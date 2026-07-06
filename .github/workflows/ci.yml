@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  ELIXIR_VERSION: "1.20.2"
+  OTP_VERSION: "29.0.2"
+  MIX_ENV: test
+
+jobs:
+  test:
+    name: Fast suite (browser-free)
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: fast-${{ runner.os }}-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-${{ env.MIX_ENV }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            fast-${{ runner.os }}-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-${{ env.MIX_ENV }}-
+      - run: mix deps.get
+      - run: mix precommit
+
+  browser-tests:
+    name: Browser journeys (Playwright)
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: slow-${{ runner.os }}-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-${{ env.MIX_ENV }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            slow-${{ runner.os }}-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-${{ env.MIX_ENV }}-
+      - uses: actions/cache@v4
+        id: npm-cache
+        with:
+          path: assets/node_modules
+          key: npm-${{ runner.os }}-${{ hashFiles('assets/package-lock.json') }}
+      # Chromium is ~150MB — cache it so we don't re-download every run.
+      - uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('assets/package-lock.json') }}
+      - run: mix deps.get
+      # npm deps must be installed BEFORE building assets, or tailwind/esbuild
+      # can't resolve those imports. Skip entirely on cache hit.
+      - if: steps.npm-cache.outputs.cache-hit != 'true'
+        run: npm --prefix assets ci || npm --prefix assets i
+      # Browser tests load the real app in Chromium, so the JS/CSS bundle
+      # (LiveView socket + phx-hooks) must be built — a fresh checkout has none.
+      - run: mix assets.setup
+      - run: mix assets.build
+      # Idempotent: the browser download is skipped on a cache hit; --with-deps
+      # still ensures the apt system libraries are present.
+      - run: npx --prefix assets playwright install chromium --with-deps
+      - run: mix test --only playwright --max-cases 1
+
+  # Deploy to Fly only after BOTH test suites pass, and only for pushes to main.
+  # DISABLED until the app is provisioned on Fly — run `fly launch` to create
+  # fly.toml + the app, add the FLY_API_TOKEN repo secret, then uncomment.
+  # See https://fly.io/docs/app-guides/continuous-deployment-with-github-actions/
+  #
+  # deploy:
+  #   name: Deploy app
+  #   runs-on: ubuntu-latest
+  #   needs: [test, browser-tests]
+  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  #   concurrency: deploy-group # ensure only one deploy runs at a time
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: superfly/flyctl-actions/setup-flyctl@master
+  #     - run: flyctl deploy --remote-only
+  #       env:
+  #         FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

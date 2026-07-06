@@ -1,0 +1,35 @@
+# fly.toml app configuration for relayboard (Relay).
+# See https://fly.io/docs/reference/configuration/ for details.
+
+app = 'relayboard'
+primary_region = 'sjc'
+kill_signal = 'SIGTERM'
+
+[build]
+
+[deploy]
+  release_command = '/app/bin/migrate'
+
+[env]
+  PHX_HOST = 'relayboard.fly.dev'
+  PORT = '8080'
+  ECTO_IPV6 = 'true'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+  [http_service.concurrency]
+    type = 'connections'
+    hard_limit = 1000
+    soft_limit = 1000
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024

@@ -1,0 +1,7 @@
+# Copy this file to `.envrc.local` (gitignored) and fill in secrets as they arise.
+# Non-secret project vars live in `.envrc`. direnv loads .envrc.local automatically
+# (.envrc sources it); run `direnv allow` after editing. These end up in your
+# environment for `mix`, `make`, and `iex`.
+
+# --- Secrets (add as features need them, e.g. OAuth, external AI providers) ---
+# export SOME_API_KEY=...
