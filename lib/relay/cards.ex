@@ -68,6 +68,20 @@ defmodule Relay.Cards do
   end
 
   @doc """
+  Sets the card's baton status (`:queued | :working | :needs_input |
+  :in_review | :done`) and optional `progress` (0–100) from `attrs`,
+  returning `{:ok, card}` (owners preloaded) or `{:error, changeset}`.
+  Status only ever changes through this explicit call — never as a side
+  effect of moving a card.
+  """
+  def set_status(%Card{} = card, attrs) do
+    card
+    |> Card.status_changeset(attrs)
+    |> Repo.update()
+    |> preload_owners_result()
+  end
+
+  @doc """
   Fetches the card a human-facing ref (e.g. `"RLY-12"`) points at on
   `board`, or `nil` when the ref does not parse against the board's key
   or no such card exists on that board. Scoping by `board_id` means a
@@ -165,6 +179,12 @@ defmodule Relay.Cards do
 
     ref_number
   end
+
+  defp preload_owners_result({:ok, card}), do: {:ok, preload_owners(card)}
+  defp preload_owners_result({:error, changeset}), do: {:error, changeset}
+
+  defp preload_owners(nil), do: nil
+  defp preload_owners(card_or_cards), do: Repo.preload(card_or_cards, owners: :user)
 
   defp insert_card(%Stage{} = stage, ref_number, attrs) do
     %Card{

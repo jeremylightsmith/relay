@@ -821,7 +821,7 @@ programmatic changesets, duplicate-proof at the DB level, factory support.
 
 **Steps**
 
-- [ ] Add failing schema tests to `test/schemas/card_test.exs` (new describe blocks at the end of the module):
+- [x] Add failing schema tests to `test/schemas/card_test.exs` (new describe blocks at the end of the module):
 
 ```elixir
   describe "status and progress" do
@@ -874,8 +874,8 @@ programmatic changesets, duplicate-proof at the DB level, factory support.
   end
 ```
 
-- [ ] Run `mix test test/schemas/card_test.exs` — expect failure (no such fields/function).
-- [ ] Run `mix ecto.gen.migration add_status_and_progress_to_cards` and fill it:
+- [x] Run `mix test test/schemas/card_test.exs` — expect failure (no such fields/function).
+- [x] Run `mix ecto.gen.migration add_status_and_progress_to_cards` and fill it:
 
 ```elixir
 defmodule Relay.Repo.Migrations.AddStatusAndProgressToCards do
@@ -890,7 +890,7 @@ defmodule Relay.Repo.Migrations.AddStatusAndProgressToCards do
 end
 ```
 
-- [ ] In `lib/schemas/card.ex`, add to the `schema "cards"` block (after `field :ref_number`):
+- [x] In `lib/schemas/card.ex`, add to the `schema "cards"` block (after `field :ref_number`):
 
 ```elixir
     field :status, Ecto.Enum,
@@ -917,8 +917,8 @@ end
   end
 ```
 
-- [ ] Run `mix ecto.migrate`, then `mix test test/schemas/card_test.exs` — expect pass.
-- [ ] Add failing context tests to `test/relay/cards_test.exs` (new describe block):
+- [x] Run `mix ecto.migrate`, then `mix test test/schemas/card_test.exs` — expect pass.
+- [x] Add failing context tests to `test/relay/cards_test.exs` (new describe block):
 
 ```elixir
   describe "set_status/2" do
@@ -949,8 +949,8 @@ end
   end
 ```
 
-- [ ] Run `mix test test/relay/cards_test.exs` — expect failure (`set_status/2` undefined).
-- [ ] Implement in `lib/relay/cards.ex` — public function after `update_card/2`:
+- [x] Run `mix test test/relay/cards_test.exs` — expect failure (`set_status/2` undefined).
+- [x] Implement in `lib/relay/cards.ex` — public function after `update_card/2`:
 
 ```elixir
   @doc """
@@ -978,8 +978,8 @@ end
   defp preload_owners(card_or_cards), do: Repo.preload(card_or_cards, owners: :user)
 ```
 
-- [ ] Run `mix test test/relay/cards_test.exs test/schemas/card_test.exs` — expect pass.
-- [ ] Run `mix precommit` — must pass. Commit.
+- [x] Run `mix test test/relay/cards_test.exs test/schemas/card_test.exs` — expect pass.
+- [x] Run `mix precommit` — must pass. Commit.
 
 **Deliverable:** cards carry a persisted status (default `:queued`) and nullable progress,
 settable only through `Cards.set_status/2`.

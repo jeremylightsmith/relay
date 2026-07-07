@@ -275,6 +275,33 @@ defmodule Relay.CardsTest do
     end
   end
 
+  describe "set_status/2" do
+    test "sets status and progress and preloads owners", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      assert {:ok, %Card{} = updated} =
+               Cards.set_status(card, %{"status" => "working", "progress" => "40"})
+
+      assert updated.status == :working
+      assert updated.progress == 40
+      assert updated.owners == []
+      assert Repo.get!(Card, card.id).status == :working
+    end
+
+    test "returns an error changeset and persists nothing on invalid input", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      assert {:error, %Ecto.Changeset{}} = Cards.set_status(card, %{"status" => "banana"})
+
+      assert {:error, %Ecto.Changeset{}} =
+               Cards.set_status(card, %{"status" => "working", "progress" => "250"})
+
+      reloaded = Repo.get!(Card, card.id)
+      assert reloaded.status == :queued
+      assert reloaded.progress == nil
+    end
+  end
+
   defp stage_card_ids(board, stage) do
     board |> Cards.list_cards() |> Enum.filter(&(&1.stage_id == stage.id)) |> Enum.map(& &1.id)
   end
