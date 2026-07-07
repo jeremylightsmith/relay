@@ -1301,7 +1301,7 @@ Pure component work with component tests and storybook stories. No LiveView wiri
 
 **Steps**
 
-- [ ] Add failing tests to `test/relay_web/components/core_components_test.exs` (new describe blocks before the final `end`):
+- [x] Add failing tests to `test/relay_web/components/core_components_test.exs` (new describe blocks before the final `end`):
 
 ```elixir
   describe "status_badge/1" do
@@ -1427,8 +1427,8 @@ Pure component work with component tests and storybook stories. No LiveView wiri
   end
 ```
 
-- [ ] Run `mix test test/relay_web/components/core_components_test.exs` — expect failure.
-- [ ] In `lib/relay_web/components/core_components.ex`, add `status_badge/1` right after `owner_pill/1`:
+- [x] Run `mix test test/relay_web/components/core_components_test.exs` — expect failure.
+- [x] In `lib/relay_web/components/core_components.ex`, add `status_badge/1` right after `owner_pill/1`:
 
 ```elixir
   @doc """
@@ -1475,7 +1475,7 @@ Pure component work with component tests and storybook stories. No LiveView wiri
   defp status_badge_label(:done, _progress), do: "done"
 ```
 
-- [ ] Replace `board_card/1` (its `@doc`, attrs, and function) with:
+- [x] Replace `board_card/1` (its `@doc`, attrs, and function) with:
 
 ```elixir
   @doc """
@@ -1578,8 +1578,8 @@ Pure component work with component tests and storybook stories. No LiveView wiri
   defp card_border_class(nil, nil), do: "border-l-transparent"
 ```
 
-- [ ] Run `mix test test/relay_web/components/core_components_test.exs` — expect pass.
-- [ ] Refresh `storybook/core_components/board_card.story.exs` — replace the `variations/0` list with:
+- [x] Run `mix test test/relay_web/components/core_components_test.exs` — expect pass.
+- [x] Refresh `storybook/core_components/board_card.story.exs` — replace the `variations/0` list with:
 
 ```elixir
   def variations do
@@ -1661,7 +1661,7 @@ Pure component work with component tests and storybook stories. No LiveView wiri
   end
 ```
 
-- [ ] Create `storybook/core_components/status_badge.story.exs`:
+- [x] Create `storybook/core_components/status_badge.story.exs`:
 
 ```elixir
 defmodule Storybook.Components.CoreComponents.StatusBadge do
@@ -1684,7 +1684,7 @@ defmodule Storybook.Components.CoreComponents.StatusBadge do
 end
 ```
 
-- [ ] Run `mix precommit` — must pass. Commit.
+- [x] Run `mix precommit` — must pass. Commit.
 
 **Deliverable:** the full card colour system as pure, tested components, browsable at
 `/storybook/core_components/board_card` and `/storybook/core_components/status_badge`
