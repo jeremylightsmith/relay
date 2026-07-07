@@ -75,6 +75,22 @@ creates if absent, else updates `name`/`avatar_url`/`email`. Fields set programm
   top-bar avatar + "Sign out". This is replaced by the board in MMF 02.
 - `fetch_current_scope` added to the `:browser` pipeline.
 
+## Dev login (dev/test only) — added for downstream drivability
+
+Real Google OAuth can't run in dev/test/CI (no live Google round-trip), yet every later MMF's
+board is behind auth and must be drivable. So add a **dev-only** bypass, mirroring throughway:
+
+- `Relay.Accounts.ensure_dev_user!/0` — upserts a fixed local user
+  (`dev@relay.local`, provider `"dev"`, stable `provider_uid`) and returns it.
+- `GET /dev/login` route, guarded by `if Application.compile_env(:relay, :dev_routes)` (same
+  gate as LiveDashboard) — logs in the dev user and redirects to the app home. **Never
+  compiled in prod.**
+- Test support: a `RelayWeb.ConnCase` helper `log_in_user(conn, user \\ ...)` (and a
+  `register_and_log_in_user` setup) that seeds the session, so LiveView/controller tests and
+  the acceptance smoke can authenticate without Google.
+
+This is the login path the acceptance smoke (and local development) uses for MMF 01–04.
+
 ## Config & secrets
 
 - `config/runtime.exs` (prod) + `config/dev.exs` read `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
