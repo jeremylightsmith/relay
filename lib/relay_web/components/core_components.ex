@@ -32,6 +32,8 @@ defmodule RelayWeb.CoreComponents do
   alias Phoenix.HTML.FormField
   alias Phoenix.LiveView.JS
   alias Relay.Cards
+  alias Schemas.Activity
+  alias Schemas.Comment
 
   @doc """
   Renders flash notices.
@@ -614,8 +616,10 @@ defmodule RelayWeb.CoreComponents do
   `"move_card"` (phx-value ref + stage_id, no index — the server appends
   to the target stage's bottom) when a "Move to…" target is picked,
   `"set_card_status"` (form params `card[status]` + `card[progress]`) on
-  status/progress change, and `"add_owner"` / `"remove_owner"` (phx-value
-  `actor_type` + `user_id`) from the owners rail's controls.
+  status/progress change, `"add_owner"` / `"remove_owner"` (phx-value
+  `actor_type` + `user_id`) from the owners rail's controls, and
+  `"validate_comment"` / `"post_comment"` (form params `comment[body]`)
+  from the timeline composer.
 
   ## Examples
 
@@ -664,6 +668,12 @@ defmodule RelayWeb.CoreComponents do
   attr :stages, :list,
     default: [],
     doc: "move targets: the board's other stages (each exposing id and name); [] hides the menu"
+
+  attr :timeline, :any,
+    required: true,
+    doc: "the :timeline LiveView stream — comments + activity entries merged chronologically"
+
+  attr :comment_form, :any, required: true, doc: "a Phoenix.HTML.Form for comment[body]"
 
   def card_drawer(assigns) do
     ~H"""
@@ -893,6 +903,66 @@ defmodule RelayWeb.CoreComponents do
               <div>Updated {Calendar.strftime(@card.updated_at, "%b %d, %Y")}</div>
             </dd>
           </dl>
+          <section class="space-y-3 border-t border-base-300 pt-4">
+            <h4 class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+              Activity
+            </h4>
+            <ol id={"#{@id}-timeline"} phx-update="stream" class="space-y-3">
+              <li id={"#{@id}-timeline-empty"} class="hidden text-sm text-base-content/50 only:block">
+                No activity yet
+              </li>
+              <li
+                :for={{dom_id, entry} <- @timeline}
+                id={dom_id}
+                class="timeline-entry flex items-start gap-2"
+                data-actor-type={entry.actor_type}
+              >
+                <span class={[
+                  "timeline-avatar flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold",
+                  if(entry.actor_type == :agent,
+                    do: "bg-secondary/15 text-secondary",
+                    else: "bg-primary/15 text-primary"
+                  )
+                ]}>
+                  {timeline_initials(entry)}
+                </span>
+                <div class="min-w-0 flex-1 space-y-0.5">
+                  <div class="flex items-baseline gap-2">
+                    <span class="timeline-author text-sm font-medium">{timeline_author(entry)}</span>
+                    <time class="timeline-time text-xs text-base-content/50">
+                      {Calendar.strftime(entry.inserted_at, "%b %d, %H:%M")}
+                    </time>
+                  </div>
+                  <%= case entry do %>
+                    <% %Comment{} = comment -> %>
+                      <p
+                        class="timeline-comment-body whitespace-pre-wrap text-sm leading-relaxed"
+                        phx-no-format
+                      >{comment.body}</p>
+                    <% %Activity{} = activity -> %>
+                      <p class="timeline-activity-phrase text-sm text-base-content/70">
+                        {activity_phrase(activity)}
+                      </p>
+                  <% end %>
+                </div>
+              </li>
+            </ol>
+            <.form
+              for={@comment_form}
+              id={"#{@id}-comment-form"}
+              phx-change="validate_comment"
+              phx-submit="post_comment"
+            >
+              <.input
+                field={@comment_form[:body]}
+                type="textarea"
+                id={"#{@id}-comment-input"}
+                rows="2"
+                placeholder="Write a comment…"
+              />
+              <.button variant="primary" class="btn btn-primary btn-sm">Comment</.button>
+            </.form>
+          </section>
         </aside>
       </div>
     </div>
@@ -930,6 +1000,40 @@ defmodule RelayWeb.CoreComponents do
 
   defp owner_dom_suffix(%{actor_type: :agent}), do: "agent"
   defp owner_dom_suffix(%{actor_type: :user, user_id: user_id}), do: "user-#{user_id}"
+
+  defp timeline_author(%{actor_type: :agent}), do: "Relay AI"
+  defp timeline_author(%{actor_type: :user, user: user}), do: user.name || user.email
+
+  defp timeline_initials(%{actor_type: :agent}), do: "AI"
+
+  defp timeline_initials(%{actor_type: :user, user: user}) do
+    (user.name || user.email)
+    |> String.split(~r/\s+/, trim: true)
+    |> Enum.map(&String.first/1)
+    |> Enum.take(2)
+    |> Enum.join()
+    |> String.upcase()
+  end
+
+  defp activity_phrase(%Activity{type: :created}), do: "created this card"
+
+  defp activity_phrase(%Activity{type: :moved, meta: meta}), do: "moved #{meta["from_stage"]} → #{meta["to_stage"]}"
+
+  defp activity_phrase(%Activity{type: :status_changed, meta: meta}), do: "set status to #{meta["to_status"]}"
+
+  defp activity_phrase(%Activity{type: :owners_changed, meta: %{"action" => "added"} = meta}),
+    do: "added #{meta["owner"]} as owner"
+
+  defp activity_phrase(%Activity{type: :owners_changed, meta: %{"action" => "removed"} = meta}),
+    do: "removed #{meta["owner"]} as owner"
+
+  defp activity_phrase(%Activity{type: :owners_changed, meta: %{"action" => "set", "owners" => []}}),
+    do: "cleared the owners"
+
+  defp activity_phrase(%Activity{type: :owners_changed, meta: %{"action" => "set", "owners" => owners}}),
+    do: "set owners to #{Enum.join(owners, ", ")}"
+
+  defp activity_phrase(%Activity{type: :commented}), do: "commented"
 
   @doc """
   Renders one stage column of the board: header (stage name, card-count

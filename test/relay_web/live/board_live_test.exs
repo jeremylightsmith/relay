@@ -10,6 +10,7 @@ defmodule RelayWeb.BoardLiveTest do
   alias Schemas.Board
   alias Schemas.Card
   alias Schemas.CardOwner
+  alias Schemas.Comment
   alias Schemas.Stage
 
   describe "when logged out" do
@@ -1010,6 +1011,154 @@ defmodule RelayWeb.BoardLiveTest do
 
       [_created | user_entries] = entries
       assert Enum.all?(user_entries, &(&1.actor_type == :user and &1.user_id == user.id))
+    end
+  end
+
+  describe "card timeline" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog, _spec, plan | _rest] = board.stages
+      {:ok, card} = Cards.create_card(backlog, %{title: "Draft the spec"})
+      %{board: board, backlog: backlog, plan: plan, card: card}
+    end
+
+    test "the drawer shows the agent-attributed created entry", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(
+               view,
+               "#card-drawer-timeline .timeline-activity-phrase",
+               "created this card"
+             )
+
+      assert has_element?(view, "#card-drawer-timeline .timeline-author", "Relay AI")
+    end
+
+    test "a card with no history shows the empty state", %{conn: conn, backlog: backlog} do
+      insert(:card, stage: backlog, title: "Bare", ref_number: 500, position: 5)
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-500")
+
+      assert has_element?(view, "#card-drawer-timeline", "No activity yet")
+    end
+
+    test "posting a comment persists it and appends it with author and timestamp",
+         %{conn: conn, user: user, card: card} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view
+      |> form("#card-drawer-comment-form", comment: %{body: "Looks good to me"})
+      |> render_submit()
+
+      assert [comment] = Repo.all(Comment)
+      assert comment.card_id == card.id
+      assert comment.actor_type == :user
+      assert comment.user_id == user.id
+      assert comment.body == "Looks good to me"
+
+      assert has_element?(
+               view,
+               "#timeline-comment-#{comment.id} .timeline-comment-body",
+               "Looks good to me"
+             )
+
+      assert has_element?(view, "#timeline-comment-#{comment.id} .timeline-author", user.name)
+
+      assert has_element?(
+               view,
+               "#timeline-comment-#{comment.id} .timeline-time",
+               Calendar.strftime(comment.inserted_at, "%b %d, %H:%M")
+             )
+    end
+
+    test "a blank comment is rejected and persists nothing", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view
+      |> form("#card-drawer-comment-form", comment: %{body: ""})
+      |> render_submit()
+
+      assert has_element?(view, "#card-drawer-comment-form", "can't be blank")
+      assert Repo.aggregate(Comment, :count) == 0
+    end
+
+    test "an agent-authored comment renders with the Relay AI identity",
+         %{conn: conn, card: card} do
+      comment = insert(:comment, card: card, body: "Implemented — ready for review.")
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#timeline-comment-#{comment.id} .timeline-author", "Relay AI")
+
+      assert has_element?(
+               view,
+               "#timeline-comment-#{comment.id} .timeline-comment-body",
+               "Implemented — ready for review."
+             )
+    end
+
+    test "changing status in the open drawer appends the activity entry live", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view
+      |> form("#card-drawer-status-form", card: %{status: "in_review"})
+      |> render_change()
+
+      assert has_element?(
+               view,
+               "#card-drawer-timeline .timeline-activity-phrase",
+               "set status to in_review"
+             )
+    end
+
+    test "adding an owner in the open drawer appends the activity entry live",
+         %{conn: conn, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-add-me") |> render_click()
+
+      assert has_element?(
+               view,
+               "#card-drawer-timeline .timeline-activity-phrase",
+               "added #{user.name} as owner"
+             )
+    end
+
+    test "moving from the open drawer appends the moved entry live", %{conn: conn, plan: plan} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-move-to-#{plan.id}") |> render_click()
+
+      assert has_element?(
+               view,
+               "#card-drawer-timeline .timeline-activity-phrase",
+               "moved Backlog → Plan"
+             )
+    end
+
+    test "comments and activity interleave in chronological order",
+         %{conn: conn, user: user, backlog: backlog} do
+      card = insert(:card, stage: backlog, title: "History", ref_number: 501, position: 6)
+      c1 = insert(:comment, card: card, user: user, body: "Kickoff", inserted_at: ~U[2026-07-01 09:00:00Z])
+      a1 = insert(:activity, card: card, inserted_at: ~U[2026-07-02 09:00:00Z])
+      c2 = insert(:comment, card: card, body: "Done", inserted_at: ~U[2026-07-03 09:00:00Z])
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-501")
+
+      ids =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#card-drawer-timeline > li.timeline-entry[id]")
+        |> LazyHTML.attribute("id")
+
+      assert ids == [
+               "timeline-comment-#{c1.id}",
+               "timeline-activity-#{a1.id}",
+               "timeline-comment-#{c2.id}"
+             ]
     end
   end
 
