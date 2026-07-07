@@ -611,9 +611,11 @@ defmodule RelayWeb.CoreComponents do
   (form params `card[title]`) on title submit, `"edit_description"` when
   the description view is clicked, `"cancel_description"` on Cancel,
   `"save_card_description"` (form params `card[description]`) on save,
-  and `"move_card"` (phx-value ref + stage_id, no index — the server
-  appends to the target stage's bottom) when a "Move to…" target is
-  picked.
+  `"move_card"` (phx-value ref + stage_id, no index — the server appends
+  to the target stage's bottom) when a "Move to…" target is picked,
+  `"set_card_status"` (form params `card[status]` + `card[progress]`) on
+  status/progress change, and `"add_owner"` / `"remove_owner"` (phx-value
+  `actor_type` + `user_id`) from the owners rail's controls.
 
   ## Examples
 
@@ -625,6 +627,7 @@ defmodule RelayWeb.CoreComponents do
         stage_owner={:human}
         close_patch={~p"/board"}
         title_form={@title_form}
+        status_form={@status_form}
       />
   """
   attr :id, :string, required: true
@@ -632,10 +635,16 @@ defmodule RelayWeb.CoreComponents do
 
   attr :card, :any,
     required: true,
-    doc: "a card exposing title, description, tag, inserted_at, and updated_at"
+    doc: "a card exposing title, description, tag, status, progress, a loaded owners list, inserted_at, and updated_at"
 
   attr :stage_name, :string, required: true
   attr :stage_owner, :atom, values: [:human, :ai], required: true
+
+  attr :active_owner, :atom,
+    values: [:human, :ai, nil],
+    default: nil,
+    doc: "who holds the baton, derived from the card's owner list"
+
   attr :close_patch, :string, required: true, doc: "the patch target that closes the drawer"
   attr :title_form, :any, required: true, doc: "a Phoenix.HTML.Form for card[title]"
   attr :editing_description, :boolean, default: false
@@ -643,6 +652,14 @@ defmodule RelayWeb.CoreComponents do
   attr :description_form, :any,
     default: nil,
     doc: "a Phoenix.HTML.Form for card[description]; required when editing_description"
+
+  attr :status_form, :any,
+    required: true,
+    doc: "a Phoenix.HTML.Form for card[status] + card[progress]"
+
+  attr :current_user_id, :integer,
+    default: nil,
+    doc: "the signed-in user's id, for the Add me owner control"
 
   attr :stages, :list,
     default: [],
@@ -747,6 +764,94 @@ defmodule RelayWeb.CoreComponents do
             class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 border-t border-base-300 pt-4 text-sm"
           >
             <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+              Active worker
+            </dt>
+            <dd class="rail-active-worker flex items-center gap-2">
+              <%= if @active_owner do %>
+                <.owner_pill owner={@active_owner} />
+                <span class="rail-active-worker-name text-sm">
+                  {active_worker_names(@card, @active_owner)}
+                </span>
+              <% else %>
+                <span class="text-base-content/50">None</span>
+              <% end %>
+            </dd>
+            <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+              Owners
+            </dt>
+            <dd class="rail-owners space-y-2">
+              <div
+                :for={owner <- @card.owners}
+                class="rail-owner flex items-center gap-2"
+                data-actor-type={owner.actor_type}
+              >
+                <span class="text-sm">{owner_name(owner)}</span>
+                <span
+                  :if={paused_owner?(owner, @active_owner)}
+                  class="rail-owner-paused badge badge-ghost badge-xs"
+                >
+                  paused
+                </span>
+                <button
+                  type="button"
+                  id={"#{@id}-remove-owner-#{owner_dom_suffix(owner)}"}
+                  class="btn btn-ghost btn-xs btn-square"
+                  phx-click="remove_owner"
+                  phx-value-actor_type={owner.actor_type}
+                  phx-value-user_id={owner.user_id}
+                  aria-label={"Remove #{owner_name(owner)} as owner"}
+                >
+                  <.icon name="hero-x-mark" class="size-3" />
+                </button>
+              </div>
+              <span :if={@card.owners == []} class="text-base-content/50">None</span>
+              <div class="flex flex-wrap gap-2">
+                <button
+                  :if={!agent_owner?(@card)}
+                  type="button"
+                  id={"#{@id}-assign-ai"}
+                  class="btn btn-ghost btn-xs"
+                  phx-click="add_owner"
+                  phx-value-actor_type="agent"
+                >
+                  Assign AI
+                </button>
+                <button
+                  :if={@current_user_id && !user_owner?(@card, @current_user_id)}
+                  type="button"
+                  id={"#{@id}-add-me"}
+                  class="btn btn-ghost btn-xs"
+                  phx-click="add_owner"
+                  phx-value-actor_type="user"
+                  phx-value-user_id={@current_user_id}
+                >
+                  Add me
+                </button>
+              </div>
+            </dd>
+            <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+              Status
+            </dt>
+            <dd class="rail-status">
+              <.form for={@status_form} id={"#{@id}-status-form"} phx-change="set_card_status">
+                <.input
+                  field={@status_form[:status]}
+                  type="select"
+                  options={status_options()}
+                  class="select select-sm w-full"
+                />
+                <.input
+                  :if={@card.status == :working}
+                  field={@status_form[:progress]}
+                  type="number"
+                  min="0"
+                  max="100"
+                  placeholder="Progress %"
+                  class="input input-sm w-full"
+                />
+              </.form>
+            </dd>
+            <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
               Stage
             </dt>
             <dd class="rail-stage flex flex-wrap items-center gap-2">
@@ -793,6 +898,38 @@ defmodule RelayWeb.CoreComponents do
     </div>
     """
   end
+
+  defp status_options do
+    [
+      {"Queued", "queued"},
+      {"Working", "working"},
+      {"Needs input", "needs_input"},
+      {"In review", "in_review"},
+      {"Done", "done"}
+    ]
+  end
+
+  defp owner_name(%{actor_type: :agent}), do: "AI Agent"
+  defp owner_name(%{actor_type: :user, user: user}), do: user.name || user.email
+
+  defp active_worker_names(_card, :ai), do: "AI Agent"
+
+  defp active_worker_names(card, :human) do
+    card.owners
+    |> Enum.filter(&(&1.actor_type == :user))
+    |> Enum.map_join(", ", &owner_name/1)
+  end
+
+  defp paused_owner?(owner, active_owner), do: active_owner == :ai and owner.actor_type == :user
+
+  defp agent_owner?(card), do: Enum.any?(card.owners, &(&1.actor_type == :agent))
+
+  defp user_owner?(card, user_id) do
+    Enum.any?(card.owners, &(&1.actor_type == :user and &1.user_id == user_id))
+  end
+
+  defp owner_dom_suffix(%{actor_type: :agent}), do: "agent"
+  defp owner_dom_suffix(%{actor_type: :user, user_id: user_id}), do: "user-#{user_id}"
 
   @doc """
   Renders one stage column of the board: header (stage name, card-count

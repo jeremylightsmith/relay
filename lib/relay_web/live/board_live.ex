@@ -62,10 +62,13 @@ defmodule RelayWeb.BoardLive do
         stage_name={@selected_stage.name}
         stage_owner={@selected_stage.owner}
         stages={move_targets(@board, @selected_card)}
+        active_owner={Cards.active_owner_type(@selected_card)}
         close_patch={~p"/board"}
         title_form={@title_form}
         editing_description={@editing_description}
         description_form={@description_form}
+        status_form={@status_form}
+        current_user_id={@current_scope.user.id}
       />
     </Layouts.app>
     """
@@ -207,6 +210,42 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("save_card_description", _params, socket), do: {:noreply, socket}
 
+  def handle_event("set_card_status", %{"card" => card_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    case Cards.set_status(card, card_params) do
+      {:ok, card} ->
+        {:noreply, refresh_card(socket, card)}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :status_form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("set_card_status", _params, socket), do: {:noreply, socket}
+
+  # Owner changes are explicit drawer actions. Adding a :user owner is
+  # restricted to the signed-in user (MVP boards are single-human; members
+  # arrive in MMF 17); anything unresolvable is a silent no-op.
+  def handle_event("add_owner", params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    current_user_id = socket.assigns.current_scope.user.id
+
+    case resolve_actor(params) do
+      :agent -> apply_owner_change(socket, Cards.add_owner(card, :agent))
+      {:user, ^current_user_id} = actor -> apply_owner_change(socket, Cards.add_owner(card, actor))
+      _other -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("add_owner", _params, socket), do: {:noreply, socket}
+
+  def handle_event("remove_owner", params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    case resolve_actor(params) do
+      nil -> {:noreply, socket}
+      actor -> apply_owner_change(socket, Cards.remove_owner(card, actor))
+    end
+  end
+
+  def handle_event("remove_owner", _params, socket), do: {:noreply, socket}
+
   # Groups position-ordered stages under their category, keeping the fixed
   # category order and dropping empty categories (per spec: headers render
   # only for non-empty categories).
@@ -263,6 +302,33 @@ defmodule RelayWeb.BoardLive do
 
   defp parse_int(_value), do: nil
 
+  defp resolve_actor(%{"actor_type" => "agent"}), do: :agent
+
+  defp resolve_actor(%{"actor_type" => "user", "user_id" => user_id}) do
+    case parse_int(user_id) do
+      nil -> nil
+      id -> {:user, id}
+    end
+  end
+
+  defp resolve_actor(_params), do: nil
+
+  defp apply_owner_change(socket, {:ok, %Card{} = card}), do: {:noreply, refresh_card(socket, card)}
+  defp apply_owner_change(socket, {:error, _changeset}), do: {:noreply, socket}
+
+  # A persisted baton change: sync the drawer assigns and re-stream the
+  # card so the board card re-renders its colour/badge.
+  defp refresh_card(socket, %Card{} = card) do
+    socket
+    |> assign(:selected_card, card)
+    |> assign(:status_form, status_form(card))
+    |> stream_insert(stream_name(card.stage_id), card)
+  end
+
+  defp status_form(%Card{} = card) do
+    to_form(%{"status" => Atom.to_string(card.status), "progress" => card.progress}, as: :card)
+  end
+
   # The move already persisted; stream items can't be reordered in
   # place, so refetch and reset the source and target stage streams,
   # refresh the lane counts, and keep the drawer in sync when the moved
@@ -310,6 +376,7 @@ defmodule RelayWeb.BoardLive do
         |> assign(:title_form, to_form(%{"title" => card.title}, as: :card))
         |> assign(:editing_description, false)
         |> assign(:description_form, nil)
+        |> assign(:status_form, status_form(card))
 
       nil ->
         assign(socket,
@@ -317,7 +384,8 @@ defmodule RelayWeb.BoardLive do
           selected_stage: nil,
           title_form: nil,
           editing_description: false,
-          description_form: nil
+          description_form: nil,
+          status_form: nil
         )
     end
   end
