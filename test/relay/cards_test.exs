@@ -199,4 +199,90 @@ defmodule Relay.CardsTest do
       assert Cards.get_card_by_ref(board, "RLY-1") == nil
     end
   end
+
+  describe "move_card/3" do
+    setup %{board: board} do
+      %{target: insert(:stage, board: board, position: 2)}
+    end
+
+    test "moves a card to another stage at the index, reindexing the target gap-free",
+         %{board: board, stage: stage, target: target} do
+      # Gappy target positions prove the whole target stage is re-indexed.
+      a = insert(:card, stage: target, title: "A", position: 3, ref_number: 10)
+      b = insert(:card, stage: target, title: "B", position: 7, ref_number: 11)
+      {:ok, card} = Cards.create_card(stage, %{title: "Mover"})
+
+      assert {:ok, %Card{} = moved} = Cards.move_card(card, target, 1)
+
+      assert moved.stage_id == target.id
+      assert moved.position == 2
+      assert stage_card_ids(board, target) == [a.id, moved.id, b.id]
+      assert stage_positions(board, target) == [1, 2, 3]
+    end
+
+    test "index 0 inserts at the top of the target stage",
+         %{board: board, stage: stage, target: target} do
+      existing = insert(:card, stage: target, title: "Existing", position: 1, ref_number: 10)
+      {:ok, card} = Cards.create_card(stage, %{title: "Mover"})
+
+      assert {:ok, moved} = Cards.move_card(card, target, 0)
+
+      assert stage_card_ids(board, target) == [moved.id, existing.id]
+      assert stage_positions(board, target) == [1, 2]
+    end
+
+    test "an index past the end and a negative index clamp into range",
+         %{board: board, stage: stage, target: target} do
+      existing = insert(:card, stage: target, title: "Existing", position: 1, ref_number: 10)
+      {:ok, card_a} = Cards.create_card(stage, %{title: "Bottom"})
+      {:ok, card_b} = Cards.create_card(stage, %{title: "Top"})
+
+      {:ok, bottom} = Cards.move_card(card_a, target, 99)
+      {:ok, top} = Cards.move_card(card_b, target, -5)
+
+      assert stage_card_ids(board, target) == [top.id, existing.id, bottom.id]
+      assert stage_positions(board, target) == [1, 2, 3]
+    end
+
+    test "reorders within the same stage keeping positions contiguous",
+         %{board: board, stage: stage} do
+      {:ok, first} = Cards.create_card(stage, %{title: "First"})
+      {:ok, second} = Cards.create_card(stage, %{title: "Second"})
+      {:ok, third} = Cards.create_card(stage, %{title: "Third"})
+
+      assert {:ok, moved} = Cards.move_card(third, stage, 0)
+
+      assert moved.stage_id == stage.id
+      assert stage_card_ids(board, stage) == [moved.id, first.id, second.id]
+      assert stage_positions(board, stage) == [1, 2, 3]
+    end
+
+    test "moving into an empty stage lands at position 1", %{stage: stage, target: target} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Loner"})
+
+      assert {:ok, moved} = Cards.move_card(card, target, 0)
+
+      assert moved.stage_id == target.id
+      assert moved.position == 1
+    end
+
+    test "refuses a target stage on another board", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Stay"})
+      foreign_stage = insert(:stage)
+
+      assert_raise FunctionClauseError, fn -> Cards.move_card(card, foreign_stage, 0) end
+      assert Repo.get!(Card, card.id).stage_id == stage.id
+    end
+  end
+
+  defp stage_card_ids(board, stage) do
+    board |> Cards.list_cards() |> Enum.filter(&(&1.stage_id == stage.id)) |> Enum.map(& &1.id)
+  end
+
+  defp stage_positions(board, stage) do
+    board
+    |> Cards.list_cards()
+    |> Enum.filter(&(&1.stage_id == stage.id))
+    |> Enum.map(& &1.position)
+  end
 end

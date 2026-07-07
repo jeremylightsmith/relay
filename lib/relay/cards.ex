@@ -81,6 +81,34 @@ defmodule Relay.Cards do
     end
   end
 
+  @doc """
+  Moves `card` into `target_stage` at the 0-based `index` among the
+  stage's cards (excluding the moved card itself), returning
+  `{:ok, card}` or `{:error, changeset}`.
+
+  The whole target stage is re-indexed inside a transaction so
+  `position` stays contiguous (1..n) and deterministic; `index` is
+  clamped into range. The target stage must belong to the card's board —
+  callers resolve both on the current board, and a cross-board call
+  raises `FunctionClauseError`. A cross-stage move fires the
+  stage-change seam (`emit_stage_changed/2`), a no-op until MMF 07 hooks
+  activity logging into it.
+  """
+  def move_card(%Card{board_id: board_id} = card, %Stage{board_id: board_id} = target_stage, index)
+      when is_integer(index) do
+    previous_stage_id = card.stage_id
+
+    Repo.transaction(fn ->
+      moved = place_at(card, target_stage, index)
+
+      if moved.stage_id != previous_stage_id do
+        emit_stage_changed(moved, previous_stage_id)
+      end
+
+      moved
+    end)
+  end
+
   defp parse_ref_number(%Board{key: key}, ref) do
     prefix = key <> "-"
 
@@ -92,6 +120,37 @@ defmodule Relay.Cards do
       _ -> :error
     end
   end
+
+  # Re-indexes the target stage: its other cards keep their relative
+  # order, `card` is inserted at the clamped index, and positions are
+  # rewritten 1..n (updates are no-ops for cards whose row is unchanged).
+  defp place_at(%Card{} = card, %Stage{} = target_stage, index) do
+    others =
+      Repo.all(
+        from c in Card,
+          where: c.stage_id == ^target_stage.id and c.id != ^card.id,
+          order_by: [asc: c.position, asc: c.id]
+      )
+
+    index = index |> max(0) |> min(length(others))
+
+    others
+    |> List.insert_at(index, card)
+    |> Enum.with_index(1)
+    |> Enum.map(&reposition(&1, target_stage.id))
+    |> Enum.find(&(&1.id == card.id))
+  end
+
+  defp reposition({%Card{} = card, position}, stage_id) do
+    case Repo.update(Ecto.Changeset.change(card, stage_id: stage_id, position: position)) do
+      {:ok, card} -> card
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
+  end
+
+  # MMF 07 seam: activity logging ("moved" timeline entries) hooks in
+  # here. Intentionally a no-op today — do not add behaviour in MMF 05.
+  defp emit_stage_changed(%Card{} = _moved_card, _previous_stage_id), do: :ok
 
   # Locks the board row so concurrent creates serialize, then bumps
   # `card_seq` and returns the newly allocated ref number. A rollback of
