@@ -111,4 +111,126 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ ~s(id="stage-col-1-new-card")
     end
   end
+
+  describe "status_badge/1" do
+    test "renders each status with its colour token and label" do
+      for {status, class, label} <- [
+            {:queued, "badge-ghost", "queued"},
+            {:working, "badge-secondary", "working"},
+            {:needs_input, "badge-warning", "NEEDS INPUT"},
+            {:in_review, "badge-primary", "in review"},
+            {:done, "badge-success", "done"}
+          ] do
+        html = render_component(&CoreComponents.status_badge/1, status: status)
+
+        assert html =~ class
+        assert html =~ label
+        assert html =~ ~s(data-status="#{status}")
+      end
+    end
+
+    test "working includes the progress percentage when present" do
+      html = render_component(&CoreComponents.status_badge/1, status: :working, progress: 61)
+
+      assert html =~ "working·61%"
+    end
+
+    test "working without progress shows no percentage" do
+      html = render_component(&CoreComponents.status_badge/1, status: :working)
+
+      refute html =~ "%"
+    end
+  end
+
+  describe "board_card/1 baton treatments" do
+    test "renders neutral without active owner or status" do
+      html = render_component(&CoreComponents.board_card/1, id: "c1", ref: "RLY-1", title: "T")
+
+      assert html =~ "border-l-transparent"
+      refute html =~ "card-owner-pill"
+      refute html =~ "status-badge"
+      refute html =~ "card-mismatch"
+    end
+
+    test "human active renders the blue border and Human pill" do
+      html =
+        render_component(&CoreComponents.board_card/1,
+          id: "c2",
+          ref: "RLY-2",
+          title: "T",
+          active_owner: :human,
+          stage_owner: :human,
+          status: :queued
+        )
+
+      assert html =~ "border-l-primary"
+      assert html =~ ~s(data-active-owner="human")
+      assert html =~ "card-owner-pill"
+      assert html =~ "badge-primary"
+      refute html =~ "card-mismatch"
+    end
+
+    test "AI active renders the violet border, AI pill, and working progress" do
+      html =
+        render_component(&CoreComponents.board_card/1,
+          id: "c3",
+          ref: "RLY-3",
+          title: "T",
+          active_owner: :ai,
+          stage_owner: :ai,
+          status: :working,
+          progress: 61
+        )
+
+      assert html =~ "border-l-secondary"
+      assert html =~ ~s(data-active-owner="ai")
+      assert html =~ "badge-secondary"
+      assert html =~ "working·61%"
+      refute html =~ "card-mismatch"
+    end
+
+    test "a human-active card in an AI stage warns it is meant for agents" do
+      html =
+        render_component(&CoreComponents.board_card/1,
+          id: "c4",
+          ref: "RLY-4",
+          title: "T",
+          active_owner: :human,
+          stage_owner: :ai,
+          status: :queued
+        )
+
+      assert html =~ "border-l-error"
+      assert html =~ "card-mismatch"
+      assert html =~ "This stage is meant to be used by agents"
+    end
+
+    test "an AI-active card in a human stage warns it is meant for humans" do
+      html =
+        render_component(&CoreComponents.board_card/1,
+          id: "c5",
+          ref: "RLY-5",
+          title: "T",
+          active_owner: :ai,
+          stage_owner: :human,
+          status: :queued
+        )
+
+      assert html =~ "border-l-error"
+      assert html =~ "This stage is meant for humans"
+    end
+
+    test "no mismatch without an active owner, even in an AI stage" do
+      html =
+        render_component(&CoreComponents.board_card/1,
+          id: "c6",
+          ref: "RLY-6",
+          title: "T",
+          stage_owner: :ai
+        )
+
+      refute html =~ "card-mismatch"
+      assert html =~ "border-l-transparent"
+    end
+  end
 end

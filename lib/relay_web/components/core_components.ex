@@ -454,8 +454,56 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
-  Renders a single kanban card: its title, optional #tag, and its
-  board-scoped ref (e.g. RLY-3).
+  Renders a card's status badge — the baton state at a glance.
+
+  `working` appends the stored progress percentage when present
+  (`working·61%`); `needs_input` renders the amber NEEDS INPUT treatment;
+  `done` is green; `in_review` blue; `queued` neutral.
+
+  ## Examples
+
+      <.status_badge status={:working} progress={61} />
+      <.status_badge status={:needs_input} />
+  """
+  attr :status, :atom,
+    values: [:queued, :working, :needs_input, :in_review, :done],
+    required: true
+
+  attr :progress, :integer, default: nil
+  attr :class, :any, default: nil
+
+  def status_badge(assigns) do
+    ~H"""
+    <span
+      class={["status-badge badge badge-sm font-medium", status_badge_class(@status), @class]}
+      data-status={@status}
+    >
+      {status_badge_label(@status, @progress)}
+    </span>
+    """
+  end
+
+  defp status_badge_class(:queued), do: "badge-ghost"
+  defp status_badge_class(:working), do: "badge-secondary"
+  defp status_badge_class(:needs_input), do: "badge-warning"
+  defp status_badge_class(:in_review), do: "badge-primary"
+  defp status_badge_class(:done), do: "badge-success"
+
+  defp status_badge_label(:working, progress) when is_integer(progress), do: "working·#{progress}%"
+  defp status_badge_label(:queued, _progress), do: "queued"
+  defp status_badge_label(:working, _progress), do: "working"
+  defp status_badge_label(:needs_input, _progress), do: "NEEDS INPUT"
+  defp status_badge_label(:in_review, _progress), do: "in review"
+  defp status_badge_label(:done, _progress), do: "done"
+
+  @doc """
+  Renders a single kanban card: its title, optional #tag, its board-scoped
+  ref (e.g. RLY-3), and — the heart of Relay — its baton state: the
+  active-owner colour (blue human / violet AI left border + owner pill),
+  the status badge (`working·61%`, amber NEEDS INPUT, green done, …), and
+  the red mismatch warning when the card's active-owner type conflicts
+  with the stage it sits in (`stage_owner`, the stage's "meant for"
+  designation). Mismatch is display-only — it never mutates the card.
 
   Clicking the card emits a `"select_card"` event (with `phx-value-ref`)
   for the parent LiveView — `RelayWeb.BoardLive` answers with a patch to
@@ -467,27 +515,64 @@ defmodule RelayWeb.CoreComponents do
   ## Examples
 
       <.board_card id="cards-1" ref="RLY-3" title="Ship MMF 03" tag="infra" />
+      <.board_card
+        id="cards-2"
+        ref="RLY-4"
+        title="Migrate the posts"
+        active_owner={:ai}
+        stage_owner={:ai}
+        status={:working}
+        progress={61}
+      />
   """
   attr :id, :string, required: true
   attr :ref, :string, required: true, doc: "the human-facing ref, e.g. RLY-3"
   attr :title, :string, required: true
   attr :tag, :string, default: nil
 
+  attr :active_owner, :atom,
+    values: [:human, :ai, nil],
+    default: nil,
+    doc: "who holds the baton, derived from the owner list; nil when unowned"
+
+  attr :stage_owner, :atom,
+    values: [:human, :ai, nil],
+    default: nil,
+    doc: "the stage's \"meant for\" designation, for the mismatch warning"
+
+  attr :status, :atom,
+    values: [:queued, :working, :needs_input, :in_review, :done, nil],
+    default: nil
+
+  attr :progress, :integer, default: nil
+
   def board_card(assigns) do
+    assigns = assign(assigns, :mismatch, mismatch(assigns.active_owner, assigns.stage_owner))
+
     ~H"""
     <article
       id={@id}
-      class="board-card card cursor-pointer bg-base-100 shadow-sm transition-shadow hover:shadow-md"
+      class={[
+        "board-card card cursor-pointer bg-base-100 shadow-sm transition-shadow hover:shadow-md",
+        "border-l-4",
+        card_border_class(@mismatch, @active_owner)
+      ]}
       role="button"
       tabindex="0"
       draggable="true"
       data-ref={@ref}
+      data-active-owner={@active_owner}
       phx-click="select_card"
       phx-value-ref={@ref}
     >
       <div class="card-body gap-2 p-3">
         <p class="card-title text-sm font-medium leading-snug">{@title}</p>
-        <div class="flex items-center justify-between gap-2">
+        <p :if={@mismatch} class="card-mismatch text-xs font-medium text-error">
+          {mismatch_message(@mismatch)}
+        </p>
+        <div class="flex flex-wrap items-center gap-2">
+          <.status_badge :if={@status} status={@status} progress={@progress} />
+          <.owner_pill :if={@active_owner} owner={@active_owner} class="card-owner-pill" />
           <span :if={@tag} class="card-tag badge badge-ghost badge-sm">#{@tag}</span>
           <span class="card-ref ml-auto font-mono text-xs text-base-content/60">{@ref}</span>
         </div>
@@ -495,6 +580,20 @@ defmodule RelayWeb.CoreComponents do
     </article>
     """
   end
+
+  defp mismatch(nil, _stage_owner), do: nil
+  defp mismatch(_active_owner, nil), do: nil
+  defp mismatch(:human, :ai), do: :meant_for_agents
+  defp mismatch(:ai, :human), do: :meant_for_humans
+  defp mismatch(_active_owner, _stage_owner), do: nil
+
+  defp mismatch_message(:meant_for_agents), do: "This stage is meant to be used by agents"
+  defp mismatch_message(:meant_for_humans), do: "This stage is meant for humans"
+
+  defp card_border_class(mismatch, _active_owner) when not is_nil(mismatch), do: "border-l-error"
+  defp card_border_class(nil, :ai), do: "border-l-secondary"
+  defp card_border_class(nil, :human), do: "border-l-primary"
+  defp card_border_class(nil, nil), do: "border-l-transparent"
 
   @doc """
   Renders the card detail drawer (daisyUI `drawer drawer-end`): a scrim
