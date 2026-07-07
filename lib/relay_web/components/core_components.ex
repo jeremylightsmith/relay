@@ -660,9 +660,9 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
-  Renders one stage column of the board: header (stage name + Human/AI
-  owner pill), the stage's cards in the order given, and the "+ New card"
-  compose control.
+  Renders one stage column of the board: header (stage name, card-count
+  badge, Human/AI owner pill), the stage's cards in the order given, and
+  the "+ New card" compose control.
 
   `cards` accepts a LiveView stream (preferred) or a list of
   `{dom_id, card}` tuples; each card needs `title`, `tag`, and
@@ -682,6 +682,7 @@ defmodule RelayWeb.CoreComponents do
   attr :id, :string, required: true
   attr :name, :string, required: true
   attr :owner, :atom, values: [:human, :ai], required: true
+  attr :count, :integer, default: nil, doc: "the number of cards in the stage; badge hidden when nil"
   attr :stage_id, :any, default: nil, doc: "the stage's database id, echoed back in compose events"
   attr :board_key, :string, default: "RLY", doc: "the board's ref prefix, e.g. RLY in RLY-3"
   attr :cards, :any, default: [], doc: "a LiveView stream or a list of {dom_id, card} tuples"
@@ -695,7 +696,10 @@ defmodule RelayWeb.CoreComponents do
       class="stage-column flex w-60 shrink-0 flex-col gap-3 rounded-box bg-base-200 p-3"
     >
       <header class="flex items-center justify-between gap-2">
-        <h3 class="text-sm font-semibold">{@name}</h3>
+        <div class="flex items-center gap-1.5">
+          <h3 class="text-sm font-semibold">{@name}</h3>
+          <span :if={@count} class="stage-count badge badge-ghost badge-sm font-mono">{@count}</span>
+        </div>
         <.owner_pill owner={@owner} />
       </header>
       <div

@@ -9,7 +9,7 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
     [
       %Variation{
         id: :empty_human,
-        attributes: %{id: "story-stage-backlog", name: "Backlog", owner: :human, stage_id: 1}
+        attributes: %{id: "story-stage-backlog", name: "Backlog", owner: :human, stage_id: 1, count: 0}
       },
       %Variation{
         id: :with_cards,
@@ -18,6 +18,7 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           name: "Code",
           owner: :ai,
           stage_id: 4,
+          count: 2,
           board_key: "RLY",
           cards: [
             {"story-card-1", %{title: "Wire up Google sign-in", tag: "auth", ref_number: 1}},

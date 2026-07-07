@@ -309,7 +309,7 @@ fully covered by `test/relay/cards_test.exs`.
 
 **Steps**
 
-- [ ] Add a failing `describe "lane counts"` block to `test/relay_web/live/board_live_test.exs`,
+- [x] Add a failing `describe "lane counts"` block to `test/relay_web/live/board_live_test.exs`,
   inserted after the `describe "cards"` block:
 
   ```elixir
@@ -347,9 +347,9 @@ fully covered by `test/relay/cards_test.exs`.
   end
   ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — expect the two new tests to fail
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — expect the two new tests to fail
   (no `.stage-count` element exists yet).
-- [ ] In `lib/relay_web/components/core_components.ex`, add the `count` attr to `stage_column`.
+- [x] In `lib/relay_web/components/core_components.ex`, add the `count` attr to `stage_column`.
   Directly below the existing `attr :owner, :atom, values: [:human, :ai], required: true` in the
   `stage_column` attr block (line ~684), add:
 
@@ -381,7 +381,7 @@ fully covered by `test/relay/cards_test.exs`.
   (`:if={@count}` hides only `nil` — `0` is truthy in Elixir and renders.) Also extend the
   `stage_column` `@doc`'s first paragraph: change `header (stage name + Human/AI owner pill)`
   to `header (stage name, card-count badge, Human/AI owner pill)`.
-- [ ] In `lib/relay_web/live/board_live.ex`:
+- [x] In `lib/relay_web/live/board_live.ex`:
   1. In `mount/3`, add the counts assign — replace:
 
      ```elixir
@@ -428,14 +428,14 @@ fully covered by `test/relay/cards_test.exs`.
      end
      ```
 
-- [ ] Update `storybook/core_components/stage_column.story.exs` so the story shows the badge:
+- [x] Update `storybook/core_components/stage_column.story.exs` so the story shows the badge:
   add `count: 0` to the `:empty_human` variation's attributes map and `count: 2` to the
   `:with_cards` variation's attributes map (leave `:composing` without a count to demonstrate
   the nil default).
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — expect all tests to pass
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — expect all tests to pass
   (existing header/`h3` assertions are unaffected).
-- [ ] Run `mix precommit` — expect a clean pass.
-- [ ] Commit.
+- [x] Run `mix precommit` — expect a clean pass.
+- [x] Commit.
 
 **Deliverable:** every stage column header shows a live card-count badge (`.stage-count`),
 correct at mount and after composing a card; the storybook stage_column story demonstrates it.

@@ -39,6 +39,7 @@ defmodule RelayWeb.BoardLive do
                 name={stage.name}
                 owner={stage.owner}
                 stage_id={stage.id}
+                count={Map.fetch!(@stage_counts, stage.id)}
                 board_key={@board.key}
                 cards={Map.fetch!(@streams, stream_name(stage.id))}
                 composing={@composing_stage_id == stage.id}
@@ -74,6 +75,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:page_title, board.name)
       |> assign(:board, board)
       |> assign(:stage_groups, group_stages(board.stages))
+      |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:composing_stage_id, nil)
       |> assign(:compose_form, empty_compose_form())
 
@@ -122,6 +124,7 @@ defmodule RelayWeb.BoardLive do
         {:noreply,
          socket
          |> stream_insert(stream_name(stage.id), card)
+         |> update(:stage_counts, &Map.update!(&1, stage.id, fn count -> count + 1 end))
          |> assign(:compose_form, empty_compose_form())}
 
       {:error, changeset} ->
@@ -192,6 +195,12 @@ defmodule RelayWeb.BoardLive do
     @category_order
     |> Enum.map(&{&1, Map.get(groups, &1, [])})
     |> Enum.reject(fn {_category, category_stages} -> category_stages == [] end)
+  end
+
+  # Streams can't be counted, so lane counts live in their own assign,
+  # recomputed from the grouped cards (mount, moves) and bumped on create.
+  defp stage_counts(stages, cards_by_stage) do
+    Map.new(stages, fn stage -> {stage.id, length(Map.get(cards_by_stage, stage.id, []))} end)
   end
 
   # Only stages of the user's own board are addressable from events.

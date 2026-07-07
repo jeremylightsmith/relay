@@ -205,6 +205,39 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
+  describe "lane counts" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      %{board: board, backlog: backlog}
+    end
+
+    test "every stage renders its card count", %{conn: conn, backlog: backlog} do
+      insert(:card, stage: backlog, title: "One", position: 1, ref_number: 1)
+      insert(:card, stage: backlog, title: "Two", position: 2, ref_number: 2)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(view, "#stage-col-1 .stage-count", "2")
+
+      for position <- 2..7 do
+        assert has_element?(view, "#stage-col-#{position} .stage-count", "0")
+      end
+    end
+
+    test "creating a card bumps its stage's count", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      view |> element("#stage-col-1-new-card") |> render_click()
+      view |> form("#stage-col-1-compose-form", card: %{title: "Count me"}) |> render_submit()
+
+      assert has_element?(view, "#stage-col-1 .stage-count", "1")
+      assert has_element?(view, "#stage-col-2 .stage-count", "0")
+    end
+  end
+
   describe "card drawer" do
     setup :register_and_log_in_user
 
