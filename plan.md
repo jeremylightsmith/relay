@@ -104,7 +104,7 @@ Phoenix 1.8 / LiveView 1.1, Ecto + Postgres, `{:ueberauth, "~> 0.10"}` +
 - [x] Run `mise exec -- mix deps.get` and then `mise exec -- mix compile` (expect: fetches
   `ueberauth`, `ueberauth_google`, `oauth2`; compiles clean).
 
-- [ ] Write the failing test at `test/relay/accounts_test.exs`:
+- [x] Write the failing test at `test/relay/accounts_test.exs`:
 
   ```elixir
   defmodule Relay.AccountsTest do
@@ -203,10 +203,10 @@ Phoenix 1.8 / LiveView 1.1, Ecto + Postgres, `{:ueberauth, "~> 0.10"}` +
   end
   ```
 
-- [ ] Run `mise exec -- mix test test/relay/accounts_test.exs` — expect FAILURE (compile errors:
+- [x] Run `mise exec -- mix test test/relay/accounts_test.exs` — expect FAILURE (compile errors:
   `Relay.Accounts` / `Relay.Factory` undefined).
 
-- [ ] Generate the migration: `mise exec -- mix ecto.gen.migration create_users`, then replace the
+- [x] Generate the migration: `mise exec -- mix ecto.gen.migration create_users`, then replace the
   generated file's contents (keep the generated filename/timestamp) with:
 
   ```elixir
@@ -230,7 +230,7 @@ Phoenix 1.8 / LiveView 1.1, Ecto + Postgres, `{:ueberauth, "~> 0.10"}` +
   end
   ```
 
-- [ ] Create `lib/relay/accounts/user.ex`:
+- [x] Create `lib/relay/accounts/user.ex`:
 
   ```elixir
   defmodule Relay.Accounts.User do
@@ -265,7 +265,7 @@ Phoenix 1.8 / LiveView 1.1, Ecto + Postgres, `{:ueberauth, "~> 0.10"}` +
   end
   ```
 
-- [ ] Create `lib/relay/accounts/scope.ex`:
+- [x] Create `lib/relay/accounts/scope.ex`:
 
   ```elixir
   defmodule Relay.Accounts.Scope do
@@ -285,7 +285,7 @@ Phoenix 1.8 / LiveView 1.1, Ecto + Postgres, `{:ueberauth, "~> 0.10"}` +
   end
   ```
 
-- [ ] Create `lib/relay/accounts.ex`:
+- [x] Create `lib/relay/accounts.ex`:
 
   ```elixir
   defmodule Relay.Accounts do
@@ -348,13 +348,13 @@ Phoenix 1.8 / LiveView 1.1, Ecto + Postgres, `{:ueberauth, "~> 0.10"}` +
   end
   ```
 
-- [ ] In `lib/relay.ex`, update the Boundary declaration to export the new context:
+- [x] In `lib/relay.ex`, update the Boundary declaration to export the new context:
 
   ```elixir
     use Boundary, deps: [], exports: [Repo, Mailer, Accounts, Accounts.Scope]
   ```
 
-- [ ] Create `test/support/factory.ex` (ExMachina; opted out of Boundary checks like
+- [x] Create `test/support/factory.ex` (ExMachina; opted out of Boundary checks like
   `Relay.DataCase`):
 
   ```elixir
@@ -379,7 +379,7 @@ Phoenix 1.8 / LiveView 1.1, Ecto + Postgres, `{:ueberauth, "~> 0.10"}` +
   end
   ```
 
-- [ ] In `test/support/data_case.ex`, add `import Relay.Factory` to the `using` block (after
+- [x] In `test/support/data_case.ex`, add `import Relay.Factory` to the `using` block (after
   `import Ecto.Query`):
 
   ```elixir
@@ -390,10 +390,10 @@ Phoenix 1.8 / LiveView 1.1, Ecto + Postgres, `{:ueberauth, "~> 0.10"}` +
       import Relay.Factory
   ```
 
-- [ ] Run `mise exec -- mix test test/relay/accounts_test.exs` — expect ALL PASS.
-- [ ] Run `mise exec -- mix ecto.migrate` (applies the migration to the dev DB too).
-- [ ] Run `mise exec -- mix precommit` — must pass. Fix any credo/format/boundary findings.
-- [ ] Commit everything.
+- [x] Run `mise exec -- mix test test/relay/accounts_test.exs` — expect ALL PASS.
+- [x] Run `mise exec -- mix ecto.migrate` (applies the migration to the dev DB too).
+- [x] Run `mise exec -- mix precommit` — must pass. Fix any credo/format/boundary findings.
+- [x] Commit everything.
 
 **Deliverable:** `mise exec -- mix test test/relay/accounts_test.exs` green; domain layer complete
 and boundary-clean with no web changes.
