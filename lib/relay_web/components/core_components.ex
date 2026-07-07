@@ -457,6 +457,10 @@ defmodule RelayWeb.CoreComponents do
   Renders a single kanban card: its title, optional #tag, and its
   board-scoped ref (e.g. RLY-3).
 
+  Clicking the card emits a `"select_card"` event (with `phx-value-ref`)
+  for the parent LiveView — `RelayWeb.BoardLive` answers with a patch to
+  `?card=<ref>`, opening the card drawer.
+
   ## Examples
 
       <.board_card id="cards-1" ref="RLY-3" title="Ship MMF 03" tag="infra" />
@@ -468,7 +472,14 @@ defmodule RelayWeb.CoreComponents do
 
   def board_card(assigns) do
     ~H"""
-    <article id={@id} class="board-card card bg-base-100 shadow-sm">
+    <article
+      id={@id}
+      class="board-card card cursor-pointer bg-base-100 shadow-sm transition-shadow hover:shadow-md"
+      role="button"
+      tabindex="0"
+      phx-click="select_card"
+      phx-value-ref={@ref}
+    >
       <div class="card-body gap-2 p-3">
         <p class="card-title text-sm font-medium leading-snug">{@title}</p>
         <div class="flex items-center justify-between gap-2">
@@ -477,6 +488,174 @@ defmodule RelayWeb.CoreComponents do
         </div>
       </div>
     </article>
+    """
+  end
+
+  @doc """
+  Renders the card detail drawer (daisyUI `drawer drawer-end`): a scrim
+  plus a right-side panel with the card's stage chip (stage name in the
+  Human/AI owner color), its ref, an editable title, the plain-text
+  description (whitespace-preserved view or a textarea editor), and a
+  properties rail (stage, tags, dates).
+
+  Render it only while a card is selected. The ✕ button and the scrim
+  are `patch` links to `close_patch`, so closing is a URL change the
+  parent LiveView handles in `handle_params/3`.
+
+  Events emitted (handled by the parent LiveView): `"save_card_title"`
+  (form params `card[title]`) on title submit, `"edit_description"` when
+  the description view is clicked, `"cancel_description"` on Cancel, and
+  `"save_card_description"` (form params `card[description]`) on save.
+
+  ## Examples
+
+      <.card_drawer
+        id="card-drawer"
+        ref="RLY-3"
+        card={@selected_card}
+        stage_name="Spec"
+        stage_owner={:human}
+        close_patch={~p"/board"}
+        title_form={@title_form}
+      />
+  """
+  attr :id, :string, required: true
+  attr :ref, :string, required: true, doc: "the human-facing ref, e.g. RLY-3"
+
+  attr :card, :any,
+    required: true,
+    doc: "a card exposing title, description, tag, inserted_at, and updated_at"
+
+  attr :stage_name, :string, required: true
+  attr :stage_owner, :atom, values: [:human, :ai], required: true
+  attr :close_patch, :string, required: true, doc: "the patch target that closes the drawer"
+  attr :title_form, :any, required: true, doc: "a Phoenix.HTML.Form for card[title]"
+  attr :editing_description, :boolean, default: false
+
+  attr :description_form, :any,
+    default: nil,
+    doc: "a Phoenix.HTML.Form for card[description]; required when editing_description"
+
+  def card_drawer(assigns) do
+    ~H"""
+    <div id={@id} class="drawer drawer-end">
+      <input
+        id={"#{@id}-toggle"}
+        type="checkbox"
+        class="drawer-toggle"
+        checked
+        tabindex="-1"
+        aria-hidden="true"
+      />
+      <div class="drawer-side z-40">
+        <.link id={"#{@id}-scrim"} patch={@close_patch} class="drawer-overlay">
+          <span class="sr-only">Close</span>
+        </.link>
+        <aside class="flex min-h-full w-full max-w-md flex-col gap-6 bg-base-100 p-5 shadow-xl">
+          <header class="space-y-3">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <span class={[
+                  "drawer-stage-chip badge badge-sm font-medium",
+                  if(@stage_owner == :human, do: "badge-primary", else: "badge-secondary")
+                ]}>
+                  {@stage_name}
+                </span>
+                <span class="drawer-card-ref font-mono text-xs text-base-content/60">{@ref}</span>
+              </div>
+              <.link
+                id={"#{@id}-close"}
+                patch={@close_patch}
+                class="btn btn-ghost btn-sm btn-square"
+                aria-label="Close card drawer"
+              >
+                <.icon name="hero-x-mark" class="size-5" />
+              </.link>
+            </div>
+            <.form for={@title_form} id={"#{@id}-title-form"} phx-submit="save_card_title">
+              <.input
+                field={@title_form[:title]}
+                type="text"
+                id={"#{@id}-title-input"}
+                class="input input-ghost w-full px-1 text-lg font-semibold"
+                autocomplete="off"
+              />
+            </.form>
+          </header>
+          <section class="space-y-2">
+            <h4 class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+              Description
+            </h4>
+            <div
+              :if={!@editing_description}
+              id={"#{@id}-description-edit"}
+              role="button"
+              tabindex="0"
+              phx-click="edit_description"
+              class="min-h-16 cursor-text rounded-lg p-1 hover:bg-base-200"
+            >
+              <p
+                :if={@card.description}
+                id={"#{@id}-description-view"}
+                class="whitespace-pre-wrap text-sm leading-relaxed"
+                phx-no-format
+              >{@card.description}</p>
+              <p :if={!@card.description} class="text-sm italic text-base-content/50">
+                Add a description…
+              </p>
+            </div>
+            <.form
+              :if={@editing_description}
+              for={@description_form}
+              id={"#{@id}-description-form"}
+              phx-submit="save_card_description"
+            >
+              <.input
+                field={@description_form[:description]}
+                type="textarea"
+                id={"#{@id}-description-input"}
+                rows="6"
+                autofocus
+              />
+              <div class="flex items-center gap-2">
+                <.button variant="primary" class="btn btn-primary btn-sm">Save</.button>
+                <button
+                  type="button"
+                  id={"#{@id}-description-cancel"}
+                  class="btn btn-ghost btn-sm"
+                  phx-click="cancel_description"
+                >
+                  Cancel
+                </button>
+              </div>
+            </.form>
+          </section>
+          <dl
+            id={"#{@id}-rail"}
+            class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 border-t border-base-300 pt-4 text-sm"
+          >
+            <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+              Stage
+            </dt>
+            <dd class="rail-stage">{@stage_name}</dd>
+            <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+              Tags
+            </dt>
+            <dd class="rail-tags">
+              <span :if={@card.tag} class="badge badge-ghost badge-sm">#{@card.tag}</span>
+              <span :if={!@card.tag} class="text-base-content/50">None</span>
+            </dd>
+            <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+              Dates
+            </dt>
+            <dd class="rail-dates space-y-0.5">
+              <div>Created {Calendar.strftime(@card.inserted_at, "%b %d, %Y")}</div>
+              <div>Updated {Calendar.strftime(@card.updated_at, "%b %d, %Y")}</div>
+            </dd>
+          </dl>
+        </aside>
+      </div>
+    </div>
     """
   end
 

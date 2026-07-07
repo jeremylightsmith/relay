@@ -6,6 +6,7 @@ defmodule RelayWeb.BoardLiveTest do
   alias Relay.Boards
   alias Relay.Boards.Board
   alias Relay.Boards.Stage
+  alias Relay.Cards
   alias Relay.Cards.Card
   alias Relay.Repo
 
@@ -201,6 +202,97 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(view, "#stage-col-1-compose-form")
       assert Repo.all(Card) == []
+    end
+  end
+
+  describe "card drawer" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      {:ok, card} = Cards.create_card(backlog, %{title: "Draft the spec", tag: "spec"})
+      %{board: board, backlog: backlog, card: card}
+    end
+
+    test "no drawer renders without a card param", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      refute has_element?(view, "#card-drawer")
+    end
+
+    test "clicking a board card patches to its ref and opens the drawer", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      view |> element("#stage-col-1-cards .board-card") |> render_click()
+
+      assert_patch(view, ~p"/board?card=RLY-1")
+      assert has_element?(view, "#card-drawer")
+      assert has_element?(view, "#card-drawer-title-input[value='Draft the spec']")
+      assert has_element?(view, "#card-drawer .drawer-card-ref", "RLY-1")
+    end
+
+    test "the drawer header shows the stage chip in the owner color", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer .drawer-stage-chip.badge-primary", "Backlog")
+    end
+
+    test "the properties rail shows stage, tags, and dates", %{conn: conn, card: card} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-rail .rail-stage", "Backlog")
+      assert has_element?(view, "#card-drawer-rail .rail-tags", "spec")
+
+      assert has_element?(
+               view,
+               "#card-drawer-rail .rail-dates",
+               Calendar.strftime(card.inserted_at, "%b %d, %Y")
+             )
+    end
+
+    test "visiting the deep link opens the drawer directly", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer")
+      assert has_element?(view, "#card-drawer .drawer-card-ref", "RLY-1")
+    end
+
+    test "the close button clears the param and closes the drawer", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-close") |> render_click()
+
+      assert_patch(view, ~p"/board")
+      refute has_element?(view, "#card-drawer")
+    end
+
+    test "clicking the scrim clears the param and closes the drawer", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-scrim") |> render_click()
+
+      assert_patch(view, ~p"/board")
+      refute has_element?(view, "#card-drawer")
+    end
+
+    test "an unknown or malformed ref renders no drawer", %{conn: conn} do
+      for ref <- ["RLY-999", "banana", "RLY-abc"] do
+        {:ok, view, _html} = live(conn, ~p"/board?card=#{ref}")
+
+        refute has_element?(view, "#card-drawer")
+        assert has_element?(view, "#board")
+      end
+    end
+
+    test "a ref for another user's card does not open the drawer", %{conn: conn} do
+      other_stage = insert(:stage)
+      insert(:card, stage: other_stage, title: "Theirs", ref_number: 2, position: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-2")
+
+      refute has_element?(view, "#card-drawer")
+      assert has_element?(view, "#board")
     end
   end
 
