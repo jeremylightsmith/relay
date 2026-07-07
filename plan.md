@@ -101,7 +101,7 @@ Phoenix 1.8 / LiveView 1.1, Ecto + Postgres, `{:ueberauth, "~> 0.10"}` +
       {:ueberauth_google, "~> 0.12"},
   ```
 
-- [ ] Run `mise exec -- mix deps.get` and then `mise exec -- mix compile` (expect: fetches
+- [x] Run `mise exec -- mix deps.get` and then `mise exec -- mix compile` (expect: fetches
   `ueberauth`, `ueberauth_google`, `oauth2`; compiles clean).
 
 - [ ] Write the failing test at `test/relay/accounts_test.exs`:
