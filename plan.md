@@ -827,7 +827,7 @@ When reporting completion, mention the two Storybook links (AGENTS.md convention
 
 **Steps**
 
-- [ ] Write the failing LiveView test. Create `test/relay_web/live/board_live_test.exs`:
+- [x] Write the failing LiveView test. Create `test/relay_web/live/board_live_test.exs`:
 
   ```elixir
   defmodule RelayWeb.BoardLiveTest do
@@ -930,9 +930,9 @@ When reporting completion, mention the two Storybook links (AGENTS.md convention
   end
   ```
 
-- [ ] Run `mise exec -- mix test test/relay_web/live/board_live_test.exs` — expect failure
+- [x] Run `mise exec -- mix test test/relay_web/live/board_live_test.exs` — expect failure
   (no route / no LiveView).
-- [ ] Modify `lib/relay_web/router.ex` — add the board route inside the existing live_session:
+- [x] Modify `lib/relay_web/router.ex` — add the board route inside the existing live_session:
 
   ```elixir
   live_session :require_authenticated, on_mount: [{RelayWeb.Auth, :require_authenticated}] do
@@ -941,7 +941,7 @@ When reporting completion, mention the two Storybook links (AGENTS.md convention
   end
   ```
 
-- [ ] Modify `lib/relay_web/components/layouts.ex` — add a `wide` attr to `app/1`. Add after the
+- [x] Modify `lib/relay_web/components/layouts.ex` — add a `wide` attr to `app/1`. Add after the
   existing `attr :current_scope, ...` declaration:
 
   ```elixir
@@ -962,7 +962,7 @@ When reporting completion, mention the two Storybook links (AGENTS.md convention
   <div class={["mx-auto space-y-4", if(@wide, do: "max-w-none", else: "max-w-2xl")]}>
   ```
 
-- [ ] Create `lib/relay_web/live/board_live.ex`:
+- [x] Create `lib/relay_web/live/board_live.ex`:
 
   ```elixir
   defmodule RelayWeb.BoardLive do
@@ -1036,10 +1036,10 @@ When reporting completion, mention the two Storybook links (AGENTS.md convention
   end
   ```
 
-- [ ] Run `mise exec -- mix test test/relay_web/live/board_live_test.exs` — expect pass.
-- [ ] Run `mise exec -- mix format`, then `mise exec -- mix precommit` — expect green (the `/home`
+- [x] Run `mise exec -- mix test test/relay_web/live/board_live_test.exs` — expect pass.
+- [x] Run `mise exec -- mix format`, then `mise exec -- mix precommit` — expect green (the `/home`
   route and its tests still exist and still pass — untouched until Task 5).
-- [ ] Commit.
+- [x] Commit.
 
 **Deliverable:** Authenticated `/board` renders the seeded board: category band in
 Unstarted → In progress → Complete order above 7 stage columns in position order, each with its
