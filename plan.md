@@ -472,7 +472,7 @@ correct at mount and after composing a card; the storybook stage_column story de
 
 **Steps**
 
-- [ ] Add a failing `describe "moving cards"` block to
+- [x] Add a failing `describe "moving cards"` block to
   `test/relay_web/live/board_live_test.exs`, inserted after the `describe "lane counts"` block,
   plus one private helper at the bottom of the module (before the final `end`). Write exactly
   this block:
@@ -621,9 +621,9 @@ correct at mount and after composing a card; the storybook stage_column story de
   end
   ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — expect the nine new tests to fail
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — expect the nine new tests to fail
   (the `"move_card"` event has no handler, so `render_hook` raises or the assertions fail).
-- [ ] Implement in `lib/relay_web/live/board_live.ex`:
+- [x] Implement in `lib/relay_web/live/board_live.ex`:
   1. Add `alias Relay.Boards.Stage` below `alias Relay.Boards` (keep aliases sorted).
   2. Add the handler after the `"select_card"` clause:
 
@@ -708,9 +708,9 @@ correct at mount and after composing a card; the storybook stage_column story de
      `MMF 05 makes cards movable: the BoardDnD drag-and-drop hook and the drawer's "Move to…"
      menu both push a "move_card" event; the server persists via Cards.move_card/3, resets the
      affected stage streams, and keeps the lane counts in sync.`
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — expect all tests to pass.
-- [ ] Run `mix precommit` — expect a clean pass.
-- [ ] Commit.
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — expect all tests to pass.
+- [x] Run `mix precommit` — expect a clean pass.
+- [x] Commit.
 
 **Deliverable:** the server fully handles `"move_card"` (integer or string params, optional
 index = append), persisting via `Cards.move_card/3`, resetting both stage streams, updating lane
