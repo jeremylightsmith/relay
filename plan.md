@@ -1073,7 +1073,7 @@ Covers spec acceptance criteria 1–4 end-to-end. Independently testable via
 
 **Steps**
 
-- [ ] Update the four MMF 01 test expectations from `/home` to `/board` (failing first):
+- [x] Update the four MMF 01 test expectations from `/home` to `/board` (failing first):
   - `test/relay_web/auth_test.exs` — in the `log_in_user/2` describe block, rename the test to
     `"renews the session, stores the user id, and redirects to the board"` and change the assert:
 
@@ -1103,9 +1103,9 @@ Covers spec acceptance criteria 1–4 end-to-end. Independently testable via
     assert redirected_to(conn) == ~p"/board"
     ```
 
-- [ ] Run `mise exec -- mix test test/relay_web/auth_test.exs test/relay_web/controllers` —
+- [x] Run `mise exec -- mix test test/relay_web/auth_test.exs test/relay_web/controllers` —
   expect exactly those four tests to fail (still redirecting to `/home`).
-- [ ] Modify `lib/relay_web/auth.ex` — change `log_in_user/2` (and its doc) to:
+- [x] Modify `lib/relay_web/auth.ex` — change `log_in_user/2` (and its doc) to:
 
   ```elixir
   @doc "Renews the session, stores the user id, and redirects to the board."
@@ -1117,7 +1117,7 @@ Covers spec acceptance criteria 1–4 end-to-end. Independently testable via
   end
   ```
 
-- [ ] Modify `lib/relay_web/controllers/page_controller.ex`:
+- [x] Modify `lib/relay_web/controllers/page_controller.ex`:
 
   ```elixir
   defmodule RelayWeb.PageController do
@@ -1137,9 +1137,9 @@ Covers spec acceptance criteria 1–4 end-to-end. Independently testable via
   end
   ```
 
-- [ ] Run `mise exec -- mix test test/relay_web/auth_test.exs test/relay_web/controllers` —
+- [x] Run `mise exec -- mix test test/relay_web/auth_test.exs test/relay_web/controllers` —
   expect pass.
-- [ ] Migrate the layout (top bar / sign-out) tests from `home_live_test.exs` into
+- [x] Migrate the layout (top bar / sign-out) tests from `home_live_test.exs` into
   `test/relay_web/live/board_live_test.exs` — append these two describe blocks at the end of the
   module (same assertions as MMF 01, now exercised through `/board`):
 
@@ -1172,19 +1172,19 @@ Covers spec acceptance criteria 1–4 end-to-end. Independently testable via
   end
   ```
 
-- [ ] Run `mise exec -- mix test test/relay_web/live/board_live_test.exs` — expect pass (these
+- [x] Run `mise exec -- mix test test/relay_web/live/board_live_test.exs` — expect pass (these
   test the shared layout, already in place).
-- [ ] Remove the `/home` stub:
+- [x] Remove the `/home` stub:
   - In `lib/relay_web/router.ex`, delete the line `live "/home", HomeLive` (keep the
     live_session block with `live "/board", BoardLive`).
   - Delete `lib/relay_web/live/home_live.ex`.
   - Delete `test/relay_web/live/home_live_test.exs`.
-- [ ] Verify no dangling references: `grep -rn "HomeLive\|/home" lib test` must return no hits
+- [x] Verify no dangling references: `grep -rn "HomeLive\|/home" lib test` must return no hits
   (a `~p"/home"` left anywhere fails compilation under verified routes; `HomeLive` left in the
   router fails compilation outright).
-- [ ] Run the full suite: `mise exec -- mix test` — expect green with warnings-as-errors.
-- [ ] Run `mise exec -- mix format`, then `mise exec -- mix precommit` — expect green.
-- [ ] Commit.
+- [x] Run the full suite: `mise exec -- mix test` — expect green with warnings-as-errors.
+- [x] Run `mise exec -- mix format`, then `mise exec -- mix precommit` — expect green.
+- [x] Commit.
 
 **Deliverable:** Signing in (Google or `/dev/login`) and visiting `/` while signed in both land on
 `/board`; the `/home` stub (LiveView, route, test) is gone with zero dangling references; the
