@@ -1719,7 +1719,7 @@ to `board_card`. After this task the live board shows the whole colour system.
 
 **Steps**
 
-- [ ] Add a failing LiveView test block to `test/relay_web/live/board_live_test.exs` (new describe after "drag-and-drop wiring"):
+- [x] Add a failing LiveView test block to `test/relay_web/live/board_live_test.exs` (new describe after "drag-and-drop wiring"):
 
 ```elixir
   describe "baton rendering on the board" do
@@ -1877,8 +1877,8 @@ to `board_card`. After this task the live board shows the whole colour system.
   > `#stage-col-3-cards`) before the assertion, so the test demonstrates a genuinely
   > non-mismatched AI-active card, matching the implementation actually committed.
 
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — expect failures (board cards render no baton markup yet).
-- [ ] In `lib/relay_web/components/core_components.ex`: add `alias Relay.Cards` to the alias block at the top, update the `stage_column/1` `@doc` sentence about cards to say each card needs `title`, `tag`, `ref_number`, `status`, `progress`, and a loaded `owners` list, and change the `<.board_card ...>` call inside `stage_column/1` to:
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — expect failures (board cards render no baton markup yet).
+- [x] In `lib/relay_web/components/core_components.ex`: add `alias Relay.Cards` to the alias block at the top, update the `stage_column/1` `@doc` sentence about cards to say each card needs `title`, `tag`, `ref_number`, `status`, `progress`, and a loaded `owners` list, and change the `<.board_card ...>` call inside `stage_column/1` to:
 
 ```heex
         <.board_card
@@ -1894,7 +1894,7 @@ to `board_card`. After this task the live board shows the whole colour system.
         />
 ```
 
-- [ ] Update the two card maps in the "renders its cards with refs derived from the board key" test in `test/relay_web/components/core_components_test.exs`:
+- [x] Update the two card maps in the "renders its cards with refs derived from the board key" test in `test/relay_web/components/core_components_test.exs`:
 
 ```elixir
           cards: [
@@ -1912,7 +1912,7 @@ to `board_card`. After this task the live board shows the whole colour system.
       assert html =~ "working·40%"
 ```
 
-- [ ] Update the `:with_cards` variation in `storybook/core_components/stage_column.story.exs`:
+- [x] Update the `:with_cards` variation in `storybook/core_components/stage_column.story.exs`:
 
 ```elixir
           cards: [
@@ -1937,8 +1937,8 @@ to `board_card`. After this task the live board shows the whole colour system.
           ]
 ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs test/relay_web/components/core_components_test.exs` — expect pass.
-- [ ] Run `mix precommit` — must pass. Commit.
+- [x] Run `mix test test/relay_web/live/board_live_test.exs test/relay_web/components/core_components_test.exs` — expect pass.
+- [x] Run `mix precommit` — must pass. Commit.
 
 **Deliverable:** the live board shows each card's active-owner colour + pill, status badge
 (amber NEEDS INPUT, `working·N%`, green done), and the red mismatch warning in both
