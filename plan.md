@@ -1019,7 +1019,7 @@ settable only through `Cards.set_status/2`.
 
 **Steps**
 
-- [ ] Add failing tests to `test/relay/cards_test.exs` (new describe blocks):
+- [x] Add failing tests to `test/relay/cards_test.exs` (new describe blocks):
 
 ```elixir
   describe "owner management" do
@@ -1139,8 +1139,8 @@ settable only through `Cards.set_status/2`.
   end
 ```
 
-- [ ] Run `mix test test/relay/cards_test.exs` — expect failures (functions undefined; preload assertions fail with `%Ecto.Association.NotLoaded{}`).
-- [ ] Implement in `lib/relay/cards.ex`. Add `alias Schemas.CardOwner` to the alias block. Extend the `@moduledoc` with a sentence: `An "actor" is either the single Relay AI agent (:agent) or a user ({:user, user_id}) — the same concept later reused for comments (MMF 07) and API attribution (MMF 09).` Add the public functions (after `set_status/2`):
+- [x] Run `mix test test/relay/cards_test.exs` — expect failures (functions undefined; preload assertions fail with `%Ecto.Association.NotLoaded{}`).
+- [x] Implement in `lib/relay/cards.ex`. Add `alias Schemas.CardOwner` to the alias block. Extend the `@moduledoc` with a sentence: `An "actor" is either the single Relay AI agent (:agent) or a user ({:user, user_id}) — the same concept later reused for comments (MMF 07) and API attribution (MMF 09).` Add the public functions (after `set_status/2`):
 
 ```elixir
   @doc """
@@ -1228,7 +1228,7 @@ settable only through `Cards.set_status/2`.
   end
 ```
 
-- [ ] Thread the preload through the existing functions in `lib/relay/cards.ex`:
+- [x] Thread the preload through the existing functions in `lib/relay/cards.ex`:
   - `create_card/2`: inside the transaction fun, change `{:ok, card} -> card` to `{:ok, card} -> preload_owners(card)`.
   - `list_cards/1`: add the preload to the query:
 
@@ -1254,8 +1254,8 @@ settable only through `Cards.set_status/2`.
 
   - `update_card/2`: append `|> preload_owners_result()` after `|> Repo.update()`.
   - `move_card/3`: change `moved = place_at(card, target_stage, index)` to `moved = preload_owners(place_at(card, target_stage, index))`.
-- [ ] Run `mix test test/relay/cards_test.exs` — expect pass.
-- [ ] Run `mix precommit` — must pass (full suite: existing LiveView tests must be unaffected). Commit.
+- [x] Run `mix test test/relay/cards_test.exs` — expect pass.
+- [x] Run `mix precommit` — must pass (full suite: existing LiveView tests must be unaffected). Commit.
 
 **Deliverable:** complete owner lifecycle in `Relay.Cards` — settable owner list,
 derived active owner, owners always preloaded — with the move path untouched (moving never
