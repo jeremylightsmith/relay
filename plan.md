@@ -872,7 +872,7 @@ Produces:
 
 **Steps**
 
-- [ ] In `test/relay_web/live/board_live_test.exs`, extend the alias block to (alphabetical; Styler enforces this order):
+- [x] In `test/relay_web/live/board_live_test.exs`, extend the alias block to (alphabetical; Styler enforces this order):
 
 ```elixir
   alias Relay.Boards
@@ -993,8 +993,8 @@ Produces:
 ```
 
   Leave every pre-existing test in the file untouched (they must all keep passing — including "every stage shows the empty-state placeholder", which counts 7 `.stage-empty` nodes that the new markup still renders).
-- [ ] Run and confirm the new tests fail (no compose wiring yet): `mise exec -- mix test test/relay_web/live/board_live_test.exs`
-- [ ] Replace `lib/relay_web/live/board_live.ex` with:
+- [x] Run and confirm the new tests fail (no compose wiring yet): `mise exec -- mix test test/relay_web/live/board_live_test.exs`
+- [x] Replace `lib/relay_web/live/board_live.ex` with:
 
 ```elixir
 defmodule RelayWeb.BoardLive do
@@ -1131,9 +1131,9 @@ end
 ```
 
   Notes: `stream_insert/3` appends at the end by default, matching "new cards append to the bottom"; after a successful create the composer stays open with a fresh empty form ("clears the input"); on `{:error, changeset}` the form re-renders with the error and nothing is created; the `stream_name/1` sobelow annotation is required — without it `mix sobelow --config` fails precommit on `DOS.BinToAtom`.
-- [ ] Run and confirm the whole file passes (new "cards" tests plus every pre-existing MMF 01/02 test): `mise exec -- mix test test/relay_web/live/board_live_test.exs`
-- [ ] Run the full gate: `mise exec -- mix precommit` — everything must be green
-- [ ] Commit
+- [x] Run and confirm the whole file passes (new "cards" tests plus every pre-existing MMF 01/02 test): `mise exec -- mix test test/relay_web/live/board_live_test.exs`
+- [x] Run the full gate: `mise exec -- mix precommit` — everything must be green
+- [x] Commit
 
 **Deliverable:** All four MMF acceptance criteria pass via tests — (1) stage compose CTA creates a card in that stage and clears the input ("submitting the composer creates a card in that stage and clears the input"); (2) cards persist and re-render in position order on reload ("cards persist and re-render in position order on reload"); (3) each card shows title and ref, and an empty stage shows its empty state ("creating cards assigns per-board incrementing refs shown on the cards" + "cards render in their own stage; other stages keep the empty state"); (4) per-board incrementing refs, gap-free under concurrency (same tests plus `Relay.CardsTest`, including the concurrency test). `mise exec -- mix precommit` green on branch `mmf-03-create-cards`.
 
