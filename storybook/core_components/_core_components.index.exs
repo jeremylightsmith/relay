@@ -5,6 +5,7 @@ defmodule Storybook.CoreComponents do
   def folder_open?, do: true
 
   def entry("back"), do: [icon: {:fa, "circle-left", :thin}]
+  def entry("board_card"), do: [icon: {:fa, "note-sticky", :thin}]
   def entry("button"), do: [icon: {:fa, "rectangle-ad", :thin}]
   def entry("error"), do: [icon: {:fa, "circle-exclamation", :thin}]
   def entry("flash"), do: [icon: {:fa, "bolt", :thin}]
