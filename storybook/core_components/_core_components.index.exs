@@ -12,5 +12,7 @@ defmodule Storybook.CoreComponents do
   def entry("icon"), do: [icon: {:fa, "icons", :thin}]
   def entry("input"), do: [icon: {:fa, "input-text", :thin}]
   def entry("list"), do: [icon: {:fa, "list", :thin}]
+  def entry("owner_pill"), do: [icon: {:fa, "tag", :thin}]
+  def entry("stage_column"), do: [icon: {:fa, "table-columns", :thin}]
   def entry("table"), do: [icon: {:fa, "table", :thin}]
 end

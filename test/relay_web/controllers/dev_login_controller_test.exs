@@ -4,13 +4,13 @@ defmodule RelayWeb.DevLoginControllerTest do
   alias Relay.Accounts.User
   alias Relay.Repo
 
-  test "GET /dev/login signs in the dev user and redirects home", %{conn: conn} do
+  test "GET /dev/login signs in the dev user and redirects to the board", %{conn: conn} do
     conn = get(conn, ~p"/dev/login")
 
     user = Repo.get_by!(User, provider: "dev")
     assert user.email == "dev@relay.local"
     assert get_session(conn, :user_id) == user.id
-    assert redirected_to(conn) == ~p"/home"
+    assert redirected_to(conn) == ~p"/board"
   end
 
   test "GET /dev/login is idempotent across sign-ins", %{conn: conn} do

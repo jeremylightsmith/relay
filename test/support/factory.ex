@@ -16,4 +16,23 @@ defmodule Relay.Factory do
       provider_uid: sequence(:provider_uid, &"google-uid-#{&1}")
     }
   end
+
+  def board_factory do
+    %Relay.Boards.Board{
+      name: "My board",
+      slug: sequence(:slug, &"board-#{&1}"),
+      key: "RLY",
+      owner: build(:user)
+    }
+  end
+
+  def stage_factory do
+    %Relay.Boards.Stage{
+      name: sequence(:stage_name, &"Stage #{&1}"),
+      position: sequence(:stage_position, & &1),
+      category: :unstarted,
+      owner: :human,
+      board: build(:board)
+    }
+  end
 end

@@ -57,13 +57,13 @@ defmodule RelayWeb.AuthTest do
   end
 
   describe "log_in_user/2" do
-    test "renews the session, stores the user id, and redirects home", %{conn: conn} do
+    test "renews the session, stores the user id, and redirects to the board", %{conn: conn} do
       user = insert(:user)
       conn = conn |> put_session(:stale, "value") |> Auth.log_in_user(user)
 
       assert get_session(conn, :user_id) == user.id
       refute get_session(conn, :stale)
-      assert redirected_to(conn) == ~p"/home"
+      assert redirected_to(conn) == ~p"/board"
     end
   end
 
