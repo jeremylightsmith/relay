@@ -399,7 +399,7 @@ Independently testable via `mise exec -- mix test test/relay/boards/`.
 
 **Steps**
 
-- [ ] Write the failing context test. Create `test/relay/boards_test.exs`:
+- [x] Write the failing context test. Create `test/relay/boards_test.exs`:
 
   ```elixir
   defmodule Relay.BoardsTest do
@@ -476,9 +476,9 @@ Independently testable via `mise exec -- mix test test/relay/boards/`.
   end
   ```
 
-- [ ] Run `mise exec -- mix test test/relay/boards_test.exs` — expect failure
+- [x] Run `mise exec -- mix test test/relay/boards_test.exs` — expect failure
   (`Boards.get_or_create_default_board/1` is undefined).
-- [ ] Replace `lib/relay/boards.ex` with the full implementation:
+- [x] Replace `lib/relay/boards.ex` with the full implementation:
 
   ```elixir
   defmodule Relay.Boards do
@@ -563,9 +563,9 @@ Independently testable via `mise exec -- mix test test/relay/boards/`.
   end
   ```
 
-- [ ] Run `mise exec -- mix test test/relay/boards_test.exs` — expect pass.
-- [ ] Run `mise exec -- mix format`, then `mise exec -- mix precommit` — expect green.
-- [ ] Commit.
+- [x] Run `mise exec -- mix test test/relay/boards_test.exs` — expect pass.
+- [x] Run `mise exec -- mix format`, then `mise exec -- mix precommit` — expect green.
+- [x] Commit.
 
 **Deliverable:** Idempotent default-board provisioning with the exact 7-stage seeded pipeline and
 unique, user-derived slugs (spec acceptance criterion 1 at the domain level). Independently
