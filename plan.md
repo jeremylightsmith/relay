@@ -1135,7 +1135,7 @@ browser smoke test.
 
 - [x] Run `mix test test/relay_web/live/board_live_test.exs` — expect all tests to pass
   (the pre-existing `.rail-stage` test still matches: the row still contains the stage name).
-- [ ] Run `mix precommit` — expect a clean pass.
+- [x] Run `mix precommit` — expect a clean pass.
 - [x] Commit.
 
 **Deliverable:** the card drawer's properties rail offers a "Move to…" dropdown listing the
