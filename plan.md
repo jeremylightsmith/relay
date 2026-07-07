@@ -650,7 +650,7 @@ sites, with integration tests proving user attribution end-to-end.
 
 **Steps**
 
-- [ ] **TDD cycle 1 — create + move.** Append to `test/relay/cards_test.exs` (inside the
+- [x] **TDD cycle 1 — create + move.** Append to `test/relay/cards_test.exs` (inside the
   module; it already has the `setup` providing `%{board: board, stage: stage}` and
   `use Relay.DataCase` brings `import Ecto.Query`):
 
@@ -714,9 +714,9 @@ sites, with integration tests proving user attribution end-to-end.
   end
   ```
 
-- [ ] Run `mix test test/relay/cards_test.exs` — the new tests fail (wrong arity / no rows).
+- [x] Run `mix test test/relay/cards_test.exs` — the new tests fail (wrong arity / no rows).
 
-- [ ] Implement in `lib/relay/cards.ex`:
+- [x] Implement in `lib/relay/cards.ex`:
   1. Boundary dep + alias:
 
      ```elixir
@@ -791,10 +791,10 @@ sites, with integration tests proving user attribution end-to-end.
 
      Update `move_card`'s `@doc` sentence about the seam ("A cross-stage move logs a
      `:moved` activity entry (MMF 07) attributed to `actor`.").
-- [ ] Run `mix test test/relay/cards_test.exs` — cycle 1 green (all pre-existing tests must
+- [x] Run `mix test test/relay/cards_test.exs` — cycle 1 green (all pre-existing tests must
   still pass unchanged — the default actor keeps old call sites compiling).
 
-- [ ] **TDD cycle 2 — status.** Append inside the `describe "activity logging"` block:
+- [x] **TDD cycle 2 — status.** Append inside the `describe "activity logging"` block:
 
   ```elixir
   test "set_status/3 logs :status_changed with from/to", %{stage: stage, user: user} do
@@ -862,7 +862,7 @@ sites, with integration tests proving user attribution end-to-end.
   Update `set_status`'s `@doc` (actor + "logs `:status_changed` when the status value
   actually changes"). Run `mix test test/relay/cards_test.exs` — green.
 
-- [ ] **TDD cycle 3 — owners.** Append inside `describe "activity logging"`:
+- [x] **TDD cycle 3 — owners.** Append inside `describe "activity logging"`:
 
   ```elixir
   test "add_owner/3 logs :owners_changed with the owner label", %{stage: stage, user: user} do
@@ -969,7 +969,7 @@ sites, with integration tests proving user attribution end-to-end.
   `set_owners/2` mentions inside the `"owner management"` test names to `/3`. Run
   `mix test test/relay/cards_test.exs` — green.
 
-- [ ] **TDD cycle 4 — web attribution.** The LiveView must attribute actions to the
+- [x] **TDD cycle 4 — web attribution.** The LiveView must attribute actions to the
   signed-in human. Append to `test/relay_web/live/board_live_test.exs` (it already aliases
   `Relay.Boards`, `Relay.Cards`, `Relay.Repo`; reference the schema fully-qualified):
 
@@ -1026,7 +1026,7 @@ sites, with integration tests proving user attribution end-to-end.
   (`board_live_test.exs` needs `import Ecto.Query` — add it under the existing
   `import Phoenix.LiveViewTest` if not already present.)
 
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — the new tests fail
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — the new tests fail
   (everything is still agent-attributed). Then update `lib/relay_web/live/board_live.ex`:
   add a tiny private
 
@@ -1045,9 +1045,9 @@ sites, with integration tests proving user attribution end-to-end.
   - `Cards.remove_owner(card, actor)` → `Cards.remove_owner(card, actor, current_actor(socket))`
 
   (`update_card/2` is untouched — title/description edits are not logged in MMF 07.)
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — green.
-- [ ] Run `mix precommit` and fix anything it flags.
-- [ ] Commit.
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — green.
+- [x] Run `mix precommit` and fix anything it flags.
+- [x] Commit.
 
 **Deliverable:** creating, moving (cross-stage), status-changing, and owner-changing a card
 each append exactly the right `Schemas.Activity` row with the right actor — proven by context
