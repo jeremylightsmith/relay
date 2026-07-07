@@ -425,6 +425,71 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
+  Renders the Human/AI owner pill — who holds the baton for a stage.
+
+  Human maps to the primary (blue) theme token, AI to the secondary
+  (violet) one, per the daisyUI theme in `assets/css/app.css`.
+
+  ## Examples
+
+      <.owner_pill owner={:human} />
+      <.owner_pill owner={:ai} />
+  """
+  attr :owner, :atom, values: [:human, :ai], required: true
+  attr :class, :any, default: nil
+
+  def owner_pill(assigns) do
+    ~H"""
+    <span
+      class={[
+        "owner-pill badge badge-sm font-medium",
+        if(@owner == :human, do: "badge-primary", else: "badge-secondary"),
+        @class
+      ]}
+      data-owner={@owner}
+    >
+      {if @owner == :human, do: "Human", else: "AI"}
+    </span>
+    """
+  end
+
+  @doc """
+  Renders one stage column of the board: the stage name, its Human/AI
+  owner pill, and the column contents (cards, from MMF 03). Shows a
+  dashed empty-state placeholder when no content is given.
+
+  ## Examples
+
+      <.stage_column id="stage-col-1" name="Backlog" owner={:human} />
+  """
+  attr :id, :string, required: true
+  attr :name, :string, required: true
+  attr :owner, :atom, values: [:human, :ai], required: true
+
+  slot :inner_block
+
+  def stage_column(assigns) do
+    ~H"""
+    <section
+      id={@id}
+      class="stage-column flex w-60 shrink-0 flex-col gap-3 rounded-box bg-base-200 p-3"
+    >
+      <header class="flex items-center justify-between gap-2">
+        <h3 class="text-sm font-semibold">{@name}</h3>
+        <.owner_pill owner={@owner} />
+      </header>
+      <div
+        :if={@inner_block == []}
+        class="stage-empty rounded-lg border border-dashed border-base-content/20 px-3 py-6 text-center text-xs text-base-content/50"
+      >
+        No cards yet
+      </div>
+      {render_slot(@inner_block)}
+    </section>
+    """
+  end
+
+  @doc """
   Renders a [Heroicon](https://heroicons.com).
 
   Heroicons come in three styles – outline, solid, and mini.
