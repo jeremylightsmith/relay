@@ -12,6 +12,6 @@ defmodule Relay do
   """
 
   use Boundary,
-    deps: [],
-    exports: [Repo, Mailer, Accounts, Accounts.Scope, Boards, Boards.Stage, Cards, Cards.Card]
+    deps: [Schemas],
+    exports: [Repo, Mailer, Accounts, Boards, Cards]
 end

@@ -2,8 +2,8 @@ defmodule Relay.BoardsTest do
   use Relay.DataCase, async: true
 
   alias Relay.Boards
-  alias Relay.Boards.Board
-  alias Relay.Boards.Stage
+  alias Schemas.Board
+  alias Schemas.Stage
 
   describe "get_or_create_default_board/1" do
     test "creates a board with defaults and the 7 seeded stages, in position order" do

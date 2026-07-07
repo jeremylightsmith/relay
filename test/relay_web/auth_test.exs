@@ -1,8 +1,8 @@
 defmodule RelayWeb.AuthTest do
   use RelayWeb.ConnCase, async: true
 
-  alias Relay.Accounts.Scope
   alias RelayWeb.Auth
+  alias Schemas.Scope
 
   setup %{conn: conn} do
     conn =

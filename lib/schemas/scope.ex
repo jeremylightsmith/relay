@@ -1,11 +1,11 @@
-defmodule Relay.Accounts.Scope do
+defmodule Schemas.Scope do
   @moduledoc """
   The current-user scope handed to LiveViews and controllers as
   `current_scope` (Phoenix 1.8 convention; `<Layouts.app>` expects it).
   `nil` means "not signed in".
   """
 
-  alias Relay.Accounts.User
+  alias Schemas.User
 
   defstruct user: nil
 

@@ -1,10 +1,10 @@
-defmodule Relay.Cards.CardTest do
+defmodule Schemas.CardTest do
   use Relay.DataCase, async: true
 
-  alias Relay.Boards.Board
-  alias Relay.Boards.Stage
   alias Relay.Cards
-  alias Relay.Cards.Card
+  alias Schemas.Board
+  alias Schemas.Card
+  alias Schemas.Stage
 
   describe "changeset/2" do
     test "requires a title" do

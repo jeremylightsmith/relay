@@ -4,14 +4,14 @@ defmodule Relay.Cards do
   (RLY-1, RLY-2, ...), and per-stage ordering.
   """
 
-  use Boundary, deps: [Relay.Boards, Relay.Repo], exports: [Card]
+  use Boundary, deps: [Relay.Repo, Schemas]
 
   import Ecto.Query
 
-  alias Relay.Boards.Board
-  alias Relay.Boards.Stage
-  alias Relay.Cards.Card
   alias Relay.Repo
+  alias Schemas.Board
+  alias Schemas.Card
+  alias Schemas.Stage
 
   @doc """
   Creates a card in `stage` from user-supplied `attrs` (`:title`, optional

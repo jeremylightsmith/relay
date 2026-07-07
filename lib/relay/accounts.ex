@@ -7,10 +7,10 @@ defmodule Relay.Accounts do
   login bypass. Web/session concerns live in `RelayWeb.Auth`, not here.
   """
 
-  use Boundary, deps: [Relay.Repo], exports: [User, Scope]
+  use Boundary, deps: [Relay.Repo, Schemas]
 
-  alias Relay.Accounts.User
   alias Relay.Repo
+  alias Schemas.User
 
   @dev_user_email "dev@relay.local"
   @dev_user_uid "dev-user"

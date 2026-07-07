@@ -16,9 +16,9 @@ defmodule RelayWeb.BoardLive do
   use RelayWeb, :live_view
 
   alias Relay.Boards
-  alias Relay.Boards.Stage
   alias Relay.Cards
-  alias Relay.Cards.Card
+  alias Schemas.Card
+  alias Schemas.Stage
 
   @category_order [:unstarted, :in_progress, :complete]
 

@@ -1,4 +1,4 @@
-defmodule Relay.Accounts.User do
+defmodule Schemas.User do
   @moduledoc """
   A person who signed in. Identity is keyed on `provider_uid`
   (Google's stable `sub` claim); `provider` and `provider_uid` are set

@@ -1,9 +1,9 @@
 defmodule Relay.CardsTest do
   use Relay.DataCase, async: true
 
-  alias Relay.Boards.Board
   alias Relay.Cards
-  alias Relay.Cards.Card
+  alias Schemas.Board
+  alias Schemas.Card
 
   setup do
     board = insert(:board, key: "RLY")

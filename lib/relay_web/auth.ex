@@ -11,7 +11,7 @@ defmodule RelayWeb.Auth do
   import Plug.Conn
 
   alias Relay.Accounts
-  alias Relay.Accounts.Scope
+  alias Schemas.Scope
 
   @doc "Plug: assigns `:current_scope` from the session (nil when logged out)."
   def fetch_current_scope(conn, _opts) do

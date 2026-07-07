@@ -1,8 +1,8 @@
 defmodule RelayWeb.AuthControllerTest do
   use RelayWeb.ConnCase, async: true
 
-  alias Relay.Accounts.User
   alias Relay.Repo
+  alias Schemas.User
 
   defp google_auth do
     %Ueberauth.Auth{

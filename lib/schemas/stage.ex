@@ -1,4 +1,4 @@
-defmodule Relay.Boards.Stage do
+defmodule Schemas.Stage do
   @moduledoc """
   A column on a board. `category` groups stages under the board's category
   band (unstarted → in_progress → complete); `owner` says whose turn work
@@ -16,7 +16,7 @@ defmodule Relay.Boards.Stage do
     field :category, Ecto.Enum, values: [:unstarted, :in_progress, :complete]
     field :owner, Ecto.Enum, values: [:human, :ai]
 
-    belongs_to :board, Relay.Boards.Board
+    belongs_to :board, Schemas.Board
 
     timestamps(type: :utc_datetime)
   end

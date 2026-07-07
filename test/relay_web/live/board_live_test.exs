@@ -4,11 +4,11 @@ defmodule RelayWeb.BoardLiveTest do
   import Phoenix.LiveViewTest
 
   alias Relay.Boards
-  alias Relay.Boards.Board
-  alias Relay.Boards.Stage
   alias Relay.Cards
-  alias Relay.Cards.Card
   alias Relay.Repo
+  alias Schemas.Board
+  alias Schemas.Card
+  alias Schemas.Stage
 
   describe "when logged out" do
     test "GET /board redirects to the sign-in page", %{conn: conn} do

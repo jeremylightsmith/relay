@@ -1,4 +1,4 @@
-defmodule Relay.Cards.Card do
+defmodule Schemas.Card do
   @moduledoc """
   A card on a board: a titled unit of work living in one stage. `position`
   orders cards within their stage; `ref_number` is the per-board sequence
@@ -18,8 +18,8 @@ defmodule Relay.Cards.Card do
     field :tag, :string
     field :ref_number, :integer
 
-    belongs_to :board, Relay.Boards.Board
-    belongs_to :stage, Relay.Boards.Stage
+    belongs_to :board, Schemas.Board
+    belongs_to :stage, Schemas.Stage
 
     timestamps(type: :utc_datetime)
   end
