@@ -457,21 +457,28 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "adding the agent as an owner flips the card to violet AI",
-         %{conn: conn, user: user, card: card} do
-      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
-      {:ok, _card} = Cards.add_owner(card, :agent)
+         %{conn: conn, user: user, card: card, plan: plan} do
+      {:ok, card} = Cards.add_owner(card, {:user, user.id})
+      {:ok, card} = Cards.add_owner(card, :agent)
+
+      # Backlog (stage-col-1) is a human-owned stage, so an AI-active card
+      # left there is a genuine stage mismatch (covered separately by "an
+      # AI-active card in a human stage shows the red meant-for-humans
+      # warning") and the mismatch rule overrides the border to
+      # border-l-error. Move the card into Plan — an AI-owned stage — so
+      # this test can demonstrate the clean, no-mismatch violet-AI border.
+      {:ok, _moved} = Cards.move_card(card, plan, 0)
 
       {:ok, view, _html} = live(conn, ~p"/board")
 
-      # Backlog is a human-owned stage, so this card (now AI-active) is a
-      # stage mismatch (asserted separately below) — check the active-owner
-      # flip and pill here, not the border colour (which the mismatch rule
-      # overrides to border-l-error).
-      assert has_element?(view, "#stage-col-1-cards .board-card[data-active-owner='ai']")
+      assert has_element?(
+               view,
+               "#stage-col-3-cards .board-card[data-active-owner='ai'].border-l-secondary"
+             )
 
       assert has_element?(
                view,
-               "#stage-col-1-cards .board-card .card-owner-pill.badge-secondary",
+               "#stage-col-3-cards .board-card .card-owner-pill.badge-secondary",
                "AI"
              )
     end
