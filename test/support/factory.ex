@@ -54,4 +54,19 @@ defmodule Relay.Factory do
 
     card |> merge_attributes(attrs) |> evaluate_lazy_attributes()
   end
+
+  # Full-control factory: `card` (when overridden) must be a persisted card.
+  # With a `user`, builds a human owner; without, the single AI agent owner.
+  def card_owner_factory(attrs) do
+    {card, attrs} = Map.pop_lazy(attrs, :card, fn -> insert(:card) end)
+    {user, attrs} = Map.pop(attrs, :user)
+
+    owner = %Schemas.CardOwner{
+      card_id: card.id,
+      actor_type: if(user, do: :user, else: :agent),
+      user_id: user && user.id
+    }
+
+    owner |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
 end

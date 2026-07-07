@@ -20,6 +20,7 @@ defmodule Schemas.Card do
 
     belongs_to :board, Schemas.Board
     belongs_to :stage, Schemas.Stage
+    has_many :owners, Schemas.CardOwner
 
     timestamps(type: :utc_datetime)
   end

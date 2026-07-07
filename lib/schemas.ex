@@ -6,5 +6,5 @@ defmodule Schemas do
   contexts. Schemas may reference each other freely within this boundary.
   """
 
-  use Boundary, deps: [], exports: [Board, Card, Scope, Stage, User]
+  use Boundary, deps: [], exports: [Board, Card, CardOwner, Scope, Stage, User]
 end
