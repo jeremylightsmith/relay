@@ -55,9 +55,13 @@ Re-pulled the mockups from the Claude Design project and diffed against what's b
 
 ## Modeling decisions (apply across MMFs)
 
-- **Ownership is stage-level.** A stage is Human-run or AI-run; a card's current owner is its
-  stage's owner. When an AI stage is working a card, human owners are "paused." This refines
-  [`../vision.md`](../vision.md)'s per-card framing — the design is authoritative.
+- **Ownership is per-card.** A card carries a settable **list of owner actors** (users and/or
+  the single Relay AI agent — the AI is just one owner among many). The **active owner** is
+  derived from that list (AI active if present, else humans; others show "paused"); nothing
+  changes automatically. A **stage** keeps an `owner` too, but only as a **"meant for"**
+  designation — when a card's active-owner type conflicts with its stage's owner the card shows
+  a **red mismatch warning** (both directions), never an auto-correction. This corrects an
+  earlier "ownership is stage-level / derived" framing — see MMF 06's design spec.
 - **Stages sit in three categories** — Unstarted / In progress / Complete (à la Linear) — so a
   stage's *meaning* is unambiguous. Owner (Human/AI) is orthogonal to category.
 - **MVP boards are single-owner.** One user owns a board; sharing/roles arrive in MMF 17.

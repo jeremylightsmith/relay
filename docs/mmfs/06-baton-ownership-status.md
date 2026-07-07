@@ -7,24 +7,32 @@ The core of Relay: at a glance you can see **who holds each card** (human vs AI)
 state it's in**. This is the signal the whole product is built around.
 
 ## In scope
-- Card `status` enum: `queued | working | needs_input | in_review | done`.
-- A card's **owner** is derived from its stage's owner (Human/AI); when an AI stage is
-  `working` a card, human owners show **paused**.
-- Visual system from the design: Human=blue / AI=violet left-border + owner pill; status badge
-  (working·%, NEEDS INPUT amber, ready/in-review, done green).
-- Properties rail: ACTIVE WORKER + OWNERS (active/paused) reflecting stage owner & status.
-- Status is settable (by a human here; by the API/agent in MMF 09).
+- Card `status` enum: `queued | working | needs_input | in_review | done`, plus a `progress` int.
+- **Ownership lives on the card** as a settable **list of actors** (`card_owners`); an actor is a
+  user or the single **Relay AI agent** — the AI is just one owner among many. **Active owner**
+  is derived from the list (AI active if present, else humans; others show **paused**). Nothing
+  changes automatically — owners/status change only on explicit human or agent action.
+- `Stage.owner` is retained as the **"meant for"** designation (not the card's owner).
+- Visual system: active Human=blue / active AI=violet left-border + owner pill; `needs_input`
+  amber; **red mismatch (both directions)** when the card's active-owner type ≠ its stage's
+  owner ("meant for agents" / "meant for humans"); status badge (working·%, in-review, done).
+- Properties rail: ACTIVE WORKER + OWNERS (active/paused); set status + add/remove owners.
+- **Foundational refactor folded in here:** shared `Schemas` boundary (ADR 0002) — migrate the
+  existing schemas to `Schemas.*` with no behaviour change (see the design spec).
 
 ## Out of scope
 - The interactive needs-input Q&A — MMF 14. Review-gate actions — MMF 15. AI progress % source
-  (just store/display the number) — automation later.
+  (just store/display the number) — automation later. Auto-changing owners/status on move.
 
 ## Acceptance criteria
-- [ ] Each card shows its owner (Human/AI) color + pill and its status badge.
-- [ ] Moving a card into an AI stage sets owner=AI; into a human stage sets owner=Human.
+- [ ] Each card shows its active owner (Human/AI) color + pill and its status badge.
+- [ ] A card whose owner type conflicts with its stage's owner shows the red mismatch warning
+      (both directions).
 - [ ] A `needs_input` card shows the amber "NEEDS INPUT" treatment on the board.
-- [ ] The drawer rail shows active worker and paused owners consistent with status.
+- [ ] The drawer rail shows active worker + paused owners and can set status/owners.
+- [ ] Existing schemas are migrated to `Schemas.*` with the suite/boundary check green.
 
 ## Notes
-- Status transitions are just data now; MMFs 14/15 add the human-facing flows, MMF 09 lets the
-  agent drive them. Keep the enum + owner-derivation authoritative here.
+- Status/owners are just data now; MMFs 14/15 add the human-facing flows, MMF 09 lets the agent
+  drive them. Keep the enum + card-owned actor list authoritative here.
+- Design spec: [`../superpowers/specs/2026-07-07-baton-ownership-status-design.md`](../superpowers/specs/2026-07-07-baton-ownership-status-design.md).
