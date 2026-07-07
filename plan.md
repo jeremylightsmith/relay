@@ -559,7 +559,7 @@ The owner list storage: one row per (card, actor). An actor is a user (`actor_ty
 
 **Steps**
 
-- [ ] Write the failing test `test/schemas/card_owner_test.exs`:
+- [x] Write the failing test `test/schemas/card_owner_test.exs`:
 
 ```elixir
 defmodule Schemas.CardOwnerTest do
@@ -680,8 +680,8 @@ defmodule Schemas.CardOwnerTest do
 end
 ```
 
-- [ ] Run `mix test test/schemas/card_owner_test.exs` — expect failure (module and table don't exist).
-- [ ] Run `mix ecto.gen.migration create_card_owners` and fill the generated file:
+- [x] Run `mix test test/schemas/card_owner_test.exs` — expect failure (module and table don't exist).
+- [x] Run `mix ecto.gen.migration create_card_owners` and fill the generated file:
 
 ```elixir
 defmodule Relay.Repo.Migrations.CreateCardOwners do
@@ -713,7 +713,7 @@ defmodule Relay.Repo.Migrations.CreateCardOwners do
 end
 ```
 
-- [ ] Create `lib/schemas/card_owner.ex`:
+- [x] Create `lib/schemas/card_owner.ex`:
 
 ```elixir
 defmodule Schemas.CardOwner do
@@ -764,9 +764,9 @@ defmodule Schemas.CardOwner do
 end
 ```
 
-- [ ] Add `has_many :owners, Schemas.CardOwner` to the `schema "cards"` block in `lib/schemas/card.ex` (directly after the two `belongs_to` lines).
-- [ ] Update `lib/schemas.ex` exports to `[Board, Card, CardOwner, Scope, Stage, User]`.
-- [ ] Add the factory to `test/support/factory.ex` (after `card_factory/1`):
+- [x] Add `has_many :owners, Schemas.CardOwner` to the `schema "cards"` block in `lib/schemas/card.ex` (directly after the two `belongs_to` lines).
+- [x] Update `lib/schemas.ex` exports to `[Board, Card, CardOwner, Scope, Stage, User]`.
+- [x] Add the factory to `test/support/factory.ex` (after `card_factory/1`):
 
 ```elixir
   # Full-control factory: `card` (when overridden) must be a persisted card.
@@ -785,8 +785,8 @@ end
   end
 ```
 
-- [ ] Run `mix ecto.migrate`, then `mix test test/schemas/card_owner_test.exs` — expect pass.
-- [ ] Run `mix precommit` — must pass. Commit.
+- [x] Run `mix ecto.migrate`, then `mix test test/schemas/card_owner_test.exs` — expect pass.
+- [x] Run `mix precommit` — must pass. Commit.
 
 **Deliverable:** the `card_owners` table + `Schemas.CardOwner` with validated
 programmatic changesets, duplicate-proof at the DB level, factory support.
