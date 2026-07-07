@@ -1202,13 +1202,13 @@ criteria.
 
 **Steps**
 
-- [ ] Run the entire gate one final time from a clean state and fix anything it flags:
+- [x] Run the entire gate one final time from a clean state and fix anything it flags:
 
   ```bash
   mise exec -- mix precommit
   ```
 
-- [ ] Confirm each spec acceptance criterion maps to green tests
+- [x] Confirm each spec acceptance criterion maps to green tests
   (`test/relay_web/live/board_live_test.exs` `describe "card drawer"`, and
   `test/relay/cards_test.exs`):
 
@@ -1227,7 +1227,7 @@ criteria.
      the drawer", "an unknown or malformed ref renders no drawer", and the
      `get_card_by_ref/2` context tests.
 
-- [ ] Boot the app and eyeball the drawer once end-to-end (sign in, open a card, edit the
+- [x] Boot the app and eyeball the drawer once end-to-end (sign in, open a card, edit the
   title and description, confirm the board card updated, close via scrim, reload the
   `?card=` deep link), then stop the server:
 
@@ -1235,7 +1235,7 @@ criteria.
   mise exec -- mix phx.server
   ```
 
-- [ ] If any fix was needed, re-run `mise exec -- mix precommit` and commit as
+- [x] If any fix was needed, re-run `mise exec -- mix precommit` and commit as
   `Fix card drawer issues found in verification`; otherwise there is nothing to commit.
 
 **Deliverable:** all four MMF 04 acceptance criteria demonstrably green, full
