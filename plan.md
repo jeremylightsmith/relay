@@ -753,7 +753,7 @@ counts and the open drawer, and silently rejecting anything not on this board â€
 
 **Steps**
 
-- [ ] Add a failing `describe "drag-and-drop wiring"` block to
+- [x] Add a failing `describe "drag-and-drop wiring"` block to
   `test/relay_web/live/board_live_test.exs`, inserted after the `describe "moving cards"` block:
 
   ```elixir
@@ -797,9 +797,9 @@ counts and the open drawer, and silently rejecting anything not on this board â€
   end
   ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` â€” expect the three new tests to
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` â€” expect the three new tests to
   fail (no hook attribute, no `draggable`/`data-ref`, no `.stage-cards` class).
-- [ ] In `lib/relay_web/components/core_components.ex`:
+- [x] In `lib/relay_web/components/core_components.ex`:
   1. `board_card/1`: replace the opening `<article ...>` tag:
 
      ```heex
@@ -852,11 +852,11 @@ counts and the open drawer, and silently rejecting anything not on this board â€
      >
      ```
 
-- [ ] In `lib/relay_web/live/board_live.ex`, replace
+- [x] In `lib/relay_web/live/board_live.ex`, replace
   `<div id="board" class="space-y-4">` with
   `<div id="board" class="space-y-4" phx-hook="BoardDnD">` (the hook only listens; it does not
   manage DOM, so no `phx-update="ignore"`).
-- [ ] Create `assets/js/hooks/board_dnd.js`:
+- [x] Create `assets/js/hooks/board_dnd.js`:
 
   ```js
   // Hand-rolled HTML5 drag-and-drop for board cards (MMF 05) â€” no JS
@@ -938,7 +938,7 @@ counts and the open drawer, and silently rejecting anything not on this board â€
   export default BoardDnD
   ```
 
-- [ ] In `assets/js/app.js`, add the import below `import topbar from "../vendor/topbar"`:
+- [x] In `assets/js/app.js`, add the import below `import topbar from "../vendor/topbar"`:
 
   ```js
   import BoardDnD from "./hooks/board_dnd"
@@ -950,7 +950,7 @@ counts and the open drawer, and silently rejecting anything not on this board â€
   hooks: {...colocatedHooks, BoardDnD},
   ```
 
-- [ ] Append the drag affordance styles at the end of `assets/css/app.css`, and mirror the same
+- [x] Append the drag affordance styles at the end of `assets/css/app.css`, and mirror the same
   block at the end of `assets/css/storybook.css` (the app.css header requires mirroring):
 
   ```css
@@ -965,11 +965,11 @@ counts and the open drawer, and silently rejecting anything not on this board â€
   }
   ```
 
-- [ ] Run `mix assets.build` â€” expect the bundle to compile without errors (proves the hook file
+- [x] Run `mix assets.build` â€” expect the bundle to compile without errors (proves the hook file
   and imports are valid).
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` â€” expect all tests to pass.
-- [ ] Run `mix precommit` â€” expect a clean pass.
-- [ ] Commit.
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` â€” expect all tests to pass.
+- [x] Run `mix precommit` â€” expect a clean pass.
+- [x] Commit.
 
 **Deliverable:** cards are natively draggable between and within stage columns; drops push
 `"move_card"` (already handled server-side in Task 3) and the target zone highlights while
