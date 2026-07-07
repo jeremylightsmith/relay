@@ -62,6 +62,10 @@ defmodule Relay.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
 
+      # --- Auth: Google OAuth via Ueberauth (MMF 01) ---
+      {:ueberauth, "~> 0.10"},
+      {:ueberauth_google, "~> 0.12"},
+
       # --- Architecture: enforced context/web boundaries (see lib/relay.ex) ---
       {:boundary, "~> 0.10"},
 
