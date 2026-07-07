@@ -1863,6 +1863,20 @@ to `board_card`. After this task the live board shows the whole colour system.
   end
 ```
 
+  > **Known plan-authoring inconsistency (adjudicated, resolved in the implementation):**
+  > the "adding the agent as an owner flips the card to violet AI" test above, as literally
+  > written, leaves the card in the Backlog stage (`#stage-col-1-cards`, human-owned per
+  > `Relay.Boards`'s `@seed_stages`) after adding the agent as a co-owner, then asserts
+  > `.border-l-secondary`. That is unsatisfiable given Task 5's mismatch rule
+  > (`card_border_class/2` in `core_components.ex`), which unconditionally overrides the
+  > border to `border-l-error` whenever `active_owner` and `stage_owner` conflict — and a
+  > human-owned stage with an AI-active card is exactly that conflict (the same conflict the
+  > later "an AI-active card in a human stage shows the red meant-for-humans warning" test
+  > exercises on purpose). The two rules cannot both hold for this fixture. Resolved by
+  > moving the card into the AI-owned Plan stage (`Cards.move_card/3`, asserting against
+  > `#stage-col-3-cards`) before the assertion, so the test demonstrates a genuinely
+  > non-mismatched AI-active card, matching the implementation actually committed.
+
 - [ ] Run `mix test test/relay_web/live/board_live_test.exs` — expect failures (board cards render no baton markup yet).
 - [ ] In `lib/relay_web/components/core_components.ex`: add `alias Relay.Cards` to the alias block at the top, update the `stage_column/1` `@doc` sentence about cards to say each card needs `title`, `tag`, `ref_number`, `status`, `progress`, and a loaded `owners` list, and change the `<.board_card ...>` call inside `stage_column/1` to:
 
