@@ -1010,7 +1010,7 @@ browser smoke test.
 
 **Steps**
 
-- [ ] Add a failing `describe "drawer move menu"` block to
+- [x] Add a failing `describe "drawer move menu"` block to
   `test/relay_web/live/board_live_test.exs`, inserted after the `describe "card drawer"` block:
 
   ```elixir
@@ -1064,9 +1064,9 @@ browser smoke test.
   end
   ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — expect the three new tests to
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — expect the three new tests to
   fail (no `#card-drawer-move` element exists yet).
-- [ ] In `lib/relay_web/components/core_components.ex`, extend `card_drawer/1`:
+- [x] In `lib/relay_web/components/core_components.ex`, extend `card_drawer/1`:
   1. Add the attr below the existing `attr :description_form, ...` declaration:
 
      ```elixir
@@ -1113,7 +1113,7 @@ browser smoke test.
   3. In the `card_drawer` `@doc`, extend the "Events emitted" sentence to also list:
      `"move_card" (phx-value ref + stage_id, no index — the server appends to the target
      stage's bottom) when a "Move to…" target is picked`.
-- [ ] In `lib/relay_web/live/board_live.ex`:
+- [x] In `lib/relay_web/live/board_live.ex`:
   1. Add `stages={move_targets(@board, @selected_card)}` to the `<.card_drawer ...>` call,
      directly below `stage_owner={@selected_stage.owner}`.
   2. Add the private helper next to `find_stage_by_id/2`:
@@ -1126,17 +1126,17 @@ browser smoke test.
      end
      ```
 
-- [ ] Update `storybook/core_components/card_drawer.story.exs`: add to the `:viewing`
+- [x] Update `storybook/core_components/card_drawer.story.exs`: add to the `:viewing`
   variation's attributes map:
 
   ```elixir
   stages: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 7, name: "Done"}]
   ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — expect all tests to pass
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — expect all tests to pass
   (the pre-existing `.rail-stage` test still matches: the row still contains the stage name).
 - [ ] Run `mix precommit` — expect a clean pass.
-- [ ] Commit.
+- [x] Commit.
 
 **Deliverable:** the card drawer's properties rail offers a "Move to…" dropdown listing the
 board's other stages; picking one persists through the exact same `"move_card"` →
