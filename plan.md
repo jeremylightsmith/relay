@@ -1053,7 +1053,7 @@ changes nothing. `mix precommit` green.
 
 **Steps**
 
-- [ ] Write the failing tests. Append inside the `describe "card drawer"` block of
+- [x] Write the failing tests. Append inside the `describe "card drawer"` block of
   `test/relay_web/live/board_live_test.exs`:
 
   ```elixir
@@ -1117,13 +1117,13 @@ changes nothing. `mix precommit` green.
   end
   ```
 
-- [ ] Run and confirm the new tests FAIL (no `edit_description` handler yet):
+- [x] Run and confirm the new tests FAIL (no `edit_description` handler yet):
 
   ```bash
   mise exec -- mix test test/relay_web/live/board_live_test.exs
   ```
 
-- [ ] Implement the handlers. In `lib/relay_web/live/board_live.ex`, add after the
+- [x] Implement the handlers. In `lib/relay_web/live/board_live.ex`, add after the
   `save_card_title` clauses (all `handle_event` clauses stay adjacent):
 
   ```elixir
@@ -1166,19 +1166,19 @@ changes nothing. `mix precommit` green.
   def handle_event("save_card_description", _params, socket), do: {:noreply, socket}
   ```
 
-- [ ] Run and confirm ALL LiveView tests PASS:
+- [x] Run and confirm ALL LiveView tests PASS:
 
   ```bash
   mise exec -- mix test test/relay_web/live/board_live_test.exs
   ```
 
-- [ ] Run the full gate and fix anything it flags:
+- [x] Run the full gate and fix anything it flags:
 
   ```bash
   mise exec -- mix precommit
   ```
 
-- [ ] Commit:
+- [x] Commit:
 
   ```bash
   git add -A && git commit -m "Edit card descriptions in the drawer"

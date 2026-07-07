@@ -149,6 +149,40 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("save_card_title", _params, socket), do: {:noreply, socket}
 
+  def handle_event("edit_description", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    {:noreply,
+     socket
+     |> assign(:editing_description, true)
+     |> assign(:description_form, to_form(%{"description" => card.description || ""}, as: :card))}
+  end
+
+  def handle_event("edit_description", _params, socket), do: {:noreply, socket}
+
+  def handle_event("cancel_description", _params, socket) do
+    {:noreply, assign(socket, editing_description: false, description_form: nil)}
+  end
+
+  def handle_event(
+        "save_card_description",
+        %{"card" => card_params},
+        %{assigns: %{selected_card: %Card{} = card}} = socket
+      ) do
+    case Cards.update_card(card, card_params) do
+      {:ok, card} ->
+        {:noreply,
+         socket
+         |> assign(:selected_card, card)
+         |> assign(:editing_description, false)
+         |> assign(:description_form, nil)
+         |> stream_insert(stream_name(card.stage_id), card)}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :description_form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("save_card_description", _params, socket), do: {:noreply, socket}
+
   # Groups position-ordered stages under their category, keeping the fixed
   # category order and dropping empty categories (per spec: headers render
   # only for non-empty categories).

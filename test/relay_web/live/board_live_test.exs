@@ -316,6 +316,65 @@ defmodule RelayWeb.BoardLiveTest do
       assert Repo.get!(Card, card.id).title == "Draft the spec"
       assert has_element?(view, "#stage-col-1-cards .board-card .card-title", "Draft the spec")
     end
+
+    test "clicking the description area opens the textarea editor", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-description-edit", "Add a description")
+      refute has_element?(view, "#card-drawer-description-form")
+
+      view |> element("#card-drawer-description-edit") |> render_click()
+
+      assert has_element?(
+               view,
+               "#card-drawer-description-form textarea#card-drawer-description-input"
+             )
+    end
+
+    test "saving the description persists and renders it whitespace-preserved",
+         %{conn: conn, card: card} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-description-edit") |> render_click()
+
+      view
+      |> form("#card-drawer-description-form", card: %{description: "Line one\n\nLine two"})
+      |> render_submit()
+
+      refute has_element?(view, "#card-drawer-description-form")
+      assert has_element?(view, "#card-drawer-description-view.whitespace-pre-wrap")
+      assert view |> element("#card-drawer-description-view") |> render() =~ "Line one\n\nLine two"
+      assert Repo.get!(Card, card.id).description == "Line one\n\nLine two"
+    end
+
+    test "cancel closes the editor without saving", %{conn: conn, card: card} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-description-edit") |> render_click()
+      view |> element("#card-drawer-description-cancel") |> render_click()
+
+      refute has_element?(view, "#card-drawer-description-form")
+      assert has_element?(view, "#card-drawer-description-edit", "Add a description")
+      assert Repo.get!(Card, card.id).description == nil
+    end
+
+    test "a saved description survives a fresh deep-link visit", %{conn: conn, card: card} do
+      {:ok, _card} = Cards.update_card(card, %{description: "Persisted\ntext"})
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-description-view")
+      assert view |> element("#card-drawer-description-view") |> render() =~ "Persisted\ntext"
+    end
+
+    test "editing pre-fills the textarea with the current description", %{conn: conn, card: card} do
+      {:ok, _card} = Cards.update_card(card, %{description: "Current text"})
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      view |> element("#card-drawer-description-edit") |> render_click()
+
+      assert view |> element("#card-drawer-description-input") |> render() =~ "Current text"
+    end
   end
 
   describe "top bar" do
