@@ -942,7 +942,7 @@ it directly; unknown, malformed, and foreign refs render no drawer. Storybook st
 
 **Steps**
 
-- [ ] Write the failing tests. Append inside the `describe "card drawer"` block of
+- [x] Write the failing tests. Append inside the `describe "card drawer"` block of
   `test/relay_web/live/board_live_test.exs`:
 
   ```elixir
@@ -969,14 +969,14 @@ it directly; unknown, malformed, and foreign refs render no drawer. Storybook st
   end
   ```
 
-- [ ] Run and confirm the two new tests FAIL (no `save_card_title` handler yet, so the
+- [x] Run and confirm the two new tests FAIL (no `save_card_title` handler yet, so the
   submit crashes the LiveView):
 
   ```bash
   mise exec -- mix test test/relay_web/live/board_live_test.exs
   ```
 
-- [ ] Implement the handler. In `lib/relay_web/live/board_live.ex`, add after the
+- [x] Implement the handler. In `lib/relay_web/live/board_live.ex`, add after the
   `"select_card"` clause (all `handle_event` clauses stay adjacent):
 
   ```elixir
@@ -1006,19 +1006,19 @@ it directly; unknown, malformed, and foreign refs render no drawer. Storybook st
   `:update` action from `Repo.update`, so "can't be blank" renders under the same
   `card[title]` input.)
 
-- [ ] Run and confirm ALL LiveView tests PASS:
+- [x] Run and confirm ALL LiveView tests PASS:
 
   ```bash
   mise exec -- mix test test/relay_web/live/board_live_test.exs
   ```
 
-- [ ] Run the full gate and fix anything it flags:
+- [x] Run the full gate and fix anything it flags:
 
   ```bash
   mise exec -- mix precommit
   ```
 
-- [ ] Commit:
+- [x] Commit:
 
   ```bash
   git add -A && git commit -m "Edit card titles inline in the drawer"
