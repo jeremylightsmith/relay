@@ -81,6 +81,15 @@ defmodule RelayWeb.BoardLive do
     {:noreply, assign(socket, :composing_stage_id, nil)}
   end
 
+  # Tracks the composer's live value server-side (LiveView only patches the
+  # client DOM when a tracked assign's rendered value actually changes). Without
+  # this, the server's view of the input is always "" before and after create,
+  # so resetting to empty_compose_form/0 in create_card is a no-op diff and the
+  # just-submitted text is left showing in the browser.
+  def handle_event("validate_card", %{"card" => card_params}, socket) do
+    {:noreply, assign(socket, :compose_form, to_form(card_params, as: :card))}
+  end
+
   def handle_event("create_card", %{"stage_id" => stage_id, "card" => card_params}, socket) do
     stage = find_stage(socket, stage_id)
 

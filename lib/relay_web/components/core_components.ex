@@ -539,7 +539,12 @@ defmodule RelayWeb.CoreComponents do
         />
       </div>
       <div :if={@composing} id={"#{@id}-composer"} phx-click-away="cancel_compose">
-        <.form for={@compose_form} id={"#{@id}-compose-form"} phx-submit="create_card">
+        <.form
+          for={@compose_form}
+          id={"#{@id}-compose-form"}
+          phx-change="validate_card"
+          phx-submit="create_card"
+        >
           <input type="hidden" name="stage_id" value={@stage_id} />
           <.input
             field={@compose_form[:title]}
