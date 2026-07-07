@@ -61,6 +61,7 @@ defmodule RelayWeb.BoardLive do
         card={@selected_card}
         stage_name={@selected_stage.name}
         stage_owner={@selected_stage.owner}
+        stages={move_targets(@board, @selected_card)}
         close_patch={~p"/board"}
         title_form={@title_form}
         editing_description={@editing_description}
@@ -230,6 +231,12 @@ defmodule RelayWeb.BoardLive do
 
   defp find_stage_by_id(socket, stage_id) do
     Enum.find(socket.assigns.board.stages, &(&1.id == stage_id))
+  end
+
+  # Drawer move targets: every stage on this board except the card's
+  # current one, in position order.
+  defp move_targets(board, %Card{stage_id: stage_id}) do
+    Enum.reject(board.stages, &(&1.id == stage_id))
   end
 
   defp resolve_stage(socket, stage_id) do

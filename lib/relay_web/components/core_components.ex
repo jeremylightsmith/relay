@@ -509,8 +509,11 @@ defmodule RelayWeb.CoreComponents do
 
   Events emitted (handled by the parent LiveView): `"save_card_title"`
   (form params `card[title]`) on title submit, `"edit_description"` when
-  the description view is clicked, `"cancel_description"` on Cancel, and
-  `"save_card_description"` (form params `card[description]`) on save.
+  the description view is clicked, `"cancel_description"` on Cancel,
+  `"save_card_description"` (form params `card[description]`) on save,
+  and `"move_card"` (phx-value ref + stage_id, no index — the server
+  appends to the target stage's bottom) when a "Move to…" target is
+  picked.
 
   ## Examples
 
@@ -540,6 +543,10 @@ defmodule RelayWeb.CoreComponents do
   attr :description_form, :any,
     default: nil,
     doc: "a Phoenix.HTML.Form for card[description]; required when editing_description"
+
+  attr :stages, :list,
+    default: [],
+    doc: "move targets: the board's other stages (each exposing id and name); [] hides the menu"
 
   def card_drawer(assigns) do
     ~H"""
@@ -642,7 +649,30 @@ defmodule RelayWeb.CoreComponents do
             <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
               Stage
             </dt>
-            <dd class="rail-stage">{@stage_name}</dd>
+            <dd class="rail-stage flex flex-wrap items-center gap-2">
+              {@stage_name}
+              <div :if={@stages != []} id={"#{@id}-move"} class="dropdown">
+                <div tabindex="0" role="button" id={"#{@id}-move-button"} class="btn btn-ghost btn-xs">
+                  Move to… <.icon name="hero-chevron-down" class="size-3" />
+                </div>
+                <ul
+                  tabindex="0"
+                  class="dropdown-content menu z-50 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg"
+                >
+                  <li :for={stage <- @stages}>
+                    <button
+                      type="button"
+                      id={"#{@id}-move-to-#{stage.id}"}
+                      phx-click="move_card"
+                      phx-value-ref={@ref}
+                      phx-value-stage_id={stage.id}
+                    >
+                      {stage.name}
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            </dd>
             <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
               Tags
             </dt>

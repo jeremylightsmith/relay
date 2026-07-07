@@ -579,6 +579,55 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
+  describe "drawer move menu" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog, spec, plan | _rest] = board.stages
+      {:ok, card} = Cards.create_card(backlog, %{title: "Pass the baton"})
+      %{board: board, backlog: backlog, spec: spec, plan: plan, card: card}
+    end
+
+    test "lists every stage except the card's current one",
+         %{conn: conn, backlog: backlog, spec: spec, plan: plan} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-move")
+      refute has_element?(view, "#card-drawer-move-to-#{backlog.id}")
+      assert has_element?(view, "#card-drawer-move-to-#{spec.id}", "Spec")
+      assert has_element?(view, "#card-drawer-move-to-#{plan.id}", "Plan")
+    end
+
+    test "moving from the drawer persists like a drag and appends to the bottom",
+         %{conn: conn, spec: spec, card: card} do
+      {:ok, existing} = Cards.create_card(spec, %{title: "Already in Spec"})
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-move-to-#{spec.id}") |> render_click()
+
+      moved = Repo.get!(Card, card.id)
+      assert moved.stage_id == spec.id
+      assert moved.position == 2
+      assert Repo.get!(Card, existing.id).position == 1
+
+      assert has_element?(view, "#stage-col-2-cards .board-card", "Pass the baton")
+      refute has_element?(view, "#stage-col-1-cards .board-card")
+      assert has_element?(view, "#stage-col-1 .stage-count", "0")
+      assert has_element?(view, "#stage-col-2 .stage-count", "2")
+    end
+
+    test "the drawer stage chip and menu update after the move", %{conn: conn, plan: plan} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-move-to-#{plan.id}") |> render_click()
+
+      assert has_element?(view, "#card-drawer .drawer-stage-chip.badge-secondary", "Plan")
+      refute has_element?(view, "#card-drawer-move-to-#{plan.id}")
+    end
+  end
+
   describe "top bar" do
     test "shows the avatar image and a sign out link", %{conn: conn} do
       user = insert(:user, avatar_url: "https://example.com/me.png")
