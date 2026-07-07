@@ -36,6 +36,7 @@ defmodule RelayWeb.Router do
 
     live_session :require_authenticated, on_mount: [{RelayWeb.Auth, :require_authenticated}] do
       live "/home", HomeLive
+      live "/board", BoardLive
     end
   end
 
