@@ -35,4 +35,23 @@ defmodule Relay.Factory do
       board: build(:board)
     }
   end
+
+  # Full-control factory: `stage` (when overridden) must be a *persisted*
+  # stage — the card's `stage_id`/`board_id` are derived from it so card and
+  # stage always share a board. When no stage is given one is inserted, so
+  # even `build(:card)` touches the database.
+  def card_factory(attrs) do
+    {stage, attrs} = Map.pop_lazy(attrs, :stage, fn -> insert(:stage) end)
+
+    card = %Relay.Cards.Card{
+      title: sequence(:card_title, &"Card #{&1}"),
+      tag: nil,
+      position: sequence(:card_position, &(&1 + 1)),
+      ref_number: sequence(:card_ref_number, &(&1 + 1)),
+      stage_id: stage.id,
+      board_id: stage.board_id
+    }
+
+    card |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
 end
