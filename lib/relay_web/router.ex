@@ -32,6 +32,8 @@ defmodule RelayWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+    get "/privacy", PageController, :privacy
+    get "/terms", PageController, :terms
     delete "/logout", AuthController, :delete
 
     live_session :require_authenticated, on_mount: [{RelayWeb.Auth, :require_authenticated}] do
