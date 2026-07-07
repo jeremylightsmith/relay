@@ -1179,7 +1179,7 @@ dev/test.
 
 **Steps**
 
-- [ ] Rewrite `test/relay_web/controllers/page_controller_test.exs` (failing first):
+- [x] Rewrite `test/relay_web/controllers/page_controller_test.exs` (failing first):
 
   ```elixir
   defmodule RelayWeb.PageControllerTest do
@@ -1207,7 +1207,7 @@ dev/test.
   end
   ```
 
-- [ ] Append these describe blocks to `test/relay_web/live/home_live_test.exs` (inside the module,
+- [x] Append these describe blocks to `test/relay_web/live/home_live_test.exs` (inside the module,
   after the existing `describe "when logged in"` block):
 
   ```elixir
@@ -1239,10 +1239,10 @@ dev/test.
     end
   ```
 
-- [ ] Run `mise exec -- mix test test/relay_web/controllers/page_controller_test.exs test/relay_web/live/home_live_test.exs`
+- [x] Run `mise exec -- mix test test/relay_web/controllers/page_controller_test.exs test/relay_web/live/home_live_test.exs`
   — expect FAILURE (old boilerplate page, no avatar/sign-out in layout).
 
-- [ ] Replace `lib/relay_web/controllers/page_controller.ex` with:
+- [x] Replace `lib/relay_web/controllers/page_controller.ex` with:
 
   ```elixir
   defmodule RelayWeb.PageController do
@@ -1262,7 +1262,7 @@ dev/test.
   end
   ```
 
-- [ ] Replace the entire contents of `lib/relay_web/controllers/page_html/home.html.heex` with the
+- [x] Replace the entire contents of `lib/relay_web/controllers/page_html/home.html.heex` with the
   minimal sign-in page (MMF 02 owns the real landing):
 
   ```heex
@@ -1300,7 +1300,7 @@ dev/test.
   </main>
   ```
 
-- [ ] In `lib/relay_web/components/layouts.ex`, replace the entire `def app(assigns) do ... end`
+- [x] In `lib/relay_web/components/layouts.ex`, replace the entire `def app(assigns) do ... end`
   function (keep the existing `attr`/`slot` declarations above it, and keep `flash_group`/
   `theme_toggle` unchanged) with:
 
@@ -1375,7 +1375,7 @@ dev/test.
     end
   ```
 
-- [ ] In `lib/relay_web/router.ex`, update the CSP `img-src` directive so Google-hosted avatars
+- [x] In `lib/relay_web/router.ex`, update the CSP `img-src` directive so Google-hosted avatars
   render (they are served from `*.googleusercontent.com`). Change the line
 
   ```elixir
@@ -1388,14 +1388,14 @@ dev/test.
                                "img-src 'self' data: blob: https://*.googleusercontent.com; " <>
   ```
 
-- [ ] Run `mise exec -- mix test test/relay_web/controllers/page_controller_test.exs test/relay_web/live/home_live_test.exs`
+- [x] Run `mise exec -- mix test test/relay_web/controllers/page_controller_test.exs test/relay_web/live/home_live_test.exs`
   — expect ALL PASS.
-- [ ] Manual smoke (dev): `mise exec -- mix phx.server`, visit `http://localhost:4003/` (sign-in
+- [x] Manual smoke (dev): `mise exec -- mix phx.server`, visit `http://localhost:4003/` (sign-in
   page renders with the Google button), visit `http://localhost:4003/dev/login` (lands on `/home`
   as Dev User with initials avatar), click "Sign out" (back on `/`), visit
   `http://localhost:4003/home` directly (redirected to `/` with the sign-in flash). Stop the server.
-- [ ] Run `mise exec -- mix precommit` — must pass.
-- [ ] Commit everything.
+- [x] Run `mise exec -- mix precommit` — must pass.
+- [x] Commit everything.
 
 **Deliverable:** Full MMF 01 flow works end-to-end: `/` shows Sign in with Google (or redirects a
 signed-in user to `/home`); `/home` shows "You're signed in as {name}" with a top-bar avatar

@@ -7,7 +7,7 @@ defmodule RelayWeb.Router do
   @content_security_policy "default-src 'self'; " <>
                              "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; " <>
                              "style-src 'self' 'unsafe-inline'; " <>
-                             "img-src 'self' data: blob:; " <>
+                             "img-src 'self' data: blob: https://*.googleusercontent.com; " <>
                              "font-src 'self'; " <>
                              "connect-src 'self' blob: ws: wss:; " <>
                              "base-uri 'self'; " <>

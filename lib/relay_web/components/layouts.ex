@@ -37,27 +37,46 @@ defmodule RelayWeb.Layouts do
     ~H"""
     <header class="navbar px-4 sm:px-6 lg:px-8">
       <div class="flex-1">
-        <a href="/" class="flex-1 flex w-fit items-center gap-2">
-          <img src={~p"/images/logo.svg"} width="36" />
-          <span class="text-sm font-semibold">v{Application.spec(:phoenix, :vsn)}</span>
+        <a href={~p"/"} class="flex w-fit items-center gap-2">
+          <img src={~p"/images/logo.svg"} width="36" alt="Relay" />
+          <span class="text-sm font-semibold">Relay</span>
         </a>
       </div>
       <div class="flex-none">
-        <ul class="flex flex-column px-1 space-x-4 items-center">
-          <li>
-            <a href="https://phoenixframework.org/" class="btn btn-ghost">Website</a>
-          </li>
-          <li>
-            <a href="https://github.com/phoenixframework/phoenix" class="btn btn-ghost">GitHub</a>
-          </li>
+        <ul class="flex px-1 space-x-4 items-center">
           <li>
             <.theme_toggle />
           </li>
-          <li>
-            <a href="https://hexdocs.pm/phoenix/overview.html" class="btn btn-primary">
-              Get Started <span aria-hidden="true">&rarr;</span>
-            </a>
-          </li>
+          <%= if @current_scope do %>
+            <li>
+              <%= if @current_scope.user.avatar_url do %>
+                <div id="user-avatar" class="avatar" title={@current_scope.user.email}>
+                  <div class="w-8 rounded-full">
+                    <img
+                      src={@current_scope.user.avatar_url}
+                      alt={@current_scope.user.name || @current_scope.user.email}
+                      referrerpolicy="no-referrer"
+                    />
+                  </div>
+                </div>
+              <% else %>
+                <div
+                  id="user-avatar"
+                  class="avatar avatar-placeholder"
+                  title={@current_scope.user.email}
+                >
+                  <div class="bg-primary text-primary-content w-8 rounded-full">
+                    <span class="text-xs">{initials(@current_scope.user)}</span>
+                  </div>
+                </div>
+              <% end %>
+            </li>
+            <li>
+              <.link href={~p"/logout"} method="delete" id="sign-out" class="btn btn-ghost btn-sm">
+                Sign out
+              </.link>
+            </li>
+          <% end %>
         </ul>
       </div>
     </header>
@@ -70,6 +89,17 @@ defmodule RelayWeb.Layouts do
 
     <.flash_group flash={@flash} />
     """
+  end
+
+  # Initials for the avatar fallback, from the user's name (or email
+  # when the name is missing). Plain dot access on purpose: Accounts.User
+  # is not exported through the Relay boundary to the web layer.
+  defp initials(user) do
+    (user.name || user.email)
+    |> String.split(~r/[\s@._-]+/, trim: true)
+    |> Enum.take(2)
+    |> Enum.map_join("", &String.first/1)
+    |> String.upcase()
   end
 
   @doc """
