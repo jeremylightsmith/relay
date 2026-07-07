@@ -2,6 +2,7 @@ defmodule RelayWeb.Router do
   use RelayWeb, :router
 
   import PhoenixStorybook.Router
+  import RelayWeb.Auth
 
   @content_security_policy "default-src 'self'; " <>
                              "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; " <>
@@ -20,6 +21,7 @@ defmodule RelayWeb.Router do
     plug :put_root_layout, html: {RelayWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers, %{"content-security-policy" => @content_security_policy}
+    plug :fetch_current_scope
   end
 
   pipeline :api do
@@ -30,6 +32,10 @@ defmodule RelayWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+
+    live_session :require_authenticated, on_mount: [{RelayWeb.Auth, :require_authenticated}] do
+      live "/home", HomeLive
+    end
   end
 
   # Other scopes may use custom stacks.

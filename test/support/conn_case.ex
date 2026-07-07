@@ -23,6 +23,7 @@ defmodule RelayWeb.ConnCase do
 
       import Phoenix.ConnTest
       import Plug.Conn
+      import Relay.Factory
       import RelayWeb.ConnCase
       # The default endpoint for testing
       @endpoint RelayWeb.Endpoint
@@ -34,5 +35,25 @@ defmodule RelayWeb.ConnCase do
   setup tags do
     Relay.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
+  end
+
+  @doc """
+  Logs the given user (or a freshly inserted factory user) into the
+  test session, so requests hit routes as an authenticated user
+  without touching real Google.
+  """
+  def log_in_user(conn, user \\ nil) do
+    user = user || Relay.Factory.insert(:user)
+    Plug.Test.init_test_session(conn, user_id: user.id)
+  end
+
+  @doc """
+  Setup helper that inserts a user and logs it in:
+
+      setup :register_and_log_in_user
+  """
+  def register_and_log_in_user(%{conn: conn}) do
+    user = Relay.Factory.insert(:user)
+    %{conn: log_in_user(conn, user), user: user}
   end
 end
