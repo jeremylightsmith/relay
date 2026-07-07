@@ -20,7 +20,7 @@ if System.get_env("PHX_SERVER") do
   config :relay, RelayWeb.Endpoint, server: true
 end
 
-config :relay, RelayWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+config :relay, RelayWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4003"))]
 
 if config_env() == :prod do
   database_url =

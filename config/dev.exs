@@ -37,8 +37,7 @@ config :relay, Relay.Repo,
 config :relay, RelayWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
-  # Port defaults to 4000 but honors PORT so you can run alongside other Phoenix apps.
-  http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("PORT") || "4000")],
+  http: [ip: {127, 0, 0, 1}],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,

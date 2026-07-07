@@ -31,9 +31,9 @@ mix phx.server               # or: iex -S mix phx.server  (also: make serve)
 
 Then visit:
 
-- <http://localhost:4000> — the app
-- <http://localhost:4000/storybook> — component storybook (dev only)
-- <http://localhost:4000/dev/dashboard> — LiveDashboard (dev only)
+- <http://localhost:4003> — the app
+- <http://localhost:4003/storybook> — component storybook (dev only)
+- <http://localhost:4003/dev/dashboard> — LiveDashboard (dev only)
 
 Postgres must be running locally with a `postgres` / `postgres` role (see
 `config/dev.exs`), or adjust that config to your local setup.
