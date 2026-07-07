@@ -60,8 +60,15 @@ Postgres, Boundary (compiler-enforced), daisyUI (`drawer drawer-end`, `badge`, `
   Never commit with a failing `mix precommit`.
 - Boundary rules: the web layer (`RelayWeb`) may only call the domain through `Relay`'s
   exported contexts; contexts may not reach into the web layer. This MMF adds no new
-  context (`Relay.Cards` is already in `Relay`'s `exports`), so no Boundary changes — a
-  violation fails compilation.
+  *context* (`Relay.Cards` is already in `Relay`'s `exports`) — but Task 2 does add one
+  entry to `Relay`'s top-level `exports` list: `Cards.Card`. Referencing a context's struct
+  type from the web layer (here, `%Card{}` pattern-matched in `BoardLive`) requires that
+  struct to be separately exported from `Relay`, exactly like `Accounts.Scope` already is
+  alongside `Accounts` — exporting the context module alone isn't enough once the web layer
+  needs the struct type itself. (An earlier draft of this doc claimed no Boundary changes at
+  all; that was wrong — verified by reverting the `Cards.Card` export and observing `mix
+  compile --warnings-as-errors` fail on the `%Card{}` reference in `board_live.ex`.) Any
+  *other* Boundary violation still fails compilation.
 - Toolchain runs through `mise` — prefix mix commands with `mise exec --` (bare `mix` also
   works).
 - Warnings-as-errors: both compilation and the test run treat warnings as errors — never
@@ -361,6 +368,9 @@ board. All context tests green; `mix precommit` green.
 
 **Files**
 
+- `lib/relay.ex` (edit: add `Cards.Card` to `Relay`'s top-level Boundary `exports`,
+  alongside the existing `Accounts.Scope` precedent — required because `BoardLive`
+  pattern-matches `%Card{}`; see the Global Constraints Boundary-rules note)
 - `lib/relay_web/components/core_components.ex` (edit: new `card_drawer/1`; `board_card/1`
   gains a click affordance)
 - `lib/relay_web/live/board_live.ex` (edit: `handle_params/3`, `select_card` event, render
@@ -399,7 +409,7 @@ board. All context tests green; `mix precommit` green.
 
 **Steps**
 
-- [ ] Write the failing tests. In `test/relay_web/live/board_live_test.exs`, first extend
+- [x] Write the failing tests. In `test/relay_web/live/board_live_test.exs`, first extend
   the alias block at the top of the module so it reads (Styler keeps it alphabetized):
 
   ```elixir
@@ -510,14 +520,14 @@ board. All context tests green; `mix precommit` green.
   current user's board only has RLY-1 — so an open drawer would prove a scoping hole.
   `insert(:stage)` creates a fresh board whose key is also `"RLY"`.)
 
-- [ ] Run the LiveView tests and confirm the new ones FAIL (no `#card-drawer` in the DOM;
+- [x] Run the LiveView tests and confirm the new ones FAIL (no `#card-drawer` in the DOM;
   the card click finds no `phx-click`):
 
   ```bash
   mise exec -- mix test test/relay_web/live/board_live_test.exs
   ```
 
-- [ ] Make `board_card/1` clickable. In `lib/relay_web/components/core_components.ex`,
+- [x] Make `board_card/1` clickable. In `lib/relay_web/components/core_components.ex`,
   replace the opening tag of `board_card/1`'s template:
 
   ```heex
@@ -545,7 +555,7 @@ board. All context tests green; `mix precommit` green.
   `?card=<ref>`, opening the card drawer.
   ```
 
-- [ ] Add the `card_drawer/1` component. In the same file, insert this after the whole
+- [x] Add the `card_drawer/1` component. In the same file, insert this after the whole
   `stage_column/1` function (before the `icon/1` `@doc`):
 
   ```elixir
@@ -724,7 +734,7 @@ board. All context tests green; `mix precommit` green.
   is the `.drawer-overlay` `<.link patch>`. `phx-no-format` on the description `<p>` keeps
   the HEEx formatter from injecting whitespace inside the `whitespace-pre-wrap` block.
 
-- [ ] Wire up `RelayWeb.BoardLive` (`lib/relay_web/live/board_live.ex`):
+- [x] Wire up `RelayWeb.BoardLive` (`lib/relay_web/live/board_live.ex`):
 
   1. Extend the alias block to:
 
@@ -816,14 +826,14 @@ board. All context tests green; `mix precommit` green.
      ("?card=<ref>", handled in handle_params/3) rendered via
      RelayWeb.CoreComponents.card_drawer/1.`
 
-- [ ] Run the LiveView tests and confirm ALL pass — the new drawer tests AND the existing
+- [x] Run the LiveView tests and confirm ALL pass — the new drawer tests AND the existing
   board/card tests (the new `phx-click` on `board_card` must not break them):
 
   ```bash
   mise exec -- mix test test/relay_web/live/board_live_test.exs
   ```
 
-- [ ] Add the Storybook story. Create `storybook/core_components/card_drawer.story.exs`:
+- [x] Add the Storybook story. Create `storybook/core_components/card_drawer.story.exs`:
 
   ```elixir
   defmodule Storybook.Components.CoreComponents.CardDrawer do
@@ -884,7 +894,7 @@ board. All context tests green; `mix precommit` green.
   (If the installed phoenix_storybook rejects `{:iframe, style: ...}`, fall back to
   `def container, do: :iframe`.)
 
-- [ ] Smoke-check the story renders: boot the server, open
+- [x] Smoke-check the story renders: boot the server, open
   `http://localhost:4000/storybook/core_components/card_drawer`, confirm both variations
   render (viewing + editing), then stop the server:
 
@@ -892,13 +902,13 @@ board. All context tests green; `mix precommit` green.
   mise exec -- mix phx.server
   ```
 
-- [ ] Run the full gate and fix anything it flags:
+- [x] Run the full gate and fix anything it flags:
 
   ```bash
   mise exec -- mix precommit
   ```
 
-- [ ] Commit:
+- [x] Commit:
 
   ```bash
   git add -A && git commit -m "Open a URL-driven card detail drawer from the board (MMF 04)"
