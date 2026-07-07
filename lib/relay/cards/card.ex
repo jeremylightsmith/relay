@@ -13,6 +13,7 @@ defmodule Relay.Cards.Card do
 
   schema "cards" do
     field :title, :string
+    field :description, :string
     field :position, :integer
     field :tag, :string
     field :ref_number, :integer
@@ -24,13 +25,13 @@ defmodule Relay.Cards.Card do
   end
 
   @doc """
-  Changeset for user-supplied card attributes (`:title`, `:tag`).
-  `board_id`, `stage_id`, `position`, and `ref_number` must already be
-  set on the struct.
+  Changeset for user-supplied card attributes (`:title`, `:description`,
+  `:tag`). `board_id`, `stage_id`, `position`, and `ref_number` must
+  already be set on the struct and are never cast.
   """
   def changeset(card, attrs) do
     card
-    |> cast(attrs, [:title, :tag])
+    |> cast(attrs, [:title, :description, :tag])
     |> validate_required([:title])
     |> unique_constraint([:board_id, :ref_number], name: :cards_board_id_ref_number_index)
   end

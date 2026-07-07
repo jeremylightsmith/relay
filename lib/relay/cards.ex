@@ -55,6 +55,44 @@ defmodule Relay.Cards do
   """
   def ref(%Board{key: key}, %Card{ref_number: ref_number}), do: "#{key}-#{ref_number}"
 
+  @doc """
+  Updates a card's user-editable attributes (`:title`, `:description`,
+  `:tag`), returning `{:ok, card}` or `{:error, changeset}`. The
+  programmatic fields (`board_id`, `stage_id`, `position`, `ref_number`)
+  are never cast and cannot be changed here.
+  """
+  def update_card(%Card{} = card, attrs) do
+    card
+    |> Card.changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Fetches the card a human-facing ref (e.g. `"RLY-12"`) points at on
+  `board`, or `nil` when the ref does not parse against the board's key
+  or no such card exists on that board. Scoping by `board_id` means a
+  ref can never resolve to another board's card — this is the card
+  drawer's authorization check.
+  """
+  def get_card_by_ref(%Board{} = board, ref) when is_binary(ref) do
+    case parse_ref_number(board, ref) do
+      {:ok, ref_number} -> Repo.get_by(Card, board_id: board.id, ref_number: ref_number)
+      :error -> nil
+    end
+  end
+
+  defp parse_ref_number(%Board{key: key}, ref) do
+    prefix = key <> "-"
+
+    with true <- String.starts_with?(ref, prefix),
+         {ref_number, ""} <- Integer.parse(String.replace_prefix(ref, prefix, "")),
+         true <- ref_number > 0 do
+      {:ok, ref_number}
+    else
+      _ -> :error
+    end
+  end
+
   # Locks the board row so concurrent creates serialize, then bumps
   # `card_seq` and returns the newly allocated ref number. A rollback of
   # the surrounding transaction also reverts the bump, keeping refs

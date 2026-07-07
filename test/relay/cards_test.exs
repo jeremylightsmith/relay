@@ -118,4 +118,85 @@ defmodule Relay.CardsTest do
       assert Enum.map(Cards.list_cards(board), & &1.id) == [mine.id]
     end
   end
+
+  describe "update_card/2" do
+    test "updates title, description, and tag", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Before"})
+
+      assert {:ok, %Card{} = updated} =
+               Cards.update_card(card, %{
+                 title: "After",
+                 description: "Line one\n\nLine two",
+                 tag: "infra"
+               })
+
+      assert updated.title == "After"
+      assert updated.description == "Line one\n\nLine two"
+      assert updated.tag == "infra"
+      assert Repo.get!(Card, card.id).description == "Line one\n\nLine two"
+    end
+
+    test "rejects a blank title and persists nothing", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Keep me"})
+
+      assert {:error, changeset} = Cards.update_card(card, %{title: ""})
+      assert "can't be blank" in errors_on(changeset).title
+      assert Repo.get!(Card, card.id).title == "Keep me"
+    end
+
+    test "clearing the description stores nil", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+      {:ok, card} = Cards.update_card(card, %{description: "something"})
+
+      assert {:ok, updated} = Cards.update_card(card, %{description: ""})
+      assert updated.description == nil
+    end
+
+    test "never changes board_id, stage_id, position, or ref_number", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Pinned"})
+
+      assert {:ok, updated} =
+               Cards.update_card(card, %{
+                 title: "Still pinned",
+                 board_id: card.board_id + 1,
+                 stage_id: card.stage_id + 1,
+                 position: 99,
+                 ref_number: 99
+               })
+
+      assert updated.board_id == card.board_id
+      assert updated.stage_id == card.stage_id
+      assert updated.position == card.position
+      assert updated.ref_number == card.ref_number
+    end
+  end
+
+  describe "get_card_by_ref/2" do
+    test "returns the card the ref points at on the board", %{board: board, stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Find me"})
+
+      assert %Card{id: id} = Cards.get_card_by_ref(board, "RLY-1")
+      assert id == card.id
+    end
+
+    test "returns nil for an unknown ref number", %{board: board} do
+      assert Cards.get_card_by_ref(board, "RLY-99") == nil
+    end
+
+    test "returns nil for malformed or foreign-key refs", %{board: board, stage: stage} do
+      {:ok, _card} = Cards.create_card(stage, %{title: "Here"})
+
+      for ref <- ["", "RLY", "RLY-", "RLY-abc", "RLY-1extra", "RLY--1", "RLY-0", "OPS-1", "rly-1"] do
+        assert Cards.get_card_by_ref(board, ref) == nil, "expected nil for #{inspect(ref)}"
+      end
+    end
+
+    test "never returns another board's card", %{board: board} do
+      other_stage = insert(:stage)
+
+      {:ok, _theirs} = Cards.create_card(other_stage, %{title: "Theirs"})
+
+      assert Cards.get_card_by_ref(board, "RLY-1") == nil
+    end
+  end
 end
