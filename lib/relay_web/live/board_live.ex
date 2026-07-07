@@ -133,6 +133,22 @@ defmodule RelayWeb.BoardLive do
     {:noreply, push_patch(socket, to: ~p"/board?card=#{ref}")}
   end
 
+  def handle_event("save_card_title", %{"card" => card_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    case Cards.update_card(card, card_params) do
+      {:ok, card} ->
+        {:noreply,
+         socket
+         |> assign(:selected_card, card)
+         |> assign(:title_form, to_form(%{"title" => card.title}, as: :card))
+         |> stream_insert(stream_name(card.stage_id), card)}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :title_form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("save_card_title", _params, socket), do: {:noreply, socket}
+
   # Groups position-ordered stages under their category, keeping the fixed
   # category order and dropping empty categories (per spec: headers render
   # only for non-empty categories).

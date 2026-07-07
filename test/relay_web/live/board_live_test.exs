@@ -294,6 +294,28 @@ defmodule RelayWeb.BoardLiveTest do
       refute has_element?(view, "#card-drawer")
       assert has_element?(view, "#board")
     end
+
+    test "saving the title persists and reflects on drawer and board card",
+         %{conn: conn, card: card} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> form("#card-drawer-title-form", card: %{title: "Sharper title"}) |> render_submit()
+
+      assert Repo.get!(Card, card.id).title == "Sharper title"
+      assert has_element?(view, "#card-drawer-title-input[value='Sharper title']")
+      assert has_element?(view, "#stage-col-1-cards .board-card .card-title", "Sharper title")
+      refute has_element?(view, "#stage-col-1-cards .board-card .card-title", "Draft the spec")
+    end
+
+    test "a blank title is rejected with an error and nothing changes", %{conn: conn, card: card} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> form("#card-drawer-title-form", card: %{title: ""}) |> render_submit()
+
+      assert has_element?(view, "#card-drawer-title-form", "can't be blank")
+      assert Repo.get!(Card, card.id).title == "Draft the spec"
+      assert has_element?(view, "#stage-col-1-cards .board-card .card-title", "Draft the spec")
+    end
   end
 
   describe "top bar" do
