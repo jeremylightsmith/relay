@@ -4,4 +4,10 @@
 # environment for `mix`, `make`, and `iex`.
 
 # --- Secrets (add as features need them, e.g. OAuth, external AI providers) ---
-# export SOME_API_KEY=...
+# Google OAuth (MMF 01). Create an OAuth client in Google Cloud Console with
+# authorized redirect URIs:
+#   http://localhost:4003/auth/google/callback
+#   https://relayboard.fly.dev/auth/google/callback
+# In prod, set the same two values with `fly secrets set`.
+# export GOOGLE_CLIENT_ID=...
+# export GOOGLE_CLIENT_SECRET=...

@@ -849,7 +849,7 @@ authenticate via `log_in_user`/`register_and_log_in_user` without Google.
 
 **Steps**
 
-- [ ] Configure the Ueberauth provider. In `config/config.exs`, add just above the final
+- [x] Configure the Ueberauth provider. In `config/config.exs`, add just above the final
   `import_config "#{config_env()}.exs"` line:
 
   ```elixir
@@ -862,7 +862,7 @@ authenticate via `log_in_user`/`register_and_log_in_user` without Google.
     ]
   ```
 
-- [ ] In `config/test.exs`, append at the end of the file:
+- [x] In `config/test.exs`, append at the end of the file:
 
   ```elixir
   # Dummy Google OAuth credentials — tests never contact real Google; the
@@ -877,7 +877,7 @@ authenticate via `log_in_user`/`register_and_log_in_user` without Google.
   config :relay, dev_routes: true
   ```
 
-- [ ] In `config/runtime.exs`, add after the
+- [x] In `config/runtime.exs`, add after the
   `config :relay, RelayWeb.Endpoint, http: [port: ...]` line and before `if config_env() == :prod do`:
 
   ```elixir
@@ -891,7 +891,7 @@ authenticate via `log_in_user`/`register_and_log_in_user` without Google.
   end
   ```
 
-- [ ] In `.envrc.local.example`, replace the line `# export SOME_API_KEY=...` with:
+- [x] In `.envrc.local.example`, replace the line `# export SOME_API_KEY=...` with:
 
   ```
   # Google OAuth (MMF 01). Create an OAuth client in Google Cloud Console with
@@ -903,7 +903,7 @@ authenticate via `log_in_user`/`register_and_log_in_user` without Google.
   # export GOOGLE_CLIENT_SECRET=...
   ```
 
-- [ ] Write the failing controller test at `test/relay_web/controllers/auth_controller_test.exs`:
+- [x] Write the failing controller test at `test/relay_web/controllers/auth_controller_test.exs`:
 
   ```elixir
   defmodule RelayWeb.AuthControllerTest do
@@ -987,7 +987,7 @@ authenticate via `log_in_user`/`register_and_log_in_user` without Google.
   end
   ```
 
-- [ ] Write the failing dev-login test at `test/relay_web/controllers/dev_login_controller_test.exs`:
+- [x] Write the failing dev-login test at `test/relay_web/controllers/dev_login_controller_test.exs`:
 
   ```elixir
   defmodule RelayWeb.DevLoginControllerTest do
@@ -1014,10 +1014,10 @@ authenticate via `log_in_user`/`register_and_log_in_user` without Google.
   end
   ```
 
-- [ ] Run `mise exec -- mix test test/relay_web/controllers/auth_controller_test.exs test/relay_web/controllers/dev_login_controller_test.exs`
+- [x] Run `mise exec -- mix test test/relay_web/controllers/auth_controller_test.exs test/relay_web/controllers/dev_login_controller_test.exs`
   — expect FAILURE (no such routes/controllers).
 
-- [ ] Create `lib/relay_web/controllers/auth_controller.ex`. Clause order matters: the
+- [x] Create `lib/relay_web/controllers/auth_controller.ex`. Clause order matters: the
   `ueberauth_auth` clause must come first (in tests both assigns can be present because the
   Ueberauth plug also runs):
 
@@ -1074,7 +1074,7 @@ authenticate via `log_in_user`/`register_and_log_in_user` without Google.
   end
   ```
 
-- [ ] Create `lib/relay_web/controllers/dev_login_controller.ex`:
+- [x] Create `lib/relay_web/controllers/dev_login_controller.ex`:
 
   ```elixir
   defmodule RelayWeb.DevLoginController do
@@ -1099,7 +1099,7 @@ authenticate via `log_in_user`/`register_and_log_in_user` without Google.
   end
   ```
 
-- [ ] Update `lib/relay_web/router.ex`. Make exactly these three edits:
+- [x] Update `lib/relay_web/router.ex`. Make exactly these three edits:
 
   1. In the main `scope "/", RelayWeb do` block, add `delete "/logout", AuthController, :delete`
      after the `get "/", PageController, :home` line:
@@ -1141,13 +1141,13 @@ authenticate via `log_in_user`/`register_and_log_in_user` without Google.
       end
   ```
 
-- [ ] Run `mise exec -- mix test test/relay_web/controllers/auth_controller_test.exs test/relay_web/controllers/dev_login_controller_test.exs`
+- [x] Run `mise exec -- mix test test/relay_web/controllers/auth_controller_test.exs test/relay_web/controllers/dev_login_controller_test.exs`
   — expect ALL PASS.
-- [ ] Run `mise exec -- mix test` — full suite green (enabling `dev_routes` in test compiles the
+- [x] Run `mise exec -- mix test` — full suite green (enabling `dev_routes` in test compiles the
   LiveDashboard/storybook routes into the test router; if anything in that block fails to compile,
   fix the compile error rather than reverting the config).
-- [ ] Run `mise exec -- mix precommit` — must pass.
-- [ ] Commit everything.
+- [x] Run `mise exec -- mix precommit` — must pass.
+- [x] Commit everything.
 
 **Deliverable:** Completing Google OAuth (simulated via fake `ueberauth_auth` assign) creates or
 reuses a `User`, starts a session, and redirects to `/home`; OAuth failure flashes an error and

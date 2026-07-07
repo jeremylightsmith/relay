@@ -76,4 +76,12 @@ config :tailwind,
     cd: Path.expand("..", __DIR__)
   ]
 
+# Google OAuth (Ueberauth). Only the provider list lives here; the client
+# id/secret come from the environment at runtime (see config/runtime.exs)
+# or static dummies in config/test.exs — never hardcode secrets.
+config :ueberauth, Ueberauth,
+  providers: [
+    google: {Ueberauth.Strategy.Google, [default_scope: "email profile"]}
+  ]
+
 import_config "#{config_env()}.exs"
