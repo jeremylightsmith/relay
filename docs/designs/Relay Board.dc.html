@@ -14,7 +14,7 @@
 <style>
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;height:100%;}
-  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.32 0.02 255);background:oklch(0.985 0.004 250);-webkit-font-smoothing:antialiased;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.32 0.02 255);background:oklch(0.955 0.008 255);-webkit-font-smoothing:antialiased;}
   a{color:oklch(0.60 0.14 250);text-decoration:none;} a:hover{text-decoration:underline;}
   button{font-family:inherit;cursor:pointer;}
   input,textarea{font-family:inherit;}
@@ -59,7 +59,7 @@
 
   <!-- ===================== BOARD ===================== -->
   <sc-if value="{{ isBoard }}" hint-placeholder-val="{{ true }}">
-    <div style="flex:1;display:flex;gap:26px;padding:16px 18px 18px 18px;overflow-x:auto;overflow-y:hidden;align-items:stretch;">
+    <div style="flex:1;display:flex;gap:22px;padding:16px 18px 18px 18px;overflow-x:auto;overflow-y:hidden;align-items:stretch;background:oklch(0.952 0.008 255);">
       <sc-for list="{{ groups }}" as="group" hint-placeholder-count="3">
         <div style="display:flex;flex-direction:column;gap:9px;flex:0 0 auto;height:100%;">
           <!-- category band -->
@@ -69,7 +69,7 @@
             <span style="font-size:10.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.68 0.02 255);">{{ group.count }}</span>
           </div>
           <!-- stages -->
-          <div style="display:flex;gap:12px;align-items:stretch;flex:1;min-height:0;">
+          <div style="display:flex;gap:9px;align-items:stretch;flex:1;min-height:0;">
             <sc-for list="{{ group.stages }}" as="stage" hint-placeholder-count="2">
 
               <sc-if value="{{ stage.collapsed }}" hint-placeholder-val="{{ false }}">
@@ -82,7 +82,7 @@
 
               <sc-if value="{{ stage.expanded }}" hint-placeholder-val="{{ true }}">
                 <div style="{{ stage.stageStyle }}">
-                  <div style="display:flex;align-items:center;gap:8px;padding:2px 4px 10px 4px;flex:0 0 auto;">
+                  <div style="{{ stage.headerStyle }}">
                     <span style="width:8px;height:8px;border-radius:3px;background:{{ stage.ownerColor }};flex:0 0 auto;"></span>
                     <span style="font-size:13px;font-weight:600;letter-spacing:-0.01em;color:oklch(0.28 0.02 255);" title="{{ stage.description }}">{{ stage.name }}</span>
                     <sc-if value="{{ stage.showWip }}" hint-placeholder-val="{{ false }}">
@@ -93,14 +93,22 @@
                   </div>
                   <div style="{{ stage.lanesRowStyle }}">
                     <sc-for list="{{ stage.lanes }}" as="lane" hint-placeholder-count="1">
-                      <div style="{{ lane.laneStyle }}">
+                      <sc-if value="{{ lane.collapsed }}" hint-placeholder-val="{{ false }}">
+                        <div onClick="{{ lane.onExpandLane }}" onDragOver="{{ lane.onDragOver }}" onDrop="{{ lane.onDrop }}" onDragEnter="{{ lane.onDragEnter }}" title="{{ lane.label }}" style="{{ lane.stripStyle }}">
+                          <span style="{{ lane.stripDotStyle }}"></span>
+                          <span style="{{ lane.stripLabelStyle }}">{{ lane.label }}</span>
+                          <span style="{{ lane.stripCountStyle }}">{{ lane.count }}</span>
+                        </div>
+                      </sc-if>
+                      <sc-if value="{{ lane.expanded }}" hint-placeholder-val="{{ true }}">
+                      <div onDragOver="{{ lane.onDragOver }}" onDrop="{{ lane.onDrop }}" onDragEnter="{{ lane.onDragEnter }}" onDragLeave="{{ lane.onDragLeave }}" style="{{ lane.laneStyle }}">
                         <sc-if value="{{ lane.showLabel }}" hint-placeholder-val="{{ false }}">
-                          <div style="display:flex;align-items:center;gap:6px;padding:0 4px 6px 4px;">
+                          <div style="{{ lane.labelRowStyle }}">
                             <span style="{{ lane.labelStyle }}">{{ lane.label }}</span>
-                            <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.66 0.02 255);">{{ lane.count }}</span>
+                            <span style="{{ lane.countStyle }}">{{ lane.count }}</span>
                           </div>
                         </sc-if>
-                        <div onDragOver="{{ lane.onDragOver }}" onDrop="{{ lane.onDrop }}" onDragEnter="{{ lane.onDragEnter }}" onDragLeave="{{ lane.onDragLeave }}" style="{{ lane.bodyStyle }}">
+                        <div style="{{ lane.bodyStyle }}">
                           <sc-if value="{{ lane.showCompose }}" hint-placeholder-val="{{ false }}">
                             <div style="background:oklch(1 0 0);border:1px solid oklch(0.60 0.14 250);border-radius:9px;padding:9px;display:flex;flex-direction:column;gap:8px;box-shadow:0 2px 8px oklch(0.55 0.05 255/0.10);">
                               <textarea value="{{ composeText }}" onChange="{{ onComposeInput }}" onKeyDown="{{ stage.onComposeKey }}" placeholder="{{ stage.composePlaceholder }}" rows="2" style="width:100%;border:none;outline:none;resize:none;font-size:13px;line-height:1.4;color:oklch(0.30 0.02 255);background:transparent;"></textarea>
@@ -121,6 +129,9 @@
                                   <span style="width:6px;height:6px;border-radius:50%;background:oklch(0.70 0.13 65);flex:0 0 auto;"></span>
                                   <span style="font-size:10px;font-weight:600;letter-spacing:0.03em;color:oklch(0.52 0.11 65);font-family:'JetBrains Mono',ui-monospace,monospace;">NEEDS INPUT</span>
                                 </div>
+                              </sc-if>
+                              <sc-if value="{{ card.skipShow }}" hint-placeholder-val="{{ false }}">
+                                <span style="align-self:flex-start;white-space:nowrap;font-size:9.5px;font-weight:600;letter-spacing:0.02em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.10 292);background:oklch(0.96 0.02 292);border-radius:4px;padding:2px 6px;">↷ {{ card.skipLabel }}</span>
                               </sc-if>
                               <div style="display:flex;align-items:center;gap:7px;">
                                 <sc-if value="{{ card.showStatus }}" hint-placeholder-val="{{ false }}">
@@ -146,6 +157,7 @@
                           </sc-for>
                         </div>
                       </div>
+                      </sc-if>
                     </sc-for>
                   </div>
                 </div>
@@ -251,18 +263,11 @@
                   </div>
                   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px dashed oklch(0.94 0.006 255);padding-top:12px;">
                     <div style="display:flex;align-items:center;gap:10px;">
-                      <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">APPROVAL GATE</span>
+                      <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">REVIEW SUB-LANE</span>
                       <button onClick="{{ st.onToggleReview }}" style="{{ st.reviewToggleStyle }}"><span style="{{ st.reviewKnobStyle }}"></span></button>
                     </div>
                     <sc-if value="{{ st.isReview }}" hint-placeholder-val="{{ false }}">
-                      <div style="display:flex;align-items:center;gap:8px;">
-                        <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">SEND REJECTS TO</span>
-                        <select value="{{ st.rejectTo }}" onChange="{{ st.onRejectTo }}" style="border:1px solid oklch(0.90 0.006 255);border-radius:7px;padding:6px 9px;font-size:12.5px;color:oklch(0.32 0.02 255);background:oklch(1 0 0);outline:none;">
-                          <sc-for list="{{ st.rejectOptions }}" as="opt" hint-placeholder-count="2">
-                            <option value="{{ opt.id }}">{{ opt.name }}</option>
-                          </sc-for>
-                        </select>
-                      </div>
+                      <span style="font-size:11px;line-height:1.4;color:oklch(0.55 0.02 255);">Finished work waits in <b style="color:oklch(0.40 0.02 255);">Review</b> for a human to approve. Rejected work returns to this stage's In&nbsp;progress lane.</span>
                     </sc-if>
                   </div>
                 </div>
@@ -583,6 +588,29 @@
               </sc-if>
             </div>
 
+            <sc-if value="{{ drawer.flowShow }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:10px;">
+                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.62 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">FLOW</span>
+                <sc-if value="{{ drawer.skipReviewShow }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;align-items:center;gap:9px;">
+                    <button onClick="{{ drawer.onToggleSkipReview }}" style="{{ drawer.skipReviewToggleStyle }}"><span style="{{ drawer.skipReviewKnobStyle }}"></span></button>
+                    <span style="font-size:12.5px;color:oklch(0.40 0.02 255);">Skip review steps</span>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ drawer.hasSkipStages }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <span style="font-size:11px;color:oklch(0.58 0.02 255);">Skip upcoming stages</span>
+                    <sc-for list="{{ drawer.skipStages }}" as="sk" hint-placeholder-count="1">
+                      <div onClick="{{ sk.onToggle }}" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;cursor:pointer;background:oklch(0.996 0.002 255);border:1px solid oklch(0.94 0.006 255);">
+                        <span style="{{ sk.boxStyle }}">{{ sk.check }}</span>
+                        <span style="font-size:12.5px;color:oklch(0.36 0.02 255);">{{ sk.name }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-if>
+
             <sc-if value="{{ drawer.hasTag }}" hint-placeholder-val="{{ false }}">
               <div style="display:flex;flex-direction:column;gap:8px;">
                 <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.62 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">TAGS</span>
@@ -639,26 +667,24 @@ class Component extends DCLogic {
       sy: { id: 'sy', name: 'Sara Yoon', initials: 'SY', hue: 150 },
     };
     const stages = [
-      { id: 'backlog', name: 'Backlog', description: 'Everything captured but not yet started.', category: 'unstarted', owner: 'human', wip: null, hasDone: false, isReview: false, rejectTo: null },
-      { id: 'next', name: 'Next', description: 'Prioritized and ready to pull into work.', category: 'unstarted', owner: 'human', wip: 5, hasDone: false, isReview: false, rejectTo: null },
-      { id: 'spec', name: 'Spec', description: 'Define the problem and acceptance criteria.', category: 'started', owner: 'human', wip: 2, hasDone: true, isReview: false, rejectTo: null },
-      { id: 'plan', name: 'Plan', description: 'AI breaks the work into an approach.', category: 'started', owner: 'ai', wip: 2, hasDone: true, isReview: false, rejectTo: null },
-      { id: 'code', name: 'Code', description: 'AI implements the change.', category: 'started', owner: 'ai', wip: 3, hasDone: true, isReview: false, rejectTo: null },
-      { id: 'review', name: 'Review', description: 'A human reviews the AI output.', category: 'started', owner: 'human', wip: 3, hasDone: true, isReview: true, rejectTo: 'code' },
-      { id: 'deploy', name: 'Deploy', description: 'AI ships the change to production.', category: 'started', owner: 'ai', wip: 2, hasDone: true, isReview: false, rejectTo: null },
-      { id: 'prodreview', name: 'Prod review', description: 'Verify behavior in production.', category: 'started', owner: 'human', wip: null, hasDone: false, isReview: true, rejectTo: 'code' },
-      { id: 'complete', name: 'Complete', description: 'Done and verified.', category: 'completed', owner: 'human', wip: null, hasDone: false, isReview: false, rejectTo: null },
+      { id: 'backlog', name: 'Backlog', description: 'Everything captured but not yet started.', category: 'unstarted', owner: 'human', wip: null, hasReview: false, hasDone: false },
+      { id: 'next', name: 'Next', description: 'Prioritized and ready to pull into work.', category: 'unstarted', owner: 'human', wip: 5, hasReview: false, hasDone: false },
+      { id: 'spec', name: 'Spec', description: 'Define the problem and acceptance criteria, then get it reviewed.', category: 'started', owner: 'human', wip: 2, hasReview: true, hasDone: true },
+      { id: 'plan', name: 'Plan', description: 'AI breaks the work into an approach.', category: 'started', owner: 'ai', wip: 2, hasReview: false, hasDone: true },
+      { id: 'code', name: 'Code', description: 'AI implements the change; a human reviews it before Done.', category: 'started', owner: 'ai', wip: 3, hasReview: true, hasDone: true },
+      { id: 'deploy', name: 'Deploy', description: 'AI ships the change; a human verifies it in production.', category: 'started', owner: 'ai', wip: 2, hasReview: true, hasDone: true },
+      { id: 'complete', name: 'Complete', description: 'Done and verified.', category: 'completed', owner: 'human', wip: null, hasReview: false, hasDone: false },
     ];
     const Q = 'Should I keep the original playful CTA wording, or rewrite it to match the more formal new brand voice?';
     let n = 0;
     const c = (o) => {
       const owners = o.owners || [o.human || 'dk'];
-      return Object.assign({ id: 'c' + (++n), tag: '', sub: 'ongoing', progress: 0, created: 'Mar 2', desc: '', checklist: [], comments: [], result: null, activity: [{ t: 'Created', ts: 'earlier' }] }, o, { owners, activeHuman: o.activeHuman || owners[0] });
+      return Object.assign({ id: 'c' + (++n), tag: '', sub: 'ongoing', progress: 0, created: 'Mar 2', desc: '', checklist: [], comments: [], result: null, skipReview: false, skipStages: [], activity: [{ t: 'Created', ts: 'earlier' }] }, o, { owners, activeHuman: o.activeHuman || owners[0] });
     };
     const cards = [
       c({ title: 'Add SSO for enterprise accounts', tag: 'auth', owners: ['dk'], stageId: 'backlog', desc: 'SAML + OIDC login for enterprise plans, with SCIM provisioning as a fast follow.' }),
       c({ title: 'Redesign the empty states', tag: 'design', owners: ['ml'], stageId: 'backlog', desc: 'Every empty board, column, and card list needs a purposeful empty state.' }),
-      c({ title: 'Bulk-edit for board cards', tag: 'product', owners: ['jr'], stageId: 'next', desc: 'Select multiple cards and move, tag, or assign them at once.' }),
+      c({ title: 'Bulk-edit for board cards', tag: 'product', owners: ['jr'], stageId: 'next', skipStages: ['spec'], desc: 'Select multiple cards and move, tag, or assign them at once.' }),
       c({ title: 'Export the board to CSV', tag: 'product', owners: ['dk'], stageId: 'spec', sub: 'ongoing', desc: 'Let people export the whole board — one row per card, columns for stage, owner, tags.',
         checklist: [{ t: 'List required columns', done: true }, { t: 'Decide on nested sub-cards', done: false }, { t: 'Write acceptance criteria', done: false }],
         comments: [{ who: 'dk', text: 'Starting the spec — I think we scope v1 to a flat export, no sub-cards.', ts: '12m ago' }],
@@ -669,7 +695,7 @@ class Component extends DCLogic {
         checklist: [{ t: 'Choose presence transport', done: true }, { t: 'Draft data model', done: false }],
         comments: [{ who: 'ai', text: 'Planning the approach — leaning on Phoenix Presence over the existing socket. Will draft the payload shape next.', ts: '6m ago' }],
         activity: [{ t: 'AI pulled into Plan', ts: '9m ago' }] }),
-      c({ title: 'Migrate 40 blog posts to the new CMS', tag: 'eng', owners: ['dk'], stageId: 'code', sub: 'ongoing', progress: 62, desc: 'Move every post, preserve slugs, set up redirects, and re-upload images.',
+      c({ title: 'Migrate 40 blog posts to the new CMS', tag: 'eng', owners: ['dk'], stageId: 'code', sub: 'ongoing', progress: 62, skipReview: true, desc: 'Move every post, preserve slugs, set up redirects, and re-upload images.',
         checklist: [{ t: 'Export from old CMS', done: true }, { t: 'Map slugs + redirects', done: true }, { t: 'Migrate post bodies', done: false }, { t: 'Re-upload images', done: false }],
         comments: [{ who: 'ai', text: '24 of 40 posts migrated. Redirects are in place for everything moved so far — no broken links yet.', ts: '3m ago' }],
         activity: [{ t: 'AI started working', ts: '18m ago' }, { t: 'Migrated 24 / 40 posts', ts: '3m ago' }] }),
@@ -682,12 +708,12 @@ class Component extends DCLogic {
         checklist: [{ t: 'Define binding map', done: true }, { t: 'Build help overlay', done: true }, { t: 'Update docs', done: true }],
         comments: [{ who: 'ai', text: 'Done. I reused the command-palette binding table so there are no conflicts. Help overlay opens on “?”.', ts: '6m ago' }],
         activity: [{ t: 'AI started working', ts: '30m ago' }, { t: 'AI finished — ready for Review', ts: '6m ago' }] }),
-      c({ title: 'Refactor the pricing page copy', tag: 'marketing', owners: ['dk', 'ml'], activeHuman: 'dk', stageId: 'review', sub: 'ongoing', progress: 100, desc: 'Clarify the three pricing tiers and rewrite the FAQ to match the new positioning.',
+      c({ title: 'Refactor the pricing page copy', tag: 'marketing', owners: ['dk', 'ml'], activeHuman: 'dk', stageId: 'code', sub: 'review', progress: 100, desc: 'Clarify the three pricing tiers and rewrite the FAQ to match the new positioning.',
         result: { summary: 'Rewrote all three tier descriptions in plainer language and trimmed the FAQ from **14 to 8** questions. Tightened the enterprise CTA to focus on onboarding support.', changes: ['3 tier blurbs rewritten', 'FAQ 14 → 8 questions', 'New enterprise CTA copy'], deployUrl: 'preview.relay.app/pricing', screens: ['Pricing hero + tiers', 'Rewritten FAQ section'] },
         checklist: [{ t: 'Rewrite tier descriptions', done: true }, { t: 'Trim the FAQ', done: true }, { t: 'Update enterprise CTA', done: true }, { t: 'Legal review of claims', done: false }],
         comments: [{ who: 'ai', text: 'Finished the rewrite. I kept the “per seat” language since three competitors use it and it tested well. Flagged one savings claim for legal to confirm.', ts: '3m ago' }, { who: 'dk', text: 'Reads much cleaner. Checking the enterprise section now.', ts: '1m ago' }],
         activity: [{ t: 'AI started working', ts: '35m ago' }, { t: 'AI finished — pulled into Review', ts: '4m ago' }] }),
-      c({ title: 'Translate the landing page to Spanish', tag: 'marketing', owners: ['ml'], stageId: 'prodreview', progress: 100, desc: 'Full es-ES translation with reviewed terminology.',
+      c({ title: 'Translate the landing page to Spanish', tag: 'marketing', owners: ['ml'], stageId: 'deploy', sub: 'review', progress: 100, desc: 'Full es-ES translation with reviewed terminology.',
         result: { summary: 'Translated the full landing page to es-ES and deployed to production. Terminology reviewed against the glossary.', changes: ['Landing page es-ES', 'Glossary applied', 'hreflang tags added'], deployUrl: 'relay.app/es', screens: ['Spanish landing page'] },
         activity: [{ t: 'Deployed', ts: '1h ago' }] }),
       c({ title: 'Compile the weekly metrics report', tag: 'ops', owners: ['sy'], stageId: 'complete', progress: 100, desc: 'Weekly numbers with week-over-week deltas and a short summary.',
@@ -718,9 +744,12 @@ class Component extends DCLogic {
     this.setState(s => {
       const stages = s.stages;
       const cards = s.cards.map(c => ({ ...c }));
-      stages.forEach((st, idx) => {
+      const nextFor = (stageId, card) => { const i = stages.findIndex(x => x.id === stageId); for (let j = i + 1; j < stages.length; j++) { if (card.skipStages && card.skipStages.includes(stages[j].id)) continue; return stages[j]; } return null; };
+      const enterProgress = (stg) => (stg.owner === 'ai' && stg.category !== 'completed') ? 4 : 100;
+      // AI progresses its ongoing work
+      stages.forEach((st) => {
         if (st.owner !== 'ai' || st.category === 'completed') return;
-        cards.filter(c => c.stageId === st.id && c.sub !== 'done').forEach(card => {
+        cards.filter(c => c.stageId === st.id && c.sub === 'ongoing').forEach(card => {
           if (card.blocked) return;
           if (card.raisesQuestion && !card.asked && (card.progress || 0) >= 55) {
             card.blocked = true; card.asked = true;
@@ -732,19 +761,20 @@ class Component extends DCLogic {
           card.progress = Math.min(100, (card.progress || 0) + inc);
           if (card.progress >= 100) {
             card.progress = 100;
-            if (st.hasDone) { card.sub = 'done'; card.activity = [...card.activity, { t: 'AI finished — moved to ' + st.name + ' · Done', ts: 'now' }]; }
-            else { const nx = stages[idx + 1]; if (nx) { card.stageId = nx.id; card.sub = 'ongoing'; card.progress = (nx.owner === 'ai' && nx.category !== 'completed') ? 4 : 100; card.activity = [...card.activity, { t: 'Advanced to ' + nx.name, ts: 'now' }]; } }
+            if (st.hasReview && !card.skipReview) { card.sub = 'review'; card.activity = [...card.activity, { t: 'AI finished — awaiting review in ' + st.name, ts: 'now' }]; }
+            else if (st.hasDone) { card.sub = 'done'; card.activity = [...card.activity, { t: 'AI finished — moved to ' + st.name + ' · Done', ts: 'now' }]; }
+            else { const nx = nextFor(st.id, card); if (nx) { card.stageId = nx.id; card.sub = 'ongoing'; card.progress = enterProgress(nx); card.activity = [...card.activity, { t: 'Advanced to ' + nx.name, ts: 'now' }]; } }
           }
         });
       });
+      // AI auto-pulls ready work from the previous stage
       stages.forEach((st, idx) => {
         if (st.owner !== 'ai' || st.category === 'completed' || idx === 0) return;
         const cap = st.wip == null ? 4 : st.wip;
-        if (cards.filter(c => c.stageId === st.id && c.sub !== 'done').length >= cap) return;
+        if (cards.filter(c => c.stageId === st.id && c.sub === 'ongoing').length >= cap) return;
         const prev = stages[idx - 1];
-        if (!prev.hasDone && prev.owner !== 'ai') return;
-        const pred = prev.hasDone ? (c => c.stageId === prev.id && c.sub === 'done') : (c => c.stageId === prev.id);
-        const cand = cards.find(pred);
+        const ready = (c) => { if (c.stageId !== prev.id) return false; if (c.skipStages && c.skipStages.includes(st.id)) return false; if (prev.hasDone) return c.sub === 'done'; if (prev.hasReview) return false; return true; };
+        const cand = cards.find(ready);
         if (cand) { cand.stageId = st.id; cand.sub = 'ongoing'; if (!cand.progress || cand.progress >= 100) cand.progress = 4; cand.blocked = false; cand.activity = [...cand.activity, { t: 'AI pulled into ' + st.name, ts: 'now' }]; }
       });
       return { cards };
@@ -781,7 +811,7 @@ class Component extends DCLogic {
   }
 
   activeWorker(card, stage) {
-    if (stage && stage.owner === 'ai' && !card.blocked && stage.category !== 'completed') return 'ai';
+    if (stage && stage.owner === 'ai' && card.sub === 'ongoing' && !card.blocked && stage.category !== 'completed') return 'ai';
     return card.activeHuman || (card.owners && card.owners[0]) || 'dk';
   }
   toggleCheck(id, i) { this.setState(s => ({ cards: s.cards.map(c => c.id === id ? { ...c, checklist: c.checklist.map((it, j) => j === i ? { ...it, done: !it.done } : it) } : c) })); }
@@ -804,39 +834,48 @@ class Component extends DCLogic {
     }) }));
   }
 
-  nextStageOf(stageId) { const i = this.stageIndex(stageId); return this.state.stages[i + 1] || null; }
+  nextStageOf(stageId, card) { const i = this.stageIndex(stageId); const st = this.state.stages; for (let j = i + 1; j < st.length; j++) { if (card && card.skipStages && card.skipStages.includes(st[j].id)) continue; return st[j]; } return null; }
+  enterProgress(stg) { return (stg.owner === 'ai' && stg.category !== 'completed') ? 4 : 100; }
   markDone(id) {
     const card = this.findCard(id); if (!card) return;
-    const st = this.state.stages.find(s => s.id === card.stageId);
-    if (st.hasDone && card.sub !== 'done') { this.moveCard(id, st.id, 'done', { activity: [...card.activity, { t: 'You marked it ready in ' + st.name, ts: 'now' }] }); }
-    else { const nx = this.nextStageOf(st.id); if (nx) this.moveCard(id, nx.id, 'ongoing', { progress: (nx.owner === 'ai' && nx.category !== 'completed') ? 4 : (card.progress || 0), blocked: false, activity: [...card.activity, { t: 'Advanced to ' + nx.name, ts: 'now' }] }, true); }
-    this.closeDrawer();
+    const st = this.state.stages.find(s => s.id === card.stageId); if (!st) return;
+    if (st.hasReview && !card.skipReview && card.sub === 'ongoing') {
+      this.moveCard(id, st.id, 'review', { progress: 100, activity: [...card.activity, { t: 'Sent for review in ' + st.name, ts: 'now' }] });
+    } else if (st.hasDone && card.sub !== 'done') {
+      this.moveCard(id, st.id, 'done', { activity: [...card.activity, { t: 'You marked it ready in ' + st.name, ts: 'now' }] });
+    } else {
+      const nx = this.nextStageOf(st.id, card); if (nx) this.moveCard(id, nx.id, 'ongoing', { progress: this.enterProgress(nx), blocked: false, activity: [...card.activity, { t: 'Advanced to ' + nx.name, ts: 'now' }] }, true);
+    }
   }
   pullNext(id) {
     const card = this.findCard(id); if (!card) return;
-    const nx = this.nextStageOf(card.stageId); if (!nx) return;
-    this.moveCard(id, nx.id, 'ongoing', { progress: (nx.owner === 'ai' && nx.category !== 'completed') ? 4 : (card.progress || 0), blocked: false, activity: [...card.activity, { t: 'Pulled into ' + nx.name, ts: 'now' }] }, true);
-    this.closeDrawer();
+    const nx = this.nextStageOf(card.stageId, card); if (!nx) return;
+    this.moveCard(id, nx.id, 'ongoing', { progress: this.enterProgress(nx), blocked: false, activity: [...card.activity, { t: 'Pulled into ' + nx.name, ts: 'now' }] }, true);
   }
   approve(id) {
     const card = this.findCard(id); if (!card) return;
-    const st = this.state.stages.find(s => s.id === card.stageId);
-    if (st && st.isReview) {
-      const nx = this.nextStageOf(st.id);
-      if (nx) this.moveCard(id, nx.id, 'ongoing', { progress: (nx.owner === 'ai' && nx.category !== 'completed') ? 4 : 100, blocked: false, comments: [...(card.comments || []), { who: 'dk', text: 'Approved. ✓', ts: 'now' }], activity: [...card.activity, { t: 'You approved — advanced to ' + nx.name, ts: 'now' }] }, true);
-      this.setState({ rejectOpen: false });
-    } else { this.markDone(id); }
+    const st = this.state.stages.find(s => s.id === card.stageId); if (!st) return;
+    const comments = [...(card.comments || []), { who: 'dk', text: 'Approved. ✓', ts: 'now' }];
+    if (st.hasDone) {
+      this.moveCard(id, st.id, 'done', { comments, activity: [...card.activity, { t: 'You approved — moved to ' + st.name + ' · Done', ts: 'now' }] });
+    } else {
+      const nx = this.nextStageOf(st.id, card);
+      if (nx) this.moveCard(id, nx.id, 'ongoing', { progress: this.enterProgress(nx), blocked: false, comments, activity: [...card.activity, { t: 'You approved — advanced to ' + nx.name, ts: 'now' }] }, true);
+    }
+    this.setState({ rejectOpen: false });
   }
   requestChanges(id) {
     const card = this.findCard(id); if (!card) return;
     const note = (this.state.rejectText || '').trim();
-    const st = this.state.stages.find(s => s.id === card.stageId);
-    const target = (st && st.rejectTo && this.state.stages.find(x => x.id === st.rejectTo)) || this.state.stages.find(s => s.owner === 'ai' && s.category === 'started') || this.state.stages[0];
+    const st = this.state.stages.find(s => s.id === card.stageId); if (!st) return;
     const comments = [...(card.comments || [])];
     if (note) comments.push({ who: 'dk', kind: 'changes', text: note, ts: 'now' });
-    this.moveCard(id, target.id, 'ongoing', { progress: 55, blocked: false, comments, activity: [...card.activity, { t: 'You requested changes — sent back to ' + target.name, ts: 'now' }, { t: 'AI resumed working', ts: 'now' }] });
+    const resumes = st.owner === 'ai' ? [{ t: 'AI resumed working', ts: 'now' }] : [];
+    this.moveCard(id, st.id, 'ongoing', { progress: st.owner === 'ai' ? 60 : 100, blocked: false, comments, activity: [...card.activity, { t: 'You requested changes — back to ' + st.name + ' · In progress', ts: 'now' }, ...resumes] });
     this.setState({ rejectText: '', rejectOpen: false });
   }
+  toggleSkipReview(id) { this.setState(s => ({ cards: s.cards.map(c => c.id === id ? { ...c, skipReview: !c.skipReview, activity: [...c.activity, { t: c.skipReview ? 'Review re-enabled' : 'Set to skip review', ts: 'now' }] } : c) })); }
+  toggleSkipStage(id, sid) { this.setState(s => ({ cards: s.cards.map(c => { if (c.id !== id) return c; const has = (c.skipStages || []).includes(sid); const skipStages = has ? c.skipStages.filter(x => x !== sid) : [...(c.skipStages || []), sid]; return { ...c, skipStages }; }) })); }
 
   updateStage(id, patch) { this.setState(s => ({ stages: s.stages.map(st => st.id === id ? { ...st, ...patch } : st) })); }
   setCategory(id, cat) { this.setState(s => ({ stages: this.sortByCat(s.stages.map(st => st.id === id ? { ...st, category: cat } : st)) })); }
@@ -849,7 +888,7 @@ class Component extends DCLogic {
       return { stages: s.stages.filter(x => x.id !== id), cards: s.cards.map(c => c.stageId === id ? { ...c, stageId: fallback.id, sub: 'ongoing' } : c) };
     });
   }
-  addStage(cat) { this.setState(s => { const st = { id: 's' + Date.now(), name: 'New stage', description: '', category: cat || 'started', owner: 'human', wip: null, hasDone: cat === 'started', isReview: false, rejectTo: null }; return { stages: this.sortByCat([...s.stages, st]) }; }); }
+  addStage(cat) { this.setState(s => { const st = { id: 's' + Date.now(), name: 'New stage', description: '', category: cat || 'started', owner: 'human', wip: null, hasReview: false, hasDone: cat === 'started' }; return { stages: this.sortByCat([...s.stages, st]) }; }); }
   bumpWip(id, d) { this.setState(s => ({ stages: s.stages.map(st => st.id === id ? { ...st, wip: Math.max(1, (st.wip || 1) + d) } : st) })); }
 
   avatarFor(who) {
@@ -912,11 +951,15 @@ class Component extends DCLogic {
       if (working) { showStatus = true; statusLabel = 'working · ' + (card.progress || 0) + '%'; statusColor = 'oklch(0.52 0.10 292)'; }
       else if (isDoneSub) { showStatus = true; statusLabel = 'ready'; statusColor = 'oklch(0.50 0.10 155)'; }
       else if (stCompleted) { showStatus = true; statusLabel = 'done'; statusColor = 'oklch(0.50 0.10 155)'; }
+      const skips = [];
+      if (card.skipReview) skips.push('review');
+      (card.skipStages || []).forEach(sid => { const ss = this.state.stages.find(x => x.id === sid); if (ss) skips.push(ss.name); });
       return {
         id: card.id, title: card.title, tag: card.tag, showTag: !!card.tag && !working,
         style: { background: 'oklch(1 0 0)', border: '1px solid oklch(0.92 0.006 255)', borderLeft: '3px solid ' + accent, borderRadius: '9px', padding: '10px 11px', display: 'flex', flexDirection: 'column', gap: '8px', cursor: 'grab', boxShadow: '0 1px 2px oklch(0.55 0.03 255/0.05)', userSelect: 'none' },
         showProgress: working, progressStyle: { height: '100%', width: (card.progress || 0) + '%', background: VIOLET, borderRadius: '3px', transition: 'width 0.6s ease' },
         blocked: !!card.blocked,
+        skipShow: skips.length > 0, skipLabel: 'skips ' + skips.join(' · '),
         showStatus, statusLabel, statusStyle: { fontSize: '11px', fontFamily: mono, color: statusColor, display: 'flex', alignItems: 'center', gap: '5px' },
         clusterStyle: cluster.containerStyle, avatars: cluster.avatars, showOwnerLabel: cluster.showOwnerLabel, ownerLabelText: cluster.ownerLabelText,
         onClick: () => this.selectCard(card.id),
@@ -936,44 +979,87 @@ class Component extends DCLogic {
           if (!id) return;
           const card = this.findCard(id); if (!card) return;
           const st = this.state.stages.find(x => x.id === stageId);
-          const targetSub = st.hasDone ? sub : 'ongoing';
+          let targetSub = sub;
+          if (targetSub === 'review' && !st.hasReview) targetSub = 'ongoing';
+          if (targetSub === 'done' && !st.hasDone) targetSub = 'ongoing';
           const extra = { blocked: false };
           if (st.owner === 'ai' && targetSub === 'ongoing' && st.category !== 'completed') { if (!card.progress || card.progress >= 100) extra.progress = 4; }
-          if (targetSub === 'done' || st.category === 'completed') extra.progress = 100;
-          extra.activity = [...card.activity, { t: 'Moved to ' + st.name + (st.hasDone ? (' · ' + (targetSub === 'done' ? 'Done' : 'In progress')) : ''), ts: 'now' }];
-          this.moveCard(id, stageId, targetSub, extra, targetSub === 'done');
+          if (targetSub === 'review' || targetSub === 'done' || st.category === 'completed') extra.progress = 100;
+          const subName = (st.hasReview || st.hasDone) ? (' · ' + (targetSub === 'done' ? 'Done' : targetSub === 'review' ? 'Review' : 'In progress')) : '';
+          extra.activity = [...card.activity, { t: 'Moved to ' + st.name + subName, ts: 'now' }];
+          this.moveCard(id, stageId, targetSub, extra, targetSub !== 'ongoing');
         },
       };
     };
 
-    const laneBody = (highlight) => ({ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '4px', borderRadius: '10px', minHeight: '70px', transition: 'background 0.15s, box-shadow 0.15s', background: highlight ? 'oklch(0.96 0.03 250)' : 'transparent', boxShadow: highlight ? 'inset 0 0 0 1.5px oklch(0.75 0.10 250)' : 'inset 0 0 0 1px transparent' });
+    const laneMeta = {
+      ongoing: { label: 'In progress', color: 'oklch(0.52 0.02 255)', tint: 'transparent', drop: 'oklch(0.94 0.045 250)', divider: 'oklch(0.915 0.008 255)' },
+      review:  { label: 'Review',      color: 'oklch(0.52 0.12 65)',  tint: 'oklch(0.966 0.032 75)', drop: 'oklch(0.95 0.06 75)',  divider: 'oklch(0.90 0.04 75)' },
+      done:    { label: 'Done',        color: 'oklch(0.47 0.11 155)', tint: 'oklch(0.964 0.03 155)', drop: 'oklch(0.94 0.05 155)', divider: 'oklch(0.90 0.035 155)' },
+    };
 
     const decoratedStages = s.stages.map(stage => {
       const all = s.cards.filter(c => c.stageId === stage.id);
-      const ongoing = stage.hasDone ? all.filter(c => c.sub !== 'done') : all;
-      const done = stage.hasDone ? all.filter(c => c.sub === 'done') : [];
+      const hasR = stage.hasReview, hasD = stage.hasDone;
+      const bucket = c => (c.sub === 'done' && hasD) ? 'done' : (c.sub === 'review' && hasR) ? 'review' : 'ongoing';
+      const cardsBy = { ongoing: [], review: [], done: [] };
+      all.forEach(c => cardsBy[bucket(c)].push(c));
       const collapsed = all.length === 0 && !s.dragging && !s.forceOpen[stage.id];
-      const wipCount = stage.hasDone ? ongoing.length : all.length;
+      const wipCount = cardsBy.ongoing.length;
       const over = stage.wip != null && wipCount > stage.wip;
       const wipStyle = { fontSize: '11px', fontWeight: 600, fontFamily: mono, padding: '2px 7px', borderRadius: '5px', background: over ? 'oklch(0.96 0.03 15)' : 'oklch(0.96 0.006 255)', color: over ? 'oklch(0.55 0.16 15)' : 'oklch(0.48 0.02 255)' };
-      const lanes = [];
-      if (stage.hasDone) {
-        const h1 = s.dragOverKey === stage.id + ':ongoing', h2 = s.dragOverKey === stage.id + ':done';
-        lanes.push({ label: 'In progress', showLabel: true, count: ongoing.length, labelStyle: { fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em', fontFamily: mono, color: 'oklch(0.55 0.02 255)' }, laneStyle: { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' }, bodyStyle: laneBody(h1), showCompose: s.composeStage === stage.id, cards: ongoing.map(c => decorateCard(c, stage)), ...dropHandlers(stage.id, 'ongoing') });
-        lanes.push({ label: 'Done', showLabel: true, count: done.length, labelStyle: { fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em', fontFamily: mono, color: 'oklch(0.50 0.09 155)' }, laneStyle: { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' }, bodyStyle: Object.assign(laneBody(h2), { background: h2 ? 'oklch(0.95 0.04 155)' : 'oklch(0.975 0.012 155)' }), showCompose: false, cards: done.map(c => decorateCard(c, stage)), ...dropHandlers(stage.id, 'done') });
-      } else {
-        const h = s.dragOverKey === stage.id + ':ongoing';
-        lanes.push({ label: '', showLabel: false, count: all.length, labelStyle: {}, laneStyle: { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' }, bodyStyle: laneBody(h), showCompose: s.composeStage === stage.id, cards: all.map(c => decorateCard(c, stage)), ...dropHandlers(stage.id, 'ongoing') });
-      }
-      const d0 = dropHandlers(stage.id, stage.hasDone ? 'done' : 'ongoing');
+
+      const kinds = ['ongoing']; if (hasR) kinds.push('review'); if (hasD) kinds.push('done');
+      const labeled = hasR || hasD;
+      let contentW = 0;
+      const lanes = kinds.map((k, i) => {
+        const key = stage.id + ':' + k;
+        const meta = laneMeta[k];
+        const laneCards = cardsBy[k];
+        const isSub = k !== 'ongoing';
+        const laneCollapsed = isSub && laneCards.length === 0 && !s.dragging && !s.forceOpen[key];
+        const highlight = s.dragOverKey === key;
+        const dh = dropHandlers(stage.id, k);
+        const width = laneCollapsed ? 34 : (k === 'ongoing' ? 240 : 178);
+        contentW += width;
+        const bg = highlight ? meta.drop : meta.tint;
+        const laneStyle = { flex: '0 0 ' + width + 'px', width: width + 'px', minWidth: 0, display: 'flex', flexDirection: 'column', boxSizing: 'border-box', background: bg, transition: 'background 0.15s, box-shadow 0.15s', boxShadow: highlight ? 'inset 0 0 0 1.5px oklch(0.72 0.11 250)' : 'none' };
+        if (i > 0) laneStyle.borderLeft = '1px solid ' + meta.divider;
+        const stripStyle = { flex: '0 0 34px', width: '34px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '9px', padding: '12px 0', boxSizing: 'border-box', background: bg, cursor: 'pointer', transition: 'background 0.15s' };
+        if (i > 0) stripStyle.borderLeft = '1px solid ' + meta.divider;
+        const padL = isSub ? '13px' : '15px';
+        return {
+          kind: k, collapsed: laneCollapsed, expanded: !laneCollapsed,
+          onExpandLane: () => this.setState(st => ({ forceOpen: { ...st.forceOpen, [key]: true } })),
+          stripStyle,
+          stripDotStyle: { width: '6px', height: '6px', borderRadius: '50%', background: meta.color, opacity: 0.6, flex: '0 0 auto' },
+          stripLabelStyle: { writingMode: 'vertical-rl', transform: 'rotate(180deg)', fontSize: '10px', fontWeight: 600, letterSpacing: '0.05em', fontFamily: mono, color: meta.color, whiteSpace: 'nowrap' },
+          stripCountStyle: { fontSize: '10px', fontFamily: mono, color: meta.color, opacity: 0.7, flex: '0 0 auto' },
+          label: meta.label, showLabel: isSub || labeled, count: laneCards.length,
+          labelRowStyle: { display: 'flex', alignItems: 'center', gap: '6px', padding: '11px ' + padL + ' 7px ' + padL, flex: '0 0 auto' },
+          labelStyle: { fontSize: '10px', fontWeight: 600, letterSpacing: '0.05em', fontFamily: mono, color: meta.color },
+          countStyle: { fontSize: '10px', fontFamily: mono, color: meta.color, opacity: 0.7 },
+          laneStyle,
+          bodyStyle: { flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', gap: '8px', padding: ((isSub || labeled) ? '0' : '13px') + ' 13px 13px ' + padL },
+          showCompose: k === 'ongoing' && s.composeStage === stage.id,
+          cards: laneCards.map(c => decorateCard(c, stage)),
+          onDragOver: dh.onDragOver, onDrop: dh.onDrop, onDragEnter: dh.onDragEnter, onDragLeave: dh.onDragLeave,
+        };
+      });
+
+      const ownerC = ownerColor(stage.owner);
+      const totalW = contentW;
+      const stageStyle = { flex: '0 0 auto', width: totalW + 'px', display: 'flex', flexDirection: 'column', height: '100%', background: 'oklch(0.976 0.004 255)', border: '1px solid oklch(0.912 0.008 255)', borderRadius: '14px', overflow: 'hidden', boxShadow: '0 1px 3px oklch(0.5 0.02 255/0.06)' };
+      const headerStyle = { display: 'flex', alignItems: 'center', gap: '8px', padding: '15px 15px 12px 15px', flex: '0 0 auto', borderBottom: '1px solid oklch(0.92 0.008 255)' };
+      const lanesRowStyle = { display: 'flex', gap: '0', flex: 1, minHeight: 0 };
+
+      const d0 = dropHandlers(stage.id, hasD ? 'done' : (hasR ? 'review' : 'ongoing'));
       return {
         id: stage.id, name: stage.name, description: stage.description, category: stage.category,
-        ownerColor: ownerColor(stage.owner), cardCount: all.length,
+        ownerColor: ownerC, cardCount: all.length,
         collapsed, expanded: !collapsed,
         showWip: stage.wip != null, wipLabel: 'wip ' + wipCount + '/' + (stage.wip || 0), wipStyle,
-        stageStyle: { flex: '0 0 auto', width: (stage.hasDone ? 300 : 236) + 'px', display: 'flex', flexDirection: 'column', height: '100%' },
-        lanesRowStyle: { display: 'flex', gap: '8px', flex: 1, minHeight: 0 },
-        lanes,
+        stageStyle, headerStyle, lanesRowStyle, lanes,
         composePlaceholder: stage.owner === 'ai' ? 'Describe work to hand to the AI…' : 'Add work to ' + stage.name + '…',
         composeCta: stage.owner === 'ai' ? 'Hand to AI' : 'Add',
         onAdd: () => this.onAdd(stage.id),
@@ -1006,13 +1092,10 @@ class Component extends DCLogic {
       limitToggleStyle: { fontSize: '12px', fontWeight: 600, padding: '5px 12px', borderRadius: '7px', border: '1px solid ' + (st.wip != null ? 'oklch(0.75 0.10 250)' : 'oklch(0.90 0.006 255)'), background: st.wip != null ? 'oklch(0.96 0.03 250)' : 'oklch(1 0 0)', color: st.wip != null ? 'oklch(0.45 0.13 250)' : 'oklch(0.52 0.02 255)' },
       doneToggleStyle: { width: '38px', height: '22px', borderRadius: '11px', border: 'none', padding: 0, position: 'relative', background: st.hasDone ? BLUE : 'oklch(0.88 0.01 255)', transition: 'background 0.15s' },
       doneKnobStyle: { position: 'absolute', top: '2px', left: st.hasDone ? '18px' : '2px', width: '18px', height: '18px', borderRadius: '50%', background: 'oklch(1 0 0)', transition: 'left 0.15s', display: 'block' },
-      isReview: !!st.isReview,
-      reviewToggleStyle: { width: '38px', height: '22px', borderRadius: '11px', border: 'none', padding: 0, position: 'relative', background: st.isReview ? GREEN : 'oklch(0.88 0.01 255)', transition: 'background 0.15s' },
-      reviewKnobStyle: { position: 'absolute', top: '2px', left: st.isReview ? '18px' : '2px', width: '18px', height: '18px', borderRadius: '50%', background: 'oklch(1 0 0)', transition: 'left 0.15s', display: 'block' },
-      rejectTo: st.rejectTo || (s.stages[0] && s.stages[0].id),
-      rejectOptions: s.stages.filter(x => x.id !== st.id).map(x => ({ id: x.id, name: x.name })),
-      onToggleReview: () => this.updateStage(st.id, { isReview: !st.isReview, rejectTo: !st.isReview && !st.rejectTo ? (s.stages.find(x => x.owner === 'ai') || s.stages[0]).id : st.rejectTo }),
-      onRejectTo: (e) => this.updateStage(st.id, { rejectTo: e.target.value }),
+      isReview: !!st.hasReview,
+      reviewToggleStyle: { width: '38px', height: '22px', borderRadius: '11px', border: 'none', padding: 0, position: 'relative', background: st.hasReview ? GREEN : 'oklch(0.88 0.01 255)', transition: 'background 0.15s' },
+      reviewKnobStyle: { position: 'absolute', top: '2px', left: st.hasReview ? '18px' : '2px', width: '18px', height: '18px', borderRadius: '50%', background: 'oklch(1 0 0)', transition: 'left 0.15s', display: 'block' },
+      onToggleReview: () => this.updateStage(st.id, { hasReview: !st.hasReview }),
       onName: (e) => this.updateStage(st.id, { name: e.target.value }), onDesc: (e) => this.updateStage(st.id, { description: e.target.value }),
       onOwnerHuman: () => this.updateStage(st.id, { owner: 'human' }), onOwnerAI: () => this.updateStage(st.id, { owner: 'ai' }),
       onCatUnstarted: () => this.setCategory(st.id, 'unstarted'), onCatStarted: () => this.setCategory(st.id, 'started'), onCatComplete: () => this.setCategory(st.id, 'completed'),
@@ -1056,14 +1139,15 @@ class Component extends DCLogic {
     };
     const sel = s.selectedId ? this.findCard(s.selectedId) : null;
     const selStage = sel ? s.stages.find(x => x.id === sel.stageId) : null;
-    let drawer = { open: false, activity: [], comments: [], owners: [], checklist: [], assignables: [], result: { summaryParts: [], changes: [], screens: [] }, activeAv: {} };
+    let drawer = { open: false, activity: [], comments: [], owners: [], checklist: [], assignables: [], skipStages: [], result: { summaryParts: [], changes: [], screens: [] }, activeAv: {} };
     if (sel && selStage) {
       const idx = this.stageIndex(selStage.id);
       const stCompleted = selStage.category === 'completed';
       const isDoneSub = sel.sub === 'done';
       const isBlocked = !!sel.blocked;
-      const isWorking = selStage.owner === 'ai' && !isDoneSub && !isBlocked && !stCompleted;
-      const isReview = !!selStage.isReview && !stCompleted;
+      const isWorking = selStage.owner === 'ai' && sel.sub === 'ongoing' && !isBlocked && !stCompleted;
+      const isReview = sel.sub === 'review' && !!selStage.hasReview && !stCompleted;
+      const subLabel = (sel.sub === 'review' && selStage.hasReview) ? ' · Review' : (sel.sub === 'done' && selStage.hasDone) ? ' · Done' : ((selStage.hasReview || selStage.hasDone) ? ' · In progress' : '');
       const isHumanOngoing = selStage.owner === 'human' && !isDoneSub && !stCompleted && !isReview;
       const nx = s.stages[idx + 1];
       const active = this.activeWorker(sel, selStage);
@@ -1100,15 +1184,20 @@ class Component extends DCLogic {
       const res = sel.result;
       const activeAv = mkAvatar(active, { size: 26 });
       const lastTs = (sel.activity && sel.activity.length) ? sel.activity[sel.activity.length - 1].ts : 'now';
+      const downstream = s.stages.slice(idx + 1);
+      const anyReview = !!selStage.hasReview || downstream.some(x => x.hasReview);
+      const srOn = !!sel.skipReview;
+      const skBox = (on) => ({ width: '17px', height: '17px', borderRadius: '5px', flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', color: 'oklch(1 0 0)', background: on ? VIOLET : 'oklch(1 0 0)', border: '1.5px solid ' + (on ? VIOLET : 'oklch(0.82 0.01 255)'), boxSizing: 'border-box' });
+      const skipStages = downstream.map(x => { const on = (sel.skipStages || []).includes(x.id); return { id: x.id, name: x.name, check: on ? '✓' : '', boxStyle: skBox(on), onToggle: () => this.toggleSkipStage(sel.id, x.id) }; });
       drawer = {
         open: true, title: sel.title, cardRef: 'RLY-' + (100 + this.stageIndex(selStage.id) + sel.id.length),
-        stageChip: selStage.name + (selStage.hasDone ? (isDoneSub ? ' · Done' : ' · In progress') : ''),
+        stageChip: selStage.name + subLabel,
         stageChipStyle: { alignSelf: 'flex-start', fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em', fontFamily: mono, background: 'oklch(0.96 0.006 255)', color: 'oklch(0.48 0.02 255)', padding: '3px 8px', borderRadius: '5px' },
         isWorking, isBlocked, isReview,
-        reviewHint: 'Relay AI finished this. Approve to advance' + (nx ? ' to ' + nx.name : '') + ', or send it back with a note.',
-        approveLabel: nx ? 'Approve → ' + nx.name : 'Approve',
-        rejectClosed: !s.rejectOpen, rejectOpen: s.rejectOpen, rejectToName: rejectTarget ? rejectTarget.name : 'previous stage',
-        canMarkDone: isHumanOngoing, markDoneLabel: selStage.hasDone ? 'Mark ready → Done' : (nx ? 'Advance to ' + nx.name : 'Complete'),
+        reviewHint: 'Relay AI finished this. Approve to ' + (selStage.hasDone ? 'move it to Done' : (nx ? 'advance to ' + nx.name : 'complete')) + ', or send it back with a note.',
+        approveLabel: selStage.hasDone ? 'Approve → Done' : (nx ? 'Approve → ' + nx.name : 'Approve'),
+        rejectClosed: !s.rejectOpen, rejectOpen: s.rejectOpen, rejectToName: selStage.name + ' · In progress',
+        canMarkDone: isHumanOngoing, markDoneLabel: selStage.hasReview ? 'Send for review' : (selStage.hasDone ? 'Mark ready → Done' : (nx ? 'Advance to ' + nx.name : 'Complete')),
         canPull: isDoneSub && !!nx, pullLabel: nx ? 'Pull into ' + nx.name + ' →' : '',
         question: sel.question, progressLabel: (sel.progress || 0) + '%',
         progressStyle: { height: '100%', width: (sel.progress || 0) + '%', background: VIOLET, borderRadius: '3px', transition: 'width 0.6s ease' },
@@ -1119,6 +1208,11 @@ class Component extends DCLogic {
         youAvatarStyle: Object.assign(mkAvatar('dk', { size: 28 }).wrapStyle, {}), youInitials: 'DK',
         activeAv, activeName: aiActive ? 'Relay AI' : (s.people[active] ? s.people[active].name : 'Someone'), aiActive,
         reassignLabel: s.reassignOpen ? 'Done' : 'Reassign', reassignOpen: s.reassignOpen,
+        flowShow: anyReview || downstream.length > 0,
+        skipReviewShow: anyReview, onToggleSkipReview: () => this.toggleSkipReview(sel.id),
+        skipReviewToggleStyle: { width: '38px', height: '22px', borderRadius: '11px', border: 'none', padding: 0, position: 'relative', background: srOn ? VIOLET : 'oklch(0.88 0.01 255)', transition: 'background 0.15s', cursor: 'pointer' },
+        skipReviewKnobStyle: { position: 'absolute', top: '2px', left: srOn ? '18px' : '2px', width: '18px', height: '18px', borderRadius: '50%', background: 'oklch(1 0 0)', transition: 'left 0.15s', display: 'block' },
+        hasSkipStages: downstream.length > 0, skipStages,
         hasTag: !!sel.tag, tag: sel.tag, created: sel.created || 'Mar 2', updated: lastTs,
         activity: (sel.activity || []).slice().reverse().map(l => ({ t: l.t, ts: l.ts, dotStyle: { width: '7px', height: '7px', borderRadius: '50%', background: dot(l.t), display: 'block', marginTop: '4px', flex: '0 0 auto' } })),
       };

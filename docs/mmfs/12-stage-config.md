@@ -9,7 +9,9 @@ relay the same way." Turns the seeded pipeline into something owned by the user.
 ## In scope
 - Settings → Stages pane: list stages grouped by the three categories.
 - Per stage: rename, reorder (↑/↓ or drag), delete, move between categories, set OWNER
-  (Human/AI segmented), toggle a "Done column" sub-lane.
+  (Human/AI segmented), and toggle the **Review sub-lane** and **Done column** sub-lanes
+  (the sub-lane model itself lands in [MMF 10b](10b-substages.md); this MMF exposes the toggles
+  in settings, matching the mockup's `REVIEW SUB-LANE` / `DONE COLUMN` controls).
 - "Add stage to <category>".
 - Guard rails: can't delete a stage with cards without moving them; keep ≥1 stage.
 

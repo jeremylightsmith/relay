@@ -25,6 +25,7 @@ Claude Code can drive. Everything after that is enhancement.
 | [08](08-board-api-keys.md) | Board API keys | ⭐ MVP | 02 |
 | [09](09-rest-api.md) | Relay REST API | ⭐ MVP | 06, 07, 08 |
 | [10](10-relay-cli.md) | Relay CLI for Claude Code | ⭐ MVP | 09 |
+| [10b](10b-substages.md) | Stage substages (Review/Done sub-lanes) | Post-MVP | 05, 06 |
 | [11](11-wip-limits.md) | WIP limits | Post-MVP | 06 |
 | [12](12-stage-config.md) | Stage configuration UI | Post-MVP | 06 |
 | [13](13-approval-gates.md) | Approval gates & reject routing | Post-MVP | 12 |
@@ -39,6 +40,18 @@ Claude Code can drive. Everything after that is enhancement.
 
 **The MVP cut is MMFs 01–10.** After 10, Relay can host its own backlog and Claude Code can
 work it; 11+ are pulled in as cards from then on.
+
+## Design refresh (2026-07-07)
+
+Re-pulled the mockups from the Claude Design project and diffed against what's built + planned:
+
+- **Board mockup evolved** (108→116 KB): stages now support optional **Review sub-lane** and
+  **Done column** sub-lanes (per-stage toggles in settings; rendered as stacked `lanes` under a
+  stage), plus a card **skip** action (`↷`). → **New [MMF 10b](10b-substages.md)** slotted before
+  WIP limits; the Review-sub-lane toggle folded into [MMF 12](12-stage-config.md).
+- **Design System + Landing mockups: unchanged** (same palette, actors, component→daisyUI map).
+- **Built so far (MMF 01–03) still matches** the design at their scope; the drawer sections
+  (MMF 04) are unchanged, so MMF 04 stands as specced.
 
 ## Modeling decisions (apply across MMFs)
 
