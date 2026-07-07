@@ -205,6 +205,208 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
+  describe "lane counts" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      %{board: board, backlog: backlog}
+    end
+
+    test "every stage renders its card count", %{conn: conn, backlog: backlog} do
+      insert(:card, stage: backlog, title: "One", position: 1, ref_number: 1)
+      insert(:card, stage: backlog, title: "Two", position: 2, ref_number: 2)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(view, "#stage-col-1 .stage-count", "2")
+
+      for position <- 2..7 do
+        assert has_element?(view, "#stage-col-#{position} .stage-count", "0")
+      end
+    end
+
+    test "creating a card bumps its stage's count", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      view |> element("#stage-col-1-new-card") |> render_click()
+      view |> form("#stage-col-1-compose-form", card: %{title: "Count me"}) |> render_submit()
+
+      assert has_element?(view, "#stage-col-1 .stage-count", "1")
+      assert has_element?(view, "#stage-col-2 .stage-count", "0")
+    end
+  end
+
+  describe "moving cards" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog, spec, plan | _rest] = board.stages
+      %{board: board, backlog: backlog, spec: spec, plan: plan}
+    end
+
+    test "a move_card event moves the card to the target stage and persists across reloads",
+         %{conn: conn, backlog: backlog, spec: spec} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Take the baton"})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => spec.id, "index" => 0})
+
+      assert has_element?(view, "#stage-col-2-cards .board-card", "Take the baton")
+      refute has_element?(view, "#stage-col-1-cards .board-card")
+      assert Repo.get!(Card, card.id).stage_id == spec.id
+
+      {:ok, reloaded, _html} = live(conn, ~p"/board")
+      assert has_element?(reloaded, "#stage-col-2-cards .board-card", "Take the baton")
+    end
+
+    test "moving updates both lane counts", %{conn: conn, backlog: backlog, spec: spec} do
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Mover"})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => spec.id, "index" => 0})
+
+      assert has_element?(view, "#stage-col-1 .stage-count", "0")
+      assert has_element?(view, "#stage-col-2 .stage-count", "1")
+    end
+
+    test "reordering within a stage persists the new order across reloads",
+         %{conn: conn, backlog: backlog} do
+      {:ok, _first} = Cards.create_card(backlog, %{title: "First"})
+      {:ok, _second} = Cards.create_card(backlog, %{title: "Second"})
+      {:ok, _third} = Cards.create_card(backlog, %{title: "Third"})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      render_hook(view, "move_card", %{"ref" => "RLY-3", "stage_id" => backlog.id, "index" => 0})
+
+      assert stage_titles(view, 1) == ["Third", "First", "Second"]
+
+      {:ok, reloaded, _html} = live(conn, ~p"/board")
+      assert stage_titles(reloaded, 1) == ["Third", "First", "Second"]
+    end
+
+    test "accepts string stage_id and index (phx-value parity)",
+         %{conn: conn, backlog: backlog, spec: spec} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Stringly"})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      render_hook(view, "move_card", %{
+        "ref" => "RLY-1",
+        "stage_id" => Integer.to_string(spec.id),
+        "index" => "0"
+      })
+
+      assert Repo.get!(Card, card.id).stage_id == spec.id
+    end
+
+    test "omitting index appends the card to the bottom of the target stage",
+         %{conn: conn, backlog: backlog, spec: spec} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Mover"})
+      {:ok, existing} = Cards.create_card(spec, %{title: "Already there"})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => spec.id})
+
+      assert Repo.get!(Card, card.id).position == 2
+      assert Repo.get!(Card, existing.id).position == 1
+      assert stage_titles(view, 2) == ["Already there", "Mover"]
+    end
+
+    test "a ref that is not on this board is rejected", %{conn: conn, spec: spec} do
+      other_stage = insert(:stage)
+      theirs = insert(:card, stage: other_stage, title: "Theirs", position: 1, ref_number: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => spec.id, "index" => 0})
+
+      assert Repo.get!(Card, theirs.id).stage_id == other_stage.id
+      refute has_element?(view, "#stage-col-2-cards .board-card")
+    end
+
+    test "a target stage that is not on this board is rejected",
+         %{conn: conn, backlog: backlog} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Stay home"})
+      other_stage = insert(:stage)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => other_stage.id, "index" => 0})
+
+      assert Repo.get!(Card, card.id).stage_id == backlog.id
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Stay home")
+    end
+
+    test "garbage stage_id or index is ignored", %{conn: conn, backlog: backlog, spec: spec} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Unmoved"})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => "banana", "index" => 0})
+      render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => spec.id, "index" => "banana"})
+
+      assert Repo.get!(Card, card.id).stage_id == backlog.id
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Unmoved")
+    end
+
+    test "moving the drawer-selected card refreshes the drawer's stage chip",
+         %{conn: conn, backlog: backlog, plan: plan} do
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Chip check"})
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => plan.id, "index" => 0})
+
+      assert has_element?(view, "#card-drawer .drawer-stage-chip.badge-secondary", "Plan")
+    end
+  end
+
+  describe "drag-and-drop wiring" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Drag me"})
+      %{board: board, backlog: backlog}
+    end
+
+    test "the board mounts the BoardDnD hook", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(view, "#board[phx-hook='BoardDnD']")
+    end
+
+    test "cards are draggable and carry their ref", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(view, "#stage-col-1-cards .board-card[draggable='true'][data-ref='RLY-1']")
+    end
+
+    test "every stage's card container is a drop zone carrying its stage id",
+         %{conn: conn, backlog: backlog} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(view, "#stage-col-1-cards.stage-cards[data-stage-id='#{backlog.id}']")
+
+      zones =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#board .stage-cards[data-stage-id]")
+        |> Enum.count()
+
+      assert zones == 7
+    end
+  end
+
   describe "card drawer" do
     setup :register_and_log_in_user
 
@@ -377,6 +579,55 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
+  describe "drawer move menu" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog, spec, plan | _rest] = board.stages
+      {:ok, card} = Cards.create_card(backlog, %{title: "Pass the baton"})
+      %{board: board, backlog: backlog, spec: spec, plan: plan, card: card}
+    end
+
+    test "lists every stage except the card's current one",
+         %{conn: conn, backlog: backlog, spec: spec, plan: plan} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-move")
+      refute has_element?(view, "#card-drawer-move-to-#{backlog.id}")
+      assert has_element?(view, "#card-drawer-move-to-#{spec.id}", "Spec")
+      assert has_element?(view, "#card-drawer-move-to-#{plan.id}", "Plan")
+    end
+
+    test "moving from the drawer persists like a drag and appends to the bottom",
+         %{conn: conn, spec: spec, card: card} do
+      {:ok, existing} = Cards.create_card(spec, %{title: "Already in Spec"})
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-move-to-#{spec.id}") |> render_click()
+
+      moved = Repo.get!(Card, card.id)
+      assert moved.stage_id == spec.id
+      assert moved.position == 2
+      assert Repo.get!(Card, existing.id).position == 1
+
+      assert has_element?(view, "#stage-col-2-cards .board-card", "Pass the baton")
+      refute has_element?(view, "#stage-col-1-cards .board-card")
+      assert has_element?(view, "#stage-col-1 .stage-count", "0")
+      assert has_element?(view, "#stage-col-2 .stage-count", "2")
+    end
+
+    test "the drawer stage chip and menu update after the move", %{conn: conn, plan: plan} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-move-to-#{plan.id}") |> render_click()
+
+      assert has_element?(view, "#card-drawer .drawer-stage-chip.badge-secondary", "Plan")
+      refute has_element?(view, "#card-drawer-move-to-#{plan.id}")
+    end
+  end
+
   describe "top bar" do
     test "shows the avatar image and a sign out link", %{conn: conn} do
       user = insert(:user, avatar_url: "https://example.com/me.png")
@@ -402,5 +653,13 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/board")
     end
+  end
+
+  defp stage_titles(view, position) do
+    view
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query("#stage-col-#{position}-cards .board-card .card-title")
+    |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
   end
 end

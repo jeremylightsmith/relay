@@ -1,0 +1,77 @@
+// Hand-rolled HTML5 drag-and-drop for board cards (MMF 05) — no JS
+// dependency. One delegated hook on #board: dragstart/dragend bubble up
+// from .board-card, dragover/drop from the .stage-cards zones. The hook
+// never mutates the card lists — it only pushes "move_card" with what
+// was dropped where; the server owns all state and re-streams.
+const CARD_SELECTOR = ".board-card"
+const ZONE_SELECTOR = ".stage-cards"
+
+const BoardDnD = {
+  mounted() {
+    this.draggedRef = null
+    this.draggedEl = null
+
+    this.el.addEventListener("dragstart", e => {
+      const card = e.target.closest(CARD_SELECTOR)
+      if (!card) return
+      this.draggedRef = card.dataset.ref
+      this.draggedEl = card
+      e.dataTransfer.effectAllowed = "move"
+      e.dataTransfer.setData("text/plain", card.dataset.ref)
+      card.classList.add("dragging")
+    })
+
+    this.el.addEventListener("dragend", e => {
+      const card = e.target.closest(CARD_SELECTOR)
+      if (card) card.classList.remove("dragging")
+      this.clearDropTargets()
+      this.draggedRef = null
+      this.draggedEl = null
+    })
+
+    this.el.addEventListener("dragover", e => {
+      const zone = e.target.closest(ZONE_SELECTOR)
+      if (!zone || !this.draggedRef) return
+      e.preventDefault() // required to allow the drop
+      e.dataTransfer.dropEffect = "move"
+      this.clearDropTargets(zone)
+      zone.classList.add("drag-over")
+    })
+
+    this.el.addEventListener("dragleave", e => {
+      const zone = e.target.closest(ZONE_SELECTOR)
+      if (zone && !zone.contains(e.relatedTarget)) zone.classList.remove("drag-over")
+    })
+
+    this.el.addEventListener("drop", e => {
+      const zone = e.target.closest(ZONE_SELECTOR)
+      if (!zone || !this.draggedRef) return
+      e.preventDefault()
+      this.pushEvent("move_card", {
+        ref: this.draggedRef,
+        stage_id: zone.dataset.stageId,
+        index: this.dropIndex(zone, e.clientY),
+      })
+      this.clearDropTargets()
+    })
+  },
+
+  // 0-based insertion index among the zone's cards *excluding* the
+  // dragged card — mirroring the server's ordered "other cards" list.
+  dropIndex(zone, y) {
+    const cards = Array.from(zone.querySelectorAll(CARD_SELECTOR))
+      .filter(el => el !== this.draggedEl)
+    return cards.filter(el => {
+      const rect = el.getBoundingClientRect()
+      return y > rect.top + rect.height / 2
+    }).length
+  },
+
+  clearDropTargets(except = null) {
+    this.el.querySelectorAll(`${ZONE_SELECTOR}.drag-over`).forEach(zone => {
+      if (zone !== except) zone.classList.remove("drag-over")
+    })
+  },
+}
+
+export default BoardDnD

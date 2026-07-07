@@ -461,6 +461,9 @@ defmodule RelayWeb.CoreComponents do
   for the parent LiveView — `RelayWeb.BoardLive` answers with a patch to
   `?card=<ref>`, opening the card drawer.
 
+  The card is natively draggable (draggable="true" + data-ref) — the
+  board-level BoardDnD hook turns drops into "move_card" events.
+
   ## Examples
 
       <.board_card id="cards-1" ref="RLY-3" title="Ship MMF 03" tag="infra" />
@@ -477,6 +480,8 @@ defmodule RelayWeb.CoreComponents do
       class="board-card card cursor-pointer bg-base-100 shadow-sm transition-shadow hover:shadow-md"
       role="button"
       tabindex="0"
+      draggable="true"
+      data-ref={@ref}
       phx-click="select_card"
       phx-value-ref={@ref}
     >
@@ -504,8 +509,11 @@ defmodule RelayWeb.CoreComponents do
 
   Events emitted (handled by the parent LiveView): `"save_card_title"`
   (form params `card[title]`) on title submit, `"edit_description"` when
-  the description view is clicked, `"cancel_description"` on Cancel, and
-  `"save_card_description"` (form params `card[description]`) on save.
+  the description view is clicked, `"cancel_description"` on Cancel,
+  `"save_card_description"` (form params `card[description]`) on save,
+  and `"move_card"` (phx-value ref + stage_id, no index — the server
+  appends to the target stage's bottom) when a "Move to…" target is
+  picked.
 
   ## Examples
 
@@ -535,6 +543,10 @@ defmodule RelayWeb.CoreComponents do
   attr :description_form, :any,
     default: nil,
     doc: "a Phoenix.HTML.Form for card[description]; required when editing_description"
+
+  attr :stages, :list,
+    default: [],
+    doc: "move targets: the board's other stages (each exposing id and name); [] hides the menu"
 
   def card_drawer(assigns) do
     ~H"""
@@ -637,7 +649,30 @@ defmodule RelayWeb.CoreComponents do
             <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
               Stage
             </dt>
-            <dd class="rail-stage">{@stage_name}</dd>
+            <dd class="rail-stage flex flex-wrap items-center gap-2">
+              {@stage_name}
+              <div :if={@stages != []} id={"#{@id}-move"} class="dropdown">
+                <div tabindex="0" role="button" id={"#{@id}-move-button"} class="btn btn-ghost btn-xs">
+                  Move to… <.icon name="hero-chevron-down" class="size-3" />
+                </div>
+                <ul
+                  tabindex="0"
+                  class="dropdown-content menu z-50 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg"
+                >
+                  <li :for={stage <- @stages}>
+                    <button
+                      type="button"
+                      id={"#{@id}-move-to-#{stage.id}"}
+                      phx-click="move_card"
+                      phx-value-ref={@ref}
+                      phx-value-stage_id={stage.id}
+                    >
+                      {stage.name}
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            </dd>
             <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
               Tags
             </dt>
@@ -660,9 +695,9 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
-  Renders one stage column of the board: header (stage name + Human/AI
-  owner pill), the stage's cards in the order given, and the "+ New card"
-  compose control.
+  Renders one stage column of the board: header (stage name, card-count
+  badge, Human/AI owner pill), the stage's cards in the order given, and
+  the "+ New card" compose control.
 
   `cards` accepts a LiveView stream (preferred) or a list of
   `{dom_id, card}` tuples; each card needs `title`, `tag`, and
@@ -682,6 +717,7 @@ defmodule RelayWeb.CoreComponents do
   attr :id, :string, required: true
   attr :name, :string, required: true
   attr :owner, :atom, values: [:human, :ai], required: true
+  attr :count, :integer, default: nil, doc: "the number of cards in the stage; badge hidden when nil"
   attr :stage_id, :any, default: nil, doc: "the stage's database id, echoed back in compose events"
   attr :board_key, :string, default: "RLY", doc: "the board's ref prefix, e.g. RLY in RLY-3"
   attr :cards, :any, default: [], doc: "a LiveView stream or a list of {dom_id, card} tuples"
@@ -695,13 +731,17 @@ defmodule RelayWeb.CoreComponents do
       class="stage-column flex w-60 shrink-0 flex-col gap-3 rounded-box bg-base-200 p-3"
     >
       <header class="flex items-center justify-between gap-2">
-        <h3 class="text-sm font-semibold">{@name}</h3>
+        <div class="flex items-center gap-1.5">
+          <h3 class="text-sm font-semibold">{@name}</h3>
+          <span :if={@count} class="stage-count badge badge-ghost badge-sm font-mono">{@count}</span>
+        </div>
         <.owner_pill owner={@owner} />
       </header>
       <div
         id={"#{@id}-cards"}
         phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}
-        class="flex flex-col gap-2"
+        data-stage-id={@stage_id}
+        class="stage-cards flex flex-col gap-2"
       >
         <div
           id={"#{@id}-empty"}

@@ -7,11 +7,16 @@ defmodule RelayWeb.BoardLive do
 
   MMF 04 adds the URL-driven card detail drawer ("?card=<ref>", handled
   in handle_params/3) rendered via RelayWeb.CoreComponents.card_drawer/1.
+
+  MMF 05 makes cards movable: the BoardDnD drag-and-drop hook and the drawer's "Move to…"
+  menu both push a "move_card" event; the server persists via Cards.move_card/3, resets the
+  affected stage streams, and keeps the lane counts in sync.
   """
 
   use RelayWeb, :live_view
 
   alias Relay.Boards
+  alias Relay.Boards.Stage
   alias Relay.Cards
   alias Relay.Cards.Card
 
@@ -21,7 +26,7 @@ defmodule RelayWeb.BoardLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} wide>
-      <div id="board" class="space-y-4">
+      <div id="board" class="space-y-4" phx-hook="BoardDnD">
         <h1 id="board-title" class="text-xl font-semibold">{@board.name}</h1>
         <div class="flex items-start gap-6 overflow-x-auto pb-4">
           <section
@@ -39,6 +44,7 @@ defmodule RelayWeb.BoardLive do
                 name={stage.name}
                 owner={stage.owner}
                 stage_id={stage.id}
+                count={Map.fetch!(@stage_counts, stage.id)}
                 board_key={@board.key}
                 cards={Map.fetch!(@streams, stream_name(stage.id))}
                 composing={@composing_stage_id == stage.id}
@@ -55,6 +61,7 @@ defmodule RelayWeb.BoardLive do
         card={@selected_card}
         stage_name={@selected_stage.name}
         stage_owner={@selected_stage.owner}
+        stages={move_targets(@board, @selected_card)}
         close_patch={~p"/board"}
         title_form={@title_form}
         editing_description={@editing_description}
@@ -74,6 +81,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:page_title, board.name)
       |> assign(:board, board)
       |> assign(:stage_groups, group_stages(board.stages))
+      |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:composing_stage_id, nil)
       |> assign(:compose_form, empty_compose_form())
 
@@ -122,6 +130,7 @@ defmodule RelayWeb.BoardLive do
         {:noreply,
          socket
          |> stream_insert(stream_name(stage.id), card)
+         |> update(:stage_counts, &Map.update!(&1, stage.id, fn count -> count + 1 end))
          |> assign(:compose_form, empty_compose_form())}
 
       {:error, changeset} ->
@@ -131,6 +140,21 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("select_card", %{"ref" => ref}, socket) do
     {:noreply, push_patch(socket, to: ~p"/board?card=#{ref}")}
+  end
+
+  # One move path, two entry points (drag-and-drop hook and the drawer's
+  # "Move to…" menu). `index` is the 0-based drop index among the target
+  # stage's other cards; when omitted (drawer) the card appends to the
+  # bottom. Anything that doesn't resolve on THIS board is a silent no-op.
+  def handle_event("move_card", %{"ref" => ref, "stage_id" => stage_id} = params, socket) do
+    with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
+         %Stage{} = stage <- resolve_stage(socket, stage_id),
+         index when is_integer(index) <- resolve_index(params, socket, stage),
+         {:ok, moved} <- Cards.move_card(card, stage, index) do
+      {:noreply, apply_move(socket, card.stage_id, moved)}
+    else
+      _ -> {:noreply, socket}
+    end
   end
 
   def handle_event("save_card_title", %{"card" => card_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
@@ -194,6 +218,12 @@ defmodule RelayWeb.BoardLive do
     |> Enum.reject(fn {_category, category_stages} -> category_stages == [] end)
   end
 
+  # Streams can't be counted, so lane counts live in their own assign,
+  # recomputed from the grouped cards (mount, moves) and bumped on create.
+  defp stage_counts(stages, cards_by_stage) do
+    Map.new(stages, fn stage -> {stage.id, length(Map.get(cards_by_stage, stage.id, []))} end)
+  end
+
   # Only stages of the user's own board are addressable from events.
   defp find_stage(socket, stage_id) do
     find_stage_by_id(socket, String.to_integer(stage_id))
@@ -201,6 +231,68 @@ defmodule RelayWeb.BoardLive do
 
   defp find_stage_by_id(socket, stage_id) do
     Enum.find(socket.assigns.board.stages, &(&1.id == stage_id))
+  end
+
+  # Drawer move targets: every stage on this board except the card's
+  # current one, in position order.
+  defp move_targets(board, %Card{stage_id: stage_id}) do
+    Enum.reject(board.stages, &(&1.id == stage_id))
+  end
+
+  defp resolve_stage(socket, stage_id) do
+    case parse_int(stage_id) do
+      nil -> nil
+      id -> find_stage_by_id(socket, id)
+    end
+  end
+
+  # The drop index from the DnD hook; the drawer omits it, meaning
+  # "append to the bottom" — the target's current count clamps to the
+  # last slot inside Cards.move_card/3.
+  defp resolve_index(%{"index" => index}, _socket, _stage), do: parse_int(index)
+  defp resolve_index(_params, socket, stage), do: Map.fetch!(socket.assigns.stage_counts, stage.id)
+
+  defp parse_int(value) when is_integer(value), do: value
+
+  defp parse_int(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {int, ""} -> int
+      _ -> nil
+    end
+  end
+
+  defp parse_int(_value), do: nil
+
+  # The move already persisted; stream items can't be reordered in
+  # place, so refetch and reset the source and target stage streams,
+  # refresh the lane counts, and keep the drawer in sync when the moved
+  # card is the selected one.
+  defp apply_move(socket, source_stage_id, %Card{} = moved) do
+    cards_by_stage = socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
+
+    socket
+    |> restream_stage(source_stage_id, cards_by_stage)
+    |> restream_stage(moved.stage_id, cards_by_stage)
+    |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, cards_by_stage))
+    |> refresh_selected_after_move(moved)
+  end
+
+  defp restream_stage(socket, stage_id, cards_by_stage) do
+    stream(socket, stream_name(stage_id), Map.get(cards_by_stage, stage_id, []), reset: true)
+  end
+
+  defp refresh_selected_after_move(socket, %Card{} = moved) do
+    moved_id = moved.id
+
+    case socket.assigns.selected_card do
+      %Card{id: ^moved_id} ->
+        socket
+        |> assign(:selected_card, moved)
+        |> assign(:selected_stage, find_stage_by_id(socket, moved.stage_id))
+
+      _ ->
+        socket
+    end
   end
 
   # The drawer is URL-driven: ?card=<ref> selects a card; no param — or a

@@ -20,7 +20,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           stage_name: "Spec",
           stage_owner: :human,
           close_patch: "/storybook/core_components/card_drawer",
-          title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card)
+          title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
+          stages: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 7, name: "Done"}]
         }
       },
       %Variation{
