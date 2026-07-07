@@ -426,7 +426,7 @@ and boundary-clean with no web changes.
 
 **Steps**
 
-- [ ] Write the failing plug/session test at `test/relay_web/auth_test.exs`:
+- [x] Write the failing plug/session test at `test/relay_web/auth_test.exs`:
 
   ```elixir
   defmodule RelayWeb.AuthTest do
@@ -510,7 +510,7 @@ and boundary-clean with no web changes.
   end
   ```
 
-- [ ] Write the failing LiveView gate test at `test/relay_web/live/home_live_test.exs`:
+- [x] Write the failing LiveView gate test at `test/relay_web/live/home_live_test.exs`:
 
   ```elixir
   defmodule RelayWeb.HomeLiveTest do
@@ -537,10 +537,10 @@ and boundary-clean with no web changes.
   end
   ```
 
-- [ ] Run `mise exec -- mix test test/relay_web/auth_test.exs test/relay_web/live/home_live_test.exs`
+- [x] Run `mise exec -- mix test test/relay_web/auth_test.exs test/relay_web/live/home_live_test.exs`
   — expect FAILURE (`RelayWeb.Auth` undefined, no `/home` route, no ConnCase helpers).
 
-- [ ] Create `lib/relay_web/auth.ex`:
+- [x] Create `lib/relay_web/auth.ex`:
 
   ```elixir
   defmodule RelayWeb.Auth do
@@ -633,7 +633,7 @@ and boundary-clean with no web changes.
   end
   ```
 
-- [ ] Create `lib/relay_web/live/home_live.ex` (minimal stub; Task 4 adds the top-bar UI in the
+- [x] Create `lib/relay_web/live/home_live.ex` (minimal stub; Task 4 adds the top-bar UI in the
   layout, MMF 02 replaces this page with the board):
 
   ```elixir
@@ -666,7 +666,7 @@ and boundary-clean with no web changes.
   end
   ```
 
-- [ ] Replace `lib/relay_web/router.ex` with (only changes vs. current file: the
+- [x] Replace `lib/relay_web/router.ex` with (only changes vs. current file: the
   `import RelayWeb.Auth`, the `plug :fetch_current_scope` at the end of `:browser`, and the
   `live_session` block; CSP, dev block, etc. stay identical):
 
@@ -744,7 +744,7 @@ and boundary-clean with no web changes.
   end
   ```
 
-- [ ] Replace `test/support/conn_case.ex` with:
+- [x] Replace `test/support/conn_case.ex` with:
 
   ```elixir
   defmodule RelayWeb.ConnCase do
@@ -809,11 +809,11 @@ and boundary-clean with no web changes.
   end
   ```
 
-- [ ] Run `mise exec -- mix test test/relay_web/auth_test.exs test/relay_web/live/home_live_test.exs`
+- [x] Run `mise exec -- mix test test/relay_web/auth_test.exs test/relay_web/live/home_live_test.exs`
   — expect ALL PASS.
-- [ ] Run `mise exec -- mix precommit` — must pass (existing `PageControllerTest` still passes:
+- [x] Run `mise exec -- mix precommit` — must pass (existing `PageControllerTest` still passes:
   `GET /` is unchanged in this task and `fetch_current_scope` is a no-op without a session user).
-- [ ] Commit everything.
+- [x] Commit everything.
 
 **Deliverable:** `/home` exists and is gated (logged-out access redirects to `/`); tests can
 authenticate via `log_in_user`/`register_and_log_in_user` without Google.
