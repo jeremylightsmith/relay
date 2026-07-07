@@ -1108,7 +1108,7 @@ live. Status/owner/move changes made while the drawer is open refresh the timeli
 
 **Steps**
 
-- [ ] **TDD cycle 1 — timeline rendering + composer.** Append to
+- [x] **TDD cycle 1 — timeline rendering + composer.** Append to
   `test/relay_web/live/board_live_test.exs` (add `alias Schemas.Comment` to the existing
   alias block at the top):
 
@@ -1203,9 +1203,9 @@ live. Status/owner/move changes made while the drawer is open refresh the timeli
   (The factory card must set an explicit `ref_number` — the factory's own sequence would
   collide with the context-allocated ref 1 on this board.)
 
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — the new describe fails.
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — the new describe fails.
 
-- [ ] Implement the LiveView side in `lib/relay_web/live/board_live.ex`:
+- [x] Implement the LiveView side in `lib/relay_web/live/board_live.ex`:
   1. `alias Relay.Activity` (alias block, sorted).
   2. In `mount/3`, configure the stream before anything streams into it (after the
      `assign(:compose_form, ...)` line, before the per-stage `Enum.reduce`):
@@ -1267,7 +1267,7 @@ live. Status/owner/move changes made while the drawer is open refresh the timeli
      comment_form={@comment_form}
      ```
 
-- [ ] Implement the component side in `lib/relay_web/components/core_components.ex`:
+- [x] Implement the component side in `lib/relay_web/components/core_components.ex`:
   1. Add `alias Schemas.Activity` and `alias Schemas.Comment` to the alias block (sorted).
   2. Add the two attrs to `card_drawer/1` (after `attr :status_form, ...`):
 
@@ -1382,9 +1382,9 @@ live. Status/owner/move changes made while the drawer is open refresh the timeli
      defp activity_phrase(%Activity{type: :commented}), do: "commented"
      ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — cycle 1 green.
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — cycle 1 green.
 
-- [ ] **TDD cycle 2 — live refresh + interleaving.** Append inside
+- [x] **TDD cycle 2 — live refresh + interleaving.** Append inside
   `describe "card timeline"`:
 
   ```elixir
@@ -1451,7 +1451,7 @@ live. Status/owner/move changes made while the drawer is open refresh the timeli
   end
   ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — the three live-refresh tests
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — the three live-refresh tests
   fail (the timeline stream isn't refreshed after drawer actions; the interleave test should
   already pass — if it fails, fix rendering/ordering, not the test). Implement in
   `lib/relay_web/live/board_live.ex`:
@@ -1477,9 +1477,9 @@ live. Status/owner/move changes made while the drawer is open refresh the timeli
        |> stream(:timeline, Activity.list_timeline(moved), reset: true)
      ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — green.
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — green.
 
-- [ ] Update `storybook/core_components/card_drawer.story.exs` — both variations gain the
+- [x] Update `storybook/core_components/card_drawer.story.exs` — both variations gain the
   two new required attrs. Variation `:viewing` gets:
 
   ```elixir
@@ -1517,8 +1517,8 @@ live. Status/owner/move changes made while the drawer is open refresh the timeli
   `/storybook/core_components/card_drawer` — the `:viewing` variation shows the four-entry
   timeline + composer, `:editing_description` shows "No activity yet".
 
-- [ ] Run the full suite (`mix test`) then `mix precommit`; fix anything flagged.
-- [ ] Commit. In the final hand-off message, tell the user the `card_drawer` story was
+- [x] Run the full suite (`mix test`) then `mix precommit`; fix anything flagged.
+- [x] Commit. In the final hand-off message, tell the user the `card_drawer` story was
   refreshed and link it: `/storybook/core_components/card_drawer` (project rule for reusable
   components).
 
