@@ -454,19 +454,60 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
-  Renders one stage column of the board: the stage name, its Human/AI
-  owner pill, and the column contents (cards, from MMF 03). Shows a
-  dashed empty-state placeholder when no content is given.
+  Renders a single kanban card: its title, optional #tag, and its
+  board-scoped ref (e.g. RLY-3).
 
   ## Examples
 
-      <.stage_column id="stage-col-1" name="Backlog" owner={:human} />
+      <.board_card id="cards-1" ref="RLY-3" title="Ship MMF 03" tag="infra" />
+  """
+  attr :id, :string, required: true
+  attr :ref, :string, required: true, doc: "the human-facing ref, e.g. RLY-3"
+  attr :title, :string, required: true
+  attr :tag, :string, default: nil
+
+  def board_card(assigns) do
+    ~H"""
+    <article id={@id} class="board-card card bg-base-100 shadow-sm">
+      <div class="card-body gap-2 p-3">
+        <p class="card-title text-sm font-medium leading-snug">{@title}</p>
+        <div class="flex items-center justify-between gap-2">
+          <span :if={@tag} class="card-tag badge badge-ghost badge-sm">#{@tag}</span>
+          <span class="card-ref ml-auto font-mono text-xs text-base-content/60">{@ref}</span>
+        </div>
+      </div>
+    </article>
+    """
+  end
+
+  @doc """
+  Renders one stage column of the board: header (stage name + Human/AI
+  owner pill), the stage's cards in the order given, and the "+ New card"
+  compose control.
+
+  `cards` accepts a LiveView stream (preferred) or a list of
+  `{dom_id, card}` tuples; each card needs `title`, `tag`, and
+  `ref_number` fields. The dashed empty-state placeholder lives inside
+  the card container and is CSS-hidden (`only:block`) as soon as the
+  stage has cards.
+
+  The compose control emits events handled by the parent LiveView:
+  `"compose"` (with `phx-value-stage-id`) to open the composer,
+  `"create_card"` (form params `card[title]` plus hidden `stage_id`) on
+  submit, and `"cancel_compose"` on Cancel, Escape, or click-away.
+
+  ## Examples
+
+      <.stage_column id="stage-col-1" name="Backlog" owner={:human} stage_id={1} />
   """
   attr :id, :string, required: true
   attr :name, :string, required: true
   attr :owner, :atom, values: [:human, :ai], required: true
-
-  slot :inner_block
+  attr :stage_id, :any, default: nil, doc: "the stage's database id, echoed back in compose events"
+  attr :board_key, :string, default: "RLY", doc: "the board's ref prefix, e.g. RLY in RLY-3"
+  attr :cards, :any, default: [], doc: "a LiveView stream or a list of {dom_id, card} tuples"
+  attr :composing, :boolean, default: false
+  attr :compose_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[title]; required when composing"
 
   def stage_column(assigns) do
     ~H"""
@@ -479,12 +520,59 @@ defmodule RelayWeb.CoreComponents do
         <.owner_pill owner={@owner} />
       </header>
       <div
-        :if={@inner_block == []}
-        class="stage-empty rounded-lg border border-dashed border-base-content/20 px-3 py-6 text-center text-xs text-base-content/50"
+        id={"#{@id}-cards"}
+        phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}
+        class="flex flex-col gap-2"
       >
-        No cards yet
+        <div
+          id={"#{@id}-empty"}
+          class="stage-empty hidden only:block rounded-lg border border-dashed border-base-content/20 px-3 py-6 text-center text-xs text-base-content/50"
+        >
+          No cards yet
+        </div>
+        <.board_card
+          :for={{dom_id, card} <- @cards}
+          id={dom_id}
+          title={card.title}
+          tag={card.tag}
+          ref={"#{@board_key}-#{card.ref_number}"}
+        />
       </div>
-      {render_slot(@inner_block)}
+      <div :if={@composing} id={"#{@id}-composer"} phx-click-away="cancel_compose">
+        <.form
+          for={@compose_form}
+          id={"#{@id}-compose-form"}
+          phx-change="validate_card"
+          phx-submit="create_card"
+        >
+          <input type="hidden" name="stage_id" value={@stage_id} />
+          <.input
+            field={@compose_form[:title]}
+            type="text"
+            placeholder="Card title"
+            autofocus
+            autocomplete="off"
+            phx-keydown="cancel_compose"
+            phx-key="escape"
+          />
+          <div class="flex items-center gap-2">
+            <.button variant="primary" class="btn btn-primary btn-sm">Add card</.button>
+            <button type="button" class="btn btn-ghost btn-sm" phx-click="cancel_compose">
+              Cancel
+            </button>
+          </div>
+        </.form>
+      </div>
+      <button
+        :if={!@composing}
+        type="button"
+        id={"#{@id}-new-card"}
+        class="stage-compose btn btn-ghost btn-sm justify-start text-base-content/60"
+        phx-click="compose"
+        phx-value-stage-id={@stage_id}
+      >
+        <.icon name="hero-plus" class="size-4" /> New card
+      </button>
     </section>
     """
   end

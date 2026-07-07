@@ -11,5 +11,5 @@ defmodule Relay do
   layer can reach them. See `docs/adr/` for the architecture rules.
   """
 
-  use Boundary, deps: [], exports: [Repo, Mailer, Accounts, Accounts.Scope, Boards]
+  use Boundary, deps: [], exports: [Repo, Mailer, Accounts, Accounts.Scope, Boards, Cards]
 end
