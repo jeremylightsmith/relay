@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.32 0.02 255);background:oklch(0.985 0.004 250);-webkit-font-smoothing:antialiased;}
+  a{color:oklch(0.60 0.14 250);text-decoration:none;} a:hover{text-decoration:underline;}
+  button{font-family:inherit;cursor:pointer;}
+  input,textarea{font-family:inherit;}
+  ::-webkit-scrollbar{width:9px;height:9px;}
+  ::-webkit-scrollbar-thumb{background:oklch(0.88 0.01 255);border-radius:6px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  @keyframes relaypulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
+</style>
+</helmet>
+
+<div style="height:100vh;display:flex;flex-direction:column;overflow:hidden;">
+
+  <!-- Top bar -->
+  <div style="display:flex;align-items:center;gap:14px;height:53px;padding:0 18px;border-bottom:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);flex:0 0 auto;z-index:10;">
+    <div style="display:flex;align-items:center;gap:9px;">
+      <div style="width:23px;height:23px;border-radius:7px;background:oklch(0.60 0.14 250);display:flex;align-items:center;justify-content:center;position:relative;">
+        <div style="width:8px;height:8px;border-radius:50%;background:oklch(1 0 0);"></div>
+        <div style="position:absolute;right:3px;top:3px;width:4px;height:4px;border-radius:50%;background:oklch(0.60 0.14 250);box-shadow:0 0 0 1.5px oklch(1 0 0);"></div>
+      </div>
+      <span style="font-weight:600;font-size:15px;letter-spacing:-0.02em;">Relay</span>
+    </div>
+    <div style="width:1px;height:18px;background:oklch(0.90 0.006 255);"></div>
+    <span style="font-size:13px;color:oklch(0.50 0.02 255);letter-spacing:-0.01em;">{{ topTitle }}</span>
+    <span style="flex:1;"></span>
+
+    <sc-if value="{{ isBoard }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div style="display:flex;align-items:center;gap:12px;font-size:11px;color:oklch(0.55 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">
+          <span style="display:flex;align-items:center;gap:5px;"><span style="width:8px;height:8px;border-radius:2px;background:oklch(0.56 0.16 292);"></span>AI</span>
+          <span style="display:flex;align-items:center;gap:5px;"><span style="width:8px;height:8px;border-radius:2px;background:oklch(0.60 0.14 250);"></span>HUMAN</span>
+        </div>
+        <button onClick="{{ openSettings }}" title="Board settings" style="display:flex;align-items:center;gap:7px;background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);color:oklch(0.40 0.02 255);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;">
+          <span style="width:13px;height:13px;border-radius:50%;border:2px solid oklch(0.55 0.02 255);position:relative;display:block;"><span style="position:absolute;top:2.5px;left:2.5px;width:4px;height:4px;border-radius:50%;background:oklch(0.55 0.02 255);"></span></span>Board settings
+        </button>
+        <div title="Dana Kim" style="width:27px;height:27px;border-radius:50%;background:oklch(0.62 0.13 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;">DK</div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+      <button onClick="{{ closeSettings }}" style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;">Done</button>
+    </sc-if>
+  </div>
+
+  <!-- ===================== BOARD ===================== -->
+  <sc-if value="{{ isBoard }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:1;display:flex;gap:26px;padding:16px 18px 18px 18px;overflow-x:auto;overflow-y:hidden;align-items:stretch;">
+      <sc-for list="{{ groups }}" as="group" hint-placeholder-count="3">
+        <div style="display:flex;flex-direction:column;gap:9px;flex:0 0 auto;height:100%;">
+          <!-- category band -->
+          <div style="display:flex;align-items:center;gap:8px;padding:0 4px;height:20px;flex:0 0 auto;">
+            <span style="{{ group.dotStyle }}"></span>
+            <span style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.52 0.02 255);">{{ group.label }}</span>
+            <span style="font-size:10.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.68 0.02 255);">{{ group.count }}</span>
+          </div>
+          <!-- stages -->
+          <div style="display:flex;gap:12px;align-items:stretch;flex:1;min-height:0;">
+            <sc-for list="{{ group.stages }}" as="stage" hint-placeholder-count="2">
+
+              <sc-if value="{{ stage.collapsed }}" hint-placeholder-val="{{ false }}">
+                <div onClick="{{ stage.onExpand }}" onDragOver="{{ stage.onDragOver0 }}" onDrop="{{ stage.onDrop0 }}" onDragEnter="{{ stage.onDragEnter0 }}" title="{{ stage.description }}" style="flex:0 0 auto;width:44px;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;border-radius:11px;background:oklch(0.965 0.004 255);border:1px dashed oklch(0.90 0.006 255);cursor:pointer;">
+                  <span style="width:9px;height:9px;border-radius:3px;background:{{ stage.ownerColor }};"></span>
+                  <span style="writing-mode:vertical-rl;transform:rotate(180deg);font-size:12px;font-weight:600;letter-spacing:0.01em;color:oklch(0.52 0.02 255);white-space:nowrap;">{{ stage.name }}</span>
+                  <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.65 0.02 255);">0</span>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ stage.expanded }}" hint-placeholder-val="{{ true }}">
+                <div style="{{ stage.stageStyle }}">
+                  <div style="display:flex;align-items:center;gap:8px;padding:2px 4px 10px 4px;flex:0 0 auto;">
+                    <span style="width:8px;height:8px;border-radius:3px;background:{{ stage.ownerColor }};flex:0 0 auto;"></span>
+                    <span style="font-size:13px;font-weight:600;letter-spacing:-0.01em;color:oklch(0.28 0.02 255);" title="{{ stage.description }}">{{ stage.name }}</span>
+                    <sc-if value="{{ stage.showWip }}" hint-placeholder-val="{{ false }}">
+                      <span style="{{ stage.wipStyle }}">{{ stage.wipLabel }}</span>
+                    </sc-if>
+                    <span style="flex:1;"></span>
+                    <button onClick="{{ stage.onAdd }}" title="Add work" style="width:22px;height:22px;border-radius:6px;border:1px solid oklch(0.90 0.006 255);background:oklch(1 0 0);color:oklch(0.45 0.02 255);font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex:0 0 auto;">+</button>
+                  </div>
+                  <div style="{{ stage.lanesRowStyle }}">
+                    <sc-for list="{{ stage.lanes }}" as="lane" hint-placeholder-count="1">
+                      <div style="{{ lane.laneStyle }}">
+                        <sc-if value="{{ lane.showLabel }}" hint-placeholder-val="{{ false }}">
+                          <div style="display:flex;align-items:center;gap:6px;padding:0 4px 6px 4px;">
+                            <span style="{{ lane.labelStyle }}">{{ lane.label }}</span>
+                            <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.66 0.02 255);">{{ lane.count }}</span>
+                          </div>
+                        </sc-if>
+                        <div onDragOver="{{ lane.onDragOver }}" onDrop="{{ lane.onDrop }}" onDragEnter="{{ lane.onDragEnter }}" onDragLeave="{{ lane.onDragLeave }}" style="{{ lane.bodyStyle }}">
+                          <sc-if value="{{ lane.showCompose }}" hint-placeholder-val="{{ false }}">
+                            <div style="background:oklch(1 0 0);border:1px solid oklch(0.60 0.14 250);border-radius:9px;padding:9px;display:flex;flex-direction:column;gap:8px;box-shadow:0 2px 8px oklch(0.55 0.05 255/0.10);">
+                              <textarea value="{{ composeText }}" onChange="{{ onComposeInput }}" onKeyDown="{{ stage.onComposeKey }}" placeholder="{{ stage.composePlaceholder }}" rows="2" style="width:100%;border:none;outline:none;resize:none;font-size:13px;line-height:1.4;color:oklch(0.30 0.02 255);background:transparent;"></textarea>
+                              <div style="display:flex;gap:6px;align-items:center;">
+                                <button onClick="{{ stage.onComposeSubmit }}" style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;">{{ stage.composeCta }}</button>
+                                <button onClick="{{ stage.onComposeCancel }}" style="background:transparent;border:none;color:oklch(0.55 0.02 255);font-size:12px;padding:6px 4px;">Cancel</button>
+                              </div>
+                            </div>
+                          </sc-if>
+                          <sc-for list="{{ lane.cards }}" as="card" hint-placeholder-count="2">
+                            <div draggable="true" onDragStart="{{ card.onDragStart }}" onDragEnd="{{ onDragEnd }}" onClick="{{ card.onClick }}" style="{{ card.style }}">
+                              <span style="font-size:12.5px;font-weight:500;line-height:1.35;letter-spacing:-0.01em;color:oklch(0.28 0.02 255);">{{ card.title }}</span>
+                              <sc-if value="{{ card.showProgress }}" hint-placeholder-val="{{ false }}">
+                                <div style="height:5px;border-radius:3px;background:oklch(0.93 0.02 292);overflow:hidden;"><div style="{{ card.progressStyle }}"></div></div>
+                              </sc-if>
+                              <sc-if value="{{ card.blocked }}" hint-placeholder-val="{{ false }}">
+                                <div style="display:flex;align-items:center;gap:6px;background:oklch(0.97 0.03 75);border:1px solid oklch(0.87 0.07 75);border-radius:6px;padding:6px 8px;">
+                                  <span style="width:6px;height:6px;border-radius:50%;background:oklch(0.70 0.13 65);flex:0 0 auto;"></span>
+                                  <span style="font-size:10px;font-weight:600;letter-spacing:0.03em;color:oklch(0.52 0.11 65);font-family:'JetBrains Mono',ui-monospace,monospace;">NEEDS INPUT</span>
+                                </div>
+                              </sc-if>
+                              <div style="display:flex;align-items:center;gap:7px;">
+                                <sc-if value="{{ card.showStatus }}" hint-placeholder-val="{{ false }}">
+                                  <span style="{{ card.statusStyle }}">{{ card.statusLabel }}</span>
+                                </sc-if>
+                                <sc-if value="{{ card.showTag }}" hint-placeholder-val="{{ false }}">
+                                  <span style="font-size:11px;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">#{{ card.tag }}</span>
+                                </sc-if>
+                                <span style="flex:1;"></span>
+                                <div style="{{ card.clusterStyle }}">
+                                  <sc-for list="{{ card.avatars }}" as="av" hint-placeholder-count="1">
+                                    <div style="{{ av.wrapStyle }}" title="{{ av.name }}">
+                                      <sc-if value="{{ av.isAI }}" hint-placeholder-val="{{ false }}"><span style="{{ av.markStyle }}"></span></sc-if>
+                                      <sc-if value="{{ av.showInitials }}" hint-placeholder-val="{{ true }}"><span>{{ av.initials }}</span></sc-if>
+                                    </div>
+                                  </sc-for>
+                                  <sc-if value="{{ card.showOwnerLabel }}" hint-placeholder-val="{{ false }}">
+                                    <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">{{ card.ownerLabelText }}</span>
+                                  </sc-if>
+                                </div>
+                              </div>
+                            </div>
+                          </sc-for>
+                        </div>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-if>
+
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <!-- ===================== BOARD SETTINGS ===================== -->
+  <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1;display:flex;overflow:hidden;">
+      <!-- left rail -->
+      <div style="width:210px;flex:0 0 auto;border-right:1px solid oklch(0.93 0.006 255);background:oklch(0.992 0.002 255);padding:22px 14px;display:flex;flex-direction:column;gap:3px;overflow-y:auto;">
+        <div style="font-size:10px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);padding:4px 10px 8px 10px;">BOARD</div>
+        <button onClick="{{ onSecGeneral }}" style="{{ nav.general }}">General</button>
+        <button onClick="{{ onSecStages }}" style="{{ nav.stages }}">Stages</button>
+        <button onClick="{{ onSecMembers }}" style="{{ nav.members }}">Members</button>
+        <button onClick="{{ onSecKeys }}" style="{{ nav.keys }}">API keys</button>
+      </div>
+
+      <!-- content -->
+      <div style="flex:1;overflow-y:auto;background:oklch(0.985 0.004 250);">
+        <div style="max-width:760px;margin:0 auto;padding:34px 40px 84px 40px;">
+
+        <!-- GENERAL -->
+        <sc-if value="{{ isGeneralSec }}" hint-placeholder-val="{{ false }}">
+          <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 4px 0;color:oklch(0.24 0.02 255);">General</h1>
+          <p style="font-size:14px;color:oklch(0.52 0.02 255);margin:0 0 30px 0;">Basic details for this board.</p>
+          <div style="display:flex;flex-direction:column;gap:22px;">
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <label style="font-size:12px;font-weight:600;color:oklch(0.40 0.02 255);">Board name</label>
+              <input value="{{ boardName }}" onChange="{{ onBoardName }}" style="border:1px solid oklch(0.90 0.006 255);border-radius:9px;padding:10px 12px;font-size:14px;color:oklch(0.28 0.02 255);background:oklch(1 0 0);outline:none;max-width:400px;" />
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <label style="font-size:12px;font-weight:600;color:oklch(0.40 0.02 255);">Board URL</label>
+              <div style="display:flex;align-items:center;border:1px solid oklch(0.90 0.006 255);border-radius:9px;overflow:hidden;max-width:400px;background:oklch(1 0 0);">
+                <span style="padding:10px 0 10px 12px;font-size:14px;color:oklch(0.62 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">relay.app/</span>
+                <input value="{{ slug }}" onChange="{{ onSlug }}" style="flex:1;border:none;padding:10px 12px 10px 2px;font-size:14px;color:oklch(0.28 0.02 255);background:transparent;outline:none;font-family:'JetBrains Mono',ui-monospace,monospace;" />
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:44px;border:1px solid oklch(0.90 0.03 15);border-radius:12px;padding:18px 20px;background:oklch(0.995 0.005 15);">
+            <div style="font-size:13px;font-weight:600;color:oklch(0.45 0.14 15);margin-bottom:4px;">Danger zone</div>
+            <div style="display:flex;align-items:center;gap:16px;">
+              <span style="font-size:13px;color:oklch(0.50 0.04 15);flex:1;">Archiving hides this board for everyone. You can restore it later.</span>
+              <button style="background:oklch(0.98 0.015 15);border:1px solid oklch(0.86 0.06 15);color:oklch(0.52 0.16 15);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;">Archive board</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- STAGES -->
+        <sc-if value="{{ isStagesSec }}" hint-placeholder-val="{{ true }}">
+        <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px 0;color:oklch(0.26 0.02 255);">Stages</h1>
+        <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 12px 0;max-width:560px;">Stages live inside three categories — <b style="color:oklch(0.34 0.02 255);">Unstarted</b>, <b style="color:oklch(0.34 0.02 255);">In progress</b>, and <b style="color:oklch(0.34 0.02 255);">Complete</b> — so everyone knows what a stage <i>means</i>. Use the arrows to move a stage up or down — cross into another category and it takes on that meaning. Set each stage's owner, WIP limit, and whether finished work waits in a Done sub-column.</p>
+
+        <sc-for list="{{ settingsGroups }}" as="sg" hint-placeholder-count="3">
+          <div style="margin-top:22px;">
+            <div style="display:flex;align-items:center;gap:8px;margin:0 0 10px 2px;">
+              <span style="{{ sg.dotStyle }}"></span>
+              <span style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);">{{ sg.label }}</span>
+              <span style="font-size:10.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.68 0.02 255);">{{ sg.count }}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:12px;">
+              <sc-for list="{{ sg.rows }}" as="st" hint-placeholder-count="2">
+                <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:13px;padding:16px 18px;display:flex;flex-direction:column;gap:14px;">
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <span style="width:9px;height:9px;border-radius:3px;background:{{ st.ownerColor }};flex:0 0 auto;"></span>
+                    <input value="{{ st.name }}" onChange="{{ st.onName }}" style="flex:1;border:none;outline:none;font-size:15px;font-weight:600;letter-spacing:-0.01em;color:oklch(0.26 0.02 255);background:transparent;" />
+                    <div style="display:flex;align-items:center;gap:2px;">
+                      <button onClick="{{ st.onUp }}" title="Move up" style="width:26px;height:26px;border-radius:6px;border:1px solid oklch(0.91 0.006 255);background:oklch(1 0 0);color:oklch(0.50 0.02 255);font-size:12px;padding:0;">↑</button>
+                      <button onClick="{{ st.onDown }}" title="Move down" style="width:26px;height:26px;border-radius:6px;border:1px solid oklch(0.91 0.006 255);background:oklch(1 0 0);color:oklch(0.50 0.02 255);font-size:12px;padding:0;">↓</button>
+                      <button onClick="{{ st.onDelete }}" title="Delete stage" style="width:26px;height:26px;border-radius:6px;border:1px solid oklch(0.90 0.03 15);background:oklch(0.98 0.015 15);color:oklch(0.55 0.14 15);font-size:14px;padding:0;margin-left:4px;">×</button>
+                    </div>
+                  </div>
+                  <input value="{{ st.description }}" onChange="{{ st.onDesc }}" placeholder="Describe what happens in this stage…" style="border:1px solid oklch(0.92 0.006 255);border-radius:8px;padding:8px 11px;font-size:13px;color:oklch(0.42 0.02 255);background:oklch(0.99 0.002 255);outline:none;" />
+                  <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+                    <div style="display:flex;align-items:center;gap:9px;">
+                      <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">OWNER</span>
+                      <div style="display:inline-flex;background:oklch(0.96 0.004 255);border:1px solid oklch(0.91 0.006 255);border-radius:8px;padding:3px;gap:2px;">
+                        <button onClick="{{ st.onOwnerHuman }}" style="{{ st.humanBtnStyle }}">Human</button>
+                        <button onClick="{{ st.onOwnerAI }}" style="{{ st.aiBtnStyle }}">AI</button>
+                      </div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:9px;">
+                      <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">WIP</span>
+                      <button onClick="{{ st.onToggleLimit }}" style="{{ st.limitToggleStyle }}">{{ st.limitToggleLabel }}</button>
+                      <sc-if value="{{ st.hasLimit }}" hint-placeholder-val="{{ false }}">
+                        <div style="display:inline-flex;align-items:center;border:1px solid oklch(0.90 0.006 255);border-radius:8px;overflow:hidden;">
+                          <button onClick="{{ st.onWipDown }}" style="width:26px;height:30px;border:none;background:oklch(0.98 0.002 255);color:oklch(0.50 0.02 255);font-size:15px;padding:0;">−</button>
+                          <span style="width:32px;text-align:center;font-size:13px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.30 0.02 255);">{{ st.wipValue }}</span>
+                          <button onClick="{{ st.onWipUp }}" style="width:26px;height:30px;border:none;background:oklch(0.98 0.002 255);color:oklch(0.50 0.02 255);font-size:15px;padding:0;">+</button>
+                        </div>
+                      </sc-if>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                      <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">DONE COLUMN</span>
+                      <button onClick="{{ st.onToggleDone }}" style="{{ st.doneToggleStyle }}"><span style="{{ st.doneKnobStyle }}"></span></button>
+                    </div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px dashed oklch(0.94 0.006 255);padding-top:12px;">
+                    <div style="display:flex;align-items:center;gap:10px;">
+                      <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">APPROVAL GATE</span>
+                      <button onClick="{{ st.onToggleReview }}" style="{{ st.reviewToggleStyle }}"><span style="{{ st.reviewKnobStyle }}"></span></button>
+                    </div>
+                    <sc-if value="{{ st.isReview }}" hint-placeholder-val="{{ false }}">
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">SEND REJECTS TO</span>
+                        <select value="{{ st.rejectTo }}" onChange="{{ st.onRejectTo }}" style="border:1px solid oklch(0.90 0.006 255);border-radius:7px;padding:6px 9px;font-size:12.5px;color:oklch(0.32 0.02 255);background:oklch(1 0 0);outline:none;">
+                          <sc-for list="{{ st.rejectOptions }}" as="opt" hint-placeholder-count="2">
+                            <option value="{{ opt.id }}">{{ opt.name }}</option>
+                          </sc-for>
+                        </select>
+                      </div>
+                    </sc-if>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+            <button onClick="{{ sg.onAdd }}" style="margin-top:10px;width:100%;border:1px dashed oklch(0.86 0.01 255);background:oklch(1 0 0);color:oklch(0.48 0.02 255);border-radius:11px;padding:11px;font-size:12.5px;font-weight:600;">+ Add stage to {{ sg.label }}</button>
+          </div>
+        </sc-for>
+        </sc-if>
+
+        <!-- MEMBERS -->
+        <sc-if value="{{ isMembersSec }}" hint-placeholder-val="{{ false }}">
+          <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 4px 0;color:oklch(0.24 0.02 255);">Members</h1>
+          <p style="font-size:14px;color:oklch(0.52 0.02 255);margin:0 0 26px 0;">People with access to this board — and the AI agent that works alongside them.</p>
+          <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px;display:flex;align-items:center;gap:10px;margin-bottom:26px;flex-wrap:wrap;">
+            <input value="{{ inviteEmail }}" onChange="{{ onInviteEmail }}" onKeyDown="{{ onInviteKey }}" placeholder="name@company.com" style="flex:1;min-width:180px;border:1px solid oklch(0.90 0.006 255);border-radius:8px;padding:9px 11px;font-size:13.5px;color:oklch(0.28 0.02 255);background:oklch(0.99 0.002 255);outline:none;" />
+            <div style="display:inline-flex;background:oklch(0.96 0.004 255);border:1px solid oklch(0.91 0.006 255);border-radius:8px;padding:3px;gap:2px;">
+              <button onClick="{{ onInviteMember }}" style="{{ invite.memberStyle }}">Member</button>
+              <button onClick="{{ onInviteAdmin }}" style="{{ invite.adminStyle }}">Admin</button>
+            </div>
+            <button onClick="{{ onInvite }}" style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 16px;font-size:13.5px;font-weight:600;">Send invite</button>
+          </div>
+          <div style="font-size:10px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:10px;">PEOPLE · {{ memberCount }}</div>
+          <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;overflow:hidden;margin-bottom:28px;">
+            <sc-for list="{{ members }}" as="m" hint-placeholder-count="3">
+              <div style="{{ m.rowStyle }}">
+                <div style="{{ m.avatarStyle }}"><span>{{ m.initials }}</span></div>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:14px;font-weight:600;color:oklch(0.28 0.02 255);">{{ m.name }}</span>
+                    <sc-if value="{{ m.isYou }}" hint-placeholder-val="{{ false }}"><span style="font-size:10px;font-weight:600;letter-spacing:0.04em;font-family:'JetBrains Mono',ui-monospace,monospace;background:oklch(0.95 0.03 250);color:oklch(0.45 0.13 250);padding:2px 6px;border-radius:5px;">YOU</span></sc-if>
+                    <sc-if value="{{ m.invited }}" hint-placeholder-val="{{ false }}"><span style="font-size:10px;font-weight:600;letter-spacing:0.04em;font-family:'JetBrains Mono',ui-monospace,monospace;background:oklch(0.96 0.03 75);color:oklch(0.52 0.11 65);padding:2px 6px;border-radius:5px;">INVITED</span></sc-if>
+                  </div>
+                  <span style="font-size:12.5px;color:oklch(0.56 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">{{ m.email }}</span>
+                </div>
+                <div style="display:inline-flex;background:oklch(0.965 0.004 255);border:1px solid oklch(0.92 0.006 255);border-radius:8px;padding:3px;gap:2px;flex:0 0 auto;">
+                  <button onClick="{{ m.onMember }}" style="{{ m.memberStyle }}">Member</button>
+                  <button onClick="{{ m.onAdmin }}" style="{{ m.adminStyle }}">Admin</button>
+                </div>
+                <sc-if value="{{ m.canRemove }}" hint-placeholder-val="{{ true }}">
+                  <button onClick="{{ m.onRemove }}" title="Remove" style="width:28px;height:28px;border-radius:7px;border:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);color:oklch(0.55 0.02 255);font-size:15px;line-height:1;padding:0;flex:0 0 auto;">×</button>
+                </sc-if>
+                <sc-if value="{{ m.lockRemove }}" hint-placeholder-val="{{ false }}">
+                  <span style="width:28px;flex:0 0 auto;"></span>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <div style="font-size:10px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:10px;">AGENT</div>
+          <div style="background:oklch(0.99 0.008 292);border:1px solid oklch(0.91 0.03 292);border-radius:12px;padding:16px;display:flex;align-items:center;gap:13px;">
+            <div style="width:38px;height:38px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;flex:0 0 auto;"><span style="width:14px;height:14px;border-radius:50%;border:2px solid oklch(1 0 0);"></span></div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:14px;font-weight:600;color:oklch(0.28 0.02 255);">Relay AI</div>
+              <div style="font-size:12.5px;color:oklch(0.50 0.03 292);">Runs the AI-owned stages · authenticated with an API key</div>
+            </div>
+            <button onClick="{{ onSecKeys }}" style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.03 292);color:oklch(0.46 0.13 292);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;flex:0 0 auto;">Manage key →</button>
+          </div>
+        </sc-if>
+
+        <!-- API KEYS -->
+        <sc-if value="{{ isKeysSec }}" hint-placeholder-val="{{ false }}">
+          <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 4px 0;color:oklch(0.24 0.02 255);">API keys</h1>
+          <p style="font-size:14px;line-height:1.55;color:oklch(0.52 0.02 255);margin:0 0 24px 0;max-width:520px;">Give a key to your agent so it can read the board, move cards, post progress, and ask questions on the AI-owned stages. Treat it like a password.</p>
+          <div style="display:flex;align-items:center;gap:11px;background:oklch(0.99 0.008 292);border:1px solid oklch(0.91 0.03 292);border-radius:10px;padding:12px 14px;margin-bottom:22px;">
+            <div style="width:26px;height:26px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;flex:0 0 auto;"><span style="width:10px;height:10px;border-radius:50%;border:1.5px solid oklch(1 0 0);"></span></div>
+            <span style="font-size:13px;color:oklch(0.44 0.06 292);">These keys authenticate <b>Relay AI</b> on this board.</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <sc-for list="{{ keys }}" as="k" hint-placeholder-count="1">
+              <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;">
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <span style="font-size:14px;font-weight:600;color:oklch(0.28 0.02 255);flex:1;">{{ k.name }}</span>
+                  <button onClick="{{ k.onReveal }}" style="background:transparent;border:1px solid oklch(0.91 0.006 255);color:oklch(0.48 0.02 255);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;">{{ k.revealLabel }}</button>
+                  <button onClick="{{ k.onRegenerate }}" style="background:transparent;border:1px solid oklch(0.91 0.006 255);color:oklch(0.48 0.02 255);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;">Regenerate</button>
+                  <button onClick="{{ k.onRevoke }}" style="background:oklch(0.98 0.015 15);border:1px solid oklch(0.90 0.04 15);color:oklch(0.52 0.16 15);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;">Revoke</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;background:oklch(0.985 0.004 255);border:1px solid oklch(0.93 0.006 255);border-radius:9px;padding:10px 12px;">
+                  <span style="flex:1;min-width:0;font-size:13px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.34 0.02 255);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:0.01em;">{{ k.display }}</span>
+                  <button onClick="{{ k.onCopy }}" style="{{ k.copyStyle }}">{{ k.copyLabel }}</button>
+                </div>
+                <div style="font-size:11.5px;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">Created {{ k.created }} · {{ k.lastUsed }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <button onClick="{{ onCreateKey }}" style="margin-top:14px;border:1px dashed oklch(0.86 0.01 255);background:oklch(1 0 0);color:oklch(0.46 0.02 255);border-radius:11px;padding:11px 16px;font-size:13px;font-weight:600;">+ Create new key</button>
+          <div style="margin-top:26px;font-size:12.5px;line-height:1.55;color:oklch(0.58 0.02 255);">Keys are shown in full only right after they're created or regenerated. Store them somewhere safe — anyone with a key can act as your agent.</div>
+        </sc-if>
+
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- Scrim + Drawer -->
+  <div onClick="{{ closeDrawer }}" style="{{ scrimStyle }}"></div>
+  <div style="{{ drawerStyle }}">
+    <sc-if value="{{ drawer.open }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;height:100%;">
+        <!-- header -->
+        <div style="display:flex;align-items:flex-start;gap:12px;padding:16px 18px 14px 18px;border-bottom:1px solid oklch(0.93 0.006 255);flex:0 0 auto;">
+          <div style="flex:1;display:flex;flex-direction:column;gap:10px;min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="{{ drawer.stageChipStyle }}">{{ drawer.stageChip }}</span>
+              <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.66 0.02 255);">{{ drawer.cardRef }}</span>
+            </div>
+            <span style="font-size:17px;font-weight:600;line-height:1.3;letter-spacing:-0.01em;color:oklch(0.24 0.02 255);">{{ drawer.title }}</span>
+          </div>
+          <button onClick="{{ closeDrawer }}" style="width:28px;height:28px;border-radius:8px;border:none;background:oklch(0.96 0.004 255);color:oklch(0.45 0.02 255);font-size:15px;line-height:1;flex:0 0 auto;">✕</button>
+        </div>
+
+        <!-- body: main + rail -->
+        <div style="flex:1;display:flex;min-height:0;">
+
+          <!-- MAIN -->
+          <div style="flex:1;min-width:0;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:22px;">
+
+            <!-- action: working -->
+            <sc-if value="{{ drawer.isWorking }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:9px;background:oklch(0.975 0.02 292);border:1px solid oklch(0.90 0.04 292);border-radius:10px;padding:14px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <span style="font-size:12px;font-weight:600;color:oklch(0.48 0.12 292);display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:oklch(0.56 0.16 292);animation:relaypulse 1.4s ease-in-out infinite;"></span>Relay AI is working</span>
+                  <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.48 0.12 292);">{{ drawer.progressLabel }}</span>
+                </div>
+                <div style="height:6px;border-radius:3px;background:oklch(0.90 0.03 292);overflow:hidden;"><div style="{{ drawer.progressStyle }}"></div></div>
+              </div>
+            </sc-if>
+
+            <!-- action: blocked question -->
+            <sc-if value="{{ drawer.isBlocked }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:11px;background:oklch(0.975 0.025 75);border:1px solid oklch(0.87 0.07 75);border-radius:10px;padding:14px;">
+                <span style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.52 0.11 65);font-family:'JetBrains Mono',ui-monospace,monospace;">RELAY AI NEEDS YOUR INPUT</span>
+                <span style="font-size:13.5px;line-height:1.5;color:oklch(0.33 0.03 65);">{{ drawer.question }}</span>
+                <textarea value="{{ answerText }}" onChange="{{ onAnswerInput }}" placeholder="Type your answer — the AI picks up where it left off…" rows="3" style="width:100%;border:1px solid oklch(0.86 0.05 75);border-radius:7px;padding:9px;outline:none;resize:none;font-size:13px;line-height:1.45;color:oklch(0.30 0.02 255);background:oklch(1 0 0);"></textarea>
+                <button onClick="{{ onSubmitAnswer }}" style="align-self:flex-start;background:oklch(0.70 0.13 65);color:oklch(1 0 0);border:none;border-radius:7px;padding:8px 16px;font-size:13px;font-weight:600;">Send to AI →</button>
+              </div>
+            </sc-if>
+
+            <!-- action: review gate -->
+            <sc-if value="{{ drawer.isReview }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:12px;background:oklch(0.975 0.02 155);border:1px solid oklch(0.88 0.05 155);border-radius:10px;padding:14px;">
+                <span style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.46 0.10 155);font-family:'JetBrains Mono',ui-monospace,monospace;">READY FOR YOUR REVIEW</span>
+                <span style="font-size:13px;line-height:1.5;color:oklch(0.36 0.03 155);">{{ drawer.reviewHint }}</span>
+                <sc-if value="{{ drawer.rejectClosed }}" hint-placeholder-val="{{ true }}">
+                  <div style="display:flex;gap:8px;">
+                    <button onClick="{{ onApproveSel }}" style="flex:1;background:oklch(0.60 0.13 155);color:oklch(1 0 0);border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:600;">{{ drawer.approveLabel }}</button>
+                    <button onClick="{{ onOpenReject }}" style="flex:1;background:oklch(1 0 0);border:1px solid oklch(0.88 0.01 255);color:oklch(0.38 0.02 255);border-radius:8px;padding:10px;font-size:13px;font-weight:600;">Request changes</button>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ drawer.rejectOpen }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;flex-direction:column;gap:9px;background:oklch(1 0 0);border:1px solid oklch(0.90 0.02 255);border-radius:8px;padding:11px;">
+                    <span style="font-size:12px;color:oklch(0.42 0.02 255);">Sending back to <b style="color:oklch(0.30 0.02 255);">{{ drawer.rejectToName }}</b> for the AI to address.</span>
+                    <textarea value="{{ rejectText }}" onChange="{{ onRejectInput }}" placeholder="What needs to change? This note goes to the AI…" rows="3" style="width:100%;border:1px solid oklch(0.90 0.006 255);border-radius:7px;padding:9px;outline:none;resize:none;font-size:13px;line-height:1.45;color:oklch(0.30 0.02 255);background:oklch(0.99 0.002 255);"></textarea>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                      <button onClick="{{ onRejectSel }}" style="background:oklch(0.70 0.13 65);color:oklch(1 0 0);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;">Send back →</button>
+                      <button onClick="{{ onCancelReject }}" style="background:transparent;border:none;color:oklch(0.55 0.02 255);font-size:12px;padding:8px 4px;">Cancel</button>
+                    </div>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ drawer.canMarkDone }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ onMarkDone }}" style="align-self:flex-start;background:oklch(0.60 0.13 155);color:oklch(1 0 0);border:none;border-radius:9px;padding:10px 16px;font-size:13px;font-weight:600;">{{ drawer.markDoneLabel }}</button>
+            </sc-if>
+            <sc-if value="{{ drawer.canPull }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ onPullNext }}" style="align-self:flex-start;background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:9px;padding:10px 16px;font-size:13px;font-weight:600;">{{ drawer.pullLabel }}</button>
+            </sc-if>
+
+            <!-- description -->
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">DESCRIPTION</span>
+              <textarea value="{{ descText }}" onChange="{{ onDescInput }}" placeholder="Add a description…" rows="2" style="width:100%;border:1px solid oklch(0.93 0.006 255);border-radius:9px;padding:11px 12px;outline:none;resize:vertical;font-size:13.5px;line-height:1.55;color:oklch(0.36 0.02 255);background:oklch(0.992 0.002 255);"></textarea>
+            </div>
+
+            <!-- AI result -->
+            <sc-if value="{{ drawer.hasResult }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:11px;">
+                <div style="display:flex;align-items:center;gap:7px;">
+                  <span style="width:16px;height:16px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;flex:0 0 auto;"><span style="width:6px;height:6px;border-radius:50%;border:1.5px solid oklch(1 0 0);"></span></span>
+                  <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.48 0.13 292);font-family:'JetBrains Mono',ui-monospace,monospace;">AI RESULT</span>
+                </div>
+                <div style="border:1px solid oklch(0.92 0.02 292);border-radius:11px;overflow:hidden;background:oklch(1 0 0);">
+                  <div style="padding:14px;display:flex;flex-direction:column;gap:12px;">
+                    <sc-for list="{{ drawer.result.summaryParts }}" as="para" hint-placeholder-count="1">
+                      <span style="font-size:13.5px;line-height:1.6;color:oklch(0.34 0.02 255);">{{ para.node }}</span>
+                    </sc-for>
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                      <sc-for list="{{ drawer.result.changes }}" as="ch" hint-placeholder-count="2">
+                        <div style="display:flex;align-items:flex-start;gap:8px;">
+                          <span style="width:15px;height:15px;border-radius:4px;background:oklch(0.95 0.03 155);color:oklch(0.48 0.11 155);display:flex;align-items:center;justify-content:center;font-size:9px;flex:0 0 auto;margin-top:2px;">✓</span>
+                          <span style="font-size:12.5px;line-height:1.45;color:oklch(0.42 0.02 255);">{{ ch.t }}</span>
+                        </div>
+                      </sc-for>
+                    </div>
+                  </div>
+                  <!-- screenshots -->
+                  <div style="display:flex;gap:8px;padding:0 14px 14px 14px;flex-wrap:wrap;">
+                    <sc-for list="{{ drawer.result.screens }}" as="sc" hint-placeholder-count="1">
+                      <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:5px;">
+                        <div style="height:96px;border-radius:8px;border:1px solid oklch(0.91 0.006 255);background:linear-gradient(135deg, oklch(0.975 0.01 250), oklch(0.95 0.02 292));display:flex;align-items:center;justify-content:center;">
+                          <span style="width:26px;height:26px;border-radius:6px;border:1.5px solid oklch(0.75 0.05 255);display:flex;align-items:center;justify-content:center;color:oklch(0.60 0.03 255);font-size:12px;">▦</span>
+                        </div>
+                        <span style="font-size:11px;color:oklch(0.58 0.02 255);">{{ sc.t }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <a href="{{ drawer.result.deployHref }}" target="_blank" style="display:flex;align-items:center;gap:8px;padding:11px 14px;border-top:1px solid oklch(0.94 0.006 255);background:oklch(0.985 0.004 250);font-size:12.5px;font-weight:600;color:oklch(0.46 0.13 250);text-decoration:none;">
+                    <span style="width:7px;height:7px;border-radius:50%;background:oklch(0.60 0.13 155);"></span>View deployment · {{ drawer.result.deployUrl }} ↗
+                  </a>
+                </div>
+              </div>
+            </sc-if>
+
+            <!-- checklist -->
+            <sc-if value="{{ drawer.hasChecklist }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:9px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">SUB-TASKS</span>
+                  <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">{{ drawer.checkProgress }}</span>
+                  <div style="flex:1;height:4px;border-radius:2px;background:oklch(0.93 0.006 255);overflow:hidden;max-width:120px;"><div style="{{ drawer.checkBarStyle }}"></div></div>
+                </div>
+                <sc-for list="{{ drawer.checklist }}" as="it" hint-placeholder-count="3">
+                  <div onClick="{{ it.onToggle }}" style="display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:8px;cursor:pointer;background:oklch(0.992 0.002 255);border:1px solid oklch(0.94 0.006 255);">
+                    <span style="{{ it.boxStyle }}">{{ it.check }}</span>
+                    <span style="{{ it.textStyle }}">{{ it.t }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <!-- comments -->
+            <div style="display:flex;flex-direction:column;gap:12px;">
+              <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">COMMENTS</span>
+              <sc-for list="{{ drawer.comments }}" as="cm" hint-placeholder-count="2">
+                <div style="display:flex;gap:10px;">
+                  <div style="{{ cm.avatarStyle }}" title="{{ cm.name }}">
+                    <sc-if value="{{ cm.isAI }}" hint-placeholder-val="{{ false }}"><span style="{{ cm.markStyle }}"></span></sc-if>
+                    <sc-if value="{{ cm.showInitials }}" hint-placeholder-val="{{ true }}"><span>{{ cm.initials }}</span></sc-if>
+                  </div>
+                  <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <span style="font-size:12.5px;font-weight:600;color:oklch(0.32 0.02 255);">{{ cm.name }}</span>
+                      <span style="font-size:10.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.66 0.02 255);">{{ cm.ts }}</span>
+                      <sc-if value="{{ cm.tagShow }}" hint-placeholder-val="{{ false }}"><span style="{{ cm.tagStyle }}">{{ cm.tagLabel }}</span></sc-if>
+                    </div>
+                    <div style="{{ cm.bubbleStyle }}">{{ cm.text }}</div>
+                  </div>
+                </div>
+              </sc-for>
+              <!-- composer -->
+              <div style="display:flex;gap:10px;align-items:flex-start;">
+                <div style="{{ drawer.youAvatarStyle }}"><span>{{ drawer.youInitials }}</span></div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:7px;">
+                  <textarea value="{{ commentText }}" onChange="{{ onCommentInput }}" onKeyDown="{{ onCommentKey }}" placeholder="Write a comment…" rows="2" style="width:100%;border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:10px 11px;outline:none;resize:none;font-size:13px;line-height:1.45;color:oklch(0.30 0.02 255);background:oklch(1 0 0);"></textarea>
+                  <button onClick="{{ onPostComment }}" style="align-self:flex-start;background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:7px;padding:7px 14px;font-size:12.5px;font-weight:600;">Comment</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- activity -->
+            <div style="display:flex;flex-direction:column;gap:2px;">
+              <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin-bottom:8px;">ACTIVITY</span>
+              <sc-for list="{{ drawer.activity }}" as="log" hint-placeholder-count="2">
+                <div style="display:flex;gap:10px;padding:5px 0;">
+                  <span style="{{ log.dotStyle }}"></span>
+                  <div style="display:flex;flex-direction:column;gap:1px;">
+                    <span style="font-size:12.5px;color:oklch(0.36 0.02 255);line-height:1.4;">{{ log.t }}</span>
+                    <span style="font-size:11px;color:oklch(0.64 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">{{ log.ts }}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <!-- PROPERTIES RAIL -->
+          <div style="width:216px;flex:0 0 auto;border-left:1px solid oklch(0.94 0.006 255);background:oklch(0.992 0.002 255);overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:20px;">
+            <div style="display:flex;flex-direction:column;gap:7px;">
+              <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.62 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">STAGE</span>
+              <span style="{{ drawer.stageChipStyle }}">{{ drawer.stageChip }}</span>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.62 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">ACTIVE WORKER</span>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <div style="{{ drawer.activeAv.wrapStyle }}" title="{{ drawer.activeAv.name }}">
+                  <sc-if value="{{ drawer.activeAv.isAI }}" hint-placeholder-val="{{ false }}"><span style="{{ drawer.activeAv.markStyle }}"></span></sc-if>
+                  <sc-if value="{{ drawer.activeAv.showInitials }}" hint-placeholder-val="{{ true }}"><span>{{ drawer.activeAv.initials }}</span></sc-if>
+                </div>
+                <span style="font-size:13px;font-weight:500;color:oklch(0.32 0.02 255);">{{ drawer.activeName }}</span>
+              </div>
+              <sc-if value="{{ drawer.aiActive }}" hint-placeholder-val="{{ false }}">
+                <span style="font-size:11px;line-height:1.4;color:oklch(0.58 0.02 255);">Owners are paused while the AI works.</span>
+              </sc-if>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.62 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">OWNERS</span>
+              <sc-for list="{{ drawer.owners }}" as="o" hint-placeholder-count="1">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <div style="{{ o.av.wrapStyle }}" title="{{ o.av.name }}"><span>{{ o.av.initials }}</span></div>
+                  <span style="{{ o.nameStyle }}">{{ o.name }}</span>
+                  <span style="flex:1;"></span>
+                  <sc-if value="{{ o.showActive }}" hint-placeholder-val="{{ false }}"><span style="font-size:9.5px;font-weight:600;letter-spacing:0.04em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.46 0.13 250);">ACTIVE</span></sc-if>
+                  <sc-if value="{{ o.showPaused }}" hint-placeholder-val="{{ false }}"><span style="font-size:9.5px;font-weight:600;letter-spacing:0.04em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.66 0.02 255);">PAUSED</span></sc-if>
+                </div>
+              </sc-for>
+              <button onClick="{{ onToggleReassign }}" style="align-self:flex-start;background:transparent;border:none;color:oklch(0.50 0.13 250);font-size:12px;font-weight:600;padding:2px 0;">{{ drawer.reassignLabel }}</button>
+              <sc-if value="{{ drawer.reassignOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:4px;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:7px;">
+                  <sc-for list="{{ drawer.assignables }}" as="a" hint-placeholder-count="2">
+                    <div onClick="{{ a.onPick }}" style="{{ a.rowStyle }}">
+                      <div style="{{ a.av.wrapStyle }}"><span>{{ a.av.initials }}</span></div>
+                      <span style="font-size:12.5px;color:oklch(0.34 0.02 255);flex:1;">{{ a.name }}</span>
+                      <sc-if value="{{ a.isOwner }}" hint-placeholder-val="{{ false }}"><span style="font-size:11px;color:oklch(0.50 0.13 250);">✓</span></sc-if>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+
+            <sc-if value="{{ drawer.hasTag }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.62 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">TAGS</span>
+                <span style="align-self:flex-start;font-size:11.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.48 0.02 255);background:oklch(0.96 0.006 255);border:1px solid oklch(0.93 0.006 255);padding:3px 9px;border-radius:6px;">#{{ drawer.tag }}</span>
+              </div>
+            </sc-if>
+
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.62 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">DATES</span>
+              <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:12px;color:oklch(0.55 0.02 255);">Created</span><span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.40 0.02 255);">{{ drawer.created }}</span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:12px;color:oklch(0.55 0.02 255);">Updated</span><span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.40 0.02 255);">{{ drawer.updated }}</span></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </sc-if>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;100%&quot;,&quot;height&quot;:&quot;100%&quot;},&quot;ownerDisplay&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;stacked&quot;,&quot;options&quot;:[&quot;stacked&quot;,&quot;split&quot;,&quot;label&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Owners&quot;,&quot;label&quot;:&quot;Owner display&quot;}}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = this.seed();
+    this.dragId = null;
+    this._huePool = [300, 90, 330, 220, 40];
+    this._hi = 0;
+  }
+
+  genKey() { const ch = 'abcdef0123456789'; let s = ''; for (let i = 0; i < 28; i++) s += ch[Math.floor(Math.random() * 16)]; return 'relay_sk_live_' + s; }
+  initials(name, email) { if (name) { const p = name.trim().split(/\s+/); return (p[0][0] + (p[1] ? p[1][0] : '')).toUpperCase(); } return (email || '?').slice(0, 2).toUpperCase(); }
+  invite() {
+    const email = (this.state.inviteEmail || '').trim(); if (!email || email.indexOf('@') < 0) return;
+    const prefix = email.split('@')[0].replace(/[._-]/g, ' ');
+    const name = prefix.split(' ').map(w => w ? w[0].toUpperCase() + w.slice(1) : '').join(' ').trim() || email;
+    const hue = this._huePool[this._hi % this._huePool.length]; this._hi++;
+    this.setState(s => ({ members: [...s.members, { id: 'm' + Date.now(), name, email, role: s.inviteRole, hue, you: false, status: 'invited' }], inviteEmail: '' }));
+  }
+  removeMember(id) { this.setState(s => ({ members: s.members.filter(m => m.id !== id) })); }
+  setRole(id, role) { this.setState(s => ({ members: s.members.map(m => m.id === id ? { ...m, role } : m) })); }
+  toggleReveal(id) { this.setState(s => ({ keys: s.keys.map(k => k.id === id ? { ...k, revealed: !k.revealed } : k) })); }
+  regenerate(id) { const nk = this.genKey(); this.setState(s => ({ keys: s.keys.map(k => k.id === id ? { ...k, key: nk, revealed: true, created: 'just now', lastUsed: 'never used' } : k) })); }
+  revoke(id) { this.setState(s => ({ keys: s.keys.filter(k => k.id !== id) })); }
+  createKey() { this.setState(s => ({ keys: [...s.keys, { id: 'k' + Date.now(), name: 'Key ' + (s.keys.length + 1), key: this.genKey(), created: 'just now', lastUsed: 'never used', revealed: true }] })); }
+  copyKey(id, val) { try { if (navigator.clipboard) navigator.clipboard.writeText(val); } catch (_) {} this.setState({ copiedKeyId: id }); clearTimeout(this._copyT); this._copyT = setTimeout(() => this.setState({ copiedKeyId: null }), 1600); }
+
+  seed() {
+    const people = {
+      dk: { id: 'dk', name: 'Dana Kim', initials: 'DK', hue: 250 },
+      ml: { id: 'ml', name: 'Mara Lopez', initials: 'ML', hue: 195 },
+      jr: { id: 'jr', name: 'Jon Reyes', initials: 'JR', hue: 15 },
+      sy: { id: 'sy', name: 'Sara Yoon', initials: 'SY', hue: 150 },
+    };
+    const stages = [
+      { id: 'backlog', name: 'Backlog', description: 'Everything captured but not yet started.', category: 'unstarted', owner: 'human', wip: null, hasDone: false, isReview: false, rejectTo: null },
+      { id: 'next', name: 'Next', description: 'Prioritized and ready to pull into work.', category: 'unstarted', owner: 'human', wip: 5, hasDone: false, isReview: false, rejectTo: null },
+      { id: 'spec', name: 'Spec', description: 'Define the problem and acceptance criteria.', category: 'started', owner: 'human', wip: 2, hasDone: true, isReview: false, rejectTo: null },
+      { id: 'plan', name: 'Plan', description: 'AI breaks the work into an approach.', category: 'started', owner: 'ai', wip: 2, hasDone: true, isReview: false, rejectTo: null },
+      { id: 'code', name: 'Code', description: 'AI implements the change.', category: 'started', owner: 'ai', wip: 3, hasDone: true, isReview: false, rejectTo: null },
+      { id: 'review', name: 'Review', description: 'A human reviews the AI output.', category: 'started', owner: 'human', wip: 3, hasDone: true, isReview: true, rejectTo: 'code' },
+      { id: 'deploy', name: 'Deploy', description: 'AI ships the change to production.', category: 'started', owner: 'ai', wip: 2, hasDone: true, isReview: false, rejectTo: null },
+      { id: 'prodreview', name: 'Prod review', description: 'Verify behavior in production.', category: 'started', owner: 'human', wip: null, hasDone: false, isReview: true, rejectTo: 'code' },
+      { id: 'complete', name: 'Complete', description: 'Done and verified.', category: 'completed', owner: 'human', wip: null, hasDone: false, isReview: false, rejectTo: null },
+    ];
+    const Q = 'Should I keep the original playful CTA wording, or rewrite it to match the more formal new brand voice?';
+    let n = 0;
+    const c = (o) => {
+      const owners = o.owners || [o.human || 'dk'];
+      return Object.assign({ id: 'c' + (++n), tag: '', sub: 'ongoing', progress: 0, created: 'Mar 2', desc: '', checklist: [], comments: [], result: null, activity: [{ t: 'Created', ts: 'earlier' }] }, o, { owners, activeHuman: o.activeHuman || owners[0] });
+    };
+    const cards = [
+      c({ title: 'Add SSO for enterprise accounts', tag: 'auth', owners: ['dk'], stageId: 'backlog', desc: 'SAML + OIDC login for enterprise plans, with SCIM provisioning as a fast follow.' }),
+      c({ title: 'Redesign the empty states', tag: 'design', owners: ['ml'], stageId: 'backlog', desc: 'Every empty board, column, and card list needs a purposeful empty state.' }),
+      c({ title: 'Bulk-edit for board cards', tag: 'product', owners: ['jr'], stageId: 'next', desc: 'Select multiple cards and move, tag, or assign them at once.' }),
+      c({ title: 'Export the board to CSV', tag: 'product', owners: ['dk'], stageId: 'spec', sub: 'ongoing', desc: 'Let people export the whole board — one row per card, columns for stage, owner, tags.',
+        checklist: [{ t: 'List required columns', done: true }, { t: 'Decide on nested sub-cards', done: false }, { t: 'Write acceptance criteria', done: false }],
+        comments: [{ who: 'dk', text: 'Starting the spec — I think we scope v1 to a flat export, no sub-cards.', ts: '12m ago' }],
+        activity: [{ t: 'You started the spec', ts: '12m ago' }] }),
+      c({ title: 'Slack notifications v2', tag: 'integrations', owners: ['ml'], stageId: 'spec', sub: 'done', desc: 'Per-channel routing and digest options for board events.',
+        activity: [{ t: 'Spec finished — ready for Plan', ts: '5m ago' }] }),
+      c({ title: 'Realtime cursors on the board', tag: 'eng', owners: ['sy'], stageId: 'plan', sub: 'ongoing', progress: 44, desc: 'Show live cursors and selections as teammates move around the board.',
+        checklist: [{ t: 'Choose presence transport', done: true }, { t: 'Draft data model', done: false }],
+        comments: [{ who: 'ai', text: 'Planning the approach — leaning on Phoenix Presence over the existing socket. Will draft the payload shape next.', ts: '6m ago' }],
+        activity: [{ t: 'AI pulled into Plan', ts: '9m ago' }] }),
+      c({ title: 'Migrate 40 blog posts to the new CMS', tag: 'eng', owners: ['dk'], stageId: 'code', sub: 'ongoing', progress: 62, desc: 'Move every post, preserve slugs, set up redirects, and re-upload images.',
+        checklist: [{ t: 'Export from old CMS', done: true }, { t: 'Map slugs + redirects', done: true }, { t: 'Migrate post bodies', done: false }, { t: 'Re-upload images', done: false }],
+        comments: [{ who: 'ai', text: '24 of 40 posts migrated. Redirects are in place for everything moved so far — no broken links yet.', ts: '3m ago' }],
+        activity: [{ t: 'AI started working', ts: '18m ago' }, { t: 'Migrated 24 / 40 posts', ts: '3m ago' }] }),
+      c({ title: 'Rewrite the onboarding tooltips', tag: 'product', owners: ['ml'], stageId: 'code', sub: 'ongoing', progress: 55, raisesQuestion: true, desc: 'Tighten the 9 onboarding tooltips to match the new brand voice.',
+        checklist: [{ t: 'Audit current 9 tooltips', done: true }, { t: 'Draft new copy', done: false }, { t: 'Match brand voice', done: false }],
+        comments: [{ who: 'ai', text: 'Audited all 9. Two of them are much longer than the rest — I\'ll tighten those first. One open question before I rewrite the CTAs:', ts: '20m ago' }, { who: 'ai', kind: 'question', text: Q, ts: '2m ago' }],
+        activity: [{ t: 'AI started working', ts: '22m ago' }, { t: 'AI asked a question', ts: '2m ago' }] }),
+      c({ title: 'Add keyboard shortcuts', tag: 'eng', owners: ['jr'], stageId: 'code', sub: 'done', progress: 100, desc: 'A set of shortcuts for the board plus a help overlay.',
+        result: { summary: 'Added 12 keyboard shortcuts and a help overlay triggered by **?**. Bindings match the existing command palette so nothing conflicts.', changes: ['12 shortcuts wired', 'Help overlay on “?”', 'Docs page updated'], deployUrl: 'preview.relay.app/board', screens: ['Board with help overlay open'] },
+        checklist: [{ t: 'Define binding map', done: true }, { t: 'Build help overlay', done: true }, { t: 'Update docs', done: true }],
+        comments: [{ who: 'ai', text: 'Done. I reused the command-palette binding table so there are no conflicts. Help overlay opens on “?”.', ts: '6m ago' }],
+        activity: [{ t: 'AI started working', ts: '30m ago' }, { t: 'AI finished — ready for Review', ts: '6m ago' }] }),
+      c({ title: 'Refactor the pricing page copy', tag: 'marketing', owners: ['dk', 'ml'], activeHuman: 'dk', stageId: 'review', sub: 'ongoing', progress: 100, desc: 'Clarify the three pricing tiers and rewrite the FAQ to match the new positioning.',
+        result: { summary: 'Rewrote all three tier descriptions in plainer language and trimmed the FAQ from **14 to 8** questions. Tightened the enterprise CTA to focus on onboarding support.', changes: ['3 tier blurbs rewritten', 'FAQ 14 → 8 questions', 'New enterprise CTA copy'], deployUrl: 'preview.relay.app/pricing', screens: ['Pricing hero + tiers', 'Rewritten FAQ section'] },
+        checklist: [{ t: 'Rewrite tier descriptions', done: true }, { t: 'Trim the FAQ', done: true }, { t: 'Update enterprise CTA', done: true }, { t: 'Legal review of claims', done: false }],
+        comments: [{ who: 'ai', text: 'Finished the rewrite. I kept the “per seat” language since three competitors use it and it tested well. Flagged one savings claim for legal to confirm.', ts: '3m ago' }, { who: 'dk', text: 'Reads much cleaner. Checking the enterprise section now.', ts: '1m ago' }],
+        activity: [{ t: 'AI started working', ts: '35m ago' }, { t: 'AI finished — pulled into Review', ts: '4m ago' }] }),
+      c({ title: 'Translate the landing page to Spanish', tag: 'marketing', owners: ['ml'], stageId: 'prodreview', progress: 100, desc: 'Full es-ES translation with reviewed terminology.',
+        result: { summary: 'Translated the full landing page to es-ES and deployed to production. Terminology reviewed against the glossary.', changes: ['Landing page es-ES', 'Glossary applied', 'hreflang tags added'], deployUrl: 'relay.app/es', screens: ['Spanish landing page'] },
+        activity: [{ t: 'Deployed', ts: '1h ago' }] }),
+      c({ title: 'Compile the weekly metrics report', tag: 'ops', owners: ['sy'], stageId: 'complete', progress: 100, desc: 'Weekly numbers with week-over-week deltas and a short summary.',
+        activity: [{ t: 'Verified in prod', ts: 'yesterday' }] }),
+      c({ title: 'Dark mode polish', tag: 'design', owners: ['jr'], stageId: 'complete', progress: 100, desc: 'Fix the last contrast issues in dark mode.',
+        activity: [{ t: 'Verified in prod', ts: 'Mon' }] }),
+    ];
+    return { people, stages, cards, view: 'board', settingsSection: 'general', selectedId: null, dragOverKey: null, composeStage: null, composeText: '', answerText: '', commentText: '', rejectText: '', rejectOpen: false, reassignOpen: false, dragging: false, forceOpen: {},
+      boardName: 'Product workspace', slug: 'acme/product', inviteEmail: '', inviteRole: 'Member', copiedKeyId: null,
+      members: [
+        { id: 'dk', name: 'Dana Kim', email: 'dana@acme.com', role: 'Admin', hue: 250, you: true, status: 'active' },
+        { id: 'ml', name: 'Mara Lopez', email: 'mara@acme.com', role: 'Member', hue: 195, you: false, status: 'active' },
+        { id: 'jr', name: 'Jon Reyes', email: 'jon@acme.com', role: 'Member', hue: 15, you: false, status: 'active' },
+        { id: 'sy', name: 'Sara Yoon', email: 'sara@acme.com', role: 'Member', hue: 150, you: false, status: 'active' },
+      ],
+      keys: [ { id: 'k1', name: 'Agent key', key: 'relay_sk_live_9f2c4b7a1e6d8035ca19bf74e2d0', created: 'Mar 4, 2026', lastUsed: 'last used 2m ago', revealed: false } ],
+    };
+  }
+
+  componentDidMount() { this.tickHandle = setInterval(() => this.tick(), 1600); }
+  componentWillUnmount() { clearInterval(this.tickHandle); }
+
+  findCard(id) { return this.state.cards.find(c => c.id === id); }
+  stageIndex(id) { return this.state.stages.findIndex(s => s.id === id); }
+  sortByCat(arr) { const r = { unstarted: 0, started: 1, completed: 2 }; return [...arr].sort((a, b) => r[a.category] - r[b.category]); }
+
+  tick() {
+    this.setState(s => {
+      const stages = s.stages;
+      const cards = s.cards.map(c => ({ ...c }));
+      stages.forEach((st, idx) => {
+        if (st.owner !== 'ai' || st.category === 'completed') return;
+        cards.filter(c => c.stageId === st.id && c.sub !== 'done').forEach(card => {
+          if (card.blocked) return;
+          if (card.raisesQuestion && !card.asked && (card.progress || 0) >= 55) {
+            card.blocked = true; card.asked = true;
+            card.question = card.question || 'Should I keep the original playful CTA wording, or rewrite it to match the more formal new brand voice?';
+            card.activity = [...card.activity, { t: 'AI asked a question', ts: 'now' }];
+            return;
+          }
+          const inc = 6 + Math.floor(Math.random() * 8);
+          card.progress = Math.min(100, (card.progress || 0) + inc);
+          if (card.progress >= 100) {
+            card.progress = 100;
+            if (st.hasDone) { card.sub = 'done'; card.activity = [...card.activity, { t: 'AI finished — moved to ' + st.name + ' · Done', ts: 'now' }]; }
+            else { const nx = stages[idx + 1]; if (nx) { card.stageId = nx.id; card.sub = 'ongoing'; card.progress = (nx.owner === 'ai' && nx.category !== 'completed') ? 4 : 100; card.activity = [...card.activity, { t: 'Advanced to ' + nx.name, ts: 'now' }]; } }
+          }
+        });
+      });
+      stages.forEach((st, idx) => {
+        if (st.owner !== 'ai' || st.category === 'completed' || idx === 0) return;
+        const cap = st.wip == null ? 4 : st.wip;
+        if (cards.filter(c => c.stageId === st.id && c.sub !== 'done').length >= cap) return;
+        const prev = stages[idx - 1];
+        if (!prev.hasDone && prev.owner !== 'ai') return;
+        const pred = prev.hasDone ? (c => c.stageId === prev.id && c.sub === 'done') : (c => c.stageId === prev.id);
+        const cand = cards.find(pred);
+        if (cand) { cand.stageId = st.id; cand.sub = 'ongoing'; if (!cand.progress || cand.progress >= 100) cand.progress = 4; cand.blocked = false; cand.activity = [...cand.activity, { t: 'AI pulled into ' + st.name, ts: 'now' }]; }
+      });
+      return { cards };
+    });
+  }
+
+  moveCard(id, stageId, sub, extra, front) {
+    this.setState(s => {
+      const cards = s.cards.map(c => c.id === id ? { ...c, stageId, sub, ...(extra || {}) } : c);
+      if (front) { const i = cards.findIndex(c => c.id === id); if (i > 0) { const [x] = cards.splice(i, 1); cards.unshift(x); } }
+      return { cards };
+    });
+  }
+  patchCard(id, extra) { this.setState(s => ({ cards: s.cards.map(c => c.id === id ? { ...c, ...extra } : c) })); }
+
+  selectCard(id) { this.setState({ selectedId: id, answerText: '', commentText: '', rejectText: '', rejectOpen: false, reassignOpen: false }); }
+  closeDrawer() { this.setState({ selectedId: null }); }
+  openSettings() { this.setState({ view: 'settings', selectedId: null }); }
+  closeSettings() { this.setState({ view: 'board' }); }
+
+  onAdd(stageId) { this.setState(s => ({ composeStage: s.composeStage === stageId ? null : stageId, composeText: '', forceOpen: { ...s.forceOpen, [stageId]: true } })); }
+  submitCompose(stageId) {
+    const text = (this.state.composeText || '').trim(); if (!text) return;
+    const st = this.state.stages.find(s => s.id === stageId);
+    const id = 'n' + Date.now();
+    const card = { id, title: text, tag: '', human: 'dk', stageId, sub: 'ongoing', progress: st.owner === 'ai' ? 3 : 0, activity: [{ t: 'You added this', ts: 'now' }] };
+    this.setState(s => ({ cards: [card, ...s.cards], composeText: '', composeStage: null }));
+  }
+
+  submitAnswer() {
+    const id = this.state.selectedId; if (!id) return;
+    const text = (this.state.answerText || '').trim(); if (!text) return;
+    this.setState(s => ({ cards: s.cards.map(c => c.id === id ? { ...c, blocked: false, question: null, comments: [...(c.comments || []), { who: 'dk', text, ts: 'now' }], activity: [...c.activity, { t: 'You answered the AI', ts: 'now' }, { t: 'AI resumed working', ts: 'now' }] } : c), answerText: '' }));
+  }
+
+  activeWorker(card, stage) {
+    if (stage && stage.owner === 'ai' && !card.blocked && stage.category !== 'completed') return 'ai';
+    return card.activeHuman || (card.owners && card.owners[0]) || 'dk';
+  }
+  toggleCheck(id, i) { this.setState(s => ({ cards: s.cards.map(c => c.id === id ? { ...c, checklist: c.checklist.map((it, j) => j === i ? { ...it, done: !it.done } : it) } : c) })); }
+  postComment() {
+    const id = this.state.selectedId; if (!id) return;
+    const text = (this.state.commentText || '').trim(); if (!text) return;
+    this.setState(s => ({ cards: s.cards.map(c => c.id === id ? { ...c, comments: [...(c.comments || []), { who: 'dk', text, ts: 'now' }] } : c), commentText: '' }));
+  }
+  setActiveHuman(id, who) {
+    this.setState(s => ({ cards: s.cards.map(c => c.id === id ? { ...c, activeHuman: who, owners: c.owners.includes(who) ? c.owners : [...c.owners, who], activity: [...c.activity, { t: (who === 'dk' ? 'You took over' : (s.people[who] ? s.people[who].name + ' took over' : 'Reassigned')), ts: 'now' }] } : c), reassignOpen: false }));
+  }
+  toggleOwner(id, who) {
+    this.setState(s => ({ cards: s.cards.map(c => {
+      if (c.id !== id) return c;
+      const has = c.owners.includes(who);
+      let owners = has ? c.owners.filter(o => o !== who) : [...c.owners, who];
+      if (owners.length === 0) owners = [who];
+      let activeHuman = c.activeHuman; if (!owners.includes(activeHuman)) activeHuman = owners[0];
+      return { ...c, owners, activeHuman };
+    }) }));
+  }
+
+  nextStageOf(stageId) { const i = this.stageIndex(stageId); return this.state.stages[i + 1] || null; }
+  markDone(id) {
+    const card = this.findCard(id); if (!card) return;
+    const st = this.state.stages.find(s => s.id === card.stageId);
+    if (st.hasDone && card.sub !== 'done') { this.moveCard(id, st.id, 'done', { activity: [...card.activity, { t: 'You marked it ready in ' + st.name, ts: 'now' }] }); }
+    else { const nx = this.nextStageOf(st.id); if (nx) this.moveCard(id, nx.id, 'ongoing', { progress: (nx.owner === 'ai' && nx.category !== 'completed') ? 4 : (card.progress || 0), blocked: false, activity: [...card.activity, { t: 'Advanced to ' + nx.name, ts: 'now' }] }, true); }
+    this.closeDrawer();
+  }
+  pullNext(id) {
+    const card = this.findCard(id); if (!card) return;
+    const nx = this.nextStageOf(card.stageId); if (!nx) return;
+    this.moveCard(id, nx.id, 'ongoing', { progress: (nx.owner === 'ai' && nx.category !== 'completed') ? 4 : (card.progress || 0), blocked: false, activity: [...card.activity, { t: 'Pulled into ' + nx.name, ts: 'now' }] }, true);
+    this.closeDrawer();
+  }
+  approve(id) {
+    const card = this.findCard(id); if (!card) return;
+    const st = this.state.stages.find(s => s.id === card.stageId);
+    if (st && st.isReview) {
+      const nx = this.nextStageOf(st.id);
+      if (nx) this.moveCard(id, nx.id, 'ongoing', { progress: (nx.owner === 'ai' && nx.category !== 'completed') ? 4 : 100, blocked: false, comments: [...(card.comments || []), { who: 'dk', text: 'Approved. ✓', ts: 'now' }], activity: [...card.activity, { t: 'You approved — advanced to ' + nx.name, ts: 'now' }] }, true);
+      this.setState({ rejectOpen: false });
+    } else { this.markDone(id); }
+  }
+  requestChanges(id) {
+    const card = this.findCard(id); if (!card) return;
+    const note = (this.state.rejectText || '').trim();
+    const st = this.state.stages.find(s => s.id === card.stageId);
+    const target = (st && st.rejectTo && this.state.stages.find(x => x.id === st.rejectTo)) || this.state.stages.find(s => s.owner === 'ai' && s.category === 'started') || this.state.stages[0];
+    const comments = [...(card.comments || [])];
+    if (note) comments.push({ who: 'dk', kind: 'changes', text: note, ts: 'now' });
+    this.moveCard(id, target.id, 'ongoing', { progress: 55, blocked: false, comments, activity: [...card.activity, { t: 'You requested changes — sent back to ' + target.name, ts: 'now' }, { t: 'AI resumed working', ts: 'now' }] });
+    this.setState({ rejectText: '', rejectOpen: false });
+  }
+
+  updateStage(id, patch) { this.setState(s => ({ stages: s.stages.map(st => st.id === id ? { ...st, ...patch } : st) })); }
+  setCategory(id, cat) { this.setState(s => ({ stages: this.sortByCat(s.stages.map(st => st.id === id ? { ...st, category: cat } : st)) })); }
+  moveStage(id, dir) { this.setState(s => { const arr = [...s.stages]; const i = arr.findIndex(x => x.id === id); const j = i + dir; if (j < 0 || j >= arr.length) return {}; if (arr[j].category !== arr[i].category) { arr[i] = { ...arr[i], category: arr[j].category }; return { stages: arr }; } const [x] = arr.splice(i, 1); arr.splice(j, 0, x); return { stages: arr }; }); }
+  deleteStage(id) {
+    this.setState(s => {
+      if (s.stages.length <= 1) return {};
+      const i = s.stages.findIndex(x => x.id === id);
+      const fallback = s.stages[i - 1] || s.stages[i + 1];
+      return { stages: s.stages.filter(x => x.id !== id), cards: s.cards.map(c => c.stageId === id ? { ...c, stageId: fallback.id, sub: 'ongoing' } : c) };
+    });
+  }
+  addStage(cat) { this.setState(s => { const st = { id: 's' + Date.now(), name: 'New stage', description: '', category: cat || 'started', owner: 'human', wip: null, hasDone: cat === 'started', isReview: false, rejectTo: null }; return { stages: this.sortByCat([...s.stages, st]) }; }); }
+  bumpWip(id, d) { this.setState(s => ({ stages: s.stages.map(st => st.id === id ? { ...st, wip: Math.max(1, (st.wip || 1) + d) } : st) })); }
+
+  avatarFor(who) {
+    if (who === 'ai') return { isAI: true, showInitials: false, name: 'Relay AI', style: { width: '22px', height: '22px', borderRadius: '50%', background: 'oklch(0.56 0.16 292)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }, markStyle: { width: '8px', height: '8px', borderRadius: '50%', border: '1.5px solid oklch(1 0 0)', display: 'block' } };
+    const p = this.state.people[who] || this.state.people.dk;
+    return { isAI: false, showInitials: true, initials: p.initials, name: p.name, style: { width: '22px', height: '22px', borderRadius: '50%', background: 'oklch(0.62 0.13 ' + p.hue + ')', color: 'oklch(1 0 0)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 600, flex: '0 0 auto' } };
+  }
+
+  renderVals() {
+    const s = this.state;
+    const VIOLET = 'oklch(0.56 0.16 292)', BLUE = 'oklch(0.60 0.14 250)', GREEN = 'oklch(0.60 0.13 155)', AMBER = 'oklch(0.70 0.13 65)', SLATE = 'oklch(0.55 0.02 255)';
+    const mono = "'JetBrains Mono',ui-monospace,monospace";
+    const ownerColor = o => o === 'ai' ? VIOLET : o === 'human' ? BLUE : SLATE;
+    const catMeta = {
+      unstarted: { label: 'UNSTARTED', dotStyle: { width: '9px', height: '9px', borderRadius: '50%', border: '1.5px solid oklch(0.68 0.02 255)', boxSizing: 'border-box', display: 'block', flex: '0 0 auto' } },
+      started: { label: 'IN PROGRESS', dotStyle: { width: '9px', height: '9px', borderRadius: '50%', background: 'conic-gradient(oklch(0.60 0.14 250) 0 50%, oklch(0.86 0.03 250) 50% 100%)', display: 'block', flex: '0 0 auto' } },
+      completed: { label: 'COMPLETE', dotStyle: { width: '9px', height: '9px', borderRadius: '50%', background: GREEN, display: 'block', flex: '0 0 auto' } },
+    };
+    const ownerMode = this.props.ownerDisplay || 'stacked';
+
+    const mkAvatar = (who, opts) => {
+      opts = opts || {}; const size = opts.size || 22; const isAI = who === 'ai';
+      const p = this.state.people[who];
+      const bg = isAI ? VIOLET : 'oklch(0.62 0.13 ' + (p ? p.hue : 250) + ')';
+      const wrap = { width: size + 'px', height: size + 'px', borderRadius: '50%', background: bg, color: 'oklch(1 0 0)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: Math.round(size * 0.42) + 'px', fontWeight: 600, flex: '0 0 auto', boxSizing: 'border-box', position: 'relative' };
+      const shadows = [];
+      if (opts.overlap) { wrap.marginLeft = '-6px'; shadows.push('0 0 0 2px oklch(1 0 0)'); }
+      if (opts.ring) { shadows.push('0 0 0 2px oklch(1 0 0)'); shadows.push('0 0 0 3.5px ' + (isAI ? VIOLET : BLUE)); }
+      if (shadows.length) wrap.boxShadow = shadows.join(', ');
+      if (opts.grayed) { wrap.filter = 'grayscale(1)'; wrap.opacity = 0.5; }
+      return { wrapStyle: wrap, isAI, markStyle: { width: Math.round(size * 0.36) + 'px', height: Math.round(size * 0.36) + 'px', borderRadius: '50%', border: '1.5px solid oklch(1 0 0)', display: 'block' }, showInitials: !isAI, initials: isAI ? '' : (p ? p.initials : '?'), name: isAI ? 'Relay AI' : (p ? p.name : 'Someone') };
+    };
+    const buildCluster = (card, stage, size) => {
+      const active = this.activeWorker(card, stage);
+      const owners = card.owners || ['dk'];
+      const aiActive = active === 'ai';
+      if (ownerMode === 'label') {
+        const names = owners.map(o => (this.state.people[o] ? this.state.people[o].initials : o)).join(', ');
+        return { containerStyle: { display: 'flex', alignItems: 'center', gap: '6px' }, avatars: [mkAvatar(active, { size })], showOwnerLabel: aiActive && owners.length > 0, ownerLabelText: names };
+      }
+      if (ownerMode === 'split') {
+        const avatars = [mkAvatar(active, { size: size + 2, ring: aiActive })];
+        owners.filter(o => o !== active).forEach(o => avatars.push(mkAvatar(o, { size: Math.round(size * 0.72), grayed: true })));
+        return { containerStyle: { display: 'flex', alignItems: 'center', gap: '5px' }, avatars, showOwnerLabel: false };
+      }
+      const seq = owners.map(o => ({ who: o, grayed: aiActive || o !== active, ring: !aiActive && o === active }));
+      if (aiActive) seq.push({ who: 'ai', grayed: false, ring: true });
+      const avatars = seq.map((it, i) => mkAvatar(it.who, { size, overlap: i > 0, ring: it.ring, grayed: it.grayed }));
+      return { containerStyle: { display: 'flex', alignItems: 'center', paddingLeft: '2px' }, avatars, showOwnerLabel: false };
+    };
+
+    const decorateCard = (card, stage) => {
+      const isDoneSub = card.sub === 'done';
+      const stCompleted = stage.category === 'completed';
+      const working = stage.owner === 'ai' && !isDoneSub && !card.blocked && !stCompleted;
+      let accent = BLUE;
+      if (card.blocked) accent = AMBER; else if (isDoneSub || stCompleted) accent = GREEN; else if (stage.owner === 'ai') accent = VIOLET;
+      const cluster = buildCluster(card, stage, 22);
+      let showStatus = false, statusLabel = '', statusColor = SLATE;
+      if (working) { showStatus = true; statusLabel = 'working · ' + (card.progress || 0) + '%'; statusColor = 'oklch(0.52 0.10 292)'; }
+      else if (isDoneSub) { showStatus = true; statusLabel = 'ready'; statusColor = 'oklch(0.50 0.10 155)'; }
+      else if (stCompleted) { showStatus = true; statusLabel = 'done'; statusColor = 'oklch(0.50 0.10 155)'; }
+      return {
+        id: card.id, title: card.title, tag: card.tag, showTag: !!card.tag && !working,
+        style: { background: 'oklch(1 0 0)', border: '1px solid oklch(0.92 0.006 255)', borderLeft: '3px solid ' + accent, borderRadius: '9px', padding: '10px 11px', display: 'flex', flexDirection: 'column', gap: '8px', cursor: 'grab', boxShadow: '0 1px 2px oklch(0.55 0.03 255/0.05)', userSelect: 'none' },
+        showProgress: working, progressStyle: { height: '100%', width: (card.progress || 0) + '%', background: VIOLET, borderRadius: '3px', transition: 'width 0.6s ease' },
+        blocked: !!card.blocked,
+        showStatus, statusLabel, statusStyle: { fontSize: '11px', fontFamily: mono, color: statusColor, display: 'flex', alignItems: 'center', gap: '5px' },
+        clusterStyle: cluster.containerStyle, avatars: cluster.avatars, showOwnerLabel: cluster.showOwnerLabel, ownerLabelText: cluster.ownerLabelText,
+        onClick: () => this.selectCard(card.id),
+        onDragStart: (e) => { this.dragId = card.id; this.setState({ dragging: true }); if (e && e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', card.id); } catch (_) {} } },
+      };
+    };
+
+    const dropHandlers = (stageId, sub) => {
+      const key = stageId + ':' + sub;
+      return {
+        onDragOver: (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'; },
+        onDragEnter: (e) => { e.preventDefault(); if (this.state.dragOverKey !== key) this.setState({ dragOverKey: key }); },
+        onDragLeave: (e) => { if (e.currentTarget && e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return; if (this.state.dragOverKey === key) this.setState({ dragOverKey: null }); },
+        onDrop: (e) => {
+          e.preventDefault();
+          const id = this.dragId; this.dragId = null; this.setState({ dragOverKey: null, dragging: false });
+          if (!id) return;
+          const card = this.findCard(id); if (!card) return;
+          const st = this.state.stages.find(x => x.id === stageId);
+          const targetSub = st.hasDone ? sub : 'ongoing';
+          const extra = { blocked: false };
+          if (st.owner === 'ai' && targetSub === 'ongoing' && st.category !== 'completed') { if (!card.progress || card.progress >= 100) extra.progress = 4; }
+          if (targetSub === 'done' || st.category === 'completed') extra.progress = 100;
+          extra.activity = [...card.activity, { t: 'Moved to ' + st.name + (st.hasDone ? (' · ' + (targetSub === 'done' ? 'Done' : 'In progress')) : ''), ts: 'now' }];
+          this.moveCard(id, stageId, targetSub, extra, targetSub === 'done');
+        },
+      };
+    };
+
+    const laneBody = (highlight) => ({ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '4px', borderRadius: '10px', minHeight: '70px', transition: 'background 0.15s, box-shadow 0.15s', background: highlight ? 'oklch(0.96 0.03 250)' : 'transparent', boxShadow: highlight ? 'inset 0 0 0 1.5px oklch(0.75 0.10 250)' : 'inset 0 0 0 1px transparent' });
+
+    const decoratedStages = s.stages.map(stage => {
+      const all = s.cards.filter(c => c.stageId === stage.id);
+      const ongoing = stage.hasDone ? all.filter(c => c.sub !== 'done') : all;
+      const done = stage.hasDone ? all.filter(c => c.sub === 'done') : [];
+      const collapsed = all.length === 0 && !s.dragging && !s.forceOpen[stage.id];
+      const wipCount = stage.hasDone ? ongoing.length : all.length;
+      const over = stage.wip != null && wipCount > stage.wip;
+      const wipStyle = { fontSize: '11px', fontWeight: 600, fontFamily: mono, padding: '2px 7px', borderRadius: '5px', background: over ? 'oklch(0.96 0.03 15)' : 'oklch(0.96 0.006 255)', color: over ? 'oklch(0.55 0.16 15)' : 'oklch(0.48 0.02 255)' };
+      const lanes = [];
+      if (stage.hasDone) {
+        const h1 = s.dragOverKey === stage.id + ':ongoing', h2 = s.dragOverKey === stage.id + ':done';
+        lanes.push({ label: 'In progress', showLabel: true, count: ongoing.length, labelStyle: { fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em', fontFamily: mono, color: 'oklch(0.55 0.02 255)' }, laneStyle: { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' }, bodyStyle: laneBody(h1), showCompose: s.composeStage === stage.id, cards: ongoing.map(c => decorateCard(c, stage)), ...dropHandlers(stage.id, 'ongoing') });
+        lanes.push({ label: 'Done', showLabel: true, count: done.length, labelStyle: { fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em', fontFamily: mono, color: 'oklch(0.50 0.09 155)' }, laneStyle: { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' }, bodyStyle: Object.assign(laneBody(h2), { background: h2 ? 'oklch(0.95 0.04 155)' : 'oklch(0.975 0.012 155)' }), showCompose: false, cards: done.map(c => decorateCard(c, stage)), ...dropHandlers(stage.id, 'done') });
+      } else {
+        const h = s.dragOverKey === stage.id + ':ongoing';
+        lanes.push({ label: '', showLabel: false, count: all.length, labelStyle: {}, laneStyle: { flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' }, bodyStyle: laneBody(h), showCompose: s.composeStage === stage.id, cards: all.map(c => decorateCard(c, stage)), ...dropHandlers(stage.id, 'ongoing') });
+      }
+      const d0 = dropHandlers(stage.id, stage.hasDone ? 'done' : 'ongoing');
+      return {
+        id: stage.id, name: stage.name, description: stage.description, category: stage.category,
+        ownerColor: ownerColor(stage.owner), cardCount: all.length,
+        collapsed, expanded: !collapsed,
+        showWip: stage.wip != null, wipLabel: 'wip ' + wipCount + '/' + (stage.wip || 0), wipStyle,
+        stageStyle: { flex: '0 0 auto', width: (stage.hasDone ? 300 : 236) + 'px', display: 'flex', flexDirection: 'column', height: '100%' },
+        lanesRowStyle: { display: 'flex', gap: '8px', flex: 1, minHeight: 0 },
+        lanes,
+        composePlaceholder: stage.owner === 'ai' ? 'Describe work to hand to the AI…' : 'Add work to ' + stage.name + '…',
+        composeCta: stage.owner === 'ai' ? 'Hand to AI' : 'Add',
+        onAdd: () => this.onAdd(stage.id),
+        onComposeSubmit: () => this.submitCompose(stage.id),
+        onComposeCancel: () => this.setState({ composeStage: null, composeText: '' }),
+        onComposeKey: (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.submitCompose(stage.id); } },
+        onExpand: () => this.setState(st => ({ forceOpen: { ...st.forceOpen, [stage.id]: true } })),
+        onDragOver0: d0.onDragOver, onDrop0: d0.onDrop, onDragEnter0: d0.onDragEnter,
+      };
+    });
+
+    // group decorated stages into contiguous category runs
+    const groups = [];
+    s.stages.forEach((st, i) => {
+      const dec = decoratedStages[i];
+      const last = groups[groups.length - 1];
+      if (last && last.cat === st.category) { last.stages.push(dec); last.count += dec.cardCount; }
+      else groups.push({ cat: st.category, key: st.category + '-' + i, label: catMeta[st.category].label, dotStyle: catMeta[st.category].dotStyle, stages: [dec], count: dec.cardCount });
+    });
+
+    // Settings rows + groups
+    const segActive = { fontSize: '12px', fontWeight: 600, padding: '6px 13px', borderRadius: '6px', background: 'oklch(1 0 0)', color: 'oklch(0.30 0.02 255)', border: 'none', boxShadow: '0 1px 2px oklch(0.5 0.03 255/0.12)', whiteSpace: 'nowrap' };
+    const segIdle = { fontSize: '12px', fontWeight: 600, padding: '6px 13px', borderRadius: '6px', background: 'transparent', color: 'oklch(0.52 0.02 255)', border: 'none', whiteSpace: 'nowrap' };
+    const settingsRows = s.stages.map(st => ({
+      id: st.id, name: st.name, description: st.description, category: st.category, ownerColor: ownerColor(st.owner),
+      humanBtnStyle: st.owner === 'human' ? segActive : segIdle, aiBtnStyle: st.owner === 'ai' ? segActive : segIdle,
+      catUnstartedStyle: st.category === 'unstarted' ? segActive : segIdle, catStartedStyle: st.category === 'started' ? segActive : segIdle, catCompleteStyle: st.category === 'completed' ? segActive : segIdle,
+      hasLimit: st.wip != null, wipValue: st.wip || 1,
+      limitToggleLabel: st.wip != null ? 'On' : 'Off',
+      limitToggleStyle: { fontSize: '12px', fontWeight: 600, padding: '5px 12px', borderRadius: '7px', border: '1px solid ' + (st.wip != null ? 'oklch(0.75 0.10 250)' : 'oklch(0.90 0.006 255)'), background: st.wip != null ? 'oklch(0.96 0.03 250)' : 'oklch(1 0 0)', color: st.wip != null ? 'oklch(0.45 0.13 250)' : 'oklch(0.52 0.02 255)' },
+      doneToggleStyle: { width: '38px', height: '22px', borderRadius: '11px', border: 'none', padding: 0, position: 'relative', background: st.hasDone ? BLUE : 'oklch(0.88 0.01 255)', transition: 'background 0.15s' },
+      doneKnobStyle: { position: 'absolute', top: '2px', left: st.hasDone ? '18px' : '2px', width: '18px', height: '18px', borderRadius: '50%', background: 'oklch(1 0 0)', transition: 'left 0.15s', display: 'block' },
+      isReview: !!st.isReview,
+      reviewToggleStyle: { width: '38px', height: '22px', borderRadius: '11px', border: 'none', padding: 0, position: 'relative', background: st.isReview ? GREEN : 'oklch(0.88 0.01 255)', transition: 'background 0.15s' },
+      reviewKnobStyle: { position: 'absolute', top: '2px', left: st.isReview ? '18px' : '2px', width: '18px', height: '18px', borderRadius: '50%', background: 'oklch(1 0 0)', transition: 'left 0.15s', display: 'block' },
+      rejectTo: st.rejectTo || (s.stages[0] && s.stages[0].id),
+      rejectOptions: s.stages.filter(x => x.id !== st.id).map(x => ({ id: x.id, name: x.name })),
+      onToggleReview: () => this.updateStage(st.id, { isReview: !st.isReview, rejectTo: !st.isReview && !st.rejectTo ? (s.stages.find(x => x.owner === 'ai') || s.stages[0]).id : st.rejectTo }),
+      onRejectTo: (e) => this.updateStage(st.id, { rejectTo: e.target.value }),
+      onName: (e) => this.updateStage(st.id, { name: e.target.value }), onDesc: (e) => this.updateStage(st.id, { description: e.target.value }),
+      onOwnerHuman: () => this.updateStage(st.id, { owner: 'human' }), onOwnerAI: () => this.updateStage(st.id, { owner: 'ai' }),
+      onCatUnstarted: () => this.setCategory(st.id, 'unstarted'), onCatStarted: () => this.setCategory(st.id, 'started'), onCatComplete: () => this.setCategory(st.id, 'completed'),
+      onToggleLimit: () => this.updateStage(st.id, { wip: st.wip == null ? 3 : null }), onWipUp: () => this.bumpWip(st.id, 1), onWipDown: () => this.bumpWip(st.id, -1),
+      onToggleDone: () => this.updateStage(st.id, { hasDone: !st.hasDone }),
+      onUp: () => this.moveStage(st.id, -1), onDown: () => this.moveStage(st.id, 1), onDelete: () => this.deleteStage(st.id),
+    }));
+    const settingsGroups = [];
+    s.stages.forEach((st, i) => {
+      const row = settingsRows[i]; const last = settingsGroups[settingsGroups.length - 1];
+      if (last && last.cat === st.category) { last.rows.push(row); last.count++; }
+      else settingsGroups.push({ cat: st.category, key: st.category + '-' + i, label: catMeta[st.category].label, dotStyle: catMeta[st.category].dotStyle, rows: [row], count: 1, onAdd: () => this.addStage(st.category) });
+    });
+
+    // Board-settings: nav, members, keys
+    const navItem = (active) => ({ textAlign: 'left', border: 'none', borderRadius: '8px', padding: '8px 10px', fontSize: '13.5px', fontWeight: active ? 600 : 500, background: active ? 'oklch(0.95 0.03 250)' : 'transparent', color: active ? 'oklch(0.42 0.13 250)' : 'oklch(0.44 0.02 255)', cursor: 'pointer' });
+    const seg2 = (active) => ({ fontSize: '12px', fontWeight: 600, padding: '6px 13px', borderRadius: '6px', border: 'none', whiteSpace: 'nowrap', background: active ? 'oklch(1 0 0)' : 'transparent', color: active ? 'oklch(0.30 0.02 255)' : 'oklch(0.52 0.02 255)', boxShadow: active ? '0 1px 2px oklch(0.5 0.03 255/0.12)' : 'none', cursor: 'pointer' });
+    const settingsMembers = s.members.map((m, i) => ({
+      id: m.id, name: m.name, email: m.email, initials: this.initials(m.name, m.email),
+      isYou: m.you, invited: m.status === 'invited', canRemove: !m.you, lockRemove: m.you,
+      rowStyle: { display: 'flex', alignItems: 'center', gap: '12px', padding: '13px 16px', borderTop: i === 0 ? 'none' : '1px solid oklch(0.95 0.005 255)' },
+      avatarStyle: { width: '34px', height: '34px', borderRadius: '50%', background: 'oklch(0.62 0.13 ' + m.hue + ')', color: 'oklch(1 0 0)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 600, flex: '0 0 auto' },
+      memberStyle: seg2(m.role === 'Member'), adminStyle: seg2(m.role === 'Admin'),
+      onMember: () => this.setRole(m.id, 'Member'), onAdmin: () => this.setRole(m.id, 'Admin'), onRemove: () => this.removeMember(m.id),
+    }));
+    const settingsKeys = s.keys.map(k => {
+      const copied = s.copiedKeyId === k.id;
+      return {
+        id: k.id, name: k.name, created: k.created, lastUsed: k.lastUsed,
+        display: k.revealed ? k.key : 'relay_sk_live_' + '•'.repeat(28),
+        revealLabel: k.revealed ? 'Hide' : 'Reveal', copyLabel: copied ? 'Copied ✓' : 'Copy',
+        copyStyle: { background: copied ? 'oklch(0.60 0.13 155)' : 'oklch(0.60 0.14 250)', color: 'oklch(1 0 0)', border: 'none', borderRadius: '7px', padding: '6px 13px', fontSize: '12px', fontWeight: 600, flex: '0 0 auto', whiteSpace: 'nowrap', cursor: 'pointer' },
+        onReveal: () => this.toggleReveal(k.id), onRegenerate: () => this.regenerate(k.id), onRevoke: () => this.revoke(k.id), onCopy: () => this.copyKey(k.id, k.key),
+      };
+    });
+
+    // Drawer
+    const mdBold = (txt) => {
+      const parts = String(txt).split(/(\*\*[^*]+\*\*)/g).filter(x => x !== '');
+      return React.createElement(React.Fragment, null, parts.map((p, i) => (p.startsWith('**') && p.endsWith('**')) ? React.createElement('strong', { key: i, style: { fontWeight: 600, color: 'oklch(0.24 0.02 255)' } }, p.slice(2, -2)) : p));
+    };
+    const sel = s.selectedId ? this.findCard(s.selectedId) : null;
+    const selStage = sel ? s.stages.find(x => x.id === sel.stageId) : null;
+    let drawer = { open: false, activity: [], comments: [], owners: [], checklist: [], assignables: [], result: { summaryParts: [], changes: [], screens: [] }, activeAv: {} };
+    if (sel && selStage) {
+      const idx = this.stageIndex(selStage.id);
+      const stCompleted = selStage.category === 'completed';
+      const isDoneSub = sel.sub === 'done';
+      const isBlocked = !!sel.blocked;
+      const isWorking = selStage.owner === 'ai' && !isDoneSub && !isBlocked && !stCompleted;
+      const isReview = !!selStage.isReview && !stCompleted;
+      const isHumanOngoing = selStage.owner === 'human' && !isDoneSub && !stCompleted && !isReview;
+      const nx = s.stages[idx + 1];
+      const active = this.activeWorker(sel, selStage);
+      const aiActive = active === 'ai';
+      const rejectTarget = (selStage.rejectTo && s.stages.find(x => x.id === selStage.rejectTo)) || s.stages.find(x => x.owner === 'ai' && x.category === 'started') || s.stages[0];
+      const dot = t => (t.indexOf('approv') >= 0 || t.indexOf('finished') >= 0 || t.indexOf('Verified') >= 0 || t.indexOf('ready') >= 0) ? GREEN : (t.indexOf('asked') >= 0 || t.indexOf('changes') >= 0) ? AMBER : (t.indexOf('AI') >= 0) ? VIOLET : BLUE;
+      const commentTag = { changes: { label: 'CHANGES REQUESTED', color: 'oklch(0.55 0.13 65)', bg: 'oklch(0.96 0.03 75)' }, question: { label: 'QUESTION', color: 'oklch(0.52 0.11 65)', bg: 'oklch(0.96 0.03 75)' } };
+      const comments = (sel.comments || []).map(cm => {
+        const av = mkAvatar(cm.who, { size: 28 });
+        const isQ = cm.kind === 'question' || cm.kind === 'changes';
+        const meta = commentTag[cm.kind];
+        return {
+          avatarStyle: av.wrapStyle, isAI: av.isAI, markStyle: av.markStyle, showInitials: av.showInitials, initials: av.initials, name: av.name, ts: cm.ts,
+          text: cm.text,
+          tagShow: !!meta, tagLabel: meta ? meta.label : '', tagStyle: meta ? { fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.04em', fontFamily: mono, color: meta.color, background: meta.bg, padding: '1px 6px', borderRadius: '4px' } : {},
+          bubbleStyle: { fontSize: '13px', lineHeight: 1.5, color: 'oklch(0.36 0.02 255)', background: isQ ? (meta ? meta.bg : 'oklch(0.97 0.02 75)') : 'oklch(0.985 0.004 250)', border: '1px solid ' + (isQ ? 'oklch(0.88 0.06 75)' : 'oklch(0.94 0.006 255)'), borderRadius: '9px', padding: '9px 11px' },
+        };
+      });
+      const owners = (sel.owners || []).map(o => {
+        const paused = aiActive || o !== active;
+        const av = mkAvatar(o, { size: 22, grayed: paused });
+        return { av, name: (s.people[o] ? s.people[o].name : o), nameStyle: { fontSize: '13px', fontWeight: 500, color: paused ? 'oklch(0.60 0.02 255)' : 'oklch(0.30 0.02 255)' }, showActive: !aiActive && o === active, showPaused: aiActive };
+      });
+      const assignables = Object.keys(s.people).map(pid => {
+        const isOwner = (sel.owners || []).includes(pid);
+        return { av: mkAvatar(pid, { size: 22 }), name: s.people[pid].name, isOwner, rowStyle: { display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 7px', borderRadius: '7px', cursor: 'pointer', background: pid === active ? 'oklch(0.96 0.02 250)' : 'transparent' }, onPick: () => this.setActiveHuman(sel.id, pid) };
+      });
+      const done = (sel.checklist || []).filter(x => x.done).length;
+      const checklist = (sel.checklist || []).map((it, i) => ({
+        t: it.t, check: it.done ? '✓' : '', onToggle: () => this.toggleCheck(sel.id, i),
+        boxStyle: { width: '17px', height: '17px', borderRadius: '5px', flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', color: 'oklch(1 0 0)', background: it.done ? GREEN : 'oklch(1 0 0)', border: '1.5px solid ' + (it.done ? GREEN : 'oklch(0.82 0.01 255)'), boxSizing: 'border-box' },
+        textStyle: { fontSize: '13px', color: it.done ? 'oklch(0.62 0.02 255)' : 'oklch(0.34 0.02 255)', textDecoration: it.done ? 'line-through' : 'none' },
+      }));
+      const res = sel.result;
+      const activeAv = mkAvatar(active, { size: 26 });
+      const lastTs = (sel.activity && sel.activity.length) ? sel.activity[sel.activity.length - 1].ts : 'now';
+      drawer = {
+        open: true, title: sel.title, cardRef: 'RLY-' + (100 + this.stageIndex(selStage.id) + sel.id.length),
+        stageChip: selStage.name + (selStage.hasDone ? (isDoneSub ? ' · Done' : ' · In progress') : ''),
+        stageChipStyle: { alignSelf: 'flex-start', fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em', fontFamily: mono, background: 'oklch(0.96 0.006 255)', color: 'oklch(0.48 0.02 255)', padding: '3px 8px', borderRadius: '5px' },
+        isWorking, isBlocked, isReview,
+        reviewHint: 'Relay AI finished this. Approve to advance' + (nx ? ' to ' + nx.name : '') + ', or send it back with a note.',
+        approveLabel: nx ? 'Approve → ' + nx.name : 'Approve',
+        rejectClosed: !s.rejectOpen, rejectOpen: s.rejectOpen, rejectToName: rejectTarget ? rejectTarget.name : 'previous stage',
+        canMarkDone: isHumanOngoing, markDoneLabel: selStage.hasDone ? 'Mark ready → Done' : (nx ? 'Advance to ' + nx.name : 'Complete'),
+        canPull: isDoneSub && !!nx, pullLabel: nx ? 'Pull into ' + nx.name + ' →' : '',
+        question: sel.question, progressLabel: (sel.progress || 0) + '%',
+        progressStyle: { height: '100%', width: (sel.progress || 0) + '%', background: VIOLET, borderRadius: '3px', transition: 'width 0.6s ease' },
+        hasResult: !!res, result: res ? { summaryParts: [{ node: mdBold(res.summary) }], changes: (res.changes || []).map(t => ({ t })), screens: (res.screens || []).map(t => ({ t })), deployUrl: res.deployUrl, deployHref: 'https://' + res.deployUrl } : { summaryParts: [], changes: [], screens: [] },
+        hasChecklist: (sel.checklist || []).length > 0, checkProgress: done + '/' + (sel.checklist || []).length,
+        checkBarStyle: { height: '100%', width: ((sel.checklist || []).length ? (done / sel.checklist.length * 100) : 0) + '%', background: GREEN, borderRadius: '2px', transition: 'width 0.3s' },
+        checklist, comments, owners, assignables,
+        youAvatarStyle: Object.assign(mkAvatar('dk', { size: 28 }).wrapStyle, {}), youInitials: 'DK',
+        activeAv, activeName: aiActive ? 'Relay AI' : (s.people[active] ? s.people[active].name : 'Someone'), aiActive,
+        reassignLabel: s.reassignOpen ? 'Done' : 'Reassign', reassignOpen: s.reassignOpen,
+        hasTag: !!sel.tag, tag: sel.tag, created: sel.created || 'Mar 2', updated: lastTs,
+        activity: (sel.activity || []).slice().reverse().map(l => ({ t: l.t, ts: l.ts, dotStyle: { width: '7px', height: '7px', borderRadius: '50%', background: dot(l.t), display: 'block', marginTop: '4px', flex: '0 0 auto' } })),
+      };
+    }
+    const drawerStyle = { position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(760px, 94vw)', background: 'oklch(1 0 0)', borderLeft: '1px solid oklch(0.92 0.006 255)', boxShadow: '-8px 0 30px oklch(0.5 0.03 255/0.10)', transform: drawer.open ? 'translateX(0)' : 'translateX(103%)', transition: 'transform 0.28s cubic-bezier(.4,0,.2,1)', zIndex: 40, display: 'flex', flexDirection: 'column' };
+    const scrimStyle = { position: 'fixed', inset: 0, background: 'oklch(0.30 0.02 255/0.22)', opacity: drawer.open ? 1 : 0, pointerEvents: drawer.open ? 'auto' : 'none', transition: 'opacity 0.28s', zIndex: 35 };
+
+    return {
+      isBoard: s.view === 'board', isSettings: s.view === 'settings',
+      topTitle: s.view === 'settings' ? 'Board settings' : s.boardName,
+      isGeneralSec: s.settingsSection === 'general', isStagesSec: s.settingsSection === 'stages', isMembersSec: s.settingsSection === 'members', isKeysSec: s.settingsSection === 'apikeys',
+      nav: { general: navItem(s.settingsSection === 'general'), stages: navItem(s.settingsSection === 'stages'), members: navItem(s.settingsSection === 'members'), keys: navItem(s.settingsSection === 'apikeys') },
+      onSecGeneral: () => this.setState({ settingsSection: 'general' }), onSecStages: () => this.setState({ settingsSection: 'stages' }), onSecMembers: () => this.setState({ settingsSection: 'members' }), onSecKeys: () => this.setState({ settingsSection: 'apikeys' }),
+      boardName: s.boardName, slug: s.slug,
+      onBoardName: (e) => this.setState({ boardName: e.target.value }), onSlug: (e) => this.setState({ slug: e.target.value }),
+      inviteEmail: s.inviteEmail, memberCount: s.members.length, members: settingsMembers, keys: settingsKeys,
+      invite: { memberStyle: seg2(s.inviteRole === 'Member'), adminStyle: seg2(s.inviteRole === 'Admin') },
+      onInviteEmail: (e) => this.setState({ inviteEmail: e.target.value }),
+      onInviteKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); this.invite(); } },
+      onInviteMember: () => this.setState({ inviteRole: 'Member' }), onInviteAdmin: () => this.setState({ inviteRole: 'Admin' }),
+      onInvite: () => this.invite(), onCreateKey: () => this.createKey(),
+      groups, settingsGroups,
+      composeText: s.composeText, answerText: s.answerText,
+      descText: sel ? (sel.desc || '') : '', commentText: s.commentText, rejectText: s.rejectText,
+      onComposeInput: (e) => this.setState({ composeText: e.target.value }),
+      onAnswerInput: (e) => this.setState({ answerText: e.target.value }),
+      onDescInput: (e) => { const v = e.target.value; const id = s.selectedId; if (id) this.setState(st => ({ cards: st.cards.map(c => c.id === id ? { ...c, desc: v } : c) })); },
+      onCommentInput: (e) => this.setState({ commentText: e.target.value }),
+      onCommentKey: (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); this.postComment(); } },
+      onPostComment: () => this.postComment(),
+      onRejectInput: (e) => this.setState({ rejectText: e.target.value }),
+      onOpenReject: () => this.setState({ rejectOpen: true }),
+      onCancelReject: () => this.setState({ rejectOpen: false, rejectText: '' }),
+      onToggleReassign: () => this.setState(st => ({ reassignOpen: !st.reassignOpen })),
+      onDragEnd: () => { this.dragId = null; this.setState({ dragOverKey: null, dragging: false }); },
+      openSettings: () => this.openSettings(), closeSettings: () => this.closeSettings(),
+      closeDrawer: () => this.closeDrawer(),
+      onSubmitAnswer: () => this.submitAnswer(),
+      onApproveSel: () => this.approve(s.selectedId), onRejectSel: () => this.requestChanges(s.selectedId),
+      onMarkDone: () => this.markDone(s.selectedId), onPullNext: () => this.pullNext(s.selectedId),
+      drawer, drawerStyle, scrimStyle,
+    };
+  }
+}
+</script>
+</body>
+</html>

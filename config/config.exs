@@ -57,7 +57,7 @@ config :relay,
 
 # Configure tailwind (the version is required)
 config :tailwind,
-  version: "4.1.12",
+  version: "4.3.1",
   relay: [
     args: ~w(
       --input=assets/css/app.css

@@ -8,6 +8,12 @@ whose turn it is, what's blocked on a human, and what an agent is actively worki
 "who holds the baton" (human vs. agent) as a first-class property of a card, not an
 afterthought. See [`docs/vision.md`](docs/vision.md) for the product north star.
 
+**Design source of truth:** hi-fi mockups live in [`docs/designs/`](docs/designs/README.md)
+(pulled from the Claude Design project). Build the LiveView UI to match them. The palette
+encodes the core idea — **Human = blue** (`--color-primary`), **AI = violet**
+(`--color-secondary`), Done = green, Blocked = amber — set these as the daisyUI theme in
+`assets/css/app.css`. The Design System mockup maps each element to a daisyUI primitive.
+
 **Client strategy (important for where code goes):** the LiveView web app is the single
 source of truth for UI and real-time logic. Mobile ships as a **thin native wrapper** around
 that same LiveView UI — so **build features in LiveView, not in a parallel client**. We do

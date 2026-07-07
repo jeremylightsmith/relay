@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.30 0.02 255);background:oklch(0.975 0.004 250);-webkit-font-smoothing:antialiased;}
+  a{color:oklch(0.60 0.14 250);text-decoration:none;} a:hover{text-decoration:underline;}
+  button{font-family:inherit;cursor:pointer;}
+</style>
+</helmet>
+
+<div style="max-width:1000px;margin:0 auto;padding:56px 40px 96px 40px;">
+
+  <!-- Masthead -->
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+    <div style="width:34px;height:34px;border-radius:10px;background:oklch(0.60 0.14 250);display:flex;align-items:center;justify-content:center;position:relative;">
+      <div style="width:12px;height:12px;border-radius:50%;background:oklch(1 0 0);"></div>
+      <div style="position:absolute;right:5px;top:5px;width:6px;height:6px;border-radius:50%;background:oklch(0.60 0.14 250);box-shadow:0 0 0 2px oklch(1 0 0);"></div>
+    </div>
+    <span style="font-size:22px;font-weight:600;letter-spacing:-0.02em;">Relay</span>
+    <span style="font-size:22px;font-weight:400;letter-spacing:-0.02em;color:oklch(0.62 0.02 255);">Design System</span>
+  </div>
+  <p style="font-size:15px;line-height:1.6;color:oklch(0.48 0.02 255);max-width:560px;margin:0 0 44px 0;">The visual language for a workspace where humans and AI pass work between each other. Calm, technical, and legible — every element makes the handoff obvious.</p>
+
+  <!-- ===== TYPOGRAPHY ===== -->
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin-bottom:16px;">01 · TYPOGRAPHY</div>
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:30px 32px;margin-bottom:16px;">
+    <div style="display:flex;gap:40px;flex-wrap:wrap;margin-bottom:28px;">
+      <div style="flex:1;min-width:220px;">
+        <div style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:10px;">INTERFACE · Helvetica Neue</div>
+        <div style="font-size:44px;font-weight:600;letter-spacing:-0.03em;line-height:1;">Aa</div>
+        <div style="font-size:13px;color:oklch(0.55 0.02 255);margin-top:8px;">Regular · Medium · Semibold</div>
+      </div>
+      <div style="flex:1;min-width:220px;">
+        <div style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:10px;">DATA & LABELS · JetBrains Mono</div>
+        <div style="font-size:44px;font-weight:500;letter-spacing:-0.02em;line-height:1;font-family:'JetBrains Mono',ui-monospace,monospace;">Aa</div>
+        <div style="font-size:13px;color:oklch(0.55 0.02 255);margin-top:8px;font-family:'JetBrains Mono',ui-monospace,monospace;">WIP · 2/3 · #tag · 61%</div>
+      </div>
+    </div>
+    <div style="height:1px;background:oklch(0.94 0.005 255);margin:0 0 24px 0;"></div>
+    <div style="display:flex;flex-direction:column;gap:18px;">
+      <div style="display:flex;align-items:baseline;gap:20px;"><span style="width:120px;flex:0 0 auto;font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">Display / 40</span><span style="font-size:40px;font-weight:600;letter-spacing:-0.03em;line-height:1.05;">Pass work between humans and AI</span></div>
+      <div style="display:flex;align-items:baseline;gap:20px;"><span style="width:120px;flex:0 0 auto;font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">Heading / 20</span><span style="font-size:20px;font-weight:600;letter-spacing:-0.01em;">A stage the AI owns</span></div>
+      <div style="display:flex;align-items:baseline;gap:20px;"><span style="width:120px;flex:0 0 auto;font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">Body / 14</span><span style="font-size:14px;line-height:1.55;color:oklch(0.40 0.02 255);max-width:460px;">Each card carries its own history. When the AI needs a decision, it asks — and the work waits for you.</span></div>
+      <div style="display:flex;align-items:baseline;gap:20px;"><span style="width:120px;flex:0 0 auto;font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">Micro / 11</span><span style="font-size:11px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);">NEEDS YOUR INPUT</span></div>
+    </div>
+  </div>
+
+  <!-- ===== COLOR ===== -->
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin:36px 0 16px 0;">02 · COLOR</div>
+
+  <div style="font-size:13px;font-weight:600;color:oklch(0.42 0.02 255);margin-bottom:10px;">Cool neutrals</div>
+  <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:24px;">
+    <div style="display:flex;flex-direction:column;gap:7px;"><div style="height:64px;border-radius:10px;background:oklch(0.26 0.02 255);border:1px solid oklch(0.92 0.006 255);"></div><span style="font-size:11px;font-weight:600;">Ink</span><span style="font-size:9.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">.26 .02 255</span></div>
+    <div style="display:flex;flex-direction:column;gap:7px;"><div style="height:64px;border-radius:10px;background:oklch(0.32 0.02 255);border:1px solid oklch(0.92 0.006 255);"></div><span style="font-size:11px;font-weight:600;">Text</span><span style="font-size:9.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">.32 .02 255</span></div>
+    <div style="display:flex;flex-direction:column;gap:7px;"><div style="height:64px;border-radius:10px;background:oklch(0.55 0.02 255);border:1px solid oklch(0.92 0.006 255);"></div><span style="font-size:11px;font-weight:600;">Muted</span><span style="font-size:9.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">.55 .02 255</span></div>
+    <div style="display:flex;flex-direction:column;gap:7px;"><div style="height:64px;border-radius:10px;background:oklch(0.92 0.006 255);border:1px solid oklch(0.90 0.006 255);"></div><span style="font-size:11px;font-weight:600;">Line</span><span style="font-size:9.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">.92 .006 255</span></div>
+    <div style="display:flex;flex-direction:column;gap:7px;"><div style="height:64px;border-radius:10px;background:oklch(0.985 0.004 250);border:1px solid oklch(0.90 0.006 255);"></div><span style="font-size:11px;font-weight:600;">Canvas</span><span style="font-size:9.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">.985 .004 250</span></div>
+    <div style="display:flex;flex-direction:column;gap:7px;"><div style="height:64px;border-radius:10px;background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);"></div><span style="font-size:11px;font-weight:600;">Surface</span><span style="font-size:9.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">1 0 0</span></div>
+  </div>
+
+  <div style="font-size:13px;font-weight:600;color:oklch(0.42 0.02 255);margin-bottom:10px;">Brand &amp; actors</div>
+  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:24px;">
+    <div style="display:flex;align-items:center;gap:14px;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:14px;"><div style="width:52px;height:52px;border-radius:12px;background:oklch(0.60 0.14 250);flex:0 0 auto;"></div><div><div style="font-size:14px;font-weight:600;">Human · Blue</div><div style="font-size:12px;color:oklch(0.55 0.02 255);">Primary actions, people, columns you own</div><div style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-top:3px;">oklch(0.60 0.14 250)</div></div></div>
+    <div style="display:flex;align-items:center;gap:14px;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:14px;"><div style="width:52px;height:52px;border-radius:12px;background:oklch(0.56 0.16 292);flex:0 0 auto;"></div><div><div style="font-size:14px;font-weight:600;">AI · Violet</div><div style="font-size:12px;color:oklch(0.55 0.02 255);">Anything the AI owns or is working on</div><div style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-top:3px;">oklch(0.56 0.16 292)</div></div></div>
+  </div>
+
+  <div style="font-size:13px;font-weight:600;color:oklch(0.42 0.02 255);margin-bottom:10px;">Status</div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
+    <div style="display:flex;flex-direction:column;gap:7px;"><div style="height:56px;border-radius:10px;background:oklch(0.60 0.13 155);"></div><span style="font-size:11px;font-weight:600;">Done · Green</span><span style="font-size:9.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">.60 .13 155</span></div>
+    <div style="display:flex;flex-direction:column;gap:7px;"><div style="height:56px;border-radius:10px;background:oklch(0.70 0.13 65);"></div><span style="font-size:11px;font-weight:600;">Blocked · Amber</span><span style="font-size:9.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">.70 .13 65</span></div>
+    <div style="display:flex;flex-direction:column;gap:7px;"><div style="height:56px;border-radius:10px;background:oklch(0.62 0.16 15);"></div><span style="font-size:11px;font-weight:600;">Over WIP · Rose</span><span style="font-size:9.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">.62 .16 15</span></div>
+    <div style="display:flex;flex-direction:column;gap:7px;"><div style="height:56px;border-radius:10px;background:oklch(0.62 0.13 195);"></div><span style="font-size:11px;font-weight:600;">Accent · Teal</span><span style="font-size:9.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">.62 .13 195</span></div>
+  </div>
+
+  <!-- ===== ACTORS / AVATARS ===== -->
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin:36px 0 16px 0;">03 · ACTORS</div>
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:28px 32px;margin-bottom:16px;display:flex;gap:48px;flex-wrap:wrap;">
+    <div>
+      <div style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:14px;">HUMAN — colored initials</div>
+      <div style="display:flex;gap:12px;">
+        <div style="width:34px;height:34px;border-radius:50%;background:oklch(0.62 0.13 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;">DK</div>
+        <div style="width:34px;height:34px;border-radius:50%;background:oklch(0.62 0.13 195);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;">ML</div>
+        <div style="width:34px;height:34px;border-radius:50%;background:oklch(0.62 0.16 15);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;">JR</div>
+        <div style="width:34px;height:34px;border-radius:50%;background:oklch(0.62 0.13 155);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;">SY</div>
+      </div>
+    </div>
+    <div>
+      <div style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:14px;">AI — violet, ringed mark</div>
+      <div style="display:flex;gap:12px;align-items:center;">
+        <div style="width:34px;height:34px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;position:relative;"><div style="width:11px;height:11px;border-radius:50%;border:2px solid oklch(1 0 0);"></div></div>
+        <span style="font-size:12px;color:oklch(0.55 0.02 255);">Relay AI</span>
+      </div>
+    </div>
+    <div>
+      <div style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:14px;">OWNER PILLS</div>
+      <div style="display:flex;gap:8px;">
+        <span style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',ui-monospace,monospace;background:oklch(0.95 0.02 255);color:oklch(0.45 0.03 255);padding:3px 7px;border-radius:5px;">HUMAN</span>
+        <span style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',ui-monospace,monospace;background:oklch(0.95 0.04 292);color:oklch(0.46 0.14 292);padding:3px 7px;border-radius:5px;">AI</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== CONTROLS ===== -->
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin:36px 0 16px 0;">04 · CONTROLS</div>
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:28px 32px;margin-bottom:16px;display:flex;flex-direction:column;gap:26px;">
+    <div>
+      <div style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:12px;">BUTTONS</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <button style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;">Primary</button>
+        <button style="background:oklch(0.56 0.16 292);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:7px;"><span style="width:8px;height:8px;border-radius:2px;background:oklch(1 0 0);"></span>Hand to AI</button>
+        <button style="background:oklch(0.60 0.13 155);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;">Approve</button>
+        <button style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.01 255);color:oklch(0.38 0.02 255);border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;">Secondary</button>
+        <button style="background:transparent;border:none;color:oklch(0.55 0.02 255);border-radius:8px;padding:9px 12px;font-size:13px;font-weight:600;">Ghost</button>
+        <button style="background:oklch(0.97 0.02 15);border:1px solid oklch(0.86 0.06 15);color:oklch(0.52 0.16 15);border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;">Delete</button>
+      </div>
+    </div>
+    <div style="height:1px;background:oklch(0.94 0.005 255);"></div>
+    <div style="display:flex;gap:40px;flex-wrap:wrap;">
+      <div>
+        <div style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:12px;">SEGMENTED</div>
+        <div style="display:inline-flex;background:oklch(0.96 0.004 255);border:1px solid oklch(0.90 0.006 255);border-radius:9px;padding:3px;gap:2px;">
+          <span style="font-size:12px;font-weight:600;padding:6px 14px;border-radius:6px;background:oklch(1 0 0);color:oklch(0.30 0.02 255);box-shadow:0 1px 2px oklch(0.5 0.03 255/0.12);">Human</span>
+          <span style="font-size:12px;font-weight:600;padding:6px 14px;border-radius:6px;color:oklch(0.52 0.02 255);">AI</span>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:12px;">TOGGLE</div>
+        <div style="display:flex;align-items:center;gap:16px;">
+          <div style="width:38px;height:22px;border-radius:11px;background:oklch(0.60 0.14 250);position:relative;"><div style="position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:oklch(1 0 0);"></div></div>
+          <div style="width:38px;height:22px;border-radius:11px;background:oklch(0.88 0.01 255);position:relative;"><div style="position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:oklch(1 0 0);"></div></div>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:12px;">WIP INPUT</div>
+        <div style="display:inline-flex;align-items:center;border:1px solid oklch(0.88 0.01 255);border-radius:8px;overflow:hidden;">
+          <span style="width:26px;height:32px;display:flex;align-items:center;justify-content:center;color:oklch(0.55 0.02 255);font-size:15px;">−</span>
+          <span style="width:36px;text-align:center;font-size:13px;font-family:'JetBrains Mono',ui-monospace,monospace;">3</span>
+          <span style="width:26px;height:32px;display:flex;align-items:center;justify-content:center;color:oklch(0.55 0.02 255);font-size:15px;">+</span>
+        </div>
+      </div>
+    </div>
+    <div style="height:1px;background:oklch(0.94 0.005 255);"></div>
+    <div>
+      <div style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:12px;">TEXT FIELD</div>
+      <div style="max-width:360px;display:flex;flex-direction:column;gap:8px;">
+        <div style="border:1px solid oklch(0.88 0.01 255);border-radius:8px;padding:9px 11px;font-size:13px;color:oklch(0.30 0.02 255);">Rewrite the onboarding tooltips</div>
+        <div style="border:1px solid oklch(0.60 0.14 250);border-radius:8px;padding:9px 11px;font-size:13px;color:oklch(0.62 0.02 255);box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.12);">Type your answer…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== COMPONENTS ===== -->
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin:36px 0 16px 0;">05 · BOARD COMPONENTS</div>
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:28px 32px;margin-bottom:16px;">
+
+    <div style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:14px;">BADGES · TAGS · WIP</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:28px;">
+      <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.52 0.10 292);display:flex;align-items:center;gap:5px;"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.56 0.16 292);"></span>working</span>
+      <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.52 0.10 155);display:flex;align-items:center;gap:5px;"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.60 0.13 155);"></span>ready</span>
+      <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">#marketing</span>
+      <span style="font-size:11px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;background:oklch(0.96 0.006 255);color:oklch(0.48 0.02 255);padding:2px 7px;border-radius:5px;">wip 2/3</span>
+      <span style="font-size:11px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;background:oklch(0.96 0.03 15);color:oklch(0.55 0.16 15);padding:2px 7px;border-radius:5px;">wip 4/3</span>
+    </div>
+
+    <div style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:14px;">CARDS</div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;">
+      <!-- AI working card -->
+      <div style="width:236px;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-left:3px solid oklch(0.56 0.16 292);border-radius:9px;padding:11px 12px;display:flex;flex-direction:column;gap:9px;box-shadow:0 1px 2px oklch(0.55 0.03 255/0.05);">
+        <span style="font-size:13px;font-weight:500;line-height:1.35;color:oklch(0.28 0.02 255);">Migrate 40 blog posts to the new CMS</span>
+        <div style="height:5px;border-radius:3px;background:oklch(0.93 0.02 292);overflow:hidden;"><div style="height:100%;width:62%;background:oklch(0.56 0.16 292);border-radius:3px;"></div></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.52 0.10 292);display:flex;align-items:center;gap:5px;"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.56 0.16 292);"></span>working · 62%</span>
+          <div style="width:22px;height:22px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;"><div style="width:8px;height:8px;border-radius:50%;border:1.5px solid oklch(1 0 0);"></div></div>
+        </div>
+      </div>
+      <!-- Human card -->
+      <div style="width:236px;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-left:3px solid oklch(0.60 0.14 250);border-radius:9px;padding:11px 12px;display:flex;flex-direction:column;gap:9px;box-shadow:0 1px 2px oklch(0.55 0.03 255/0.05);">
+        <span style="font-size:13px;font-weight:500;line-height:1.35;color:oklch(0.28 0.02 255);">Spec the CSV export acceptance criteria</span>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">#product</span>
+          <div style="width:22px;height:22px;border-radius:50%;background:oklch(0.62 0.13 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;">DK</div>
+        </div>
+      </div>
+      <!-- Blocked card -->
+      <div style="width:236px;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-left:3px solid oklch(0.70 0.13 65);border-radius:9px;padding:11px 12px;display:flex;flex-direction:column;gap:9px;box-shadow:0 1px 2px oklch(0.55 0.03 255/0.05);">
+        <span style="font-size:13px;font-weight:500;line-height:1.35;color:oklch(0.28 0.02 255);">Rewrite the onboarding tooltips</span>
+        <div style="display:flex;flex-direction:column;gap:6px;background:oklch(0.97 0.03 75);border:1px solid oklch(0.86 0.08 75);border-radius:7px;padding:8px;">
+          <span style="font-size:10px;font-weight:600;letter-spacing:0.04em;color:oklch(0.52 0.11 65);font-family:'JetBrains Mono',ui-monospace,monospace;">NEEDS YOUR INPUT</span>
+          <span style="font-size:12px;line-height:1.4;color:oklch(0.35 0.03 65);">Keep the playful CTA or match the new voice?</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STATUS CATEGORIES ===== -->
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin:36px 0 16px 0;">06 · STATUS CATEGORIES</div>
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:28px 32px;margin-bottom:16px;">
+    <p style="font-size:13.5px;line-height:1.6;color:oklch(0.48 0.02 255);margin:0 0 20px 0;max-width:560px;">Every stage belongs to one of three categories — the same model as Linear and Shortcut — so a stage's <i>meaning</i> is never ambiguous. Squares mark the <b>owner</b>; circles mark the <b>category</b>.</p>
+    <div style="display:flex;gap:32px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:10px;"><span style="width:12px;height:12px;border-radius:50%;border:2px solid oklch(0.68 0.02 255);box-sizing:border-box;"></span><div><div style="font-size:13px;font-weight:600;">Unstarted</div><div style="font-size:12px;color:oklch(0.55 0.02 255);">Not picked up yet</div></div></div>
+      <div style="display:flex;align-items:center;gap:10px;"><span style="width:12px;height:12px;border-radius:50%;background:conic-gradient(oklch(0.60 0.14 250) 0 50%, oklch(0.86 0.03 250) 50% 100%);"></span><div><div style="font-size:13px;font-weight:600;">In progress</div><div style="font-size:12px;color:oklch(0.55 0.02 255);">Actively being worked</div></div></div>
+      <div style="display:flex;align-items:center;gap:10px;"><span style="width:12px;height:12px;border-radius:50%;background:oklch(0.60 0.13 155);"></span><div><div style="font-size:13px;font-weight:600;">Complete</div><div style="font-size:12px;color:oklch(0.55 0.02 255);">Done and verified</div></div></div>
+    </div>
+  </div>
+
+  <!-- ===== IMPLEMENTATION MAP ===== -->
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin:36px 0 16px 0;">07 · IMPLEMENTATION · TAILWIND 4 + daisyUI 5</div>
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:28px 32px;margin-bottom:16px;">
+    <p style="font-size:13.5px;line-height:1.6;color:oklch(0.48 0.02 255);margin:0 0 20px 0;max-width:600px;">Target stack: Phoenix LiveView with Tailwind 4 + daisyUI 5. Each element here maps to a daisyUI primitive — set the palette below as your daisyUI theme, then compose with utility classes. LiveView drives card moves and the live AI progress over the socket.</p>
+    <div style="display:flex;flex-direction:column;gap:0;border:1px solid oklch(0.93 0.006 255);border-radius:10px;overflow:hidden;">
+      <div style="display:flex;padding:9px 14px;background:oklch(0.975 0.004 255);font-size:11px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);"><span style="flex:1;">RELAY ELEMENT</span><span style="flex:1;">daisyUI / TAILWIND</span></div>
+      <div style="display:flex;padding:9px 14px;border-top:1px solid oklch(0.95 0.005 255);font-size:12.5px;"><span style="flex:1;color:oklch(0.34 0.02 255);">Card</span><span style="flex:1;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);">card card-border + border-l-3</span></div>
+      <div style="display:flex;padding:9px 14px;border-top:1px solid oklch(0.95 0.005 255);font-size:12.5px;"><span style="flex:1;color:oklch(0.34 0.02 255);">Buttons</span><span style="flex:1;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);">btn · btn-primary · btn-ghost · btn-success</span></div>
+      <div style="display:flex;padding:9px 14px;border-top:1px solid oklch(0.95 0.005 255);font-size:12.5px;"><span style="flex:1;color:oklch(0.34 0.02 255);">Owner / status pills</span><span style="flex:1;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);">badge badge-sm badge-soft</span></div>
+      <div style="display:flex;padding:9px 14px;border-top:1px solid oklch(0.95 0.005 255);font-size:12.5px;"><span style="flex:1;color:oklch(0.34 0.02 255);">Segmented (owner/category)</span><span style="flex:1;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);">join + btn / tab tabs-box</span></div>
+      <div style="display:flex;padding:9px 14px;border-top:1px solid oklch(0.95 0.005 255);font-size:12.5px;"><span style="flex:1;color:oklch(0.34 0.02 255);">Done-column toggle</span><span style="flex:1;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);">toggle toggle-primary</span></div>
+      <div style="display:flex;padding:9px 14px;border-top:1px solid oklch(0.95 0.005 255);font-size:12.5px;"><span style="flex:1;color:oklch(0.34 0.02 255);">AI progress</span><span style="flex:1;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);">progress progress-secondary</span></div>
+      <div style="display:flex;padding:9px 14px;border-top:1px solid oklch(0.95 0.005 255);font-size:12.5px;"><span style="flex:1;color:oklch(0.34 0.02 255);">Detail panel</span><span style="flex:1;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);">drawer drawer-end</span></div>
+      <div style="display:flex;padding:9px 14px;border-top:1px solid oklch(0.95 0.005 255);font-size:12.5px;"><span style="flex:1;color:oklch(0.34 0.02 255);">Assignee avatar</span><span style="flex:1;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);">avatar avatar-placeholder</span></div>
+      <div style="display:flex;padding:9px 14px;border-top:1px solid oklch(0.95 0.005 255);font-size:12.5px;"><span style="flex:1;color:oklch(0.34 0.02 255);">Stage pipeline</span><span style="flex:1;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);">steps (landing) / flex overflow-x-auto</span></div>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:20px;">
+      <div style="display:flex;align-items:center;gap:8px;"><span style="width:16px;height:16px;border-radius:4px;background:oklch(0.60 0.14 250);"></span><span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);">--color-primary</span></div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="width:16px;height:16px;border-radius:4px;background:oklch(0.56 0.16 292);"></span><span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);">--color-secondary (AI)</span></div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="width:16px;height:16px;border-radius:4px;background:oklch(0.60 0.13 155);"></span><span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);">--color-success</span></div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="width:16px;height:16px;border-radius:4px;background:oklch(0.70 0.13 65);"></span><span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);">--color-warning</span></div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="width:16px;height:16px;border-radius:4px;background:oklch(0.62 0.16 15);"></span><span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);">--color-error</span></div>
+    </div>
+  </div>
+
+  <div style="margin-top:28px;font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.66 0.02 255);">RELAY · v1 · humans + AI, one board</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1000,&quot;height&quot;:1600}}"></script>
+</body>
+</html>
