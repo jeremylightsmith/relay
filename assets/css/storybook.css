@@ -102,3 +102,13 @@
 @custom-variant phx-change-loading (.phx-change-loading&, .phx-change-loading &);
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/* --- Drag-and-drop affordances (classes toggled by the BoardDnD hook) --- */
+.board-card.dragging {
+  opacity: 0.5;
+}
+.stage-cards.drag-over {
+  outline: 2px dashed var(--color-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-field);
+}

@@ -368,6 +368,45 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
+  describe "drag-and-drop wiring" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Drag me"})
+      %{board: board, backlog: backlog}
+    end
+
+    test "the board mounts the BoardDnD hook", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(view, "#board[phx-hook='BoardDnD']")
+    end
+
+    test "cards are draggable and carry their ref", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(view, "#stage-col-1-cards .board-card[draggable='true'][data-ref='RLY-1']")
+    end
+
+    test "every stage's card container is a drop zone carrying its stage id",
+         %{conn: conn, backlog: backlog} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(view, "#stage-col-1-cards.stage-cards[data-stage-id='#{backlog.id}']")
+
+      zones =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#board .stage-cards[data-stage-id]")
+        |> Enum.count()
+
+      assert zones == 7
+    end
+  end
+
   describe "card drawer" do
     setup :register_and_log_in_user
 

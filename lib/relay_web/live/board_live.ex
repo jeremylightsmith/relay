@@ -26,7 +26,7 @@ defmodule RelayWeb.BoardLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} wide>
-      <div id="board" class="space-y-4">
+      <div id="board" class="space-y-4" phx-hook="BoardDnD">
         <h1 id="board-title" class="text-xl font-semibold">{@board.name}</h1>
         <div class="flex items-start gap-6 overflow-x-auto pb-4">
           <section

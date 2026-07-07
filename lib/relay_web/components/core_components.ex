@@ -461,6 +461,9 @@ defmodule RelayWeb.CoreComponents do
   for the parent LiveView — `RelayWeb.BoardLive` answers with a patch to
   `?card=<ref>`, opening the card drawer.
 
+  The card is natively draggable (draggable="true" + data-ref) — the
+  board-level BoardDnD hook turns drops into "move_card" events.
+
   ## Examples
 
       <.board_card id="cards-1" ref="RLY-3" title="Ship MMF 03" tag="infra" />
@@ -477,6 +480,8 @@ defmodule RelayWeb.CoreComponents do
       class="board-card card cursor-pointer bg-base-100 shadow-sm transition-shadow hover:shadow-md"
       role="button"
       tabindex="0"
+      draggable="true"
+      data-ref={@ref}
       phx-click="select_card"
       phx-value-ref={@ref}
     >
@@ -705,7 +710,8 @@ defmodule RelayWeb.CoreComponents do
       <div
         id={"#{@id}-cards"}
         phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}
-        class="flex flex-col gap-2"
+        data-stage-id={@stage_id}
+        class="stage-cards flex flex-col gap-2"
       >
         <div
           id={"#{@id}-empty"}

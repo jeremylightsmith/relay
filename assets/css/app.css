@@ -107,3 +107,13 @@
 
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
+
+/* --- Drag-and-drop affordances (classes toggled by the BoardDnD hook) --- */
+.board-card.dragging {
+  opacity: 0.5;
+}
+.stage-cards.drag-over {
+  outline: 2px dashed var(--color-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-field);
+}
