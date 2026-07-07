@@ -4,11 +4,12 @@ defmodule RelayWeb.BoardLiveTest do
   import Phoenix.LiveViewTest
 
   alias Relay.Boards
-  alias Relay.Boards.Board
-  alias Relay.Boards.Stage
   alias Relay.Cards
-  alias Relay.Cards.Card
   alias Relay.Repo
+  alias Schemas.Board
+  alias Schemas.Card
+  alias Schemas.CardOwner
+  alias Schemas.Stage
 
   describe "when logged out" do
     test "GET /board redirects to the sign-in page", %{conn: conn} do
@@ -407,6 +408,154 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
+  describe "baton rendering on the board" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog, _spec, plan | _rest] = board.stages
+      {:ok, card} = Cards.create_card(backlog, %{title: "Baton card"})
+      %{board: board, backlog: backlog, plan: plan, card: card}
+    end
+
+    test "an unowned card renders neutral: queued badge, no pill, no mismatch", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card .status-badge[data-status='queued']",
+               "queued"
+             )
+
+      refute has_element?(view, "#stage-col-1-cards .board-card .card-owner-pill")
+      refute has_element?(view, "#stage-col-1-cards .board-card .card-mismatch")
+    end
+
+    test "an unowned card in an AI stage shows no mismatch", %{conn: conn, plan: plan} do
+      {:ok, _card} = Cards.create_card(plan, %{title: "Unowned in Plan"})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      refute has_element?(view, "#stage-col-3-cards .board-card .card-mismatch")
+    end
+
+    test "a human-owned card renders blue with the Human pill",
+         %{conn: conn, user: user, card: card} do
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card[data-active-owner='human'].border-l-primary"
+             )
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card .card-owner-pill.badge-primary",
+               "Human"
+             )
+    end
+
+    test "adding the agent as an owner flips the card to violet AI",
+         %{conn: conn, user: user, card: card, plan: plan} do
+      {:ok, card} = Cards.add_owner(card, {:user, user.id})
+      {:ok, card} = Cards.add_owner(card, :agent)
+
+      # Backlog (stage-col-1) is a human-owned stage, so an AI-active card
+      # left there is a genuine stage mismatch (covered separately by "an
+      # AI-active card in a human stage shows the red meant-for-humans
+      # warning") and the mismatch rule overrides the border to
+      # border-l-error. Move the card into Plan — an AI-owned stage — so
+      # this test can demonstrate the clean, no-mismatch violet-AI border.
+      {:ok, _moved} = Cards.move_card(card, plan, 0)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(
+               view,
+               "#stage-col-3-cards .board-card[data-active-owner='ai'].border-l-secondary"
+             )
+
+      assert has_element?(
+               view,
+               "#stage-col-3-cards .board-card .card-owner-pill.badge-secondary",
+               "AI"
+             )
+    end
+
+    test "a needs_input card shows the amber NEEDS INPUT badge", %{conn: conn, card: card} do
+      {:ok, _card} = Cards.set_status(card, %{"status" => "needs_input"})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card .status-badge.badge-warning[data-status='needs_input']",
+               "NEEDS INPUT"
+             )
+    end
+
+    test "a working card shows its progress on the badge", %{conn: conn, card: card} do
+      {:ok, _card} = Cards.set_status(card, %{"status" => "working", "progress" => "61"})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card .status-badge[data-status='working']",
+               "working·61%"
+             )
+    end
+
+    test "a human-active card in an AI stage shows the red meant-for-agents warning",
+         %{conn: conn, user: user, card: card, plan: plan} do
+      {:ok, card} = Cards.add_owner(card, {:user, user.id})
+      {:ok, _moved} = Cards.move_card(card, plan, 0)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(
+               view,
+               "#stage-col-3-cards .board-card.border-l-error .card-mismatch",
+               "meant to be used by agents"
+             )
+    end
+
+    test "an AI-active card in a human stage shows the red meant-for-humans warning",
+         %{conn: conn, card: card} do
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card.border-l-error .card-mismatch",
+               "meant for humans"
+             )
+    end
+
+    test "moving a card changes neither its owners nor its status",
+         %{conn: conn, board: board, user: user, card: card, plan: plan} do
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => plan.id, "index" => 0})
+
+      moved = Cards.get_card_by_ref(board, "RLY-1")
+      assert moved.stage_id == plan.id
+      assert moved.status == :queued
+      assert [%{actor_type: :user}] = moved.owners
+
+      assert has_element?(
+               view,
+               "#stage-col-3-cards .board-card.border-l-error .card-mismatch",
+               "meant to be used by agents"
+             )
+    end
+  end
+
   describe "card drawer" do
     setup :register_and_log_in_user
 
@@ -625,6 +774,166 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(view, "#card-drawer .drawer-stage-chip.badge-secondary", "Plan")
       refute has_element?(view, "#card-drawer-move-to-#{plan.id}")
+    end
+  end
+
+  describe "drawer baton rail" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      {:ok, card} = Cards.create_card(backlog, %{title: "Baton"})
+      %{board: board, backlog: backlog, card: card}
+    end
+
+    test "an unowned card shows None for active worker and owners, with both add controls",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-rail .rail-active-worker", "None")
+      assert has_element?(view, "#card-drawer-rail .rail-owners", "None")
+      assert has_element?(view, "#card-drawer-assign-ai")
+      assert has_element?(view, "#card-drawer-add-me")
+    end
+
+    test "Add me makes the current user the active worker and reflects on the board card",
+         %{conn: conn, user: user, card: card} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-add-me") |> render_click()
+
+      assert has_element?(
+               view,
+               "#card-drawer-rail .rail-active-worker .owner-pill.badge-primary",
+               "Human"
+             )
+
+      assert has_element?(view, "#card-drawer-rail .rail-active-worker", "Test User")
+
+      assert has_element?(
+               view,
+               "#card-drawer-rail .rail-owner[data-actor-type='user']",
+               "Test User"
+             )
+
+      refute has_element?(view, "#card-drawer-add-me")
+
+      assert [owner] = Repo.all(CardOwner)
+      assert owner.card_id == card.id
+      assert owner.user_id == user.id
+
+      assert has_element?(view, "#stage-col-1-cards .board-card[data-active-owner='human']")
+    end
+
+    test "Assign AI flips the active worker to AI and pauses the human", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-add-me") |> render_click()
+      view |> element("#card-drawer-assign-ai") |> render_click()
+
+      assert has_element?(
+               view,
+               "#card-drawer-rail .rail-active-worker .owner-pill.badge-secondary",
+               "AI"
+             )
+
+      assert has_element?(
+               view,
+               "#card-drawer-rail .rail-owner[data-actor-type='user'] .rail-owner-paused",
+               "paused"
+             )
+
+      refute has_element?(view, "#card-drawer-assign-ai")
+      assert has_element?(view, "#stage-col-1-cards .board-card[data-active-owner='ai']")
+    end
+
+    test "releasing the AI returns the baton to the human", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-add-me") |> render_click()
+      view |> element("#card-drawer-assign-ai") |> render_click()
+      view |> element("#card-drawer-remove-owner-agent") |> render_click()
+
+      assert has_element?(
+               view,
+               "#card-drawer-rail .rail-active-worker .owner-pill.badge-primary",
+               "Human"
+             )
+
+      refute has_element?(view, "#card-drawer-rail .rail-owner[data-actor-type='agent']")
+      assert has_element?(view, "#card-drawer-assign-ai")
+      refute has_element?(view, "#card-drawer-rail .rail-owner-paused")
+    end
+
+    test "removing the human owner leaves the card unowned", %{conn: conn, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-add-me") |> render_click()
+      view |> element("#card-drawer-remove-owner-user-#{user.id}") |> render_click()
+
+      assert has_element?(view, "#card-drawer-rail .rail-active-worker", "None")
+      assert Repo.all(CardOwner) == []
+      refute has_element?(view, "#stage-col-1-cards .board-card[data-active-owner]")
+    end
+
+    test "setting status from the drawer persists and updates the board card",
+         %{conn: conn, card: card} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> form("#card-drawer-status-form", card: %{status: "needs_input"}) |> render_change()
+
+      assert Repo.get!(Card, card.id).status == :needs_input
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card .status-badge[data-status='needs_input']",
+               "NEEDS INPUT"
+             )
+    end
+
+    test "working reveals the progress input; progress shows on the board badge",
+         %{conn: conn, card: card} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      refute has_element?(view, "#card-drawer-status-form input[name='card[progress]']")
+
+      view |> form("#card-drawer-status-form", card: %{status: "working"}) |> render_change()
+
+      assert has_element?(view, "#card-drawer-status-form input[name='card[progress]']")
+
+      view
+      |> form("#card-drawer-status-form", card: %{status: "working", progress: "61"})
+      |> render_change()
+
+      assert Repo.get!(Card, card.id).progress == 61
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card .status-badge[data-status='working']",
+               "working·61%"
+             )
+    end
+
+    test "an invalid status payload changes nothing", %{conn: conn, card: card} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view
+      |> element("#card-drawer-status-form")
+      |> render_change(%{"card" => %{"status" => "banana"}})
+
+      assert Repo.get!(Card, card.id).status == :queued
+    end
+
+    test "adding another user's id as owner is ignored", %{conn: conn} do
+      other = insert(:user)
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      render_click(view, "add_owner", %{"actor_type" => "user", "user_id" => other.id})
+
+      assert Repo.all(CardOwner) == []
+      assert has_element?(view, "#card-drawer-rail .rail-active-worker", "None")
     end
   end
 

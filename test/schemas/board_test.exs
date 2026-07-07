@@ -1,7 +1,7 @@
-defmodule Relay.Boards.BoardTest do
+defmodule Schemas.BoardTest do
   use Relay.DataCase, async: true
 
-  alias Relay.Boards.Board
+  alias Schemas.Board
 
   describe "Board.changeset/2 + persistence" do
     test "inserts a board and applies the name/key defaults" do

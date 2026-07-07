@@ -21,8 +21,24 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           count: 2,
           board_key: "RLY",
           cards: [
-            {"story-card-1", %{title: "Wire up Google sign-in", tag: "auth", ref_number: 1}},
-            {"story-card-2", %{title: "Render the stage columns", tag: nil, ref_number: 2}}
+            {"story-card-1",
+             %{
+               title: "Wire up Google sign-in",
+               tag: "auth",
+               ref_number: 1,
+               status: :working,
+               progress: 61,
+               owners: [%{actor_type: :agent}]
+             }},
+            {"story-card-2",
+             %{
+               title: "Render the stage columns",
+               tag: nil,
+               ref_number: 2,
+               status: :queued,
+               progress: nil,
+               owners: []
+             }}
           ]
         }
       },

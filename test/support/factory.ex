@@ -8,7 +8,7 @@ defmodule Relay.Factory do
   use ExMachina.Ecto, repo: Relay.Repo
 
   def user_factory do
-    %Relay.Accounts.User{
+    %Schemas.User{
       email: sequence(:email, &"user#{&1}@example.com"),
       name: "Test User",
       avatar_url: "https://example.com/avatar.png",
@@ -18,7 +18,7 @@ defmodule Relay.Factory do
   end
 
   def board_factory do
-    %Relay.Boards.Board{
+    %Schemas.Board{
       name: "My board",
       slug: sequence(:slug, &"board-#{&1}"),
       key: "RLY",
@@ -27,7 +27,7 @@ defmodule Relay.Factory do
   end
 
   def stage_factory do
-    %Relay.Boards.Stage{
+    %Schemas.Stage{
       name: sequence(:stage_name, &"Stage #{&1}"),
       position: sequence(:stage_position, & &1),
       category: :unstarted,
@@ -43,7 +43,7 @@ defmodule Relay.Factory do
   def card_factory(attrs) do
     {stage, attrs} = Map.pop_lazy(attrs, :stage, fn -> insert(:stage) end)
 
-    card = %Relay.Cards.Card{
+    card = %Schemas.Card{
       title: sequence(:card_title, &"Card #{&1}"),
       tag: nil,
       position: sequence(:card_position, &(&1 + 1)),
@@ -53,5 +53,20 @@ defmodule Relay.Factory do
     }
 
     card |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
+
+  # Full-control factory: `card` (when overridden) must be a persisted card.
+  # With a `user`, builds a human owner; without, the single AI agent owner.
+  def card_owner_factory(attrs) do
+    {card, attrs} = Map.pop_lazy(attrs, :card, fn -> insert(:card) end)
+    {user, attrs} = Map.pop(attrs, :user)
+
+    owner = %Schemas.CardOwner{
+      card_id: card.id,
+      actor_type: if(user, do: :user, else: :agent),
+      user_id: user && user.id
+    }
+
+    owner |> merge_attributes(attrs) |> evaluate_lazy_attributes()
   end
 end

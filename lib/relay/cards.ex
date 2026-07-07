@@ -2,16 +2,21 @@ defmodule Relay.Cards do
   @moduledoc """
   The Cards context: cards on a board, per-board ref allocation
   (RLY-1, RLY-2, ...), and per-stage ordering.
+
+  An "actor" is either the single Relay AI agent (`:agent`) or a user
+  (`{:user, user_id}`) — the same concept later reused for comments
+  (MMF 07) and API attribution (MMF 09).
   """
 
-  use Boundary, deps: [Relay.Boards, Relay.Repo], exports: [Card]
+  use Boundary, deps: [Relay.Repo, Schemas]
 
   import Ecto.Query
 
-  alias Relay.Boards.Board
-  alias Relay.Boards.Stage
-  alias Relay.Cards.Card
   alias Relay.Repo
+  alias Schemas.Board
+  alias Schemas.Card
+  alias Schemas.CardOwner
+  alias Schemas.Stage
 
   @doc """
   Creates a card in `stage` from user-supplied `attrs` (`:title`, optional
@@ -27,7 +32,7 @@ defmodule Relay.Cards do
       ref_number = allocate_ref_number(stage.board_id)
 
       case insert_card(stage, ref_number, attrs) do
-        {:ok, card} -> card
+        {:ok, card} -> preload_owners(card)
         {:error, changeset} -> Repo.rollback(changeset)
       end
     end)
@@ -41,7 +46,8 @@ defmodule Relay.Cards do
     Repo.all(
       from c in Card,
         where: c.board_id == ^board_id,
-        order_by: [asc: c.stage_id, asc: c.position, asc: c.id]
+        order_by: [asc: c.stage_id, asc: c.position, asc: c.id],
+        preload: [owners: :user]
     )
   end
 
@@ -65,6 +71,69 @@ defmodule Relay.Cards do
     card
     |> Card.changeset(attrs)
     |> Repo.update()
+    |> preload_owners_result()
+  end
+
+  @doc """
+  Sets the card's baton status (`:queued | :working | :needs_input |
+  :in_review | :done`) and optional `progress` (0–100) from `attrs`,
+  returning `{:ok, card}` (owners preloaded) or `{:error, changeset}`.
+  Status only ever changes through this explicit call — never as a side
+  effect of moving a card.
+  """
+  def set_status(%Card{} = card, attrs) do
+    card
+    |> Card.status_changeset(attrs)
+    |> Repo.update()
+    |> preload_owners_result()
+  end
+
+  @doc """
+  Replaces the card's whole owner list with `actors`
+  (`:agent | {:user, user_id}`) atomically, returning `{:ok, card}` with
+  owners preloaded or `{:error, changeset}` (nothing changes on error).
+  """
+  def set_owners(%Card{} = card, actors) when is_list(actors) do
+    Repo.transaction(fn ->
+      Repo.delete_all(from o in CardOwner, where: o.card_id == ^card.id)
+      Enum.each(actors, &insert_owner_or_rollback(card, &1))
+      reload_with_owners(card)
+    end)
+  end
+
+  @doc """
+  Adds one owner actor to the card, returning `{:ok, card}` with owners
+  preloaded. Adding an actor that is already an owner is an ok no-op.
+  """
+  def add_owner(%Card{} = card, actor) do
+    case insert_owner(card, actor) do
+      {:ok, _owner} -> {:ok, reload_with_owners(card)}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  @doc """
+  Removes one owner actor from the card, returning `{:ok, card}` with
+  owners preloaded. Removing an actor that is not an owner is an ok no-op.
+  """
+  def remove_owner(%Card{} = card, actor) do
+    Repo.delete_all(owner_query(card, actor))
+    {:ok, reload_with_owners(card)}
+  end
+
+  @doc """
+  Derives who holds the baton from the (preloaded) owner list: `:ai` when
+  the agent is among the owners (human owners render paused), `:human`
+  when only humans own it, `nil` when unowned. Never stored — always
+  derived. Accepts any map with a loaded `owners` list so components can
+  use it on plain maps too.
+  """
+  def active_owner_type(%{owners: owners}) when is_list(owners) do
+    cond do
+      Enum.any?(owners, &(&1.actor_type == :agent)) -> :ai
+      owners != [] -> :human
+      true -> nil
+    end
   end
 
   @doc """
@@ -76,8 +145,13 @@ defmodule Relay.Cards do
   """
   def get_card_by_ref(%Board{} = board, ref) when is_binary(ref) do
     case parse_ref_number(board, ref) do
-      {:ok, ref_number} -> Repo.get_by(Card, board_id: board.id, ref_number: ref_number)
-      :error -> nil
+      {:ok, ref_number} ->
+        Card
+        |> Repo.get_by(board_id: board.id, ref_number: ref_number)
+        |> preload_owners()
+
+      :error ->
+        nil
     end
   end
 
@@ -99,7 +173,7 @@ defmodule Relay.Cards do
     previous_stage_id = card.stage_id
 
     Repo.transaction(fn ->
-      moved = place_at(card, target_stage, index)
+      moved = preload_owners(place_at(card, target_stage, index))
 
       if moved.stage_id != previous_stage_id do
         emit_stage_changed(moved, previous_stage_id)
@@ -164,6 +238,44 @@ defmodule Relay.Cards do
       Repo.update_all(from(b in Board, where: b.id == ^board_id), set: [card_seq: ref_number])
 
     ref_number
+  end
+
+  defp preload_owners_result({:ok, card}), do: {:ok, preload_owners(card)}
+  defp preload_owners_result({:error, changeset}), do: {:error, changeset}
+
+  defp preload_owners(nil), do: nil
+  defp preload_owners(card_or_cards), do: Repo.preload(card_or_cards, owners: :user)
+
+  defp insert_owner_or_rollback(%Card{} = card, actor) do
+    case insert_owner(card, actor) do
+      {:ok, _owner} -> :ok
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
+  end
+
+  defp insert_owner(%Card{} = card, :agent) do
+    %CardOwner{card_id: card.id, actor_type: :agent}
+    |> CardOwner.changeset()
+    |> Repo.insert(on_conflict: :nothing)
+  end
+
+  defp insert_owner(%Card{} = card, {:user, user_id}) when is_integer(user_id) do
+    %CardOwner{card_id: card.id, actor_type: :user, user_id: user_id}
+    |> CardOwner.changeset()
+    |> Repo.insert(on_conflict: :nothing)
+  end
+
+  defp owner_query(%Card{} = card, :agent) do
+    from o in CardOwner, where: o.card_id == ^card.id and o.actor_type == ^:agent
+  end
+
+  defp owner_query(%Card{} = card, {:user, user_id}) do
+    from o in CardOwner,
+      where: o.card_id == ^card.id and o.actor_type == ^:user and o.user_id == ^user_id
+  end
+
+  defp reload_with_owners(%Card{} = card) do
+    Card |> Repo.get!(card.id) |> Repo.preload(owners: :user)
   end
 
   defp insert_card(%Stage{} = stage, ref_number, attrs) do

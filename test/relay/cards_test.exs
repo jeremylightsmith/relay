@@ -1,9 +1,9 @@
 defmodule Relay.CardsTest do
   use Relay.DataCase, async: true
 
-  alias Relay.Boards.Board
   alias Relay.Cards
-  alias Relay.Cards.Card
+  alias Schemas.Board
+  alias Schemas.Card
 
   setup do
     board = insert(:board, key: "RLY")
@@ -272,6 +272,149 @@ defmodule Relay.CardsTest do
 
       assert_raise FunctionClauseError, fn -> Cards.move_card(card, foreign_stage, 0) end
       assert Repo.get!(Card, card.id).stage_id == stage.id
+    end
+  end
+
+  describe "set_status/2" do
+    test "sets status and progress and preloads owners", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      assert {:ok, %Card{} = updated} =
+               Cards.set_status(card, %{"status" => "working", "progress" => "40"})
+
+      assert updated.status == :working
+      assert updated.progress == 40
+      assert updated.owners == []
+      assert Repo.get!(Card, card.id).status == :working
+    end
+
+    test "returns an error changeset and persists nothing on invalid input", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      assert {:error, %Ecto.Changeset{}} = Cards.set_status(card, %{"status" => "banana"})
+
+      assert {:error, %Ecto.Changeset{}} =
+               Cards.set_status(card, %{"status" => "working", "progress" => "250"})
+
+      reloaded = Repo.get!(Card, card.id)
+      assert reloaded.status == :queued
+      assert reloaded.progress == nil
+    end
+  end
+
+  describe "owner management" do
+    setup %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Owned"})
+      %{card: card, user: insert(:user)}
+    end
+
+    test "add_owner/2 with {:user, id} adds a human owner with the user preloaded",
+         %{card: card, user: user} do
+      assert {:ok, %Card{} = updated} = Cards.add_owner(card, {:user, user.id})
+
+      assert [owner] = updated.owners
+      assert owner.actor_type == :user
+      assert owner.user_id == user.id
+      assert owner.user.id == user.id
+    end
+
+    test "add_owner/2 with :agent adds the AI owner", %{card: card} do
+      assert {:ok, %Card{} = updated} = Cards.add_owner(card, :agent)
+
+      assert [owner] = updated.owners
+      assert owner.actor_type == :agent
+      assert owner.user_id == nil
+    end
+
+    test "add_owner/2 is idempotent", %{card: card, user: user} do
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+      {:ok, updated} = Cards.add_owner(card, {:user, user.id})
+      {:ok, _card} = Cards.add_owner(card, :agent)
+      {:ok, updated_again} = Cards.add_owner(card, :agent)
+
+      assert length(updated.owners) == 1
+      assert length(updated_again.owners) == 2
+    end
+
+    test "add_owner/2 returns an error changeset for an unknown user id", %{card: card} do
+      assert {:error, %Ecto.Changeset{}} = Cards.add_owner(card, {:user, -1})
+      assert {:ok, %Card{owners: []}} = Cards.set_owners(card, [])
+    end
+
+    test "remove_owner/2 removes only the matching actor and is idempotent",
+         %{card: card, user: user} do
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      assert {:ok, %Card{} = updated} = Cards.remove_owner(card, :agent)
+      assert [%{actor_type: :user}] = updated.owners
+
+      assert {:ok, %Card{} = again} = Cards.remove_owner(card, :agent)
+      assert [%{actor_type: :user}] = again.owners
+
+      assert {:ok, %Card{owners: []}} = Cards.remove_owner(card, {:user, user.id})
+    end
+
+    test "set_owners/2 replaces the owner list atomically", %{card: card, user: user} do
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      assert {:ok, %Card{} = updated} = Cards.set_owners(card, [{:user, user.id}])
+
+      assert [owner] = updated.owners
+      assert owner.actor_type == :user
+      assert owner.user_id == user.id
+    end
+
+    test "set_owners/2 rolls back on an invalid actor, keeping existing owners",
+         %{card: card, user: user} do
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+
+      assert {:error, %Ecto.Changeset{}} = Cards.set_owners(card, [:agent, {:user, -1}])
+
+      assert {:ok, %Card{} = reloaded} = Cards.remove_owner(card, :agent)
+      assert [%{actor_type: :user}] = reloaded.owners
+    end
+  end
+
+  describe "active_owner_type/1" do
+    setup %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Baton"})
+      %{card: card, user: insert(:user)}
+    end
+
+    test "returns nil for an unowned card", %{card: card} do
+      assert Cards.active_owner_type(card) == nil
+    end
+
+    test "returns :human when only user owners", %{card: card, user: user} do
+      {:ok, card} = Cards.add_owner(card, {:user, user.id})
+
+      assert Cards.active_owner_type(card) == :human
+    end
+
+    test "returns :ai when the agent is among the owners, even with humans",
+         %{card: card, user: user} do
+      {:ok, card} = Cards.add_owner(card, {:user, user.id})
+      {:ok, card} = Cards.add_owner(card, :agent)
+
+      assert Cards.active_owner_type(card) == :ai
+    end
+  end
+
+  describe "owner preloading" do
+    test "every card-returning function preloads owners", %{board: board, stage: stage} do
+      {:ok, created} = Cards.create_card(stage, %{title: "Preloaded"})
+      assert created.owners == []
+
+      assert [%Card{owners: []}] = Cards.list_cards(board)
+      assert %Card{owners: []} = Cards.get_card_by_ref(board, "RLY-1")
+
+      {:ok, updated} = Cards.update_card(created, %{title: "Still preloaded"})
+      assert updated.owners == []
+
+      target = insert(:stage, board: board, position: 2)
+      {:ok, moved} = Cards.move_card(created, target, 0)
+      assert moved.owners == []
     end
   end
 

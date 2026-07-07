@@ -1,4 +1,4 @@
-defmodule Relay.Cards.Card do
+defmodule Schemas.Card do
   @moduledoc """
   A card on a board: a titled unit of work living in one stage. `position`
   orders cards within their stage; `ref_number` is the per-board sequence
@@ -18,8 +18,15 @@ defmodule Relay.Cards.Card do
     field :tag, :string
     field :ref_number, :integer
 
-    belongs_to :board, Relay.Boards.Board
-    belongs_to :stage, Relay.Boards.Stage
+    field :status, Ecto.Enum,
+      values: [:queued, :working, :needs_input, :in_review, :done],
+      default: :queued
+
+    field :progress, :integer
+
+    belongs_to :board, Schemas.Board
+    belongs_to :stage, Schemas.Stage
+    has_many :owners, Schemas.CardOwner
 
     timestamps(type: :utc_datetime)
   end
@@ -34,5 +41,18 @@ defmodule Relay.Cards.Card do
     |> cast(attrs, [:title, :description, :tag])
     |> validate_required([:title])
     |> unique_constraint([:board_id, :ref_number], name: :cards_board_id_ref_number_index)
+  end
+
+  @doc """
+  Changeset for the card's baton state: `:status` (enum) and `:progress`
+  (0–100, nullable — just stored and displayed; MMF 06 has no automation).
+  Kept separate from `changeset/2` so title/description edits can never
+  touch the baton and vice versa.
+  """
+  def status_changeset(card, attrs) do
+    card
+    |> cast(attrs, [:status, :progress])
+    |> validate_required([:status])
+    |> validate_number(:progress, greater_than_or_equal_to: 0, less_than_or_equal_to: 100)
   end
 end

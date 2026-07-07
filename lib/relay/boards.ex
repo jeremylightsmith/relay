@@ -4,14 +4,14 @@ defmodule Relay.Boards do
   Cards arrive in MMF 03 (`Relay.Cards`).
   """
 
-  use Boundary, deps: [Relay.Accounts, Relay.Repo], exports: [Board, Stage]
+  use Boundary, deps: [Relay.Repo, Schemas]
 
   import Ecto.Query
 
-  alias Relay.Accounts.User
-  alias Relay.Boards.Board
-  alias Relay.Boards.Stage
   alias Relay.Repo
+  alias Schemas.Board
+  alias Schemas.Stage
+  alias Schemas.User
 
   @seed_stages [
     {"Backlog", :human, :unstarted},

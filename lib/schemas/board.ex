@@ -1,4 +1,4 @@
-defmodule Relay.Boards.Board do
+defmodule Schemas.Board do
   @moduledoc """
   A user's kanban board. One board per user for now (MMF 19 adds more).
   `slug` is stored for future slug-routing (MMF 19); `key` is the short
@@ -18,8 +18,8 @@ defmodule Relay.Boards.Board do
     field :key, :string, default: "RLY"
     field :card_seq, :integer, default: 0
 
-    belongs_to :owner, Relay.Accounts.User
-    has_many :stages, Relay.Boards.Stage
+    belongs_to :owner, Schemas.User
+    has_many :stages, Schemas.Stage
 
     timestamps(type: :utc_datetime)
   end

@@ -1,7 +1,7 @@
-defmodule Relay.Boards.StageTest do
+defmodule Schemas.StageTest do
   use Relay.DataCase, async: true
 
-  alias Relay.Boards.Stage
+  alias Schemas.Stage
 
   describe "Stage.changeset/2 + persistence" do
     test "inserts a stage with enum category and owner" do

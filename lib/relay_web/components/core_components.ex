@@ -31,6 +31,7 @@ defmodule RelayWeb.CoreComponents do
 
   alias Phoenix.HTML.FormField
   alias Phoenix.LiveView.JS
+  alias Relay.Cards
 
   @doc """
   Renders flash notices.
@@ -454,8 +455,56 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
-  Renders a single kanban card: its title, optional #tag, and its
-  board-scoped ref (e.g. RLY-3).
+  Renders a card's status badge — the baton state at a glance.
+
+  `working` appends the stored progress percentage when present
+  (`working·61%`); `needs_input` renders the amber NEEDS INPUT treatment;
+  `done` is green; `in_review` blue; `queued` neutral.
+
+  ## Examples
+
+      <.status_badge status={:working} progress={61} />
+      <.status_badge status={:needs_input} />
+  """
+  attr :status, :atom,
+    values: [:queued, :working, :needs_input, :in_review, :done],
+    required: true
+
+  attr :progress, :integer, default: nil
+  attr :class, :any, default: nil
+
+  def status_badge(assigns) do
+    ~H"""
+    <span
+      class={["status-badge badge badge-sm font-medium", status_badge_class(@status), @class]}
+      data-status={@status}
+    >
+      {status_badge_label(@status, @progress)}
+    </span>
+    """
+  end
+
+  defp status_badge_class(:queued), do: "badge-ghost"
+  defp status_badge_class(:working), do: "badge-secondary"
+  defp status_badge_class(:needs_input), do: "badge-warning"
+  defp status_badge_class(:in_review), do: "badge-primary"
+  defp status_badge_class(:done), do: "badge-success"
+
+  defp status_badge_label(:working, progress) when is_integer(progress), do: "working·#{progress}%"
+  defp status_badge_label(:queued, _progress), do: "queued"
+  defp status_badge_label(:working, _progress), do: "working"
+  defp status_badge_label(:needs_input, _progress), do: "NEEDS INPUT"
+  defp status_badge_label(:in_review, _progress), do: "in review"
+  defp status_badge_label(:done, _progress), do: "done"
+
+  @doc """
+  Renders a single kanban card: its title, optional #tag, its board-scoped
+  ref (e.g. RLY-3), and — the heart of Relay — its baton state: the
+  active-owner colour (blue human / violet AI left border + owner pill),
+  the status badge (`working·61%`, amber NEEDS INPUT, green done, …), and
+  the red mismatch warning when the card's active-owner type conflicts
+  with the stage it sits in (`stage_owner`, the stage's "meant for"
+  designation). Mismatch is display-only — it never mutates the card.
 
   Clicking the card emits a `"select_card"` event (with `phx-value-ref`)
   for the parent LiveView — `RelayWeb.BoardLive` answers with a patch to
@@ -467,27 +516,64 @@ defmodule RelayWeb.CoreComponents do
   ## Examples
 
       <.board_card id="cards-1" ref="RLY-3" title="Ship MMF 03" tag="infra" />
+      <.board_card
+        id="cards-2"
+        ref="RLY-4"
+        title="Migrate the posts"
+        active_owner={:ai}
+        stage_owner={:ai}
+        status={:working}
+        progress={61}
+      />
   """
   attr :id, :string, required: true
   attr :ref, :string, required: true, doc: "the human-facing ref, e.g. RLY-3"
   attr :title, :string, required: true
   attr :tag, :string, default: nil
 
+  attr :active_owner, :atom,
+    values: [:human, :ai, nil],
+    default: nil,
+    doc: "who holds the baton, derived from the owner list; nil when unowned"
+
+  attr :stage_owner, :atom,
+    values: [:human, :ai, nil],
+    default: nil,
+    doc: "the stage's \"meant for\" designation, for the mismatch warning"
+
+  attr :status, :atom,
+    values: [:queued, :working, :needs_input, :in_review, :done, nil],
+    default: nil
+
+  attr :progress, :integer, default: nil
+
   def board_card(assigns) do
+    assigns = assign(assigns, :mismatch, mismatch(assigns.active_owner, assigns.stage_owner))
+
     ~H"""
     <article
       id={@id}
-      class="board-card card cursor-pointer bg-base-100 shadow-sm transition-shadow hover:shadow-md"
+      class={[
+        "board-card card cursor-pointer bg-base-100 shadow-sm transition-shadow hover:shadow-md",
+        "border-l-4",
+        card_border_class(@mismatch, @active_owner)
+      ]}
       role="button"
       tabindex="0"
       draggable="true"
       data-ref={@ref}
+      data-active-owner={@active_owner}
       phx-click="select_card"
       phx-value-ref={@ref}
     >
       <div class="card-body gap-2 p-3">
         <p class="card-title text-sm font-medium leading-snug">{@title}</p>
-        <div class="flex items-center justify-between gap-2">
+        <p :if={@mismatch} class="card-mismatch text-xs font-medium text-error">
+          {mismatch_message(@mismatch)}
+        </p>
+        <div class="flex flex-wrap items-center gap-2">
+          <.status_badge :if={@status} status={@status} progress={@progress} />
+          <.owner_pill :if={@active_owner} owner={@active_owner} class="card-owner-pill" />
           <span :if={@tag} class="card-tag badge badge-ghost badge-sm">#{@tag}</span>
           <span class="card-ref ml-auto font-mono text-xs text-base-content/60">{@ref}</span>
         </div>
@@ -495,6 +581,20 @@ defmodule RelayWeb.CoreComponents do
     </article>
     """
   end
+
+  defp mismatch(nil, _stage_owner), do: nil
+  defp mismatch(_active_owner, nil), do: nil
+  defp mismatch(:human, :ai), do: :meant_for_agents
+  defp mismatch(:ai, :human), do: :meant_for_humans
+  defp mismatch(_active_owner, _stage_owner), do: nil
+
+  defp mismatch_message(:meant_for_agents), do: "This stage is meant to be used by agents"
+  defp mismatch_message(:meant_for_humans), do: "This stage is meant for humans"
+
+  defp card_border_class(mismatch, _active_owner) when not is_nil(mismatch), do: "border-l-error"
+  defp card_border_class(nil, :ai), do: "border-l-secondary"
+  defp card_border_class(nil, :human), do: "border-l-primary"
+  defp card_border_class(nil, nil), do: "border-l-transparent"
 
   @doc """
   Renders the card detail drawer (daisyUI `drawer drawer-end`): a scrim
@@ -511,9 +611,11 @@ defmodule RelayWeb.CoreComponents do
   (form params `card[title]`) on title submit, `"edit_description"` when
   the description view is clicked, `"cancel_description"` on Cancel,
   `"save_card_description"` (form params `card[description]`) on save,
-  and `"move_card"` (phx-value ref + stage_id, no index — the server
-  appends to the target stage's bottom) when a "Move to…" target is
-  picked.
+  `"move_card"` (phx-value ref + stage_id, no index — the server appends
+  to the target stage's bottom) when a "Move to…" target is picked,
+  `"set_card_status"` (form params `card[status]` + `card[progress]`) on
+  status/progress change, and `"add_owner"` / `"remove_owner"` (phx-value
+  `actor_type` + `user_id`) from the owners rail's controls.
 
   ## Examples
 
@@ -525,6 +627,7 @@ defmodule RelayWeb.CoreComponents do
         stage_owner={:human}
         close_patch={~p"/board"}
         title_form={@title_form}
+        status_form={@status_form}
       />
   """
   attr :id, :string, required: true
@@ -532,10 +635,16 @@ defmodule RelayWeb.CoreComponents do
 
   attr :card, :any,
     required: true,
-    doc: "a card exposing title, description, tag, inserted_at, and updated_at"
+    doc: "a card exposing title, description, tag, status, progress, a loaded owners list, inserted_at, and updated_at"
 
   attr :stage_name, :string, required: true
   attr :stage_owner, :atom, values: [:human, :ai], required: true
+
+  attr :active_owner, :atom,
+    values: [:human, :ai, nil],
+    default: nil,
+    doc: "who holds the baton, derived from the card's owner list"
+
   attr :close_patch, :string, required: true, doc: "the patch target that closes the drawer"
   attr :title_form, :any, required: true, doc: "a Phoenix.HTML.Form for card[title]"
   attr :editing_description, :boolean, default: false
@@ -543,6 +652,14 @@ defmodule RelayWeb.CoreComponents do
   attr :description_form, :any,
     default: nil,
     doc: "a Phoenix.HTML.Form for card[description]; required when editing_description"
+
+  attr :status_form, :any,
+    required: true,
+    doc: "a Phoenix.HTML.Form for card[status] + card[progress]"
+
+  attr :current_user_id, :integer,
+    default: nil,
+    doc: "the signed-in user's id, for the Add me owner control"
 
   attr :stages, :list,
     default: [],
@@ -647,6 +764,94 @@ defmodule RelayWeb.CoreComponents do
             class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 border-t border-base-300 pt-4 text-sm"
           >
             <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+              Active worker
+            </dt>
+            <dd class="rail-active-worker flex items-center gap-2">
+              <%= if @active_owner do %>
+                <.owner_pill owner={@active_owner} />
+                <span class="rail-active-worker-name text-sm">
+                  {active_worker_names(@card, @active_owner)}
+                </span>
+              <% else %>
+                <span class="text-base-content/50">None</span>
+              <% end %>
+            </dd>
+            <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+              Owners
+            </dt>
+            <dd class="rail-owners space-y-2">
+              <div
+                :for={owner <- @card.owners}
+                class="rail-owner flex items-center gap-2"
+                data-actor-type={owner.actor_type}
+              >
+                <span class="text-sm">{owner_name(owner)}</span>
+                <span
+                  :if={paused_owner?(owner, @active_owner)}
+                  class="rail-owner-paused badge badge-ghost badge-xs"
+                >
+                  paused
+                </span>
+                <button
+                  type="button"
+                  id={"#{@id}-remove-owner-#{owner_dom_suffix(owner)}"}
+                  class="btn btn-ghost btn-xs btn-square"
+                  phx-click="remove_owner"
+                  phx-value-actor_type={owner.actor_type}
+                  phx-value-user_id={owner.user_id}
+                  aria-label={"Remove #{owner_name(owner)} as owner"}
+                >
+                  <.icon name="hero-x-mark" class="size-3" />
+                </button>
+              </div>
+              <span :if={@card.owners == []} class="text-base-content/50">None</span>
+              <div class="flex flex-wrap gap-2">
+                <button
+                  :if={!agent_owner?(@card)}
+                  type="button"
+                  id={"#{@id}-assign-ai"}
+                  class="btn btn-ghost btn-xs"
+                  phx-click="add_owner"
+                  phx-value-actor_type="agent"
+                >
+                  Assign AI
+                </button>
+                <button
+                  :if={@current_user_id && !user_owner?(@card, @current_user_id)}
+                  type="button"
+                  id={"#{@id}-add-me"}
+                  class="btn btn-ghost btn-xs"
+                  phx-click="add_owner"
+                  phx-value-actor_type="user"
+                  phx-value-user_id={@current_user_id}
+                >
+                  Add me
+                </button>
+              </div>
+            </dd>
+            <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+              Status
+            </dt>
+            <dd class="rail-status">
+              <.form for={@status_form} id={"#{@id}-status-form"} phx-change="set_card_status">
+                <.input
+                  field={@status_form[:status]}
+                  type="select"
+                  options={status_options()}
+                  class="select select-sm w-full"
+                />
+                <.input
+                  :if={@card.status == :working}
+                  field={@status_form[:progress]}
+                  type="number"
+                  min="0"
+                  max="100"
+                  placeholder="Progress %"
+                  class="input input-sm w-full"
+                />
+              </.form>
+            </dd>
+            <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
               Stage
             </dt>
             <dd class="rail-stage flex flex-wrap items-center gap-2">
@@ -694,16 +899,48 @@ defmodule RelayWeb.CoreComponents do
     """
   end
 
+  defp status_options do
+    [
+      {"Queued", "queued"},
+      {"Working", "working"},
+      {"Needs input", "needs_input"},
+      {"In review", "in_review"},
+      {"Done", "done"}
+    ]
+  end
+
+  defp owner_name(%{actor_type: :agent}), do: "AI Agent"
+  defp owner_name(%{actor_type: :user, user: user}), do: user.name || user.email
+
+  defp active_worker_names(_card, :ai), do: "AI Agent"
+
+  defp active_worker_names(card, :human) do
+    card.owners
+    |> Enum.filter(&(&1.actor_type == :user))
+    |> Enum.map_join(", ", &owner_name/1)
+  end
+
+  defp paused_owner?(owner, active_owner), do: active_owner == :ai and owner.actor_type == :user
+
+  defp agent_owner?(card), do: Enum.any?(card.owners, &(&1.actor_type == :agent))
+
+  defp user_owner?(card, user_id) do
+    Enum.any?(card.owners, &(&1.actor_type == :user and &1.user_id == user_id))
+  end
+
+  defp owner_dom_suffix(%{actor_type: :agent}), do: "agent"
+  defp owner_dom_suffix(%{actor_type: :user, user_id: user_id}), do: "user-#{user_id}"
+
   @doc """
   Renders one stage column of the board: header (stage name, card-count
   badge, Human/AI owner pill), the stage's cards in the order given, and
   the "+ New card" compose control.
 
   `cards` accepts a LiveView stream (preferred) or a list of
-  `{dom_id, card}` tuples; each card needs `title`, `tag`, and
-  `ref_number` fields. The dashed empty-state placeholder lives inside
-  the card container and is CSS-hidden (`only:block`) as soon as the
-  stage has cards.
+  `{dom_id, card}` tuples; each card needs `title`, `tag`, `ref_number`,
+  `status`, `progress`, and a loaded `owners` list. The dashed empty-state
+  placeholder lives inside the card container and is CSS-hidden
+  (`only:block`) as soon as the stage has cards.
 
   The compose control emits events handled by the parent LiveView:
   `"compose"` (with `phx-value-stage-id`) to open the composer,
@@ -755,6 +992,10 @@ defmodule RelayWeb.CoreComponents do
           title={card.title}
           tag={card.tag}
           ref={"#{@board_key}-#{card.ref_number}"}
+          status={card.status}
+          progress={card.progress}
+          active_owner={Cards.active_owner_type(card)}
+          stage_owner={@owner}
         />
       </div>
       <div :if={@composing} id={"#{@id}-composer"} phx-click-away="cancel_compose">

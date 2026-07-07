@@ -1,8 +1,8 @@
 defmodule RelayWeb.DevLoginControllerTest do
   use RelayWeb.ConnCase, async: true
 
-  alias Relay.Accounts.User
   alias Relay.Repo
+  alias Schemas.User
 
   test "GET /dev/login signs in the dev user and redirects to the board", %{conn: conn} do
     conn = get(conn, ~p"/dev/login")

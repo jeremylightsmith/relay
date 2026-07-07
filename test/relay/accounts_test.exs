@@ -2,8 +2,8 @@ defmodule Relay.AccountsTest do
   use Relay.DataCase, async: true
 
   alias Relay.Accounts
-  alias Relay.Accounts.Scope
-  alias Relay.Accounts.User
+  alias Schemas.Scope
+  alias Schemas.User
 
   defp google_auth(attrs) do
     %Ueberauth.Auth{

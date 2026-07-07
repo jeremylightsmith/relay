@@ -96,8 +96,8 @@ defmodule RelayWeb.Layouts do
   end
 
   # Initials for the avatar fallback, from the user's name (or email
-  # when the name is missing). Plain dot access on purpose: Accounts.User
-  # is not exported through the Relay boundary to the web layer.
+  # when the name is missing). Works on any user-shaped map or the
+  # Schemas.User struct.
   defp initials(user) do
     (user.name || user.email)
     |> String.split(~r/[\s@._-]+/, trim: true)
