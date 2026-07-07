@@ -4,12 +4,16 @@ defmodule RelayWeb.BoardLive do
   columns grouped under category bands (Unstarted → In progress →
   Complete). Cards live in one LiveView stream per stage; each column's
   composer creates cards via `Relay.Cards` (MMF 03).
+
+  MMF 04 adds the URL-driven card detail drawer ("?card=<ref>", handled
+  in handle_params/3) rendered via RelayWeb.CoreComponents.card_drawer/1.
   """
 
   use RelayWeb, :live_view
 
   alias Relay.Boards
   alias Relay.Cards
+  alias Relay.Cards.Card
 
   @category_order [:unstarted, :in_progress, :complete]
 
@@ -44,6 +48,18 @@ defmodule RelayWeb.BoardLive do
           </section>
         </div>
       </div>
+      <.card_drawer
+        :if={@selected_card}
+        id="card-drawer"
+        ref={Cards.ref(@board, @selected_card)}
+        card={@selected_card}
+        stage_name={@selected_stage.name}
+        stage_owner={@selected_stage.owner}
+        close_patch={~p"/board"}
+        title_form={@title_form}
+        editing_description={@editing_description}
+        description_form={@description_form}
+      />
     </Layouts.app>
     """
   end
@@ -67,6 +83,11 @@ defmodule RelayWeb.BoardLive do
       end)
 
     {:ok, socket}
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    {:noreply, assign_selected_card(socket, params["card"])}
   end
 
   @impl true
@@ -108,6 +129,60 @@ defmodule RelayWeb.BoardLive do
     end
   end
 
+  def handle_event("select_card", %{"ref" => ref}, socket) do
+    {:noreply, push_patch(socket, to: ~p"/board?card=#{ref}")}
+  end
+
+  def handle_event("save_card_title", %{"card" => card_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    case Cards.update_card(card, card_params) do
+      {:ok, card} ->
+        {:noreply,
+         socket
+         |> assign(:selected_card, card)
+         |> assign(:title_form, to_form(%{"title" => card.title}, as: :card))
+         |> stream_insert(stream_name(card.stage_id), card)}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :title_form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("save_card_title", _params, socket), do: {:noreply, socket}
+
+  def handle_event("edit_description", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    {:noreply,
+     socket
+     |> assign(:editing_description, true)
+     |> assign(:description_form, to_form(%{"description" => card.description || ""}, as: :card))}
+  end
+
+  def handle_event("edit_description", _params, socket), do: {:noreply, socket}
+
+  def handle_event("cancel_description", _params, socket) do
+    {:noreply, assign(socket, editing_description: false, description_form: nil)}
+  end
+
+  def handle_event(
+        "save_card_description",
+        %{"card" => card_params},
+        %{assigns: %{selected_card: %Card{} = card}} = socket
+      ) do
+    case Cards.update_card(card, card_params) do
+      {:ok, card} ->
+        {:noreply,
+         socket
+         |> assign(:selected_card, card)
+         |> assign(:editing_description, false)
+         |> assign(:description_form, nil)
+         |> stream_insert(stream_name(card.stage_id), card)}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :description_form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("save_card_description", _params, socket), do: {:noreply, socket}
+
   # Groups position-ordered stages under their category, keeping the fixed
   # category order and dropping empty categories (per spec: headers render
   # only for non-empty categories).
@@ -121,8 +196,38 @@ defmodule RelayWeb.BoardLive do
 
   # Only stages of the user's own board are addressable from events.
   defp find_stage(socket, stage_id) do
-    stage_id = String.to_integer(stage_id)
+    find_stage_by_id(socket, String.to_integer(stage_id))
+  end
+
+  defp find_stage_by_id(socket, stage_id) do
     Enum.find(socket.assigns.board.stages, &(&1.id == stage_id))
+  end
+
+  # The drawer is URL-driven: ?card=<ref> selects a card; no param — or a
+  # ref that doesn't resolve on this user's board (unknown, malformed, or
+  # another board's card) — means no drawer. Authorization is the board
+  # scoping inside Cards.get_card_by_ref/2.
+  defp assign_selected_card(socket, ref) do
+    card = if ref, do: Cards.get_card_by_ref(socket.assigns.board, ref)
+
+    case card do
+      %Card{} = card ->
+        socket
+        |> assign(:selected_card, card)
+        |> assign(:selected_stage, find_stage_by_id(socket, card.stage_id))
+        |> assign(:title_form, to_form(%{"title" => card.title}, as: :card))
+        |> assign(:editing_description, false)
+        |> assign(:description_form, nil)
+
+      nil ->
+        assign(socket,
+          selected_card: nil,
+          selected_stage: nil,
+          title_form: nil,
+          editing_description: false,
+          description_form: nil
+        )
+    end
   end
 
   # Streams are keyed per stage so each column gets its own
