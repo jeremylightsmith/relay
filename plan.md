@@ -291,7 +291,7 @@ Produces:
 
 **Steps**
 
-- [ ] Create the failing test file `test/relay/cards_test.exs` with exactly:
+- [x] Create the failing test file `test/relay/cards_test.exs` with exactly:
 
 ```elixir
 defmodule Relay.CardsTest do
@@ -417,8 +417,8 @@ defmodule Relay.CardsTest do
 end
 ```
 
-- [ ] Run it and confirm it fails (undefined `Cards.create_card/2`): `mise exec -- mix test test/relay/cards_test.exs`
-- [ ] Replace `lib/relay/cards.ex` with the full context:
+- [x] Run it and confirm it fails (undefined `Cards.create_card/2`): `mise exec -- mix test test/relay/cards_test.exs`
+- [x] Replace `lib/relay/cards.ex` with the full context:
 
 ```elixir
 defmodule Relay.Cards do
@@ -511,9 +511,9 @@ defmodule Relay.Cards do
 end
 ```
 
-- [ ] Run the test again and confirm all pass: `mise exec -- mix test test/relay/cards_test.exs`
-- [ ] Run `mise exec -- mix precommit` and fix anything it flags
-- [ ] Commit
+- [x] Run the test again and confirm all pass: `mise exec -- mix test test/relay/cards_test.exs`
+- [x] Run `mise exec -- mix precommit` and fix anything it flags
+- [x] Commit
 
 **Deliverable:** `mise exec -- mix test test/relay/cards_test.exs` green — sequential refs, cross-board independence, bottom-of-stage positions, gap-free rollback, concurrency, ordered/scoped listing; `mise exec -- mix precommit` green.
 
