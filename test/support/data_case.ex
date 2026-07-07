@@ -25,6 +25,7 @@ defmodule Relay.DataCase do
       import Ecto.Changeset
       import Ecto.Query
       import Relay.DataCase
+      import Relay.Factory
 
       alias Relay.Repo
     end

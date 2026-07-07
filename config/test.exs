@@ -37,5 +37,16 @@ config :relay, RelayWeb.Endpoint,
   secret_key_base: "d7ZQNZUWtP3mPcEZbpa3EzYQ70t1YmaHBlp+2uxkBeAXR5d6FfGSGzr/toxbUS5k",
   server: false
 
+# Compile dev-only routes (GET /dev/login, LiveDashboard, storybook) into
+# the test router so tests and the acceptance smoke can authenticate
+# without real Google. Never enabled in prod.
+config :relay, dev_routes: true
+
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
+
+# Dummy Google OAuth credentials — tests never contact real Google; the
+# request-phase redirect is asserted but never followed.
+config :ueberauth, Ueberauth.Strategy.Google.OAuth,
+  client_id: "test-google-client-id",
+  client_secret: "test-google-client-secret"

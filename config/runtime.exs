@@ -22,6 +22,15 @@ end
 
 config :relay, RelayWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4003"))]
 
+# Google OAuth credentials. Dev reads these from .envrc.local (direnv);
+# prod from `fly secrets set`. Test uses static dummies from
+# config/test.exs, which this must not override with nils.
+if config_env() != :test do
+  config :ueberauth, Ueberauth.Strategy.Google.OAuth,
+    client_id: System.get_env("GOOGLE_CLIENT_ID"),
+    client_secret: System.get_env("GOOGLE_CLIENT_SECRET")
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

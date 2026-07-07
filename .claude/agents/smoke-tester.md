@@ -21,19 +21,19 @@ confirm the feature demonstrably does what the plan says.
 - Read the spec under `docs/superpowers/specs/` if the plan references one.
 
 ## 2. Make sure you're testing THIS branch's code
-- A dev server is normally already running on `http://localhost:4000` and Phoenix hot-reloads
+- A dev server is normally already running on `http://localhost:4003` and Phoenix hot-reloads
   `.ex`/`.heex` changes, so it reflects the working tree.
 - **If the branch changed `mix.exs` (added/updated a dep), restart it** — deps are NOT
   hot-reloaded and stale code will pass while the browser fails silently:
-  `lsof -ti :4000 | xargs kill` then `MIX_ENV=dev mix phx.server` in the background, and wait:
-  `curl --retry 20 --retry-connrefused --retry-delay 1 http://localhost:4000/`.
-- If nothing is on :4000, start it the same way.
+  `lsof -ti :4003 | xargs kill` then `MIX_ENV=dev mix phx.server` in the background, and wait:
+  `curl --retry 20 --retry-connrefused --retry-delay 1 http://localhost:4003/`.
+- If nothing is on :4003, start it the same way.
 
 ## 3. Drive the feature end-to-end (ALWAYS — even with no UI)
 Set up your own scenario data through the app; don't assume fixtures exist.
 
-- **Auth:** hitting `http://localhost:4000/dev/login` logs you in as the dev coach
-  (`Accounts.ensure_dev_coach!`) and redirects into the app. Do this first in the browser
+- **Auth:** hitting `http://localhost:4003/dev/login` logs you in as the dev user
+  (`Accounts.ensure_dev_user!`) and redirects into the app. Do this first in the browser
   context (or, for non-browser drives, carry the session cookie it sets).
 - **UI features → Playwright** (recipe below): navigate to the state, perform the real flow
   (click, fill, submit), and assert the observable result (text appeared, total changed,
@@ -46,8 +46,7 @@ Set up your own scenario data through the app; don't assume fixtures exist.
 
 ## 4. Visual check (UI features)
 For every new or changed screen/state, capture a screenshot and compare it to the matching
-artboard in `docs/designs/` (`index.html`, `pipeline.html`, `client.html`, `contract.html`,
-`live_session.html`, `invoicing.html` — most screens are ports of these). Judge **layout,
+artboard in `docs/designs/` (`Relay Board.dc.html`, `Relay Landing.dc.html`, `Relay Design System.dc.html`). Judge **layout,
 the states you built, and obvious fidelity** — flag clear divergences (missing element,
 broken layout, wrong structure), not pixel nitpicks or copy differences. Save screenshots to
 `tmp/smoke/` (gitignored) with descriptive names and return their absolute paths.
@@ -70,12 +69,12 @@ const { chromium } = require('playwright');
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await ctx.newPage();
     // 1) log in (sets the session, redirects into the app)
-    await page.goto('http://localhost:4000/dev/login', { waitUntil: 'domcontentloaded' });
+    await page.goto('http://localhost:4003/dev/login', { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(800);
     // 2) drive your flow — navigate, click, fill, submit. Prefer waiting on a
     //    selector (page.waitForSelector) over fixed timeouts. Avoid waitUntil:'networkidle'
     //    (LiveView keeps a websocket open and it may never idle).
-    await page.goto('http://localhost:4000/billing', { waitUntil: 'domcontentloaded' });
+    await page.goto('http://localhost:4003/billing', { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(1000);
     await page.screenshot({ path: 'tmp/smoke/billing.png', fullPage: true });
     // assert observable behavior, e.g.:
