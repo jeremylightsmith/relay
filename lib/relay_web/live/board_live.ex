@@ -125,7 +125,7 @@ defmodule RelayWeb.BoardLive do
   def handle_event("create_card", %{"stage_id" => stage_id, "card" => card_params}, socket) do
     stage = find_stage(socket, stage_id)
 
-    case stage && Cards.create_card(stage, card_params) do
+    case stage && Cards.create_card(stage, card_params, current_actor(socket)) do
       nil ->
         {:noreply, socket}
 
@@ -153,7 +153,7 @@ defmodule RelayWeb.BoardLive do
     with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
          %Stage{} = stage <- resolve_stage(socket, stage_id),
          index when is_integer(index) <- resolve_index(params, socket, stage),
-         {:ok, moved} <- Cards.move_card(card, stage, index) do
+         {:ok, moved} <- Cards.move_card(card, stage, index, current_actor(socket)) do
       {:noreply, apply_move(socket, card.stage_id, moved)}
     else
       _ -> {:noreply, socket}
@@ -211,7 +211,7 @@ defmodule RelayWeb.BoardLive do
   def handle_event("save_card_description", _params, socket), do: {:noreply, socket}
 
   def handle_event("set_card_status", %{"card" => card_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
-    case Cards.set_status(card, card_params) do
+    case Cards.set_status(card, card_params, current_actor(socket)) do
       {:ok, card} ->
         {:noreply, refresh_card(socket, card)}
 
@@ -229,9 +229,14 @@ defmodule RelayWeb.BoardLive do
     current_user_id = socket.assigns.current_scope.user.id
 
     case resolve_actor(params) do
-      :agent -> apply_owner_change(socket, Cards.add_owner(card, :agent))
-      {:user, ^current_user_id} = actor -> apply_owner_change(socket, Cards.add_owner(card, actor))
-      _other -> {:noreply, socket}
+      :agent ->
+        apply_owner_change(socket, Cards.add_owner(card, :agent, current_actor(socket)))
+
+      {:user, ^current_user_id} = actor ->
+        apply_owner_change(socket, Cards.add_owner(card, actor, current_actor(socket)))
+
+      _other ->
+        {:noreply, socket}
     end
   end
 
@@ -240,7 +245,7 @@ defmodule RelayWeb.BoardLive do
   def handle_event("remove_owner", params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
     case resolve_actor(params) do
       nil -> {:noreply, socket}
-      actor -> apply_owner_change(socket, Cards.remove_owner(card, actor))
+      actor -> apply_owner_change(socket, Cards.remove_owner(card, actor, current_actor(socket)))
     end
   end
 
@@ -264,6 +269,10 @@ defmodule RelayWeb.BoardLive do
   end
 
   # Only stages of the user's own board are addressable from events.
+  # Every action taken in this LiveView is attributed to the signed-in
+  # human; the :agent default on the Cards mutators is the API's (MMF 09).
+  defp current_actor(socket), do: {:user, socket.assigns.current_scope.user.id}
+
   defp find_stage(socket, stage_id) do
     find_stage_by_id(socket, String.to_integer(stage_id))
   end

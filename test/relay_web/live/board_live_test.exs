@@ -1,6 +1,7 @@
 defmodule RelayWeb.BoardLiveTest do
   use RelayWeb.ConnCase, async: true
 
+  import Ecto.Query
   import Phoenix.LiveViewTest
 
   alias Relay.Boards
@@ -961,6 +962,54 @@ defmodule RelayWeb.BoardLiveTest do
       conn = conn |> log_in_user(user) |> delete(~p"/logout")
 
       assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/board")
+    end
+  end
+
+  describe "activity attribution" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      %{board: board, backlog: backlog}
+    end
+
+    test "creating a card via the composer logs :created attributed to the signed-in user",
+         %{conn: conn, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      view |> element("#stage-col-1-new-card") |> render_click()
+
+      view
+      |> form("#stage-col-1-compose-form", card: %{title: "Attributed"})
+      |> render_submit()
+
+      assert [%Schemas.Activity{type: :created, actor_type: :user, user_id: user_id}] =
+               Repo.all(Schemas.Activity)
+
+      assert user_id == user.id
+    end
+
+    test "drawer actions (status, owners, move) log user-attributed entries",
+         %{conn: conn, user: user, board: board, backlog: backlog} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Card"})
+      [_backlog, spec | _rest] = board.stages
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view
+      |> form("#card-drawer-status-form", card: %{status: "in_review"})
+      |> render_change()
+
+      view |> element("#card-drawer-add-me") |> render_click()
+      view |> element("#card-drawer-move-to-#{spec.id}") |> render_click()
+
+      entries = Repo.all(from a in Schemas.Activity, where: a.card_id == ^card.id, order_by: a.id)
+
+      assert Enum.map(entries, & &1.type) == [:created, :status_changed, :owners_changed, :moved]
+
+      [_created | user_entries] = entries
+      assert Enum.all?(user_entries, &(&1.actor_type == :user and &1.user_id == user.id))
     end
   end
 

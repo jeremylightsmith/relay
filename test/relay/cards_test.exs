@@ -11,7 +11,7 @@ defmodule Relay.CardsTest do
     %{board: board, stage: stage}
   end
 
-  describe "create_card/2" do
+  describe "create_card/3" do
     test "creates a card in the stage with the given title", %{board: board, stage: stage} do
       assert {:ok, %Card{} = card} = Cards.create_card(stage, %{title: "Ship MMF 03"})
 
@@ -200,7 +200,7 @@ defmodule Relay.CardsTest do
     end
   end
 
-  describe "move_card/3" do
+  describe "move_card/4" do
     setup %{board: board} do
       %{target: insert(:stage, board: board, position: 2)}
     end
@@ -275,7 +275,7 @@ defmodule Relay.CardsTest do
     end
   end
 
-  describe "set_status/2" do
+  describe "set_status/3" do
     test "sets status and progress and preloads owners", %{stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "T"})
 
@@ -308,7 +308,7 @@ defmodule Relay.CardsTest do
       %{card: card, user: insert(:user)}
     end
 
-    test "add_owner/2 with {:user, id} adds a human owner with the user preloaded",
+    test "add_owner/3 with {:user, id} adds a human owner with the user preloaded",
          %{card: card, user: user} do
       assert {:ok, %Card{} = updated} = Cards.add_owner(card, {:user, user.id})
 
@@ -318,7 +318,7 @@ defmodule Relay.CardsTest do
       assert owner.user.id == user.id
     end
 
-    test "add_owner/2 with :agent adds the AI owner", %{card: card} do
+    test "add_owner/3 with :agent adds the AI owner", %{card: card} do
       assert {:ok, %Card{} = updated} = Cards.add_owner(card, :agent)
 
       assert [owner] = updated.owners
@@ -326,7 +326,7 @@ defmodule Relay.CardsTest do
       assert owner.user_id == nil
     end
 
-    test "add_owner/2 is idempotent", %{card: card, user: user} do
+    test "add_owner/3 is idempotent", %{card: card, user: user} do
       {:ok, _card} = Cards.add_owner(card, {:user, user.id})
       {:ok, updated} = Cards.add_owner(card, {:user, user.id})
       {:ok, _card} = Cards.add_owner(card, :agent)
@@ -336,12 +336,12 @@ defmodule Relay.CardsTest do
       assert length(updated_again.owners) == 2
     end
 
-    test "add_owner/2 returns an error changeset for an unknown user id", %{card: card} do
+    test "add_owner/3 returns an error changeset for an unknown user id", %{card: card} do
       assert {:error, %Ecto.Changeset{}} = Cards.add_owner(card, {:user, -1})
       assert {:ok, %Card{owners: []}} = Cards.set_owners(card, [])
     end
 
-    test "remove_owner/2 removes only the matching actor and is idempotent",
+    test "remove_owner/3 removes only the matching actor and is idempotent",
          %{card: card, user: user} do
       {:ok, _card} = Cards.add_owner(card, {:user, user.id})
       {:ok, _card} = Cards.add_owner(card, :agent)
@@ -355,7 +355,7 @@ defmodule Relay.CardsTest do
       assert {:ok, %Card{owners: []}} = Cards.remove_owner(card, {:user, user.id})
     end
 
-    test "set_owners/2 replaces the owner list atomically", %{card: card, user: user} do
+    test "set_owners/3 replaces the owner list atomically", %{card: card, user: user} do
       {:ok, _card} = Cards.add_owner(card, :agent)
 
       assert {:ok, %Card{} = updated} = Cards.set_owners(card, [{:user, user.id}])
@@ -365,7 +365,7 @@ defmodule Relay.CardsTest do
       assert owner.user_id == user.id
     end
 
-    test "set_owners/2 rolls back on an invalid actor, keeping existing owners",
+    test "set_owners/3 rolls back on an invalid actor, keeping existing owners",
          %{card: card, user: user} do
       {:ok, _card} = Cards.add_owner(card, {:user, user.id})
 
@@ -401,6 +401,123 @@ defmodule Relay.CardsTest do
     end
   end
 
+  describe "activity logging" do
+    setup %{board: board} do
+      user = insert(:user, name: "Ada Lovelace")
+      target = insert(:stage, board: board, name: "Code", position: 2)
+      %{user: user, target: target}
+    end
+
+    test "create_card/3 logs :created attributed to the actor", %{stage: stage, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"}, {:user, user.id})
+
+      assert [%Schemas.Activity{type: :created, actor_type: :user, user_id: user_id, meta: %{}}] =
+               activities(card)
+
+      assert user_id == user.id
+    end
+
+    test "create_card/3 defaults the actor to the agent", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      assert [%Schemas.Activity{type: :created, actor_type: :agent, user_id: nil}] = activities(card)
+    end
+
+    test "a failed create logs nothing", %{stage: stage} do
+      {:error, _changeset} = Cards.create_card(stage, %{title: ""})
+
+      assert Repo.aggregate(Schemas.Activity, :count) == 0
+    end
+
+    test "move_card/4 logs :moved with both stage names", %{stage: stage, target: target, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Mover"})
+
+      {:ok, moved} = Cards.move_card(card, target, 0, {:user, user.id})
+
+      assert [_created, %Schemas.Activity{type: :moved, actor_type: :user, meta: meta}] =
+               activities(moved)
+
+      assert meta == %{"from_stage" => stage.name, "to_stage" => "Code"}
+    end
+
+    test "a same-stage reorder logs nothing", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "A"})
+      {:ok, _other} = Cards.create_card(stage, %{title: "B"})
+
+      {:ok, moved} = Cards.move_card(card, stage, 1)
+
+      assert [%Schemas.Activity{type: :created}] = activities(moved)
+    end
+
+    test "set_status/3 logs :status_changed with from/to", %{stage: stage, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      {:ok, updated} = Cards.set_status(card, %{"status" => "in_review"}, {:user, user.id})
+
+      assert [_created, %Schemas.Activity{type: :status_changed, actor_type: :user, meta: meta}] =
+               activities(updated)
+
+      assert meta == %{"from_status" => "queued", "to_status" => "in_review"}
+    end
+
+    test "a progress-only change does not log", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+      {:ok, card} = Cards.set_status(card, %{"status" => "working", "progress" => "10"})
+
+      {:ok, card} = Cards.set_status(card, %{"status" => "working", "progress" => "50"})
+
+      assert Enum.map(activities(card), & &1.type) == [:created, :status_changed]
+    end
+
+    test "a failed status change logs nothing", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      {:error, _changeset} = Cards.set_status(card, %{"status" => "banana"})
+
+      assert Enum.map(activities(card), & &1.type) == [:created]
+    end
+
+    test "add_owner/3 logs :owners_changed with the owner label", %{stage: stage, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      {:ok, card} = Cards.add_owner(card, :agent, {:user, user.id})
+
+      assert [_created, %Schemas.Activity{type: :owners_changed, actor_type: :user, meta: meta}] =
+               activities(card)
+
+      assert meta == %{"action" => "added", "owner" => "AI"}
+    end
+
+    test "adding an existing owner logs nothing new", %{stage: stage, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+      {:ok, card} = Cards.add_owner(card, {:user, user.id})
+
+      {:ok, card} = Cards.add_owner(card, {:user, user.id})
+
+      assert Enum.map(activities(card), & &1.type) == [:created, :owners_changed]
+    end
+
+    test "remove_owner/3 logs the user's name; a no-op remove logs nothing", %{stage: stage, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+      {:ok, card} = Cards.add_owner(card, {:user, user.id})
+
+      {:ok, card} = Cards.remove_owner(card, {:user, user.id})
+      {:ok, card} = Cards.remove_owner(card, {:user, user.id})
+
+      assert [_created, _added, %Schemas.Activity{type: :owners_changed, meta: meta}] = activities(card)
+      assert meta == %{"action" => "removed", "owner" => "Ada Lovelace"}
+    end
+
+    test "set_owners/3 logs the new owner labels", %{stage: stage, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      {:ok, card} = Cards.set_owners(card, [:agent, {:user, user.id}], {:user, user.id})
+
+      assert [_created, %Schemas.Activity{type: :owners_changed, meta: meta}] = activities(card)
+      assert meta == %{"action" => "set", "owners" => ["AI", "Ada Lovelace"]}
+    end
+  end
+
   describe "owner preloading" do
     test "every card-returning function preloads owners", %{board: board, stage: stage} do
       {:ok, created} = Cards.create_card(stage, %{title: "Preloaded"})
@@ -427,5 +544,9 @@ defmodule Relay.CardsTest do
     |> Cards.list_cards()
     |> Enum.filter(&(&1.stage_id == stage.id))
     |> Enum.map(& &1.position)
+  end
+
+  defp activities(card) do
+    Repo.all(from a in Schemas.Activity, where: a.card_id == ^card.id, order_by: a.id)
   end
 end
