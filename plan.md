@@ -1983,7 +1983,7 @@ directions — and a move changes neither owners nor status. Stage column story 
 
 **Steps**
 
-- [ ] Add `alias Schemas.CardOwner` to the alias block of `test/relay_web/live/board_live_test.exs`, then add the failing describe block (after "drawer move menu"):
+- [x] Add `alias Schemas.CardOwner` to the alias block of `test/relay_web/live/board_live_test.exs`, then add the failing describe block (after "drawer move menu"):
 
 ```elixir
   describe "drawer baton rail" do
@@ -2147,8 +2147,8 @@ directions — and a move changes neither owners nor status. Stage column story 
   end
 ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — expect failure (no rail markup, no events, no `status_form` assign).
-- [ ] Extend `card_drawer/1` in `lib/relay_web/components/core_components.ex`. Add the new attrs after `attr :stage_owner ...`:
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — expect failure (no rail markup, no events, no `status_form` assign).
+- [x] Extend `card_drawer/1` in `lib/relay_web/components/core_components.ex`. Add the new attrs after `attr :stage_owner ...`:
 
 ```elixir
   attr :active_owner, :atom,
@@ -2294,7 +2294,7 @@ directions — and a move changes neither owners nor status. Stage column story 
   defp owner_dom_suffix(%{actor_type: :user, user_id: user_id}), do: "user-#{user_id}"
 ```
 
-- [ ] Wire `RelayWeb.BoardLive` (`lib/relay_web/live/board_live.ex`):
+- [x] Wire `RelayWeb.BoardLive` (`lib/relay_web/live/board_live.ex`):
   1. In `render/1`, add to the `<.card_drawer ...>` call (alongside the existing attrs):
 
 ```heex
@@ -2375,8 +2375,8 @@ directions — and a move changes neither owners nor status. Stage column story 
   end
 ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — expect pass.
-- [ ] Refresh `storybook/core_components/card_drawer.story.exs` — the drawer now requires `status_form` and reads `card.status` / `card.owners`. Replace `variations/0` and `story_card/0` with:
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — expect pass.
+- [x] Refresh `storybook/core_components/card_drawer.story.exs` — the drawer now requires `status_form` and reads `card.status` / `card.owners`. Replace `variations/0` and `story_card/0` with:
 
 ```elixir
   def variations do
@@ -2434,7 +2434,7 @@ directions — and a move changes neither owners nor status. Stage column story 
   end
 ```
 
-- [ ] Run `mix precommit` — must pass (the whole suite, including all pre-existing drawer tests). Commit.
+- [x] Run `mix precommit` — must pass (the whole suite, including all pre-existing drawer tests). Commit.
 
 **Deliverable:** the drawer's properties rail shows ACTIVE WORKER (pill + name), the full
 owner list with paused markers and per-owner remove, Assign AI / Add me controls, and a
