@@ -541,7 +541,7 @@ Produces:
 
 **Steps**
 
-- [ ] In `test/relay_web/components/core_components_test.exs`, add a `board_card/1` describe block and REPLACE the entire existing `describe "stage_column/1"` block (its "renders slot content instead of the empty state" test is obsolete — the slot is gone and the empty state is now always in the DOM, CSS-hidden). New content:
+- [x] In `test/relay_web/components/core_components_test.exs`, add a `board_card/1` describe block and REPLACE the entire existing `describe "stage_column/1"` block (its "renders slot content instead of the empty state" test is obsolete — the slot is gone and the empty state is now always in the DOM, CSS-hidden). New content:
 
 ```elixir
   describe "board_card/1" do
@@ -632,8 +632,8 @@ Produces:
 ```
 
   (`to_form/2` comes from the file's existing `import Phoenix.Component`.)
-- [ ] Run and confirm failures (`board_card/1` undefined; old `stage_column/1` lacks the new attrs): `mise exec -- mix test test/relay_web/components/core_components_test.exs`
-- [ ] In `lib/relay_web/components/core_components.ex`, add `board_card/1` immediately after `owner_pill/1`:
+- [x] Run and confirm failures (`board_card/1` undefined; old `stage_column/1` lacks the new attrs): `mise exec -- mix test test/relay_web/components/core_components_test.exs`
+- [x] In `lib/relay_web/components/core_components.ex`, add `board_card/1` immediately after `owner_pill/1`:
 
 ```elixir
   @doc """
@@ -665,7 +665,7 @@ Produces:
 ```
 
   (In the tag span, `#` is literal text and `{@tag}` is HEEx interpolation — together they render e.g. `#infra`.)
-- [ ] In the same file, REPLACE the whole existing `stage_column/1` (its `@doc`, attrs, slot, and function) with:
+- [x] In the same file, REPLACE the whole existing `stage_column/1` (its `@doc`, attrs, slot, and function) with:
 
 ```elixir
   @doc """
@@ -759,8 +759,8 @@ Produces:
 ```
 
   Notes: the `<.button>` in the form intentionally has no `type` attr — inside a form, buttons default to `type="submit"` (and `type` is not in `button/1`'s `rest` include list). The empty state uses the LiveView-documented `hidden only:block` stream empty-state pattern (works because it is the only non-stream child of the container). `phx-update` is set only when `cards` is a real `Phoenix.LiveView.LiveStream` (same trick as the existing `table/1`), so plain lists (Storybook, tests) render statically. `phx-click-away` (not `phx-blur`) implements "blur closes it" without eating the submit click.
-- [ ] Run and confirm the component tests pass, and that the MMF 02 LiveView tests still pass (all new `stage_column` attrs have defaults; `.stage-empty` still renders on every empty column): `mise exec -- mix test test/relay_web/components/core_components_test.exs test/relay_web/live/board_live_test.exs`
-- [ ] Create `storybook/core_components/board_card.story.exs`:
+- [x] Run and confirm the component tests pass, and that the MMF 02 LiveView tests still pass (all new `stage_column` attrs have defaults; `.stage-empty` still renders on every empty column): `mise exec -- mix test test/relay_web/components/core_components_test.exs test/relay_web/live/board_live_test.exs`
+- [x] Create `storybook/core_components/board_card.story.exs`:
 
 ```elixir
 defmodule Storybook.Components.CoreComponents.BoardCard do
@@ -790,7 +790,7 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
 end
 ```
 
-- [ ] Replace `storybook/core_components/stage_column.story.exs` (the `:with_content` slot variation is obsolete) with:
+- [x] Replace `storybook/core_components/stage_column.story.exs` (the `:with_content` slot variation is obsolete) with:
 
 ```elixir
 defmodule Storybook.Components.CoreComponents.StageColumn do
@@ -836,14 +836,14 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
 end
 ```
 
-- [ ] In `storybook/core_components/_core_components.index.exs`, add an entry (keep the list alphabetical, i.e. after `"back"`):
+- [x] In `storybook/core_components/_core_components.index.exs`, add an entry (keep the list alphabetical, i.e. after `"back"`):
 
 ```elixir
   def entry("board_card"), do: [icon: {:fa, "note-sticky", :thin}]
 ```
 
-- [ ] Run `mise exec -- mix precommit` and fix anything it flags
-- [ ] Commit
+- [x] Run `mise exec -- mix precommit` and fix anything it flags
+- [x] Commit
 
 **Deliverable:** Component tests green; Storybook has stories at `/storybook/core_components/board_card` (new) and `/storybook/core_components/stage_column` (empty / with-cards / composing states); the board page behavior is unchanged; `mise exec -- mix precommit` green.
 
