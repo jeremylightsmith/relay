@@ -601,7 +601,7 @@ testable via `mise exec -- mix test test/relay/boards_test.exs`.
 
 **Steps**
 
-- [ ] Write the failing component tests. Create
+- [x] Write the failing component tests. Create
   `test/relay_web/components/core_components_test.exs`:
 
   ```elixir
@@ -662,9 +662,9 @@ testable via `mise exec -- mix test test/relay/boards_test.exs`.
   end
   ```
 
-- [ ] Run `mise exec -- mix test test/relay_web/components/core_components_test.exs` — expect
+- [x] Run `mise exec -- mix test test/relay_web/components/core_components_test.exs` — expect
   failure (components don't exist).
-- [ ] Add both components to `lib/relay_web/components/core_components.ex`, inserted after the
+- [x] Add both components to `lib/relay_web/components/core_components.ex`, inserted after the
   `list/1` function and before the `icon/1` doc block:
 
   ```elixir
@@ -731,8 +731,8 @@ testable via `mise exec -- mix test test/relay/boards_test.exs`.
   end
   ```
 
-- [ ] Run `mise exec -- mix test test/relay_web/components/core_components_test.exs` — expect pass.
-- [ ] Create `storybook/core_components/owner_pill.story.exs`:
+- [x] Run `mise exec -- mix test test/relay_web/components/core_components_test.exs` — expect pass.
+- [x] Create `storybook/core_components/owner_pill.story.exs`:
 
   ```elixir
   defmodule Storybook.Components.CoreComponents.OwnerPill do
@@ -751,7 +751,7 @@ testable via `mise exec -- mix test test/relay/boards_test.exs`.
   end
   ```
 
-- [ ] Create `storybook/core_components/stage_column.story.exs`:
+- [x] Create `storybook/core_components/stage_column.story.exs`:
 
   ```elixir
   defmodule Storybook.Components.CoreComponents.StageColumn do
@@ -783,7 +783,7 @@ testable via `mise exec -- mix test test/relay/boards_test.exs`.
   end
   ```
 
-- [ ] Modify `storybook/core_components/_core_components.index.exs` — add two entries, keeping the
+- [x] Modify `storybook/core_components/_core_components.index.exs` — add two entries, keeping the
   clauses alphabetical (between `entry("list")` and `entry("table")`):
 
   ```elixir
@@ -791,8 +791,8 @@ testable via `mise exec -- mix test test/relay/boards_test.exs`.
   def entry("stage_column"), do: [icon: {:fa, "table-columns", :thin}]
   ```
 
-- [ ] Run `mise exec -- mix format`, then `mise exec -- mix precommit` — expect green.
-- [ ] Commit.
+- [x] Run `mise exec -- mix format`, then `mise exec -- mix precommit` — expect green.
+- [x] Commit.
 
 **Deliverable:** Reusable `owner_pill` and `stage_column` components (spec acceptance criteria
 3 and 4 at the component level) with passing render tests and Storybook stories at
