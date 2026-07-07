@@ -79,8 +79,16 @@ defmodule RelayWeb.CoreComponentsTest do
           stage_id: 4,
           board_key: "RLY",
           cards: [
-            {"cards-1", %{title: "First card", tag: "infra", ref_number: 1}},
-            {"cards-2", %{title: "Second card", tag: nil, ref_number: 2}}
+            {"cards-1", %{title: "First card", tag: "infra", ref_number: 1, status: :queued, progress: nil, owners: []}},
+            {"cards-2",
+             %{
+               title: "Second card",
+               tag: nil,
+               ref_number: 2,
+               status: :working,
+               progress: 40,
+               owners: [%{actor_type: :agent}]
+             }}
           ]
         )
 
@@ -91,6 +99,8 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "#infra"
       assert html =~ ~s(id="cards-2")
       assert html =~ "RLY-2"
+      assert html =~ ~s(data-active-owner="ai")
+      assert html =~ "working·40%"
     end
 
     test "shows the composer form instead of the compose button when composing" do

@@ -407,6 +407,147 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
+  describe "baton rendering on the board" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog, _spec, plan | _rest] = board.stages
+      {:ok, card} = Cards.create_card(backlog, %{title: "Baton card"})
+      %{board: board, backlog: backlog, plan: plan, card: card}
+    end
+
+    test "an unowned card renders neutral: queued badge, no pill, no mismatch", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card .status-badge[data-status='queued']",
+               "queued"
+             )
+
+      refute has_element?(view, "#stage-col-1-cards .board-card .card-owner-pill")
+      refute has_element?(view, "#stage-col-1-cards .board-card .card-mismatch")
+    end
+
+    test "an unowned card in an AI stage shows no mismatch", %{conn: conn, plan: plan} do
+      {:ok, _card} = Cards.create_card(plan, %{title: "Unowned in Plan"})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      refute has_element?(view, "#stage-col-3-cards .board-card .card-mismatch")
+    end
+
+    test "a human-owned card renders blue with the Human pill",
+         %{conn: conn, user: user, card: card} do
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card[data-active-owner='human'].border-l-primary"
+             )
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card .card-owner-pill.badge-primary",
+               "Human"
+             )
+    end
+
+    test "adding the agent as an owner flips the card to violet AI",
+         %{conn: conn, user: user, card: card} do
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      # Backlog is a human-owned stage, so this card (now AI-active) is a
+      # stage mismatch (asserted separately below) — check the active-owner
+      # flip and pill here, not the border colour (which the mismatch rule
+      # overrides to border-l-error).
+      assert has_element?(view, "#stage-col-1-cards .board-card[data-active-owner='ai']")
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card .card-owner-pill.badge-secondary",
+               "AI"
+             )
+    end
+
+    test "a needs_input card shows the amber NEEDS INPUT badge", %{conn: conn, card: card} do
+      {:ok, _card} = Cards.set_status(card, %{"status" => "needs_input"})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card .status-badge.badge-warning[data-status='needs_input']",
+               "NEEDS INPUT"
+             )
+    end
+
+    test "a working card shows its progress on the badge", %{conn: conn, card: card} do
+      {:ok, _card} = Cards.set_status(card, %{"status" => "working", "progress" => "61"})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card .status-badge[data-status='working']",
+               "working·61%"
+             )
+    end
+
+    test "a human-active card in an AI stage shows the red meant-for-agents warning",
+         %{conn: conn, user: user, card: card, plan: plan} do
+      {:ok, card} = Cards.add_owner(card, {:user, user.id})
+      {:ok, _moved} = Cards.move_card(card, plan, 0)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(
+               view,
+               "#stage-col-3-cards .board-card.border-l-error .card-mismatch",
+               "meant to be used by agents"
+             )
+    end
+
+    test "an AI-active card in a human stage shows the red meant-for-humans warning",
+         %{conn: conn, card: card} do
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card.border-l-error .card-mismatch",
+               "meant for humans"
+             )
+    end
+
+    test "moving a card changes neither its owners nor its status",
+         %{conn: conn, board: board, user: user, card: card, plan: plan} do
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => plan.id, "index" => 0})
+
+      moved = Cards.get_card_by_ref(board, "RLY-1")
+      assert moved.stage_id == plan.id
+      assert moved.status == :queued
+      assert [%{actor_type: :user}] = moved.owners
+
+      assert has_element?(
+               view,
+               "#stage-col-3-cards .board-card.border-l-error .card-mismatch",
+               "meant to be used by agents"
+             )
+    end
+  end
+
   describe "card drawer" do
     setup :register_and_log_in_user
 

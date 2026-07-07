@@ -31,6 +31,7 @@ defmodule RelayWeb.CoreComponents do
 
   alias Phoenix.HTML.FormField
   alias Phoenix.LiveView.JS
+  alias Relay.Cards
 
   @doc """
   Renders flash notices.
@@ -799,10 +800,10 @@ defmodule RelayWeb.CoreComponents do
   the "+ New card" compose control.
 
   `cards` accepts a LiveView stream (preferred) or a list of
-  `{dom_id, card}` tuples; each card needs `title`, `tag`, and
-  `ref_number` fields. The dashed empty-state placeholder lives inside
-  the card container and is CSS-hidden (`only:block`) as soon as the
-  stage has cards.
+  `{dom_id, card}` tuples; each card needs `title`, `tag`, `ref_number`,
+  `status`, `progress`, and a loaded `owners` list. The dashed empty-state
+  placeholder lives inside the card container and is CSS-hidden
+  (`only:block`) as soon as the stage has cards.
 
   The compose control emits events handled by the parent LiveView:
   `"compose"` (with `phx-value-stage-id`) to open the composer,
@@ -854,6 +855,10 @@ defmodule RelayWeb.CoreComponents do
           title={card.title}
           tag={card.tag}
           ref={"#{@board_key}-#{card.ref_number}"}
+          status={card.status}
+          progress={card.progress}
+          active_owner={Cards.active_owner_type(card)}
+          stage_owner={@owner}
         />
       </div>
       <div :if={@composing} id={"#{@id}-composer"} phx-click-away="cancel_compose">
