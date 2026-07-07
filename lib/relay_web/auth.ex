@@ -32,12 +32,12 @@ defmodule RelayWeb.Auth do
     end
   end
 
-  @doc "Renews the session, stores the user id, and redirects to the app home."
+  @doc "Renews the session, stores the user id, and redirects to the board."
   def log_in_user(conn, user) do
     conn
     |> renew_session()
     |> put_session(:user_id, user.id)
-    |> redirect(to: ~p"/home")
+    |> redirect(to: ~p"/board")
   end
 
   @doc "Clears the session and redirects to the sign-in page."

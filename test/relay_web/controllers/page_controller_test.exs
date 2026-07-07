@@ -15,9 +15,9 @@ defmodule RelayWeb.PageControllerTest do
   describe "GET / when logged in" do
     setup :register_and_log_in_user
 
-    test "redirects to the app home", %{conn: conn} do
+    test "redirects to the board", %{conn: conn} do
       conn = get(conn, ~p"/")
-      assert redirected_to(conn) == ~p"/home"
+      assert redirected_to(conn) == ~p"/board"
     end
   end
 end

@@ -24,7 +24,7 @@ defmodule RelayWeb.AuthControllerTest do
   end
 
   describe "GET /auth/google/callback" do
-    test "with a successful auth upserts the user, starts a session, and redirects home",
+    test "with a successful auth upserts the user, starts a session, and redirects to the board",
          %{conn: conn} do
       conn =
         conn
@@ -34,7 +34,7 @@ defmodule RelayWeb.AuthControllerTest do
       user = Repo.get_by!(User, provider_uid: "google-uid-123")
       assert user.email == "ada@example.com"
       assert get_session(conn, :user_id) == user.id
-      assert redirected_to(conn) == ~p"/home"
+      assert redirected_to(conn) == ~p"/board"
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "Signed in"
     end
 
