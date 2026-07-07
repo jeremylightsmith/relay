@@ -524,7 +524,10 @@ defmodule RelayWeb.CoreComponents do
         phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}
         class="flex flex-col gap-2"
       >
-        <div class="stage-empty hidden only:block rounded-lg border border-dashed border-base-content/20 px-3 py-6 text-center text-xs text-base-content/50">
+        <div
+          id={"#{@id}-empty"}
+          class="stage-empty hidden only:block rounded-lg border border-dashed border-base-content/20 px-3 py-6 text-center text-xs text-base-content/50"
+        >
           No cards yet
         </div>
         <.board_card

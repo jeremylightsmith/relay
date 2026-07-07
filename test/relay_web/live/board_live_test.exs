@@ -3,8 +3,10 @@ defmodule RelayWeb.BoardLiveTest do
 
   import Phoenix.LiveViewTest
 
+  alias Relay.Boards
   alias Relay.Boards.Board
   alias Relay.Boards.Stage
+  alias Relay.Cards.Card
   alias Relay.Repo
 
   describe "when logged out" do
@@ -93,6 +95,112 @@ defmodule RelayWeb.BoardLiveTest do
         |> Enum.count()
 
       assert empties == 7
+    end
+  end
+
+  describe "cards" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      %{board: board, backlog: backlog}
+    end
+
+    test "a stage's compose CTA reveals the composer for that stage only", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      refute has_element?(view, "#stage-col-1-compose-form")
+
+      view |> element("#stage-col-1-new-card") |> render_click()
+
+      assert has_element?(view, "#stage-col-1-compose-form")
+      refute has_element?(view, "#stage-col-2-compose-form")
+    end
+
+    test "submitting the composer creates a card in that stage and clears the input",
+         %{conn: conn, backlog: backlog} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      view |> element("#stage-col-1-new-card") |> render_click()
+
+      view
+      |> form("#stage-col-1-compose-form", card: %{title: "Ship MMF 03"})
+      |> render_submit()
+
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Ship MMF 03")
+
+      assert [card] = Repo.all(Card)
+      assert card.stage_id == backlog.id
+      assert card.title == "Ship MMF 03"
+      assert card.ref_number == 1
+
+      assert has_element?(view, "#stage-col-1-compose-form")
+
+      input_html =
+        view
+        |> element("#stage-col-1-compose-form input[name='card[title]']")
+        |> render()
+
+      refute input_html =~ "Ship MMF 03"
+    end
+
+    test "creating cards assigns per-board incrementing refs shown on the cards", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      view |> element("#stage-col-1-new-card") |> render_click()
+      view |> form("#stage-col-1-compose-form", card: %{title: "First"}) |> render_submit()
+      view |> form("#stage-col-1-compose-form", card: %{title: "Second"}) |> render_submit()
+
+      assert has_element?(view, "#stage-col-1-cards .board-card .card-ref", "RLY-1")
+      assert has_element?(view, "#stage-col-1-cards .board-card .card-ref", "RLY-2")
+    end
+
+    test "cards persist and re-render in position order on reload", %{conn: conn, backlog: backlog} do
+      insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
+      insert(:card, stage: backlog, title: "First", position: 1, ref_number: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      titles =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#stage-col-1-cards .board-card .card-title")
+        |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+
+      assert titles == ["First", "Second"]
+    end
+
+    test "cards render in their own stage; other stages keep the empty state",
+         %{conn: conn, backlog: backlog} do
+      insert(:card, stage: backlog, title: "Only here", position: 1, ref_number: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Only here")
+      refute has_element?(view, "#stage-col-2-cards .board-card")
+      assert has_element?(view, "#stage-col-2-cards .stage-empty")
+    end
+
+    test "cancel closes the composer without creating a card", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      view |> element("#stage-col-1-new-card") |> render_click()
+      view |> element("#stage-col-1-composer button", "Cancel") |> render_click()
+
+      refute has_element?(view, "#stage-col-1-compose-form")
+      assert Repo.all(Card) == []
+    end
+
+    test "submitting a blank title keeps the composer open and creates nothing", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      view |> element("#stage-col-1-new-card") |> render_click()
+      view |> form("#stage-col-1-compose-form", card: %{title: ""}) |> render_submit()
+
+      assert has_element?(view, "#stage-col-1-compose-form")
+      assert Repo.all(Card) == []
     end
   end
 
