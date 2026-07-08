@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+"""relay — a tiny CLI for driving a Relay board over its REST API.
+
+Zero dependencies (Python 3 stdlib only), so it runs anywhere Claude Code does.
+
+Config (env):
+  RELAY_URL       e.g. https://relayboard.fly.dev
+  RELAY_API_KEY   a board API key (relay_<prefix>_<secret>) from /board/settings
+
+Usage:
+  relay board [--json]
+  relay card REF [--json]
+  relay pull [--json]                 # next card to work (right-to-left priority)
+  relay comment REF TEXT
+  relay move REF STAGE                # STAGE by name (e.g. "Spec", "Spec:Review")
+  relay status REF STATUS             # queued|working|needs_input|in_review|done
+  relay describe REF TEXT             # set the card description (TEXT may be "-"=stdin, "@file")
+  relay needs-input REF QUESTION      # ask a question (blocks the card)
+  relay own REF                       # claim the card for the AI
+  relay release REF                   # clear owners (hand back)
+  relay approve REF                   # gate: advance to the next stage
+  relay reject REF NOTE               # gate: send back with a note
+
+TEXT/QUESTION/NOTE args accept "-" (read stdin) or "@path" (read a file) for long content.
+Every command prints human-readable text by default; add --json for machine output.
+Non-zero exit on any error.
+"""
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+
+def die(msg):
+    print(f"relay: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def env(name):
+    v = os.environ.get(name)
+    if not v:
+        die(f"{name} is not set")
+    return v
+
+
+def request(method, path, body=None):
+    url = env("RELAY_URL").rstrip("/") + path
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("Authorization", f"Bearer {env('RELAY_API_KEY')}")
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req) as resp:
+            raw = resp.read()
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        try:
+            msg = json.loads(e.read())["error"]["message"]
+        except Exception:
+            msg = f"HTTP {e.code}"
+        die(f"API {e.code}: {msg}")
+    except urllib.error.URLError as e:
+        die(f"request failed: {e.reason}")
+
+
+def read_arg(text):
+    """A text arg: '-' reads stdin, '@path' reads a file, else literal."""
+    if text == "-":
+        return sys.stdin.read()
+    if text.startswith("@"):
+        with open(text[1:], encoding="utf-8") as f:
+            return f.read()
+    return text
+
+
+# ---------- rendering ----------
+
+def card_line(c):
+    owner = c.get("active_owner") or "-"
+    return f'{c["ref"]} [{c.get("status", "?")}/{owner}] {c["title"]}'
+
+
+def print_card(c):
+    owners = ", ".join(o.get("name", "?") for o in c.get("owners", []))
+    print(f'{c["ref"]}  {c["title"]}')
+    print(f'status: {c.get("status", "?")}   active: {c.get("active_owner") or "-"}   owners: {owners}\n')
+    print(c.get("description") or "(no description)")
+    timeline = c.get("timeline") or []
+    if timeline:
+        print("\ntimeline:")
+        for e in timeline:
+            who = e.get("author", {}).get("name", "?")
+            if e.get("kind") == "comment":
+                print(f"  - {who}: {e.get('body', '')}")
+            else:
+                print(f"  * {who} {e.get('type', '')} {e.get('meta', '')}")
+
+
+def emit(args, data, human):
+    print(json.dumps(data, indent=2) if getattr(args, "json", False) else human)
+
+
+# ---------- stage resolution ----------
+
+def resolve_stage_id(name):
+    board = request("GET", "/api/board")
+    for st in board["stages"]:
+        if st["name"] == name:
+            return st["id"], board
+    names = ", ".join(st["name"] for st in board["stages"])
+    die(f'no stage named "{name}". stages: {names}')
+
+
+# ---------- commands ----------
+
+def cmd_board(args):
+    b = request("GET", "/api/board")
+    if args.json:
+        print(json.dumps(b, indent=2))
+        return
+    by_stage = {}
+    for c in b["cards"]:
+        by_stage.setdefault(c["stage_id"], []).append(c)
+    print(f'{b["board"]["name"]} ({b["board"]["key"]})\n')
+    for st in b["stages"]:
+        print(f'{st["name"]} ({st["owner"]})')
+        cards = by_stage.get(st["id"], [])
+        if not cards:
+            print("  (empty)")
+        for c in cards:
+            print("  " + card_line(c))
+        print()
+
+
+def cmd_card(args):
+    c = request("GET", f"/api/cards/{args.ref}")["data"]
+    emit(args, c, "") if args.json else print_card(c)
+
+
+def cmd_pull(args):
+    """Next card to work: a card whose stage is immediately left of an AI stage,
+    prioritizing the rightmost (furthest-along) such card. Advisory — prints the
+    card; use `own`+`move` to take it (or extend pull to auto-move later)."""
+    b = request("GET", "/api/board")
+    stages = sorted(b["stages"], key=lambda s: s["position"])
+    pos_of = {s["id"]: i for i, s in enumerate(stages)}
+    ai_next = {}  # stage_id -> the AI stage immediately to its right, if any
+    for i, s in enumerate(stages[:-1]):
+        nxt = stages[i + 1]
+        if nxt["owner"] == "ai":
+            ai_next[s["id"]] = nxt
+    candidates = [c for c in b["cards"] if c["stage_id"] in ai_next]
+    if not candidates:
+        emit(args, None, "No card ready to pull.")
+        return
+    # rightmost first: highest current-stage position
+    candidates.sort(key=lambda c: pos_of[c["stage_id"]], reverse=True)
+    c = candidates[0]
+    target = ai_next[c["stage_id"]]
+    human = f'{card_line(c)}  → ready for {target["name"]}'
+    emit(args, {"card": c, "target_stage": target}, human)
+
+
+def cmd_comment(args):
+    request("POST", f"/api/cards/{args.ref}/comments", {"body": read_arg(args.text)})
+    print(f"{args.ref}: comment posted")
+
+
+def cmd_move(args):
+    stage_id, _ = resolve_stage_id(args.stage)
+    c = request("POST", f"/api/cards/{args.ref}/move", {"stage": stage_id})["data"]
+    emit(args, c, card_line(c))
+
+
+def cmd_status(args):
+    c = request("PATCH", f"/api/cards/{args.ref}", {"status": args.status})["data"]
+    emit(args, c, card_line(c))
+
+
+def cmd_describe(args):
+    c = request("PATCH", f"/api/cards/{args.ref}", {"description": read_arg(args.text)})["data"]
+    emit(args, c, card_line(c))
+
+
+def cmd_needs_input(args):
+    c = request("POST", f"/api/cards/{args.ref}/needs-input", {"question": read_arg(args.question)})["data"]
+    emit(args, c, card_line(c))
+
+
+def cmd_own(args):
+    c = request("PATCH", f"/api/cards/{args.ref}", {"owners": ["agent"]})["data"]
+    emit(args, c, card_line(c))
+
+
+def cmd_release(args):
+    c = request("PATCH", f"/api/cards/{args.ref}", {"owners": []})["data"]
+    emit(args, c, card_line(c))
+
+
+def cmd_approve(args):
+    c = request("POST", f"/api/cards/{args.ref}/approve", {})["data"]
+    emit(args, c, card_line(c))
+
+
+def cmd_reject(args):
+    c = request("POST", f"/api/cards/{args.ref}/reject", {"note": read_arg(args.note)})["data"]
+    emit(args, c, card_line(c))
+
+
+def build_parser():
+    p = argparse.ArgumentParser(prog="relay", description="Drive a Relay board from the terminal.")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    def add(name, fn, *pos_args, json_flag=False):
+        sp = sub.add_parser(name)
+        for a in pos_args:
+            sp.add_argument(a)
+        if json_flag:
+            sp.add_argument("--json", action="store_true")
+        sp.set_defaults(func=fn)
+        return sp
+
+    add("board", cmd_board, json_flag=True)
+    add("card", cmd_card, "ref", json_flag=True)
+    add("pull", cmd_pull, json_flag=True)
+    add("comment", cmd_comment, "ref", "text")
+    add("move", cmd_move, "ref", "stage", json_flag=True)
+    add("status", cmd_status, "ref", "status", json_flag=True)
+    add("describe", cmd_describe, "ref", "text", json_flag=True)
+    add("needs-input", cmd_needs_input, "ref", "question", json_flag=True)
+    add("own", cmd_own, "ref", json_flag=True)
+    add("release", cmd_release, "ref", json_flag=True)
+    add("approve", cmd_approve, "ref", json_flag=True)
+    add("reject", cmd_reject, "ref", "note", json_flag=True)
+    return p
+
+
+def main():
+    args = build_parser().parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

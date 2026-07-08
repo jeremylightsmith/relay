@@ -50,3 +50,4 @@ npm-debug.log
 
 # Uploaded files (dev/local).
 /priv/uploads/
+.relay-watch-state.json

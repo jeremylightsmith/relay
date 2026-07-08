@@ -1,0 +1,10 @@
+{
+  "_comment": "watch-relay config: the pipeline the board runner drives. One entry per AI stage, in left-to-right order. `from` = the column a ready card is pulled FROM; `done` = where the card is pushed when the stage finishes (a Review sub-lane = human checkpoint, else a Done sub-lane = auto-continue). Priority is right-to-left (Deploy first). This can be regenerated from the board via `./bin/relay layout`.",
+  "poll_interval": 45,
+  "pipeline": [
+    { "stage": "Spec",   "action": "spec",   "from": "Next up",   "done": "Spec:Review" },
+    { "stage": "Plan",   "action": "plan",   "from": "Spec:Done", "done": "Plan:Done" },
+    { "stage": "Code",   "action": "code",   "from": "Plan:Done", "done": "Code:Review" },
+    { "stage": "Deploy", "action": "deploy", "from": "Code:Done", "done": "Deploy:Done" }
+  ]
+}
