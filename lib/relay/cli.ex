@@ -53,6 +53,53 @@ defmodule Relay.CLI do
     end
   end
 
+  @doc "Posts a comment (as the agent) on the card."
+  def comment(ref, body, opts) do
+    with {:ok, %{"data" => entry}} <- request(:post, "/api/cards/#{ref}/comments", %{body: body}) do
+      {:ok, render(opts, entry, "#{ref}: comment posted")}
+    end
+  end
+
+  @doc "Moves the card to the stage named `stage_name` (resolved on the board)."
+  def move(ref, stage_name, opts) do
+    with {:ok, board} <- request(:get, "/api/board"),
+         %{"id" => stage_id} <- Enum.find(board["stages"], &(&1["name"] == stage_name)) || {:no_stage, stage_name},
+         {:ok, %{"data" => card}} <- request(:post, "/api/cards/#{ref}/move", %{stage: stage_id}) do
+      {:ok, render(opts, card, format_card_line(card))}
+    else
+      {:no_stage, name} -> {:error, "no stage named #{inspect(name)} on this board"}
+      other -> other
+    end
+  end
+
+  @doc "Sets the card's status (queued|working|needs_input|in_review|done)."
+  def status(ref, status, opts) do
+    with {:ok, %{"data" => card}} <- request(:patch, "/api/cards/#{ref}", %{status: status}) do
+      {:ok, render(opts, card, format_card_line(card))}
+    end
+  end
+
+  @doc "Flags the card as needs_input with a question (recorded as an agent comment)."
+  def needs_input(ref, question, opts) do
+    with {:ok, %{"data" => card}} <- request(:post, "/api/cards/#{ref}/needs-input", %{question: question}) do
+      {:ok, render(opts, card, format_card_line(card))}
+    end
+  end
+
+  @doc "Claims the card for the AI agent (replaces owners with the agent)."
+  def own(ref, opts) do
+    with {:ok, %{"data" => card}} <- request(:patch, "/api/cards/#{ref}", %{owners: ["agent"]}) do
+      {:ok, render(opts, card, format_card_line(card))}
+    end
+  end
+
+  @doc "Releases the card (clears its owners so a human can pick it up)."
+  def release(ref, opts) do
+    with {:ok, %{"data" => card}} <- request(:patch, "/api/cards/#{ref}", %{owners: []}) do
+      {:ok, render(opts, card, format_card_line(card))}
+    end
+  end
+
   @doc "Renders `human` unless `opts[:json]`, in which case pretty JSON of `data`."
   def render(opts, data, human) do
     if opts[:json], do: Jason.encode!(data, pretty: true), else: human

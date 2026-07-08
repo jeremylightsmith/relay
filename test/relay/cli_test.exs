@@ -122,4 +122,79 @@ defmodule Relay.CLITest do
     assert {:error, msg2} = CLI.board([])
     assert msg2 =~ "RELAY_API_KEY"
   end
+
+  test "comment posts and confirms" do
+    stub(fn conn ->
+      assert conn.method == "POST"
+
+      conn
+      |> Plug.Conn.put_status(201)
+      |> Req.Test.json(%{
+        "data" => %{"kind" => "comment", "body" => "on it", "author" => %{"name" => "Relay AI"}}
+      })
+    end)
+
+    assert {:ok, text} = CLI.comment("RLY-1", "on it", [])
+    assert text =~ "RLY-1"
+  end
+
+  test "move resolves a stage name to its id then posts" do
+    stub(fn conn ->
+      case conn.request_path do
+        "/api/board" ->
+          Req.Test.json(conn, %{
+            "board" => %{"name" => "B", "key" => "RLY"},
+            "stages" => [
+              %{"id" => 7, "name" => "Code", "owner" => "ai", "category" => "in_progress", "position" => 2}
+            ],
+            "cards" => []
+          })
+
+        "/api/cards/RLY-1/move" ->
+          assert conn |> Plug.Conn.read_body() |> elem(1) |> Jason.decode!() |> Access.get("stage") == 7
+
+          Req.Test.json(conn, %{
+            "data" => %{
+              "ref" => "RLY-1",
+              "title" => "X",
+              "status" => "queued",
+              "stage_id" => 7,
+              "active_owner" => "ai",
+              "owners" => []
+            }
+          })
+      end
+    end)
+
+    assert {:ok, text} = CLI.move("RLY-1", "Code", [])
+    assert text =~ "RLY-1"
+  end
+
+  test "move errors when the stage name is unknown" do
+    stub(fn conn ->
+      Req.Test.json(conn, %{"board" => %{"name" => "B", "key" => "RLY"}, "stages" => [], "cards" => []})
+    end)
+
+    assert {:error, msg} = CLI.move("RLY-1", "Nope", [])
+    assert msg =~ "Nope"
+  end
+
+  test "status, needs_input, own, release hit the right endpoints" do
+    stub(fn conn ->
+      Req.Test.json(conn, %{
+        "data" => %{
+          "ref" => "RLY-1",
+          "title" => "X",
+          "status" => "working",
+          "active_owner" => "ai",
+          "owners" => [%{"type" => "agent", "name" => "Relay AI"}]
+        }
+      })
+    end)
+
+    assert {:ok, _} = CLI.status("RLY-1", "working", [])
+    assert {:ok, _} = CLI.needs_input("RLY-1", "Which region?", [])
+    assert {:ok, _} = CLI.own("RLY-1", [])
+    assert {:ok, _} = CLI.release("RLY-1", [])
+  end
 end

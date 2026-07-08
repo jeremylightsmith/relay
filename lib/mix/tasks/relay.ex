@@ -31,11 +31,28 @@ defmodule Mix.Tasks.Relay do
   defp dispatch(["board"], opts), do: Relay.CLI.board(opts)
   defp dispatch(["card", ref], opts), do: Relay.CLI.card(ref, opts)
   defp dispatch(["pull"], opts), do: Relay.CLI.pull(opts)
+  defp dispatch(["comment", ref, body], opts), do: Relay.CLI.comment(ref, body, opts)
+  defp dispatch(["move", ref, stage], opts), do: Relay.CLI.move(ref, stage, opts)
+  defp dispatch(["status", ref, status], opts), do: Relay.CLI.status(ref, status, opts)
+  defp dispatch(["needs-input", ref, question], opts), do: Relay.CLI.needs_input(ref, question, opts)
+  defp dispatch(["own", ref], opts), do: Relay.CLI.own(ref, opts)
+  defp dispatch(["release", ref], opts), do: Relay.CLI.release(ref, opts)
   defp dispatch(_argv, _opts), do: {:error, usage()}
 
   defp pop_json(argv), do: {"--json" in argv, argv -- ["--json"]}
 
   defp usage do
-    "usage: mix relay <board | card REF | pull> [--json]"
+    """
+    usage: mix relay <command> [--json]
+      board                      show the board
+      card REF                   show a card + timeline
+      pull                       next AI card to work
+      comment REF "text"         post a comment
+      move REF STAGE             move to a stage (by name)
+      status REF STATUS          set status
+      needs-input REF "question" flag needs_input with a question
+      own REF                    claim the card for the AI
+      release REF                clear owners
+    """
   end
 end

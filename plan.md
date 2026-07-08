@@ -363,7 +363,7 @@ end
 
 ### Steps
 
-- [ ] **Failing tests.** Append to `test/relay/cli_test.exs` (inside the module):
+- [x] **Failing tests.** Append to `test/relay/cli_test.exs` (inside the module):
 
 ```elixir
   test "comment posts and confirms" do
@@ -411,9 +411,9 @@ end
   end
 ```
 
-- [ ] **Run — expect fail.**
+- [x] **Run — expect fail.**
 
-- [ ] **Implement the write commands.** Add to `lib/relay/cli.ex`:
+- [x] **Implement the write commands.** Add to `lib/relay/cli.ex`:
 
 ```elixir
   @doc "Posts a comment (as the agent) on the card."
@@ -464,7 +464,7 @@ end
   end
 ```
 
-- [ ] **Dispatch the write commands.** In `lib/mix/tasks/relay.ex`, add clauses **above** the catch-all `dispatch(_argv, _opts)`:
+- [x] **Dispatch the write commands.** In `lib/mix/tasks/relay.ex`, add clauses **above** the catch-all `dispatch(_argv, _opts)`:
 
 ```elixir
   defp dispatch(["comment", ref, body], opts), do: Relay.CLI.comment(ref, body, opts)
@@ -494,9 +494,9 @@ And extend `usage/0`:
   end
 ```
 
-- [ ] **Run — expect pass.**
+- [x] **Run — expect pass.**
 
-- [ ] **Full check + commit.** `mix precommit`. Commit: `feat(cli): comment/move/status/needs-input/own/release commands`.
+- [x] **Full check + commit.** `mix precommit`. Commit: `feat(cli): comment/move/status/needs-input/own/release commands`.
 
 **Deliverable:** the full agent verb set works end-to-end over the API; `move` resolves a stage by name; every command supports `--json`; unit tests cover each via `Req.Test`.
 
