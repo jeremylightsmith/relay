@@ -241,6 +241,81 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
     end
   end
 
+  describe "stage configuration changes reflect on open boards (MMF 12)" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      %{board: Boards.get_or_create_default_board(user)}
+    end
+
+    test "a rename in one session's settings renders on another session's board",
+         %{conn: conn, board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+
+      {:ok, board_view, _html} = live(conn, ~p"/board")
+      {:ok, settings_view, _html} = live(conn, ~p"/board/settings")
+
+      settings_view
+      |> form("#stage-#{code.id}-form", stage: %{name: "Build"})
+      |> render_change()
+
+      assert has_element?(board_view, "#stage-col-#{code.position} h3", "Build")
+    end
+
+    test "an owner change re-tints the column and flips the card mismatch flag",
+         %{conn: conn, board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, card} = Cards.create_card(code, %{title: "Agent task"})
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      {:ok, board_view, _html} = live(conn, ~p"/board")
+      {:ok, settings_view, _html} = live(conn, ~p"/board/settings")
+
+      # :ai stage + agent owner: no mismatch yet
+      refute has_element?(board_view, "#stage-col-#{code.position} .card-mismatch")
+
+      settings_view |> element("#stage-#{code.id}-owner-human") |> render_click()
+
+      assert has_element?(
+               board_view,
+               "#stage-col-#{code.position} .stage-owner-swatch[data-owner='human']"
+             )
+
+      assert has_element?(board_view, "#stage-col-#{code.position} .card-mismatch")
+      # meant-for change only — the card's owner rows are untouched
+      assert [%Schemas.CardOwner{actor_type: :agent}] = Repo.all(Schemas.CardOwner)
+    end
+
+    test "reordering swaps the columns and keeps card streams attached",
+         %{conn: conn, board: board} do
+      [backlog, spec | _rest] = board.stages
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Ride along"})
+
+      {:ok, board_view, _html} = live(conn, ~p"/board")
+      {:ok, settings_view, _html} = live(conn, ~p"/board/settings")
+
+      settings_view |> element("#stage-#{spec.id}-up") |> render_click()
+
+      assert has_element?(board_view, "#stage-col-1 h3", "Spec")
+      assert has_element?(board_view, "#stage-col-2 h3", "Backlog")
+      assert has_element?(board_view, "#stage-col-2-cards .board-card", "Ride along")
+    end
+
+    test "adding and deleting stages restructures the open board",
+         %{conn: conn, board: board} do
+      deploy = Enum.find(board.stages, &(&1.name == "Deploy"))
+
+      {:ok, board_view, _html} = live(conn, ~p"/board")
+      {:ok, settings_view, _html} = live(conn, ~p"/board/settings")
+
+      settings_view |> element("#add-stage-unstarted") |> render_click()
+      assert has_element?(board_view, "#category-unstarted h3", "New stage")
+
+      settings_view |> element("#stage-#{deploy.id}-delete") |> render_click()
+      refute render(board_view) =~ "Deploy"
+    end
+  end
+
   defp api_conn(token) do
     put_req_header(build_conn(), "authorization", "Bearer " <> token)
   end

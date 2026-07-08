@@ -25,6 +25,8 @@ defmodule Relay.Boards do
     {"Done", :human, :complete}
   ]
 
+  @category_order [:unstarted, :in_progress, :complete]
+
   @doc """
   Returns the user's board with `stages` preloaded in `position` order,
   creating the board (unique slug derived from the user) and seeding the
@@ -99,6 +101,80 @@ defmodule Relay.Boards do
   end
 
   @doc """
+  Updates a main stage's editable configuration (name, description, owner —
+  and any future per-stage fields cast by `Schemas.Stage.changeset/2`;
+  MMFs 11/13 reuse this). Broadcasts `{:stages_changed, board_id}` on
+  success. `owner` is the stage's *meant-for* designation only — this never
+  touches any card's `card_owners` rows.
+  """
+  def update_stage(%Stage{} = stage, attrs) do
+    stage
+    |> Stage.changeset(attrs)
+    |> Repo.update()
+    |> broadcast_stages_changed(stage.board_id)
+  end
+
+  @doc """
+  Swaps `stage` with the adjacent main stage in board position order
+  (`:up` = toward position 1), inside a transaction. Categories swap along
+  with position (the mockup: "cross into another category and it takes on
+  that meaning") — the moved stage adopts the neighbour's category and the
+  neighbour adopts the one it displaced, so moving back across the same
+  boundary undoes the crossing. At the board's edge it is a no-op:
+  `{:ok, stage}`, no broadcast.
+  """
+  def reorder_stage(%Stage{lane: :main} = stage, direction) when direction in [:up, :down] do
+    mains = main_stages(stage.board_id)
+    index = Enum.find_index(mains, &(&1.id == stage.id))
+    neighbor_index = if direction == :up, do: index - 1, else: index + 1
+
+    case fetch_neighbor(mains, neighbor_index) do
+      nil -> {:ok, stage}
+      %Stage{} = neighbor -> swap_stages(stage, neighbor)
+    end
+  end
+
+  @doc """
+  Appends a new main stage (name "New stage", owner `:human`) at the end of
+  `category` — an empty category appends right after every earlier
+  category's stages. Broadcasts on success.
+  """
+  def create_stage(%Board{id: board_id}, category) when category in @category_order do
+    {:ok, stage} =
+      Repo.transaction(fn ->
+        position = append_position(board_id, category)
+        shift_positions_from(board_id, position)
+
+        %Stage{board_id: board_id}
+        |> Stage.changeset(%{name: "New stage", position: position, category: category, owner: :human})
+        |> Repo.insert!()
+      end)
+
+    broadcast_stages_changed({:ok, stage}, board_id)
+  end
+
+  @doc """
+  Deletes an empty main stage; its Review/Done children cascade via the
+  `parent_id` FK (they are guaranteed empty by the guard). Returns
+  `{:error, :not_empty}` when the stage or any of its sub-lanes holds
+  cards, `{:error, :last_stage}` for the board's only main stage. Sub-lane
+  children are never directly deletable (only via `disable_lane/2`).
+  """
+  def delete_stage(%Stage{lane: :main} = stage) do
+    cond do
+      length(main_stages(stage.board_id)) == 1 ->
+        {:error, :last_stage}
+
+      stage_holds_cards?(stage) ->
+        {:error, :not_empty}
+
+      true ->
+        {:ok, deleted} = Repo.delete(stage)
+        broadcast_stages_changed({:ok, deleted}, stage.board_id)
+    end
+  end
+
+  @doc """
   The human-facing label for `stage`: its own `name` for a main-lane
   stage, or `"<parent name> · Review|Done"` for a sub-lane child (loading
   the parent). Guards the same composite-name leak (`enable_lane/2`
@@ -116,6 +192,71 @@ defmodule Relay.Boards do
 
   defp get_sublane(%Stage{} = parent, lane) do
     Repo.get_by(Stage, parent_id: parent.id, lane: lane)
+  end
+
+  @position_park_offset 1_000_000
+
+  defp main_stages(board_id) do
+    Repo.all(from s in Stage, where: s.board_id == ^board_id and s.lane == :main, order_by: s.position)
+  end
+
+  defp fetch_neighbor(_mains, index) when index < 0, do: nil
+  defp fetch_neighbor(mains, index), do: Enum.at(mains, index)
+
+  # stages_board_id_position_index is not deferrable, so a direct swap
+  # would collide: park the moved stage on a free position first, so each
+  # subsequent update lands on a just-vacated slot. Position AND category
+  # both swap (a true exchange, not one-directional adoption) so that
+  # moving a stage back across the same boundary undoes the crossing —
+  # the neighbour reverts to the category it had before the first swap.
+  defp swap_stages(%Stage{} = stage, %Stage{} = neighbor) do
+    {:ok, moved} =
+      Repo.transaction(fn ->
+        parked = next_position(stage.board_id)
+
+        stage |> Stage.changeset(%{position: parked}) |> Repo.update!()
+
+        neighbor
+        |> Stage.changeset(%{position: stage.position, category: stage.category})
+        |> Repo.update!()
+
+        stage
+        |> Stage.changeset(%{position: neighbor.position, category: neighbor.category})
+        |> Repo.update!()
+      end)
+
+    broadcast_stages_changed({:ok, moved}, moved.board_id)
+  end
+
+  # Position right after the category's last main stage; an empty category
+  # appends after every earlier category's stages (or at 1 on an empty board).
+  defp append_position(board_id, category) do
+    allowed = Enum.take_while(@category_order, &(&1 != category)) ++ [category]
+
+    last =
+      board_id
+      |> main_stages()
+      |> Enum.filter(&(&1.category in allowed))
+      |> List.last()
+
+    if last, do: last.position + 1, else: 1
+  end
+
+  # Frees `position` by shifting every stage at or after it up by one — in
+  # two passes (way out of range, then back down to original + 1) because
+  # a single `position + 1` update can transiently collide on the unique
+  # index depending on row order.
+  defp shift_positions_from(board_id, position) do
+    tail = from s in Stage, where: s.board_id == ^board_id and s.position >= ^position
+    Repo.update_all(tail, inc: [position: @position_park_offset])
+
+    parked = from s in Stage, where: s.board_id == ^board_id and s.position >= ^@position_park_offset
+    Repo.update_all(parked, inc: [position: -(@position_park_offset - 1)])
+  end
+
+  defp stage_holds_cards?(%Stage{} = stage) do
+    stage_ids = [stage.id | stage |> sublanes() |> Enum.map(& &1.id)]
+    Repo.exists?(from c in Card, where: c.stage_id in ^stage_ids)
   end
 
   # MMF 18: stage config changed — coarse event, receivers refetch stages.

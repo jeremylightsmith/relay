@@ -13,6 +13,7 @@ defmodule Schemas.Stage do
 
   schema "stages" do
     field :name, :string
+    field :description, :string
     field :position, :integer
     field :category, Ecto.Enum, values: [:unstarted, :in_progress, :complete]
     field :owner, Ecto.Enum, values: [:human, :ai]
@@ -28,7 +29,7 @@ defmodule Schemas.Stage do
   @doc "Changeset for stage attributes. `board_id` must already be set on the struct."
   def changeset(stage, attrs) do
     stage
-    |> cast(attrs, [:name, :position, :category, :owner])
+    |> cast(attrs, [:name, :description, :position, :category, :owner])
     |> validate_required([:name, :position, :category, :owner])
     |> unique_constraint(:position, name: :stages_board_id_position_index)
   end
