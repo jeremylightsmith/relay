@@ -28,6 +28,10 @@ defmodule RelayWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :api_auth do
+    plug RelayWeb.ApiAuth
+  end
+
   scope "/", RelayWeb do
     pipe_through :browser
 
@@ -49,10 +53,17 @@ defmodule RelayWeb.Router do
     get "/:provider/callback", AuthController, :callback
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", RelayWeb do
-  #   pipe_through :api
-  # end
+  scope "/api", RelayWeb.Api do
+    pipe_through [:api, :api_auth]
+
+    get "/board", BoardController, :show
+    get "/cards", CardController, :index
+    get "/cards/:ref", CardController, :show
+    patch "/cards/:ref", CardController, :update
+    post "/cards/:ref/move", CardController, :move
+    post "/cards/:ref/comments", CardController, :comments
+    post "/cards/:ref/needs-input", CardController, :needs_input
+  end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
   if Application.compile_env(:relay, :dev_routes) do
