@@ -409,7 +409,7 @@ Then, inside `stage_column`'s `~H`, insert this block **immediately after** the 
 
 ### Steps
 
-- [ ] **Failing tests.** Add to `test/relay_web/live/board_settings_live_test.exs` (new describe; reuse the file's existing login setup — a `register_and_log_in_user`/board setup):
+- [x] **Failing tests.** Add to `test/relay_web/live/board_settings_live_test.exs` (new describe; reuse the file's existing login setup — a `register_and_log_in_user`/board setup):
 
 ```elixir
   describe "stage sub-lanes" do
@@ -444,9 +444,9 @@ Then, inside `stage_column`'s `~H`, insert this block **immediately after** the 
   end
 ```
 
-- [ ] **Run — expect fail.**
+- [x] **Run — expect fail.**
 
-- [ ] **Add the Stages pane.** In `lib/relay_web/live/board_settings_live.ex`:
+- [x] **Add the Stages pane.** In `lib/relay_web/live/board_settings_live.ex`:
 
   1. In `mount/3`, assign the main stages + their current lanes:
 
@@ -543,9 +543,9 @@ Then, inside `stage_column`'s `~H`, insert this block **immediately after** the 
   end
 ```
 
-- [ ] **Run — expect pass.**
+- [x] **Run — expect pass.**
 
-- [ ] **Full check + commit.** `mix precommit`. Commit: `feat(settings): per-stage Review/Done sub-lane toggles`.
+- [x] **Full check + commit.** `mix precommit`. Commit: `feat(settings): per-stage Review/Done sub-lane toggles`.
 
 **Deliverable:** the settings page lists each stage with Review/Done toggles that create/remove the child lane via `Relay.Boards`; toggling off a non-empty lane is blocked with a flash and leaves the lane intact.
 
