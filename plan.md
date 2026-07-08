@@ -633,7 +633,7 @@ Produces:
 
 **Steps**
 
-- [ ] Write the failing settings test. Create
+- [x] Write the failing settings test. Create
   `test/relay_web/live/board_settings_gate_test.exs`:
 
 ```elixir
@@ -724,7 +724,7 @@ defmodule RelayWeb.BoardSettingsGateTest do
 end
 ```
 
-- [ ] Write the failing API test. Create `test/relay_web/api/card_gates_test.exs`:
+- [x] Write the failing API test. Create `test/relay_web/api/card_gates_test.exs`:
 
 ```elixir
 defmodule RelayWeb.Api.CardGatesTest do
@@ -829,10 +829,10 @@ defmodule RelayWeb.Api.CardGatesTest do
 end
 ```
 
-- [ ] Run
+- [x] Run
   `mix test test/relay_web/live/board_settings_gate_test.exs test/relay_web/api/card_gates_test.exs`
   — expect failures (no controls, no routes).
-- [ ] Add the gate row to `lib/relay_web/live/board_settings_live.ex`. In `render/1`,
+- [x] Add the gate row to `lib/relay_web/live/board_settings_live.ex`. In `render/1`,
   insert the following block **immediately after** the closing `</div>` of the REVIEW
   SUB-LANE row (the `<div>` that opens with `border-top:1px dashed …` and contains the
   `REVIEW SUB-LANE` label), still inside the stage card container:
@@ -877,7 +877,7 @@ end
                     </div>
 ```
 
-- [ ] Add the two event handlers in the same LiveView, right after the
+- [x] Add the two event handlers in the same LiveView, right after the
   `handle_event("delete_stage", …)` clause:
 
 ```elixir
@@ -916,8 +916,8 @@ end
   end
 ```
 
-- [ ] Run `mix test test/relay_web/live/board_settings_gate_test.exs` (expect pass).
-- [ ] Add the API routes in `lib/relay_web/router.ex`, inside the existing
+- [x] Run `mix test test/relay_web/live/board_settings_gate_test.exs` (expect pass).
+- [x] Add the API routes in `lib/relay_web/router.ex`, inside the existing
   `scope "/api", RelayWeb.Api` block after the `needs-input` route:
 
 ```elixir
@@ -925,7 +925,7 @@ end
     post "/cards/:ref/reject", CardController, :reject
 ```
 
-- [ ] Add the controller actions in `lib/relay_web/controllers/api/card_controller.ex`,
+- [x] Add the controller actions in `lib/relay_web/controllers/api/card_controller.ex`,
   after the `needs_input/2` clauses:
 
 ```elixir
@@ -959,7 +959,7 @@ end
   defp reject_note(_params), do: {:error, :missing_note}
 ```
 
-- [ ] Add the 422 clauses in `lib/relay_web/controllers/api/fallback_controller.ex`, after
+- [x] Add the 422 clauses in `lib/relay_web/controllers/api/fallback_controller.ex`, after
   the `{:error, :not_found}` clause:
 
 ```elixir
@@ -978,7 +978,7 @@ end
   end
 ```
 
-- [ ] Expose the gate fields in `lib/relay_web/controllers/api/card_json.ex` — replace
+- [x] Expose the gate fields in `lib/relay_web/controllers/api/card_json.ex` — replace
   `stage/1` with:
 
 ```elixir
@@ -996,9 +996,9 @@ end
   end
 ```
 
-- [ ] Run `mix test test/relay_web/api/card_gates_test.exs` (expect pass).
-- [ ] Run `mix precommit` (expect green — full suite, format, credo, sobelow).
-- [ ] Commit.
+- [x] Run `mix test test/relay_web/api/card_gates_test.exs` (expect pass).
+- [x] Run `mix precommit` (expect green — full suite, format, credo, sobelow).
+- [x] Commit.
 
 **Deliverable:** the Board Settings stage card carries an APPROVAL GATE toggle and a
 SEND REJECTS TO select that persist through `Boards.update_stage/2` and drive real reject
