@@ -71,6 +71,45 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           timeline: story_timeline(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
+      },
+      %Variation{
+        id: :in_review_gated,
+        attributes: %{
+          id: "story-drawer-4",
+          ref: "RLY-10",
+          card: %{story_card() | status: :in_review, progress: nil},
+          stage_name: "Review",
+          stage_owner: :human,
+          active_owner: :ai,
+          current_user_id: 2,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
+          review_gate: %{approve_label: "Approve → Deploy", reject_to_name: "Code"},
+          reject_form: Phoenix.Component.to_form(%{"note" => ""}, as: :reject),
+          timeline: story_timeline(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
+        id: :in_review_request_changes,
+        attributes: %{
+          id: "story-drawer-5",
+          ref: "RLY-11",
+          card: %{story_card() | status: :in_review, progress: nil},
+          stage_name: "Review",
+          stage_owner: :human,
+          active_owner: :ai,
+          current_user_id: 2,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
+          review_gate: %{approve_label: "Approve → Deploy", reject_to_name: "Code"},
+          reject_open: true,
+          reject_form: Phoenix.Component.to_form(%{"note" => ""}, as: :reject),
+          timeline: story_timeline(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
       }
     ]
   end

@@ -185,4 +185,34 @@ defmodule RelayWeb.BoardLiveReviewTest do
     reloaded = Cards.get_card_by_ref(board, "RLY-1")
     assert Enum.any?(reloaded.owners, &(&1.actor_type == :user and &1.user_id == user.id))
   end
+
+  test "the review and needs-input panels are mutually exclusive by status",
+       %{conn: conn, review: review} do
+    card = in_review_card(review)
+
+    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    assert has_element?(view, "#review-panel")
+    refute has_element?(view, "#needs-input-panel")
+
+    {:ok, _blocked} = Cards.request_input(card, "Which palette?")
+
+    refute has_element?(view, "#review-panel")
+    refute has_element?(view, "#review-actions")
+    assert has_element?(view, "#needs-input-panel", "Which palette?")
+  end
+
+  test "review transitions from elsewhere update an open drawer live (MMF 18)",
+       %{conn: conn, review: review} do
+    {:ok, card} = Cards.create_card(review, %{title: "Live review"})
+
+    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    refute has_element?(view, "#review-panel")
+
+    {:ok, card} = Cards.set_status(card, %{status: :in_review})
+    assert has_element?(view, "#review-panel", "READY FOR YOUR REVIEW")
+
+    {:ok, _approved} = Cards.approve(card)
+    refute has_element?(view, "#review-panel")
+    assert has_element?(view, "#card-drawer .drawer-stage-chip", "Deploy")
+  end
 end
