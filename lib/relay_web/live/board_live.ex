@@ -66,7 +66,7 @@ defmodule RelayWeb.BoardLive do
             style="display:flex;flex-direction:column;gap:9px;flex:0 0 auto;"
           >
             <div style="display:flex;align-items:center;gap:8px;padding:0 4px;height:20px;flex:0 0 auto;">
-              <span style={category_dot_style(category)}></span>
+              <span class="category-dot" style={category_dot_style(category)}></span>
               <h2
                 class="category-band"
                 style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;font-family:var(--font-mono);color:oklch(0.52 0.02 255);margin:0;"

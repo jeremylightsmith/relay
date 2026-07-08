@@ -81,6 +81,25 @@ defmodule RelayWeb.BoardLiveTest do
       assert bands == ["Unstarted", "Planning", "In progress", "Complete"]
     end
 
+    test "renders the Planning band with its label and violet dot", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      plan = Enum.find(board.stages, &(&1.name == "Plan"))
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(view, "#category-planning h2.category-band", "Planning")
+      assert has_element?(view, "#category-planning #stage-strip-#{plan.id}", "Plan")
+
+      [style] =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#category-planning .category-dot")
+        |> LazyHTML.attribute("style")
+
+      assert style =~ "--color-secondary"
+    end
+
     test "shows the right Human/AI owner swatch on each stage", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
 

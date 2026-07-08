@@ -69,21 +69,21 @@ defmodule RelayWeb.BoardSettingsLive do
               </h1>
               <%!-- Mockup line ~217; the WIP-limit mention is deferred to MMF 11. --%>
               <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 12px 0;max-width:560px;">
-                Stages live inside three categories — <b style="color:oklch(0.34 0.02 255);">Unstarted</b>, <b style="color:oklch(0.34 0.02 255);">In progress</b>, and
+                Stages live inside four categories — <b style="color:oklch(0.34 0.02 255);">Unstarted</b>, <b style="color:oklch(0.34 0.02 255);">Planning</b>, <b style="color:oklch(0.34 0.02 255);">In progress</b>, and
                 <b style="color:oklch(0.34 0.02 255);">Complete</b>
                 — so everyone knows what a stage <i>means</i>. Use the arrows to move a stage
                 up or down — cross into another category and it takes on that meaning. Set
                 each stage's owner and whether finished work waits in a Done sub-column.
               </p>
 
-              <%!-- All three groups always render so an emptied category stays reachable. --%>
+              <%!-- All four groups always render so an emptied category stays reachable. --%>
               <div
                 :for={{category, stages} <- @stage_groups}
                 id={"settings-group-#{category}"}
                 style="margin-top:22px;"
               >
                 <div style="display:flex;align-items:center;gap:8px;margin:0 0 10px 2px;">
-                  <span style={category_dot_style(category)}></span>
+                  <span class="category-dot" style={category_dot_style(category)}></span>
                   <span
                     class="font-mono"
                     style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;color:oklch(0.50 0.02 255);"
@@ -451,7 +451,7 @@ defmodule RelayWeb.BoardSettingsLive do
   defp section(_params), do: :stages
 
   # Reloads the main stages and lane map from the DB after any mutation, and
-  # groups them for the pane. All three categories always render so an
+  # groups them for the pane. All four categories always render so an
   # emptied category keeps its "+ Add stage" button.
   defp refresh_stages(socket) do
     board = socket.assigns.board
