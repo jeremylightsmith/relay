@@ -1,0 +1,44 @@
+defmodule Relay.Events do
+  @moduledoc """
+  The realtime notification seam (MMF 18): board-scoped Phoenix.PubSub
+  topics carrying semantic domain events from the contexts to every open
+  `RelayWeb.BoardLive` (and any future subscriber).
+
+  Topic: `"board:<board_id>"`. Event vocabulary — broadcast by the
+  contexts after each successful mutation, never by controllers or
+  LiveViews, so the LiveView and REST API entry points share one path:
+
+    * `{:card_upserted, card}` — create or any in-place edit
+      (title/description/tag, status, owners); `card` arrives with
+      owners preloaded.
+    * `{:card_moved, card, from_stage_id}` — cross- or within-stage move.
+    * `{:timeline_appended, card_id, entry}` — a new `Schemas.Comment` or
+      `Schemas.Activity` entry (with `:user` preloaded).
+    * `{:stages_changed, board_id}` — any stage/config change; coarse on
+      purpose, receivers refetch stages.
+
+  Broadcasting is fire-and-forget: `broadcast/2` swallows PubSub errors
+  and always returns `:ok`, so a broadcast failure can never fail the
+  mutation that triggered it.
+  """
+
+  use Boundary, deps: []
+
+  @pubsub Relay.PubSub
+
+  @doc "Subscribes the calling process to `board_id`'s event topic."
+  def subscribe(board_id) do
+    Phoenix.PubSub.subscribe(@pubsub, topic(board_id))
+  end
+
+  @doc """
+  Broadcasts `event` to every subscriber of `board_id`'s topic.
+  Fire-and-forget: errors are swallowed and `:ok` is always returned.
+  """
+  def broadcast(board_id, event) do
+    _ = Phoenix.PubSub.broadcast(@pubsub, topic(board_id), event)
+    :ok
+  end
+
+  defp topic(board_id), do: "board:#{board_id}"
+end
