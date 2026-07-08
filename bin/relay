@@ -1,36 +1,40 @@
 #!/usr/bin/env python3
-"""relay — a tiny CLI for driving a Relay board over its REST API.
+"""relay — one tool for a Relay board: a REST-API CLI, and (with no arguments) a
+board *runner* that watches the board and drives ready cards through a pipeline.
 
-Zero dependencies (Python 3 stdlib only), so it runs anywhere Claude Code does.
+This file is generic: it knows the Relay REST API and how to watch/dispatch, but
+NOTHING about any particular board's columns, agents, or skills. All of that —
+the pipeline, and what to run when a card is ready at each stage — lives in
+`relay_config.json` (see its `_comment`). The runner just executes the steps it
+finds there.
 
-Config (env):
-  RELAY_URL       e.g. https://relayboard.fly.dev
-  RELAY_API_KEY   a board API key (relay_<prefix>_<secret>) from /board/settings
+Config (env): RELAY_URL, RELAY_API_KEY  (a board key from /board/settings)
 
-Usage:
-  relay board [--json]
-  relay card REF [--json]
-  relay pull [--json]                 # next card to work (right-to-left priority)
-  relay comment REF TEXT
-  relay move REF STAGE                # STAGE by name (e.g. "Spec", "Spec:Review")
-  relay status REF STATUS             # queued|working|needs_input|in_review|done
-  relay describe REF TEXT             # set the card description (TEXT may be "-"=stdin, "@file")
-  relay needs-input REF QUESTION      # ask a question (blocks the card)
-  relay own REF                       # claim the card for the AI
-  relay release REF                   # clear owners (hand back)
-  relay approve REF                   # gate: advance to the next stage
-  relay reject REF NOTE               # gate: send back with a note
+  relay                       # run the board runner (watch loop)
+  relay watch [--once] [--dry-run] [--interval N]
+  relay board [--json]        relay card REF [--json]     relay pull [--json]
+  relay comment REF TEXT      relay move REF STAGE        relay status REF STATUS
+  relay describe REF TEXT     relay needs-input REF Q     relay own REF / release REF
+  relay approve REF           relay reject REF NOTE       relay layout   # config skeleton
 
-TEXT/QUESTION/NOTE args accept "-" (read stdin) or "@path" (read a file) for long content.
-Every command prints human-readable text by default; add --json for machine output.
-Non-zero exit on any error.
+TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output.
 """
 import argparse
+import hashlib
 import json
 import os
+import re
+import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
+
+HERE = os.path.abspath(__file__)
+ROOT = os.path.dirname(os.path.dirname(HERE))
+CONFIG_PATH = os.path.join(ROOT, "relay_config.json")
+STATE_PATH = os.path.join(ROOT, ".relay-watch-state.json")
+DRY = False
 
 
 def die(msg):
@@ -38,14 +42,18 @@ def die(msg):
     sys.exit(1)
 
 
+def log(msg):
+    print(f"[relay] {msg}", flush=True)
+
+
+# ============================ REST API client ============================
+
 def env(name):
     v = os.environ.get(name)
-    if not v:
-        die(f"{name} is not set")
-    return v
+    return v or die(f"{name} is not set")
 
 
-def request(method, path, body=None):
+def api(method, path, body=None):
     url = env("RELAY_URL").rstrip("/") + path
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
@@ -67,7 +75,6 @@ def request(method, path, body=None):
 
 
 def read_arg(text):
-    """A text arg: '-' reads stdin, '@path' reads a file, else literal."""
     if text == "-":
         return sys.stdin.read()
     if text.startswith("@"):
@@ -76,11 +83,55 @@ def read_arg(text):
     return text
 
 
-# ---------- rendering ----------
+def get_board():
+    return api("GET", "/api/board")
+
+
+def get_card(ref):
+    return api("GET", f"/api/cards/{ref}")["data"]
+
+
+def resolve_stage_id(name, board=None):
+    board = board or get_board()
+    for s in board["stages"]:
+        if s["name"] == name:
+            return s["id"]
+    die(f'no stage named "{name}". stages: ' + ", ".join(s["name"] for s in board["stages"]))
+
+
+# board mutations (used by both the CLI and the runner)
+def own(ref):
+    return api("PATCH", f"/api/cards/{ref}", {"owners": ["agent"]})["data"]
+
+
+def release(ref):
+    return api("PATCH", f"/api/cards/{ref}", {"owners": []})["data"]
+
+
+def set_status(ref, status):
+    return api("PATCH", f"/api/cards/{ref}", {"status": status})["data"]
+
+
+def set_description(ref, text):
+    return api("PATCH", f"/api/cards/{ref}", {"description": text})["data"]
+
+
+def move(ref, stage_name):
+    return api("POST", f"/api/cards/{ref}/move", {"stage": resolve_stage_id(stage_name)})["data"]
+
+
+def comment(ref, text):
+    return api("POST", f"/api/cards/{ref}/comments", {"body": text})
+
+
+def needs_input(ref, question):
+    return api("POST", f"/api/cards/{ref}/needs-input", {"question": question})["data"]
+
+
+# ============================ rendering ============================
 
 def card_line(c):
-    owner = c.get("active_owner") or "-"
-    return f'{c["ref"]} [{c.get("status", "?")}/{owner}] {c["title"]}'
+    return f'{c["ref"]} [{c.get("status", "?")}/{c.get("active_owner") or "-"}] {c["title"]}'
 
 
 def print_card(c):
@@ -88,135 +139,226 @@ def print_card(c):
     print(f'{c["ref"]}  {c["title"]}')
     print(f'status: {c.get("status", "?")}   active: {c.get("active_owner") or "-"}   owners: {owners}\n')
     print(c.get("description") or "(no description)")
-    timeline = c.get("timeline") or []
-    if timeline:
-        print("\ntimeline:")
-        for e in timeline:
-            who = e.get("author", {}).get("name", "?")
-            if e.get("kind") == "comment":
-                print(f"  - {who}: {e.get('body', '')}")
-            else:
-                print(f"  * {who} {e.get('type', '')} {e.get('meta', '')}")
+    for e in c.get("timeline") or []:
+        who = e.get("author", {}).get("name", "?")
+        if e.get("kind") == "comment":
+            print(f"  - {who}: {e.get('body', '')}")
+        else:
+            print(f"  * {who} {e.get('type', '')} {e.get('meta', '')}")
 
 
 def emit(args, data, human):
     print(json.dumps(data, indent=2) if getattr(args, "json", False) else human)
 
 
-# ---------- stage resolution ----------
-
-def resolve_stage_id(name):
-    board = request("GET", "/api/board")
-    for st in board["stages"]:
-        if st["name"] == name:
-            return st["id"], board
-    names = ", ".join(st["name"] for st in board["stages"])
-    die(f'no stage named "{name}". stages: {names}')
-
-
-# ---------- commands ----------
+# ============================ CLI commands ============================
 
 def cmd_board(args):
-    b = request("GET", "/api/board")
+    b = get_board()
     if args.json:
-        print(json.dumps(b, indent=2))
-        return
+        return print(json.dumps(b, indent=2))
     by_stage = {}
     for c in b["cards"]:
         by_stage.setdefault(c["stage_id"], []).append(c)
     print(f'{b["board"]["name"]} ({b["board"]["key"]})\n')
-    for st in b["stages"]:
-        print(f'{st["name"]} ({st["owner"]})')
-        cards = by_stage.get(st["id"], [])
-        if not cards:
-            print("  (empty)")
-        for c in cards:
+    for s in b["stages"]:
+        print(f'{s["name"]} ({s["owner"]})')
+        for c in by_stage.get(s["id"], []) or []:
             print("  " + card_line(c))
+        if not by_stage.get(s["id"]):
+            print("  (empty)")
         print()
 
 
 def cmd_card(args):
-    c = request("GET", f"/api/cards/{args.ref}")["data"]
-    emit(args, c, "") if args.json else print_card(c)
+    c = get_card(args.ref)
+    print(json.dumps(c, indent=2)) if args.json else print_card(c)
 
 
-def cmd_pull(args):
-    """Next card to work: a card whose stage is immediately left of an AI stage,
-    prioritizing the rightmost (furthest-along) such card. Advisory — prints the
-    card; use `own`+`move` to take it (or extend pull to auto-move later)."""
-    b = request("GET", "/api/board")
-    stages = sorted(b["stages"], key=lambda s: s["position"])
-    pos_of = {s["id"]: i for i, s in enumerate(stages)}
-    ai_next = {}  # stage_id -> the AI stage immediately to its right, if any
-    for i, s in enumerate(stages[:-1]):
-        nxt = stages[i + 1]
-        if nxt["owner"] == "ai":
-            ai_next[s["id"]] = nxt
-    candidates = [c for c in b["cards"] if c["stage_id"] in ai_next]
-    if not candidates:
-        emit(args, None, "No card ready to pull.")
-        return
-    # rightmost first: highest current-stage position
-    candidates.sort(key=lambda c: pos_of[c["stage_id"]], reverse=True)
-    c = candidates[0]
-    target = ai_next[c["stage_id"]]
-    human = f'{card_line(c)}  → ready for {target["name"]}'
-    emit(args, {"card": c, "target_stage": target}, human)
+def _simple(fn):
+    """Wrap a mutation returning a card into a CLI handler that prints it."""
+    def run(args):
+        card = fn(args)
+        emit(args, card, card_line(card))
+    return run
 
 
 def cmd_comment(args):
-    request("POST", f"/api/cards/{args.ref}/comments", {"body": read_arg(args.text)})
+    comment(args.ref, read_arg(args.text))
     print(f"{args.ref}: comment posted")
 
 
-def cmd_move(args):
-    stage_id, _ = resolve_stage_id(args.stage)
-    c = request("POST", f"/api/cards/{args.ref}/move", {"stage": stage_id})["data"]
-    emit(args, c, card_line(c))
+def cmd_layout(args):
+    """Print a relay_config.json pipeline skeleton derived from the live board."""
+    b = get_board()
+    ai = [s for s in b["stages"] if s["owner"] == "ai"]
+    print(json.dumps({"poll_interval": 45, "pipeline": [
+        {"stage": s["name"], "from": "<column left of it>", "done": "<its :Review or :Done>",
+         "action": [{"claude": "<what to do for {ref}>"}]} for s in ai
+    ]}, indent=2))
 
 
-def cmd_status(args):
-    c = request("PATCH", f"/api/cards/{args.ref}", {"status": args.status})["data"]
-    emit(args, c, card_line(c))
+# ============================ the runner ============================
+
+def load_config():
+    return json.load(open(CONFIG_PATH))
 
 
-def cmd_describe(args):
-    c = request("PATCH", f"/api/cards/{args.ref}", {"description": read_arg(args.text)})["data"]
-    emit(args, c, card_line(c))
+def fingerprint(b):
+    rows = sorted(f'{c["ref"]}|{c["stage_id"]}|{c.get("status")}|{c.get("active_owner")}' for c in b["cards"])
+    return hashlib.sha256("\n".join(rows).encode()).hexdigest()
 
 
-def cmd_needs_input(args):
-    c = request("POST", f"/api/cards/{args.ref}/needs-input", {"question": read_arg(args.question)})["data"]
-    emit(args, c, card_line(c))
+def blocked(card):
+    return card.get("status") == "needs_input"
 
 
-def cmd_own(args):
-    c = request("PATCH", f"/api/cards/{args.ref}", {"owners": ["agent"]})["data"]
-    emit(args, c, card_line(c))
+def find_ready(b, cfg):
+    """(card, entry, mode) for the next card to work — right-to-left priority; resume before fresh."""
+    by_name = {s["name"]: s for s in b["stages"]}
+    by_id = {}
+    for c in b["cards"]:
+        by_id.setdefault(c["stage_id"], []).append(c)
+
+    def cards_in(name):
+        s = by_name.get(name)
+        return by_id.get(s["id"], []) if s else []
+
+    def wip_ok(name):
+        s = by_name.get(name)
+        limit = s.get("wip_limit") if s else None
+        return not limit or len(cards_in(name)) < limit
+
+    for entry in reversed(cfg["pipeline"]):
+        for c in cards_in(entry["stage"]):
+            if c.get("status") == "working" and not blocked(c):
+                return c, entry, "resume"
+        if wip_ok(entry["stage"]):
+            for c in cards_in(entry["from"]):
+                if not blocked(c):
+                    return c, entry, "fresh"
+    return None
 
 
-def cmd_release(args):
-    c = request("PATCH", f"/api/cards/{args.ref}", {"owners": []})["data"]
-    emit(args, c, card_line(c))
+def slug(text):
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40] or "card"
 
 
-def cmd_approve(args):
-    c = request("POST", f"/api/cards/{args.ref}/approve", {})["data"]
-    emit(args, c, card_line(c))
+def render(template, vars):
+    for k, v in vars.items():
+        template = template.replace("{" + k + "}", str(v))
+    return template
 
 
-def cmd_reject(args):
-    c = request("POST", f"/api/cards/{args.ref}/reject", {"note": read_arg(args.note)})["data"]
-    emit(args, c, card_line(c))
+def run_step(step, vars):
+    """A pipeline step is {shell: cmd} or {claude: prompt}. Returns True on success."""
+    if "shell" in step:
+        cmd = render(step["shell"], vars)
+        if DRY:
+            log(f"  (dry) shell: {cmd}")
+            return True
+        return subprocess.run(cmd, shell=True, cwd=ROOT).returncode == 0
+    if "claude" in step:
+        prompt = render(step["claude"], vars)
+        if DRY:
+            log("  (dry) claude -p <<<\n" + "\n".join("      " + l for l in prompt.splitlines()))
+            return True
+        return subprocess.run(["claude", "-p", prompt], cwd=ROOT).returncode == 0
+    log(f"  ! unknown step: {step}")
+    return False
 
+
+def flag(ref, reason):
+    log(f"  ⚑ {ref}: {reason}")
+    if not DRY:
+        try:
+            needs_input(ref, f"[auto] stage failed: {reason}. A human needs to look — the runner "
+                             f"won't retry until this is cleared.")
+        except SystemExit:
+            pass
+
+
+def work(card, entry, mode):
+    ref = card["ref"]
+    n = ref.split("-")[-1]
+    vars = {"ref": ref, "title": card["title"], "stage": entry["stage"], "from": entry["from"],
+            "done": entry["done"], "branch": f"rly-{n}-{slug(card['title'])}",
+            "relay": HERE, "url": os.environ.get("RELAY_URL", "")}
+    log(f"→ {ref} '{card['title']}' :: {entry['stage']} ({mode}) — then {entry['done']}")
+    if DRY:
+        for step in entry["action"]:
+            run_step(step, vars)
+        return
+    own(ref)
+    if mode == "fresh":
+        move(ref, entry["stage"])
+    set_status(ref, "working")
+    ok = all(run_step(step, vars) for step in entry["action"])
+    after = get_card(ref)
+    if after.get("status") == "needs_input":
+        return log(f"  {ref} asked the human — left blocked in {entry['stage']}")
+    if not ok:
+        return flag(ref, f"{entry['stage']} stage did not complete")
+    comment(ref, f"{entry['stage']} done → pushing to {entry['done']}")
+    move(ref, entry["done"])
+    set_status(ref, "in_review" if entry["done"].lower().endswith(":review") else "queued")
+    release(ref)
+    log(f"  ✓ {ref} pushed to {entry['done']}")
+
+
+def state_get():
+    try:
+        return json.load(open(STATE_PATH)).get("fingerprint")
+    except Exception:
+        return None
+
+
+def state_set(fp):
+    if not DRY:
+        json.dump({"fingerprint": fp}, open(STATE_PATH, "w"))
+
+
+def tick(cfg):
+    b = get_board()
+    fp = fingerprint(b)
+    if fp == state_get():
+        return False
+    log("board changed — scanning for ready work")
+    ready = find_ready(b, cfg)
+    if not ready:
+        log("  nothing ready to work")
+        state_set(fp)
+        return False
+    work(*ready)
+    state_set(fp if DRY else None)  # after real work, force a re-poll
+    return True
+
+
+def cmd_watch(args):
+    global DRY
+    DRY = args.dry_run
+    cfg = load_config()
+    interval = args.interval or cfg.get("poll_interval", 45)
+    env("RELAY_URL"), env("RELAY_API_KEY")
+    log(f"watching {os.environ['RELAY_URL']} every {interval}s"
+        + (" (dry-run)" if DRY else "") + (" — one pass" if args.once else ""))
+    while True:
+        did = tick(cfg)
+        if args.once:
+            break
+        if not did:
+            time.sleep(interval)
+
+
+# ============================ argparse ============================
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="relay", description="Drive a Relay board from the terminal.")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    p = argparse.ArgumentParser(prog="relay", description=__doc__.splitlines()[1])
+    sub = p.add_subparsers(dest="cmd")
 
-    def add(name, fn, *pos_args, json_flag=False):
+    def add(name, fn, *pos, json_flag=False):
         sp = sub.add_parser(name)
-        for a in pos_args:
+        for a in pos:
             sp.add_argument(a)
         if json_flag:
             sp.add_argument("--json", action="store_true")
@@ -226,20 +368,39 @@ def build_parser():
     add("board", cmd_board, json_flag=True)
     add("card", cmd_card, "ref", json_flag=True)
     add("pull", cmd_pull, json_flag=True)
+    add("move", _simple(lambda a: move(a.ref, a.stage)), "ref", "stage", json_flag=True)
+    add("status", _simple(lambda a: set_status(a.ref, a.status)), "ref", "status", json_flag=True)
+    add("describe", _simple(lambda a: set_description(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
+    add("needs-input", _simple(lambda a: needs_input(a.ref, read_arg(a.question))), "ref", "question", json_flag=True)
+    add("own", _simple(lambda a: own(a.ref)), "ref", json_flag=True)
+    add("release", _simple(lambda a: release(a.ref)), "ref", json_flag=True)
+    add("approve", _simple(lambda a: api("POST", f"/api/cards/{a.ref}/approve", {})["data"]), "ref", json_flag=True)
+    add("reject", _simple(lambda a: api("POST", f"/api/cards/{a.ref}/reject", {"note": read_arg(a.note)})["data"]), "ref", "note", json_flag=True)
     add("comment", cmd_comment, "ref", "text")
-    add("move", cmd_move, "ref", "stage", json_flag=True)
-    add("status", cmd_status, "ref", "status", json_flag=True)
-    add("describe", cmd_describe, "ref", "text", json_flag=True)
-    add("needs-input", cmd_needs_input, "ref", "question", json_flag=True)
-    add("own", cmd_own, "ref", json_flag=True)
-    add("release", cmd_release, "ref", json_flag=True)
-    add("approve", cmd_approve, "ref", json_flag=True)
-    add("reject", cmd_reject, "ref", "note", json_flag=True)
+    add("layout", cmd_layout)
+    w = add("watch", cmd_watch)
+    w.add_argument("--once", action="store_true")
+    w.add_argument("--dry-run", action="store_true")
+    w.add_argument("--interval", type=int)
     return p
+
+
+def cmd_pull(args):
+    """Advisory: print the next ready card per the config (does not move it)."""
+    ready = find_ready(get_board(), load_config())
+    if not ready:
+        return emit(args, None, "No card ready to pull.")
+    c, entry, _ = ready
+    emit(args, {"card": c, "target_stage": entry["stage"]},
+         f'{card_line(c)}  → ready for {entry["stage"]}')
 
 
 def main():
     args = build_parser().parse_args()
+    if not getattr(args, "cmd", None):
+        # no arguments → run the board runner with defaults
+        ns = argparse.Namespace(once=False, dry_run=False, interval=None)
+        return cmd_watch(ns)
     args.func(args)
 
 

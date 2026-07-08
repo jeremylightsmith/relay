@@ -1,0 +1,44 @@
+{
+  "_comment": "Project config for `relay` (the generic engine reads this — it hardcodes nothing about these columns/agents/skills). `pipeline` lists AI stages left-to-right; the runner works cards right-to-left. Per stage: `from` = column a ready card is pulled from, `done` = where to push when finished (a *:Review lane = human checkpoint, else auto-continues), `action` = ordered steps. Each step is {shell: <cmd>} or {claude: <prompt>}. Templates: {ref} {title} {branch} {stage} {from} {done} {relay} {url}. Regenerate the skeleton from the board with `relay layout`.",
+  "poll_interval": 45,
+  "pipeline": [
+    {
+      "stage": "Spec",
+      "from": "Next up",
+      "done": "Spec:Review",
+      "action": [
+        { "claude": "You are the AI working Relay card {ref} at the SPEC stage. Read it: {relay} card {ref}. Design this feature — decide scope, keep it tight. If you genuinely need clarification, ask the human instead of guessing: `{relay} needs-input {ref} \"<your question>\"` then STOP. Otherwise write a concise design spec, save it to a temp file, and set it as the card's description: `{relay} describe {ref} @<that file>`. Then STOP. Do not touch git or other cards." }
+      ]
+    },
+    {
+      "stage": "Plan",
+      "from": "Spec:Done",
+      "done": "Plan:Done",
+      "action": [
+        { "claude": "You are the AI working Relay card {ref} at the PLAN stage. Read it: `{relay} card {ref}` — its description is the approved spec. Author an implementation plan at the repo root as plan.md following this repo's /write-plan conventions (bite-sized TDD tasks with ACTUAL test + implementation code, no placeholders). Overwrite any existing plan.md. Then STOP. Do not touch git or other cards." }
+      ]
+    },
+    {
+      "stage": "Code",
+      "from": "Plan:Done",
+      "done": "Code:Review",
+      "action": [
+        { "shell": "git checkout main && git checkout -B {branch}" },
+        { "claude": "Run /exec-plan on the current branch to completion using the repo-root plan.md. This is authorized — proceed without asking for confirmation. Do not merge; exec-plan stops before the human-gated finish." },
+        { "shell": "git push -u origin {branch}" }
+      ]
+    },
+    {
+      "stage": "Deploy",
+      "from": "Code:Done",
+      "done": "Deploy:Done",
+      "action": [
+        { "shell": "git checkout main && git merge --no-ff {branch} -m 'Merge {branch} ({ref})' && (git ls-files --error-unmatch plan.md >/dev/null 2>&1 && git rm --cached plan.md && git commit -q -m 'chore: untrack throwaway plan.md' || true)" },
+        { "shell": "mix precommit" },
+        { "shell": "git push origin main" },
+        { "shell": "gh run watch $(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId') --exit-status" },
+        { "shell": "git branch -d {branch} || true" }
+      ]
+    }
+  ]
+}
