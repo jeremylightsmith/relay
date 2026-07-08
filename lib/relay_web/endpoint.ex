@@ -11,9 +11,11 @@ defmodule RelayWeb.Endpoint do
     same_site: "Lax"
   ]
 
+  # `:user_agent` carries the Ecto sandbox metadata for browser acceptance tests
+  # (see RelayWeb.LiveAcceptance); harmless outside test.
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options]],
-    longpoll: [connect_info: [session: @session_options]]
+    websocket: [connect_info: [:user_agent, session: @session_options]],
+    longpoll: [connect_info: [:user_agent, session: @session_options]]
 
   # Serve at "/" the static files from "priv/static" directory.
   #
@@ -51,5 +53,11 @@ defmodule RelayWeb.Endpoint do
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options
+
+  # In test, let browser (Playwright) sessions join the test's DB transaction.
+  if Application.compile_env(:relay, :sql_sandbox) do
+    plug Phoenix.Ecto.SQL.Sandbox
+  end
+
   plug RelayWeb.Router
 end

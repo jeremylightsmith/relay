@@ -40,7 +40,14 @@ defmodule RelayWeb.Router do
     get "/terms", PageController, :terms
     delete "/logout", AuthController, :delete
 
-    live_session :require_authenticated, on_mount: [{RelayWeb.Auth, :require_authenticated}] do
+    # In test, RelayWeb.LiveAcceptance must run first so the auth hook's DB query
+    # runs inside the browser test's shared sandbox transaction.
+    live_session :require_authenticated,
+      on_mount:
+        if(Application.compile_env(:relay, :sql_sandbox),
+          do: [RelayWeb.LiveAcceptance],
+          else: []
+        ) ++ [{RelayWeb.Auth, :require_authenticated}] do
       live "/board", BoardLive
       live "/board/settings", BoardSettingsLive
     end

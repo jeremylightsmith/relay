@@ -14,6 +14,18 @@ config :phoenix,
 config :phoenix_live_view,
   enable_expensive_runtime_checks: true
 
+# PhoenixTest + Playwright driver. The fast suite excludes :playwright and never
+# starts the driver (see test/test_helper.exs); CI runs it with --max-cases 1.
+config :phoenix_test,
+  otp_app: :relay,
+  playwright: [
+    browser: :chromium,
+    # LiveView reconnect + first render on a cold CI runner can be slow.
+    timeout: to_timeout(second: 10),
+    # Give LiveView processes time to release the sandbox connection on test exit.
+    ecto_sandbox_stop_owner_delay: 50
+  ]
+
 # In test we don't send emails
 config :relay, Relay.Mailer, adapter: Swoosh.Adapters.Test
 
@@ -30,12 +42,12 @@ config :relay, Relay.Repo,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
-# We don't run a server during test. If one is required,
-# you can enable the server option below.
+# Browser (Playwright) tests need a real running server; the plain LiveView
+# tests don't care. Running the server always is harmless for the fast suite.
 config :relay, RelayWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base: "d7ZQNZUWtP3mPcEZbpa3EzYQ70t1YmaHBlp+2uxkBeAXR5d6FfGSGzr/toxbUS5k",
-  server: false
+  server: true
 
 # Route Relay.CLI's HTTP requests to a Req.Test stub in tests.
 config :relay, cli_req_options: [plug: {Req.Test, Relay.CLI}]
@@ -44,6 +56,10 @@ config :relay, cli_req_options: [plug: {Req.Test, Relay.CLI}]
 # the test router so tests and the acceptance smoke can authenticate
 # without real Google. Never enabled in prod.
 config :relay, dev_routes: true
+
+# Share the test's DB transaction with the browser session (see the SQL sandbox
+# plug in RelayWeb.Endpoint, compiled only when this flag is set).
+config :relay, sql_sandbox: true
 
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
