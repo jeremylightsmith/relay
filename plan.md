@@ -630,7 +630,7 @@ needs-input with a question.
 
 ### Steps
 
-- [ ] **Failing tests.** Add `test/relay_web/api/card_actions_test.exs`:
+- [x] **Failing tests.** Add `test/relay_web/api/card_actions_test.exs`:
 
 ```elixir
 defmodule RelayWeb.Api.CardActionsTest do
@@ -699,9 +699,9 @@ defmodule RelayWeb.Api.CardActionsTest do
 end
 ```
 
-- [ ] **Run — expect fail.**
+- [x] **Run — expect fail.**
 
-- [ ] **Implement the actions.** Add `alias Relay.Boards` to `RelayWeb.Api.CardController` and add these functions:
+- [x] **Implement the actions.** Add `alias Relay.Boards` to `RelayWeb.Api.CardController` and add these functions:
 
 ```elixir
   def move(conn, %{"ref" => ref} = params) do
@@ -749,7 +749,7 @@ end
   defp move_index(_params), do: 1_000_000
 ```
 
-- [ ] **Implement the comment render.** Add to `lib/relay_web/controllers/api/card_json.ex`:
+- [x] **Implement the comment render.** Add to `lib/relay_web/controllers/api/card_json.ex`:
 
 ```elixir
   def comment(%{comment: comment}) do
@@ -759,9 +759,9 @@ end
 
 (`entry/1` + `author/1` from Task 2 already handle a `%Schemas.Comment{}`.)
 
-- [ ] **Run — expect pass.**
+- [x] **Run — expect pass.**
 
-- [ ] **Full check + commit.** `mix precommit`. Commit: `feat(api): POST move / comments / needs-input card actions`.
+- [x] **Full check + commit.** `mix precommit`. Commit: `feat(api): POST move / comments / needs-input card actions`.
 
 **Deliverable:** the agent can move a card (board-scoped stage, 404 on foreign stage/ref), comment as "Relay AI" (201), and flag needs-input (sets `needs_input` + records the question) — completing the MMF 09 endpoint set, all thin over the contexts.
 
