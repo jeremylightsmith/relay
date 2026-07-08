@@ -76,4 +76,12 @@ defmodule RelayWeb.Api.CardControllerTest do
     card = insert(:card, stage: stage)
     assert conn |> patch(~p"/api/cards/#{ref(board, card)}", %{status: "bogus"}) |> json_response(400)
   end
+
+  test "PATCH malformed owners returns 400 instead of crashing", %{conn: conn, board: board, stage: stage} do
+    card = insert(:card, stage: stage)
+
+    assert conn |> patch(~p"/api/cards/#{ref(board, card)}", %{owners: ["nonsense"]}) |> json_response(400)
+    assert conn |> patch(~p"/api/cards/#{ref(board, card)}", %{owners: ["user:abc"]}) |> json_response(400)
+    assert conn |> patch(~p"/api/cards/#{ref(board, card)}", %{owners: ["user:"]}) |> json_response(400)
+  end
 end

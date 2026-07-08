@@ -18,6 +18,13 @@ defmodule RelayWeb.Api.FallbackController do
     |> render(:error, code: "invalid", message: changeset_message(changeset))
   end
 
+  def call(conn, {:error, :invalid_request}) do
+    conn
+    |> put_status(:bad_request)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid", message: "Invalid request")
+  end
+
   defp changeset_message(changeset) do
     changeset
     |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->

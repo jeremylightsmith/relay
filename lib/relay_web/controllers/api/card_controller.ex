@@ -31,6 +31,7 @@ defmodule RelayWeb.Api.CardController do
     else
       nil -> {:error, :not_found}
       {:error, changeset} -> {:error, changeset}
+      :error -> {:error, :invalid_request}
     end
   end
 
@@ -49,11 +50,28 @@ defmodule RelayWeb.Api.CardController do
   defp update_status(card, _params), do: {:ok, card}
 
   defp update_owners(card, %{"owners" => owners}) when is_list(owners) do
-    Cards.set_owners(card, Enum.map(owners, &parse_actor/1), :agent)
+    owners
+    |> Enum.map(&parse_actor/1)
+    |> Enum.reduce_while({:ok, []}, fn
+      {:ok, actor}, {:ok, acc} -> {:cont, {:ok, [actor | acc]}}
+      :error, _acc -> {:halt, :error}
+    end)
+    |> case do
+      {:ok, actors} -> Cards.set_owners(card, Enum.reverse(actors), :agent)
+      :error -> :error
+    end
   end
 
   defp update_owners(card, _params), do: {:ok, card}
 
-  defp parse_actor("agent"), do: :agent
-  defp parse_actor("user:" <> id), do: {:user, String.to_integer(id)}
+  defp parse_actor("agent"), do: {:ok, :agent}
+
+  defp parse_actor("user:" <> id) do
+    case Integer.parse(id) do
+      {int, ""} -> {:ok, {:user, int}}
+      _ -> :error
+    end
+  end
+
+  defp parse_actor(_), do: :error
 end
