@@ -572,7 +572,7 @@ copy these values exactly):
 
 **Steps**
 
-- [ ] Write the failing LiveView tests. Create
+- [x] Write the failing LiveView tests. Create
   `test/relay_web/live/board_live_needs_input_test.exs` with exactly:
 
   ```elixir
@@ -710,11 +710,11 @@ copy these values exactly):
   end
   ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_needs_input_test.exs` — expect failures
+- [x] Run `mix test test/relay_web/live/board_live_needs_input_test.exs` — expect failures
   (no `#needs-input-panel`, unknown `question`/`answer_form` assigns, `FunctionClauseError`
   from `activity_phrase/1` on the new entry types).
 
-- [ ] Implement the component. In `lib/relay_web/components/core_components.ex`:
+- [x] Implement the component. In `lib/relay_web/components/core_components.ex`:
 
   1. Add the two attrs after the `comment_form` attr of `card_drawer/1` (and extend the
      `card` attr's `doc` to mention `blocked_since`; extend the component `@doc`'s events
@@ -817,7 +817,7 @@ copy these values exactly):
     defp activity_phrase(%Activity{type: :input_answered}), do: "answered the question"
   ```
 
-- [ ] Implement the LiveView side. In `lib/relay_web/live/board_live.ex`:
+- [x] Implement the LiveView side. In `lib/relay_web/live/board_live.ex`:
 
   1. Pass the new attrs in `render/1`'s `<.card_drawer …>` call (after `comment_form`):
 
@@ -914,11 +914,11 @@ copy these values exactly):
     defp latest_question(_card, _timeline), do: nil
   ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_needs_input_test.exs` — expect green.
+- [x] Run `mix test test/relay_web/live/board_live_needs_input_test.exs` — expect green.
   Also run `mix test test/relay_web/live test/relay_web/components` to confirm no existing
   drawer/realtime test regressed.
 
-- [ ] Refresh the storybook story `storybook/core_components/card_drawer.story.exs`: add
+- [x] Refresh the storybook story `storybook/core_components/card_drawer.story.exs`: add
   `blocked_since: nil` to the `story_card/0` map (after `progress: 61`), then add a third
   variation after `:editing_description`:
 
@@ -949,8 +949,8 @@ copy these values exactly):
         }
   ```
 
-- [ ] Run `mix precommit` and fix anything it flags.
-- [ ] Commit.
+- [x] Run `mix precommit` and fix anything it flags.
+- [x] Commit.
 
 **Deliverable:** opening a `:needs_input` card's drawer shows the mockup's amber
 "RELAY AI NEEDS YOUR INPUT" panel with the latest question, a "waiting Xm/Xh/Xd" aging hint
