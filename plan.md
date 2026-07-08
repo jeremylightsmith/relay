@@ -514,7 +514,7 @@ ExMachina factories, `Phoenix.LiveViewTest`. No new dependencies.
 
 - [x] Run the three test files again — expect all green. Then run `mix precommit` and fix
   anything it flags.
-- [ ] Commit.
+- [x] Commit.
 
 **Deliverable:** the full question ↔ answer round trip works headlessly — an agent blocks a
 card with a question via the API (status `:needs_input`, `blocked_since` stamped, question
