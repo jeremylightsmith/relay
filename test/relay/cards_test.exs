@@ -440,6 +440,17 @@ defmodule Relay.CardsTest do
       assert meta == %{"from_stage" => stage.name, "to_stage" => "Code"}
     end
 
+    test "move_card/4 into a sub-lane snapshots the human label, not the composite Stage.name",
+         %{stage: stage, target: target} do
+      {:ok, review} = Relay.Boards.enable_lane(target, :review)
+      {:ok, card} = Cards.create_card(stage, %{title: "Reviewable"})
+
+      {:ok, moved} = Cards.move_card(card, review, 0)
+
+      assert [_created, %Schemas.Activity{type: :moved, meta: meta}] = activities(moved)
+      assert meta == %{"from_stage" => stage.name, "to_stage" => "Code · Review"}
+    end
+
     test "a same-stage reorder logs nothing", %{stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "A"})
       {:ok, _other} = Cards.create_card(stage, %{title: "B"})

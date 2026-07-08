@@ -109,6 +109,53 @@ defmodule RelayWeb.BoardSettingsLiveTest do
     end
   end
 
+  describe "stage sub-lanes" do
+    setup %{conn: conn} do
+      user = Relay.Factory.insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      %{conn: Plug.Test.init_test_session(conn, user_id: user.id), board: board}
+    end
+
+    test "toggling Review on creates the child lane; off removes it", %{conn: conn, board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, view, _html} = live(conn, ~p"/board/settings")
+
+      view |> element("#stage-#{code.id}-review-toggle") |> render_click()
+      assert [%{lane: :review}] = Boards.sublanes(code)
+
+      view |> element("#stage-#{code.id}-review-toggle") |> render_click()
+      assert Boards.sublanes(code) == []
+    end
+
+    test "toggling off a non-empty lane is blocked with a flash", %{conn: conn, board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, review} = Boards.enable_lane(code, :review)
+      Relay.Factory.insert(:card, stage: review)
+
+      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      html = view |> element("#stage-#{code.id}-review-toggle") |> render_click()
+
+      assert html =~ "still has cards"
+      assert [%{lane: :review}] = Boards.sublanes(code)
+    end
+
+    test "a blocked disable snaps the checkbox back to checked instead of leaving it visually off",
+         %{conn: conn, board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, review} = Boards.enable_lane(code, :review)
+      Relay.Factory.insert(:card, stage: review)
+
+      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      view |> element("#stage-#{code.id}-review-toggle") |> render_click()
+
+      # The blocked toggle bumps a render nonce into the checkbox's id so
+      # the client swaps in a fresh, correctly-checked element rather than
+      # patching the one the browser already unchecked on click.
+      refute has_element?(view, "#stage-#{code.id}-review-toggle")
+      assert has_element?(view, "#stage-#{code.id}-review-toggle-1[checked]")
+    end
+  end
+
   defp revealed_secret(view) do
     view
     |> element("#api-key-secret")

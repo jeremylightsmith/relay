@@ -113,6 +113,50 @@ defmodule RelayWeb.BoardSettingsLive do
             <% end %>
           </div>
         </section>
+
+        <section id="stages-pane" class="card border border-base-300 bg-base-100">
+          <div class="card-body space-y-4">
+            <div>
+              <h2 class="card-title text-base">Stages</h2>
+              <p class="text-sm text-base-content/60">
+                Add a Review or Done sub-lane to a stage. A Review lane is for humans; a Done lane matches the stage.
+              </p>
+            </div>
+            <ul class="divide-y divide-base-200">
+              <li
+                :for={stage <- @stages}
+                id={"stage-#{stage.id}-row"}
+                class="flex items-center justify-between py-2"
+              >
+                <span class="text-sm font-medium">{stage.name}</span>
+                <div class="flex items-center gap-4">
+                  <label class="flex items-center gap-2 text-xs">
+                    <input
+                      id={toggle_id(@lane_nonce, stage.id, :review)}
+                      type="checkbox"
+                      class="toggle toggle-sm"
+                      checked={lane_on?(@lane_map, stage.id, :review)}
+                      phx-click="toggle_lane"
+                      phx-value-stage-id={stage.id}
+                      phx-value-lane="review"
+                    /> Review
+                  </label>
+                  <label class="flex items-center gap-2 text-xs">
+                    <input
+                      id={toggle_id(@lane_nonce, stage.id, :done)}
+                      type="checkbox"
+                      class="toggle toggle-sm"
+                      checked={lane_on?(@lane_map, stage.id, :done)}
+                      phx-click="toggle_lane"
+                      phx-value-stage-id={stage.id}
+                      phx-value-lane="done"
+                    /> Done
+                  </label>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </section>
       </div>
     </Layouts.app>
     """
@@ -127,7 +171,10 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:page_title, "Board settings")
      |> assign(:board, board)
      |> assign(:api_key, ApiKeys.get_key(board))
-     |> assign(:revealed_token, nil)}
+     |> assign(:revealed_token, nil)
+     |> assign(:stages, board |> Boards.list_stages() |> Enum.filter(&(&1.lane == :main)))
+     |> assign(:lane_map, lane_map(board))
+     |> assign(:lane_nonce, %{})}
   end
 
   @impl true
@@ -158,6 +205,60 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:revealed_token, nil)
      |> put_flash(:info, "API key revoked.")}
   end
+
+  def handle_event("toggle_lane", %{"stage-id" => stage_id, "lane" => lane}, socket) do
+    lane = lane_atom(lane)
+    stage = Enum.find(socket.assigns.stages, &(&1.id == String.to_integer(stage_id)))
+
+    result =
+      if lane_on?(socket.assigns.lane_map, stage.id, lane) do
+        Boards.disable_lane(stage, lane)
+      else
+        Boards.enable_lane(stage, lane)
+      end
+
+    {:noreply, apply_lane_result(socket, result, stage.id, lane)}
+  end
+
+  defp lane_atom("review"), do: :review
+  defp lane_atom("done"), do: :done
+
+  # The disable was rejected server-side, so `lane_map` (and thus the
+  # `checked` value the toggle renders) is unchanged — but the native
+  # checkbox already flipped itself off the instant the user clicked it,
+  # before the "blocked" reply came back. Because the rendered `checked`
+  # output is identical to last render, LiveView sends no diff for that
+  # node, so the stale client-side property would otherwise never get
+  # corrected. Bumping the nonce changes the input's `id`, forcing the
+  # client to swap in a freshly-parsed element (checked from the true
+  # server state) instead of patching the one the user already toggled.
+  defp apply_lane_result(socket, {:error, :not_empty}, stage_id, lane) do
+    socket
+    |> put_flash(:error, "That lane still has cards — move them out first.")
+    |> update(:lane_nonce, &Map.update(&1, {stage_id, lane}, 1, fn n -> n + 1 end))
+  end
+
+  defp apply_lane_result(socket, {:ok, _}, _stage_id, _lane) do
+    board = socket.assigns.board
+    assign(socket, :lane_map, lane_map(board))
+  end
+
+  defp toggle_id(lane_nonce, stage_id, lane) do
+    case Map.get(lane_nonce, {stage_id, lane}, 0) do
+      0 -> "stage-#{stage_id}-#{lane}-toggle"
+      n -> "stage-#{stage_id}-#{lane}-toggle-#{n}"
+    end
+  end
+
+  defp lane_map(board) do
+    board
+    |> Boards.list_stages()
+    |> Enum.filter(&(&1.lane != :main))
+    |> Enum.group_by(& &1.parent_id, & &1.lane)
+    |> Map.new(fn {parent_id, lanes} -> {parent_id, MapSet.new(lanes)} end)
+  end
+
+  defp lane_on?(lane_map, stage_id, lane), do: MapSet.member?(Map.get(lane_map, stage_id, MapSet.new()), lane)
 
   defp masked(key), do: "relay_#{key.token_prefix}_…#{key.last_four}"
 

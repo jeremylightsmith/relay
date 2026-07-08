@@ -43,6 +43,48 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         }
       },
       %Variation{
+        id: :with_sublanes,
+        attributes: %{
+          id: "story-stage-code-sublanes",
+          name: "Code",
+          owner: :ai,
+          stage_id: 4,
+          count: 1,
+          board_key: "RLY",
+          cards: [
+            {"story-card-3",
+             %{
+               title: "Wire up Google sign-in",
+               tag: "auth",
+               ref_number: 3,
+               status: :working,
+               progress: 61,
+               owners: [%{actor_type: :agent}]
+             }}
+          ],
+          sublanes: [
+            %{
+              id: 401,
+              name: "Review",
+              owner: :human,
+              count: 1,
+              cards: [
+                {"story-card-4",
+                 %{
+                   title: "Approve the sign-in flow",
+                   tag: nil,
+                   ref_number: 4,
+                   status: :queued,
+                   progress: nil,
+                   owners: []
+                 }}
+              ]
+            },
+            %{id: 402, name: "Done", owner: :ai, count: 0, cards: []}
+          ]
+        }
+      },
+      %Variation{
         id: :composing,
         attributes: %{
           id: "story-stage-plan",

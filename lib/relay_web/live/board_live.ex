@@ -60,6 +60,17 @@ defmodule RelayWeb.BoardLive do
                 cards={Map.fetch!(@streams, stream_name(stage.id))}
                 composing={@composing_stage_id == stage.id}
                 compose_form={@compose_form}
+                sublanes={
+                  for sub <- Map.get(@sublanes_by_parent, stage.id, []) do
+                    %{
+                      id: sub.id,
+                      name: lane_label(sub.lane),
+                      owner: sub.owner,
+                      count: Map.fetch!(@stage_counts, sub.id),
+                      cards: Map.fetch!(@streams, stream_name(sub.id))
+                    }
+                  end
+                }
               />
             </div>
           </section>
@@ -70,7 +81,7 @@ defmodule RelayWeb.BoardLive do
         id="card-drawer"
         ref={Cards.ref(@board, @selected_card)}
         card={@selected_card}
-        stage_name={@selected_stage.name}
+        stage_name={drawer_stage_name(@selected_stage, @board.stages)}
         stage_owner={@selected_stage.owner}
         stages={move_targets(@board, @selected_card)}
         active_owner={Cards.active_owner_type(@selected_card)}
@@ -98,6 +109,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:board, board)
       |> assign(:stage_groups, group_stages(board.stages))
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
+      |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
       |> assign(:composing_stage_id, nil)
       |> assign(:compose_form, empty_compose_form())
       |> stream_configure(:timeline, dom_id: &timeline_dom_id/1)
@@ -288,12 +300,26 @@ defmodule RelayWeb.BoardLive do
   # category order and dropping empty categories (per spec: headers render
   # only for non-empty categories).
   defp group_stages(stages) do
-    groups = Enum.group_by(stages, & &1.category)
+    groups = stages |> Enum.filter(&(&1.lane == :main)) |> Enum.group_by(& &1.category)
 
     @category_order
     |> Enum.map(&{&1, Map.get(groups, &1, [])})
     |> Enum.reject(fn {_category, category_stages} -> category_stages == [] end)
   end
+
+  # Children grouped under their parent's id, each list ordered Review→Done.
+  defp sublanes_by_parent(stages) do
+    stages
+    |> Enum.filter(&(&1.lane != :main))
+    |> Enum.group_by(& &1.parent_id)
+    |> Map.new(fn {parent_id, children} -> {parent_id, Enum.sort_by(children, &lane_order/1)} end)
+  end
+
+  defp lane_order(%Stage{lane: :review}), do: 0
+  defp lane_order(%Stage{lane: :done}), do: 1
+
+  defp lane_label(:review), do: "Review"
+  defp lane_label(:done), do: "Done"
 
   # Streams can't be counted, so lane counts live in their own assign,
   # recomputed from the grouped cards (mount, moves) and bumped on create.
@@ -315,9 +341,32 @@ defmodule RelayWeb.BoardLive do
   end
 
   # Drawer move targets: every stage on this board except the card's
-  # current one, in position order.
+  # current one, in position order. Sub-lanes are ordinary move_card
+  # targets (per plan Architecture: "no move changes"), but must show a
+  # human label ("Code · Review") rather than the composite internal
+  # Stage.name ("Code:Review") built by Boards.enable_lane/2 — the same
+  # leak lane_label/1 already guards against on the board itself.
   defp move_targets(board, %Card{stage_id: stage_id}) do
-    Enum.reject(board.stages, &(&1.id == stage_id))
+    stages_by_id = Map.new(board.stages, &{&1.id, &1})
+
+    board.stages
+    |> Enum.reject(&(&1.id == stage_id))
+    |> Enum.map(&%{id: &1.id, name: move_target_name(&1, stages_by_id)})
+  end
+
+  defp move_target_name(%Stage{lane: :main} = stage, _stages_by_id), do: stage.name
+
+  defp move_target_name(%Stage{parent_id: parent_id} = stage, stages_by_id) do
+    parent = Map.fetch!(stages_by_id, parent_id)
+    "#{parent.name} · #{lane_label(stage.lane)}"
+  end
+
+  # The drawer header chip and "Stage" rail label render whatever stage
+  # is selected, including a sub-lane child — sanitize it the same way
+  # move_target_name/2 already does for the move menu, so the composite
+  # internal Stage.name ("Code:Review") never reaches either spot.
+  defp drawer_stage_name(%Stage{} = stage, stages) do
+    move_target_name(stage, Map.new(stages, &{&1.id, &1}))
   end
 
   defp resolve_stage(socket, stage_id) do

@@ -8,11 +8,12 @@ defmodule Relay.Cards do
   (MMF 07) and API attribution (MMF 09).
   """
 
-  use Boundary, deps: [Relay.Activity, Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Activity, Relay.Boards, Relay.Repo, Schemas]
 
   import Ecto.Query
 
   alias Relay.Activity
+  alias Relay.Boards
   alias Relay.Repo
   alias Schemas.Board
   alias Schemas.Card
@@ -262,7 +263,10 @@ defmodule Relay.Cards do
   end
 
   # The MMF 05 seam, now live: a cross-stage move appends a :moved
-  # timeline entry with both stage names snapshotted into meta.
+  # timeline entry with both stage names snapshotted into meta. Routed
+  # through Boards.stage_display_name/1 so a move into/out of a sub-lane
+  # snapshots the human label ("Code · Review"), not the composite
+  # internal Stage.name ("Code:Review") enable_lane/2 builds.
   defp emit_stage_changed(%Card{} = moved, previous_stage_id, %Stage{} = target_stage, actor) do
     from_stage = Repo.get!(Stage, previous_stage_id)
 
@@ -270,7 +274,10 @@ defmodule Relay.Cards do
       Activity.log(moved, %{
         type: :moved,
         actor: actor,
-        meta: %{"from_stage" => from_stage.name, "to_stage" => target_stage.name}
+        meta: %{
+          "from_stage" => Boards.stage_display_name(from_stage),
+          "to_stage" => Boards.stage_display_name(target_stage)
+        }
       })
   end
 
