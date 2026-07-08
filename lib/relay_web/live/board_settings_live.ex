@@ -283,6 +283,43 @@ defmodule RelayWeb.BoardSettingsLive do
                         In progress lane.
                       </span>
                     </div>
+                    <%!-- MMF 13 — APPROVAL GATE + SEND REJECTS TO, in the card's mono-label row
+                         idiom (the mockup ships no literal gate controls). A nil target means
+                         "Rejected work returns to this stage's In progress lane". --%>
+                    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                      <div style="display:flex;align-items:center;gap:10px;">
+                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
+                          APPROVAL GATE
+                        </span>
+                        <input
+                          id={"stage-#{stage.id}-gate-toggle"}
+                          type="checkbox"
+                          class="toggle toggle-sm"
+                          checked={stage.approval_gate}
+                          phx-click="toggle_gate"
+                          phx-value-stage-id={stage.id}
+                        />
+                      </div>
+                      <form
+                        :if={stage.approval_gate}
+                        id={"stage-#{stage.id}-reject-form"}
+                        phx-change="set_reject_target"
+                        style="display:flex;align-items:center;gap:10px;"
+                      >
+                        <input type="hidden" name="stage_id" value={stage.id} />
+                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
+                          SEND REJECTS TO
+                        </span>
+                        <.input
+                          type="select"
+                          id={"stage-#{stage.id}-reject-target"}
+                          name="reject_to_stage_id"
+                          value={stage.reject_to_stage_id}
+                          options={reject_options(stage, @stages)}
+                          class="select select-sm w-auto"
+                        />
+                      </form>
+                    </div>
                   </div>
                 </div>
                 <button
@@ -510,6 +547,26 @@ defmodule RelayWeb.BoardSettingsLive do
     end
   end
 
+  # MMF 13 — toggling the gate off also clears its reject target, so a
+  # re-enabled gate starts back at the default ("This stage").
+  def handle_event("toggle_gate", %{"stage-id" => stage_id}, socket) do
+    stage = find_stage(socket, stage_id)
+
+    attrs =
+      if stage.approval_gate,
+        do: %{approval_gate: false, reject_to_stage_id: nil},
+        else: %{approval_gate: true}
+
+    {:ok, _stage} = Boards.update_stage(stage, attrs)
+    {:noreply, refresh_stages(socket)}
+  end
+
+  def handle_event("set_reject_target", %{"stage_id" => stage_id, "reject_to_stage_id" => target}, socket) do
+    stage = find_stage(socket, stage_id)
+    {:ok, _stage} = Boards.update_stage(stage, %{reject_to_stage_id: parse_reject_target(target)})
+    {:noreply, refresh_stages(socket)}
+  end
+
   defp section(%{"section" => "keys"}), do: :keys
   defp section(_params), do: :stages
 
@@ -539,6 +596,16 @@ defmodule RelayWeb.BoardSettingsLive do
 
   defp lane_atom("review"), do: :review
   defp lane_atom("done"), do: :done
+
+  # "" is the select's "This stage" default — reject_to_stage_id nil.
+  defp parse_reject_target(""), do: nil
+  defp parse_reject_target(id), do: String.to_integer(id)
+
+  # "This stage" (nil target) plus every OTHER main stage on the board.
+  # `stages` is the mains-only list refresh_stages/1 assigns.
+  defp reject_options(stage, stages) do
+    [{"This stage", ""} | for(s <- stages, s.id != stage.id, do: {s.name, s.id})]
+  end
 
   defp owner_atom("human"), do: :human
   defp owner_atom("ai"), do: :ai

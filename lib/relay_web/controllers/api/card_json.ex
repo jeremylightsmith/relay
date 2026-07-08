@@ -20,7 +20,15 @@ defmodule RelayWeb.Api.CardJSON do
 
   @doc "The shared stage shape."
   def stage(stage) do
-    %{id: stage.id, name: stage.name, category: stage.category, owner: stage.owner, position: stage.position}
+    %{
+      id: stage.id,
+      name: stage.name,
+      category: stage.category,
+      owner: stage.owner,
+      position: stage.position,
+      approval_gate: stage.approval_gate,
+      reject_to_stage_id: stage.reject_to_stage_id
+    }
   end
 
   def index(%{board: board, cards: cards}) do

@@ -70,6 +70,8 @@ defmodule RelayWeb.Router do
     post "/cards/:ref/move", CardController, :move
     post "/cards/:ref/comments", CardController, :comments
     post "/cards/:ref/needs-input", CardController, :needs_input
+    post "/cards/:ref/approve", CardController, :approve
+    post "/cards/:ref/reject", CardController, :reject
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
