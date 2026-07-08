@@ -51,20 +51,24 @@ defmodule RelayWeb.BoardLiveTest do
       assert names == ["Backlog", "Spec", "Plan", "Code", "Review", "Deploy", "Done"]
     end
 
-    test "groups the stages under their category bands in order", %{conn: conn} do
+    test "groups the stages under their category bands in order", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog, spec, plan, code, review, deploy, done] = board.stages
+
       {:ok, view, _html} = live(conn, ~p"/board")
 
       assert has_element?(view, "#category-unstarted h2.category-band", "Unstarted")
       assert has_element?(view, "#category-in_progress h2.category-band", "In progress")
       assert has_element?(view, "#category-complete h2.category-band", "Complete")
 
-      assert has_element?(view, "#category-unstarted #stage-col-1", "Backlog")
-      assert has_element?(view, "#category-unstarted #stage-col-2", "Spec")
-      assert has_element?(view, "#category-in_progress #stage-col-3", "Plan")
-      assert has_element?(view, "#category-in_progress #stage-col-4", "Code")
-      assert has_element?(view, "#category-in_progress #stage-col-5", "Review")
-      assert has_element?(view, "#category-in_progress #stage-col-6", "Deploy")
-      assert has_element?(view, "#category-complete #stage-col-7", "Done")
+      # a fresh board is empty, so every stage renders as its collapsed strip
+      assert has_element?(view, "#category-unstarted #stage-strip-#{backlog.id}", "Backlog")
+      assert has_element?(view, "#category-unstarted #stage-strip-#{spec.id}", "Spec")
+      assert has_element?(view, "#category-in_progress #stage-strip-#{plan.id}", "Plan")
+      assert has_element?(view, "#category-in_progress #stage-strip-#{code.id}", "Code")
+      assert has_element?(view, "#category-in_progress #stage-strip-#{review.id}", "Review")
+      assert has_element?(view, "#category-in_progress #stage-strip-#{deploy.id}", "Deploy")
+      assert has_element?(view, "#category-complete #stage-strip-#{done.id}", "Done")
 
       bands =
         view
@@ -76,29 +80,26 @@ defmodule RelayWeb.BoardLiveTest do
       assert bands == ["Unstarted", "In progress", "Complete"]
     end
 
-    test "shows the right Human/AI owner swatch on each stage", %{conn: conn} do
+    test "shows the right Human/AI owner swatch on each stage", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+
       {:ok, view, _html} = live(conn, ~p"/board")
 
-      for position <- [1, 2, 5, 7] do
-        assert has_element?(view, ~s(#stage-col-#{position} .stage-owner-swatch[data-owner="human"]))
-      end
-
-      for position <- [3, 4, 6] do
-        assert has_element?(view, ~s(#stage-col-#{position} .stage-owner-swatch[data-owner="ai"]))
+      for stage <- board.stages do
+        assert has_element?(
+                 view,
+                 ~s(#stage-strip-#{stage.id} .stage-owner-swatch[data-owner="#{stage.owner}"])
+               )
       end
     end
 
-    test "every stage shows the empty-state placeholder", %{conn: conn} do
+    test "a fresh board collapses every empty stage to a strip", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/board")
 
-      empties =
-        view
-        |> render()
-        |> LazyHTML.from_fragment()
-        |> LazyHTML.query("#board .stage-empty")
-        |> Enum.count()
+      document = view |> render() |> LazyHTML.from_fragment()
 
-      assert empties == 7
+      assert document |> LazyHTML.query("#board .stage-strip") |> Enum.count() == 7
+      assert document |> LazyHTML.query("#board .stage-empty") |> Enum.count() == 0
     end
   end
 
@@ -111,8 +112,10 @@ defmodule RelayWeb.BoardLiveTest do
       %{board: board, backlog: backlog}
     end
 
-    test "a stage's compose CTA reveals the composer for that stage only", %{conn: conn} do
+    test "a stage's compose CTA reveals the composer for that stage only", %{conn: conn, backlog: backlog} do
       {:ok, view, _html} = live(conn, ~p"/board")
+
+      expand_stage(view, backlog)
 
       refute has_element?(view, "#stage-col-1-compose-form")
 
@@ -126,6 +129,7 @@ defmodule RelayWeb.BoardLiveTest do
          %{conn: conn, backlog: backlog} do
       {:ok, view, _html} = live(conn, ~p"/board")
 
+      expand_stage(view, backlog)
       view |> element("#stage-col-1-new-card") |> render_click()
 
       view
@@ -149,9 +153,10 @@ defmodule RelayWeb.BoardLiveTest do
       refute input_html =~ "Ship MMF 03"
     end
 
-    test "creating cards assigns per-board incrementing refs shown on the cards", %{conn: conn} do
+    test "creating cards assigns per-board incrementing refs shown on the cards", %{conn: conn, backlog: backlog} do
       {:ok, view, _html} = live(conn, ~p"/board")
 
+      expand_stage(view, backlog)
       view |> element("#stage-col-1-new-card") |> render_click()
       view |> form("#stage-col-1-compose-form", card: %{title: "First"}) |> render_submit()
       view |> form("#stage-col-1-compose-form", card: %{title: "Second"}) |> render_submit()
@@ -177,19 +182,21 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "cards render in their own stage; other stages keep the empty state",
-         %{conn: conn, backlog: backlog} do
+         %{conn: conn, backlog: backlog, board: board} do
+      [_backlog, spec | _rest] = board.stages
       insert(:card, stage: backlog, title: "Only here", position: 1, ref_number: 1)
 
       {:ok, view, _html} = live(conn, ~p"/board")
 
       assert has_element?(view, "#stage-col-1-cards .board-card", "Only here")
       refute has_element?(view, "#stage-col-2-cards .board-card")
-      assert has_element?(view, "#stage-col-2-cards .stage-empty")
+      assert has_element?(view, "#stage-strip-#{spec.id} .stage-count", "0")
     end
 
-    test "cancel closes the composer without creating a card", %{conn: conn} do
+    test "cancel closes the composer without creating a card", %{conn: conn, backlog: backlog} do
       {:ok, view, _html} = live(conn, ~p"/board")
 
+      expand_stage(view, backlog)
       view |> element("#stage-col-1-new-card") |> render_click()
       view |> element("#stage-col-1-composer button", "Cancel") |> render_click()
 
@@ -197,9 +204,10 @@ defmodule RelayWeb.BoardLiveTest do
       assert Repo.all(Card) == []
     end
 
-    test "submitting a blank title keeps the composer open and creates nothing", %{conn: conn} do
+    test "submitting a blank title keeps the composer open and creates nothing", %{conn: conn, backlog: backlog} do
       {:ok, view, _html} = live(conn, ~p"/board")
 
+      expand_stage(view, backlog)
       view |> element("#stage-col-1-new-card") |> render_click()
       view |> form("#stage-col-1-compose-form", card: %{title: ""}) |> render_submit()
 
@@ -217,7 +225,7 @@ defmodule RelayWeb.BoardLiveTest do
       %{board: board, backlog: backlog}
     end
 
-    test "every stage renders its card count", %{conn: conn, backlog: backlog} do
+    test "every stage renders its card count", %{conn: conn, board: board, backlog: backlog} do
       insert(:card, stage: backlog, title: "One", position: 1, ref_number: 1)
       insert(:card, stage: backlog, title: "Two", position: 2, ref_number: 2)
 
@@ -225,19 +233,22 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(view, "#stage-col-1 .stage-count", "2")
 
-      for position <- 2..7 do
-        assert has_element?(view, "#stage-col-#{position} .stage-count", "0")
+      for stage <- tl(board.stages) do
+        assert has_element?(view, "#stage-strip-#{stage.id} .stage-count", "0")
       end
     end
 
-    test "creating a card bumps its stage's count", %{conn: conn} do
+    test "creating a card bumps its stage's count", %{conn: conn, board: board, backlog: backlog} do
+      [_backlog, spec | _rest] = board.stages
+
       {:ok, view, _html} = live(conn, ~p"/board")
 
+      expand_stage(view, backlog)
       view |> element("#stage-col-1-new-card") |> render_click()
       view |> form("#stage-col-1-compose-form", card: %{title: "Count me"}) |> render_submit()
 
       assert has_element?(view, "#stage-col-1 .stage-count", "1")
-      assert has_element?(view, "#stage-col-2 .stage-count", "0")
+      assert has_element?(view, "#stage-strip-#{spec.id} .stage-count", "0")
     end
   end
 
@@ -273,7 +284,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => spec.id, "index" => 0})
 
-      assert has_element?(view, "#stage-col-1 .stage-count", "0")
+      assert has_element?(view, "#stage-strip-#{backlog.id} .stage-count", "0")
       assert has_element?(view, "#stage-col-2 .stage-count", "1")
     end
 
@@ -769,7 +780,7 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "moving from the drawer persists like a drag and appends to the bottom",
-         %{conn: conn, spec: spec, card: card} do
+         %{conn: conn, backlog: backlog, spec: spec, card: card} do
       {:ok, existing} = Cards.create_card(spec, %{title: "Already in Spec"})
 
       {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
@@ -783,7 +794,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(view, "#stage-col-2-cards .board-card", "Pass the baton")
       refute has_element?(view, "#stage-col-1-cards .board-card")
-      assert has_element?(view, "#stage-col-1 .stage-count", "0")
+      assert has_element?(view, "#stage-strip-#{backlog.id} .stage-count", "0")
       assert has_element?(view, "#stage-col-2 .stage-count", "2")
     end
 
@@ -994,9 +1005,10 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "creating a card via the composer logs :created attributed to the signed-in user",
-         %{conn: conn, user: user} do
+         %{conn: conn, user: user, backlog: backlog} do
       {:ok, view, _html} = live(conn, ~p"/board")
 
+      expand_stage(view, backlog)
       view |> element("#stage-col-1-new-card") |> render_click()
 
       view
@@ -1190,6 +1202,8 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "renders a stage's review sub-lane stacked with its own count", %{conn: conn, code: code} do
+      insert(:card, stage: code, title: "Main work", position: 1, ref_number: 1)
+
       {:ok, _view, html} = live(conn, ~p"/board")
       review = code |> Boards.sublanes() |> hd()
       assert html =~ "sublane-#{review.id}"
@@ -1209,6 +1223,103 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     defp card_ref(card), do: "RLY-#{card.ref_number}"
+  end
+
+  describe "collapsed empty stages (MMF 12c)" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog, spec | _rest] = board.stages
+      %{board: board, backlog: backlog, spec: spec}
+    end
+
+    test "an empty stage renders the collapsed strip; a stage with a card renders the full column",
+         %{conn: conn, backlog: backlog, spec: spec} do
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Keep me open"})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      # non-empty Backlog: full column, no strip
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Keep me open")
+      refute has_element?(view, "#stage-strip-#{backlog.id}")
+
+      # empty Spec: strip with rotated name + count 0, no expanded column
+      assert has_element?(view, "#stage-strip-#{spec.id}.stage-strip", "Spec")
+      assert has_element?(view, "#stage-strip-#{spec.id} .stage-strip-name", "Spec")
+      assert has_element?(view, "#stage-strip-#{spec.id} .stage-count", "0")
+      refute has_element?(view, "#stage-col-2-cards")
+
+      strip_html = view |> element("#stage-strip-#{spec.id}") |> render()
+      assert strip_html =~ "width:44px"
+      assert strip_html =~ "writing-mode:vertical-rl"
+      assert strip_html =~ "border:1px dashed oklch(0.90 0.006 255)"
+    end
+
+    test "the strip is a DnD drop zone carrying its stage id", %{conn: conn, spec: spec} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(view, "#stage-strip-#{spec.id}.stage-cards[data-stage-id='#{spec.id}']")
+    end
+
+    test "clicking a strip force-opens the empty stage for the session",
+         %{conn: conn, backlog: backlog} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      expand_stage(view, backlog)
+
+      refute has_element?(view, "#stage-strip-#{backlog.id}")
+      assert has_element?(view, "#stage-col-1-cards .stage-empty", "No cards yet")
+
+      # it stays expanded on subsequent renders, even while still empty
+      assert render(view) =~ "stage-col-1-cards"
+    end
+
+    test "moving the last card out collapses the stage",
+         %{conn: conn, backlog: backlog, spec: spec} do
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Last one"})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      refute has_element?(view, "#stage-strip-#{backlog.id}")
+
+      render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => spec.id, "index" => 0})
+
+      assert has_element?(view, "#stage-strip-#{backlog.id} .stage-count", "0")
+      refute has_element?(view, "#stage-col-1-cards")
+    end
+
+    test "moving a card onto a collapsed strip expands it and the card renders there",
+         %{conn: conn, backlog: backlog, spec: spec} do
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Incoming"})
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(view, "#stage-strip-#{spec.id}")
+
+      # exactly what board_dnd.js pushes on a drop over the strip (index 0 — empty zone)
+      render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => "#{spec.id}", "index" => 0})
+
+      refute has_element?(view, "#stage-strip-#{spec.id}")
+      assert has_element?(view, "#stage-col-2-cards .board-card", "Incoming")
+      assert has_element?(view, "#stage-col-2 .stage-count", "1")
+    end
+
+    test "a stage whose only card sits in a sub-lane does not collapse",
+         %{conn: conn, board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, review} = Boards.enable_lane(code, :review)
+      insert(:card, stage: review, title: "In review", position: 1, ref_number: 9)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      refute has_element?(view, "#stage-strip-#{code.id}")
+      assert has_element?(view, "#sublane-#{review.id}-cards .board-card", "In review")
+    end
+  end
+
+  defp expand_stage(view, stage) do
+    view |> element("#stage-strip-#{stage.id}") |> render_click()
   end
 
   defp stage_titles(view, position) do

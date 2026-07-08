@@ -121,6 +121,86 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "Cancel"
       refute html =~ ~s(id="stage-col-1-new-card")
     end
+
+    test "collapsed renders the mockup's 44px dashed strip instead of the column" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-6",
+          name: "Deploy",
+          owner: :ai,
+          stage_id: 6,
+          count: 0,
+          collapsed: true
+        )
+
+      # strip identity + mockup values (Relay Board.dc.html lines ~75–81)
+      assert html =~ ~s(id="stage-strip-6")
+      assert html =~ "width:44px"
+      assert html =~ "border:1px dashed oklch(0.90 0.006 255)"
+      assert html =~ "background:oklch(0.965 0.004 255)"
+      assert html =~ "border-radius:11px"
+      assert html =~ "cursor:pointer"
+      # 9px owner swatch in the AI colour
+      assert html =~ "stage-owner-swatch"
+      assert html =~ ~s(data-owner="ai")
+      assert html =~ "width:9px;height:9px;border-radius:3px"
+      # rotated name + mono count
+      assert html =~ "writing-mode:vertical-rl"
+      assert html =~ "rotate(180deg)"
+      assert html =~ "stage-strip-name"
+      assert html =~ "Deploy"
+      assert html =~ ~s(class="stage-count")
+      # click-to-expand + drop-target contract
+      assert html =~ ~s(phx-click="expand_stage")
+      assert html =~ ~s(phx-value-stage-id="6")
+      assert html =~ ~s(data-stage-id="6")
+      assert html =~ "stage-cards"
+      # none of the expanded chrome renders
+      refute html =~ ~s(id="stage-col-6-new-card")
+      refute html =~ "No cards yet"
+    end
+
+    test "collapsed shows the total card count across main and sub-lanes" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-4",
+          name: "Code",
+          owner: :ai,
+          stage_id: 4,
+          count: 0,
+          collapsed: true,
+          sublanes: [
+            %{id: 401, name: "Review", lane: :review, owner: :human, count: 0, cards: []},
+            %{id: 402, name: "Done", lane: :done, owner: :ai, count: 0, cards: []}
+          ]
+        )
+
+      assert html =~ ~s(id="stage-strip-4")
+
+      count_text =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#stage-strip-4 .stage-count")
+        |> LazyHTML.text()
+        |> String.trim()
+
+      assert count_text == "0"
+    end
+
+    test "collapsed: false renders the full column exactly as before" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-1",
+          name: "Backlog",
+          owner: :human,
+          stage_id: 7,
+          collapsed: false
+        )
+
+      assert html =~ ~s(id="stage-col-1")
+      refute html =~ "stage-strip"
+      assert html =~ "No cards yet"
+    end
   end
 
   describe "status_badge/1" do

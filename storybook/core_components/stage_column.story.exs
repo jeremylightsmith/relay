@@ -12,6 +12,18 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         attributes: %{id: "story-stage-backlog", name: "Backlog", owner: :human, stage_id: 1, count: 0}
       },
       %Variation{
+        id: :collapsed_empty,
+        description: "An empty stage auto-collapses to the 44px dashed strip (MMF 12c)",
+        attributes: %{
+          id: "story-stage-collapsed",
+          name: "Deploy",
+          owner: :ai,
+          stage_id: 6,
+          count: 0,
+          collapsed: true
+        }
+      },
+      %Variation{
         id: :with_cards,
         attributes: %{
           id: "story-stage-code",
