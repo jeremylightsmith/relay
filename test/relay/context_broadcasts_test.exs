@@ -67,6 +67,29 @@ defmodule Relay.ContextBroadcastsTest do
       assert_receive {:card_upserted, %Card{id: ^card_id, owners: [%{actor_type: :user}]}}
     end
 
+    test "request_input broadcasts the blocked card and both timeline entries", %{spec: spec} do
+      {:ok, %Card{id: card_id} = card} = Cards.create_card(spec, %{title: "Blocked"})
+
+      {:ok, _blocked} = Cards.request_input(card, "Which region?")
+
+      assert_receive {:card_upserted, %Card{id: ^card_id, status: :needs_input, blocked_since: %DateTime{}}}
+      assert_receive {:timeline_appended, ^card_id, %Schemas.Comment{body: "Which region?"}}
+
+      assert_receive {:timeline_appended, ^card_id,
+                      %Schemas.Activity{type: :needs_input, meta: %{"question" => "Which region?"}}}
+    end
+
+    test "answer_input broadcasts the resumed card and the answer", %{user: user, spec: spec} do
+      {:ok, %Card{id: card_id} = card} = Cards.create_card(spec, %{title: "Answer me"})
+      {:ok, blocked} = Cards.request_input(card, "Ready?")
+
+      {:ok, _answered} = Cards.answer_input(blocked, "Yes — go ahead", {:user, user.id})
+
+      assert_receive {:card_upserted, %Card{id: ^card_id, status: :queued, blocked_since: nil}}
+      assert_receive {:timeline_appended, ^card_id, %Schemas.Comment{body: "Yes — go ahead"}}
+      assert_receive {:timeline_appended, ^card_id, %Schemas.Activity{type: :input_answered}}
+    end
+
     test "move_card broadcasts {:card_moved, moved, from_stage_id}", %{backlog: backlog, spec: spec} do
       {:ok, %Card{id: card_id} = card} = Cards.create_card(backlog, %{title: "Mover"})
       backlog_id = backlog.id

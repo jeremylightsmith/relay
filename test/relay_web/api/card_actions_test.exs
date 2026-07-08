@@ -63,6 +63,58 @@ defmodule RelayWeb.Api.CardActionsTest do
     assert Enum.any?(body["timeline"], &(&1["kind"] == "comment" and &1["body"] == "Which region?"))
   end
 
+  test "needs-input records the durable :needs_input activity and stamps blocked_since", %{
+    conn: conn,
+    board: board,
+    spec: spec
+  } do
+    card = insert(:card, stage: spec)
+
+    body =
+      conn
+      |> post(~p"/api/cards/#{ref(board, card)}/needs-input", %{question: "Blue or green?"})
+      |> json_response(200)
+      |> Map.fetch!("data")
+
+    assert Enum.any?(
+             body["timeline"],
+             &(&1["kind"] == "activity" and &1["type"] == "needs_input" and
+                 &1["meta"]["question"] == "Blue or green?")
+           )
+
+    reloaded = Cards.get_card_by_ref(board, ref(board, card))
+    assert reloaded.status == :needs_input
+    assert %DateTime{} = reloaded.blocked_since
+  end
+
+  test "the human's answer reaches the agent via the card timeline", %{
+    conn: conn,
+    board: board,
+    code: code
+  } do
+    card = insert(:card, stage: code)
+    {:ok, blocked} = Cards.request_input(card, "Which region?")
+    {:ok, _answered} = Cards.answer_input(blocked, "us-east-1", {:user, board.owner_id})
+
+    body =
+      conn
+      |> get(~p"/api/cards/#{ref(board, card)}")
+      |> json_response(200)
+      |> Map.fetch!("data")
+
+    assert body["status"] == "working"
+    assert Enum.any?(body["timeline"], &(&1["kind"] == "comment" and &1["body"] == "us-east-1"))
+    assert Enum.any?(body["timeline"], &(&1["kind"] == "activity" and &1["type"] == "input_answered"))
+  end
+
+  test "needs-input with a non-string question is invalid", %{conn: conn, board: board, spec: spec} do
+    card = insert(:card, stage: spec)
+
+    assert conn
+           |> post(~p"/api/cards/#{ref(board, card)}/needs-input", %{question: 42})
+           |> json_response(400)
+  end
+
   test "actions on an unknown ref 404", %{conn: conn} do
     assert conn |> post(~p"/api/cards/RLY-9999/comments", %{body: "x"}) |> json_response(404)
   end

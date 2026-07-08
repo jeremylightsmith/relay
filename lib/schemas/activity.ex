@@ -7,14 +7,27 @@ defmodule Schemas.Activity do
   (`actor_type: :agent`, no `user_id`). All fields are set
   programmatically by `Relay.Activity.log/2`, never cast from input.
   `:commented` is reserved for future feeds/API use (MMF 09/16) —
-  nothing emits it in MMF 07.
+  nothing emits it in MMF 07. `:needs_input` (MMF 14) carries
+  `meta: %{"question" => ...}` — the AI blocked the card on a human
+  question. `:input_answered` (MMF 14) marks the human's answer, with
+  empty meta.
   """
 
   use Ecto.Schema
 
   import Ecto.Changeset
 
-  @types [:created, :moved, :status_changed, :owners_changed, :commented, :approved, :rejected]
+  @types [
+    :created,
+    :moved,
+    :status_changed,
+    :owners_changed,
+    :commented,
+    :approved,
+    :rejected,
+    :needs_input,
+    :input_answered
+  ]
 
   schema "activities" do
     field :type, Ecto.Enum, values: @types

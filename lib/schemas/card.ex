@@ -23,6 +23,7 @@ defmodule Schemas.Card do
       default: :queued
 
     field :progress, :integer
+    field :blocked_since, :utc_datetime
 
     belongs_to :board, Schemas.Board
     belongs_to :stage, Schemas.Stage
@@ -47,12 +48,36 @@ defmodule Schemas.Card do
   Changeset for the card's baton state: `:status` (enum) and `:progress`
   (0–100, nullable — just stored and displayed; MMF 06 has no automation).
   Kept separate from `changeset/2` so title/description edits can never
-  touch the baton and vice versa.
+  touch the baton and vice versa. Also manages `:blocked_since` (MMF 14)
+  bookkeeping: stamped when the status changes to `:needs_input`, cleared
+  when it changes to anything else, untouched otherwise — never cast from
+  input.
   """
   def status_changeset(card, attrs) do
     card
     |> cast(attrs, [:status, :progress])
     |> validate_required([:status])
     |> validate_number(:progress, greater_than_or_equal_to: 0, less_than_or_equal_to: 100)
+    |> manage_blocked_since()
+  end
+
+  # `blocked_since` tracks how long the card has been waiting on a human
+  # (MMF 14): stamped when the status *changes to* :needs_input, cleared
+  # when it changes to anything else, untouched when the status isn't
+  # changing (e.g. a progress-only update while blocked). Every status
+  # path — drawer control, API, approve/reject, request/answer — goes
+  # through this changeset, so the invariant holds everywhere. Never cast
+  # from user input.
+  defp manage_blocked_since(changeset) do
+    case fetch_change(changeset, :status) do
+      {:ok, :needs_input} ->
+        put_change(changeset, :blocked_since, DateTime.truncate(DateTime.utc_now(), :second))
+
+      {:ok, _other} ->
+        put_change(changeset, :blocked_since, nil)
+
+      :error ->
+        changeset
+    end
   end
 end

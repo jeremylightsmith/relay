@@ -36,7 +36,7 @@ defmodule Relay.Activity do
 
   @doc """
   Appends an activity entry to `card`'s log from `attrs` — `:type`
-  (`:created | :moved | :status_changed | :owners_changed | :commented | :approved | :rejected`),
+  (`:created | :moved | :status_changed | :owners_changed | :commented | :approved | :rejected | :needs_input | :input_answered`),
   `:actor` (`:agent | {:user, user_id}`), and optional `:meta` (a map
   with STRING keys and primitive values, stored as jsonb; defaults to
   `%{}`) — returning `{:ok, activity}` with the actor preloaded or
