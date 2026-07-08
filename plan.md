@@ -251,7 +251,7 @@ board scoping, and the fire-and-forget `:ok` contract.
 
 **Steps**
 
-- [ ] Write the failing context tests at `test/relay/context_broadcasts_test.exs`:
+- [x] Write the failing context tests at `test/relay/context_broadcasts_test.exs`:
 
 ```elixir
 defmodule Relay.ContextBroadcastsTest do
@@ -407,9 +407,9 @@ defmodule Relay.ContextBroadcastsTest do
 end
 ```
 
-- [ ] Run `mix test test/relay/context_broadcasts_test.exs` — expect every test to fail on
+- [x] Run `mix test test/relay/context_broadcasts_test.exs` — expect every test to fail on
       `assert_receive` timeouts (nothing broadcasts yet).
-- [ ] Wire `Relay.Cards` (`lib/relay/cards.ex`). Change its boundary declaration and
+- [x] Wire `Relay.Cards` (`lib/relay/cards.ex`). Change its boundary declaration and
       aliases — replace:
 
 ```elixir
@@ -435,7 +435,7 @@ with:
   alias Relay.Repo
 ```
 
-- [ ] In `lib/relay/cards.ex`, replace the body of `create_card/3` (keep its `@doc`) so the
+- [x] In `lib/relay/cards.ex`, replace the body of `create_card/3` (keep its `@doc`) so the
       broadcast fires after the transaction commits:
 
 ```elixir
@@ -458,7 +458,7 @@ with:
   end
 ```
 
-- [ ] In `lib/relay/cards.ex`, append `|> broadcast_upserted()` to the `update_card/2` and
+- [x] In `lib/relay/cards.ex`, append `|> broadcast_upserted()` to the `update_card/2` and
       `set_status/3` pipelines (keep the `@doc`s):
 
 ```elixir
@@ -484,7 +484,7 @@ with:
   end
 ```
 
-- [ ] In `lib/relay/cards.ex`, replace the bodies of `set_owners/3`, `add_owner/3`, and
+- [x] In `lib/relay/cards.ex`, replace the bodies of `set_owners/3`, `add_owner/3`, and
       `remove_owner/3` (keep their `@doc`s) so each broadcasts its `{:ok, card}` result
       (after the transaction commits, where there is one):
 
@@ -532,7 +532,7 @@ with:
   end
 ```
 
-- [ ] In `lib/relay/cards.ex`, replace the body of `move_card/4` (keep its `@doc` and
+- [x] In `lib/relay/cards.ex`, replace the body of `move_card/4` (keep its `@doc` and
       guard) so `{:card_moved, moved, previous_stage_id}` broadcasts after commit:
 
 ```elixir
@@ -562,7 +562,7 @@ with:
   end
 ```
 
-- [ ] In `lib/relay/cards.ex`, add the broadcast helper among the private functions (e.g.
+- [x] In `lib/relay/cards.ex`, add the broadcast helper among the private functions (e.g.
       right after `preload_owners_result/1`):
 
 ```elixir
@@ -577,7 +577,7 @@ with:
   defp broadcast_upserted({:error, _changeset} = result), do: result
 ```
 
-- [ ] Wire `Relay.Activity` (`lib/relay/activity.ex`). Replace:
+- [x] Wire `Relay.Activity` (`lib/relay/activity.ex`). Replace:
 
 ```elixir
   use Boundary, deps: [Relay.Repo, Schemas]
@@ -644,7 +644,7 @@ and add the private helper right before `split_actor/1`:
   defp broadcast_appended({:error, _changeset} = result, _card), do: result
 ```
 
-- [ ] Wire `Relay.Boards` (`lib/relay/boards.ex`). Replace:
+- [x] Wire `Relay.Boards` (`lib/relay/boards.ex`). Replace:
 
 ```elixir
   use Boundary, deps: [Relay.Repo, Schemas]
@@ -717,10 +717,10 @@ and add the private helper right after `get_sublane/2`:
   defp broadcast_stages_changed({:error, _reason} = result, _board_id), do: result
 ```
 
-- [ ] Run `mix test test/relay/context_broadcasts_test.exs` — expect all tests to pass.
-- [ ] Run `mix precommit` — the full existing suite must stay green (no public signature
+- [x] Run `mix test test/relay/context_broadcasts_test.exs` — expect all tests to pass.
+- [x] Run `mix precommit` — the full existing suite must stay green (no public signature
       changed; return values are identical).
-- [ ] Commit.
+- [x] Commit.
 
 **Deliverable:** every mutating context function announces its semantic event on the
 board's topic after a successful mutation (post-commit for card events), idempotent no-ops
