@@ -65,6 +65,7 @@ defmodule RelayWeb.Router do
 
     get "/board", BoardController, :show
     get "/cards", CardController, :index
+    post "/cards", CardController, :create
     get "/cards/:ref", CardController, :show
     patch "/cards/:ref", CardController, :update
     post "/cards/:ref/move", CardController, :move

@@ -76,6 +76,33 @@ defmodule RelayWeb.Api.CardController do
 
   defp parse_actor(_), do: :error
 
+  def create(conn, params) do
+    board = conn.assigns.current_board
+
+    with {:ok, stage} <- resolve_create_stage(board, params["stage"]),
+         {:ok, card} <- Cards.create_card(stage, params, :agent) do
+      conn
+      |> put_status(:created)
+      |> render(:show, board: board, card: card, timeline: Activity.list_timeline(card))
+    end
+  end
+
+  # No stage given -> the board's first stage in position order. An explicit
+  # stage id reuses move/2's get_stage/2 (bad/unknown id -> nil -> not_found).
+  defp resolve_create_stage(board, nil) do
+    case Boards.list_stages(board) do
+      [stage | _] -> {:ok, stage}
+      [] -> {:error, :invalid_request}
+    end
+  end
+
+  defp resolve_create_stage(board, stage_id) do
+    case get_stage(board, stage_id) do
+      %Schemas.Stage{} = stage -> {:ok, stage}
+      nil -> {:error, :not_found}
+    end
+  end
+
   def move(conn, %{"ref" => ref} = params) do
     board = conn.assigns.current_board
 

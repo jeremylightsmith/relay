@@ -84,4 +84,73 @@ defmodule RelayWeb.Api.CardControllerTest do
     assert conn |> patch(~p"/api/cards/#{ref(board, card)}", %{owners: ["user:abc"]}) |> json_response(400)
     assert conn |> patch(~p"/api/cards/#{ref(board, card)}", %{owners: ["user:"]}) |> json_response(400)
   end
+
+  describe "POST /api/cards" do
+    test "creates a card with title only, landing in the board's first stage", %{conn: conn, board: board} do
+      first = insert(:stage, board: board, name: "Backlog", owner: :human, position: 0)
+
+      body =
+        conn
+        |> post(~p"/api/cards", %{title: "New card"})
+        |> json_response(201)
+        |> Map.fetch!("data")
+
+      assert body["title"] == "New card"
+      assert body["status"] == "queued"
+      assert body["stage_id"] == first.id
+      assert body["owners"] == []
+      assert Enum.any?(body["timeline"], &(&1["type"] == "created" and &1["author"]["name"] == "Relay AI"))
+    end
+
+    test "creates a card into an explicit stage id", %{conn: conn, stage: stage} do
+      body =
+        conn
+        |> post(~p"/api/cards", %{title: "Placed", stage: stage.id})
+        |> json_response(201)
+        |> Map.fetch!("data")
+
+      assert body["stage_id"] == stage.id
+    end
+
+    test "accepts a stage id given as a string", %{conn: conn, stage: stage} do
+      body =
+        conn
+        |> post(~p"/api/cards", %{title: "Placed", stage: to_string(stage.id)})
+        |> json_response(201)
+        |> Map.fetch!("data")
+
+      assert body["stage_id"] == stage.id
+    end
+
+    test "400 when title is missing", %{conn: conn} do
+      assert conn |> post(~p"/api/cards", %{}) |> json_response(400)
+    end
+
+    test "400 when title is blank", %{conn: conn} do
+      assert conn |> post(~p"/api/cards", %{title: "   "}) |> json_response(400)
+    end
+
+    test "404 when the stage id is unknown", %{conn: conn} do
+      assert conn |> post(~p"/api/cards", %{title: "X", stage: 999_999}) |> json_response(404)
+    end
+
+    test "404 when the stage id is uncastable", %{conn: conn} do
+      assert conn |> post(~p"/api/cards", %{title: "X", stage: "not-an-int"}) |> json_response(404)
+    end
+
+    test "created card appears in GET /api/cards", %{conn: conn} do
+      conn |> post(~p"/api/cards", %{title: "Findable"}) |> json_response(201)
+
+      titles =
+        conn |> get(~p"/api/cards") |> json_response(200) |> Map.fetch!("data") |> Enum.map(& &1["title"])
+
+      assert "Findable" in titles
+    end
+
+    test "unauthenticated POST /api/cards is rejected", %{board: board} do
+      insert(:stage, board: board, name: "Backlog", owner: :human, position: 0)
+
+      assert build_conn() |> post(~p"/api/cards", %{title: "Nope"}) |> json_response(401)
+    end
+  end
 end
