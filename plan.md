@@ -515,7 +515,7 @@ Produces:
 
 **Steps**
 
-- [ ] Write the failing LiveView test at `test/relay_web/live/board_settings_live_test.exs`:
+- [x] Write the failing LiveView test at `test/relay_web/live/board_settings_live_test.exs`:
 
   ```elixir
   defmodule RelayWeb.BoardSettingsLiveTest do
@@ -643,7 +643,7 @@ Produces:
   Run `mix test test/relay_web/live/board_settings_live_test.exs` — it must fail
   (route/module don't exist).
 
-- [ ] Add the route in `lib/relay_web/router.ex`, inside the existing authenticated
+- [x] Add the route in `lib/relay_web/router.ex`, inside the existing authenticated
   live_session (no extra alias — the scope provides `RelayWeb`):
 
   ```elixir
@@ -653,7 +653,7 @@ Produces:
   end
   ```
 
-- [ ] Create `lib/relay_web/live/board_settings_live.ex`:
+- [x] Create `lib/relay_web/live/board_settings_live.ex`:
 
   ```elixir
   defmodule RelayWeb.BoardSettingsLive do
@@ -824,7 +824,7 @@ Produces:
   end
   ```
 
-- [ ] Make the page reachable: in `lib/relay_web/live/board_live.ex` (in `render/1`, the
+- [x] Make the page reachable: in `lib/relay_web/live/board_live.ex` (in `render/1`, the
   template currently has the title directly under `<div id="board" ...>`), replace:
 
   ```heex
@@ -847,7 +847,7 @@ Produces:
   </div>
   ```
 
-- [ ] Run `mix test test/relay_web/live/board_settings_live_test.exs` — all green. Run
+- [x] Run `mix test test/relay_web/live/board_settings_live_test.exs` — all green. Run
   `mix test` (full suite — the `board_live` template changed, so its tests must still
   pass). Then `mix precommit` — fix anything it flags before committing.
 
