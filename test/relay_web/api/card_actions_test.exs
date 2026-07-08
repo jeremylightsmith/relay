@@ -66,4 +66,32 @@ defmodule RelayWeb.Api.CardActionsTest do
   test "actions on an unknown ref 404", %{conn: conn} do
     assert conn |> post(~p"/api/cards/RLY-9999/comments", %{body: "x"}) |> json_response(404)
   end
+
+  test "move with a non-numeric stage 404s instead of crashing", %{conn: conn, board: board, spec: spec} do
+    card = insert(:card, stage: spec)
+    assert conn |> post(~p"/api/cards/#{ref(board, card)}/move", %{stage: "abc"}) |> json_response(404)
+  end
+
+  test "move with a non-numeric position returns 400 instead of crashing", %{
+    conn: conn,
+    board: board,
+    spec: spec,
+    code: code
+  } do
+    card = insert(:card, stage: spec)
+
+    assert conn
+           |> post(~p"/api/cards/#{ref(board, card)}/move", %{stage: code.id, position: "xyz"})
+           |> json_response(400)
+  end
+
+  test "comments without a body returns 400 instead of crashing", %{conn: conn, board: board, spec: spec} do
+    card = insert(:card, stage: spec)
+    assert conn |> post(~p"/api/cards/#{ref(board, card)}/comments", %{}) |> json_response(400)
+  end
+
+  test "needs-input without a question returns 400 instead of crashing", %{conn: conn, board: board, spec: spec} do
+    card = insert(:card, stage: spec)
+    assert conn |> post(~p"/api/cards/#{ref(board, card)}/needs-input", %{}) |> json_response(400)
+  end
 end

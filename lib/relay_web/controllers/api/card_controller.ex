@@ -80,12 +80,14 @@ defmodule RelayWeb.Api.CardController do
     board = conn.assigns.current_board
 
     with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
-         %Schemas.Stage{} = stage <- Boards.get_stage(board, params["stage"]),
-         {:ok, card} <- Cards.move_card(card, stage, move_index(params), :agent) do
+         {:ok, index} <- move_index(params),
+         %Schemas.Stage{} = stage <- get_stage(board, params["stage"]),
+         {:ok, card} <- Cards.move_card(card, stage, index, :agent) do
       render(conn, :show, board: board, card: card, timeline: Activity.list_timeline(card))
     else
       nil -> {:error, :not_found}
       {:error, changeset} -> {:error, changeset}
+      :error -> {:error, :invalid_request}
     end
   end
 
@@ -101,6 +103,8 @@ defmodule RelayWeb.Api.CardController do
     end
   end
 
+  def comments(_conn, %{"ref" => _ref}), do: {:error, :invalid_request}
+
   def needs_input(conn, %{"ref" => ref, "question" => question}) do
     board = conn.assigns.current_board
 
@@ -114,9 +118,31 @@ defmodule RelayWeb.Api.CardController do
     end
   end
 
+  def needs_input(_conn, %{"ref" => _ref}), do: {:error, :invalid_request}
+
+  # A stage id that doesn't cast to an integer can't match any stage; treat it
+  # as not-found rather than letting Ecto raise a CastError.
+  defp get_stage(board, stage_id) when is_integer(stage_id), do: Boards.get_stage(board, stage_id)
+
+  defp get_stage(board, stage_id) when is_binary(stage_id) do
+    case Integer.parse(stage_id) do
+      {int, ""} -> Boards.get_stage(board, int)
+      _ -> nil
+    end
+  end
+
+  defp get_stage(_board, _stage_id), do: nil
+
   # 1-based `position` from the API maps to move_card's 0-based index; a
   # missing position appends (move_card clamps a large index to the end).
-  defp move_index(%{"position" => p}) when is_integer(p), do: p - 1
-  defp move_index(%{"position" => p}) when is_binary(p), do: String.to_integer(p) - 1
-  defp move_index(_params), do: 1_000_000
+  defp move_index(%{"position" => p}) when is_integer(p), do: {:ok, p - 1}
+
+  defp move_index(%{"position" => p}) when is_binary(p) do
+    case Integer.parse(p) do
+      {int, ""} -> {:ok, int - 1}
+      _ -> :error
+    end
+  end
+
+  defp move_index(_params), do: {:ok, 1_000_000}
 end
