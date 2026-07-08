@@ -26,6 +26,21 @@ defmodule Relay.Factory do
     }
   end
 
+  # A persisted key whose raw token is intentionally unknown — use
+  # Relay.ApiKeys.create_key/2 in tests that need the raw secret.
+  def api_key_factory do
+    secret = 32 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower)
+
+    %Schemas.ApiKey{
+      name: "Board API key",
+      token_prefix: sequence(:token_prefix, &String.pad_leading("#{&1}", 12, "0")),
+      token_hash: Base.encode16(:crypto.hash(:sha256, secret), case: :lower),
+      last_four: String.slice(secret, -4, 4),
+      board: build(:board),
+      created_by: build(:user)
+    }
+  end
+
   def stage_factory do
     %Schemas.Stage{
       name: sequence(:stage_name, &"Stage #{&1}"),
