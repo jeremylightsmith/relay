@@ -10,6 +10,7 @@ defmodule Relay.Boards do
 
   alias Relay.Repo
   alias Schemas.Board
+  alias Schemas.Card
   alias Schemas.Stage
   alias Schemas.User
 
@@ -41,6 +42,72 @@ defmodule Relay.Boards do
   @doc "Returns the stage with `id` on `board`, or nil (board-scoped lookup)."
   def get_stage(%Board{id: board_id}, id) do
     Repo.get_by(Stage, id: id, board_id: board_id)
+  end
+
+  @doc """
+  Enables a `:review` or `:done` sub-lane on `parent` (a main stage),
+  creating the child stage with the predictable owner (review → :human,
+  done → the parent's owner). Idempotent — returns the existing child if
+  the lane is already enabled.
+  """
+  def enable_lane(%Stage{lane: :main} = parent, lane) when lane in [:review, :done] do
+    case get_sublane(parent, lane) do
+      %Stage{} = existing ->
+        {:ok, existing}
+
+      nil ->
+        %Stage{board_id: parent.board_id, parent_id: parent.id, lane: lane}
+        |> Stage.changeset(%{
+          name: "#{parent.name}:#{lane_word(lane)}",
+          position: next_position(parent.board_id),
+          category: parent.category,
+          owner: lane_owner(lane, parent)
+        })
+        |> Repo.insert()
+    end
+  end
+
+  @doc """
+  Disables `parent`'s `lane` sub-lane. Returns `{:ok, :disabled}` when the
+  (empty) child is removed, `{:ok, :not_enabled}` when there is nothing to
+  remove, or `{:error, :not_empty}` when the lane still holds cards.
+  """
+  def disable_lane(%Stage{} = parent, lane) when lane in [:review, :done] do
+    case get_sublane(parent, lane) do
+      nil ->
+        {:ok, :not_enabled}
+
+      %Stage{} = child ->
+        if Repo.exists?(from c in Card, where: c.stage_id == ^child.id) do
+          {:error, :not_empty}
+        else
+          {:ok, _} = Repo.delete(child)
+          {:ok, :disabled}
+        end
+    end
+  end
+
+  @doc "The stage's `:review`/`:done` children, ordered Review then Done."
+  def sublanes(%Stage{} = parent) do
+    Repo.all(
+      from s in Stage,
+        where: s.parent_id == ^parent.id,
+        order_by: fragment("array_position(ARRAY['review','done'], ?)", s.lane)
+    )
+  end
+
+  defp get_sublane(%Stage{} = parent, lane) do
+    Repo.get_by(Stage, parent_id: parent.id, lane: lane)
+  end
+
+  defp lane_owner(:review, _parent), do: :human
+  defp lane_owner(:done, %Stage{owner: owner}), do: owner
+
+  defp lane_word(:review), do: "Review"
+  defp lane_word(:done), do: "Done"
+
+  defp next_position(board_id) do
+    (Repo.one(from s in Stage, where: s.board_id == ^board_id, select: max(s.position)) || 0) + 1
   end
 
   defp create_default_board!(user) do

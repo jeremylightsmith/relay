@@ -16,8 +16,11 @@ defmodule Schemas.Stage do
     field :position, :integer
     field :category, Ecto.Enum, values: [:unstarted, :in_progress, :complete]
     field :owner, Ecto.Enum, values: [:human, :ai]
+    field :lane, Ecto.Enum, values: [:main, :review, :done], default: :main
 
     belongs_to :board, Schemas.Board
+    belongs_to :parent, Schemas.Stage
+    has_many :sublanes, Schemas.Stage, foreign_key: :parent_id
 
     timestamps(type: :utc_datetime)
   end
