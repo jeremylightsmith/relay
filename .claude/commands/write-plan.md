@@ -46,16 +46,26 @@ don't make them standalone tasks. Each task ends with an independently testable 
     tasks) and **Produces** (exact function names, params, and return types later tasks rely
     on). Each task's implementer sees only its own task, so this block is how it learns the
     names and types its neighbors use.
-  - Steps as checkboxes `- [ ]`, each ONE action: write failing test → run it (expect
-    fail) → minimal implementation → run it (expect pass) → commit. Include the ACTUAL
-    test code and implementation code in fenced blocks — no placeholders, no "similar to".
+  - Steps as checkboxes `- [ ]`, each ONE action, in TDD order: write failing test → run it
+    (expect fail) → minimal implementation → run it (expect pass) → commit. Specify the
+    **contract, not the source code**. For each test step: the test's label/description and
+    exactly what it asserts — concrete inputs and the expected output/behaviour (and the
+    error cases). For each implementation step: the function it adds/changes with its **exact
+    signature** (from Interfaces), the key logic/branches, and the edge cases to handle —
+    in prose/bullets, NOT literal test or implementation source. The implementer (a capable
+    coding agent) writes the code **once**, from this contract; the plan tells it *what* to
+    build and *how it must behave*, not the lines to type.
   - End each task with an independently testable deliverable + the commit message to use.
 - **Task checkbox convention:** every task's steps use `- [ ]`. The executor flips them to
   `- [x]` as it completes each task, so keep them clean GitHub task-list checkboxes.
 
-### No placeholders
-No "TBD", no "add error handling", no "write tests for the above" without the code. Every
-step an engineer needs is on the page.
+### Concrete, not vague — and not code either
+No "TBD", no "add error handling" (name the error cases and their expected results), no
+"write tests for the above" (every test's inputs→expected assertion is spelled out). The bar:
+an engineer could implement the task from this contract without guessing *what* to build or
+*how it must behave* — even though the source is left for them to write. Do NOT paste literal
+test or implementation code; a signature, a described behaviour, and named edge cases are the
+right altitude.
 
 ### Self-review then return
 After writing `plan.md`, re-read it for: placeholder scan; internal consistency; scope
