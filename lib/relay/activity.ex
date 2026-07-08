@@ -9,10 +9,11 @@ defmodule Relay.Activity do
   This context never calls `Relay.Cards`; `Cards` depends on it to log.
   """
 
-  use Boundary, deps: [Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Events, Relay.Repo, Schemas]
 
   import Ecto.Query
 
+  alias Relay.Events
   alias Relay.Repo
   alias Schemas.Card
   alias Schemas.Comment
@@ -30,6 +31,7 @@ defmodule Relay.Activity do
     |> Comment.changeset(Map.take(attrs, [:body]))
     |> Repo.insert()
     |> preload_user()
+    |> broadcast_appended(card)
   end
 
   @doc """
@@ -53,6 +55,7 @@ defmodule Relay.Activity do
     |> Schemas.Activity.changeset()
     |> Repo.insert()
     |> preload_user()
+    |> broadcast_appended(card)
   end
 
   @doc """
@@ -81,6 +84,16 @@ defmodule Relay.Activity do
 
     Enum.sort_by(comments ++ activities, & &1.inserted_at, DateTime)
   end
+
+  # MMF 18: announce the new timeline entry to every open board session.
+  # Receivers apply the payload struct directly (no DB re-read), so this
+  # is safe even when the log happens inside a caller's transaction.
+  defp broadcast_appended({:ok, entry} = result, %Card{} = card) do
+    Events.broadcast(card.board_id, {:timeline_appended, card.id, entry})
+    result
+  end
+
+  defp broadcast_appended({:error, _changeset} = result, _card), do: result
 
   defp split_actor(:agent), do: {:agent, nil}
   defp split_actor({:user, user_id}) when is_integer(user_id), do: {:user, user_id}

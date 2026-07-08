@@ -8,12 +8,13 @@ defmodule Relay.Cards do
   (MMF 07) and API attribution (MMF 09).
   """
 
-  use Boundary, deps: [Relay.Activity, Relay.Boards, Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Activity, Relay.Boards, Relay.Events, Relay.Repo, Schemas]
 
   import Ecto.Query
 
   alias Relay.Activity
   alias Relay.Boards
+  alias Relay.Events
   alias Relay.Repo
   alias Schemas.Board
   alias Schemas.Card
@@ -34,18 +35,21 @@ defmodule Relay.Cards do
   create logs a `:created` activity entry (MMF 07) attributed to `actor`.
   """
   def create_card(%Stage{} = stage, attrs, actor \\ :agent) do
-    Repo.transaction(fn ->
-      ref_number = allocate_ref_number(stage.board_id)
+    result =
+      Repo.transaction(fn ->
+        ref_number = allocate_ref_number(stage.board_id)
 
-      case insert_card(stage, ref_number, attrs) do
-        {:ok, card} ->
-          {:ok, _entry} = Activity.log(card, %{type: :created, actor: actor})
-          preload_owners(card)
+        case insert_card(stage, ref_number, attrs) do
+          {:ok, card} ->
+            {:ok, _entry} = Activity.log(card, %{type: :created, actor: actor})
+            preload_owners(card)
 
-        {:error, changeset} ->
-          Repo.rollback(changeset)
-      end
-    end)
+          {:error, changeset} ->
+            Repo.rollback(changeset)
+        end
+      end)
+
+    broadcast_upserted(result)
   end
 
   @doc """
@@ -82,6 +86,7 @@ defmodule Relay.Cards do
     |> Card.changeset(attrs)
     |> Repo.update()
     |> preload_owners_result()
+    |> broadcast_upserted()
   end
 
   @doc """
@@ -102,6 +107,7 @@ defmodule Relay.Cards do
     |> Repo.update()
     |> preload_owners_result()
     |> log_status_changed(from_status, actor)
+    |> broadcast_upserted()
   end
 
   @doc """
@@ -113,12 +119,15 @@ defmodule Relay.Cards do
   with the new owner labels.
   """
   def set_owners(%Card{} = card, actors, actor \\ :agent) when is_list(actors) do
-    Repo.transaction(fn ->
-      Repo.delete_all(from o in CardOwner, where: o.card_id == ^card.id)
-      Enum.each(actors, &insert_owner_or_rollback(card, &1))
-      log_owners_changed(card, actor, %{"action" => "set", "owners" => Enum.map(actors, &owner_label/1)})
-      reload_with_owners(card)
-    end)
+    result =
+      Repo.transaction(fn ->
+        Repo.delete_all(from o in CardOwner, where: o.card_id == ^card.id)
+        Enum.each(actors, &insert_owner_or_rollback(card, &1))
+        log_owners_changed(card, actor, %{"action" => "set", "owners" => Enum.map(actors, &owner_label/1)})
+        reload_with_owners(card)
+      end)
+
+    broadcast_upserted(result)
   end
 
   @doc """
@@ -137,7 +146,7 @@ defmodule Relay.Cards do
           log_owners_changed(card, actor, %{"action" => "added", "owner" => owner_label(owner_actor)})
         end
 
-        {:ok, reload_with_owners(card)}
+        broadcast_upserted({:ok, reload_with_owners(card)})
 
       {:error, changeset} ->
         {:error, changeset}
@@ -158,7 +167,7 @@ defmodule Relay.Cards do
       log_owners_changed(card, actor, %{"action" => "removed", "owner" => owner_label(owner_actor)})
     end
 
-    {:ok, reload_with_owners(card)}
+    broadcast_upserted({:ok, reload_with_owners(card)})
   end
 
   @doc """
@@ -212,15 +221,25 @@ defmodule Relay.Cards do
       when is_integer(index) do
     previous_stage_id = card.stage_id
 
-    Repo.transaction(fn ->
-      moved = preload_owners(place_at(card, target_stage, index))
+    result =
+      Repo.transaction(fn ->
+        moved = preload_owners(place_at(card, target_stage, index))
 
-      if moved.stage_id != previous_stage_id do
-        emit_stage_changed(moved, previous_stage_id, target_stage, actor)
-      end
+        if moved.stage_id != previous_stage_id do
+          emit_stage_changed(moved, previous_stage_id, target_stage, actor)
+        end
 
-      moved
-    end)
+        moved
+      end)
+
+    case result do
+      {:ok, moved} ->
+        Events.broadcast(moved.board_id, {:card_moved, moved, previous_stage_id})
+        {:ok, moved}
+
+      {:error, _changeset} = error ->
+        error
+    end
   end
 
   defp parse_ref_number(%Board{key: key}, ref) do
@@ -297,6 +316,16 @@ defmodule Relay.Cards do
 
   defp preload_owners_result({:ok, card}), do: {:ok, preload_owners(card)}
   defp preload_owners_result({:error, changeset}), do: {:error, changeset}
+
+  # MMF 18: announce a created/edited card to every open board session.
+  # Called only after the mutation (and its transaction, where there is
+  # one) has committed; Events.broadcast/2 is fire-and-forget.
+  defp broadcast_upserted({:ok, %Card{} = card} = result) do
+    Events.broadcast(card.board_id, {:card_upserted, card})
+    result
+  end
+
+  defp broadcast_upserted({:error, _changeset} = result), do: result
 
   defp log_status_changed({:ok, %Card{} = card} = result, from_status, actor) do
     if card.status != from_status do

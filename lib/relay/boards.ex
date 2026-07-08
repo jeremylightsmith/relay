@@ -4,10 +4,11 @@ defmodule Relay.Boards do
   Cards arrive in MMF 03 (`Relay.Cards`).
   """
 
-  use Boundary, deps: [Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Events, Relay.Repo, Schemas]
 
   import Ecto.Query
 
+  alias Relay.Events
   alias Relay.Repo
   alias Schemas.Board
   alias Schemas.Card
@@ -64,6 +65,7 @@ defmodule Relay.Boards do
           owner: lane_owner(lane, parent)
         })
         |> Repo.insert()
+        |> broadcast_stages_changed(parent.board_id)
     end
   end
 
@@ -82,7 +84,7 @@ defmodule Relay.Boards do
           {:error, :not_empty}
         else
           {:ok, _} = Repo.delete(child)
-          {:ok, :disabled}
+          broadcast_stages_changed({:ok, :disabled}, parent.board_id)
         end
     end
   end
@@ -115,6 +117,14 @@ defmodule Relay.Boards do
   defp get_sublane(%Stage{} = parent, lane) do
     Repo.get_by(Stage, parent_id: parent.id, lane: lane)
   end
+
+  # MMF 18: stage config changed — coarse event, receivers refetch stages.
+  defp broadcast_stages_changed({:ok, _value} = result, board_id) do
+    Events.broadcast(board_id, {:stages_changed, board_id})
+    result
+  end
+
+  defp broadcast_stages_changed({:error, _reason} = result, _board_id), do: result
 
   defp lane_owner(:review, _parent), do: :human
   defp lane_owner(:done, %Stage{owner: owner}), do: owner
