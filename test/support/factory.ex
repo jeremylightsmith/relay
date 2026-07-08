@@ -69,4 +69,38 @@ defmodule Relay.Factory do
 
     owner |> merge_attributes(attrs) |> evaluate_lazy_attributes()
   end
+
+  # Full-control factory: `card` (when overridden) must be a persisted card.
+  # With a `user`, a human comment; without, an agent ("Relay AI") comment.
+  def comment_factory(attrs) do
+    {card, attrs} = Map.pop_lazy(attrs, :card, fn -> insert(:card) end)
+    {user, attrs} = Map.pop(attrs, :user)
+
+    comment = %Schemas.Comment{
+      card_id: card.id,
+      actor_type: if(user, do: :user, else: :agent),
+      user_id: user && user.id,
+      body: sequence(:comment_body, &"Comment #{&1}")
+    }
+
+    comment |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
+
+  # Full-control factory: `card` (when overridden) must be a persisted card.
+  # With a `user`, a human actor; without, the agent. Defaults to a :moved
+  # entry with a sample string-keyed meta.
+  def activity_factory(attrs) do
+    {card, attrs} = Map.pop_lazy(attrs, :card, fn -> insert(:card) end)
+    {user, attrs} = Map.pop(attrs, :user)
+
+    activity = %Schemas.Activity{
+      card_id: card.id,
+      type: :moved,
+      meta: %{"from_stage" => "Spec", "to_stage" => "Code"},
+      actor_type: if(user, do: :user, else: :agent),
+      user_id: user && user.id
+    }
+
+    activity |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
 end

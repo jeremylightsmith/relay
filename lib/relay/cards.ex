@@ -8,32 +8,41 @@ defmodule Relay.Cards do
   (MMF 07) and API attribution (MMF 09).
   """
 
-  use Boundary, deps: [Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Activity, Relay.Repo, Schemas]
 
   import Ecto.Query
 
+  alias Relay.Activity
   alias Relay.Repo
   alias Schemas.Board
   alias Schemas.Card
   alias Schemas.CardOwner
   alias Schemas.Stage
+  alias Schemas.User
 
   @doc """
   Creates a card in `stage` from user-supplied `attrs` (`:title`, optional
-  `:tag`), returning `{:ok, card}` or `{:error, changeset}`.
+  `:tag`), attributed to `actor` (`:agent | {:user, user_id}`, defaults to
+  `:agent` — the API identity; web callers pass the signed-in user),
+  returning `{:ok, card}` or `{:error, changeset}`.
 
   The next per-board `ref_number` is allocated by locking the board row
   (`SELECT ... FOR UPDATE`) and bumping `Board.card_seq` inside the
   transaction, so refs are sequential and gap-free even under concurrent
-  creates. The card is appended to the bottom of the stage.
+  creates. The card is appended to the bottom of the stage. A successful
+  create logs a `:created` activity entry (MMF 07) attributed to `actor`.
   """
-  def create_card(%Stage{} = stage, attrs) do
+  def create_card(%Stage{} = stage, attrs, actor \\ :agent) do
     Repo.transaction(fn ->
       ref_number = allocate_ref_number(stage.board_id)
 
       case insert_card(stage, ref_number, attrs) do
-        {:ok, card} -> preload_owners(card)
-        {:error, changeset} -> Repo.rollback(changeset)
+        {:ok, card} ->
+          {:ok, _entry} = Activity.log(card, %{type: :created, actor: actor})
+          preload_owners(card)
+
+        {:error, changeset} ->
+          Repo.rollback(changeset)
       end
     end)
   end
@@ -77,47 +86,77 @@ defmodule Relay.Cards do
   @doc """
   Sets the card's baton status (`:queued | :working | :needs_input |
   :in_review | :done`) and optional `progress` (0–100) from `attrs`,
-  returning `{:ok, card}` (owners preloaded) or `{:error, changeset}`.
-  Status only ever changes through this explicit call — never as a side
-  effect of moving a card.
+  attributed to `actor` (`:agent | {:user, user_id}`, defaults to
+  `:agent`), returning `{:ok, card}` (owners preloaded) or
+  `{:error, changeset}`. Status only ever changes through this explicit
+  call — never as a side effect of moving a card. Logs a
+  `:status_changed` activity entry (MMF 07) only when the status value
+  actually changes (a progress-only update logs nothing).
   """
-  def set_status(%Card{} = card, attrs) do
+  def set_status(%Card{} = card, attrs, actor \\ :agent) do
+    from_status = card.status
+
     card
     |> Card.status_changeset(attrs)
     |> Repo.update()
     |> preload_owners_result()
+    |> log_status_changed(from_status, actor)
   end
 
   @doc """
   Replaces the card's whole owner list with `actors`
-  (`:agent | {:user, user_id}`) atomically, returning `{:ok, card}` with
-  owners preloaded or `{:error, changeset}` (nothing changes on error).
+  (`:agent | {:user, user_id}`) atomically, attributed to `actor`
+  (`:agent | {:user, user_id}`, defaults to `:agent`), returning
+  `{:ok, card}` with owners preloaded or `{:error, changeset}` (nothing
+  changes on error). Logs an `:owners_changed` activity entry (MMF 07)
+  with the new owner labels.
   """
-  def set_owners(%Card{} = card, actors) when is_list(actors) do
+  def set_owners(%Card{} = card, actors, actor \\ :agent) when is_list(actors) do
     Repo.transaction(fn ->
       Repo.delete_all(from o in CardOwner, where: o.card_id == ^card.id)
       Enum.each(actors, &insert_owner_or_rollback(card, &1))
+      log_owners_changed(card, actor, %{"action" => "set", "owners" => Enum.map(actors, &owner_label/1)})
       reload_with_owners(card)
     end)
   end
 
   @doc """
-  Adds one owner actor to the card, returning `{:ok, card}` with owners
-  preloaded. Adding an actor that is already an owner is an ok no-op.
+  Adds one owner actor to the card, attributed to `actor`
+  (`:agent | {:user, user_id}`, defaults to `:agent`), returning
+  `{:ok, card}` with owners preloaded. Adding an actor that is already an
+  owner is an ok no-op that logs nothing; otherwise logs an
+  `:owners_changed` activity entry (MMF 07) with the owner label.
   """
-  def add_owner(%Card{} = card, actor) do
-    case insert_owner(card, actor) do
-      {:ok, _owner} -> {:ok, reload_with_owners(card)}
-      {:error, changeset} -> {:error, changeset}
+  def add_owner(%Card{} = card, owner_actor, actor \\ :agent) do
+    already_owner? = Repo.exists?(owner_query(card, owner_actor))
+
+    case insert_owner(card, owner_actor) do
+      {:ok, _owner} ->
+        if not already_owner? do
+          log_owners_changed(card, actor, %{"action" => "added", "owner" => owner_label(owner_actor)})
+        end
+
+        {:ok, reload_with_owners(card)}
+
+      {:error, changeset} ->
+        {:error, changeset}
     end
   end
 
   @doc """
-  Removes one owner actor from the card, returning `{:ok, card}` with
-  owners preloaded. Removing an actor that is not an owner is an ok no-op.
+  Removes one owner actor from the card, attributed to `actor`
+  (`:agent | {:user, user_id}`, defaults to `:agent`), returning
+  `{:ok, card}` with owners preloaded. Removing an actor that is not an
+  owner is an ok no-op that logs nothing; otherwise logs an
+  `:owners_changed` activity entry (MMF 07) with the owner label.
   """
-  def remove_owner(%Card{} = card, actor) do
-    Repo.delete_all(owner_query(card, actor))
+  def remove_owner(%Card{} = card, owner_actor, actor \\ :agent) do
+    {deleted, _} = Repo.delete_all(owner_query(card, owner_actor))
+
+    if deleted > 0 do
+      log_owners_changed(card, actor, %{"action" => "removed", "owner" => owner_label(owner_actor)})
+    end
+
     {:ok, reload_with_owners(card)}
   end
 
@@ -157,18 +196,18 @@ defmodule Relay.Cards do
 
   @doc """
   Moves `card` into `target_stage` at the 0-based `index` among the
-  stage's cards (excluding the moved card itself), returning
+  stage's cards (excluding the moved card itself), attributed to `actor`
+  (`:agent | {:user, user_id}`, defaults to `:agent`), returning
   `{:ok, card}` or `{:error, changeset}`.
 
   The whole target stage is re-indexed inside a transaction so
   `position` stays contiguous (1..n) and deterministic; `index` is
   clamped into range. The target stage must belong to the card's board —
   callers resolve both on the current board, and a cross-board call
-  raises `FunctionClauseError`. A cross-stage move fires the
-  stage-change seam (`emit_stage_changed/2`), a no-op until MMF 07 hooks
-  activity logging into it.
+  raises `FunctionClauseError`. A cross-stage move logs a `:moved`
+  activity entry (MMF 07) attributed to `actor`.
   """
-  def move_card(%Card{board_id: board_id} = card, %Stage{board_id: board_id} = target_stage, index)
+  def move_card(%Card{board_id: board_id} = card, %Stage{board_id: board_id} = target_stage, index, actor \\ :agent)
       when is_integer(index) do
     previous_stage_id = card.stage_id
 
@@ -176,7 +215,7 @@ defmodule Relay.Cards do
       moved = preload_owners(place_at(card, target_stage, index))
 
       if moved.stage_id != previous_stage_id do
-        emit_stage_changed(moved, previous_stage_id)
+        emit_stage_changed(moved, previous_stage_id, target_stage, actor)
       end
 
       moved
@@ -222,9 +261,18 @@ defmodule Relay.Cards do
     end
   end
 
-  # MMF 07 seam: activity logging ("moved" timeline entries) hooks in
-  # here. Intentionally a no-op today — do not add behaviour in MMF 05.
-  defp emit_stage_changed(%Card{} = _moved_card, _previous_stage_id), do: :ok
+  # The MMF 05 seam, now live: a cross-stage move appends a :moved
+  # timeline entry with both stage names snapshotted into meta.
+  defp emit_stage_changed(%Card{} = moved, previous_stage_id, %Stage{} = target_stage, actor) do
+    from_stage = Repo.get!(Stage, previous_stage_id)
+
+    {:ok, _entry} =
+      Activity.log(moved, %{
+        type: :moved,
+        actor: actor,
+        meta: %{"from_stage" => from_stage.name, "to_stage" => target_stage.name}
+      })
+  end
 
   # Locks the board row so concurrent creates serialize, then bumps
   # `card_seq` and returns the newly allocated ref number. A rollback of
@@ -242,6 +290,34 @@ defmodule Relay.Cards do
 
   defp preload_owners_result({:ok, card}), do: {:ok, preload_owners(card)}
   defp preload_owners_result({:error, changeset}), do: {:error, changeset}
+
+  defp log_status_changed({:ok, %Card{} = card} = result, from_status, actor) do
+    if card.status != from_status do
+      {:ok, _entry} =
+        Activity.log(card, %{
+          type: :status_changed,
+          actor: actor,
+          meta: %{"from_status" => to_string(from_status), "to_status" => to_string(card.status)}
+        })
+    end
+
+    result
+  end
+
+  defp log_status_changed({:error, _changeset} = result, _from_status, _actor), do: result
+
+  defp log_owners_changed(%Card{} = card, actor, meta) do
+    {:ok, _entry} = Activity.log(card, %{type: :owners_changed, actor: actor, meta: meta})
+  end
+
+  # The label snapshotted into owners_changed meta — how the timeline
+  # phrases the changed owner ("added AI as owner", "removed Ada …").
+  defp owner_label(:agent), do: "AI"
+
+  defp owner_label({:user, user_id}) do
+    user = Repo.get!(User, user_id)
+    user.name || user.email
+  end
 
   defp preload_owners(nil), do: nil
   defp preload_owners(card_or_cards), do: Repo.preload(card_or_cards, owners: :user)

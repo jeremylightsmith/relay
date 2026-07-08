@@ -15,6 +15,7 @@ defmodule RelayWeb.BoardLive do
 
   use RelayWeb, :live_view
 
+  alias Relay.Activity
   alias Relay.Boards
   alias Relay.Cards
   alias Schemas.Card
@@ -69,6 +70,8 @@ defmodule RelayWeb.BoardLive do
         description_form={@description_form}
         status_form={@status_form}
         current_user_id={@current_scope.user.id}
+        timeline={@streams.timeline}
+        comment_form={@comment_form}
       />
     </Layouts.app>
     """
@@ -87,6 +90,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:composing_stage_id, nil)
       |> assign(:compose_form, empty_compose_form())
+      |> stream_configure(:timeline, dom_id: &timeline_dom_id/1)
 
     socket =
       Enum.reduce(board.stages, socket, fn stage, acc ->
@@ -125,7 +129,7 @@ defmodule RelayWeb.BoardLive do
   def handle_event("create_card", %{"stage_id" => stage_id, "card" => card_params}, socket) do
     stage = find_stage(socket, stage_id)
 
-    case stage && Cards.create_card(stage, card_params) do
+    case stage && Cards.create_card(stage, card_params, current_actor(socket)) do
       nil ->
         {:noreply, socket}
 
@@ -153,7 +157,7 @@ defmodule RelayWeb.BoardLive do
     with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
          %Stage{} = stage <- resolve_stage(socket, stage_id),
          index when is_integer(index) <- resolve_index(params, socket, stage),
-         {:ok, moved} <- Cards.move_card(card, stage, index) do
+         {:ok, moved} <- Cards.move_card(card, stage, index, current_actor(socket)) do
       {:noreply, apply_move(socket, card.stage_id, moved)}
     else
       _ -> {:noreply, socket}
@@ -211,7 +215,7 @@ defmodule RelayWeb.BoardLive do
   def handle_event("save_card_description", _params, socket), do: {:noreply, socket}
 
   def handle_event("set_card_status", %{"card" => card_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
-    case Cards.set_status(card, card_params) do
+    case Cards.set_status(card, card_params, current_actor(socket)) do
       {:ok, card} ->
         {:noreply, refresh_card(socket, card)}
 
@@ -229,9 +233,14 @@ defmodule RelayWeb.BoardLive do
     current_user_id = socket.assigns.current_scope.user.id
 
     case resolve_actor(params) do
-      :agent -> apply_owner_change(socket, Cards.add_owner(card, :agent))
-      {:user, ^current_user_id} = actor -> apply_owner_change(socket, Cards.add_owner(card, actor))
-      _other -> {:noreply, socket}
+      :agent ->
+        apply_owner_change(socket, Cards.add_owner(card, :agent, current_actor(socket)))
+
+      {:user, ^current_user_id} = actor ->
+        apply_owner_change(socket, Cards.add_owner(card, actor, current_actor(socket)))
+
+      _other ->
+        {:noreply, socket}
     end
   end
 
@@ -240,11 +249,30 @@ defmodule RelayWeb.BoardLive do
   def handle_event("remove_owner", params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
     case resolve_actor(params) do
       nil -> {:noreply, socket}
-      actor -> apply_owner_change(socket, Cards.remove_owner(card, actor))
+      actor -> apply_owner_change(socket, Cards.remove_owner(card, actor, current_actor(socket)))
     end
   end
 
   def handle_event("remove_owner", _params, socket), do: {:noreply, socket}
+
+  def handle_event("validate_comment", %{"comment" => comment_params}, socket) do
+    {:noreply, assign(socket, :comment_form, to_form(comment_params, as: :comment))}
+  end
+
+  def handle_event("post_comment", %{"comment" => comment_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    case Activity.add_comment(card, %{actor: current_actor(socket), body: comment_params["body"]}) do
+      {:ok, comment} ->
+        {:noreply,
+         socket
+         |> stream_insert(:timeline, comment)
+         |> assign(:comment_form, empty_comment_form())}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :comment_form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("post_comment", _params, socket), do: {:noreply, socket}
 
   # Groups position-ordered stages under their category, keeping the fixed
   # category order and dropping empty categories (per spec: headers render
@@ -264,6 +292,10 @@ defmodule RelayWeb.BoardLive do
   end
 
   # Only stages of the user's own board are addressable from events.
+  # Every action taken in this LiveView is attributed to the signed-in
+  # human; the :agent default on the Cards mutators is the API's (MMF 09).
+  defp current_actor(socket), do: {:user, socket.assigns.current_scope.user.id}
+
   defp find_stage(socket, stage_id) do
     find_stage_by_id(socket, String.to_integer(stage_id))
   end
@@ -322,6 +354,7 @@ defmodule RelayWeb.BoardLive do
     socket
     |> assign(:selected_card, card)
     |> assign(:status_form, status_form(card))
+    |> stream(:timeline, Activity.list_timeline(card), reset: true)
     |> stream_insert(stream_name(card.stage_id), card)
   end
 
@@ -355,6 +388,7 @@ defmodule RelayWeb.BoardLive do
         socket
         |> assign(:selected_card, moved)
         |> assign(:selected_stage, find_stage_by_id(socket, moved.stage_id))
+        |> stream(:timeline, Activity.list_timeline(moved), reset: true)
 
       _ ->
         socket
@@ -377,16 +411,21 @@ defmodule RelayWeb.BoardLive do
         |> assign(:editing_description, false)
         |> assign(:description_form, nil)
         |> assign(:status_form, status_form(card))
+        |> assign(:comment_form, empty_comment_form())
+        |> stream(:timeline, Activity.list_timeline(card), reset: true)
 
       nil ->
-        assign(socket,
+        socket
+        |> assign(
           selected_card: nil,
           selected_stage: nil,
           title_form: nil,
           editing_description: false,
           description_form: nil,
-          status_form: nil
+          status_form: nil,
+          comment_form: nil
         )
+        |> stream(:timeline, [], reset: true)
     end
   end
 
@@ -398,6 +437,11 @@ defmodule RelayWeb.BoardLive do
   defp stream_name(stage_id), do: :"stage_cards_#{stage_id}"
 
   defp empty_compose_form, do: to_form(%{"title" => ""}, as: :card)
+
+  defp empty_comment_form, do: to_form(%{"body" => ""}, as: :comment)
+
+  defp timeline_dom_id(%Schemas.Comment{id: id}), do: "timeline-comment-#{id}"
+  defp timeline_dom_id(%Schemas.Activity{id: id}), do: "timeline-activity-#{id}"
 
   defp category_label(:unstarted), do: "Unstarted"
   defp category_label(:in_progress), do: "In progress"

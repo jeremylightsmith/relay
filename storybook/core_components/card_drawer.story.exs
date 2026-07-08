@@ -24,7 +24,9 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 61}, as: :card),
-          stages: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 7, name: "Done"}]
+          stages: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 7, name: "Done"}],
+          timeline: story_timeline(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
       },
       %Variation{
@@ -41,9 +43,52 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           title_form: Phoenix.Component.to_form(%{"title" => "Wire the drawer"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "queued", "progress" => nil}, as: :card),
           editing_description: true,
-          description_form: Phoenix.Component.to_form(%{"description" => ""}, as: :card)
+          description_form: Phoenix.Component.to_form(%{"description" => ""}, as: :card),
+          timeline: [],
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
       }
+    ]
+  end
+
+  defp story_timeline do
+    ada = %Schemas.User{id: 1, name: "Ada Lovelace", email: "ada@example.com"}
+
+    [
+      {"timeline-activity-1",
+       %Schemas.Activity{
+         id: 1,
+         type: :created,
+         meta: %{},
+         actor_type: :user,
+         user: ada,
+         inserted_at: ~U[2026-07-01 09:00:00Z]
+       }},
+      {"timeline-comment-1",
+       %Schemas.Comment{
+         id: 1,
+         actor_type: :user,
+         user: ada,
+         body: "Kicking this off — spec draft attached.",
+         inserted_at: ~U[2026-07-02 10:15:00Z]
+       }},
+      {"timeline-activity-2",
+       %Schemas.Activity{
+         id: 2,
+         type: :moved,
+         meta: %{"from_stage" => "Spec", "to_stage" => "Code"},
+         actor_type: :agent,
+         user: nil,
+         inserted_at: ~U[2026-07-03 11:00:00Z]
+       }},
+      {"timeline-comment-2",
+       %Schemas.Comment{
+         id: 2,
+         actor_type: :agent,
+         user: nil,
+         body: "Implemented the drawer — ready for review.",
+         inserted_at: ~U[2026-07-06 15:30:00Z]
+       }}
     ]
   end
 
