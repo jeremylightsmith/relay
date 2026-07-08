@@ -28,7 +28,17 @@ defmodule RelayWeb.BoardLive do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} wide>
       <div id="board" class="space-y-4" phx-hook="BoardDnD">
-        <h1 id="board-title" class="text-xl font-semibold">{@board.name}</h1>
+        <div class="flex items-center justify-between">
+          <h1 id="board-title" class="text-xl font-semibold">{@board.name}</h1>
+          <.link
+            navigate={~p"/board/settings"}
+            id="board-settings-link"
+            class="btn btn-ghost btn-sm btn-circle"
+            aria-label="Board settings"
+          >
+            <.icon name="hero-cog-6-tooth" class="size-5" />
+          </.link>
+        </div>
         <div class="flex items-start gap-6 overflow-x-auto pb-4">
           <section
             :for={{category, stages} <- @stage_groups}
