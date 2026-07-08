@@ -428,7 +428,7 @@ claim/release ownership.
 
 ### Steps
 
-- [ ] **Failing tests.** Add `test/relay_web/api/card_controller_test.exs`:
+- [x] **Failing tests.** Add `test/relay_web/api/card_controller_test.exs`:
 
 ```elixir
 defmodule RelayWeb.Api.CardControllerTest do
@@ -510,9 +510,9 @@ defmodule RelayWeb.Api.CardControllerTest do
 end
 ```
 
-- [ ] **Run — expect fail** (actions/renders undefined).
+- [x] **Run — expect fail** (actions/renders undefined).
 
-- [ ] **Implement the controller actions.** Set `lib/relay_web/controllers/api/card_controller.ex` to:
+- [x] **Implement the controller actions.** Set `lib/relay_web/controllers/api/card_controller.ex` to:
 
 ```elixir
 defmodule RelayWeb.Api.CardController do
@@ -577,7 +577,7 @@ defmodule RelayWeb.Api.CardController do
 end
 ```
 
-- [ ] **Implement the JSON renders.** Add to `lib/relay_web/controllers/api/card_json.ex`:
+- [x] **Implement the JSON renders.** Add to `lib/relay_web/controllers/api/card_json.ex`:
 
 ```elixir
   def index(%{board: board, cards: cards}) do
@@ -606,9 +606,9 @@ end
   defp author(%{actor_type: :user, user: user}), do: %{type: "user", id: user.id, name: user.name || user.email}
 ```
 
-- [ ] **Run — expect pass.**
+- [x] **Run — expect pass.**
 
-- [ ] **Full check + commit.** `mix precommit`. Commit: `feat(api): GET /api/cards, GET/PATCH /api/cards/:ref (fields, status, owners)`.
+- [x] **Full check + commit.** `mix precommit`. Commit: `feat(api): GET /api/cards, GET/PATCH /api/cards/:ref (fields, status, owners)`.
 
 **Deliverable:** list/read cards with timeline; PATCH persists title/description/tag, status (400 on invalid), and owners (claim `["agent"]` → AI active, hand back `["user:ID"]` → human active); unknown/foreign refs → 404 — all attributed to the agent.
 
