@@ -19,7 +19,7 @@ defmodule Relay.BoardsTest do
       assert [
                %Stage{name: "Backlog", position: 1, owner: :human, category: :unstarted},
                %Stage{name: "Spec", position: 2, owner: :human, category: :unstarted},
-               %Stage{name: "Plan", position: 3, owner: :ai, category: :in_progress},
+               %Stage{name: "Plan", position: 3, owner: :ai, category: :planning},
                %Stage{name: "Code", position: 4, owner: :ai, category: :in_progress},
                %Stage{name: "Review", position: 5, owner: :human, category: :in_progress},
                %Stage{name: "Deploy", position: 6, owner: :ai, category: :in_progress},

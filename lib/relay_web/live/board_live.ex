@@ -28,7 +28,7 @@ defmodule RelayWeb.BoardLive do
   alias Schemas.Card
   alias Schemas.Stage
 
-  @category_order [:unstarted, :in_progress, :complete]
+  @category_order [:unstarted, :planning, :in_progress, :complete]
 
   @impl true
   def render(assigns) do
@@ -651,6 +651,7 @@ defmodule RelayWeb.BoardLive do
   defp timeline_dom_id(%Schemas.Activity{id: id}), do: "timeline-activity-#{id}"
 
   defp category_label(:unstarted), do: "Unstarted"
+  defp category_label(:planning), do: "Planning"
   defp category_label(:in_progress), do: "In progress"
   defp category_label(:complete), do: "Complete"
 
@@ -668,11 +669,16 @@ defmodule RelayWeb.BoardLive do
   end
 
   # The small colored marker beside each category band, mirroring the mockup's
-  # catMeta dots: a hollow ring (unstarted), a half-filled conic (in progress),
-  # and a solid green disc (complete).
+  # catMeta dots: a hollow ring (unstarted), a quarter-filled violet conic
+  # (planning — where AI planning lives), a half-filled blue conic
+  # (in progress), and a solid green disc (complete).
   defp category_dot_style(:unstarted),
     do:
       "width:9px;height:9px;border-radius:50%;border:1.5px solid oklch(0.68 0.02 255);box-sizing:border-box;display:block;flex:0 0 auto;"
+
+  defp category_dot_style(:planning),
+    do:
+      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-secondary) 0 25%, oklch(0.86 0.03 250) 25% 100%);display:block;flex:0 0 auto;"
 
   defp category_dot_style(:in_progress),
     do:

@@ -18,14 +18,14 @@ defmodule Relay.Boards do
   @seed_stages [
     {"Backlog", :human, :unstarted},
     {"Spec", :human, :unstarted},
-    {"Plan", :ai, :in_progress},
+    {"Plan", :ai, :planning},
     {"Code", :ai, :in_progress},
     {"Review", :human, :in_progress},
     {"Deploy", :ai, :in_progress},
     {"Done", :human, :complete}
   ]
 
-  @category_order [:unstarted, :in_progress, :complete]
+  @category_order [:unstarted, :planning, :in_progress, :complete]
 
   @doc """
   Returns the user's board with `stages` preloaded in `position` order,
@@ -115,22 +115,30 @@ defmodule Relay.Boards do
   end
 
   @doc """
-  Swaps `stage` with the adjacent main stage in board position order
-  (`:up` = toward position 1), inside a transaction. Categories swap along
-  with position (the mockup: "cross into another category and it takes on
-  that meaning") — the moved stage adopts the neighbour's category and the
-  neighbour adopts the one it displaced, so moving back across the same
-  boundary undoes the crossing. At the board's edge it is a no-op:
-  `{:ok, stage}`, no broadcast.
+  Moves `stage` one step up or down among the board's main stages (`:up` =
+  toward position 1), inside a transaction. With a same-category neighbour
+  in the move direction the two stages swap positions (categories are
+  untouched). When the stage is already first/last in its category it
+  crosses one-directionally into the adjacent category in `@category_order`
+  — adopting that category even when it is empty, landing at its edge (top
+  when moving down, bottom when moving up) — and no other stage's category
+  or relative order changes. Already in the first category moving up (or
+  the last moving down) it is a no-op: `{:ok, stage}`, no broadcast.
   """
   def reorder_stage(%Stage{lane: :main} = stage, direction) when direction in [:up, :down] do
     mains = main_stages(stage.board_id)
     index = Enum.find_index(mains, &(&1.id == stage.id))
+    stage = Enum.at(mains, index)
     neighbor_index = if direction == :up, do: index - 1, else: index + 1
+    neighbor = fetch_neighbor(mains, neighbor_index)
 
-    case fetch_neighbor(mains, neighbor_index) do
-      nil -> {:ok, stage}
-      %Stage{} = neighbor -> swap_stages(stage, neighbor)
+    if neighbor && neighbor.category == stage.category do
+      mains
+      |> List.replace_at(index, neighbor)
+      |> List.replace_at(neighbor_index, stage)
+      |> persist_order(stage, stage.category)
+    else
+      cross_category(mains, stage, direction)
     end
   end
 
@@ -200,32 +208,57 @@ defmodule Relay.Boards do
     Repo.all(from s in Stage, where: s.board_id == ^board_id and s.lane == :main, order_by: s.position)
   end
 
-  defp fetch_neighbor(_mains, index) when index < 0, do: nil
-  defp fetch_neighbor(mains, index), do: Enum.at(mains, index)
+  defp fetch_neighbor(_list, index) when index < 0, do: nil
+  defp fetch_neighbor(list, index), do: Enum.at(list, index)
 
-  # stages_board_id_position_index is not deferrable, so a direct swap
-  # would collide: park the moved stage on a free position first, so each
-  # subsequent update lands on a just-vacated slot. Position AND category
-  # both swap (a true exchange, not one-directional adoption) so that
-  # moving a stage back across the same boundary undoes the crossing —
-  # the neighbour reverts to the category it had before the first swap.
-  defp swap_stages(%Stage{} = stage, %Stage{} = neighbor) do
-    {:ok, moved} =
+  # The stage is first/last in its category: it alone adopts the adjacent
+  # category in @category_order (even an empty one — never skipping past
+  # it). Because a category's stages are contiguous in position order,
+  # landing at the adjacent category's near edge (top going down, bottom
+  # going up) keeps the flat board order unchanged — only the moved
+  # stage's category changes. No adjacent category -> silent no-op.
+  defp cross_category(mains, stage, direction) do
+    category_index = Enum.find_index(@category_order, &(&1 == stage.category))
+    adjacent_index = if direction == :up, do: category_index - 1, else: category_index + 1
+
+    case fetch_neighbor(@category_order, adjacent_index) do
+      nil -> {:ok, stage}
+      category -> persist_order(mains, stage, category)
+    end
+  end
+
+  # Persists `ordered_mains` as the board's main-stage order, renumbering
+  # positions 1..n and setting `category` on `moved` alone. The whole block
+  # is parked out of range first so no renumbering step collides with the
+  # stages_board_id_position_index unique index (sub-lane children always
+  # sit above every main-stage position, so 1..n stays free and children
+  # are untouched). Returns the broadcast-wrapped moved stage.
+  defp persist_order(ordered_mains, %Stage{} = moved, category) do
+    {:ok, updated} =
       Repo.transaction(fn ->
-        parked = next_position(stage.board_id)
+        ids = Enum.map(ordered_mains, & &1.id)
+        parked = from s in Stage, where: s.id in ^ids
+        Repo.update_all(parked, inc: [position: @position_park_offset])
 
-        stage |> Stage.changeset(%{position: parked}) |> Repo.update!()
-
-        neighbor
-        |> Stage.changeset(%{position: stage.position, category: stage.category})
-        |> Repo.update!()
-
-        stage
-        |> Stage.changeset(%{position: neighbor.position, category: neighbor.category})
-        |> Repo.update!()
+        ordered_mains
+        |> Enum.with_index(1)
+        |> Enum.map(fn {stage, position} -> renumber!(stage, position, moved.id, category) end)
+        |> Enum.find(&(&1.id == moved.id))
       end)
 
-    broadcast_stages_changed({:ok, moved}, moved.board_id)
+    broadcast_stages_changed({:ok, updated}, updated.board_id)
+  end
+
+  # `position` is force-changed: a stage's final position often equals its
+  # stale in-memory one (cross-category moves keep the flat order), yet the
+  # parked row still needs writing back to its real position.
+  defp renumber!(stage, position, moved_id, category) do
+    attrs = if stage.id == moved_id, do: %{category: category}, else: %{}
+
+    stage
+    |> Stage.changeset(attrs)
+    |> Ecto.Changeset.force_change(:position, position)
+    |> Repo.update!()
   end
 
   # Position right after the category's last main stage; an empty category

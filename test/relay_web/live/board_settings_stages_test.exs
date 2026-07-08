@@ -96,12 +96,15 @@ defmodule RelayWeb.BoardSettingsStagesTest do
     test "the arrows reorder stages and crossing a band adopts the category",
          %{conn: conn, board: board} do
       spec = stage_named(board, "Spec")
+      plan = stage_named(board, "Plan")
       {:ok, view, _html} = live(conn, ~p"/board/settings")
 
       view |> element("#stage-#{spec.id}-down") |> render_click()
 
-      assert has_element?(view, "#settings-group-in_progress #stage-#{spec.id}-row")
-      assert Boards.get_stage(board, spec.id).category == :in_progress
+      assert has_element?(view, "#settings-group-planning #stage-#{spec.id}-row")
+      assert Boards.get_stage(board, spec.id).category == :planning
+      # one-directional: the old first-Planning stage keeps its category
+      assert Boards.get_stage(board, plan.id).category == :planning
 
       view |> element("#stage-#{spec.id}-up") |> render_click()
 

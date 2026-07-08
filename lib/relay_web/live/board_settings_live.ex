@@ -18,7 +18,7 @@ defmodule RelayWeb.BoardSettingsLive do
   alias Relay.ApiKeys
   alias Relay.Boards
 
-  @categories [:unstarted, :in_progress, :complete]
+  @categories [:unstarted, :planning, :in_progress, :complete]
 
   @impl true
   def render(assigns) do
@@ -429,7 +429,7 @@ defmodule RelayWeb.BoardSettingsLive do
   end
 
   def handle_event("add_stage", %{"category" => category}, socket)
-      when category in ["unstarted", "in_progress", "complete"] do
+      when category in ["unstarted", "planning", "in_progress", "complete"] do
     {:ok, _stage} = Boards.create_stage(socket.assigns.board, category_atom(category))
     {:noreply, refresh_stages(socket)}
   end
@@ -484,6 +484,7 @@ defmodule RelayWeb.BoardSettingsLive do
   defp direction_atom("down"), do: :down
 
   defp category_atom("unstarted"), do: :unstarted
+  defp category_atom("planning"), do: :planning
   defp category_atom("in_progress"), do: :in_progress
   defp category_atom("complete"), do: :complete
 
@@ -551,6 +552,7 @@ defmodule RelayWeb.BoardSettingsLive do
   defp owner_color(:ai), do: "var(--color-secondary)"
 
   defp category_band_label(:unstarted), do: "UNSTARTED"
+  defp category_band_label(:planning), do: "PLANNING"
   defp category_band_label(:in_progress), do: "IN PROGRESS"
   defp category_band_label(:complete), do: "COMPLETE"
 
@@ -558,6 +560,10 @@ defmodule RelayWeb.BoardSettingsLive do
   defp category_dot_style(:unstarted),
     do:
       "width:9px;height:9px;border-radius:50%;border:1.5px solid oklch(0.68 0.02 255);box-sizing:border-box;display:block;flex:0 0 auto;"
+
+  defp category_dot_style(:planning),
+    do:
+      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-secondary) 0 25%, oklch(0.86 0.03 250) 25% 100%);display:block;flex:0 0 auto;"
 
   defp category_dot_style(:in_progress),
     do:
