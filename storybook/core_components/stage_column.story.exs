@@ -100,6 +100,34 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         }
       },
       %Variation{
+        id: :with_collapsed_sublanes,
+        description: "Empty Review/Done sub-lanes collapse to 34px strips (MMF 12c)",
+        attributes: %{
+          id: "story-stage-collapsed-sublanes",
+          name: "Code",
+          owner: :ai,
+          stage_id: 5,
+          count: 1,
+          board_key: "RLY",
+          category: :in_progress,
+          cards: [
+            {"story-card-5",
+             %{
+               title: "Implement the API",
+               tag: "api",
+               ref_number: 5,
+               status: :working,
+               progress: 30,
+               owners: [%{actor_type: :agent}]
+             }}
+          ],
+          sublanes: [
+            %{id: 501, name: "Review", lane: :review, owner: :human, count: 0, cards: [], collapsed: true},
+            %{id: 502, name: "Done", lane: :done, owner: :ai, count: 0, cards: [], collapsed: true}
+          ]
+        }
+      },
+      %Variation{
         id: :composing,
         attributes: %{
           id: "story-stage-plan",

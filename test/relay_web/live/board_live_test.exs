@@ -1318,6 +1318,82 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
+  describe "collapsed empty sub-lanes (MMF 12c)" do
+    setup %{conn: conn} do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, review} = Boards.enable_lane(code, :review)
+
+      %{
+        conn: Plug.Test.init_test_session(conn, user_id: user.id),
+        board: board,
+        code: code,
+        review: review
+      }
+    end
+
+    test "an empty review sub-lane renders its 34px strip inside the expanded stage",
+         %{conn: conn, code: code, review: review} do
+      insert(:card, stage: code, title: "Main work", position: 1, ref_number: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(
+               view,
+               "#sublane-#{review.id}-strip.sublane-strip.stage-cards[data-stage-id='#{review.id}']"
+             )
+
+      assert has_element?(view, "#sublane-#{review.id}-strip .sublane-strip-name", "Review")
+      assert has_element?(view, "#sublane-#{review.id}-strip .sublane-strip-count", "0")
+      refute has_element?(view, "#sublane-#{review.id}-cards")
+
+      strip_html = view |> element("#sublane-#{review.id}-strip") |> render()
+      assert strip_html =~ "flex:0 0 34px"
+      assert strip_html =~ "writing-mode:vertical-rl"
+      assert strip_html =~ "oklch(0.52 0.12 65)"
+    end
+
+    test "a sub-lane with a card renders expanded", %{conn: conn, review: review} do
+      insert(:card, stage: review, title: "Please review", position: 1, ref_number: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(view, "#sublane-#{review.id}-cards .board-card", "Please review")
+      refute has_element?(view, "#sublane-#{review.id}-strip")
+    end
+
+    test "moving a card onto the sub-lane strip expands it and the card renders there",
+         %{conn: conn, code: code, review: review} do
+      card = insert(:card, stage: code, title: "Ready for review", position: 1, ref_number: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(view, "#sublane-#{review.id}-strip")
+
+      render_hook(view, "move_card", %{
+        "ref" => "RLY-#{card.ref_number}",
+        "stage_id" => review.id,
+        "index" => 0
+      })
+
+      refute has_element?(view, "#sublane-#{review.id}-strip")
+      assert has_element?(view, "#sublane-#{review.id}-cards .board-card", "Ready for review")
+    end
+
+    test "clicking the sub-lane strip force-opens the empty lane",
+         %{conn: conn, code: code, review: review} do
+      insert(:card, stage: code, title: "Main work", position: 1, ref_number: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      view |> element("#sublane-#{review.id}-strip") |> render_click()
+
+      refute has_element?(view, "#sublane-#{review.id}-strip")
+      assert has_element?(view, "#sublane-#{review.id}-cards .stage-empty", "Empty")
+    end
+  end
+
   defp expand_stage(view, stage) do
     view |> element("#stage-strip-#{stage.id}") |> render_click()
   end

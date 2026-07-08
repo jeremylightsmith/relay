@@ -201,6 +201,46 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ "stage-strip"
       assert html =~ "No cards yet"
     end
+
+    test "an empty collapsed sub-lane renders the 34px strip; a non-collapsed one renders expanded" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-4",
+          name: "Code",
+          owner: :ai,
+          stage_id: 4,
+          count: 1,
+          board_key: "RLY",
+          cards: [
+            {"cards-1", %{title: "Main work", tag: nil, ref_number: 1, status: :queued, progress: nil, owners: []}}
+          ],
+          sublanes: [
+            %{id: 401, name: "Review", lane: :review, owner: :human, count: 0, cards: [], collapsed: true},
+            %{id: 402, name: "Done", lane: :done, owner: :ai, count: 0, cards: []}
+          ]
+        )
+
+      # collapsed Review lane: 34px strip (mockup lines ~1028–1037)
+      assert html =~ ~s(id="sublane-401-strip")
+      assert html =~ "flex:0 0 34px"
+      assert html =~ "width:6px;height:6px;border-radius:50%"
+      assert html =~ "opacity:0.6"
+      assert html =~ "writing-mode:vertical-rl"
+      # lane colour + the same left divider as an expanded lane
+      assert html =~ "oklch(0.52 0.12 65)"
+      assert html =~ "border-left:1px solid oklch(0.90 0.04 75)"
+      # drop target + click-to-expand contract
+      assert html =~ ~s(data-stage-id="401")
+      assert html =~ ~s(phx-value-stage-id="401")
+      refute html =~ ~s(id="sublane-401-cards")
+
+      # Done lane was not marked collapsed: renders expanded as before
+      assert html =~ ~s(id="sublane-402-cards")
+      refute html =~ ~s(id="sublane-402-strip")
+
+      # stage width: 240 (main) + 34 (strip) + 178 (expanded) = 452
+      assert html =~ "width:452px"
+    end
   end
 
   describe "status_badge/1" do

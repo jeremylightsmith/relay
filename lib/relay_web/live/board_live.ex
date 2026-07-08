@@ -99,7 +99,8 @@ defmodule RelayWeb.BoardLive do
                       lane: sub.lane,
                       owner: sub.owner,
                       count: Map.fetch!(@stage_counts, sub.id),
-                      cards: Map.fetch!(@streams, stream_name(sub.id))
+                      cards: Map.fetch!(@streams, stream_name(sub.id)),
+                      collapsed: sublane_collapsed?(sub, @stage_counts, @force_open)
                     }
                   end
                 }
@@ -424,6 +425,12 @@ defmodule RelayWeb.BoardLive do
       end)
 
     total == 0 and not MapSet.member?(force_open, stage.id)
+  end
+
+  # MMF 12c — a Review/Done sub-lane collapses to its 34px strip when empty
+  # and not force-opened (mockup: laneCollapsed = isSub && laneCards.length === 0).
+  defp sublane_collapsed?(%Stage{} = sub, stage_counts, force_open) do
+    Map.fetch!(stage_counts, sub.id) == 0 and not MapSet.member?(force_open, sub.id)
   end
 
   # Only stages of the user's own board are addressable from events.

@@ -807,6 +807,9 @@ defmodule RelayWeb.CoreComponents do
   defp card_status_color(:working), do: "oklch(0.52 0.10 292)"
   defp card_status_color(_status), do: "oklch(0.50 0.10 155)"
 
+  defp sublane_width(%{collapsed: true}), do: 34
+  defp sublane_width(_sub), do: 178
+
   defp lane_color(:review), do: "oklch(0.52 0.12 65)"
   defp lane_color(:done), do: "oklch(0.47 0.11 155)"
   defp lane_color(_ongoing), do: "oklch(0.52 0.02 255)"
@@ -1308,18 +1311,23 @@ defmodule RelayWeb.CoreComponents do
 
   attr :sublanes, :list,
     default: [],
-    doc: "the stage's Review/Done child lanes, each a %{id, name, lane, owner, count, cards}"
+    doc:
+      "the stage's Review/Done child lanes, each a %{id, name, lane, owner, count, cards} " <>
+        "with an optional collapsed: true to render the lane as its 34px strip (MMF 12c)"
 
   attr :collapsed, :boolean,
     default: false,
     doc: "render the whole stage as the mockup's 44px dashed strip (still a drop target)"
 
   def stage_column(assigns) do
+    sublanes = Enum.map(assigns.sublanes, &Map.put_new(&1, :collapsed, false))
+
     assigns =
       assigns
-      |> assign(:labeled, assigns.sublanes != [])
-      |> assign(:stage_width, 240 + 178 * length(assigns.sublanes))
-      |> assign(:total_count, (assigns.count || 0) + Enum.sum(Enum.map(assigns.sublanes, & &1.count)))
+      |> assign(:sublanes, sublanes)
+      |> assign(:labeled, sublanes != [])
+      |> assign(:stage_width, 240 + Enum.sum(Enum.map(sublanes, &sublane_width/1)))
+      |> assign(:total_count, (assigns.count || 0) + Enum.sum(Enum.map(sublanes, & &1.count)))
 
     ~H"""
     <%= if @collapsed do %>
@@ -1461,50 +1469,80 @@ defmodule RelayWeb.CoreComponents do
               </div>
             </div>
           </div>
-          <%!-- Review / Done sub-lanes, side by side --%>
-          <div
-            :for={sub <- @sublanes}
-            id={"sublane-#{sub.id}"}
-            style={"flex:0 0 178px;width:178px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;background:#{lane_tint(sub.lane)};border-left:1px solid #{lane_divider(sub.lane)};"}
-          >
-            <div style="display:flex;align-items:center;gap:6px;padding:11px 13px 7px 13px;flex:0 0 auto;">
-              <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(sub.lane)};"}>
+          <%!-- Review / Done sub-lanes, side by side; empty ones collapse to 34px strips --%>
+          <%= for sub <- @sublanes do %>
+            <div
+              :if={sub.collapsed}
+              id={"sublane-#{sub.id}-strip"}
+              class="sublane-strip stage-cards"
+              data-stage-id={sub.id}
+              phx-click="expand_stage"
+              phx-value-stage-id={sub.id}
+              aria-label={"Expand #{sub.name} lane"}
+              style={"flex:0 0 34px;width:34px;display:flex;flex-direction:column;align-items:center;gap:9px;padding:12px 0;box-sizing:border-box;background:#{lane_tint(sub.lane)};border-left:1px solid #{lane_divider(sub.lane)};cursor:pointer;"}
+            >
+              <span
+                class="sublane-strip-dot"
+                style={"width:6px;height:6px;border-radius:50%;background:#{lane_color(sub.lane)};opacity:0.6;flex:0 0 auto;"}
+              >
+              </span>
+              <span
+                class="sublane-strip-name"
+                style={"writing-mode:vertical-rl;transform:rotate(180deg);font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(sub.lane)};white-space:nowrap;"}
+              >
                 {sub.name}
               </span>
-              <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(sub.lane)};opacity:0.7;"}>
+              <span
+                class="sublane-strip-count"
+                style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(sub.lane)};opacity:0.7;flex:0 0 auto;"}
+              >
                 {sub.count}
               </span>
             </div>
             <div
-              id={"sublane-#{sub.id}-cards"}
-              phx-update="stream"
-              data-stage-id={sub.id}
-              class="stage-cards"
-              style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:0 13px 13px 13px;"
+              :if={!sub.collapsed}
+              id={"sublane-#{sub.id}"}
+              style={"flex:0 0 178px;width:178px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;background:#{lane_tint(sub.lane)};border-left:1px solid #{lane_divider(sub.lane)};"}
             >
-              <div
-                id={"sublane-#{sub.id}-empty"}
-                class="stage-empty hidden only:block"
-                style="border:1px dashed var(--color-base-300);border-radius:8px;padding:14px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:oklch(0.70 0.02 255);"
-              >
-                Empty
+              <div style="display:flex;align-items:center;gap:6px;padding:11px 13px 7px 13px;flex:0 0 auto;">
+                <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(sub.lane)};"}>
+                  {sub.name}
+                </span>
+                <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(sub.lane)};opacity:0.7;"}>
+                  {sub.count}
+                </span>
               </div>
-              <.board_card
-                :for={{dom_id, card} <- sub.cards}
-                id={dom_id}
-                title={card.title}
-                tag={card.tag}
-                ref={"#{@board_key}-#{card.ref_number}"}
-                status={card.status}
-                progress={card.progress}
-                owners={card.owners}
-                active_owner={Cards.active_owner_type(card)}
-                stage_owner={sub.owner}
-                lane={sub.lane}
-                category={@category}
-              />
+              <div
+                id={"sublane-#{sub.id}-cards"}
+                phx-update="stream"
+                data-stage-id={sub.id}
+                class="stage-cards"
+                style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:0 13px 13px 13px;"
+              >
+                <div
+                  id={"sublane-#{sub.id}-empty"}
+                  class="stage-empty hidden only:block"
+                  style="border:1px dashed var(--color-base-300);border-radius:8px;padding:14px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:oklch(0.70 0.02 255);"
+                >
+                  Empty
+                </div>
+                <.board_card
+                  :for={{dom_id, card} <- sub.cards}
+                  id={dom_id}
+                  title={card.title}
+                  tag={card.tag}
+                  ref={"#{@board_key}-#{card.ref_number}"}
+                  status={card.status}
+                  progress={card.progress}
+                  owners={card.owners}
+                  active_owner={Cards.active_owner_type(card)}
+                  stage_owner={sub.owner}
+                  lane={sub.lane}
+                  category={@category}
+                />
+              </div>
             </div>
-          </div>
+          <% end %>
         </div>
       </section>
     <% end %>

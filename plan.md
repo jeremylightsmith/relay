@@ -642,7 +642,7 @@ with inline `oklch(...)` values copied verbatim from the mockup, `Phoenix.LiveVi
 
 **Steps**
 
-- [ ] **Write the failing component test.** Append inside `describe "stage_column/1"` in `test/relay_web/components/core_components_test.exs`:
+- [x] **Write the failing component test.** Append inside `describe "stage_column/1"` in `test/relay_web/components/core_components_test.exs`:
 
   ```elixir
   test "an empty collapsed sub-lane renders the 34px strip; a non-collapsed one renders expanded" do
@@ -686,9 +686,9 @@ with inline `oklch(...)` values copied verbatim from the mockup, `Phoenix.LiveVi
   end
   ```
 
-- [ ] Run `mix test test/relay_web/components/core_components_test.exs` — expect the new test to FAIL.
+- [x] Run `mix test test/relay_web/components/core_components_test.exs` — expect the new test to FAIL.
 
-- [ ] **Implement in `stage_column/1`** (`lib/relay_web/components/core_components.ex`).
+- [x] **Implement in `stage_column/1`** (`lib/relay_web/components/core_components.ex`).
 
   1. Update the `sublanes` attr doc:
 
@@ -800,9 +800,9 @@ with inline `oklch(...)` values copied verbatim from the mockup, `Phoenix.LiveVi
      defp sublane_width(_sub), do: 178
      ```
 
-- [ ] Run `mix test test/relay_web/components/core_components_test.exs` — expect PASS (including the untouched Task 1 and pre-existing stage_column tests).
+- [x] Run `mix test test/relay_web/components/core_components_test.exs` — expect PASS (including the untouched Task 1 and pre-existing stage_column tests).
 
-- [ ] **Write the failing BoardLive tests.** In `test/relay_web/live/board_live_test.exs`, add a new describe after `describe "collapsed empty stages (MMF 12c)"` (mirrors the existing "sub-lanes" describe's session setup):
+- [x] **Write the failing BoardLive tests.** In `test/relay_web/live/board_live_test.exs`, add a new describe after `describe "collapsed empty stages (MMF 12c)"` (mirrors the existing "sub-lanes" describe's session setup):
 
   ```elixir
   describe "collapsed empty sub-lanes (MMF 12c)" do
@@ -882,9 +882,9 @@ with inline `oklch(...)` values copied verbatim from the mockup, `Phoenix.LiveVi
   end
   ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — expect the new describe to FAIL (BoardLive never passes `collapsed:` for sub-lanes yet).
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — expect the new describe to FAIL (BoardLive never passes `collapsed:` for sub-lanes yet).
 
-- [ ] **Implement in `lib/relay_web/live/board_live.ex`.**
+- [x] **Implement in `lib/relay_web/live/board_live.ex`.**
 
   1. In `render/1`, add the `collapsed` key to the sublane map:
 
@@ -916,7 +916,7 @@ with inline `oklch(...)` values copied verbatim from the mockup, `Phoenix.LiveVi
 
      (The Task 1 `expand_stage` handler already covers lane strips — no new event.)
 
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — new describe passes. Then run `mix test test/relay_web/live/board_live_realtime_test.exs` — one test now fails because the freshly enabled (empty) Review lane renders as a strip; update it:
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — new describe passes. Then run `mix test test/relay_web/live/board_live_realtime_test.exs` — one test now fails because the freshly enabled (empty) Review lane renders as a strip; update it:
 
   In `test/relay_web/live/board_live_realtime_test.exs`, test `"enabling and disabling a lane restructures another open session"`, replace the two assertions:
 
@@ -930,9 +930,9 @@ with inline `oklch(...)` values copied verbatim from the mockup, `Phoenix.LiveVi
 
   (The `"renders a stage's review sub-lane stacked with its own count"` test in `board_live_test.exs` needs NO further change: its `html =~ "sublane-#{review.id}"` assertion matches the strip's `sublane-<id>-strip` id as a substring, and `"Review"` is the strip label. The `"a card moved into the review sub-lane renders there"` test also holds: the lane starts as a strip, the `move_card` hook fires regardless of DOM, and the post-move assertion targets the now-expanded `#sublane-<id>-cards`.)
 
-- [ ] Run `mix test test/relay_web/live/board_live_realtime_test.exs` — expect PASS.
+- [x] Run `mix test test/relay_web/live/board_live_realtime_test.exs` — expect PASS.
 
-- [ ] **Refresh the storybook story.** In `storybook/core_components/stage_column.story.exs`, add after the `:with_sublanes` variation:
+- [x] **Refresh the storybook story.** In `storybook/core_components/stage_column.story.exs`, add after the `:with_sublanes` variation:
 
   ```elixir
   %Variation{
@@ -965,7 +965,7 @@ with inline `oklch(...)` values copied verbatim from the mockup, `Phoenix.LiveVi
   },
   ```
 
-- [ ] Run `mix precommit` — the full gate must be green (this also re-proves the side-by-side lane layout, DnD wiring, MMF 06 baton rendering, and MMF 18 realtime suites against both collapse levels).
+- [x] Run `mix precommit` — the full gate must be green (this also re-proves the side-by-side lane layout, DnD wiring, MMF 06 baton rendering, and MMF 18 realtime suites against both collapse levels).
 
 **Deliverable:** inside an expanded stage, an empty Review/Done sub-lane renders the mockup's 34px strip (6px lane-colour dot at 0.6 opacity, rotated mono label, mono count) with the same left divider as an expanded lane; it accepts drops (expanding with the arriving card) and click-expands for the session; non-empty sub-lanes render exactly as before; the stage card width shrinks to fit (240 + 34/178 per lane). Storybook shows both collapse levels. Full suite + precommit green.
 

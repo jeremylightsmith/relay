@@ -119,10 +119,10 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       {:ok, view_b, _html} = live(conn, ~p"/board")
 
       {:ok, review} = Boards.enable_lane(code, :review)
-      assert has_element?(view_b, "#sublane-#{review.id}-cards")
+      assert has_element?(view_b, "#sublane-#{review.id}-strip")
 
       {:ok, :disabled} = Boards.disable_lane(code, :review)
-      refute has_element?(view_b, "#sublane-#{review.id}-cards")
+      refute has_element?(view_b, "#sublane-#{review.id}-strip")
     end
 
     test "emptying a stage in session A collapses it to a strip in session B",
