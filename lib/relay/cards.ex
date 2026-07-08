@@ -22,6 +22,10 @@ defmodule Relay.Cards do
   alias Schemas.Stage
   alias Schemas.User
 
+  # Approve/reject append the card to the bottom of the target stage;
+  # move_card/4 clamps this into range.
+  @append_index 1_000_000
+
   @doc """
   Creates a card in `stage` from user-supplied `attrs` (`:title`, optional
   `:tag`), attributed to `actor` (`:agent | {:user, user_id}`, defaults to
@@ -242,6 +246,50 @@ defmodule Relay.Cards do
     end
   end
 
+  @doc """
+  Approves the card past its approval gate (MMF 13). Allowed when the
+  card's stage — or its parent, for a card sitting in a sub-lane — has
+  `approval_gate` set; otherwise returns `{:error, :not_gated}`. Moves
+  the card to the bottom of the next main stage by position (sub-lane
+  children are never "next"; from a sub-lane, next = the first main
+  stage after the parent), arriving `:working` when that stage is meant
+  for AI and `:queued` when meant for a human. At the board's last main
+  stage there is no move — the card's status becomes `:done` in place.
+  Logs an `:approved` activity entry (from/to stage display names in
+  meta) attributed to `actor`, and reuses `move_card`/`set_status`, so
+  the usual `{:card_moved}`/`{:card_upserted}`/`{:timeline_appended}`
+  events fire. Reused verbatim by the API (MMF 09) and the drawer
+  (MMF 15).
+  """
+  def approve(%Card{} = card, actor \\ :agent) do
+    case fetch_gate(card) do
+      {:ok, from_stage, gate} ->
+        case Boards.next_main_stage(gate) do
+          nil -> approve_in_place(card, from_stage, actor)
+          %Stage{} = target -> route(card, from_stage, target, :approved, nil, actor)
+        end
+
+      {:error, :not_gated} ->
+        {:error, :not_gated}
+    end
+  end
+
+  @doc """
+  Rejects the card at its approval gate (MMF 13), under the same gate
+  rule as `approve/2` (`{:error, :not_gated}` otherwise). Moves the card
+  to the gate's `reject_to_stage_id` — or, when nil, the gate's own main
+  lane — arriving `:working`/`:queued` by the target's meant-for owner.
+  Posts `note` as a comment from `actor` and logs a `:rejected` activity
+  entry (from/to stage display names plus the note in meta). Reuses
+  `move_card`/`set_status`, so the usual events fire.
+  """
+  def reject(%Card{} = card, note, actor \\ :agent) when is_binary(note) do
+    case fetch_gate(card) do
+      {:ok, from_stage, gate} -> route(card, from_stage, reject_target(gate), :rejected, note, actor)
+      {:error, :not_gated} -> {:error, :not_gated}
+    end
+  end
+
   defp parse_ref_number(%Board{key: key}, ref) do
     prefix = key <> "-"
 
@@ -252,6 +300,67 @@ defmodule Relay.Cards do
     else
       _ -> :error
     end
+  end
+
+  # The gate governing the card: its own stage when main-lane, else the
+  # sub-lane's parent. {:error, :not_gated} when that stage isn't a gate.
+  defp fetch_gate(%Card{stage_id: stage_id}) do
+    stage = Repo.get!(Stage, stage_id)
+    gate = if stage.lane == :main, do: stage, else: Repo.get!(Stage, stage.parent_id)
+
+    if gate.approval_gate, do: {:ok, stage, gate}, else: {:error, :not_gated}
+  end
+
+  defp reject_target(%Stage{reject_to_stage_id: nil} = gate), do: gate
+  defp reject_target(%Stage{reject_to_stage_id: target_id}), do: Repo.get!(Stage, target_id)
+
+  # Shared approve/reject transition: move to the bottom of `target`, set
+  # the arrival status, attach the note (rejects only), then log the
+  # :approved/:rejected entry. A nil-target reject resolves to the gate
+  # itself, so a main-lane card "moves" within its own stage (no :moved
+  # entry — move_card only logs cross-stage moves).
+  defp route(%Card{} = card, from_stage, %Stage{} = target, type, note, actor) do
+    with {:ok, moved} <- move_card(card, target, @append_index, actor),
+         {:ok, updated} <- set_status(moved, %{status: arrival_status(target)}, actor),
+         :ok <- attach_note(updated, note, actor) do
+      log_gate(updated, type, actor, from_stage, target, note)
+      {:ok, updated}
+    end
+  end
+
+  # Approve at the board's last main stage: :done in place, no move.
+  defp approve_in_place(%Card{} = card, from_stage, actor) do
+    case set_status(card, %{status: :done}, actor) do
+      {:ok, updated} ->
+        log_gate(updated, :approved, actor, from_stage, from_stage, nil)
+        {:ok, updated}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
+  defp arrival_status(%Stage{owner: :ai}), do: :working
+  defp arrival_status(%Stage{owner: :human}), do: :queued
+
+  defp attach_note(_card, nil, _actor), do: :ok
+
+  defp attach_note(%Card{} = card, note, actor) do
+    case Activity.add_comment(card, %{actor: actor, body: note}) do
+      {:ok, _comment} -> :ok
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  defp log_gate(%Card{} = card, type, actor, from_stage, to_stage, note) do
+    meta = %{
+      "from_stage" => Boards.stage_display_name(from_stage),
+      "to_stage" => Boards.stage_display_name(to_stage)
+    }
+
+    meta = if note, do: Map.put(meta, "note", note), else: meta
+
+    {:ok, _entry} = Activity.log(card, %{type: type, actor: actor, meta: meta})
   end
 
   # Re-indexes the target stage: its other cards keep their relative

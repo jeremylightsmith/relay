@@ -101,17 +101,32 @@ defmodule Relay.Boards do
   end
 
   @doc """
-  Updates a main stage's editable configuration (name, description, owner —
-  and any future per-stage fields cast by `Schemas.Stage.changeset/2`;
-  MMFs 11/13 reuse this). Broadcasts `{:stages_changed, board_id}` on
-  success. `owner` is the stage's *meant-for* designation only — this never
-  touches any card's `card_owners` rows.
+  Updates a main stage's editable configuration (name, description, owner,
+  WIP limit — and the MMF 13 gate fields `approval_gate` /
+  `reject_to_stage_id`). The reject target must be a main-lane stage on
+  the same board (nil means "this stage"). Broadcasts
+  `{:stages_changed, board_id}` on success. `owner` is the stage's
+  *meant-for* designation only — this never touches any card's
+  `card_owners` rows.
   """
   def update_stage(%Stage{} = stage, attrs) do
     stage
     |> Stage.changeset(attrs)
+    |> validate_reject_target(stage.board_id)
     |> Repo.update()
     |> broadcast_stages_changed(stage.board_id)
+  end
+
+  @doc """
+  The next main stage after `stage` in board order (position), or nil
+  when `stage` is the board's last main stage. Sub-lane children are
+  never "next" — MMF 13's approve routing advances through this.
+  """
+  def next_main_stage(%Stage{lane: :main} = stage) do
+    stage.board_id
+    |> main_stages()
+    |> Enum.drop_while(&(&1.id != stage.id))
+    |> Enum.at(1)
   end
 
   @doc """
@@ -206,6 +221,23 @@ defmodule Relay.Boards do
 
   defp main_stages(board_id) do
     Repo.all(from s in Stage, where: s.board_id == ^board_id and s.lane == :main, order_by: s.position)
+  end
+
+  # MMF 13: a gate may only send rejects to a main-lane stage on its own
+  # board. Validated here (not in the schema) because only the context
+  # knows the board.
+  defp validate_reject_target(changeset, board_id) do
+    case Ecto.Changeset.get_change(changeset, :reject_to_stage_id) do
+      nil ->
+        changeset
+
+      target_id ->
+        if Repo.exists?(from s in Stage, where: s.id == ^target_id and s.board_id == ^board_id and s.lane == :main) do
+          changeset
+        else
+          Ecto.Changeset.add_error(changeset, :reject_to_stage_id, "must be a main stage on the same board")
+        end
+    end
   end
 
   defp fetch_neighbor(_list, index) when index < 0, do: nil
