@@ -87,6 +87,7 @@ defmodule RelayWeb.BoardLive do
                 stage_id={stage.id}
                 collapsed={stage_collapsed?(stage, @stage_counts, @sublanes_by_parent, @force_open)}
                 count={Map.fetch!(@stage_counts, stage.id)}
+                wip_limit={stage.wip_limit}
                 board_key={@board.key}
                 cards={Map.fetch!(@streams, stream_name(stage.id))}
                 composing={@composing_stage_id == stage.id}

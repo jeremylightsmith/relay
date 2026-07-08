@@ -4,7 +4,9 @@ defmodule Schemas.Stage do
   band (unstarted → planning → in_progress → complete); `owner` says who work in this
   stage is **meant for** — human (blue) or ai (violet). It is NOT the
   card's owner (cards carry their own owner list from MMF 06). `board_id`
-  is set programmatically, never cast from input.
+  is set programmatically, never cast from input. `wip_limit` is the
+  optional MMF 11 WIP limit — `nil` means no limit; it is only meaningful
+  on `lane: :main` stages.
   """
 
   use Ecto.Schema
@@ -18,6 +20,7 @@ defmodule Schemas.Stage do
     field :category, Ecto.Enum, values: [:unstarted, :planning, :in_progress, :complete]
     field :owner, Ecto.Enum, values: [:human, :ai]
     field :lane, Ecto.Enum, values: [:main, :review, :done], default: :main
+    field :wip_limit, :integer
 
     belongs_to :board, Schemas.Board
     belongs_to :parent, Schemas.Stage
@@ -29,8 +32,9 @@ defmodule Schemas.Stage do
   @doc "Changeset for stage attributes. `board_id` must already be set on the struct."
   def changeset(stage, attrs) do
     stage
-    |> cast(attrs, [:name, :description, :position, :category, :owner])
+    |> cast(attrs, [:name, :description, :position, :category, :owner, :wip_limit])
     |> validate_required([:name, :position, :category, :owner])
+    |> validate_number(:wip_limit, greater_than: 0)
     |> unique_constraint(:position, name: :stages_board_id_position_index)
   end
 end
