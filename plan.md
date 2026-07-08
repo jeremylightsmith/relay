@@ -544,7 +544,7 @@ broadcast. Independently testable via the two new test files. Storybook shows bo
 
 **Steps**
 
-- [ ] Write the failing move-warning test file `test/relay_web/live/board_live_wip_move_test.exs`
+- [x] Write the failing move-warning test file `test/relay_web/live/board_live_wip_move_test.exs`
   (cards are ref'd sequentially per board: three cards created in Code are RLY-1..3, the next in
   Spec is RLY-4):
 
@@ -627,10 +627,10 @@ broadcast. Independently testable via the two new test files. Storybook shows bo
   end
   ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_wip_move_test.exs` — expect the first test to
+- [x] Run `mix test test/relay_web/live/board_live_wip_move_test.exs` — expect the first test to
   fail on the missing `#flash-error` assertion (the move itself already succeeds).
 
-- [ ] Implement the warning in `lib/relay_web/live/board_live.ex`. Change the `"move_card"`
+- [x] Implement the warning in `lib/relay_web/live/board_live.ex`. Change the `"move_card"`
   handler's success branch from `{:noreply, apply_move(socket, card.stage_id, moved)}` to:
 
   ```elixir
@@ -673,9 +673,9 @@ broadcast. Independently testable via the two new test files. Storybook shows bo
   stages — so they fall through the second clause; `target.name` is a main stage's own name, so
   no composite-name leak.)
 
-- [ ] Run `mix test test/relay_web/live/board_live_wip_move_test.exs` — expect pass.
+- [x] Run `mix test test/relay_web/live/board_live_wip_move_test.exs` — expect pass.
 
-- [ ] Write the failing settings test file `test/relay_web/live/board_settings_wip_test.exs`:
+- [x] Write the failing settings test file `test/relay_web/live/board_settings_wip_test.exs`:
 
   ```elixir
   defmodule RelayWeb.BoardSettingsWipTest do
@@ -765,10 +765,10 @@ broadcast. Independently testable via the two new test files. Storybook shows bo
   end
   ```
 
-- [ ] Run `mix test test/relay_web/live/board_settings_wip_test.exs` — expect failures (the
+- [x] Run `mix test test/relay_web/live/board_settings_wip_test.exs` — expect failures (the
   `#stage-<id>-wip-toggle` element does not exist).
 
-- [ ] Implement the settings control in `lib/relay_web/live/board_settings_live.ex`. In the
+- [x] Implement the settings control in `lib/relay_web/live/board_settings_live.ex`. In the
   controls row — the `<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">`
   whose preceding HEEx comment mentions "MMF 11's WIP control slots in between OWNER and DONE
   COLUMN" — insert this block **between** the OWNER group's closing `</div>` and the DONE COLUMN
@@ -870,9 +870,9 @@ broadcast. Independently testable via the two new test files. Storybook shows bo
   `<%!-- Mockup line ~217; the WIP-limit mention is deferred to MMF 11. --%>` to
   `<%!-- Mockup line ~217. --%>`.
 
-- [ ] Run `mix test test/relay_web/live/board_settings_wip_test.exs` — expect pass.
+- [x] Run `mix test test/relay_web/live/board_settings_wip_test.exs` — expect pass.
 
-- [ ] Run `mix precommit` — fix anything it reports until green.
+- [x] Run `mix precommit` — fix anything it reports until green.
 
 **Deliverable:** moving a card into an at-/over-limit stage completes (soft — the card renders in
 the target, DB updated, API untouched) while the acting session sees the "`<stage>` is over its
