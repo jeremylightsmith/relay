@@ -351,7 +351,7 @@ PhoenixStorybook.
 - [x] Run `mix test test/relay_web/live/board_live_wip_test.exs` — expect failures (the
   `.stage-wip` chip does not exist and `stage_column` has no `wip_limit` attr).
 
-- [ ] Implement the chip in `lib/relay_web/components/core_components.ex`. Add the attr to
+- [x] Implement the chip in `lib/relay_web/components/core_components.ex`. Add the attr to
   `stage_column/1`, directly after the existing `attr :count, ...` line:
 
   ```elixir
