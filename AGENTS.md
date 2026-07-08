@@ -22,6 +22,9 @@ upgrade path, adopted for iOS and Android together once the Android client is st
 rationale in [ADR 0001](docs/adr/0001-client-architecture.md) — read it before adding any
 client-side or API surface.
 
+**Working Relay from Claude Code:** the `mix relay` CLI + REST API let a Claude session pull a
+card, work it, and hand it back. See [`docs/agent-integration.md`](docs/agent-integration.md).
+
 ## Skill discipline
 
 This project ships skills in `.claude/skills/` and a pipeline of commands
