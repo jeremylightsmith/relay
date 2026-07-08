@@ -116,10 +116,12 @@ defmodule Relay.Boards do
 
   @doc """
   Swaps `stage` with the adjacent main stage in board position order
-  (`:up` = toward position 1), inside a transaction. Crossing into the
-  neighbour's category makes the moved stage adopt it (the mockup: "cross
-  into another category and it takes on that meaning"). At the board's
-  edge it is a no-op: `{:ok, stage}`, no broadcast.
+  (`:up` = toward position 1), inside a transaction. Categories swap along
+  with position (the mockup: "cross into another category and it takes on
+  that meaning") — the moved stage adopts the neighbour's category and the
+  neighbour adopts the one it displaced, so moving back across the same
+  boundary undoes the crossing. At the board's edge it is a no-op:
+  `{:ok, stage}`, no broadcast.
   """
   def reorder_stage(%Stage{lane: :main} = stage, direction) when direction in [:up, :down] do
     mains = main_stages(stage.board_id)
@@ -203,14 +205,20 @@ defmodule Relay.Boards do
 
   # stages_board_id_position_index is not deferrable, so a direct swap
   # would collide: park the moved stage on a free position first, so each
-  # subsequent update lands on a just-vacated slot.
+  # subsequent update lands on a just-vacated slot. Position AND category
+  # both swap (a true exchange, not one-directional adoption) so that
+  # moving a stage back across the same boundary undoes the crossing —
+  # the neighbour reverts to the category it had before the first swap.
   defp swap_stages(%Stage{} = stage, %Stage{} = neighbor) do
     {:ok, moved} =
       Repo.transaction(fn ->
         parked = next_position(stage.board_id)
 
         stage |> Stage.changeset(%{position: parked}) |> Repo.update!()
-        neighbor |> Stage.changeset(%{position: stage.position}) |> Repo.update!()
+
+        neighbor
+        |> Stage.changeset(%{position: stage.position, category: stage.category})
+        |> Repo.update!()
 
         stage
         |> Stage.changeset(%{position: neighbor.position, category: neighbor.category})
