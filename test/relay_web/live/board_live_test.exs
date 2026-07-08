@@ -750,6 +750,17 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#card-drawer-move-to-#{plan.id}", "Plan")
     end
 
+    test "labels a sub-lane target with the parent's name, not the raw composite Stage.name",
+         %{conn: conn, board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, review} = Boards.enable_lane(code, :review)
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-move-to-#{review.id}", "Code · Review")
+      refute has_element?(view, "#card-drawer-move-to-#{review.id}", "Code:Review")
+    end
+
     test "moving from the drawer persists like a drag and appends to the bottom",
          %{conn: conn, spec: spec, card: card} do
       {:ok, existing} = Cards.create_card(spec, %{title: "Already in Spec"})

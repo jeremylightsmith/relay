@@ -132,7 +132,7 @@ defmodule RelayWeb.BoardSettingsLive do
                 <div class="flex items-center gap-4">
                   <label class="flex items-center gap-2 text-xs">
                     <input
-                      id={"stage-#{stage.id}-review-toggle"}
+                      id={toggle_id(@lane_nonce, stage.id, :review)}
                       type="checkbox"
                       class="toggle toggle-sm"
                       checked={lane_on?(@lane_map, stage.id, :review)}
@@ -143,7 +143,7 @@ defmodule RelayWeb.BoardSettingsLive do
                   </label>
                   <label class="flex items-center gap-2 text-xs">
                     <input
-                      id={"stage-#{stage.id}-done-toggle"}
+                      id={toggle_id(@lane_nonce, stage.id, :done)}
                       type="checkbox"
                       class="toggle toggle-sm"
                       checked={lane_on?(@lane_map, stage.id, :done)}
@@ -173,7 +173,8 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:api_key, ApiKeys.get_key(board))
      |> assign(:revealed_token, nil)
      |> assign(:stages, board |> Boards.list_stages() |> Enum.filter(&(&1.lane == :main)))
-     |> assign(:lane_map, lane_map(board))}
+     |> assign(:lane_map, lane_map(board))
+     |> assign(:lane_nonce, %{})}
   end
 
   @impl true
@@ -216,19 +217,37 @@ defmodule RelayWeb.BoardSettingsLive do
         Boards.enable_lane(stage, lane)
       end
 
-    {:noreply, apply_lane_result(socket, result)}
+    {:noreply, apply_lane_result(socket, result, stage.id, lane)}
   end
 
   defp lane_atom("review"), do: :review
   defp lane_atom("done"), do: :done
 
-  defp apply_lane_result(socket, {:error, :not_empty}) do
-    put_flash(socket, :error, "That lane still has cards — move them out first.")
+  # The disable was rejected server-side, so `lane_map` (and thus the
+  # `checked` value the toggle renders) is unchanged — but the native
+  # checkbox already flipped itself off the instant the user clicked it,
+  # before the "blocked" reply came back. Because the rendered `checked`
+  # output is identical to last render, LiveView sends no diff for that
+  # node, so the stale client-side property would otherwise never get
+  # corrected. Bumping the nonce changes the input's `id`, forcing the
+  # client to swap in a freshly-parsed element (checked from the true
+  # server state) instead of patching the one the user already toggled.
+  defp apply_lane_result(socket, {:error, :not_empty}, stage_id, lane) do
+    socket
+    |> put_flash(:error, "That lane still has cards — move them out first.")
+    |> update(:lane_nonce, &Map.update(&1, {stage_id, lane}, 1, fn n -> n + 1 end))
   end
 
-  defp apply_lane_result(socket, {:ok, _}) do
+  defp apply_lane_result(socket, {:ok, _}, _stage_id, _lane) do
     board = socket.assigns.board
     assign(socket, :lane_map, lane_map(board))
+  end
+
+  defp toggle_id(lane_nonce, stage_id, lane) do
+    case Map.get(lane_nonce, {stage_id, lane}, 0) do
+      0 -> "stage-#{stage_id}-#{lane}-toggle"
+      n -> "stage-#{stage_id}-#{lane}-toggle-#{n}"
+    end
   end
 
   defp lane_map(board) do

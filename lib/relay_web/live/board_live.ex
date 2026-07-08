@@ -341,9 +341,24 @@ defmodule RelayWeb.BoardLive do
   end
 
   # Drawer move targets: every stage on this board except the card's
-  # current one, in position order.
+  # current one, in position order. Sub-lanes are ordinary move_card
+  # targets (per plan Architecture: "no move changes"), but must show a
+  # human label ("Code · Review") rather than the composite internal
+  # Stage.name ("Code:Review") built by Boards.enable_lane/2 — the same
+  # leak lane_label/1 already guards against on the board itself.
   defp move_targets(board, %Card{stage_id: stage_id}) do
-    Enum.reject(board.stages, &(&1.id == stage_id))
+    stages_by_id = Map.new(board.stages, &{&1.id, &1})
+
+    board.stages
+    |> Enum.reject(&(&1.id == stage_id))
+    |> Enum.map(&%{id: &1.id, name: move_target_name(&1, stages_by_id)})
+  end
+
+  defp move_target_name(%Stage{lane: :main} = stage, _stages_by_id), do: stage.name
+
+  defp move_target_name(%Stage{parent_id: parent_id} = stage, stages_by_id) do
+    parent = Map.fetch!(stages_by_id, parent_id)
+    "#{parent.name} · #{lane_label(stage.lane)}"
   end
 
   defp resolve_stage(socket, stage_id) do

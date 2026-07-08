@@ -138,6 +138,22 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       assert html =~ "still has cards"
       assert [%{lane: :review}] = Boards.sublanes(code)
     end
+
+    test "a blocked disable snaps the checkbox back to checked instead of leaving it visually off",
+         %{conn: conn, board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, review} = Boards.enable_lane(code, :review)
+      Relay.Factory.insert(:card, stage: review)
+
+      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      view |> element("#stage-#{code.id}-review-toggle") |> render_click()
+
+      # The blocked toggle bumps a render nonce into the checkbox's id so
+      # the client swaps in a fresh, correctly-checked element rather than
+      # patching the one the browser already unchecked on click.
+      refute has_element?(view, "#stage-#{code.id}-review-toggle")
+      assert has_element?(view, "#stage-#{code.id}-review-toggle-1[checked]")
+    end
   end
 
   defp revealed_secret(view) do
