@@ -101,7 +101,9 @@ defmodule Relay.Cards do
   `{:error, changeset}`. Status only ever changes through this explicit
   call — never as a side effect of moving a card. Logs a
   `:status_changed` activity entry (MMF 07) only when the status value
-  actually changes (a progress-only update logs nothing).
+  actually changes (a progress-only update logs nothing). Entering
+  `:needs_input` stamps `blocked_since` and leaving it clears it (MMF 14,
+  managed in `Schemas.Card.status_changeset/2`).
   """
   def set_status(%Card{} = card, attrs, actor \\ :agent) do
     from_status = card.status
@@ -289,6 +291,46 @@ defmodule Relay.Cards do
       {:error, :not_gated} -> {:error, :not_gated}
     end
   end
+
+  @doc """
+  Blocks the card on a human (MMF 14): sets status `:needs_input` — which
+  stamps `blocked_since` (see `Schemas.Card.status_changeset/2`) — posts
+  `question` as a comment from `actor`, and logs a `:needs_input` activity
+  entry with the question in `meta` (the durable record the drawer's
+  question panel reads). The MMF 09 `POST /api/cards/:ref/needs-input`
+  endpoint routes here. Reuses `set_status`/`Relay.Activity`, so the usual
+  `{:card_upserted}` / `{:timeline_appended}` events fire (MMF 18).
+  """
+  def request_input(%Card{} = card, question, actor \\ :agent) when is_binary(question) do
+    with {:ok, updated} <- set_status(card, %{status: :needs_input}, actor),
+         {:ok, _comment} <- Activity.add_comment(updated, %{actor: actor, body: question}),
+         {:ok, _entry} <-
+           Activity.log(updated, %{type: :needs_input, actor: actor, meta: %{"question" => question}}) do
+      {:ok, updated}
+    end
+  end
+
+  @doc """
+  Answers a blocked card's question (MMF 14): posts `answer` as a comment
+  from `actor`, flips status to `:working` when the card's stage is meant
+  for the AI (the agent resumes) or `:queued` otherwise — clearing
+  `blocked_since` — and logs an `:input_answered` activity entry. The
+  answer reaches the agent through the existing `GET /api/cards/:ref`
+  timeline; no new endpoint. The comment posts first, so a blank answer
+  fails before any status change. Reuses `set_status`/`Relay.Activity`,
+  so the usual events fire (MMF 18).
+  """
+  def answer_input(%Card{} = card, answer, actor \\ :agent) when is_binary(answer) do
+    with {:ok, _comment} <- Activity.add_comment(card, %{actor: actor, body: answer}),
+         {:ok, updated} <- set_status(card, %{status: resume_status(card)}, actor),
+         {:ok, _entry} <- Activity.log(updated, %{type: :input_answered, actor: actor}) do
+      {:ok, updated}
+    end
+  end
+
+  # Where an answered card resumes: the stage's meant-for owner decides
+  # (same rule as approve/reject arrivals).
+  defp resume_status(%Card{stage_id: stage_id}), do: arrival_status(Repo.get!(Stage, stage_id))
 
   defp parse_ref_number(%Board{key: key}, ref) do
     prefix = key <> "-"

@@ -47,6 +47,30 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           timeline: [],
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
+      },
+      %Variation{
+        id: :needs_input,
+        attributes: %{
+          id: "story-drawer-3",
+          ref: "RLY-9",
+          card: %{
+            story_card()
+            | status: :needs_input,
+              progress: nil,
+              blocked_since: DateTime.add(DateTime.utc_now(), -3, :hour)
+          },
+          stage_name: "Code",
+          stage_owner: :ai,
+          active_owner: :ai,
+          current_user_id: 1,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "needs_input", "progress" => nil}, as: :card),
+          question: "Should exports use the billing timezone or the viewer's local timezone?",
+          answer_form: Phoenix.Component.to_form(%{"body" => ""}, as: :answer),
+          timeline: story_timeline(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
       }
     ]
   end
@@ -99,6 +123,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
       tag: "spec",
       status: :working,
       progress: 61,
+      blocked_since: nil,
       owners: [
         %{id: 1, actor_type: :user, user_id: 1, user: %{name: "Ada Lovelace", email: "ada@example.com"}},
         %{id: 2, actor_type: :agent, user_id: nil, user: nil}

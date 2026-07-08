@@ -850,9 +850,10 @@ defmodule RelayWeb.CoreComponents do
   to the target stage's bottom) when a "Move to…" target is picked,
   `"set_card_status"` (form params `card[status]` + `card[progress]`) on
   status/progress change, `"add_owner"` / `"remove_owner"` (phx-value
-  `actor_type` + `user_id`) from the owners rail's controls, and
+  `actor_type` + `user_id`) from the owners rail's controls,
   `"validate_comment"` / `"post_comment"` (form params `comment[body]`)
-  from the timeline composer.
+  from the timeline composer, and `"answer_input"` (form params
+  `answer[body]`) from the needs-input panel's composer.
 
   ## Examples
 
@@ -872,7 +873,8 @@ defmodule RelayWeb.CoreComponents do
 
   attr :card, :any,
     required: true,
-    doc: "a card exposing title, description, tag, status, progress, a loaded owners list, inserted_at, and updated_at"
+    doc:
+      "a card exposing title, description, tag, status, progress, blocked_since, a loaded owners list, inserted_at, and updated_at"
 
   attr :stage_name, :string, required: true
   attr :stage_owner, :atom, values: [:human, :ai], required: true
@@ -907,6 +909,14 @@ defmodule RelayWeb.CoreComponents do
     doc: "the :timeline LiveView stream — comments + activity entries merged chronologically"
 
   attr :comment_form, :any, required: true, doc: "a Phoenix.HTML.Form for comment[body]"
+
+  attr :question, :string,
+    default: nil,
+    doc: "the latest :needs_input question from the timeline; nil when a human blocked without one"
+
+  attr :answer_form, :any,
+    default: nil,
+    doc: "a Phoenix.HTML.Form for answer[body]; required when the card's status is :needs_input"
 
   def card_drawer(assigns) do
     ~H"""
@@ -954,6 +964,61 @@ defmodule RelayWeb.CoreComponents do
               />
             </.form>
           </header>
+          <section
+            :if={@card.status == :needs_input}
+            id="needs-input-panel"
+            class="flex flex-col gap-[11px] rounded-[10px] p-3.5"
+            style="background:oklch(0.975 0.025 75);border:1px solid oklch(0.87 0.07 75);"
+          >
+            <div class="flex items-center justify-between">
+              <span
+                class="font-mono text-[10px] font-semibold tracking-[0.05em]"
+                style="color:oklch(0.52 0.11 65);"
+              >
+                RELAY AI NEEDS YOUR INPUT
+              </span>
+              <span
+                :if={@card.blocked_since}
+                id="needs-input-waiting"
+                class="font-mono text-[10px]"
+                style="color:oklch(0.52 0.11 65);"
+              >
+                {waiting_label(@card.blocked_since)}
+              </span>
+            </div>
+            <p
+              :if={@question}
+              id="needs-input-question"
+              class="text-[13.5px] leading-normal"
+              style="color:oklch(0.33 0.03 65);"
+            >
+              {@question}
+            </p>
+            <.form
+              for={@answer_form}
+              id="needs-input-form"
+              class="flex flex-col items-start gap-[11px]"
+              phx-submit="answer_input"
+            >
+              <.input
+                field={@answer_form[:body]}
+                type="textarea"
+                id="needs-input-answer"
+                rows="3"
+                placeholder="Type your answer — the AI picks up where it left off…"
+                class="w-full resize-none rounded-[7px] bg-white p-[9px] text-[13px] leading-snug"
+                style="border:1px solid oklch(0.86 0.05 75);color:oklch(0.30 0.02 255);"
+              />
+              <button
+                id="needs-input-send"
+                type="submit"
+                class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
+                style="background:oklch(0.70 0.13 65);"
+              >
+                Send to AI →
+              </button>
+            </.form>
+          </section>
           <section class="space-y-2">
             <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
               Description
@@ -1267,6 +1332,22 @@ defmodule RelayWeb.CoreComponents do
     do: "set owners to #{Enum.join(owners, ", ")}"
 
   defp activity_phrase(%Activity{type: :commented}), do: "commented"
+
+  defp activity_phrase(%Activity{type: :needs_input}), do: "asked for input"
+
+  defp activity_phrase(%Activity{type: :input_answered}), do: "answered the question"
+
+  # The panel's aging hint ("waiting 3h"), derived from Card.blocked_since —
+  # the mockup's small amber mono text beside the panel label.
+  defp waiting_label(%DateTime{} = blocked_since) do
+    minutes = max(DateTime.diff(DateTime.utc_now(), blocked_since, :minute), 0)
+
+    cond do
+      minutes < 60 -> "waiting #{minutes}m"
+      minutes < 1440 -> "waiting #{div(minutes, 60)}h"
+      true -> "waiting #{div(minutes, 1440)}d"
+    end
+  end
 
   @doc """
   Renders one stage as the mockup's rounded stage card

@@ -127,6 +127,8 @@ defmodule RelayWeb.BoardLive do
         current_user_id={@current_scope.user.id}
         timeline={@streams.timeline}
         comment_form={@comment_form}
+        question={@question}
+        answer_form={@answer_form}
       />
     </Layouts.app>
     """
@@ -343,6 +345,24 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("post_comment", _params, socket), do: {:noreply, socket}
 
+  # MMF 14 — the drawer's amber panel submits the human's answer: log it,
+  # return the baton (working on an AI-meant stage, queued otherwise), and
+  # clear the block. Attributed to the signed-in user; refresh_card re-streams
+  # the board card so the amber badge flips off (and MMF 18 broadcasts do the
+  # same everywhere else).
+  def handle_event(
+        "answer_input",
+        %{"answer" => %{"body" => body}},
+        %{assigns: %{selected_card: %Card{status: :needs_input} = card}} = socket
+      ) do
+    case Cards.answer_input(card, body, current_actor(socket)) do
+      {:ok, card} -> {:noreply, refresh_card(socket, card)}
+      {:error, _changeset} -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("answer_input", _params, socket), do: {:noreply, socket}
+
   # MMF 18 — realtime application of Relay.Events broadcasts. Every open
   # session applies every event for its board, including the acting
   # session's own echo: streams upsert by DOM id and counts/stages are
@@ -515,12 +535,17 @@ defmodule RelayWeb.BoardLive do
   defp apply_owner_change(socket, {:error, _changeset}), do: {:noreply, socket}
 
   # A persisted baton change: sync the drawer assigns and re-stream the
-  # card so the board card re-renders its colour/badge.
+  # card so the board card re-renders its colour/badge. Also recomputes
+  # the needs-input panel's question from the fresh timeline (MMF 14).
   defp refresh_card(socket, %Card{} = card) do
+    timeline = Activity.list_timeline(card)
+
     socket
     |> assign(:selected_card, card)
     |> assign(:status_form, status_form(card))
-    |> stream(:timeline, Activity.list_timeline(card), reset: true)
+    |> assign(:question, latest_question(card, timeline))
+    |> assign(:answer_form, empty_answer_form())
+    |> stream(:timeline, timeline, reset: true)
     |> stream_insert(stream_name(card.stage_id), card)
   end
 
@@ -631,6 +656,8 @@ defmodule RelayWeb.BoardLive do
 
     case card do
       %Card{} = card ->
+        timeline = Activity.list_timeline(card)
+
         socket
         |> assign(:selected_card, card)
         |> assign(:selected_stage, find_stage_by_id(socket, card.stage_id))
@@ -639,7 +666,9 @@ defmodule RelayWeb.BoardLive do
         |> assign(:description_form, nil)
         |> assign(:status_form, status_form(card))
         |> assign(:comment_form, empty_comment_form())
-        |> stream(:timeline, Activity.list_timeline(card), reset: true)
+        |> assign(:question, latest_question(card, timeline))
+        |> assign(:answer_form, empty_answer_form())
+        |> stream(:timeline, timeline, reset: true)
 
       nil ->
         socket
@@ -650,7 +679,9 @@ defmodule RelayWeb.BoardLive do
           editing_description: false,
           description_form: nil,
           status_form: nil,
-          comment_form: nil
+          comment_form: nil,
+          question: nil,
+          answer_form: nil
         )
         |> stream(:timeline, [], reset: true)
     end
@@ -666,6 +697,22 @@ defmodule RelayWeb.BoardLive do
   defp empty_compose_form, do: to_form(%{"title" => ""}, as: :card)
 
   defp empty_comment_form, do: to_form(%{"body" => ""}, as: :comment)
+
+  defp empty_answer_form, do: to_form(%{"body" => ""}, as: :answer)
+
+  # The panel shows the newest :needs_input question. A human-blocked card
+  # (status control — no question recorded) yields nil, and the panel
+  # renders with just the composer (spec edge case).
+  defp latest_question(%Card{status: :needs_input}, timeline) do
+    timeline
+    |> Enum.reverse()
+    |> Enum.find_value(fn
+      %Schemas.Activity{type: :needs_input, meta: meta} -> meta["question"]
+      _entry -> nil
+    end)
+  end
+
+  defp latest_question(_card, _timeline), do: nil
 
   defp timeline_dom_id(%Schemas.Comment{id: id}), do: "timeline-comment-#{id}"
   defp timeline_dom_id(%Schemas.Activity{id: id}), do: "timeline-activity-#{id}"

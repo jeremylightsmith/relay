@@ -105,12 +105,11 @@ defmodule RelayWeb.Api.CardController do
 
   def comments(_conn, %{"ref" => _ref}), do: {:error, :invalid_request}
 
-  def needs_input(conn, %{"ref" => ref, "question" => question}) do
+  def needs_input(conn, %{"ref" => ref, "question" => question}) when is_binary(question) do
     board = conn.assigns.current_board
 
     with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
-         {:ok, card} <- Cards.set_status(card, %{status: :needs_input}, :agent),
-         {:ok, _comment} <- Activity.add_comment(card, %{actor: :agent, body: question}) do
+         {:ok, card} <- Cards.request_input(card, question, :agent) do
       render(conn, :show, board: board, card: card, timeline: Activity.list_timeline(card))
     else
       nil -> {:error, :not_found}
