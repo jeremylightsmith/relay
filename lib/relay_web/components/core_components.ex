@@ -853,7 +853,10 @@ defmodule RelayWeb.CoreComponents do
   `actor_type` + `user_id`) from the owners rail's controls,
   `"validate_comment"` / `"post_comment"` (form params `comment[body]`)
   from the timeline composer, and `"answer_input"` (form params
-  `answer[body]`) from the needs-input panel's composer.
+  `answer[body]`) from the needs-input panel's composer, and the MMF 15
+  review-panel events: `"review_approve"`, `"review_open_reject"`,
+  `"review_cancel_reject"`, `"review_reject"` (form params `reject[note]`),
+  `"review_mark_done"`, and `"review_pull"`.
 
   ## Examples
 
@@ -917,6 +920,23 @@ defmodule RelayWeb.CoreComponents do
   attr :answer_form, :any,
     default: nil,
     doc: "a Phoenix.HTML.Form for answer[body]; required when the card's status is :needs_input"
+
+  attr :review_gate, :any,
+    default: nil,
+    doc:
+      "MMF 15 gate info for an :in_review card on a gated stage — %{approve_label: label, reject_to_name: name}; nil when the governing stage is not an approval gate (hides Approve/Request changes)"
+
+  attr :reject_open, :boolean,
+    default: false,
+    doc: "whether the Request-changes note sub-panel is expanded in place"
+
+  attr :reject_form, :any,
+    default: nil,
+    doc: "a Phoenix.HTML.Form for reject[note]; required when the card's status is :in_review"
+
+  attr :reject_error, :string,
+    default: nil,
+    doc: "inline prompt shown when Send back was submitted with an empty note"
 
   def card_drawer(assigns) do
     ~H"""
@@ -1019,6 +1039,117 @@ defmodule RelayWeb.CoreComponents do
               </button>
             </.form>
           </section>
+          <section
+            :if={@card.status == :in_review}
+            id="review-panel"
+            class="flex flex-col gap-3 rounded-[10px] p-3.5"
+            style="background:oklch(0.975 0.02 155);border:1px solid oklch(0.88 0.05 155);"
+          >
+            <span
+              class="font-mono text-[10px] font-semibold tracking-[0.05em]"
+              style="color:oklch(0.46 0.10 155);"
+            >
+              READY FOR YOUR REVIEW
+            </span>
+            <p class="text-[13px] leading-normal" style="color:oklch(0.36 0.03 155);">
+              {review_hint(@review_gate)}
+            </p>
+            <div :if={@review_gate && !@reject_open} class="flex gap-2">
+              <button
+                id="review-approve"
+                type="button"
+                phx-click="review_approve"
+                class="btn btn-sm flex-1 rounded-lg border-none font-semibold text-white"
+                style="background:oklch(0.60 0.13 155);"
+              >
+                {@review_gate.approve_label}
+              </button>
+              <button
+                id="review-request-changes"
+                type="button"
+                phx-click="review_open_reject"
+                class="btn btn-sm flex-1 rounded-lg bg-white font-semibold"
+                style="border:1px solid oklch(0.88 0.01 255);color:oklch(0.38 0.02 255);"
+              >
+                Request changes
+              </button>
+            </div>
+            <div
+              :if={@review_gate && @reject_open}
+              id="review-reject-panel"
+              class="flex flex-col gap-2 rounded-lg bg-white p-3"
+              style="border:1px solid oklch(0.90 0.02 255);"
+            >
+              <p class="text-xs" style="color:oklch(0.42 0.02 255);">
+                Sending back to
+                <b style="color:oklch(0.30 0.02 255);">{@review_gate.reject_to_name}</b>
+                for the AI to address.
+              </p>
+              <.form
+                for={@reject_form}
+                id="review-reject-form"
+                class="flex flex-col gap-2"
+                phx-submit="review_reject"
+              >
+                <.input
+                  field={@reject_form[:note]}
+                  type="textarea"
+                  id="review-request-note"
+                  rows="3"
+                  placeholder="What needs to change? This note goes to the AI…"
+                  class="w-full resize-none rounded-[7px] p-[9px] text-[13px] leading-snug"
+                  style="border:1px solid oklch(0.90 0.006 255);color:oklch(0.30 0.02 255);background:oklch(0.99 0.002 255);"
+                />
+                <p
+                  :if={@reject_error}
+                  id="review-note-error"
+                  class="text-xs text-error"
+                >
+                  {@reject_error}
+                </p>
+                <div class="flex items-center gap-2">
+                  <button
+                    id="review-send-back"
+                    type="submit"
+                    class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
+                    style="background:oklch(0.70 0.13 65);"
+                  >
+                    Send back →
+                  </button>
+                  <button
+                    id="review-cancel-reject"
+                    type="button"
+                    phx-click="review_cancel_reject"
+                    class="btn btn-ghost btn-sm text-xs"
+                    style="color:oklch(0.55 0.02 255);"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </.form>
+            </div>
+          </section>
+          <div :if={@card.status == :in_review} id="review-actions" class="flex flex-wrap gap-2">
+            <button
+              id="review-mark-done"
+              type="button"
+              phx-click="review_mark_done"
+              class="btn btn-sm rounded-[9px] border-none font-semibold text-white"
+              style="background:oklch(0.60 0.13 155);"
+            >
+              Mark done
+            </button>
+            <button
+              :if={@current_user_id && !user_owner?(@card, @current_user_id)}
+              id="review-pull"
+              type="button"
+              phx-click="review_pull"
+              class="btn btn-sm rounded-[9px] border-none font-semibold text-white"
+              style="background:oklch(0.60 0.14 250);"
+            >
+              Pull — take this card
+            </button>
+          </div>
           <section class="space-y-2">
             <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
               Description
@@ -1333,9 +1464,23 @@ defmodule RelayWeb.CoreComponents do
 
   defp activity_phrase(%Activity{type: :commented}), do: "commented"
 
+  defp activity_phrase(%Activity{type: :approved, meta: %{"from_stage" => same, "to_stage" => same}}),
+    do: "approved this card as done"
+
+  defp activity_phrase(%Activity{type: :approved, meta: meta}), do: "approved #{meta["from_stage"]} → #{meta["to_stage"]}"
+
+  defp activity_phrase(%Activity{type: :rejected, meta: meta}), do: "requested changes — sent back to #{meta["to_stage"]}"
+
   defp activity_phrase(%Activity{type: :needs_input}), do: "asked for input"
 
   defp activity_phrase(%Activity{type: :input_answered}), do: "answered the question"
+
+  # The one-line hint under READY FOR YOUR REVIEW (MMF 15): a gated stage
+  # offers the approve/send-back pair; an ungated one only the standalone
+  # Mark done / Pull actions.
+  defp review_hint(nil), do: "Relay AI finished this. Mark it done, or pull the card to take it over."
+
+  defp review_hint(_gate), do: "Relay AI finished this. Approve to move it forward, or send it back with a note."
 
   # The panel's aging hint ("waiting 3h"), derived from Card.blocked_since —
   # the mockup's small amber mono text beside the panel label.
