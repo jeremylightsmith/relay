@@ -9,6 +9,10 @@
 > same stage settings card in `RelayWeb.BoardSettingsLive` — plan them coherently. This MMF
 > owns the `wip_limit` field + board display; the settings card shell it renders into is
 > MMF 12's.
+>
+> **Related:** empty stages auto-collapse to a strip that shows only the count
+> (`2026-07-08-collapse-empty-columns-design.md`) — a collapsed (empty) stage is never over-WIP,
+> so the over-limit treatment only applies to expanded stages.
 
 ## Overview
 

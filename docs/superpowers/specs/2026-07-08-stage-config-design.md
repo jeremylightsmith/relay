@@ -9,6 +9,11 @@
 > same stage settings card in `RelayWeb.BoardSettingsLive` — plan them coherently. This MMF
 > owns the settings shell + stage card chrome; 11 adds the WIP row, 13 the gate controls.
 
+> **Related board-render behaviour:** empty stages (and empty sub-lanes) **auto-collapse** to the
+> mockup's dashed vertical strip — specced separately in
+> `2026-07-08-collapse-empty-columns-design.md` (build after this MMF; it layers on the stage
+> card/column restyled here).
+
 ## Overview
 
 `/board/settings` grows from MMF 08's simple API-key page into the mockup's two-pane Board

@@ -59,6 +59,10 @@ No schema or migration changes. New module `lib/relay/events.ex` (`Relay.Events`
   with the correct accent colour, status label, owner cluster, and lane counts — the live
   "working" feel the mockup's pulsing indicators promise (`docs/designs/Relay Board.dc.html`,
   the `relaypulse` working dot).
+- **Empty stages/lanes auto-collapse (and re-expand) live.** Collapse is count-derived
+  (see `2026-07-08-collapse-empty-columns-design.md`), so when a realtime update empties the
+  last slot of a stage/lane it collapses in every open session, and it expands when a card
+  arrives — no special handling beyond keeping the counts/streams accurate here.
 - The same happens when the mutation arrives via `PATCH /api/cards/:ref`, `POST .../move`,
   `POST .../comments`, or `POST .../needs-input` — agent actions show up live because the
   broadcasts fire in the contexts those controllers call.
