@@ -27,8 +27,14 @@ defmodule Schemas.Board do
   @doc "Changeset for board attributes. `owner_id` must already be set on the struct."
   def changeset(board, attrs) do
     board
-    |> cast(attrs, [:name, :slug, :key])
+    # `empty_values: []` disables Ecto's default cast behavior of silently
+    # substituting a blank/whitespace param with the field's schema default
+    # (`name`'s default is "My board") — without this, submitting a blank
+    # name would reset it to "My board" instead of failing validation below.
+    |> cast(attrs, [:name, :slug, :key], empty_values: [])
+    |> update_change(:name, &String.trim/1)
     |> validate_required([:name, :slug, :key])
+    |> validate_length(:name, min: 1, max: 80)
     |> unique_constraint(:slug)
   end
 end
