@@ -11,6 +11,12 @@ defmodule RelayWeb.BoardLive do
   MMF 05 makes cards movable: the BoardDnD drag-and-drop hook and the drawer's "Move to…"
   menu both push a "move_card" event; the server persists via Cards.move_card/3, resets the
   affected stage streams, and keeps the lane counts in sync.
+
+  MMF 18 makes the board realtime: mount subscribes to `Relay.Events` for this
+  board, and handle_info/2 applies the broadcast domain events (card_upserted,
+  card_moved, timeline_appended, stages_changed) idempotently to the streams,
+  counts, and open drawer — whether the change came from another browser
+  session or from the REST API.
   """
 
   use RelayWeb, :live_view
@@ -18,6 +24,7 @@ defmodule RelayWeb.BoardLive do
   alias Relay.Activity
   alias Relay.Boards
   alias Relay.Cards
+  alias Relay.Events
   alias Schemas.Card
   alias Schemas.Stage
 
@@ -125,6 +132,9 @@ defmodule RelayWeb.BoardLive do
   @impl true
   def mount(_params, _session, socket) do
     board = Boards.get_or_create_default_board(socket.assigns.current_scope.user)
+
+    if connected?(socket), do: Events.subscribe(board.id)
+
     cards_by_stage = board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
 
     socket =
@@ -320,6 +330,46 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("post_comment", _params, socket), do: {:noreply, socket}
 
+  # MMF 18 — realtime application of Relay.Events broadcasts. Every open
+  # session applies every event for its board, including the acting
+  # session's own echo: streams upsert by DOM id and counts/stages are
+  # recomputed from the DB, so double-apply is a no-op by construction.
+  @impl true
+  def handle_info({:card_upserted, %Card{} = card}, socket) do
+    if find_stage_by_id(socket, card.stage_id) do
+      cards_by_stage = socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
+
+      {:noreply,
+       socket
+       |> stream_insert(stream_name(card.stage_id), card)
+       |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, cards_by_stage))
+       |> maybe_refresh_drawer(card)}
+    else
+      # The card sits in a stage this socket hasn't loaded yet (e.g. a
+      # just-enabled sub-lane racing its stages_changed event): rebuild.
+      {:noreply, reload_board(socket)}
+    end
+  end
+
+  def handle_info({:card_moved, %Card{} = moved, from_stage_id}, socket) do
+    if find_stage_by_id(socket, moved.stage_id) do
+      {:noreply, apply_move(socket, from_stage_id, moved)}
+    else
+      {:noreply, reload_board(socket)}
+    end
+  end
+
+  def handle_info({:timeline_appended, card_id, entry}, socket) do
+    case socket.assigns.selected_card do
+      %Card{id: ^card_id} -> {:noreply, stream_insert(socket, :timeline, entry)}
+      _other -> {:noreply, socket}
+    end
+  end
+
+  def handle_info({:stages_changed, _board_id}, socket) do
+    {:noreply, reload_board(socket)}
+  end
+
   # Groups position-ordered stages under their category, keeping the fixed
   # category order and dropping empty categories (per spec: headers render
   # only for non-empty categories).
@@ -475,6 +525,48 @@ defmodule RelayWeb.BoardLive do
 
       _ ->
         socket
+    end
+  end
+
+  # A remotely upserted card that is open in this session's drawer: sync
+  # the drawer assigns (selected card, status form, timeline) through the
+  # same refresh_card/2 path local drawer actions use.
+  defp maybe_refresh_drawer(socket, %Card{id: id} = card) do
+    case socket.assigns.selected_card do
+      %Card{id: ^id} -> refresh_card(socket, card)
+      _other -> socket
+    end
+  end
+
+  # stages_changed (or an event for a stage this socket doesn't know yet):
+  # refetch the board and rebuild every stage-derived assign and stream,
+  # exactly like mount does. Streams reset from the DB, so this is
+  # idempotent and safe to run on the acting session's own echo too.
+  defp reload_board(socket) do
+    board = Boards.get_or_create_default_board(socket.assigns.current_scope.user)
+    cards_by_stage = board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
+
+    socket =
+      socket
+      |> assign(:board, board)
+      |> assign(:stage_groups, group_stages(board.stages))
+      |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
+      |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
+
+    board.stages
+    |> Enum.reduce(socket, fn stage, acc ->
+      stream(acc, stream_name(stage.id), Map.get(cards_by_stage, stage.id, []), reset: true)
+    end)
+    |> refresh_selected_stage()
+  end
+
+  # After a stage reload, re-derive the open drawer's stage from the new
+  # board (disable_lane refuses to remove a non-empty lane, so the
+  # selected card's stage always still exists).
+  defp refresh_selected_stage(socket) do
+    case socket.assigns.selected_card do
+      %Card{} = card -> assign(socket, :selected_stage, find_stage_by_id(socket, card.stage_id))
+      _other -> socket
     end
   end
 

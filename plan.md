@@ -753,7 +753,7 @@ writes are broadcasting too — no controller changes needed.
 
 **Steps**
 
-- [ ] Write the failing LiveView tests at
+- [x] Write the failing LiveView tests at
       `test/relay_web/live/board_live_realtime_test.exs`:
 
 ```elixir
@@ -1014,11 +1014,11 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 end
 ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_realtime_test.exs` — expect failures:
+- [x] Run `mix test test/relay_web/live/board_live_realtime_test.exs` — expect failures:
       the two-session/API tests fail on missing elements (no subscription yet), and the
       `send/2` idempotence tests crash the LiveView (no `handle_info/2` clause), which also
       surfaces as failures.
-- [ ] Subscribe on connected mount in `lib/relay_web/live/board_live.ex`. Add the alias —
+- [x] Subscribe on connected mount in `lib/relay_web/live/board_live.ex`. Add the alias —
       replace:
 
 ```elixir
@@ -1055,7 +1055,7 @@ with:
     cards_by_stage = board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
 ```
 
-- [ ] Add the `handle_info/2` clauses directly after the last `handle_event` clause
+- [x] Add the `handle_info/2` clauses directly after the last `handle_event` clause
       (`def handle_event("post_comment", _params, socket), do: {:noreply, socket}`) and
       before the private helpers:
 
@@ -1101,7 +1101,7 @@ with:
   end
 ```
 
-- [ ] Add the three private helpers right after the existing
+- [x] Add the three private helpers right after the existing
       `refresh_selected_after_move/2` helper:
 
 ```elixir
@@ -1148,7 +1148,7 @@ with:
   end
 ```
 
-- [ ] Update the `@moduledoc` of `RelayWeb.BoardLive` by appending one paragraph after the
+- [x] Update the `@moduledoc` of `RelayWeb.BoardLive` by appending one paragraph after the
       MMF 05 paragraph:
 
 ```elixir
@@ -1159,16 +1159,16 @@ with:
   session or from the REST API.
 ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_realtime_test.exs` — expect all tests
+- [x] Run `mix test test/relay_web/live/board_live_realtime_test.exs` — expect all tests
       to pass. (Broadcast delivery is deterministic here: PubSub dispatches locally and
       synchronously inside the mutating call, so the event is already in the receiving
       LiveView's mailbox before the test's next `render`/`has_element?` call — no sleeps
       needed.)
-- [ ] Run `mix test test/relay_web/live/board_live_test.exs` — the existing BoardLive suite
+- [x] Run `mix test test/relay_web/live/board_live_test.exs` — the existing BoardLive suite
       must stay green (the acting session now also applies its own echoed events; they are
       idempotent no-ops).
-- [ ] Run `mix precommit` — expect a clean pass.
-- [ ] Commit.
+- [x] Run `mix precommit` — expect a clean pass.
+- [x] Commit.
 
 **Deliverable:** every open `BoardLive` on a board applies creates, edits, moves, status
 and owner changes, comments, and lane toggles live — from other sessions and from the REST
