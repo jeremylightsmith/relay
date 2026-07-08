@@ -514,7 +514,7 @@ And extend `usage/0`:
 
 ### Steps
 
-- [ ] **Failing doc-contract test.** Create `test/relay_web/agent_integration_docs_test.exs` (guards that the doc exists and documents every shipped command, so the docs can't silently drift from the CLI):
+- [x] **Failing doc-contract test.** Create `test/relay_web/agent_integration_docs_test.exs` (guards that the doc exists and documents every shipped command, so the docs can't silently drift from the CLI):
 
 ```elixir
 defmodule Relay.AgentIntegrationDocsTest do
@@ -540,9 +540,9 @@ defmodule Relay.AgentIntegrationDocsTest do
 end
 ```
 
-- [ ] **Run — expect fail** (doc/link missing).
+- [x] **Run — expect fail** (doc/link missing).
 
-- [ ] **Write the doc.** Create `docs/agent-integration.md`:
+- [x] **Write the doc.** Create `docs/agent-integration.md`:
 
 ```markdown
 # Working Relay from Claude Code
@@ -636,16 +636,16 @@ To validate: point the env vars at a real board, run `mix relay pull`, work the 
 it back — then adapt the examples above into your own `.claude/` setup.
 ```
 
-- [ ] **Link from AGENTS.md.** Add near the "What Relay is" / client-strategy section a short pointer:
+- [x] **Link from AGENTS.md.** Add near the "What Relay is" / client-strategy section a short pointer:
 
 ```markdown
 **Working Relay from Claude Code:** the `mix relay` CLI + REST API let a Claude session pull a
 card, work it, and hand it back. See [`docs/agent-integration.md`](docs/agent-integration.md).
 ```
 
-- [ ] **Run — expect pass.**
+- [x] **Run — expect pass.**
 
-- [ ] **Full check + commit.** `mix precommit`. Commit: `docs: agent-integration guide + AGENTS.md pointer`.
+- [x] **Full check + commit.** `mix precommit`. Commit: `docs: agent-integration guide + AGENTS.md pointer`.
 
 **Deliverable:** `docs/agent-integration.md` documents the whole CLI + an example agent/workflow/skill and the dogfood walkthrough; AGENTS.md points to it; a doc-contract test keeps the reference in sync with the shipped commands.
 
