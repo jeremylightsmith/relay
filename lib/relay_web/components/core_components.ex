@@ -683,7 +683,7 @@ defmodule RelayWeb.CoreComponents do
     doc: "which sub-lane the card sits in (a :done lane greens the accent)"
 
   attr :category, :atom,
-    values: [:unstarted, :in_progress, :complete, nil],
+    values: [:unstarted, :planning, :in_progress, :complete, nil],
     default: nil,
     doc: "the stage's category (a :complete stage greens the accent)"
 
@@ -1299,7 +1299,7 @@ defmodule RelayWeb.CoreComponents do
   attr :count, :integer, default: nil, doc: "the number of cards in the main lane; count hidden when nil"
 
   attr :category, :atom,
-    values: [:unstarted, :in_progress, :complete, nil],
+    values: [:unstarted, :planning, :in_progress, :complete, nil],
     default: nil,
     doc: "the stage's category, forwarded to its cards for the green accent"
 

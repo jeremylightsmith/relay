@@ -19,6 +19,13 @@ defmodule Relay.BoardsStageConfigTest do
 
   defp stage_named(board, name), do: Enum.find(board.stages, &(&1.name == name))
 
+  defp categories(board) do
+    board
+    |> Boards.list_stages()
+    |> Enum.filter(&(&1.lane == :main))
+    |> Enum.map(& &1.category)
+  end
+
   describe "update_stage/2" do
     test "persists name, description, and owner" do
       board = seeded_board()
@@ -72,29 +79,67 @@ defmodule Relay.BoardsStageConfigTest do
       assert main_names(board) == ["Spec", "Backlog", "Plan", "Code", "Review", "Deploy", "Done"]
     end
 
-    test ":down across a category boundary adopts the neighbour's category" do
+    test ":down across a boundary adopts the next category and leaves the neighbour untouched" do
       board = seeded_board()
+      plan = stage_named(board, "Plan")
 
       assert {:ok, moved} = Boards.reorder_stage(stage_named(board, "Spec"), :down)
-      assert moved.category == :in_progress
-      assert main_names(board) == ["Backlog", "Plan", "Spec", "Code", "Review", "Deploy", "Done"]
+
+      # Spec alone crosses the band, landing at the TOP of Planning: the flat
+      # board order is unchanged. Plan — which the old bidirectional swap
+      # dragged up into :unstarted (the reported bug) — stays put.
+      assert moved.category == :planning
+      assert Boards.get_stage(board, plan.id).category == :planning
+      assert main_names(board) == ["Backlog", "Spec", "Plan", "Code", "Review", "Deploy", "Done"]
+
+      assert categories(board) ==
+               [:unstarted, :planning, :planning, :in_progress, :in_progress, :in_progress, :complete]
     end
 
-    test ":up across a category boundary adopts the earlier category" do
+    test ":up across a boundary adopts the previous category and leaves the neighbour untouched" do
       board = seeded_board()
+      spec = stage_named(board, "Spec")
 
       assert {:ok, moved} = Boards.reorder_stage(stage_named(board, "Plan"), :up)
+
+      # Plan lands at the BOTTOM of Unstarted; Spec keeps its category.
       assert moved.category == :unstarted
-      assert main_names(board) == ["Backlog", "Plan", "Spec", "Code", "Review", "Deploy", "Done"]
+      assert Boards.get_stage(board, spec.id).category == :unstarted
+      assert main_names(board) == ["Backlog", "Spec", "Plan", "Code", "Review", "Deploy", "Done"]
     end
 
-    test "the board's first and last stages no-op at the edges" do
+    test ":down into an empty adjacent category lands there instead of skipping past it" do
+      board = seeded_board()
+      {:ok, _} = Boards.delete_stage(stage_named(board, "Plan"))
+
+      assert {:ok, moved} = Boards.reorder_stage(stage_named(board, "Spec"), :down)
+      assert moved.category == :planning
+      assert main_names(board) == ["Backlog", "Spec", "Code", "Review", "Deploy", "Done"]
+
+      # A second :down crosses on into In progress, again without touching Code.
+      assert {:ok, again} = Boards.reorder_stage(Boards.get_stage(board, moved.id), :down)
+      assert again.category == :in_progress
+      assert Boards.get_stage(board, stage_named(board, "Code").id).category == :in_progress
+    end
+
+    test ":up into an empty adjacent category lands there instead of skipping past it" do
+      board = seeded_board()
+      {:ok, _} = Boards.delete_stage(stage_named(board, "Plan"))
+
+      assert {:ok, moved} = Boards.reorder_stage(stage_named(board, "Code"), :up)
+      assert moved.category == :planning
+      assert main_names(board) == ["Backlog", "Spec", "Code", "Review", "Deploy", "Done"]
+    end
+
+    test "the first and last categories no-op at the board's edges" do
       board = seeded_board()
 
       assert {:ok, %{position: 1, category: :unstarted}} =
                Boards.reorder_stage(stage_named(board, "Backlog"), :up)
 
-      assert {:ok, %{name: "Done"}} = Boards.reorder_stage(stage_named(board, "Done"), :down)
+      assert {:ok, %{name: "Done", category: :complete}} =
+               Boards.reorder_stage(stage_named(board, "Done"), :down)
+
       assert main_names(board) == ["Backlog", "Spec", "Plan", "Code", "Review", "Deploy", "Done"]
     end
 
@@ -104,6 +149,24 @@ defmodule Relay.BoardsStageConfigTest do
 
       assert {:ok, _moved} = Boards.reorder_stage(stage_named(board, "Review"), :up)
       assert main_names(board) == ["Backlog", "Spec", "Plan", "Review", "Code", "Deploy", "Done"]
+    end
+
+    test "reordering never touches card owners and keeps main positions contiguous" do
+      board = seeded_board()
+      code = stage_named(board, "Code")
+      card = insert(:card, stage: code)
+      owner_row = insert(:card_owner, card: card, user: insert(:user))
+
+      {:ok, _} = Boards.reorder_stage(stage_named(board, "Spec"), :down)
+      {:ok, _} = Boards.reorder_stage(Boards.get_stage(board, code.id), :up)
+
+      assert [%CardOwner{} = row] = Repo.all(CardOwner)
+      assert row.id == owner_row.id
+
+      positions =
+        board |> Boards.list_stages() |> Enum.filter(&(&1.lane == :main)) |> Enum.map(& &1.position)
+
+      assert positions == Enum.to_list(1..7)
     end
   end
 

@@ -53,6 +53,27 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       assert has_element?(view, "#stages-pane")
       refute has_element?(view, "#api-key-pane")
     end
+
+    test "the stages pane always shows all four category groups with add buttons", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board/settings")
+
+      for category <- ["unstarted", "planning", "in_progress", "complete"] do
+        assert has_element?(view, "#settings-group-#{category}")
+        assert has_element?(view, "#add-stage-#{category}")
+      end
+
+      assert has_element?(view, "#settings-group-planning", "PLANNING")
+      assert has_element?(view, "#add-stage-planning", "+ Add stage to PLANNING")
+
+      [style] =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#settings-group-planning .category-dot")
+        |> LazyHTML.attribute("style")
+
+      assert style =~ "--color-secondary"
+    end
   end
 
   describe "editing stages" do
@@ -96,12 +117,15 @@ defmodule RelayWeb.BoardSettingsStagesTest do
     test "the arrows reorder stages and crossing a band adopts the category",
          %{conn: conn, board: board} do
       spec = stage_named(board, "Spec")
+      plan = stage_named(board, "Plan")
       {:ok, view, _html} = live(conn, ~p"/board/settings")
 
       view |> element("#stage-#{spec.id}-down") |> render_click()
 
-      assert has_element?(view, "#settings-group-in_progress #stage-#{spec.id}-row")
-      assert Boards.get_stage(board, spec.id).category == :in_progress
+      assert has_element?(view, "#settings-group-planning #stage-#{spec.id}-row")
+      assert Boards.get_stage(board, spec.id).category == :planning
+      # one-directional: the old first-Planning stage keeps its category
+      assert Boards.get_stage(board, plan.id).category == :planning
 
       view |> element("#stage-#{spec.id}-up") |> render_click()
 
@@ -187,6 +211,16 @@ defmodule RelayWeb.BoardSettingsStagesTest do
 
       assert html =~ "at least one stage"
       assert Boards.get_stage(board, keep.id)
+    end
+
+    test "add stage to Planning creates a planning stage", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/settings")
+
+      view |> element("#add-stage-planning") |> render_click()
+
+      new_stage = board |> Boards.list_stages() |> Enum.find(&(&1.name == "New stage"))
+      assert new_stage.category == :planning
+      assert has_element?(view, "#settings-group-planning #stage-#{new_stage.id}-row")
     end
   end
 

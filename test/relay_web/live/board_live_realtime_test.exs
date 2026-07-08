@@ -320,6 +320,20 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       assert has_element?(board_view, "#stage-col-2-cards .board-card", "Ride along")
     end
 
+    test "reordering a stage across the Planning band updates the open board live",
+         %{conn: conn, board: board} do
+      spec = Enum.find(board.stages, &(&1.name == "Spec"))
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+
+      {:ok, board_view, _html} = live(conn, ~p"/board")
+      {:ok, settings_view, _html} = live(conn, ~p"/board/settings")
+
+      settings_view |> element("#stage-#{spec.id}-down") |> render_click()
+
+      assert has_element?(board_view, "#category-planning #stage-strip-#{spec.id}", "Spec")
+      assert has_element?(board_view, "#category-unstarted #stage-strip-#{backlog.id}", "Backlog")
+    end
+
     test "adding and deleting stages restructures the open board",
          %{conn: conn, board: board} do
       deploy = Enum.find(board.stages, &(&1.name == "Deploy"))

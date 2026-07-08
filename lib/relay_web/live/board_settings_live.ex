@@ -18,7 +18,7 @@ defmodule RelayWeb.BoardSettingsLive do
   alias Relay.ApiKeys
   alias Relay.Boards
 
-  @categories [:unstarted, :in_progress, :complete]
+  @categories [:unstarted, :planning, :in_progress, :complete]
 
   @impl true
   def render(assigns) do
@@ -69,21 +69,21 @@ defmodule RelayWeb.BoardSettingsLive do
               </h1>
               <%!-- Mockup line ~217; the WIP-limit mention is deferred to MMF 11. --%>
               <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 12px 0;max-width:560px;">
-                Stages live inside three categories — <b style="color:oklch(0.34 0.02 255);">Unstarted</b>, <b style="color:oklch(0.34 0.02 255);">In progress</b>, and
+                Stages live inside four categories — <b style="color:oklch(0.34 0.02 255);">Unstarted</b>, <b style="color:oklch(0.34 0.02 255);">Planning</b>, <b style="color:oklch(0.34 0.02 255);">In progress</b>, and
                 <b style="color:oklch(0.34 0.02 255);">Complete</b>
                 — so everyone knows what a stage <i>means</i>. Use the arrows to move a stage
                 up or down — cross into another category and it takes on that meaning. Set
                 each stage's owner and whether finished work waits in a Done sub-column.
               </p>
 
-              <%!-- All three groups always render so an emptied category stays reachable. --%>
+              <%!-- All four groups always render so an emptied category stays reachable. --%>
               <div
                 :for={{category, stages} <- @stage_groups}
                 id={"settings-group-#{category}"}
                 style="margin-top:22px;"
               >
                 <div style="display:flex;align-items:center;gap:8px;margin:0 0 10px 2px;">
-                  <span style={category_dot_style(category)}></span>
+                  <span class="category-dot" style={category_dot_style(category)}></span>
                   <span
                     class="font-mono"
                     style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;color:oklch(0.50 0.02 255);"
@@ -429,7 +429,7 @@ defmodule RelayWeb.BoardSettingsLive do
   end
 
   def handle_event("add_stage", %{"category" => category}, socket)
-      when category in ["unstarted", "in_progress", "complete"] do
+      when category in ["unstarted", "planning", "in_progress", "complete"] do
     {:ok, _stage} = Boards.create_stage(socket.assigns.board, category_atom(category))
     {:noreply, refresh_stages(socket)}
   end
@@ -451,7 +451,7 @@ defmodule RelayWeb.BoardSettingsLive do
   defp section(_params), do: :stages
 
   # Reloads the main stages and lane map from the DB after any mutation, and
-  # groups them for the pane. All three categories always render so an
+  # groups them for the pane. All four categories always render so an
   # emptied category keeps its "+ Add stage" button.
   defp refresh_stages(socket) do
     board = socket.assigns.board
@@ -484,6 +484,7 @@ defmodule RelayWeb.BoardSettingsLive do
   defp direction_atom("down"), do: :down
 
   defp category_atom("unstarted"), do: :unstarted
+  defp category_atom("planning"), do: :planning
   defp category_atom("in_progress"), do: :in_progress
   defp category_atom("complete"), do: :complete
 
@@ -551,6 +552,7 @@ defmodule RelayWeb.BoardSettingsLive do
   defp owner_color(:ai), do: "var(--color-secondary)"
 
   defp category_band_label(:unstarted), do: "UNSTARTED"
+  defp category_band_label(:planning), do: "PLANNING"
   defp category_band_label(:in_progress), do: "IN PROGRESS"
   defp category_band_label(:complete), do: "COMPLETE"
 
@@ -558,6 +560,10 @@ defmodule RelayWeb.BoardSettingsLive do
   defp category_dot_style(:unstarted),
     do:
       "width:9px;height:9px;border-radius:50%;border:1.5px solid oklch(0.68 0.02 255);box-sizing:border-box;display:block;flex:0 0 auto;"
+
+  defp category_dot_style(:planning),
+    do:
+      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-secondary) 0 25%, oklch(0.86 0.03 250) 25% 100%);display:block;flex:0 0 auto;"
 
   defp category_dot_style(:in_progress),
     do:

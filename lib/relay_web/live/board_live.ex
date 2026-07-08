@@ -28,7 +28,7 @@ defmodule RelayWeb.BoardLive do
   alias Schemas.Card
   alias Schemas.Stage
 
-  @category_order [:unstarted, :in_progress, :complete]
+  @category_order [:unstarted, :planning, :in_progress, :complete]
 
   @impl true
   def render(assigns) do
@@ -66,7 +66,7 @@ defmodule RelayWeb.BoardLive do
             style="display:flex;flex-direction:column;gap:9px;flex:0 0 auto;"
           >
             <div style="display:flex;align-items:center;gap:8px;padding:0 4px;height:20px;flex:0 0 auto;">
-              <span style={category_dot_style(category)}></span>
+              <span class="category-dot" style={category_dot_style(category)}></span>
               <h2
                 class="category-band"
                 style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;font-family:var(--font-mono);color:oklch(0.52 0.02 255);margin:0;"
@@ -651,6 +651,7 @@ defmodule RelayWeb.BoardLive do
   defp timeline_dom_id(%Schemas.Activity{id: id}), do: "timeline-activity-#{id}"
 
   defp category_label(:unstarted), do: "Unstarted"
+  defp category_label(:planning), do: "Planning"
   defp category_label(:in_progress), do: "In progress"
   defp category_label(:complete), do: "Complete"
 
@@ -668,11 +669,16 @@ defmodule RelayWeb.BoardLive do
   end
 
   # The small colored marker beside each category band, mirroring the mockup's
-  # catMeta dots: a hollow ring (unstarted), a half-filled conic (in progress),
-  # and a solid green disc (complete).
+  # catMeta dots: a hollow ring (unstarted), a quarter-filled violet conic
+  # (planning — where AI planning lives), a half-filled blue conic
+  # (in progress), and a solid green disc (complete).
   defp category_dot_style(:unstarted),
     do:
       "width:9px;height:9px;border-radius:50%;border:1.5px solid oklch(0.68 0.02 255);box-sizing:border-box;display:block;flex:0 0 auto;"
+
+  defp category_dot_style(:planning),
+    do:
+      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-secondary) 0 25%, oklch(0.86 0.03 250) 25% 100%);display:block;flex:0 0 auto;"
 
   defp category_dot_style(:in_progress),
     do:

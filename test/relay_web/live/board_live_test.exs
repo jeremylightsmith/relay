@@ -58,13 +58,14 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, view, _html} = live(conn, ~p"/board")
 
       assert has_element?(view, "#category-unstarted h2.category-band", "Unstarted")
+      assert has_element?(view, "#category-planning h2.category-band", "Planning")
       assert has_element?(view, "#category-in_progress h2.category-band", "In progress")
       assert has_element?(view, "#category-complete h2.category-band", "Complete")
 
       # a fresh board is empty, so every stage renders as its collapsed strip
       assert has_element?(view, "#category-unstarted #stage-strip-#{backlog.id}", "Backlog")
       assert has_element?(view, "#category-unstarted #stage-strip-#{spec.id}", "Spec")
-      assert has_element?(view, "#category-in_progress #stage-strip-#{plan.id}", "Plan")
+      assert has_element?(view, "#category-planning #stage-strip-#{plan.id}", "Plan")
       assert has_element?(view, "#category-in_progress #stage-strip-#{code.id}", "Code")
       assert has_element?(view, "#category-in_progress #stage-strip-#{review.id}", "Review")
       assert has_element?(view, "#category-in_progress #stage-strip-#{deploy.id}", "Deploy")
@@ -77,7 +78,26 @@ defmodule RelayWeb.BoardLiveTest do
         |> LazyHTML.query("#board .category-band")
         |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
 
-      assert bands == ["Unstarted", "In progress", "Complete"]
+      assert bands == ["Unstarted", "Planning", "In progress", "Complete"]
+    end
+
+    test "renders the Planning band with its label and violet dot", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      plan = Enum.find(board.stages, &(&1.name == "Plan"))
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      assert has_element?(view, "#category-planning h2.category-band", "Planning")
+      assert has_element?(view, "#category-planning #stage-strip-#{plan.id}", "Plan")
+
+      [style] =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#category-planning .category-dot")
+        |> LazyHTML.attribute("style")
+
+      assert style =~ "--color-secondary"
     end
 
     test "shows the right Human/AI owner swatch on each stage", %{conn: conn, user: user} do
