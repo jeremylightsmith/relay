@@ -12,6 +12,18 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         attributes: %{id: "story-stage-backlog", name: "Backlog", owner: :human, stage_id: 1, count: 0}
       },
       %Variation{
+        id: :collapsed_empty,
+        description: "An empty stage auto-collapses to the 44px dashed strip (MMF 12c)",
+        attributes: %{
+          id: "story-stage-collapsed",
+          name: "Deploy",
+          owner: :ai,
+          stage_id: 6,
+          count: 0,
+          collapsed: true
+        }
+      },
+      %Variation{
         id: :with_cards,
         attributes: %{
           id: "story-stage-code",
@@ -84,6 +96,34 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
               ]
             },
             %{id: 402, name: "Done", lane: :done, owner: :ai, count: 0, cards: []}
+          ]
+        }
+      },
+      %Variation{
+        id: :with_collapsed_sublanes,
+        description: "Empty Review/Done sub-lanes collapse to 34px strips (MMF 12c)",
+        attributes: %{
+          id: "story-stage-collapsed-sublanes",
+          name: "Code",
+          owner: :ai,
+          stage_id: 5,
+          count: 1,
+          board_key: "RLY",
+          category: :in_progress,
+          cards: [
+            {"story-card-5",
+             %{
+               title: "Implement the API",
+               tag: "api",
+               ref_number: 5,
+               status: :working,
+               progress: 30,
+               owners: [%{actor_type: :agent}]
+             }}
+          ],
+          sublanes: [
+            %{id: 501, name: "Review", lane: :review, owner: :human, count: 0, cards: [], collapsed: true},
+            %{id: 502, name: "Done", lane: :done, owner: :ai, count: 0, cards: [], collapsed: true}
           ]
         }
       },

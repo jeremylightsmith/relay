@@ -68,7 +68,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       assert has_element?(view, "#stage-#{code.id}-name[value='Build']")
 
       {:ok, board_view, _html} = live(conn, ~p"/board")
-      assert has_element?(board_view, "#stage-col-#{code.position} h3", "Build")
+      assert has_element?(board_view, "#stage-strip-#{code.id} h3", "Build")
     end
 
     test "a blank rename is rejected with a flash and keeps the old name",

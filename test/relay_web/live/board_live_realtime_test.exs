@@ -17,10 +17,12 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       %{board: board, backlog: backlog, spec: spec}
     end
 
-    test "a card created in session A appears in session B with the count bumped", %{conn: conn} do
+    test "a card created in session A appears in session B with the count bumped",
+         %{conn: conn, backlog: backlog} do
       {:ok, view_a, _html} = live(conn, ~p"/board")
       {:ok, view_b, _html} = live(conn, ~p"/board")
 
+      view_a |> element("#stage-strip-#{backlog.id}") |> render_click()
       view_a |> element("#stage-col-1-new-card") |> render_click()
       view_a |> form("#stage-col-1-compose-form", card: %{title: "Broadcast me"}) |> render_submit()
 
@@ -39,7 +41,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
       assert has_element?(view_b, "#stage-col-2-cards .board-card", "Pass the baton")
       refute has_element?(view_b, "#stage-col-1-cards .board-card")
-      assert has_element?(view_b, "#stage-col-1 .stage-count", "0")
+      assert has_element?(view_b, "#stage-strip-#{backlog.id} .stage-count", "0")
       assert has_element?(view_b, "#stage-col-2 .stage-count", "1")
     end
 
@@ -112,14 +114,30 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
     test "enabling and disabling a lane restructures another open session", %{conn: conn, board: board} do
       code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, _card} = Cards.create_card(code, %{title: "Keep Code expanded"})
 
       {:ok, view_b, _html} = live(conn, ~p"/board")
 
       {:ok, review} = Boards.enable_lane(code, :review)
-      assert has_element?(view_b, "#sublane-#{review.id}-cards")
+      assert has_element?(view_b, "#sublane-#{review.id}-strip")
 
       {:ok, :disabled} = Boards.disable_lane(code, :review)
-      refute has_element?(view_b, "#sublane-#{review.id}-cards")
+      refute has_element?(view_b, "#sublane-#{review.id}-strip")
+    end
+
+    test "emptying a stage in session A collapses it to a strip in session B",
+         %{conn: conn, backlog: backlog, spec: spec} do
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Last one"})
+
+      {:ok, view_a, _html} = live(conn, ~p"/board")
+      {:ok, view_b, _html} = live(conn, ~p"/board")
+
+      refute has_element?(view_b, "#stage-strip-#{backlog.id}")
+
+      render_hook(view_a, "move_card", %{"ref" => "RLY-1", "stage_id" => spec.id, "index" => 0})
+
+      assert has_element?(view_b, "#stage-strip-#{backlog.id} .stage-count", "0")
+      assert has_element?(view_b, "#stage-col-2-cards .board-card", "Last one")
     end
   end
 
@@ -131,14 +149,15 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       [backlog_a | _rest] = board_a.stages
 
       other_user = insert(:user)
-      _board_b = Boards.get_or_create_default_board(other_user)
+      board_b = Boards.get_or_create_default_board(other_user)
+      [backlog_b | _rest] = board_b.stages
 
       {:ok, view_b, _html} = live(log_in_user(build_conn(), other_user), ~p"/board")
 
       {:ok, _card} = Cards.create_card(backlog_a, %{title: "Only on A"})
 
       refute has_element?(view_b, ".board-card")
-      assert has_element?(view_b, "#stage-col-1 .stage-count", "0")
+      assert has_element?(view_b, "#stage-strip-#{backlog_b.id} .stage-count", "0")
     end
   end
 
@@ -259,7 +278,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       |> form("#stage-#{code.id}-form", stage: %{name: "Build"})
       |> render_change()
 
-      assert has_element?(board_view, "#stage-col-#{code.position} h3", "Build")
+      assert has_element?(board_view, "#stage-strip-#{code.id} h3", "Build")
     end
 
     test "an owner change re-tints the column and flips the card mismatch flag",
@@ -296,7 +315,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
       settings_view |> element("#stage-#{spec.id}-up") |> render_click()
 
-      assert has_element?(board_view, "#stage-col-1 h3", "Spec")
+      assert has_element?(board_view, "#stage-strip-#{spec.id} h3", "Spec")
       assert has_element?(board_view, "#stage-col-2 h3", "Backlog")
       assert has_element?(board_view, "#stage-col-2-cards .board-card", "Ride along")
     end

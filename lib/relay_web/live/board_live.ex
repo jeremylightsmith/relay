@@ -85,6 +85,7 @@ defmodule RelayWeb.BoardLive do
                 owner={stage.owner}
                 category={category}
                 stage_id={stage.id}
+                collapsed={stage_collapsed?(stage, @stage_counts, @sublanes_by_parent, @force_open)}
                 count={Map.fetch!(@stage_counts, stage.id)}
                 board_key={@board.key}
                 cards={Map.fetch!(@streams, stream_name(stage.id))}
@@ -98,7 +99,8 @@ defmodule RelayWeb.BoardLive do
                       lane: sub.lane,
                       owner: sub.owner,
                       count: Map.fetch!(@stage_counts, sub.id),
-                      cards: Map.fetch!(@streams, stream_name(sub.id))
+                      cards: Map.fetch!(@streams, stream_name(sub.id)),
+                      collapsed: sublane_collapsed?(sub, @stage_counts, @force_open)
                     }
                   end
                 }
@@ -144,6 +146,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:stage_groups, group_stages(board.stages))
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
+      |> assign(:force_open, MapSet.new())
       |> assign(:composing_stage_id, nil)
       |> assign(:compose_form, empty_compose_form())
       |> stream_configure(:timeline, dom_id: &timeline_dom_id/1)
@@ -217,6 +220,15 @@ defmodule RelayWeb.BoardLive do
       {:noreply, apply_move(socket, card.stage_id, moved)}
     else
       _ -> {:noreply, socket}
+    end
+  end
+
+  # MMF 12c — clicking a collapsed stage/lane strip force-opens it for this
+  # session only (a MapSet in the socket; not persisted, not broadcast).
+  def handle_event("expand_stage", %{"stage-id" => stage_id}, socket) do
+    case parse_int(stage_id) do
+      nil -> {:noreply, socket}
+      id -> {:noreply, update(socket, :force_open, &MapSet.put(&1, id))}
     end
   end
 
@@ -399,6 +411,26 @@ defmodule RelayWeb.BoardLive do
   # recomputed from the grouped cards (mount, moves) and bumped on create.
   defp stage_counts(stages, cards_by_stage) do
     Map.new(stages, fn stage -> {stage.id, length(Map.get(cards_by_stage, stage.id, []))} end)
+  end
+
+  # MMF 12c — a stage auto-collapses to the mockup's strip only when it is
+  # empty across its main lane AND all its sub-lanes, and the user hasn't
+  # force-opened it this session (mockup: collapsed = all.length === 0).
+  defp stage_collapsed?(%Stage{} = stage, stage_counts, sublanes_by_parent, force_open) do
+    total =
+      sublanes_by_parent
+      |> Map.get(stage.id, [])
+      |> Enum.reduce(Map.fetch!(stage_counts, stage.id), fn sub, acc ->
+        acc + Map.fetch!(stage_counts, sub.id)
+      end)
+
+    total == 0 and not MapSet.member?(force_open, stage.id)
+  end
+
+  # MMF 12c — a Review/Done sub-lane collapses to its 34px strip when empty
+  # and not force-opened (mockup: laneCollapsed = isSub && laneCards.length === 0).
+  defp sublane_collapsed?(%Stage{} = sub, stage_counts, force_open) do
+    Map.fetch!(stage_counts, sub.id) == 0 and not MapSet.member?(force_open, sub.id)
   end
 
   # Only stages of the user's own board are addressable from events.

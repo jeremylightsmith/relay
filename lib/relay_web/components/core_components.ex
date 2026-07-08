@@ -807,6 +807,9 @@ defmodule RelayWeb.CoreComponents do
   defp card_status_color(:working), do: "oklch(0.52 0.10 292)"
   defp card_status_color(_status), do: "oklch(0.50 0.10 155)"
 
+  defp sublane_width(%{collapsed: true}), do: 34
+  defp sublane_width(_sub), do: 178
+
   defp lane_color(:review), do: "oklch(0.52 0.12 65)"
   defp lane_color(:done), do: "oklch(0.47 0.11 155)"
   defp lane_color(_ongoing), do: "oklch(0.52 0.02 255)"
@@ -1281,6 +1284,11 @@ defmodule RelayWeb.CoreComponents do
   `"create_card"` (form params `card[title]` plus hidden `stage_id`) on
   submit, and `"cancel_compose"` on Cancel, Escape, or click-away.
 
+  When `collapsed` (MMF 12c), the stage renders instead as the mockup's 44px dashed
+  vertical strip — owner swatch, rotated name, total count — which remains a
+  `.stage-cards[data-stage-id]` drop zone and emits `"expand_stage"`
+  (`phx-value-stage-id`) on click.
+
   ## Examples
 
       <.stage_column id="stage-col-1" name="Backlog" owner={:human} stage_id={1} />
@@ -1303,170 +1311,241 @@ defmodule RelayWeb.CoreComponents do
 
   attr :sublanes, :list,
     default: [],
-    doc: "the stage's Review/Done child lanes, each a %{id, name, lane, owner, count, cards}"
+    doc:
+      "the stage's Review/Done child lanes, each a %{id, name, lane, owner, count, cards} " <>
+        "with an optional collapsed: true to render the lane as its 34px strip (MMF 12c)"
+
+  attr :collapsed, :boolean,
+    default: false,
+    doc: "render the whole stage as the mockup's 44px dashed strip (still a drop target)"
 
   def stage_column(assigns) do
+    sublanes = Enum.map(assigns.sublanes, &Map.put_new(&1, :collapsed, false))
+
     assigns =
       assigns
-      |> assign(:labeled, assigns.sublanes != [])
-      |> assign(:stage_width, 240 + 178 * length(assigns.sublanes))
+      |> assign(:sublanes, sublanes)
+      |> assign(:labeled, sublanes != [])
+      |> assign(:stage_width, 240 + Enum.sum(Enum.map(sublanes, &sublane_width/1)))
+      |> assign(:total_count, (assigns.count || 0) + Enum.sum(Enum.map(sublanes, & &1.count)))
 
     ~H"""
-    <section
-      id={@id}
-      class="stage-column"
-      style={"flex:0 0 auto;width:#{@stage_width}px;display:flex;flex-direction:column;height:100%;background:var(--color-base-100);border:1px solid var(--color-base-300);border-radius:14px;overflow:hidden;box-shadow:0 1px 3px oklch(0.5 0.02 255/0.06);"}
-    >
-      <header style="display:flex;align-items:center;gap:8px;padding:15px 15px 12px 15px;flex:0 0 auto;border-bottom:1px solid var(--color-base-300);">
+    <%= if @collapsed do %>
+      <section
+        id={"stage-strip-#{@stage_id}"}
+        class="stage-column stage-strip stage-cards"
+        data-stage-id={@stage_id}
+        phx-click="expand_stage"
+        phx-value-stage-id={@stage_id}
+        aria-label={"Expand stage #{@name}"}
+        style="flex:0 0 auto;width:44px;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;border-radius:11px;background:oklch(0.965 0.004 255);border:1px dashed oklch(0.90 0.006 255);cursor:pointer;box-sizing:border-box;"
+      >
         <span
           class="stage-owner-swatch"
           data-owner={@owner}
-          style={"width:8px;height:8px;border-radius:3px;flex:0 0 auto;background:#{owner_hex(@owner)};"}
+          style={"width:9px;height:9px;border-radius:3px;flex:0 0 auto;background:#{owner_hex(@owner)};"}
         >
         </span>
-        <h3 style="font-size:13px;font-weight:600;letter-spacing:-0.01em;color:var(--color-base-content);">
+        <h3
+          class="stage-strip-name"
+          style="writing-mode:vertical-rl;transform:rotate(180deg);font-size:12px;font-weight:600;letter-spacing:0.01em;color:oklch(0.52 0.02 255);white-space:nowrap;"
+        >
           {@name}
         </h3>
         <span
-          :if={@count}
           class="stage-count"
-          style="font-size:10.5px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);"
+          style="font-size:10px;font-family:var(--font-mono);color:oklch(0.65 0.02 255);"
         >
-          {@count}
+          {@total_count}
         </span>
-        <span style="flex:1;"></span>
-        <button
-          :if={!@composing}
-          type="button"
-          id={"#{@id}-new-card"}
-          class="stage-compose"
-          phx-click="compose"
-          phx-value-stage-id={@stage_id}
-          title="Add work"
-          aria-label="New card"
-          style="width:22px;height:22px;border-radius:6px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:oklch(0.45 0.02 255);font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex:0 0 auto;"
-        >
-          +
-        </button>
-      </header>
-      <div style="display:flex;gap:0;flex:1;min-height:0;">
-        <%!-- main / ongoing lane --%>
-        <div style="flex:0 0 240px;width:240px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;">
-          <div
-            :if={@labeled}
-            style="display:flex;align-items:center;gap:6px;padding:11px 15px 7px 15px;flex:0 0 auto;"
+      </section>
+    <% else %>
+      <section
+        id={@id}
+        class="stage-column"
+        style={"flex:0 0 auto;width:#{@stage_width}px;display:flex;flex-direction:column;height:100%;background:var(--color-base-100);border:1px solid var(--color-base-300);border-radius:14px;overflow:hidden;box-shadow:0 1px 3px oklch(0.5 0.02 255/0.06);"}
+      >
+        <header style="display:flex;align-items:center;gap:8px;padding:15px 15px 12px 15px;flex:0 0 auto;border-bottom:1px solid var(--color-base-300);">
+          <span
+            class="stage-owner-swatch"
+            data-owner={@owner}
+            style={"width:8px;height:8px;border-radius:3px;flex:0 0 auto;background:#{owner_hex(@owner)};"}
           >
-            <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(:ongoing)};"}>
-              In progress
-            </span>
-            <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(:ongoing)};opacity:0.7;"}>
-              {@count}
-            </span>
-          </div>
-          <div style={"flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:#{if(@labeled, do: "0", else: "13px")} 13px 13px 15px;"}>
-            <div :if={@composing} id={"#{@id}-composer"} phx-click-away="cancel_compose">
-              <.form
-                for={@compose_form}
-                id={"#{@id}-compose-form"}
-                phx-change="validate_card"
-                phx-submit="create_card"
-              >
-                <input type="hidden" name="stage_id" value={@stage_id} />
-                <.input
-                  field={@compose_form[:title]}
-                  type="text"
-                  placeholder="Card title"
-                  autofocus
-                  autocomplete="off"
-                  class="input input-sm w-full"
-                  phx-keydown="cancel_compose"
-                  phx-key="escape"
-                />
-                <div class="mt-2 flex items-center gap-2">
-                  <.button variant="primary" class="btn btn-primary btn-xs">Add card</.button>
-                  <button type="button" class="btn btn-ghost btn-xs" phx-click="cancel_compose">
-                    Cancel
-                  </button>
-                </div>
-              </.form>
-            </div>
+          </span>
+          <h3 style="font-size:13px;font-weight:600;letter-spacing:-0.01em;color:var(--color-base-content);">
+            {@name}
+          </h3>
+          <span
+            :if={@count}
+            class="stage-count"
+            style="font-size:10.5px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);"
+          >
+            {@count}
+          </span>
+          <span style="flex:1;"></span>
+          <button
+            :if={!@composing}
+            type="button"
+            id={"#{@id}-new-card"}
+            class="stage-compose"
+            phx-click="compose"
+            phx-value-stage-id={@stage_id}
+            title="Add work"
+            aria-label="New card"
+            style="width:22px;height:22px;border-radius:6px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:oklch(0.45 0.02 255);font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex:0 0 auto;"
+          >
+            +
+          </button>
+        </header>
+        <div style="display:flex;gap:0;flex:1;min-height:0;">
+          <%!-- main / ongoing lane --%>
+          <div style="flex:0 0 240px;width:240px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;">
             <div
-              id={"#{@id}-cards"}
-              phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}
-              data-stage-id={@stage_id}
-              class="stage-cards"
-              style="display:flex;flex-direction:column;gap:8px;"
+              :if={@labeled}
+              style="display:flex;align-items:center;gap:6px;padding:11px 15px 7px 15px;flex:0 0 auto;"
             >
-              <div
-                id={"#{@id}-empty"}
-                class="stage-empty hidden only:block"
-                style="border:1px dashed var(--color-base-300);border-radius:8px;padding:18px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);"
-              >
-                No cards yet
+              <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(:ongoing)};"}>
+                In progress
+              </span>
+              <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(:ongoing)};opacity:0.7;"}>
+                {@count}
+              </span>
+            </div>
+            <div style={"flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:#{if(@labeled, do: "0", else: "13px")} 13px 13px 15px;"}>
+              <div :if={@composing} id={"#{@id}-composer"} phx-click-away="cancel_compose">
+                <.form
+                  for={@compose_form}
+                  id={"#{@id}-compose-form"}
+                  phx-change="validate_card"
+                  phx-submit="create_card"
+                >
+                  <input type="hidden" name="stage_id" value={@stage_id} />
+                  <.input
+                    field={@compose_form[:title]}
+                    type="text"
+                    placeholder="Card title"
+                    autofocus
+                    autocomplete="off"
+                    class="input input-sm w-full"
+                    phx-keydown="cancel_compose"
+                    phx-key="escape"
+                  />
+                  <div class="mt-2 flex items-center gap-2">
+                    <.button variant="primary" class="btn btn-primary btn-xs">Add card</.button>
+                    <button type="button" class="btn btn-ghost btn-xs" phx-click="cancel_compose">
+                      Cancel
+                    </button>
+                  </div>
+                </.form>
               </div>
-              <.board_card
-                :for={{dom_id, card} <- @cards}
-                id={dom_id}
-                title={card.title}
-                tag={card.tag}
-                ref={"#{@board_key}-#{card.ref_number}"}
-                status={card.status}
-                progress={card.progress}
-                owners={card.owners}
-                active_owner={Cards.active_owner_type(card)}
-                stage_owner={@owner}
-                lane={:main}
-                category={@category}
-              />
+              <div
+                id={"#{@id}-cards"}
+                phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}
+                data-stage-id={@stage_id}
+                class="stage-cards"
+                style="display:flex;flex-direction:column;gap:8px;"
+              >
+                <div
+                  id={"#{@id}-empty"}
+                  class="stage-empty hidden only:block"
+                  style="border:1px dashed var(--color-base-300);border-radius:8px;padding:18px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);"
+                >
+                  No cards yet
+                </div>
+                <.board_card
+                  :for={{dom_id, card} <- @cards}
+                  id={dom_id}
+                  title={card.title}
+                  tag={card.tag}
+                  ref={"#{@board_key}-#{card.ref_number}"}
+                  status={card.status}
+                  progress={card.progress}
+                  owners={card.owners}
+                  active_owner={Cards.active_owner_type(card)}
+                  stage_owner={@owner}
+                  lane={:main}
+                  category={@category}
+                />
+              </div>
             </div>
           </div>
-        </div>
-        <%!-- Review / Done sub-lanes, side by side --%>
-        <div
-          :for={sub <- @sublanes}
-          id={"sublane-#{sub.id}"}
-          style={"flex:0 0 178px;width:178px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;background:#{lane_tint(sub.lane)};border-left:1px solid #{lane_divider(sub.lane)};"}
-        >
-          <div style="display:flex;align-items:center;gap:6px;padding:11px 13px 7px 13px;flex:0 0 auto;">
-            <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(sub.lane)};"}>
-              {sub.name}
-            </span>
-            <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(sub.lane)};opacity:0.7;"}>
-              {sub.count}
-            </span>
-          </div>
-          <div
-            id={"sublane-#{sub.id}-cards"}
-            phx-update="stream"
-            data-stage-id={sub.id}
-            class="stage-cards"
-            style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:0 13px 13px 13px;"
-          >
+          <%!-- Review / Done sub-lanes, side by side; empty ones collapse to 34px strips --%>
+          <%= for sub <- @sublanes do %>
             <div
-              id={"sublane-#{sub.id}-empty"}
-              class="stage-empty hidden only:block"
-              style="border:1px dashed var(--color-base-300);border-radius:8px;padding:14px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:oklch(0.70 0.02 255);"
+              :if={sub.collapsed}
+              id={"sublane-#{sub.id}-strip"}
+              class="sublane-strip stage-cards"
+              data-stage-id={sub.id}
+              phx-click="expand_stage"
+              phx-value-stage-id={sub.id}
+              aria-label={"Expand #{sub.name} lane"}
+              style={"flex:0 0 34px;width:34px;display:flex;flex-direction:column;align-items:center;gap:9px;padding:12px 0;box-sizing:border-box;background:#{lane_tint(sub.lane)};border-left:1px solid #{lane_divider(sub.lane)};cursor:pointer;"}
             >
-              Empty
+              <span
+                class="sublane-strip-dot"
+                style={"width:6px;height:6px;border-radius:50%;background:#{lane_color(sub.lane)};opacity:0.6;flex:0 0 auto;"}
+              >
+              </span>
+              <span
+                class="sublane-strip-name"
+                style={"writing-mode:vertical-rl;transform:rotate(180deg);font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(sub.lane)};white-space:nowrap;"}
+              >
+                {sub.name}
+              </span>
+              <span
+                class="sublane-strip-count"
+                style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(sub.lane)};opacity:0.7;flex:0 0 auto;"}
+              >
+                {sub.count}
+              </span>
             </div>
-            <.board_card
-              :for={{dom_id, card} <- sub.cards}
-              id={dom_id}
-              title={card.title}
-              tag={card.tag}
-              ref={"#{@board_key}-#{card.ref_number}"}
-              status={card.status}
-              progress={card.progress}
-              owners={card.owners}
-              active_owner={Cards.active_owner_type(card)}
-              stage_owner={sub.owner}
-              lane={sub.lane}
-              category={@category}
-            />
-          </div>
+            <div
+              :if={!sub.collapsed}
+              id={"sublane-#{sub.id}"}
+              style={"flex:0 0 178px;width:178px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;background:#{lane_tint(sub.lane)};border-left:1px solid #{lane_divider(sub.lane)};"}
+            >
+              <div style="display:flex;align-items:center;gap:6px;padding:11px 13px 7px 13px;flex:0 0 auto;">
+                <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(sub.lane)};"}>
+                  {sub.name}
+                </span>
+                <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(sub.lane)};opacity:0.7;"}>
+                  {sub.count}
+                </span>
+              </div>
+              <div
+                id={"sublane-#{sub.id}-cards"}
+                phx-update="stream"
+                data-stage-id={sub.id}
+                class="stage-cards"
+                style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:0 13px 13px 13px;"
+              >
+                <div
+                  id={"sublane-#{sub.id}-empty"}
+                  class="stage-empty hidden only:block"
+                  style="border:1px dashed var(--color-base-300);border-radius:8px;padding:14px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:oklch(0.70 0.02 255);"
+                >
+                  Empty
+                </div>
+                <.board_card
+                  :for={{dom_id, card} <- sub.cards}
+                  id={dom_id}
+                  title={card.title}
+                  tag={card.tag}
+                  ref={"#{@board_key}-#{card.ref_number}"}
+                  status={card.status}
+                  progress={card.progress}
+                  owners={card.owners}
+                  active_owner={Cards.active_owner_type(card)}
+                  stage_owner={sub.owner}
+                  lane={sub.lane}
+                  category={@category}
+                />
+              </div>
+            </div>
+          <% end %>
         </div>
-      </div>
-    </section>
+      </section>
+    <% end %>
     """
   end
 
