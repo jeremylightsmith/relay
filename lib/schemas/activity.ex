@@ -14,8 +14,10 @@ defmodule Schemas.Activity do
 
   import Ecto.Changeset
 
+  @types [:created, :moved, :status_changed, :owners_changed, :commented, :approved, :rejected]
+
   schema "activities" do
-    field :type, Ecto.Enum, values: [:created, :moved, :status_changed, :owners_changed, :commented]
+    field :type, Ecto.Enum, values: @types
     field :meta, :map, default: %{}
     field :actor_type, Ecto.Enum, values: [:user, :agent]
 

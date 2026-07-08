@@ -120,6 +120,35 @@ defmodule RelayWeb.Api.CardController do
 
   def needs_input(_conn, %{"ref" => _ref}), do: {:error, :invalid_request}
 
+  def approve(conn, %{"ref" => ref}) do
+    board = conn.assigns.current_board
+
+    with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
+         {:ok, card} <- Cards.approve(card, :agent) do
+      render(conn, :show, board: board, card: card, timeline: Activity.list_timeline(card))
+    else
+      nil -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def reject(conn, %{"ref" => ref} = params) do
+    board = conn.assigns.current_board
+
+    with {:ok, note} <- reject_note(params),
+         %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
+         {:ok, card} <- Cards.reject(card, note, :agent) do
+      render(conn, :show, board: board, card: card, timeline: Activity.list_timeline(card))
+    else
+      nil -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # The note is required for rejects (spec: 422 when missing).
+  defp reject_note(%{"note" => note}) when is_binary(note) and note != "", do: {:ok, note}
+  defp reject_note(_params), do: {:error, :missing_note}
+
   # A stage id that doesn't cast to an integer can't match any stage; treat it
   # as not-found rather than letting Ecto raise a CastError.
   defp get_stage(board, stage_id) when is_integer(stage_id), do: Boards.get_stage(board, stage_id)

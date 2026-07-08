@@ -25,6 +25,20 @@ defmodule RelayWeb.Api.FallbackController do
     |> render(:error, code: "invalid", message: "Invalid request")
   end
 
+  def call(conn, {:error, :not_gated}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "not_gated", message: "This card's stage is not an approval gate")
+  end
+
+  def call(conn, {:error, :missing_note}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "missing_note", message: "note is required")
+  end
+
   defp changeset_message(changeset) do
     changeset
     |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->
