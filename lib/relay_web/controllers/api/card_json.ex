@@ -37,6 +37,10 @@ defmodule RelayWeb.Api.CardJSON do
     }
   end
 
+  def comment(%{comment: comment}) do
+    %{data: entry(comment)}
+  end
+
   defp entry(%Schemas.Comment{} = c) do
     %{kind: "comment", body: c.body, author: author(c), inserted_at: c.inserted_at}
   end

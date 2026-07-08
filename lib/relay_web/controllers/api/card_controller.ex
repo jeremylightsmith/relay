@@ -2,6 +2,7 @@ defmodule RelayWeb.Api.CardController do
   use RelayWeb, :controller
 
   alias Relay.Activity
+  alias Relay.Boards
   alias Relay.Cards
 
   action_fallback RelayWeb.Api.FallbackController
@@ -74,4 +75,48 @@ defmodule RelayWeb.Api.CardController do
   end
 
   defp parse_actor(_), do: :error
+
+  def move(conn, %{"ref" => ref} = params) do
+    board = conn.assigns.current_board
+
+    with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
+         %Schemas.Stage{} = stage <- Boards.get_stage(board, params["stage"]),
+         {:ok, card} <- Cards.move_card(card, stage, move_index(params), :agent) do
+      render(conn, :show, board: board, card: card, timeline: Activity.list_timeline(card))
+    else
+      nil -> {:error, :not_found}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  def comments(conn, %{"ref" => ref, "body" => body}) do
+    board = conn.assigns.current_board
+
+    with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
+         {:ok, comment} <- Activity.add_comment(card, %{actor: :agent, body: body}) do
+      conn |> put_status(:created) |> render(:comment, comment: comment)
+    else
+      nil -> {:error, :not_found}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  def needs_input(conn, %{"ref" => ref, "question" => question}) do
+    board = conn.assigns.current_board
+
+    with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
+         {:ok, card} <- Cards.set_status(card, %{status: :needs_input}, :agent),
+         {:ok, _comment} <- Activity.add_comment(card, %{actor: :agent, body: question}) do
+      render(conn, :show, board: board, card: card, timeline: Activity.list_timeline(card))
+    else
+      nil -> {:error, :not_found}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  # 1-based `position` from the API maps to move_card's 0-based index; a
+  # missing position appends (move_card clamps a large index to the end).
+  defp move_index(%{"position" => p}) when is_integer(p), do: p - 1
+  defp move_index(%{"position" => p}) when is_binary(p), do: String.to_integer(p) - 1
+  defp move_index(_params), do: 1_000_000
 end

@@ -1,0 +1,69 @@
+defmodule RelayWeb.Api.CardActionsTest do
+  use RelayWeb.ConnCase, async: true
+
+  alias Relay.Activity
+  alias Relay.Cards
+
+  setup %{conn: conn} do
+    board = insert(:board)
+    {:ok, %{token: token}} = Relay.ApiKeys.create_key(board, board.owner)
+    spec = insert(:stage, board: board, name: "Spec", position: 1)
+    code = insert(:stage, board: board, name: "Code", owner: :ai, position: 2)
+    conn = put_req_header(conn, "authorization", "Bearer " <> token)
+    {:ok, conn: conn, board: board, spec: spec, code: code}
+  end
+
+  defp ref(board, card), do: Cards.ref(board, card)
+
+  test "move sets the card's stage and logs a moved entry as the agent", %{
+    conn: conn,
+    board: board,
+    spec: spec,
+    code: code
+  } do
+    card = insert(:card, stage: spec)
+
+    body =
+      conn
+      |> post(~p"/api/cards/#{ref(board, card)}/move", %{stage: code.id})
+      |> json_response(200)
+      |> Map.fetch!("data")
+
+    assert body["stage_id"] == code.id
+    assert Cards.get_card_by_ref(board, ref(board, card)).stage_id == code.id
+
+    moved = Activity.list_timeline(%Schemas.Card{id: card.id})
+    assert Enum.any?(moved, &(Map.get(&1, :type) == :moved and &1.actor_type == :agent))
+  end
+
+  test "move to a stage on another board 404s", %{conn: conn, board: board, spec: spec} do
+    foreign_stage = insert(:stage, board: insert(:board))
+    card = insert(:card, stage: spec)
+    assert conn |> post(~p"/api/cards/#{ref(board, card)}/move", %{stage: foreign_stage.id}) |> json_response(404)
+  end
+
+  test "comments posts an agent comment shown as Relay AI", %{conn: conn, board: board, spec: spec} do
+    card = insert(:card, stage: spec)
+
+    body = conn |> post(~p"/api/cards/#{ref(board, card)}/comments", %{body: "on it"}) |> json_response(201)
+    assert body["data"]["body"] == "on it"
+    assert body["data"]["author"]["name"] == "Relay AI"
+  end
+
+  test "needs-input sets status and records the question", %{conn: conn, board: board, spec: spec} do
+    card = insert(:card, stage: spec)
+
+    body =
+      conn
+      |> post(~p"/api/cards/#{ref(board, card)}/needs-input", %{question: "Which region?"})
+      |> json_response(200)
+      |> Map.fetch!("data")
+
+    assert body["status"] == "needs_input"
+    assert Enum.any?(body["timeline"], &(&1["kind"] == "comment" and &1["body"] == "Which region?"))
+  end
+
+  test "actions on an unknown ref 404", %{conn: conn} do
+    assert conn |> post(~p"/api/cards/RLY-9999/comments", %{body: "x"}) |> json_response(404)
+  end
+end
