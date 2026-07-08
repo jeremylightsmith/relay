@@ -250,7 +250,7 @@ end
 
 ### Steps
 
-- [ ] **Failing LiveView tests.** Add to `test/relay_web/live/board_live_test.exs` (new describe block):
+- [x] **Failing LiveView tests.** Add to `test/relay_web/live/board_live_test.exs` (new describe block):
 
 ```elixir
   describe "sub-lanes" do
@@ -287,9 +287,9 @@ end
 
 (If a `card_ref`/board-key helper already exists in the test file, reuse it instead of redefining.)
 
-- [ ] **Run — expect fail** (no sub-lane DOM yet).
+- [x] **Run — expect fail** (no sub-lane DOM yet).
 
-- [ ] **Add the `sublanes` attr + rendering to `stage_column`.** In `lib/relay_web/components/core_components.ex`, add near the other `stage_column` attrs:
+- [x] **Add the `sublanes` attr + rendering to `stage_column`.** In `lib/relay_web/components/core_components.ex`, add near the other `stage_column` attrs:
 
 ```elixir
   attr :sublanes, :list, default: []
@@ -334,7 +334,7 @@ Then, inside `stage_column`'s `~H`, insert this block **immediately after** the 
       </div>
 ```
 
-- [ ] **Wire BoardLive to render only main columns + pass sub-lanes.** In `lib/relay_web/live/board_live.ex`:
+- [x] **Wire BoardLive to render only main columns + pass sub-lanes.** In `lib/relay_web/live/board_live.ex`:
 
   1. In `mount/3`, after assigning `:stage_groups`, add a sub-lanes-by-parent assign:
 
@@ -388,11 +388,11 @@ Then, inside `stage_column`'s `~H`, insert this block **immediately after** the 
                 }
 ```
 
-- [ ] **Refresh the storybook story.** In `storybook/core_components/stage_column.story.exs`, add a variation passing a `sublanes` list (one review lane with a card map `%{count: 1, ...}` and an empty `cards` — mirror the existing story's data shape) so the component's sub-lane rendering has a story. Tell the user the page: `/storybook/core_components/stage_column`.
+- [x] **Refresh the storybook story.** In `storybook/core_components/stage_column.story.exs`, add a variation passing a `sublanes` list (one review lane with a card map `%{count: 1, ...}` and an empty `cards` — mirror the existing story's data shape) so the component's sub-lane rendering has a story. Tell the user the page: `/storybook/core_components/stage_column`.
 
-- [ ] **Run — expect pass.**
+- [x] **Run — expect pass.**
 
-- [ ] **Full check + commit.** `mix precommit`. Commit: `feat(board): render stage sub-lanes stacked under their parent`.
+- [x] **Full check + commit.** `mix precommit`. Commit: `feat(board): render stage sub-lanes stacked under their parent`.
 
 **Deliverable:** a stage's Review/Done sub-lanes render stacked beneath it (label + count + cards, no owner pill); a card dragged or moved into a sub-lane renders there (the sub-lane is a real stream + drop zone); move-into-lane needs no move-path change.
 
