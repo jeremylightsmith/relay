@@ -718,7 +718,7 @@ test), and the existing `#needs-input-panel` id.
 
 **Steps**
 
-- [ ] Append two regression tests to `test/relay_web/live/board_live_review_test.exs`
+- [x] Append two regression tests to `test/relay_web/live/board_live_review_test.exs`
   (inside the module, after the Pull test). These lock in behavior Task 1 should already
   satisfy — if either fails, fix the implementation, not the test:
 
@@ -754,10 +754,10 @@ test), and the existing `#needs-input-panel` id.
   end
 ```
 
-- [ ] Run `mix test test/relay_web/live/board_live_review_test.exs` — expect **all pass**
+- [x] Run `mix test test/relay_web/live/board_live_review_test.exs` — expect **all pass**
   (fix the Task 1 implementation if not; do not weaken the assertions).
 
-- [ ] Refresh the storybook story: in
+- [x] Refresh the storybook story: in
   `storybook/core_components/card_drawer.story.exs`, append two variations to the
   `variations/0` list, after the `:needs_input` variation. `current_user_id: 2` keeps the
   Pull button visible (the story card's owners are user 1 + the agent):
@@ -804,13 +804,13 @@ test), and the existing `#needs-input-panel` id.
       }
 ```
 
-- [ ] Verify the story compiles: `mix compile --warnings-as-errors`. If a dev server is
+- [x] Verify the story compiles: `mix compile --warnings-as-errors`. If a dev server is
   easy to run, spot-check `/storybook/core_components/card_drawer` renders both new
   variations.
-- [ ] Run `mix precommit` — must be fully green.
-- [ ] Commit with message:
+- [x] Run `mix precommit` — must be fully green.
+- [x] Commit with message:
   `chore(board): review-panel regression tests + card_drawer storybook in_review variations (MMF 15)`
-- [ ] In the final report, tell the user the refreshed storybook page:
+- [x] In the final report, tell the user the refreshed storybook page:
   `/storybook/core_components/card_drawer` (new variations: `in_review_gated`,
   `in_review_request_changes`).
 
