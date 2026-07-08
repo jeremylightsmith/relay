@@ -109,6 +109,37 @@ defmodule RelayWeb.BoardSettingsLiveTest do
     end
   end
 
+  describe "stage sub-lanes" do
+    setup %{conn: conn} do
+      user = Relay.Factory.insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      %{conn: Plug.Test.init_test_session(conn, user_id: user.id), board: board}
+    end
+
+    test "toggling Review on creates the child lane; off removes it", %{conn: conn, board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, view, _html} = live(conn, ~p"/board/settings")
+
+      view |> element("#stage-#{code.id}-review-toggle") |> render_click()
+      assert [%{lane: :review}] = Boards.sublanes(code)
+
+      view |> element("#stage-#{code.id}-review-toggle") |> render_click()
+      assert Boards.sublanes(code) == []
+    end
+
+    test "toggling off a non-empty lane is blocked with a flash", %{conn: conn, board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, review} = Boards.enable_lane(code, :review)
+      Relay.Factory.insert(:card, stage: review)
+
+      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      html = view |> element("#stage-#{code.id}-review-toggle") |> render_click()
+
+      assert html =~ "still has cards"
+      assert [%{lane: :review}] = Boards.sublanes(code)
+    end
+  end
+
   defp revealed_secret(view) do
     view
     |> element("#api-key-secret")
