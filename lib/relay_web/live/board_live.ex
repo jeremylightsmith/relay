@@ -27,33 +27,56 @@ defmodule RelayWeb.BoardLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} wide>
-      <div id="board" class="space-y-4" phx-hook="BoardDnD">
-        <div class="flex items-center justify-between">
+      <div id="board" phx-hook="BoardDnD">
+        <div class="flex items-center justify-between px-4 pb-3 pt-1 sm:px-5">
           <h1 id="board-title" class="text-xl font-semibold">{@board.name}</h1>
-          <.link
-            navigate={~p"/board/settings"}
-            id="board-settings-link"
-            class="btn btn-ghost btn-sm btn-circle"
-            aria-label="Board settings"
-          >
-            <.icon name="hero-cog-6-tooth" class="size-5" />
-          </.link>
+          <div class="flex items-center gap-4">
+            <div
+              class="hidden items-center gap-3 sm:flex"
+              style="font-size:11px;font-family:var(--font-mono);color:oklch(0.55 0.02 255);"
+            >
+              <span class="flex items-center gap-1.5">
+                <span style="width:8px;height:8px;border-radius:2px;background:var(--color-secondary);"></span>AI
+              </span>
+              <span class="flex items-center gap-1.5">
+                <span style="width:8px;height:8px;border-radius:2px;background:var(--color-primary);"></span>HUMAN
+              </span>
+            </div>
+            <.link
+              navigate={~p"/board/settings"}
+              id="board-settings-link"
+              class="btn btn-ghost btn-sm btn-circle"
+              aria-label="Board settings"
+            >
+              <.icon name="hero-cog-6-tooth" class="size-5" />
+            </.link>
+          </div>
         </div>
-        <div class="flex items-start gap-6 overflow-x-auto pb-4">
+        <div style="display:flex;gap:22px;padding:16px 18px 18px 18px;overflow-x:auto;overflow-y:hidden;align-items:stretch;background:oklch(0.952 0.008 255);min-height:calc(100vh - 120px);">
           <section
             :for={{category, stages} <- @stage_groups}
             id={"category-#{category}"}
-            class="shrink-0 space-y-2"
+            style="display:flex;flex-direction:column;gap:9px;flex:0 0 auto;"
           >
-            <h2 class="category-band px-1 text-xs font-semibold uppercase tracking-wider text-base-content/60">
-              {category_label(category)}
-            </h2>
-            <div class="flex items-start gap-4">
+            <div style="display:flex;align-items:center;gap:8px;padding:0 4px;height:20px;flex:0 0 auto;">
+              <span style={category_dot_style(category)}></span>
+              <h2
+                class="category-band"
+                style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;font-family:var(--font-mono);color:oklch(0.52 0.02 255);margin:0;"
+              >
+                {category_label(category)}
+              </h2>
+              <span style="font-size:10.5px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);">
+                {category_card_count(category, stages, @stage_counts, @sublanes_by_parent)}
+              </span>
+            </div>
+            <div style="display:flex;gap:9px;align-items:stretch;flex:1;min-height:0;">
               <.stage_column
                 :for={stage <- stages}
                 id={"stage-col-#{stage.position}"}
                 name={stage.name}
                 owner={stage.owner}
+                category={category}
                 stage_id={stage.id}
                 count={Map.fetch!(@stage_counts, stage.id)}
                 board_key={@board.key}
@@ -65,6 +88,7 @@ defmodule RelayWeb.BoardLive do
                     %{
                       id: sub.id,
                       name: lane_label(sub.lane),
+                      lane: sub.lane,
                       owner: sub.owner,
                       count: Map.fetch!(@stage_counts, sub.id),
                       cards: Map.fetch!(@streams, stream_name(sub.id))
@@ -505,4 +529,31 @@ defmodule RelayWeb.BoardLive do
   defp category_label(:unstarted), do: "Unstarted"
   defp category_label(:in_progress), do: "In progress"
   defp category_label(:complete), do: "Complete"
+
+  # The category band's total: every card in the category's main stages plus
+  # their Review/Done sub-lanes.
+  defp category_card_count(_category, stages, stage_counts, sublanes_by_parent) do
+    Enum.reduce(stages, 0, fn stage, acc ->
+      sub_total =
+        sublanes_by_parent
+        |> Map.get(stage.id, [])
+        |> Enum.reduce(0, fn sub, sub_acc -> sub_acc + Map.fetch!(stage_counts, sub.id) end)
+
+      acc + Map.fetch!(stage_counts, stage.id) + sub_total
+    end)
+  end
+
+  # The small colored marker beside each category band, mirroring the mockup's
+  # catMeta dots: a hollow ring (unstarted), a half-filled conic (in progress),
+  # and a solid green disc (complete).
+  defp category_dot_style(:unstarted),
+    do:
+      "width:9px;height:9px;border-radius:50%;border:1.5px solid oklch(0.68 0.02 255);box-sizing:border-box;display:block;flex:0 0 auto;"
+
+  defp category_dot_style(:in_progress),
+    do:
+      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-primary) 0 50%, oklch(0.86 0.03 250) 50% 100%);display:block;flex:0 0 auto;"
+
+  defp category_dot_style(:complete),
+    do: "width:9px;height:9px;border-radius:50%;background:var(--color-success);display:block;flex:0 0 auto;"
 end

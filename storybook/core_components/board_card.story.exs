@@ -20,7 +20,8 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
           tag: "spec",
           active_owner: :human,
           stage_owner: :human,
-          status: :queued
+          status: :queued,
+          owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}]
         }
       },
       %Variation{
@@ -32,7 +33,8 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
           active_owner: :ai,
           stage_owner: :ai,
           status: :working,
-          progress: 61
+          progress: 61,
+          owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}, %{actor_type: :agent}]
         }
       },
       %Variation{
@@ -43,7 +45,8 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
           title: "Pick the target locale list",
           active_owner: :ai,
           stage_owner: :ai,
-          status: :needs_input
+          status: :needs_input,
+          owners: [%{actor_type: :agent}]
         }
       },
       %Variation{
@@ -77,7 +80,8 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
           title: "Ship the landing page",
           active_owner: :human,
           stage_owner: :human,
-          status: :done
+          status: :done,
+          owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}]
         }
       }
     ]
