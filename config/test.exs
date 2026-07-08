@@ -37,6 +37,9 @@ config :relay, RelayWeb.Endpoint,
   secret_key_base: "d7ZQNZUWtP3mPcEZbpa3EzYQ70t1YmaHBlp+2uxkBeAXR5d6FfGSGzr/toxbUS5k",
   server: false
 
+# Route Relay.CLI's HTTP requests to a Req.Test stub in tests.
+config :relay, cli_req_options: [plug: {Req.Test, Relay.CLI}]
+
 # Compile dev-only routes (GET /dev/login, LiveDashboard, storybook) into
 # the test router so tests and the acceptance smoke can authenticate
 # without real Google. Never enabled in prod.
