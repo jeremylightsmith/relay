@@ -100,10 +100,47 @@ defmodule Relay.CLI do
     end
   end
 
+  @doc """
+  Creates a card with `title`. Optional `opts`: `:stage` (a stage *name*,
+  resolved to its id on the board), `:description`, `:tag`. Owners/status are
+  not settable here (a new card is queued and unowned).
+  """
+  def create(title, opts) do
+    with {:ok, body} <- create_body(title, opts),
+         {:ok, %{"data" => card}} <- request(:post, "/api/cards", body) do
+      {:ok, render(opts, card, format_card_line(card))}
+    end
+  end
+
   @doc "Renders `human` unless `opts[:json]`, in which case pretty JSON of `data`."
   def render(opts, data, human) do
     if opts[:json], do: Jason.encode!(data, pretty: true), else: human
   end
+
+  defp create_body(title, opts) do
+    base =
+      %{title: title}
+      |> put_if(:description, opts[:description])
+      |> put_if(:tag, opts[:tag])
+
+    case opts[:stage] do
+      nil ->
+        {:ok, base}
+
+      stage_name ->
+        with {:ok, board} <- request(:get, "/api/board"),
+             %{"id" => id} <-
+               Enum.find(board["stages"], &(&1["name"] == stage_name)) || {:no_stage, stage_name} do
+          {:ok, Map.put(base, :stage, id)}
+        else
+          {:no_stage, name} -> {:error, "no stage named #{inspect(name)} on this board"}
+          other -> other
+        end
+    end
+  end
+
+  defp put_if(map, _key, nil), do: map
+  defp put_if(map, key, value), do: Map.put(map, key, value)
 
   defp env(name) do
     case System.get_env(name) do

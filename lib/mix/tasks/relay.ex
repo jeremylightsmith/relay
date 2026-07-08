@@ -37,6 +37,17 @@ defmodule Mix.Tasks.Relay do
   defp dispatch(["needs-input", ref, question], opts), do: Relay.CLI.needs_input(ref, question, opts)
   defp dispatch(["own", ref], opts), do: Relay.CLI.own(ref, opts)
   defp dispatch(["release", ref], opts), do: Relay.CLI.release(ref, opts)
+
+  defp dispatch(["create" | rest], opts) do
+    {flags, positional, _invalid} =
+      OptionParser.parse(rest, strict: [stage: :string, description: :string, tag: :string])
+
+    case positional do
+      [title] -> Relay.CLI.create(title, Keyword.merge(opts, flags))
+      _ -> {:error, usage()}
+    end
+  end
+
   defp dispatch(_argv, _opts), do: {:error, usage()}
 
   defp pop_json(argv), do: {"--json" in argv, argv -- ["--json"]}
@@ -50,6 +61,7 @@ defmodule Mix.Tasks.Relay do
       comment REF "text"         post a comment
       move REF STAGE             move to a stage (by name)
       status REF STATUS          set status
+      create "Title" [--stage N] create a card (first stage unless --stage)
       needs-input REF "question" flag needs_input with a question
       own REF                    claim the card for the AI
       release REF                clear owners

@@ -197,4 +197,94 @@ defmodule Relay.CLITest do
     assert {:ok, _} = CLI.own("RLY-1", [])
     assert {:ok, _} = CLI.release("RLY-1", [])
   end
+
+  test "create posts a new card with title only" do
+    stub(fn conn ->
+      assert conn.method == "POST"
+      assert conn.request_path == "/api/cards"
+      assert conn |> Plug.Conn.read_body() |> elem(1) |> Jason.decode!() == %{"title" => "New one"}
+
+      conn
+      |> Plug.Conn.put_status(201)
+      |> Req.Test.json(%{
+        "data" => %{
+          "ref" => "RLY-5",
+          "title" => "New one",
+          "status" => "queued",
+          "stage_id" => 1,
+          "active_owner" => nil,
+          "owners" => []
+        }
+      })
+    end)
+
+    assert {:ok, text} = CLI.create("New one", [])
+    assert text =~ "RLY-5"
+  end
+
+  test "create includes description and tag when given" do
+    stub(fn conn ->
+      body = conn |> Plug.Conn.read_body() |> elem(1) |> Jason.decode!()
+      assert body == %{"title" => "T", "description" => "details", "tag" => "chore"}
+
+      conn
+      |> Plug.Conn.put_status(201)
+      |> Req.Test.json(%{
+        "data" => %{
+          "ref" => "RLY-7",
+          "title" => "T",
+          "status" => "queued",
+          "stage_id" => 1,
+          "active_owner" => nil,
+          "owners" => []
+        }
+      })
+    end)
+
+    assert {:ok, text} = CLI.create("T", description: "details", tag: "chore")
+    assert text =~ "RLY-7"
+  end
+
+  test "create resolves --stage name to an id then posts" do
+    stub(fn conn ->
+      case conn.request_path do
+        "/api/board" ->
+          Req.Test.json(conn, %{
+            "board" => %{"name" => "B", "key" => "RLY"},
+            "stages" => [
+              %{"id" => 3, "name" => "Backlog", "owner" => "human", "category" => "unstarted", "position" => 1}
+            ],
+            "cards" => []
+          })
+
+        "/api/cards" ->
+          assert conn |> Plug.Conn.read_body() |> elem(1) |> Jason.decode!() |> Access.get("stage") == 3
+
+          conn
+          |> Plug.Conn.put_status(201)
+          |> Req.Test.json(%{
+            "data" => %{
+              "ref" => "RLY-6",
+              "title" => "Placed",
+              "status" => "queued",
+              "stage_id" => 3,
+              "active_owner" => nil,
+              "owners" => []
+            }
+          })
+      end
+    end)
+
+    assert {:ok, text} = CLI.create("Placed", stage: "Backlog")
+    assert text =~ "RLY-6"
+  end
+
+  test "create errors when the --stage name is unknown" do
+    stub(fn conn ->
+      Req.Test.json(conn, %{"board" => %{"name" => "B", "key" => "RLY"}, "stages" => [], "cards" => []})
+    end)
+
+    assert {:error, msg} = CLI.create("X", stage: "Nope")
+    assert msg =~ "Nope"
+  end
 end
