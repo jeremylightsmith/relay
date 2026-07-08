@@ -218,7 +218,7 @@ defmodule RelayWeb.BoardLive do
          %Stage{} = stage <- resolve_stage(socket, stage_id),
          index when is_integer(index) <- resolve_index(params, socket, stage),
          {:ok, moved} <- Cards.move_card(card, stage, index, current_actor(socket)) do
-      {:noreply, apply_move(socket, card.stage_id, moved)}
+      {:noreply, socket |> apply_move(card.stage_id, moved) |> maybe_warn_over_wip(stage, card.stage_id)}
     else
       _ -> {:noreply, socket}
     end
@@ -545,6 +545,25 @@ defmodule RelayWeb.BoardLive do
   defp restream_stage(socket, stage_id, cards_by_stage) do
     stream(socket, stream_name(stage_id), Map.get(cards_by_stage, stage_id, []), reset: true)
   end
+
+  # MMF 11 — soft enforcement: a cross-stage move into a limited stage that
+  # ends up over its WIP limit still succeeds; the acting session just gets
+  # a non-blocking warning flash. `used` reads the freshly recomputed
+  # @stage_counts from apply_move/3. Reorders within the stage never warn,
+  # and only this handler flashes — broadcast-applied moves in handle_info
+  # (other sessions, API moves) stay silent, so the API contract and remote
+  # sessions see only the rose chip.
+  defp maybe_warn_over_wip(socket, %Stage{wip_limit: limit} = target, from_stage_id) when is_integer(limit) do
+    used = Map.fetch!(socket.assigns.stage_counts, target.id)
+
+    if target.id != from_stage_id and used > limit do
+      put_flash(socket, :error, "#{target.name} is over its WIP limit — #{used}/#{limit}")
+    else
+      socket
+    end
+  end
+
+  defp maybe_warn_over_wip(socket, _target, _from_stage_id), do: socket
 
   defp refresh_selected_after_move(socket, %Card{} = moved) do
     moved_id = moved.id
