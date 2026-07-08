@@ -46,7 +46,7 @@ defmodule RelayWeb.BoardLiveTest do
         |> render()
         |> LazyHTML.from_fragment()
         |> LazyHTML.query("#board .stage-column h3")
-        |> Enum.map(&LazyHTML.text/1)
+        |> Enum.map(&String.trim(LazyHTML.text(&1)))
 
       assert names == ["Backlog", "Spec", "Plan", "Code", "Review", "Deploy", "Done"]
     end
@@ -76,15 +76,15 @@ defmodule RelayWeb.BoardLiveTest do
       assert bands == ["Unstarted", "In progress", "Complete"]
     end
 
-    test "shows the right Human/AI owner pill on each stage", %{conn: conn} do
+    test "shows the right Human/AI owner swatch on each stage", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/board")
 
       for position <- [1, 2, 5, 7] do
-        assert has_element?(view, "#stage-col-#{position} .owner-pill.badge-primary", "Human")
+        assert has_element?(view, ~s(#stage-col-#{position} .stage-owner-swatch[data-owner="human"]))
       end
 
       for position <- [3, 4, 6] do
-        assert has_element?(view, "#stage-col-#{position} .owner-pill.badge-secondary", "AI")
+        assert has_element?(view, ~s(#stage-col-#{position} .stage-owner-swatch[data-owner="ai"]))
       end
     end
 
@@ -420,16 +420,12 @@ defmodule RelayWeb.BoardLiveTest do
       %{board: board, backlog: backlog, plan: plan, card: card}
     end
 
-    test "an unowned card renders neutral: queued badge, no pill, no mismatch", %{conn: conn} do
+    test "an unowned card renders neutral: transparent accent, no owners, no mismatch", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/board")
 
-      assert has_element?(
-               view,
-               "#stage-col-1-cards .board-card .status-badge[data-status='queued']",
-               "queued"
-             )
-
-      refute has_element?(view, "#stage-col-1-cards .board-card .card-owner-pill")
+      assert has_element?(view, "#stage-col-1-cards .board-card.border-l-transparent", "Baton card")
+      refute has_element?(view, "#stage-col-1-cards .board-card .card-owners")
+      refute has_element?(view, "#stage-col-1-cards .board-card .card-status")
       refute has_element?(view, "#stage-col-1-cards .board-card .card-mismatch")
     end
 
@@ -441,7 +437,7 @@ defmodule RelayWeb.BoardLiveTest do
       refute has_element?(view, "#stage-col-3-cards .board-card .card-mismatch")
     end
 
-    test "a human-owned card renders blue with the Human pill",
+    test "a human-owned card renders blue with a human owner avatar",
          %{conn: conn, user: user, card: card} do
       {:ok, _card} = Cards.add_owner(card, {:user, user.id})
 
@@ -454,8 +450,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#stage-col-1-cards .board-card .card-owner-pill.badge-primary",
-               "Human"
+               ~s(#stage-col-1-cards .board-card .card-owners [data-actor-type="user"])
              )
     end
 
@@ -481,32 +476,31 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#stage-col-3-cards .board-card .card-owner-pill.badge-secondary",
-               "AI"
+               ~s(#stage-col-3-cards .board-card .card-owners [data-actor-type="agent"])
              )
     end
 
-    test "a needs_input card shows the amber NEEDS INPUT badge", %{conn: conn, card: card} do
+    test "a needs_input card shows the amber NEEDS INPUT box", %{conn: conn, card: card} do
       {:ok, _card} = Cards.set_status(card, %{"status" => "needs_input"})
 
       {:ok, view, _html} = live(conn, ~p"/board")
 
       assert has_element?(
                view,
-               "#stage-col-1-cards .board-card .status-badge.badge-warning[data-status='needs_input']",
+               "#stage-col-1-cards .board-card.border-l-warning .card-needs-input",
                "NEEDS INPUT"
              )
     end
 
-    test "a working card shows its progress on the badge", %{conn: conn, card: card} do
+    test "a working card shows its progress in the status line", %{conn: conn, card: card} do
       {:ok, _card} = Cards.set_status(card, %{"status" => "working", "progress" => "61"})
 
       {:ok, view, _html} = live(conn, ~p"/board")
 
       assert has_element?(
                view,
-               "#stage-col-1-cards .board-card .status-badge[data-status='working']",
-               "working·61%"
+               "#stage-col-1-cards .board-card .card-status[data-status='working']",
+               "working · 61%"
              )
     end
 
@@ -913,7 +907,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#stage-col-1-cards .board-card .status-badge[data-status='needs_input']",
+               "#stage-col-1-cards .board-card .card-needs-input",
                "NEEDS INPUT"
              )
     end
@@ -936,8 +930,8 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#stage-col-1-cards .board-card .status-badge[data-status='working']",
-               "working·61%"
+               "#stage-col-1-cards .board-card .card-status[data-status='working']",
+               "working · 61%"
              )
     end
 

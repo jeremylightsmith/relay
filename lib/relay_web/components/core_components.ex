@@ -500,13 +500,140 @@ defmodule RelayWeb.CoreComponents do
   defp status_badge_label(:done, _progress), do: "done"
 
   @doc """
-  Renders a single kanban card: its title, optional #tag, its board-scoped
-  ref (e.g. RLY-3), and — the heart of Relay — its baton state: the
-  active-owner colour (blue human / violet AI left border + owner pill),
-  the status badge (`working·61%`, amber NEEDS INPUT, green done, …), and
-  the red mismatch warning when the card's active-owner type conflicts
-  with the stage it sits in (`stage_owner`, the stage's "meant for"
-  designation). Mismatch is display-only — it never mutates the card.
+  Renders the owner avatar cluster for a card — the mockup's "who holds the
+  baton" glance (`docs/designs/Relay Board.dc.html`, `buildCluster`). Human
+  owners are ~22px initialed circles (blue); the AI owner is a violet circle
+  with a small mark. The active owner is ringed; when the AI is active the
+  human owners render smaller/grayed and overlap behind it. Nothing renders
+  for an unowned card.
+  """
+  attr :owners, :list, default: [], doc: "the card's loaded owner rows (actor_type + optional :user)"
+
+  attr :active_owner, :atom,
+    values: [:human, :ai, nil],
+    default: nil,
+    doc: "who holds the baton, derived by Relay.Cards.active_owner_type/1"
+
+  attr :size, :integer, default: 22
+
+  def owner_avatars(assigns) do
+    assigns = assign(assigns, :avatars, build_cluster(assigns.owners, assigns.active_owner, assigns.size))
+
+    ~H"""
+    <div :if={@avatars != []} class="card-owners flex items-center" style="padding-left:2px;">
+      <div :for={av <- @avatars} style={av.wrap} title={av.name} data-actor-type={av.actor_type}>
+        <span :if={av.ai?} style={av.mark}></span>
+        <span :if={!av.ai?}>{av.initials}</span>
+      </div>
+    </div>
+    """
+  end
+
+  defp build_cluster(_owners, nil, _size), do: []
+
+  defp build_cluster(owners, active_owner, size) do
+    ai_active = active_owner == :ai
+    humans = Enum.filter(owners, &(&1.actor_type == :user))
+
+    human_avatars =
+      humans
+      |> Enum.with_index()
+      |> Enum.map(fn {owner, i} ->
+        avatar_data(:human, Map.get(owner, :user), size,
+          overlap?: i > 0,
+          ring?: not ai_active and i == 0,
+          grayed?: ai_active
+        )
+      end)
+
+    ai_avatars =
+      if ai_active do
+        [avatar_data(:ai, nil, size, overlap?: humans != [], ring?: true, grayed?: false)]
+      else
+        []
+      end
+
+    human_avatars ++ ai_avatars
+  end
+
+  defp avatar_data(kind, user, size, opts) do
+    ai? = kind == :ai
+    bg = if ai?, do: "var(--color-secondary)", else: "var(--color-primary)"
+    ring_color = if ai?, do: "var(--color-secondary)", else: "var(--color-primary)"
+
+    shadows =
+      []
+      |> prepend_when(opts[:overlap?], "0 0 0 2px var(--color-base-100)")
+      |> prepend_when(opts[:ring?], "0 0 0 2px var(--color-base-100)")
+      |> prepend_when(opts[:ring?], "0 0 0 3.5px #{ring_color}")
+
+    wrap =
+      [
+        "width:#{size}px",
+        "height:#{size}px",
+        "border-radius:50%",
+        "background:#{bg}",
+        "color:oklch(1 0 0)",
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "font-size:#{round(size * 0.42)}px",
+        "font-weight:600",
+        "flex:0 0 auto",
+        "box-sizing:border-box",
+        "position:relative"
+      ]
+      |> append_when(opts[:overlap?], "margin-left:-6px")
+      |> append_when(opts[:grayed?], "filter:grayscale(1)")
+      |> append_when(opts[:grayed?], "opacity:0.5")
+      |> append_when(shadows != [], "box-shadow:#{Enum.join(shadows, ", ")}")
+      |> Enum.join(";")
+
+    mark_size = round(size * 0.36)
+
+    %{
+      wrap: wrap,
+      mark: "width:#{mark_size}px;height:#{mark_size}px;border-radius:50%;border:1.5px solid oklch(1 0 0);display:block",
+      ai?: ai?,
+      initials: initials_of(user),
+      name: if(ai?, do: "Relay AI", else: user_name(user) || "Someone"),
+      actor_type: if(ai?, do: :agent, else: :user)
+    }
+  end
+
+  defp append_when(list, true, value), do: list ++ [value]
+  defp append_when(list, _false, _value), do: list
+  defp prepend_when(list, true, value), do: [value | list]
+  defp prepend_when(list, _false, _value), do: list
+
+  defp initials_of(user) do
+    case user_name(user) do
+      nil ->
+        "?"
+
+      name ->
+        name
+        |> String.split(~r/\s+/, trim: true)
+        |> Enum.map(&String.first/1)
+        |> Enum.take(2)
+        |> Enum.join()
+        |> String.upcase()
+    end
+  end
+
+  defp user_name(nil), do: nil
+  defp user_name(user), do: Map.get(user, :name) || Map.get(user, :email)
+
+  @doc """
+  Renders a single kanban card matching the hi-fi mockup
+  (`docs/designs/Relay Board.dc.html`): title, an accent left border keyed to
+  the baton state (blue human / violet AI / amber needs-input / green done /
+  red mismatch), an optional violet progress bar while working, the amber
+  NEEDS INPUT box, a mono status line + `#tag`, and the owner avatar cluster.
+
+  The red mismatch warning (MMF 06) still fires when the card's active-owner
+  type conflicts with the stage it sits in (`stage_owner`) — display-only,
+  it never mutates the card.
 
   Clicking the card emits a `"select_card"` event (with `phx-value-ref`)
   for the parent LiveView — `RelayWeb.BoardLive` answers with a patch to
@@ -548,18 +675,32 @@ defmodule RelayWeb.CoreComponents do
     default: nil
 
   attr :progress, :integer, default: nil
+  attr :owners, :list, default: [], doc: "the card's loaded owner rows, for the avatar cluster"
+
+  attr :lane, :atom,
+    values: [:main, :review, :done, nil],
+    default: :main,
+    doc: "which sub-lane the card sits in (a :done lane greens the accent)"
+
+  attr :category, :atom,
+    values: [:unstarted, :in_progress, :complete, nil],
+    default: nil,
+    doc: "the stage's category (a :complete stage greens the accent)"
 
   def board_card(assigns) do
-    assigns = assign(assigns, :mismatch, mismatch(assigns.active_owner, assigns.stage_owner))
+    accent_class = card_accent_class(mismatch(assigns.active_owner, assigns.stage_owner), assigns)
+
+    assigns =
+      assigns
+      |> assign(:mismatch, mismatch(assigns.active_owner, assigns.stage_owner))
+      |> assign(:accent_class, accent_class)
+      |> assign(:accent_color, card_accent_color(accent_class))
 
     ~H"""
     <article
       id={@id}
-      class={[
-        "board-card card cursor-pointer bg-base-100 shadow-sm transition-shadow hover:shadow-md",
-        "border-l-4",
-        card_border_class(@mismatch, @active_owner)
-      ]}
+      class={["board-card group", @accent_class]}
+      style={"background:var(--color-base-100);border:1px solid var(--color-base-300);border-left:3px solid #{@accent_color};border-radius:9px;padding:10px 11px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px oklch(0.55 0.03 255/0.05);cursor:pointer;"}
       role="button"
       tabindex="0"
       draggable="true"
@@ -568,17 +709,56 @@ defmodule RelayWeb.CoreComponents do
       phx-click="select_card"
       phx-value-ref={@ref}
     >
-      <div class="card-body gap-2 p-3">
-        <p class="card-title text-sm font-medium leading-snug">{@title}</p>
-        <p :if={@mismatch} class="card-mismatch text-xs font-medium text-error">
-          {mismatch_message(@mismatch)}
-        </p>
-        <div class="flex flex-wrap items-center gap-2">
-          <.status_badge :if={@status} status={@status} progress={@progress} />
-          <.owner_pill :if={@active_owner} owner={@active_owner} class="card-owner-pill" />
-          <span :if={@tag} class="card-tag badge badge-ghost badge-sm">#{@tag}</span>
-          <span class="card-ref ml-auto font-mono text-xs text-base-content/60">{@ref}</span>
+      <span
+        class="card-title"
+        style="font-size:12.5px;font-weight:500;line-height:1.35;letter-spacing:-0.01em;color:var(--color-base-content);"
+      >
+        {@title}
+      </span>
+      <span class="card-ref sr-only">{@ref}</span>
+      <p
+        :if={@mismatch}
+        class="card-mismatch"
+        style="font-size:11px;font-weight:500;color:var(--color-error);"
+      >
+        {mismatch_message(@mismatch)}
+      </p>
+      <div
+        :if={@status == :working}
+        style="height:5px;border-radius:3px;background:oklch(0.93 0.02 292);overflow:hidden;"
+      >
+        <div style={"height:100%;width:#{@progress || 0}%;background:var(--color-secondary);border-radius:3px;"}>
         </div>
+      </div>
+      <div
+        :if={@status == :needs_input}
+        class="card-needs-input"
+        style="display:flex;align-items:center;gap:6px;background:oklch(0.97 0.03 75);border:1px solid oklch(0.87 0.07 75);border-radius:6px;padding:6px 8px;"
+      >
+        <span style="width:6px;height:6px;border-radius:50%;background:var(--color-warning);flex:0 0 auto;">
+        </span>
+        <span style="font-size:10px;font-weight:600;letter-spacing:0.03em;color:oklch(0.52 0.11 65);font-family:var(--font-mono);">
+          NEEDS INPUT
+        </span>
+      </div>
+      <div style="display:flex;align-items:center;gap:7px;">
+        <span
+          :if={card_status_label(@status, @progress)}
+          class="card-status"
+          data-status={@status}
+          style={"font-size:11px;font-family:var(--font-mono);color:#{card_status_color(@status)};"}
+        >
+          {card_status_label(@status, @progress)}
+        </span>
+        <span
+          :if={@tag && @status != :working}
+          class="card-tag"
+          style="font-size:11px;color:oklch(0.60 0.02 255);font-family:var(--font-mono);"
+        >
+          #{@tag}
+        </span>
+        <span style="flex:1;"></span>
+        <.owner_avatars owners={@owners} active_owner={@active_owner} />
       </div>
     </article>
     """
@@ -593,10 +773,55 @@ defmodule RelayWeb.CoreComponents do
   defp mismatch_message(:meant_for_agents), do: "This stage is meant to be used by agents"
   defp mismatch_message(:meant_for_humans), do: "This stage is meant for humans"
 
-  defp card_border_class(mismatch, _active_owner) when not is_nil(mismatch), do: "border-l-error"
-  defp card_border_class(nil, :ai), do: "border-l-secondary"
-  defp card_border_class(nil, :human), do: "border-l-primary"
-  defp card_border_class(nil, nil), do: "border-l-transparent"
+  # Accent precedence mirrors the mockup's decorateCard: mismatch (Relay's own
+  # red case) wins, then needs-input amber, then the green "finished" states
+  # (done status, a Done sub-lane, or a Complete-category stage), then the
+  # stage-owner colour.
+  #
+  # The returned `border-l-*` string is a *semantic/test hook only* — it is NOT
+  # what paints the border. The actual 3px accent colour is set inline in
+  # board_card/1 via card_accent_color/1 (an inline `style` beats the class, so
+  # the class carries no colour). Do not delete these classes as "unused": the
+  # board/card tests select on them (e.g. `.border-l-primary`, `.border-l-error`).
+  defp card_accent_class(mismatch, _assigns) when not is_nil(mismatch), do: "border-l-error"
+  defp card_accent_class(_mismatch, %{status: :needs_input}), do: "border-l-warning"
+  defp card_accent_class(_mismatch, %{status: :done}), do: "border-l-success"
+  defp card_accent_class(_mismatch, %{lane: :done}), do: "border-l-success"
+  defp card_accent_class(_mismatch, %{category: :complete}), do: "border-l-success"
+  defp card_accent_class(_mismatch, %{active_owner: :ai}), do: "border-l-secondary"
+  defp card_accent_class(_mismatch, %{active_owner: :human}), do: "border-l-primary"
+  defp card_accent_class(_mismatch, _assigns), do: "border-l-transparent"
+
+  defp card_accent_color("border-l-error"), do: "var(--color-error)"
+  defp card_accent_color("border-l-warning"), do: "var(--color-warning)"
+  defp card_accent_color("border-l-success"), do: "var(--color-success)"
+  defp card_accent_color("border-l-secondary"), do: "var(--color-secondary)"
+  defp card_accent_color("border-l-primary"), do: "var(--color-primary)"
+  defp card_accent_color("border-l-transparent"), do: "transparent"
+
+  defp card_status_label(:working, progress), do: "working · #{progress || 0}%"
+  defp card_status_label(:in_review, _progress), do: "ready"
+  defp card_status_label(:done, _progress), do: "done"
+  defp card_status_label(_status, _progress), do: nil
+
+  defp card_status_color(:working), do: "oklch(0.52 0.10 292)"
+  defp card_status_color(_status), do: "oklch(0.50 0.10 155)"
+
+  defp lane_color(:review), do: "oklch(0.52 0.12 65)"
+  defp lane_color(:done), do: "oklch(0.47 0.11 155)"
+  defp lane_color(_ongoing), do: "oklch(0.52 0.02 255)"
+
+  defp lane_tint(:review), do: "oklch(0.966 0.032 75)"
+  defp lane_tint(:done), do: "oklch(0.964 0.03 155)"
+  defp lane_tint(_ongoing), do: "transparent"
+
+  defp lane_divider(:review), do: "oklch(0.90 0.04 75)"
+  defp lane_divider(:done), do: "oklch(0.90 0.035 155)"
+  defp lane_divider(_ongoing), do: "oklch(0.915 0.008 255)"
+
+  defp owner_hex(:ai), do: "var(--color-secondary)"
+  defp owner_hex(:human), do: "var(--color-primary)"
+  defp owner_hex(_owner), do: "oklch(0.55 0.02 255)"
 
   @doc """
   Renders the card detail drawer (daisyUI `drawer drawer-end`): a scrim
@@ -722,7 +947,7 @@ defmodule RelayWeb.CoreComponents do
             </.form>
           </header>
           <section class="space-y-2">
-            <h4 class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+            <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
               Description
             </h4>
             <div
@@ -773,7 +998,7 @@ defmodule RelayWeb.CoreComponents do
             id={"#{@id}-rail"}
             class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 border-t border-base-300 pt-4 text-sm"
           >
-            <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+            <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
               Active worker
             </dt>
             <dd class="rail-active-worker flex items-center gap-2">
@@ -786,7 +1011,7 @@ defmodule RelayWeb.CoreComponents do
                 <span class="text-base-content/50">None</span>
               <% end %>
             </dd>
-            <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+            <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
               Owners
             </dt>
             <dd class="rail-owners space-y-2">
@@ -839,7 +1064,7 @@ defmodule RelayWeb.CoreComponents do
                 </button>
               </div>
             </dd>
-            <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+            <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
               Status
             </dt>
             <dd class="rail-status">
@@ -861,7 +1086,7 @@ defmodule RelayWeb.CoreComponents do
                 />
               </.form>
             </dd>
-            <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+            <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
               Stage
             </dt>
             <dd class="rail-stage flex flex-wrap items-center gap-2">
@@ -888,14 +1113,14 @@ defmodule RelayWeb.CoreComponents do
                 </ul>
               </div>
             </dd>
-            <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+            <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
               Tags
             </dt>
             <dd class="rail-tags">
               <span :if={@card.tag} class="badge badge-ghost badge-sm">#{@card.tag}</span>
               <span :if={!@card.tag} class="text-base-content/50">None</span>
             </dd>
-            <dt class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+            <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
               Dates
             </dt>
             <dd class="rail-dates space-y-0.5">
@@ -904,7 +1129,7 @@ defmodule RelayWeb.CoreComponents do
             </dd>
           </dl>
           <section class="space-y-3 border-t border-base-300 pt-4">
-            <h4 class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+            <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
               Activity
             </h4>
             <ol id={"#{@id}-timeline"} phx-update="stream" class="space-y-3">
@@ -1036,15 +1261,20 @@ defmodule RelayWeb.CoreComponents do
   defp activity_phrase(%Activity{type: :commented}), do: "commented"
 
   @doc """
-  Renders one stage column of the board: header (stage name, card-count
-  badge, Human/AI owner pill), the stage's cards in the order given, and
-  the "+ New card" compose control.
+  Renders one stage as the mockup's rounded stage card
+  (`docs/designs/Relay Board.dc.html`): a header (owner square swatch, name,
+  count, and a `+` add button) above a row of side-by-side lanes. The main
+  "In progress" lane is 240px; each Review/Done sub-lane is 178px, tinted
+  (amber/green) and split off by a vertical divider. The stage card grows to
+  fit its lanes.
 
   `cards` accepts a LiveView stream (preferred) or a list of
   `{dom_id, card}` tuples; each card needs `title`, `tag`, `ref_number`,
-  `status`, `progress`, and a loaded `owners` list. The dashed empty-state
-  placeholder lives inside the card container and is CSS-hidden
-  (`only:block`) as soon as the stage has cards.
+  `status`, `progress`, and a loaded `owners` list. Each lane body is its own
+  `phx-update="stream"` drop zone carrying `data-stage-id` (the main stage id
+  for the ongoing lane, each child stage id for the sub-lanes) — the DnD
+  contract is unchanged. The empty-state placeholder is CSS-hidden
+  (`only:block`) once the lane has cards.
 
   The compose control emits events handled by the parent LiveView:
   `"compose"` (with `phx-value-stage-id`) to open the composer,
@@ -1058,7 +1288,13 @@ defmodule RelayWeb.CoreComponents do
   attr :id, :string, required: true
   attr :name, :string, required: true
   attr :owner, :atom, values: [:human, :ai], required: true
-  attr :count, :integer, default: nil, doc: "the number of cards in the stage; badge hidden when nil"
+  attr :count, :integer, default: nil, doc: "the number of cards in the main lane; count hidden when nil"
+
+  attr :category, :atom,
+    values: [:unstarted, :in_progress, :complete, nil],
+    default: nil,
+    doc: "the stage's category, forwarded to its cards for the green accent"
+
   attr :stage_id, :any, default: nil, doc: "the stage's database id, echoed back in compose events"
   attr :board_key, :string, default: "RLY", doc: "the board's ref prefix, e.g. RLY in RLY-3"
   attr :cards, :any, default: [], doc: "a LiveView stream or a list of {dom_id, card} tuples"
@@ -1067,116 +1303,169 @@ defmodule RelayWeb.CoreComponents do
 
   attr :sublanes, :list,
     default: [],
-    doc: "the stage's Review/Done child lanes, each a %{id, name, owner, count, cards}"
+    doc: "the stage's Review/Done child lanes, each a %{id, name, lane, owner, count, cards}"
 
   def stage_column(assigns) do
+    assigns =
+      assigns
+      |> assign(:labeled, assigns.sublanes != [])
+      |> assign(:stage_width, 240 + 178 * length(assigns.sublanes))
+
     ~H"""
     <section
       id={@id}
-      class="stage-column flex w-60 shrink-0 flex-col gap-3 rounded-box bg-base-200 p-3"
+      class="stage-column"
+      style={"flex:0 0 auto;width:#{@stage_width}px;display:flex;flex-direction:column;height:100%;background:var(--color-base-100);border:1px solid var(--color-base-300);border-radius:14px;overflow:hidden;box-shadow:0 1px 3px oklch(0.5 0.02 255/0.06);"}
     >
-      <header class="flex items-center justify-between gap-2">
-        <div class="flex items-center gap-1.5">
-          <h3 class="text-sm font-semibold">{@name}</h3>
-          <span :if={@count} class="stage-count badge badge-ghost badge-sm font-mono">{@count}</span>
-        </div>
-        <.owner_pill owner={@owner} />
+      <header style="display:flex;align-items:center;gap:8px;padding:15px 15px 12px 15px;flex:0 0 auto;border-bottom:1px solid var(--color-base-300);">
+        <span
+          class="stage-owner-swatch"
+          data-owner={@owner}
+          style={"width:8px;height:8px;border-radius:3px;flex:0 0 auto;background:#{owner_hex(@owner)};"}
+        >
+        </span>
+        <h3 style="font-size:13px;font-weight:600;letter-spacing:-0.01em;color:var(--color-base-content);">
+          {@name}
+        </h3>
+        <span
+          :if={@count}
+          class="stage-count"
+          style="font-size:10.5px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);"
+        >
+          {@count}
+        </span>
+        <span style="flex:1;"></span>
+        <button
+          :if={!@composing}
+          type="button"
+          id={"#{@id}-new-card"}
+          class="stage-compose"
+          phx-click="compose"
+          phx-value-stage-id={@stage_id}
+          title="Add work"
+          aria-label="New card"
+          style="width:22px;height:22px;border-radius:6px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:oklch(0.45 0.02 255);font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex:0 0 auto;"
+        >
+          +
+        </button>
       </header>
-      <div
-        id={"#{@id}-cards"}
-        phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}
-        data-stage-id={@stage_id}
-        class="stage-cards flex flex-col gap-2"
-      >
-        <div
-          id={"#{@id}-empty"}
-          class="stage-empty hidden only:block rounded-lg border border-dashed border-base-content/20 px-3 py-6 text-center text-xs text-base-content/50"
-        >
-          No cards yet
-        </div>
-        <.board_card
-          :for={{dom_id, card} <- @cards}
-          id={dom_id}
-          title={card.title}
-          tag={card.tag}
-          ref={"#{@board_key}-#{card.ref_number}"}
-          status={card.status}
-          progress={card.progress}
-          active_owner={Cards.active_owner_type(card)}
-          stage_owner={@owner}
-        />
-      </div>
-      <div
-        :for={sub <- @sublanes}
-        id={"sublane-#{sub.id}"}
-        class="stage-sublane mt-1 rounded-lg border border-base-300/60 bg-base-100/40 p-2"
-      >
-        <header class="mb-1.5 flex items-center justify-between gap-2">
-          <h4 class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
-            {sub.name}
-          </h4>
-          <span class="badge badge-ghost badge-xs font-mono">{sub.count}</span>
-        </header>
-        <div
-          id={"sublane-#{sub.id}-cards"}
-          phx-update="stream"
-          data-stage-id={sub.id}
-          class="stage-cards flex flex-col gap-2"
-        >
+      <div style="display:flex;gap:0;flex:1;min-height:0;">
+        <%!-- main / ongoing lane --%>
+        <div style="flex:0 0 240px;width:240px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;">
           <div
-            id={"sublane-#{sub.id}-empty"}
-            class="stage-empty hidden only:block rounded-lg border border-dashed border-base-content/20 px-3 py-4 text-center text-xs text-base-content/40"
+            :if={@labeled}
+            style="display:flex;align-items:center;gap:6px;padding:11px 15px 7px 15px;flex:0 0 auto;"
           >
-            Empty
+            <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(:ongoing)};"}>
+              In progress
+            </span>
+            <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(:ongoing)};opacity:0.7;"}>
+              {@count}
+            </span>
           </div>
-          <.board_card
-            :for={{dom_id, card} <- sub.cards}
-            id={dom_id}
-            title={card.title}
-            tag={card.tag}
-            ref={"#{@board_key}-#{card.ref_number}"}
-            status={card.status}
-            progress={card.progress}
-            active_owner={Cards.active_owner_type(card)}
-            stage_owner={sub.owner}
-          />
+          <div style={"flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:#{if(@labeled, do: "0", else: "13px")} 13px 13px 15px;"}>
+            <div :if={@composing} id={"#{@id}-composer"} phx-click-away="cancel_compose">
+              <.form
+                for={@compose_form}
+                id={"#{@id}-compose-form"}
+                phx-change="validate_card"
+                phx-submit="create_card"
+              >
+                <input type="hidden" name="stage_id" value={@stage_id} />
+                <.input
+                  field={@compose_form[:title]}
+                  type="text"
+                  placeholder="Card title"
+                  autofocus
+                  autocomplete="off"
+                  class="input input-sm w-full"
+                  phx-keydown="cancel_compose"
+                  phx-key="escape"
+                />
+                <div class="mt-2 flex items-center gap-2">
+                  <.button variant="primary" class="btn btn-primary btn-xs">Add card</.button>
+                  <button type="button" class="btn btn-ghost btn-xs" phx-click="cancel_compose">
+                    Cancel
+                  </button>
+                </div>
+              </.form>
+            </div>
+            <div
+              id={"#{@id}-cards"}
+              phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}
+              data-stage-id={@stage_id}
+              class="stage-cards"
+              style="display:flex;flex-direction:column;gap:8px;"
+            >
+              <div
+                id={"#{@id}-empty"}
+                class="stage-empty hidden only:block"
+                style="border:1px dashed var(--color-base-300);border-radius:8px;padding:18px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);"
+              >
+                No cards yet
+              </div>
+              <.board_card
+                :for={{dom_id, card} <- @cards}
+                id={dom_id}
+                title={card.title}
+                tag={card.tag}
+                ref={"#{@board_key}-#{card.ref_number}"}
+                status={card.status}
+                progress={card.progress}
+                owners={card.owners}
+                active_owner={Cards.active_owner_type(card)}
+                stage_owner={@owner}
+                lane={:main}
+                category={@category}
+              />
+            </div>
+          </div>
+        </div>
+        <%!-- Review / Done sub-lanes, side by side --%>
+        <div
+          :for={sub <- @sublanes}
+          id={"sublane-#{sub.id}"}
+          style={"flex:0 0 178px;width:178px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;background:#{lane_tint(sub.lane)};border-left:1px solid #{lane_divider(sub.lane)};"}
+        >
+          <div style="display:flex;align-items:center;gap:6px;padding:11px 13px 7px 13px;flex:0 0 auto;">
+            <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(sub.lane)};"}>
+              {sub.name}
+            </span>
+            <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(sub.lane)};opacity:0.7;"}>
+              {sub.count}
+            </span>
+          </div>
+          <div
+            id={"sublane-#{sub.id}-cards"}
+            phx-update="stream"
+            data-stage-id={sub.id}
+            class="stage-cards"
+            style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:0 13px 13px 13px;"
+          >
+            <div
+              id={"sublane-#{sub.id}-empty"}
+              class="stage-empty hidden only:block"
+              style="border:1px dashed var(--color-base-300);border-radius:8px;padding:14px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:oklch(0.70 0.02 255);"
+            >
+              Empty
+            </div>
+            <.board_card
+              :for={{dom_id, card} <- sub.cards}
+              id={dom_id}
+              title={card.title}
+              tag={card.tag}
+              ref={"#{@board_key}-#{card.ref_number}"}
+              status={card.status}
+              progress={card.progress}
+              owners={card.owners}
+              active_owner={Cards.active_owner_type(card)}
+              stage_owner={sub.owner}
+              lane={sub.lane}
+              category={@category}
+            />
+          </div>
         </div>
       </div>
-      <div :if={@composing} id={"#{@id}-composer"} phx-click-away="cancel_compose">
-        <.form
-          for={@compose_form}
-          id={"#{@id}-compose-form"}
-          phx-change="validate_card"
-          phx-submit="create_card"
-        >
-          <input type="hidden" name="stage_id" value={@stage_id} />
-          <.input
-            field={@compose_form[:title]}
-            type="text"
-            placeholder="Card title"
-            autofocus
-            autocomplete="off"
-            phx-keydown="cancel_compose"
-            phx-key="escape"
-          />
-          <div class="flex items-center gap-2">
-            <.button variant="primary" class="btn btn-primary btn-sm">Add card</.button>
-            <button type="button" class="btn btn-ghost btn-sm" phx-click="cancel_compose">
-              Cancel
-            </button>
-          </div>
-        </.form>
-      </div>
-      <button
-        :if={!@composing}
-        type="button"
-        id={"#{@id}-new-card"}
-        class="stage-compose btn btn-ghost btn-sm justify-start text-base-content/60"
-        phx-click="compose"
-        phx-value-stage-id={@stage_id}
-      >
-        <.icon name="hero-plus" class="size-4" /> New card
-      </button>
     </section>
     """
   end

@@ -62,7 +62,8 @@ defmodule RelayWeb.CoreComponentsTest do
 
       assert html =~ ~s(id="stage-col-1")
       assert html =~ "Backlog"
-      assert html =~ "badge-primary"
+      assert html =~ "stage-owner-swatch"
+      assert html =~ ~s(data-owner="human")
       assert html =~ "stage-empty"
       assert html =~ "No cards yet"
       assert html =~ ~s(id="stage-col-1-new-card")
@@ -100,7 +101,7 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(id="cards-2")
       assert html =~ "RLY-2"
       assert html =~ ~s(data-active-owner="ai")
-      assert html =~ "working·40%"
+      assert html =~ "working · 40%"
     end
 
     test "shows the composer form instead of the compose button when composing" do
@@ -157,12 +158,12 @@ defmodule RelayWeb.CoreComponentsTest do
       html = render_component(&CoreComponents.board_card/1, id: "c1", ref: "RLY-1", title: "T")
 
       assert html =~ "border-l-transparent"
-      refute html =~ "card-owner-pill"
-      refute html =~ "status-badge"
+      refute html =~ "card-owners"
+      refute html =~ "card-status"
       refute html =~ "card-mismatch"
     end
 
-    test "human active renders the blue border and Human pill" do
+    test "human active renders the blue border and owner avatar" do
       html =
         render_component(&CoreComponents.board_card/1,
           id: "c2",
@@ -170,17 +171,18 @@ defmodule RelayWeb.CoreComponentsTest do
           title: "T",
           active_owner: :human,
           stage_owner: :human,
-          status: :queued
+          status: :queued,
+          owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}]
         )
 
       assert html =~ "border-l-primary"
       assert html =~ ~s(data-active-owner="human")
-      assert html =~ "card-owner-pill"
-      assert html =~ "badge-primary"
+      assert html =~ "card-owners"
+      assert html =~ ~s(data-actor-type="user")
       refute html =~ "card-mismatch"
     end
 
-    test "AI active renders the violet border, AI pill, and working progress" do
+    test "AI active renders the violet border, AI avatar, and working progress" do
       html =
         render_component(&CoreComponents.board_card/1,
           id: "c3",
@@ -189,13 +191,15 @@ defmodule RelayWeb.CoreComponentsTest do
           active_owner: :ai,
           stage_owner: :ai,
           status: :working,
-          progress: 61
+          progress: 61,
+          owners: [%{actor_type: :agent}]
         )
 
       assert html =~ "border-l-secondary"
       assert html =~ ~s(data-active-owner="ai")
-      assert html =~ "badge-secondary"
-      assert html =~ "working·61%"
+      assert html =~ "card-owners"
+      assert html =~ ~s(data-actor-type="agent")
+      assert html =~ "working · 61%"
       refute html =~ "card-mismatch"
     end
 

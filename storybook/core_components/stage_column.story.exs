@@ -19,6 +19,7 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           owner: :ai,
           stage_id: 4,
           count: 2,
+          category: :in_progress,
           board_key: "RLY",
           cards: [
             {"story-card-1",
@@ -33,7 +34,7 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
             {"story-card-2",
              %{
                title: "Render the stage columns",
-               tag: nil,
+               tag: "ui",
                ref_number: 2,
                status: :queued,
                progress: nil,
@@ -62,10 +63,12 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
                owners: [%{actor_type: :agent}]
              }}
           ],
+          category: :in_progress,
           sublanes: [
             %{
               id: 401,
               name: "Review",
+              lane: :review,
               owner: :human,
               count: 1,
               cards: [
@@ -74,13 +77,13 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
                    title: "Approve the sign-in flow",
                    tag: nil,
                    ref_number: 4,
-                   status: :queued,
+                   status: :in_review,
                    progress: nil,
-                   owners: []
+                   owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}]
                  }}
               ]
             },
-            %{id: 402, name: "Done", owner: :ai, count: 0, cards: []}
+            %{id: 402, name: "Done", lane: :done, owner: :ai, count: 0, cards: []}
           ]
         }
       },
