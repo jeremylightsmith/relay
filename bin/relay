@@ -250,6 +250,43 @@ def render(template, vars):
     return template
 
 
+def _print_claude_event(ev):
+    """Render one stream-json event from a headless claude as a readable feed line."""
+    t = ev.get("type")
+    if t == "assistant":
+        for b in ev.get("message", {}).get("content", []):
+            if b.get("type") == "text" and b.get("text", "").strip():
+                print("    🤖 " + b["text"].strip()[:600], flush=True)
+            elif b.get("type") == "tool_use":
+                inp = b.get("input", {}) or {}
+                brief = (inp.get("command") or inp.get("file_path") or inp.get("path")
+                         or inp.get("pattern") or inp.get("description") or "")
+                print(f"    🔧 {b.get('name')}  {str(brief)[:140]}", flush=True)
+    elif t == "result":
+        turns = ev.get("num_turns")
+        print(f"    {'✗' if ev.get('is_error') else '✓'} claude finished"
+              + (f" ({turns} turns)" if turns else ""), flush=True)
+
+
+def _stream_claude(prompt):
+    """Run headless claude with a live streamed feed. Returns True on success.
+    --dangerously-skip-permissions lets it use tools unattended (this is an
+    autonomous runner); --output-format stream-json emits one event per step."""
+    cmd = ["claude", "-p", prompt, "--dangerously-skip-permissions",
+           "--verbose", "--output-format", "stream-json"]
+    proc = subprocess.Popen(cmd, cwd=ROOT, text=True, bufsize=1,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    for line in proc.stdout:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            _print_claude_event(json.loads(line))
+        except Exception:
+            print("    " + line[:200], flush=True)
+    return proc.wait() == 0
+
+
 def run_step(step, vars):
     """A pipeline step is {shell: cmd} or {claude: prompt}. Returns True on success."""
     if "shell" in step:
@@ -263,7 +300,7 @@ def run_step(step, vars):
         if DRY:
             log("  (dry) claude -p <<<\n" + "\n".join("      " + l for l in prompt.splitlines()))
             return True
-        return subprocess.run(["claude", "-p", prompt], cwd=ROOT).returncode == 0
+        return _stream_claude(prompt)
     log(f"  ! unknown step: {step}")
     return False
 
