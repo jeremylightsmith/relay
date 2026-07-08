@@ -137,6 +137,92 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           composing: true,
           compose_form: Phoenix.Component.to_form(%{"title" => ""}, as: :card)
         }
+      },
+      %Variation{
+        id: :wip_within_limit,
+        description: "A WIP-limited stage within its limit shows the neutral wip chip (MMF 11)",
+        attributes: %{
+          id: "story-stage-wip-ok",
+          name: "Code",
+          owner: :ai,
+          stage_id: 7,
+          count: 2,
+          wip_limit: 3,
+          category: :in_progress,
+          board_key: "RLY",
+          cards: [
+            {"story-card-wip-1",
+             %{
+               title: "Wire up Google sign-in",
+               tag: "auth",
+               ref_number: 6,
+               status: :working,
+               progress: 61,
+               owners: [%{actor_type: :agent}]
+             }},
+            {"story-card-wip-2",
+             %{
+               title: "Render the stage columns",
+               tag: "ui",
+               ref_number: 7,
+               status: :queued,
+               progress: nil,
+               owners: []
+             }}
+          ]
+        }
+      },
+      %Variation{
+        id: :wip_over_limit,
+        description: "Exceeding the limit flips the chip to the rose over-WIP treatment (MMF 11)",
+        attributes: %{
+          id: "story-stage-wip-over",
+          name: "Code",
+          owner: :ai,
+          stage_id: 8,
+          count: 4,
+          wip_limit: 3,
+          category: :in_progress,
+          board_key: "RLY",
+          cards: [
+            {"story-card-wip-3",
+             %{
+               title: "Ship the WIP chip",
+               tag: "ui",
+               ref_number: 8,
+               status: :working,
+               progress: 40,
+               owners: [%{actor_type: :agent}]
+             }},
+            {"story-card-wip-4",
+             %{
+               title: "Fix the flaky deploy",
+               tag: "infra",
+               ref_number: 9,
+               status: :queued,
+               progress: nil,
+               owners: []
+             }},
+            {"story-card-wip-5",
+             %{
+               title: "Add the settings stepper",
+               tag: nil,
+               ref_number: 10,
+               status: :working,
+               progress: 15,
+               owners: [%{actor_type: :agent}]
+             }},
+            {"story-card-wip-6",
+             %{
+               title: "Write the move warning",
+               tag: nil,
+               ref_number: 11,
+               status: :queued,
+               progress: nil,
+               owners: []
+             }}
+          ]
+        }
       }
     ]
   end

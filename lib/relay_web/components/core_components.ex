@@ -826,6 +826,11 @@ defmodule RelayWeb.CoreComponents do
   defp owner_hex(:human), do: "var(--color-primary)"
   defp owner_hex(_owner), do: "oklch(0.55 0.02 255)"
 
+  # MMF 11 WIP chip colours (mockup "Relay Board.dc.html" line ~1010):
+  # over-limit rose vs. within-limit neutral.
+  defp wip_chip_colors(true), do: "background:oklch(0.96 0.03 15);color:oklch(0.55 0.16 15);"
+  defp wip_chip_colors(false), do: "background:oklch(0.96 0.006 255);color:oklch(0.48 0.02 255);"
+
   @doc """
   Renders the card detail drawer (daisyUI `drawer drawer-end`): a scrim
   plus a right-side panel with the card's stage chip (stage name in the
@@ -1298,6 +1303,10 @@ defmodule RelayWeb.CoreComponents do
   attr :owner, :atom, values: [:human, :ai], required: true
   attr :count, :integer, default: nil, doc: "the number of cards in the main lane; count hidden when nil"
 
+  attr :wip_limit, :integer,
+    default: nil,
+    doc: "the stage's optional WIP limit (MMF 11); the header chip is hidden when nil"
+
   attr :category, :atom,
     values: [:unstarted, :planning, :in_progress, :complete, nil],
     default: nil,
@@ -1381,6 +1390,14 @@ defmodule RelayWeb.CoreComponents do
             style="font-size:10.5px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);"
           >
             {@count}
+          </span>
+          <span
+            :if={@wip_limit}
+            class="stage-wip"
+            data-over={(@count || 0) > @wip_limit}
+            style={"font-size:11px;font-weight:600;font-family:var(--font-mono);padding:2px 7px;border-radius:5px;flex:0 0 auto;#{wip_chip_colors((@count || 0) > @wip_limit)}"}
+          >
+            wip {@count || 0}/{@wip_limit}
           </span>
           <span style="flex:1;"></span>
           <button

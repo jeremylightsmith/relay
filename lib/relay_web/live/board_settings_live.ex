@@ -67,13 +67,13 @@ defmodule RelayWeb.BoardSettingsLive do
               <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px 0;color:oklch(0.26 0.02 255);">
                 Stages
               </h1>
-              <%!-- Mockup line ~217; the WIP-limit mention is deferred to MMF 11. --%>
+              <%!-- Mockup line ~217. --%>
               <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 12px 0;max-width:560px;">
                 Stages live inside four categories — <b style="color:oklch(0.34 0.02 255);">Unstarted</b>, <b style="color:oklch(0.34 0.02 255);">Planning</b>, <b style="color:oklch(0.34 0.02 255);">In progress</b>, and
                 <b style="color:oklch(0.34 0.02 255);">Complete</b>
                 — so everyone knows what a stage <i>means</i>. Use the arrows to move a stage
                 up or down — cross into another category and it takes on that meaning. Set
-                each stage's owner and whether finished work waits in a Done sub-column.
+                each stage's owner, WIP limit, and whether finished work waits in a Done sub-column.
               </p>
 
               <%!-- All four groups always render so an emptied category stays reachable. --%>
@@ -167,8 +167,7 @@ defmodule RelayWeb.BoardSettingsLive do
                         style="border:1px solid oklch(0.92 0.006 255);border-radius:8px;padding:8px 11px;font-size:13px;color:oklch(0.42 0.02 255);background:oklch(0.99 0.002 255);outline:none;"
                       />
                     </form>
-                    <%!-- Controls row — MMF 11's WIP control slots in between
-                         OWNER and DONE COLUMN (mockup lines ~241-262). --%>
+                    <%!-- Controls row — OWNER / WIP (MMF 11) / DONE COLUMN (mockup lines ~241-262). --%>
                     <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
                       <div style="display:flex;align-items:center;gap:9px;">
                         <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
@@ -194,6 +193,54 @@ defmodule RelayWeb.BoardSettingsLive do
                             style={segment_style(stage.owner == :ai)}
                           >
                             AI
+                          </button>
+                        </div>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:9px;">
+                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
+                          WIP
+                        </span>
+                        <button
+                          type="button"
+                          id={"stage-#{stage.id}-wip-toggle"}
+                          phx-click="toggle_wip"
+                          phx-value-stage-id={stage.id}
+                          style={wip_toggle_style(stage.wip_limit != nil)}
+                        >
+                          {if stage.wip_limit, do: "On", else: "Off"}
+                        </button>
+                        <div
+                          :if={stage.wip_limit}
+                          style="display:inline-flex;align-items:center;border:1px solid oklch(0.90 0.006 255);border-radius:8px;overflow:hidden;"
+                        >
+                          <button
+                            type="button"
+                            id={"stage-#{stage.id}-wip-down"}
+                            phx-click="bump_wip"
+                            phx-value-stage-id={stage.id}
+                            phx-value-delta="-1"
+                            aria-label="Decrease WIP limit"
+                            style="width:26px;height:30px;border:none;background:oklch(0.98 0.002 255);color:oklch(0.50 0.02 255);font-size:15px;padding:0;"
+                          >
+                            −
+                          </button>
+                          <span
+                            id={"stage-#{stage.id}-wip-value"}
+                            class="font-mono"
+                            style="width:32px;text-align:center;font-size:13px;color:oklch(0.30 0.02 255);"
+                          >
+                            {stage.wip_limit}
+                          </span>
+                          <button
+                            type="button"
+                            id={"stage-#{stage.id}-wip-up"}
+                            phx-click="bump_wip"
+                            phx-value-stage-id={stage.id}
+                            phx-value-delta="1"
+                            aria-label="Increase WIP limit"
+                            style="width:26px;height:30px;border:none;background:oklch(0.98 0.002 255);color:oklch(0.50 0.02 255);font-size:15px;padding:0;"
+                          >
+                            +
                           </button>
                         </div>
                       </div>
@@ -422,6 +469,22 @@ defmodule RelayWeb.BoardSettingsLive do
     {:noreply, refresh_stages(socket)}
   end
 
+  # MMF 11 — the mockup's onToggleLimit (line ~1102): enabling defaults the
+  # limit to 3, disabling clears it (nil = no limit, chip hidden, enforcement off).
+  def handle_event("toggle_wip", %{"stage-id" => stage_id}, socket) do
+    stage = find_stage(socket, stage_id)
+    {:ok, _stage} = Boards.update_stage(stage, %{wip_limit: if(stage.wip_limit, do: nil, else: 3)})
+    {:noreply, refresh_stages(socket)}
+  end
+
+  # MMF 11 — the mockup's bumpWip (line ~892): step by ±1, flooring at 1.
+  def handle_event("bump_wip", %{"stage-id" => stage_id, "delta" => delta}, socket) when delta in ["1", "-1"] do
+    stage = find_stage(socket, stage_id)
+    limit = max(1, (stage.wip_limit || 1) + String.to_integer(delta))
+    {:ok, _stage} = Boards.update_stage(stage, %{wip_limit: limit})
+    {:noreply, refresh_stages(socket)}
+  end
+
   def handle_event("reorder_stage", %{"stage-id" => stage_id, "direction" => direction}, socket)
       when direction in ["up", "down"] do
     {:ok, _stage} = Boards.reorder_stage(find_stage(socket, stage_id), direction_atom(direction))
@@ -545,6 +608,17 @@ defmodule RelayWeb.BoardSettingsLive do
   defp segment_style(false) do
     "font-size:12px;font-weight:600;padding:6px 13px;border-radius:6px;" <>
       "background:transparent;color:oklch(0.52 0.02 255);border:none;white-space:nowrap;"
+  end
+
+  # The mockup's limitToggleStyle (line ~1092): blue-tinted when On.
+  defp wip_toggle_style(true) do
+    "font-size:12px;font-weight:600;padding:5px 12px;border-radius:7px;" <>
+      "border:1px solid oklch(0.75 0.10 250);background:oklch(0.96 0.03 250);color:oklch(0.45 0.13 250);"
+  end
+
+  defp wip_toggle_style(false) do
+    "font-size:12px;font-weight:600;padding:5px 12px;border-radius:7px;" <>
+      "border:1px solid oklch(0.90 0.006 255);background:oklch(1 0 0);color:oklch(0.52 0.02 255);"
   end
 
   # Human = blue, AI = violet (theme tokens in app.css).
