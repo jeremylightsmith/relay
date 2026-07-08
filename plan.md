@@ -556,7 +556,7 @@ green.
 
 **Steps**
 
-- [ ] Write the LiveView tests first.
+- [x] Write the LiveView tests first.
 
   In `test/relay_web/live/board_live_test.exs`, add inside the `describe "when logged in"`
   block (after the `"groups the stages under their category bands in order"` test):
@@ -642,13 +642,13 @@ green.
   end
   ```
 
-- [ ] Run
+- [x] Run
   `mix test test/relay_web/live/board_live_test.exs test/relay_web/live/board_settings_stages_test.exs test/relay_web/live/board_live_realtime_test.exs`
   — expect the two dot tests to FAIL (no `.category-dot` class exists yet); the add-to-planning
   and realtime tests should already pass on Task 1's work (they are regression coverage — verify
   they do).
 
-- [ ] Add the `category-dot` class to both dot spans.
+- [x] Add the `category-dot` class to both dot spans.
 
   In `lib/relay_web/live/board_live.ex` (the category `<section>` band header), replace
 
@@ -674,7 +674,7 @@ green.
   <span class="category-dot" style={category_dot_style(category)}></span>
   ```
 
-- [ ] Update the settings pane copy and comments in `lib/relay_web/live/board_settings_live.ex`:
+- [x] Update the settings pane copy and comments in `lib/relay_web/live/board_settings_live.ex`:
 
   1. Replace the intro paragraph fragment
 
@@ -699,7 +699,7 @@ green.
   3. In the `refresh_stages/1` code comment, change `All three categories always render` to
      `All four categories always render`.
 
-- [ ] Add `:planning` to the component attr enums in
+- [x] Add `:planning` to the component attr enums in
   `lib/relay_web/components/core_components.ex` — in BOTH the `board_card` and `stage_column`
   components, replace
 
@@ -717,7 +717,7 @@ green.
 
   (two occurrences; keep each attr's `default:`/`doc:` lines as they are).
 
-- [ ] Grep-verify nothing was missed: run
+- [x] Grep-verify nothing was missed: run
   `grep -rn "unstarted" lib test storybook | grep -v planning` and inspect the hits — every
   place that enumerates the category set (module attributes, `category_*` function clause
   groups, `values:` lists, seed tuples, guards, tests iterating categories) must now include
@@ -725,9 +725,9 @@ green.
   `storybook/core_components/stage_column.story.exs` variations use a single
   `category: :in_progress` value and do not enumerate the category set — no change needed there.
 
-- [ ] Run `mix test` — full suite green (the dot tests now pass).
-- [ ] Run `mix precommit` — must pass. Fix anything it flags.
-- [ ] Commit.
+- [x] Run `mix test` — full suite green (the dot tests now pass).
+- [x] Run `mix precommit` — must pass. Fix anything it flags.
+- [x] Commit.
 
 **Deliverable:** The board renders the PLANNING band (label + violet `--color-secondary` dot)
 when non-empty; settings always shows all four category groups, each with its dot, PLANNING
