@@ -229,7 +229,7 @@ conventions: `Relay.CLI.create/2` (resolves an optional `--stage` *name* to an i
 
 **Steps**
 
-- [ ] Write the failing CLI tests. Append these to `test/relay/cli_test.exs` (before the
+- [x] Write the failing CLI tests. Append these to `test/relay/cli_test.exs` (before the
   module's final `end`). They use the file's existing `stub/1` helper (`Req.Test.stub`):
 
   ```elixir
@@ -324,10 +324,10 @@ conventions: `Relay.CLI.create/2` (resolves an optional `--stage` *name* to an i
   end
   ```
 
-- [ ] Run the new tests and confirm they fail (no `create/2` yet):
+- [x] Run the new tests and confirm they fail (no `create/2` yet):
   `mix test test/relay/cli_test.exs`.
 
-- [ ] Implement `Relay.CLI.create/2`. In `lib/relay/cli.ex`, add the function after
+- [x] Implement `Relay.CLI.create/2`. In `lib/relay/cli.ex`, add the function after
   `move/3` (keep `defp env`, `defp send_request`, etc. below it), and add the `put_if/3`
   helper alongside the other private helpers:
 
@@ -370,7 +370,7 @@ conventions: `Relay.CLI.create/2` (resolves an optional `--stage` *name* to an i
   defp put_if(map, key, value), do: Map.put(map, key, value)
   ```
 
-- [ ] Wire it into the mix task. In `lib/mix/tasks/relay.ex`, add a `create` dispatch
+- [x] Wire it into the mix task. In `lib/mix/tasks/relay.ex`, add a `create` dispatch
   clause (before the catch-all `dispatch(_argv, _opts)` clause). It parses the optional
   flags with `OptionParser` and merges them into `opts`:
 
@@ -393,10 +393,10 @@ conventions: `Relay.CLI.create/2` (resolves an optional `--stage` *name* to an i
       create "Title" [--stage N] create a card (first stage unless --stage)
   ```
 
-- [ ] Run the tests again and confirm they pass:
+- [x] Run the tests again and confirm they pass:
   `mix test test/relay/cli_test.exs`.
 
-- [ ] Run `mix precommit` and fix any failures.
+- [x] Run `mix precommit` and fix any failures.
 
 **Deliverable:** `mix relay create "Title" [--stage NAME] [--description TEXT] [--tag TAG]
 [--json]` creates a card via the API and prints the one-line card summary (or JSON with
