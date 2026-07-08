@@ -81,7 +81,7 @@ defmodule RelayWeb.BoardLive do
         id="card-drawer"
         ref={Cards.ref(@board, @selected_card)}
         card={@selected_card}
-        stage_name={@selected_stage.name}
+        stage_name={drawer_stage_name(@selected_stage, @board.stages)}
         stage_owner={@selected_stage.owner}
         stages={move_targets(@board, @selected_card)}
         active_owner={Cards.active_owner_type(@selected_card)}
@@ -359,6 +359,14 @@ defmodule RelayWeb.BoardLive do
   defp move_target_name(%Stage{parent_id: parent_id} = stage, stages_by_id) do
     parent = Map.fetch!(stages_by_id, parent_id)
     "#{parent.name} · #{lane_label(stage.lane)}"
+  end
+
+  # The drawer header chip and "Stage" rail label render whatever stage
+  # is selected, including a sub-lane child — sanitize it the same way
+  # move_target_name/2 already does for the move menu, so the composite
+  # internal Stage.name ("Code:Review") never reaches either spot.
+  defp drawer_stage_name(%Stage{} = stage, stages) do
+    move_target_name(stage, Map.new(stages, &{&1.id, &1}))
   end
 
   defp resolve_stage(socket, stage_id) do

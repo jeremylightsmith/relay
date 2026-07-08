@@ -96,6 +96,22 @@ defmodule Relay.Boards do
     )
   end
 
+  @doc """
+  The human-facing label for `stage`: its own `name` for a main-lane
+  stage, or `"<parent name> · Review|Done"` for a sub-lane child (loading
+  the parent). Guards the same composite-name leak (`enable_lane/2`
+  builds the child's internal `name` as `"Code:Review"`) that the
+  drawer's move menu already sanitizes — route any other display of a
+  stage name (e.g. the `:moved` activity phrase) through this instead of
+  the raw `Stage.name`.
+  """
+  def stage_display_name(%Stage{lane: :main} = stage), do: stage.name
+
+  def stage_display_name(%Stage{parent_id: parent_id, lane: lane}) do
+    parent = Repo.get!(Stage, parent_id)
+    "#{parent.name} · #{lane_word(lane)}"
+  end
+
   defp get_sublane(%Stage{} = parent, lane) do
     Repo.get_by(Stage, parent_id: parent.id, lane: lane)
   end
