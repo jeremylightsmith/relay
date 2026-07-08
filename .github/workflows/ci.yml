@@ -96,20 +96,15 @@ jobs:
       - run: npx --prefix assets playwright install chromium --with-deps
       - run: mix test --only playwright --max-cases 1
 
-  # Deploy to Fly only after BOTH test suites pass, and only for pushes to main.
-  # DISABLED until the app is provisioned on Fly — run `fly launch` to create
-  # fly.toml + the app, add the FLY_API_TOKEN repo secret, then uncomment.
-  # See https://fly.io/docs/app-guides/continuous-deployment-with-github-actions/
-  #
-  # deploy:
-  #   name: Deploy app
-  #   runs-on: ubuntu-latest
-  #   needs: [test, browser-tests]
-  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-  #   concurrency: deploy-group # ensure only one deploy runs at a time
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: superfly/flyctl-actions/setup-flyctl@master
-  #     - run: flyctl deploy --remote-only
-  #       env:
-  #         FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+  deploy:
+    name: Deploy app
+    runs-on: ubuntu-latest
+    needs: [test, browser-tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    concurrency: deploy-group # ensure only one deploy runs at a time
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
