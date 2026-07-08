@@ -1065,6 +1065,10 @@ defmodule RelayWeb.CoreComponents do
   attr :composing, :boolean, default: false
   attr :compose_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[title]; required when composing"
 
+  attr :sublanes, :list,
+    default: [],
+    doc: "the stage's Review/Done child lanes, each a %{id, name, owner, count, cards}"
+
   def stage_column(assigns) do
     ~H"""
     <section
@@ -1101,6 +1105,42 @@ defmodule RelayWeb.CoreComponents do
           active_owner={Cards.active_owner_type(card)}
           stage_owner={@owner}
         />
+      </div>
+      <div
+        :for={sub <- @sublanes}
+        id={"sublane-#{sub.id}"}
+        class="stage-sublane mt-1 rounded-lg border border-base-300/60 bg-base-100/40 p-2"
+      >
+        <header class="mb-1.5 flex items-center justify-between gap-2">
+          <h4 class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
+            {sub.name}
+          </h4>
+          <span class="badge badge-ghost badge-xs font-mono">{sub.count}</span>
+        </header>
+        <div
+          id={"sublane-#{sub.id}-cards"}
+          phx-update="stream"
+          data-stage-id={sub.id}
+          class="stage-cards flex flex-col gap-2"
+        >
+          <div
+            id={"sublane-#{sub.id}-empty"}
+            class="stage-empty hidden only:block rounded-lg border border-dashed border-base-content/20 px-3 py-4 text-center text-xs text-base-content/40"
+          >
+            Empty
+          </div>
+          <.board_card
+            :for={{dom_id, card} <- sub.cards}
+            id={dom_id}
+            title={card.title}
+            tag={card.tag}
+            ref={"#{@board_key}-#{card.ref_number}"}
+            status={card.status}
+            progress={card.progress}
+            active_owner={Cards.active_owner_type(card)}
+            stage_owner={sub.owner}
+          />
+        </div>
       </div>
       <div :if={@composing} id={"#{@id}-composer"} phx-click-away="cancel_compose">
         <.form

@@ -1162,6 +1162,37 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
+  describe "sub-lanes" do
+    setup %{conn: conn} do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, _review} = Boards.enable_lane(code, :review)
+      %{conn: Plug.Test.init_test_session(conn, user_id: user.id), board: board, code: code}
+    end
+
+    test "renders a stage's review sub-lane stacked with its own count", %{conn: conn, code: code} do
+      {:ok, _view, html} = live(conn, ~p"/board")
+      review = code |> Boards.sublanes() |> hd()
+      assert html =~ "sublane-#{review.id}"
+      assert html =~ "Review"
+    end
+
+    test "a card moved into the review sub-lane renders there", %{conn: conn, code: code} do
+      review = code |> Boards.sublanes() |> hd()
+      card = insert(:card, stage: code)
+
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      render_hook(view, "move_card", %{"ref" => card_ref(card), "stage_id" => review.id})
+
+      # Assert by container + title (the card's DOM id is stream-generated, not #card-<id>).
+      assert has_element?(view, "#sublane-#{review.id}-cards", card.title)
+    end
+
+    defp card_ref(card), do: "RLY-#{card.ref_number}"
+  end
+
   defp stage_titles(view, position) do
     view
     |> render()

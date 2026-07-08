@@ -60,6 +60,17 @@ defmodule RelayWeb.BoardLive do
                 cards={Map.fetch!(@streams, stream_name(stage.id))}
                 composing={@composing_stage_id == stage.id}
                 compose_form={@compose_form}
+                sublanes={
+                  for sub <- Map.get(@sublanes_by_parent, stage.id, []) do
+                    %{
+                      id: sub.id,
+                      name: lane_label(sub.lane),
+                      owner: sub.owner,
+                      count: Map.fetch!(@stage_counts, sub.id),
+                      cards: Map.fetch!(@streams, stream_name(sub.id))
+                    }
+                  end
+                }
               />
             </div>
           </section>
@@ -98,6 +109,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:board, board)
       |> assign(:stage_groups, group_stages(board.stages))
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
+      |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
       |> assign(:composing_stage_id, nil)
       |> assign(:compose_form, empty_compose_form())
       |> stream_configure(:timeline, dom_id: &timeline_dom_id/1)
@@ -288,12 +300,26 @@ defmodule RelayWeb.BoardLive do
   # category order and dropping empty categories (per spec: headers render
   # only for non-empty categories).
   defp group_stages(stages) do
-    groups = Enum.group_by(stages, & &1.category)
+    groups = stages |> Enum.filter(&(&1.lane == :main)) |> Enum.group_by(& &1.category)
 
     @category_order
     |> Enum.map(&{&1, Map.get(groups, &1, [])})
     |> Enum.reject(fn {_category, category_stages} -> category_stages == [] end)
   end
+
+  # Children grouped under their parent's id, each list ordered Review→Done.
+  defp sublanes_by_parent(stages) do
+    stages
+    |> Enum.filter(&(&1.lane != :main))
+    |> Enum.group_by(& &1.parent_id)
+    |> Map.new(fn {parent_id, children} -> {parent_id, Enum.sort_by(children, &lane_order/1)} end)
+  end
+
+  defp lane_order(%Stage{lane: :review}), do: 0
+  defp lane_order(%Stage{lane: :done}), do: 1
+
+  defp lane_label(:review), do: "Review"
+  defp lane_label(:done), do: "Done"
 
   # Streams can't be counted, so lane counts live in their own assign,
   # recomputed from the grouped cards (mount, moves) and bumped on create.
