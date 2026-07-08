@@ -16,6 +16,8 @@ defmodule Relay.Events do
       `Schemas.Activity` entry (with `:user` preloaded).
     * `{:stages_changed, board_id}` — any stage/config change; coarse on
       purpose, receivers refetch stages.
+    * `{:board_updated, board}` — a board's editable attributes (currently
+      just `name`) changed; carries the fresh board (stages not preloaded).
 
   Broadcasting is fire-and-forget: `broadcast/2` swallows PubSub errors
   and always returns `:ok`, so a broadcast failure can never fail the

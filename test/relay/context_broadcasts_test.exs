@@ -5,6 +5,7 @@ defmodule Relay.ContextBroadcastsTest do
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Events
+  alias Schemas.Board
   alias Schemas.Card
 
   setup do
@@ -169,6 +170,18 @@ defmodule Relay.ContextBroadcastsTest do
 
       {:ok, :not_enabled} = Boards.disable_lane(code, :review)
       refute_receive {:stages_changed, ^board_id}, 100
+    end
+
+    test "update_board broadcasts {:board_updated, board}", %{board: board} do
+      {:ok, %Board{id: board_id}} = Boards.update_board(board, %{name: "Live rename"})
+
+      assert_receive {:board_updated, %Board{id: ^board_id, name: "Live rename"}}
+    end
+
+    test "a failed update_board broadcasts no board event", %{board: board} do
+      {:error, _changeset} = Boards.update_board(board, %{name: "   "})
+
+      refute_receive {:board_updated, _board}, 100
     end
   end
 end

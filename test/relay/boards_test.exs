@@ -2,6 +2,7 @@ defmodule Relay.BoardsTest do
   use Relay.DataCase, async: true
 
   alias Relay.Boards
+  alias Relay.Repo
   alias Schemas.Board
   alias Schemas.Stage
 
@@ -67,6 +68,69 @@ defmodule Relay.BoardsTest do
 
       refute board.id == other_board.id
       assert board.owner_id == user.id
+    end
+  end
+
+  describe "update_board/2" do
+    test "persists a new name" do
+      board = Boards.get_or_create_default_board(insert(:user))
+
+      assert {:ok, updated} = Boards.update_board(board, %{name: "Launch"})
+      assert updated.name == "Launch"
+      assert Repo.get!(Board, board.id).name == "Launch"
+    end
+
+    test "trims surrounding whitespace" do
+      board = Boards.get_or_create_default_board(insert(:user))
+
+      assert {:ok, updated} = Boards.update_board(board, %{name: "  Spacey  "})
+      assert updated.name == "Spacey"
+    end
+
+    test "rejects a blank name and leaves the stored name unchanged" do
+      board = Boards.get_or_create_default_board(insert(:user))
+
+      assert {:error, changeset} = Boards.update_board(board, %{name: "   "})
+      refute changeset.valid?
+      assert Repo.get!(Board, board.id).name == "My board"
+    end
+
+    test "rejects a name longer than 80 characters" do
+      board = Boards.get_or_create_default_board(insert(:user))
+
+      assert {:error, changeset} = Boards.update_board(board, %{name: String.duplicate("a", 81)})
+      refute changeset.valid?
+    end
+
+    test "never changes slug, key, or owner_id even when supplied" do
+      board = Boards.get_or_create_default_board(insert(:user))
+      %{slug: slug, key: key, owner_id: owner_id} = board
+
+      assert {:ok, updated} =
+               Boards.update_board(board, %{
+                 name: "Renamed",
+                 slug: "hacked",
+                 key: "HAX",
+                 owner_id: -1
+               })
+
+      assert updated.name == "Renamed"
+      assert updated.slug == slug
+      assert updated.key == key
+      assert updated.owner_id == owner_id
+
+      reloaded = Repo.get!(Board, board.id)
+      assert reloaded.slug == slug
+      assert reloaded.key == key
+      assert reloaded.owner_id == owner_id
+    end
+
+    test "change_board/1 returns a changeset carrying the current name" do
+      board = Boards.get_or_create_default_board(insert(:user))
+
+      changeset = Boards.change_board(board)
+      assert %Ecto.Changeset{} = changeset
+      assert Ecto.Changeset.get_field(changeset, :name) == board.name
     end
   end
 end

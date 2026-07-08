@@ -28,6 +28,27 @@ defmodule Relay.Boards do
   @category_order [:unstarted, :planning, :in_progress, :complete]
 
   @doc """
+  An unvalidated changeset for a board's user-editable attributes.
+  Drives the settings "Board name" form.
+  """
+  def change_board(%Board{} = board, attrs \\ %{}) do
+    Board.changeset(board, attrs)
+  end
+
+  @doc """
+  Updates a board's user-editable `name` only — never `slug`, `key`, or
+  `owner_id`, whatever the caller passes. On success broadcasts
+  `{:board_updated, board}` (MMF 18) so every open board retitles live.
+  Returns `{:ok, board} | {:error, changeset}`.
+  """
+  def update_board(%Board{} = board, attrs) do
+    board
+    |> Board.changeset(Map.take(attrs, [:name, "name"]))
+    |> Repo.update()
+    |> broadcast_board_updated(board.id)
+  end
+
+  @doc """
   Returns the user's board with `stages` preloaded in `position` order,
   creating the board (unique slug derived from the user) and seeding the
   default 7-stage pipeline on first call. Idempotent per user.
@@ -331,6 +352,15 @@ defmodule Relay.Boards do
   end
 
   defp broadcast_stages_changed({:error, _reason} = result, _board_id), do: result
+
+  # MMF 18: a board's name changed — carries the fresh board so subscribers
+  # can retitle without a reload.
+  defp broadcast_board_updated({:ok, board} = result, board_id) do
+    Events.broadcast(board_id, {:board_updated, board})
+    result
+  end
+
+  defp broadcast_board_updated({:error, _changeset} = result, _board_id), do: result
 
   defp lane_owner(:review, _parent), do: :human
   defp lane_owner(:done, %Stage{owner: owner}), do: owner
