@@ -129,6 +129,10 @@ defmodule RelayWeb.BoardLive do
         comment_form={@comment_form}
         question={@question}
         answer_form={@answer_form}
+        review_gate={@review_gate}
+        reject_open={@reject_open}
+        reject_form={@reject_form}
+        reject_error={@reject_error}
       />
     </Layouts.app>
     """
@@ -363,6 +367,66 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("answer_input", _params, socket), do: {:noreply, socket}
 
+  # MMF 15 — the drawer's green review panel: the four human review actions,
+  # each a thin wrapper over an existing context transition (Cards.approve/
+  # reject from MMF 13, set_status/add_owner from MMF 06), attributed to the
+  # signed-in user. Approve/reject move the card, so the acting session
+  # re-streams the source and target columns synchronously; MMF 18 echoes
+  # keep every other session in sync.
+  def handle_event("review_approve", _params, %{assigns: %{selected_card: %Card{status: :in_review} = card}} = socket) do
+    case Cards.approve(card, current_actor(socket)) do
+      {:ok, updated} -> {:noreply, refresh_after_review(socket, card, updated)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("review_approve", _params, socket), do: {:noreply, socket}
+
+  def handle_event("review_open_reject", _params, socket) do
+    {:noreply, assign(socket, reject_open: true, reject_form: empty_reject_form(), reject_error: nil)}
+  end
+
+  def handle_event("review_cancel_reject", _params, socket) do
+    {:noreply, assign(socket, reject_open: false, reject_error: nil)}
+  end
+
+  def handle_event(
+        "review_reject",
+        %{"reject" => %{"note" => note}},
+        %{assigns: %{selected_card: %Card{status: :in_review} = card}} = socket
+      ) do
+    if String.trim(note) == "" do
+      {:noreply,
+       assign(socket,
+         reject_form: to_form(%{"note" => note}, as: :reject),
+         reject_error: "Add a note — the AI needs to know what to change."
+       )}
+    else
+      case Cards.reject(card, note, current_actor(socket)) do
+        {:ok, updated} -> {:noreply, refresh_after_review(socket, card, updated)}
+        {:error, _reason} -> {:noreply, socket}
+      end
+    end
+  end
+
+  def handle_event("review_reject", _params, socket), do: {:noreply, socket}
+
+  def handle_event("review_mark_done", _params, %{assigns: %{selected_card: %Card{status: :in_review} = card}} = socket) do
+    case Cards.set_status(card, %{status: :done}, current_actor(socket)) do
+      {:ok, updated} -> {:noreply, refresh_card(socket, updated)}
+      {:error, _changeset} -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("review_mark_done", _params, socket), do: {:noreply, socket}
+
+  def handle_event("review_pull", _params, %{assigns: %{selected_card: %Card{status: :in_review} = card}} = socket) do
+    actor = current_actor(socket)
+    apply_owner_change(socket, Cards.add_owner(card, actor, actor))
+  end
+
+  def handle_event("review_pull", _params, socket), do: {:noreply, socket}
+
   # MMF 18 — realtime application of Relay.Events broadcasts. Every open
   # session applies every event for its board, including the acting
   # session's own echo: streams upsert by DOM id and counts/stages are
@@ -545,9 +609,64 @@ defmodule RelayWeb.BoardLive do
     |> assign(:status_form, status_form(card))
     |> assign(:question, latest_question(card, timeline))
     |> assign(:answer_form, empty_answer_form())
+    |> assign_review(card)
     |> stream(:timeline, timeline, reset: true)
     |> stream_insert(stream_name(card.stage_id), card)
   end
+
+  # Approve/reject moved the card: re-stream the source and target stage
+  # columns (and counts) exactly like any move, then refresh the drawer to
+  # the updated card — status form, review panel, and timeline included.
+  defp refresh_after_review(socket, %Card{} = before, %Card{} = updated) do
+    socket
+    |> apply_move(before.stage_id, updated)
+    |> refresh_card(updated)
+  end
+
+  # MMF 15 — the drawer's review-panel assigns. Recomputed on every drawer
+  # refresh so the panel appears/disappears as the status changes and the
+  # note sub-panel collapses after a transition.
+  defp assign_review(socket, %Card{status: :in_review} = card) do
+    assign(socket,
+      review_gate: review_gate_info(socket, card),
+      reject_open: false,
+      reject_form: empty_reject_form(),
+      reject_error: nil
+    )
+  end
+
+  defp assign_review(socket, _card) do
+    assign(socket, review_gate: nil, reject_open: false, reject_form: empty_reject_form(), reject_error: nil)
+  end
+
+  # Gate info for the review panel, or nil when the governing stage (the
+  # card's own main-lane stage, or the sub-lane's parent) is not an
+  # approval gate — mirroring Cards.approve/reject's :not_gated guard so
+  # Approve/Request-changes only render where the transition can succeed.
+  defp review_gate_info(socket, %Card{} = card) do
+    stage = find_stage_by_id(socket, card.stage_id)
+    gate = if stage.lane == :main, do: stage, else: find_stage_by_id(socket, stage.parent_id)
+
+    if gate && gate.approval_gate do
+      %{approve_label: approve_label(gate), reject_to_name: reject_to_name(socket, gate)}
+    end
+  end
+
+  # Mirrors Cards.approve/2 routing: next main stage by position, or done
+  # in place at the board's last main stage (mockup: "Approve → Deploy").
+  defp approve_label(gate) do
+    case Boards.next_main_stage(gate) do
+      nil -> "Approve → Done"
+      %Stage{name: name} -> "Approve → #{name}"
+    end
+  end
+
+  # Mirrors Cards.reject/3 routing: the gate's configured target, or the
+  # gate's own main lane when unset.
+  defp reject_to_name(_socket, %Stage{reject_to_stage_id: nil} = gate), do: gate.name
+  defp reject_to_name(socket, %Stage{reject_to_stage_id: target_id}), do: find_stage_by_id(socket, target_id).name
+
+  defp empty_reject_form, do: to_form(%{"note" => ""}, as: :reject)
 
   defp status_form(%Card{} = card) do
     to_form(%{"status" => Atom.to_string(card.status), "progress" => card.progress}, as: :card)
@@ -598,6 +717,7 @@ defmodule RelayWeb.BoardLive do
         socket
         |> assign(:selected_card, moved)
         |> assign(:selected_stage, find_stage_by_id(socket, moved.stage_id))
+        |> assign_review(moved)
         |> stream(:timeline, Activity.list_timeline(moved), reset: true)
 
       _ ->
@@ -668,6 +788,7 @@ defmodule RelayWeb.BoardLive do
         |> assign(:comment_form, empty_comment_form())
         |> assign(:question, latest_question(card, timeline))
         |> assign(:answer_form, empty_answer_form())
+        |> assign_review(card)
         |> stream(:timeline, timeline, reset: true)
 
       nil ->
@@ -681,7 +802,11 @@ defmodule RelayWeb.BoardLive do
           status_form: nil,
           comment_form: nil,
           question: nil,
-          answer_form: nil
+          answer_form: nil,
+          review_gate: nil,
+          reject_open: false,
+          reject_form: nil,
+          reject_error: nil
         )
         |> stream(:timeline, [], reset: true)
     end
