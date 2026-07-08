@@ -27,6 +27,7 @@ exit on any error (bad env, auth, unknown ref, HTTP error).
 |---|---|
 | `mix relay board` | The board: stages with their cards |
 | `mix relay card RLY-12` | One card with description + timeline |
+| `mix relay create "New card" --stage Backlog` | Create a card (lands in the first stage unless `--stage`) |
 | `mix relay pull` | The next card to work: AI-owned first, else an unclaimed card in an AI stage |
 | `mix relay comment RLY-12 "on it"` | Post a comment (as Relay AI) |
 | `mix relay move RLY-12 Code` | Move the card to a stage (by name) |

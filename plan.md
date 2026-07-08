@@ -434,7 +434,7 @@ The Python script has no unit-test harness in this repo, so it is verified with
 
 **Steps**
 
-- [ ] Add the `create_card` helper. In `bin/relay`, in the "board mutations" group
+- [x] Add the `create_card` helper. In `bin/relay`, in the "board mutations" group
   (after the existing `needs_input` function, ~line 129):
 
   ```python
@@ -449,7 +449,7 @@ The Python script has no unit-test harness in this repo, so it is verified with
       return api("POST", "/api/cards", body)["data"]
   ```
 
-- [ ] Add the `cmd_create` handler. In the "CLI commands" group (near `cmd_card`,
+- [x] Add the `cmd_create` handler. In the "CLI commands" group (near `cmd_card`,
   ~line 173), add:
 
   ```python
@@ -463,7 +463,7 @@ The Python script has no unit-test harness in this repo, so it is verified with
       print(json.dumps(card, indent=2)) if args.json else print_card(card)
   ```
 
-- [ ] Register the subcommand. In `build_parser()`, after the `add("card", ...)` line,
+- [x] Register the subcommand. In `build_parser()`, after the `add("card", ...)` line,
   add (capturing the returned subparser to attach the optional flags):
 
   ```python
@@ -473,7 +473,7 @@ The Python script has no unit-test harness in this repo, so it is verified with
       cr.add_argument("--tag")
   ```
 
-- [ ] Update the top-of-file usage docstring. In the command listing block (the lines
+- [x] Update the top-of-file usage docstring. In the command listing block (the lines
   around `relay board [--json] ...`), add a `create` line so `relay --help`/the header
   documents it. Place it just above the `relay comment ... relay move ...` line:
 
@@ -481,12 +481,12 @@ The Python script has no unit-test harness in this repo, so it is verified with
     relay create TITLE [--stage NAME] [--description TEXT] [--tag TAG]
   ```
 
-- [ ] Verify the script compiles and the subcommand is wired:
+- [x] Verify the script compiles and the subcommand is wired:
   - `python3 -m py_compile bin/relay` (exit 0, no syntax error).
   - `python3 bin/relay create --help` (exit 0; prints usage showing `title`, `--stage`,
     `--description`, `--tag`, `--json`).
 
-- [ ] Update the docs CLI reference table. In `docs/agent-integration.md`, add a row to
+- [x] Update the docs CLI reference table. In `docs/agent-integration.md`, add a row to
   the `| Command | What it does |` table (right after the `card` row, so create sits
   near the read commands):
 
@@ -494,7 +494,7 @@ The Python script has no unit-test harness in this repo, so it is verified with
   | `mix relay create "New card" --stage Backlog` | Create a card (lands in the first stage unless `--stage`) |
   ```
 
-- [ ] Run `mix precommit` and fix any failures (the Python + Markdown changes should not
+- [x] Run `mix precommit` and fix any failures (the Python + Markdown changes should not
   affect it, but confirm the suite is still green).
 
 **Deliverable:** `bin/relay create "Title" [--stage NAME] [--description TEXT] [--tag TAG]

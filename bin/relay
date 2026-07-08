@@ -13,6 +13,7 @@ Config (env): RELAY_URL, RELAY_API_KEY  (a board key from /board/settings)
   relay                       # run the board runner (watch loop)
   relay watch [--once] [--dry-run] [--interval N]
   relay board [--json]        relay card REF [--json]     relay pull [--json]
+  relay create TITLE [--stage NAME] [--description TEXT] [--tag TAG]
   relay comment REF TEXT      relay move REF STAGE        relay status REF STATUS
   relay describe REF TEXT     relay needs-input REF Q     relay own REF / release REF
   relay approve REF           relay reject REF NOTE       relay layout   # config skeleton
@@ -128,6 +129,17 @@ def needs_input(ref, question):
     return api("POST", f"/api/cards/{ref}/needs-input", {"question": question})["data"]
 
 
+def create_card(title, stage=None, description=None, tag=None):
+    body = {"title": title}
+    if stage is not None:
+        body["stage"] = resolve_stage_id(stage)
+    if description is not None:
+        body["description"] = description
+    if tag is not None:
+        body["tag"] = tag
+    return api("POST", "/api/cards", body)["data"]
+
+
 # ============================ rendering ============================
 
 def card_line(c):
@@ -173,6 +185,16 @@ def cmd_board(args):
 def cmd_card(args):
     c = get_card(args.ref)
     print(json.dumps(c, indent=2)) if args.json else print_card(c)
+
+
+def cmd_create(args):
+    card = create_card(
+        args.title,
+        stage=args.stage,
+        description=read_arg(args.description) if args.description else None,
+        tag=args.tag,
+    )
+    print(json.dumps(card, indent=2)) if args.json else print_card(card)
 
 
 def _simple(fn):
@@ -404,6 +426,10 @@ def build_parser():
 
     add("board", cmd_board, json_flag=True)
     add("card", cmd_card, "ref", json_flag=True)
+    cr = add("create", cmd_create, "title", json_flag=True)
+    cr.add_argument("--stage")
+    cr.add_argument("--description")
+    cr.add_argument("--tag")
     add("pull", cmd_pull, json_flag=True)
     add("move", _simple(lambda a: move(a.ref, a.stage)), "ref", "stage", json_flag=True)
     add("status", _simple(lambda a: set_status(a.ref, a.status)), "ref", "status", json_flag=True)
