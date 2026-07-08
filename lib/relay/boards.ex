@@ -33,6 +33,16 @@ defmodule Relay.Boards do
     Repo.preload(board, stages: from(s in Stage, order_by: s.position))
   end
 
+  @doc "Returns the board's stages in position order."
+  def list_stages(%Board{id: board_id}) do
+    Repo.all(from s in Stage, where: s.board_id == ^board_id, order_by: s.position)
+  end
+
+  @doc "Returns the stage with `id` on `board`, or nil (board-scoped lookup)."
+  def get_stage(%Board{id: board_id}, id) do
+    Repo.get_by(Stage, id: id, board_id: board_id)
+  end
+
   defp create_default_board!(user) do
     {:ok, board} =
       Repo.transaction(fn ->
