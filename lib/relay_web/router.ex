@@ -26,6 +26,7 @@ defmodule RelayWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
+    plug RelayWeb.Plugs.ApiLogger
   end
 
   pipeline :api_auth do
@@ -42,6 +43,7 @@ defmodule RelayWeb.Router do
     get "/", PageController, :home
     get "/privacy", PageController, :privacy
     get "/terms", PageController, :terms
+    get "/docs/api", DocsController, :api
     delete "/logout", AuthController, :delete
 
     # In test, RelayWeb.LiveAcceptance must run first so the auth hook's DB query
@@ -62,6 +64,19 @@ defmodule RelayWeb.Router do
     pipe_through [:browser, :require_authenticated_user]
 
     get "/board", BoardRedirectController, :index
+  end
+
+  scope "/admin", RelayWeb.Admin do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :admin,
+      on_mount:
+        if(Application.compile_env(:relay, :sql_sandbox),
+          do: [RelayWeb.LiveAcceptance],
+          else: []
+        ) ++ [{RelayWeb.Auth, :require_authenticated}] do
+      live "/api", ApiLive
+    end
   end
 
   scope "/auth", RelayWeb do

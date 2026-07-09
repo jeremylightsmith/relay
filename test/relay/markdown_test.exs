@@ -29,5 +29,19 @@ defmodule Relay.MarkdownTest do
       refute html =~ "alert('xss')"
       assert html =~ "hello"
     end
+
+    test "renders a GFM pipe table as an HTML <table>" do
+      {:safe, html} =
+        Markdown.to_html("""
+        | HTTP | code |
+        | --- | --- |
+        | 401 | unauthorized |
+        """)
+
+      assert html =~ "<table>"
+      assert html =~ "<th>HTTP</th>"
+      assert html =~ "<td>401</td>"
+      refute html =~ "| HTTP | code |"
+    end
   end
 end
