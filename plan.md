@@ -260,7 +260,7 @@ there is no ExUnit/pytest to write.
 
 **Steps**
 
-- [ ] Add the `create_card` helper to `bin/relay`, alongside the other board mutations
+- [x] Add the `create_card` helper to `bin/relay`, alongside the other board mutations
   (place it directly after the `move(...)` function, before `comment(...)`, in the
   "board mutations" section). It sends `stage` only when a name is given (server default
   otherwise), and `description`/`tag` only when provided:
@@ -277,7 +277,7 @@ there is no ExUnit/pytest to write.
       return api("POST", "/api/cards", body)["data"]
   ```
 
-- [ ] Add the `cmd_create` handler to `bin/relay`, in the "CLI commands" section (place it
+- [x] Add the `cmd_create` handler to `bin/relay`, in the "CLI commands" section (place it
   after `cmd_card`, before `_simple`). `--description` honors `read_arg` (`@file` / `-`
   stdin), consistent with `describe`; on success it prints the card via `print_card`
   (or JSON with `--json`), like `card`:
@@ -293,7 +293,7 @@ there is no ExUnit/pytest to write.
       print(json.dumps(card, indent=2)) if args.json else print_card(card)
   ```
 
-- [ ] Register the `create` subcommand in `build_parser`. The shared `add(...)` helper only
+- [x] Register the `create` subcommand in `build_parser`. The shared `add(...)` helper only
   supports positional args + `--json`, so register `create` explicitly (like `watch` does),
   right after the `add("card", ...)` line:
 
@@ -308,25 +308,25 @@ there is no ExUnit/pytest to write.
   `func=cmd_create`; the three `add_argument` calls add the optional flags, which default to
   `None` when omitted — matching the `is not None` guards above.)
 
-- [ ] Verify the parser wiring without hitting the API. Run:
+- [x] Verify the parser wiring without hitting the API. Run:
   `python3 bin/relay create --help`
   and confirm the usage line shows `create [--stage STAGE] [--description DESCRIPTION]
   [--tag TAG] [--json] title`. Also run `python3 -c "import ast; ast.parse(open('bin/relay').read())"`
   to confirm the file still parses.
 
-- [ ] (Optional, if `RELAY_URL`/`RELAY_API_KEY` are set to a running dev server) Smoke it
+- [x] (Optional, if `RELAY_URL`/`RELAY_API_KEY` are set to a running dev server) Smoke it
   end-to-end: `./bin/relay create "Smoke test card" --tag demo` should print the new card,
   and `./bin/relay board` should show it in the first stage. Skip if no server is available —
   Task 1's ExUnit tests already prove the endpoint.
 
-- [ ] Add a row to the CLI reference table in `docs/agent-integration.md`, directly under the
+- [x] Add a row to the CLI reference table in `docs/agent-integration.md`, directly under the
   `bin/relay card RLY-12` row (line ~37):
 
   ```
   | `bin/relay create "Fix login" --stage Backlog` | Create a new card (title; optional `--stage`/`--description`/`--tag`) |
   ```
 
-- [ ] Update the `bin/relay` module docstring usage summary (the `"""..."""` header near the
+- [x] Update the `bin/relay` module docstring usage summary (the `"""..."""` header near the
   top, around lines 13–19) to mention `create` so `--help`/the header stays accurate. Add it
   next to `describe`, e.g. change the `describe` usage line to include create:
 
@@ -337,7 +337,7 @@ there is no ExUnit/pytest to write.
   (Keep the existing columns readable; the exact layout is cosmetic — just ensure `create`
   appears in the header.)
 
-- [ ] Run `mix precommit` to confirm nothing in the Elixir suite regressed (the CLI change is
+- [x] Run `mix precommit` to confirm nothing in the Elixir suite regressed (the CLI change is
   Python-only, but precommit is the project's required green gate).
 
 **Deliverable:** `bin/relay create TITLE [--stage NAME] [--description TEXT] [--tag TAG]

@@ -14,8 +14,9 @@ Config (env): RELAY_URL, RELAY_API_KEY  (a board key from /board/settings)
   relay watch [--once] [--dry-run] [--interval N]
   relay board [--json]        relay card REF [--json]     relay pull [--json]
   relay comment REF TEXT      relay move REF STAGE        relay status REF STATUS
-  relay describe REF TEXT     relay needs-input REF Q     relay own REF / release REF
-  relay approve REF           relay reject REF NOTE       relay layout   # config skeleton
+  relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF Q
+  relay own REF / release REF relay approve REF           relay reject REF NOTE
+  relay layout   # config skeleton
 
 TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output.
 """
@@ -132,6 +133,17 @@ def move(ref, stage_name):
     return api("POST", f"/api/cards/{ref}/move", {"stage": resolve_stage_id(stage_name)})["data"]
 
 
+def create_card(title, stage_name=None, description=None, tag=None):
+    body = {"title": title}
+    if stage_name is not None:
+        body["stage"] = resolve_stage_id(stage_name)
+    if description is not None:
+        body["description"] = description
+    if tag is not None:
+        body["tag"] = tag
+    return api("POST", "/api/cards", body)["data"]
+
+
 def comment(ref, text):
     return api("POST", f"/api/cards/{ref}/comments", {"body": text})
 
@@ -185,6 +197,16 @@ def cmd_board(args):
 def cmd_card(args):
     c = get_card(args.ref)
     print(json.dumps(c, indent=2)) if args.json else print_card(c)
+
+
+def cmd_create(args):
+    card = create_card(
+        args.title,
+        stage_name=args.stage,
+        description=read_arg(args.description) if args.description is not None else None,
+        tag=args.tag,
+    )
+    print(json.dumps(card, indent=2)) if args.json else print_card(card)
 
 
 def _simple(fn):
@@ -418,6 +440,10 @@ def build_parser():
 
     add("board", cmd_board, json_flag=True)
     add("card", cmd_card, "ref", json_flag=True)
+    c = add("create", cmd_create, "title", json_flag=True)
+    c.add_argument("--stage")
+    c.add_argument("--description")
+    c.add_argument("--tag")
     add("pull", cmd_pull, json_flag=True)
     add("move", _simple(lambda a: move(a.ref, a.stage)), "ref", "stage", json_flag=True)
     add("status", _simple(lambda a: set_status(a.ref, a.status)), "ref", "status", json_flag=True)
