@@ -35,7 +35,7 @@ defmodule RelayWeb.BoardSettingsGeneralTest do
         |> form("#general-form", board: %{name: "Launch board"})
         |> render_submit()
 
-      assert html =~ "Board name saved."
+      assert html =~ "Board saved."
       assert Boards.get_or_create_default_board(user).name == "Launch board"
       assert view |> element("#board-name-input") |> render() =~ "Launch board"
     end
@@ -65,6 +65,61 @@ defmodule RelayWeb.BoardSettingsGeneralTest do
       updated = Boards.get_or_create_default_board(user)
       assert updated.slug == board.slug
       assert updated.key == board.key
+    end
+
+    test "the General pane shows the Board URL slug field prefilled with the slug",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      assert has_element?(view, "#board-slug-input")
+      assert view |> element("#board-slug-input") |> render() =~ board.slug
+    end
+
+    test "saving a new slug changes the board URL and navigates to it",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      assert {:error, {:live_redirect, %{to: to}}} =
+               view
+               |> form("#general-form", board: %{name: board.name, slug: "launch-2027"})
+               |> render_submit()
+
+      assert to == ~p"/board/launch-2027/settings?section=general"
+      assert Boards.get_board(user, "launch-2027")
+    end
+
+    test "a taken slug shows an inline error and does not navigate",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, other} = Boards.create_board(user, %{name: "Other"})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      html =
+        view
+        |> form("#general-form", board: %{name: board.name, slug: other.slug})
+        |> render_submit()
+
+      assert html =~ "has already been taken"
+      assert Boards.get_board(user, board.slug)
+    end
+
+    test "an invalid slug format shows an inline error", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      html =
+        view
+        |> form("#general-form", board: %{name: board.name, slug: "Not Valid!"})
+        |> render_submit()
+
+      assert html =~ "must be lowercase letters, numbers, and hyphens"
+      assert Boards.get_board(user, board.slug)
     end
   end
 end
