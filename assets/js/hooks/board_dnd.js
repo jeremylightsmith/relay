@@ -54,6 +54,13 @@ const BoardDnD = {
       })
       this.clearDropTargets()
     })
+
+    this.handleEvent("focus_card", ({ref}) => {
+      const card = this.el.querySelector(`${CARD_SELECTOR}[data-ref="${ref}"]`)
+      if (!card) return
+      card.scrollIntoView({block: "nearest"})
+      card.focus()
+    })
   },
 
   // 0-based insertion index among the zone's cards *excluding* the

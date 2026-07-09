@@ -248,9 +248,10 @@ defmodule RelayWeb.BoardLive do
       {:ok, card} ->
         {:noreply,
          socket
-         |> stream_insert(stream_name(stage.id), card)
+         |> stream_insert(stream_name(stage.id), card, at: 0)
          |> update(:stage_counts, &Map.update!(&1, stage.id, fn count -> count + 1 end))
-         |> assign(:compose_form, empty_compose_form())}
+         |> assign(:compose_form, empty_compose_form())
+         |> push_event("focus_card", %{ref: Cards.ref(socket.assigns.board, card)})}
 
       {:error, changeset} ->
         {:noreply, assign(socket, :compose_form, to_form(changeset))}
