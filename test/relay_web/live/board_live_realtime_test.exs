@@ -67,7 +67,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
       assert has_element?(
                view_b,
-               "#card-drawer-timeline .timeline-activity-phrase",
+               "#card-drawer-activity .timeline-activity-phrase",
                "set status to in_review"
              )
     end

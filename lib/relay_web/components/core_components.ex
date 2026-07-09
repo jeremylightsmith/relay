@@ -33,7 +33,6 @@ defmodule RelayWeb.CoreComponents do
   alias Phoenix.LiveView.JS
   alias Relay.Cards
   alias Schemas.Activity
-  alias Schemas.Comment
 
   @doc """
   Renders flash notices.
@@ -895,6 +894,7 @@ defmodule RelayWeb.CoreComponents do
 
   attr :close_patch, :string, required: true, doc: "the patch target that closes the drawer"
   attr :title_form, :any, required: true, doc: "a Phoenix.HTML.Form for card[title]"
+  attr :editing_title, :boolean, default: false
   attr :editing_description, :boolean, default: false
 
   attr :description_form, :any,
@@ -913,9 +913,13 @@ defmodule RelayWeb.CoreComponents do
     default: [],
     doc: "move targets: the board's other stages (each exposing id and name); [] hides the menu"
 
-  attr :timeline, :any,
+  attr :conversation, :any,
     required: true,
-    doc: "the :timeline LiveView stream — comments + activity entries merged chronologically"
+    doc: "the :conversation LiveView stream — the card's comments, oldest first"
+
+  attr :activity, :any,
+    required: true,
+    doc: "the :activity LiveView stream — the card's activity-log entries, newest first"
 
   attr :comment_form, :any, required: true, doc: "a Phoenix.HTML.Form for comment[body]"
 
@@ -946,7 +950,7 @@ defmodule RelayWeb.CoreComponents do
 
   def card_drawer(assigns) do
     ~H"""
-    <div id={@id} class="drawer drawer-end">
+    <div id={@id} class="drawer drawer-end" phx-window-keydown="close_drawer" phx-key="escape">
       <input
         id={"#{@id}-toggle"}
         type="checkbox"
@@ -959,9 +963,9 @@ defmodule RelayWeb.CoreComponents do
         <.link id={"#{@id}-scrim"} patch={@close_patch} class="drawer-overlay">
           <span class="sr-only">Close</span>
         </.link>
-        <aside class="flex min-h-full w-full max-w-md flex-col gap-6 bg-base-100 p-5 shadow-xl">
-          <header class="space-y-3">
-            <div class="flex items-center justify-between gap-2">
+        <aside class="drawer-panel flex h-dvh w-full max-w-[1100px] flex-col bg-base-100 shadow-xl lg:w-2/3">
+          <header class="flex items-start gap-3 border-b border-base-300 p-5">
+            <div class="flex min-w-0 flex-1 flex-col gap-2.5">
               <div class="flex items-center gap-2">
                 <span class={[
                   "drawer-stage-chip badge badge-sm font-medium",
@@ -971,489 +975,558 @@ defmodule RelayWeb.CoreComponents do
                 </span>
                 <span class="drawer-card-ref font-mono text-xs text-base-content/60">{@ref}</span>
               </div>
-              <.link
-                id={"#{@id}-close"}
-                patch={@close_patch}
-                class="btn btn-ghost btn-sm btn-square"
-                aria-label="Close card drawer"
+              <div
+                :if={!@editing_title}
+                id={"#{@id}-title-display"}
+                role="button"
+                tabindex="0"
+                phx-click="edit_title"
+                class="cursor-text whitespace-pre-wrap break-words rounded-md px-1 text-lg font-semibold leading-[1.3] hover:bg-base-200"
               >
-                <.icon name="hero-x-mark" class="size-5" />
-              </.link>
-            </div>
-            <.form for={@title_form} id={"#{@id}-title-form"} phx-submit="save_card_title">
-              <.input
-                field={@title_form[:title]}
-                type="text"
-                id={"#{@id}-title-input"}
-                class="input input-ghost w-full px-1 text-lg font-semibold"
-                autocomplete="off"
-              />
-            </.form>
-          </header>
-          <section
-            :if={@card.status == :needs_input}
-            id="needs-input-panel"
-            class="flex flex-col gap-[11px] rounded-[10px] p-3.5"
-            style="background:oklch(0.975 0.025 75);border:1px solid oklch(0.87 0.07 75);"
-          >
-            <div class="flex items-center justify-between">
-              <span
-                class="font-mono text-[10px] font-semibold tracking-[0.05em]"
-                style="color:oklch(0.52 0.11 65);"
-              >
-                RELAY AI NEEDS YOUR INPUT
-              </span>
-              <span
-                :if={@card.blocked_since}
-                id="needs-input-waiting"
-                class="font-mono text-[10px]"
-                style="color:oklch(0.52 0.11 65);"
-              >
-                {waiting_label(@card.blocked_since)}
-              </span>
-            </div>
-            <div
-              :if={@question}
-              id="needs-input-question"
-              class="md text-[13.5px] leading-normal"
-              style="color:oklch(0.33 0.03 65);"
-            >
-              {Relay.Markdown.to_html(@question)}
-            </div>
-            <.form
-              for={@answer_form}
-              id="needs-input-form"
-              class="flex flex-col items-start gap-[11px]"
-              phx-submit="answer_input"
-            >
-              <.input
-                field={@answer_form[:body]}
-                type="textarea"
-                id="needs-input-answer"
-                rows="3"
-                placeholder="Type your answer — the AI picks up where it left off…"
-                class="w-full resize-none rounded-[7px] bg-white p-[9px] text-[13px] leading-snug"
-                style="border:1px solid oklch(0.86 0.05 75);color:oklch(0.30 0.02 255);"
-              />
-              <button
-                id="needs-input-send"
-                type="submit"
-                class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
-                style="background:oklch(0.70 0.13 65);"
-              >
-                Send to AI →
-              </button>
-            </.form>
-          </section>
-          <section
-            :if={@card.status == :in_review}
-            id="review-panel"
-            class="flex flex-col gap-3 rounded-[10px] p-3.5"
-            style="background:oklch(0.975 0.02 155);border:1px solid oklch(0.88 0.05 155);"
-          >
-            <span
-              class="font-mono text-[10px] font-semibold tracking-[0.05em]"
-              style="color:oklch(0.46 0.10 155);"
-            >
-              READY FOR YOUR REVIEW
-            </span>
-            <p class="text-[13px] leading-normal" style="color:oklch(0.36 0.03 155);">
-              {review_hint(@review_gate)}
-            </p>
-            <div :if={@review_gate && !@reject_open} class="flex gap-2">
-              <button
-                id="review-approve"
-                type="button"
-                phx-click="review_approve"
-                class="btn btn-sm flex-1 rounded-lg border-none font-semibold text-white"
-                style="background:oklch(0.60 0.13 155);"
-              >
-                {@review_gate.approve_label}
-              </button>
-              <button
-                id="review-request-changes"
-                type="button"
-                phx-click="review_open_reject"
-                class="btn btn-sm flex-1 rounded-lg bg-white font-semibold"
-                style="border:1px solid oklch(0.88 0.01 255);color:oklch(0.38 0.02 255);"
-              >
-                Request changes
-              </button>
-            </div>
-            <div
-              :if={@review_gate && @reject_open}
-              id="review-reject-panel"
-              class="flex flex-col gap-2 rounded-lg bg-white p-3"
-              style="border:1px solid oklch(0.90 0.02 255);"
-            >
-              <p class="text-xs" style="color:oklch(0.42 0.02 255);">
-                Sending back to
-                <b style="color:oklch(0.30 0.02 255);">{@review_gate.reject_to_name}</b>
-                for the AI to address.
-              </p>
+                {@card.title}
+              </div>
               <.form
-                for={@reject_form}
-                id="review-reject-form"
-                class="flex flex-col gap-2"
-                phx-submit="review_reject"
+                :if={@editing_title}
+                for={@title_form}
+                id={"#{@id}-title-form"}
+                phx-submit="save_card_title"
               >
                 <.input
-                  field={@reject_form[:note]}
+                  field={@title_form[:title]}
                   type="textarea"
-                  id="review-request-note"
-                  rows="3"
-                  placeholder="What needs to change? This note goes to the AI…"
-                  class="w-full resize-none rounded-[7px] p-[9px] text-[13px] leading-snug"
-                  style="border:1px solid oklch(0.90 0.006 255);color:oklch(0.30 0.02 255);background:oklch(0.99 0.002 255);"
+                  id={"#{@id}-title-input"}
+                  rows="2"
+                  autofocus
+                  class="textarea textarea-bordered w-full text-lg font-semibold leading-[1.3]"
                 />
-                <p
-                  :if={@reject_error}
-                  id="review-note-error"
-                  class="text-xs text-error"
-                >
-                  {@reject_error}
-                </p>
-                <div class="flex items-center gap-2">
+                <div class="mt-2 flex items-center gap-2">
+                  <.button variant="primary" class="btn btn-primary btn-sm">Save</.button>
                   <button
-                    id="review-send-back"
-                    type="submit"
-                    class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
-                    style="background:oklch(0.70 0.13 65);"
-                  >
-                    Send back →
-                  </button>
-                  <button
-                    id="review-cancel-reject"
                     type="button"
-                    phx-click="review_cancel_reject"
-                    class="btn btn-ghost btn-sm text-xs"
-                    style="color:oklch(0.55 0.02 255);"
+                    id={"#{@id}-title-cancel"}
+                    class="btn btn-ghost btn-sm"
+                    phx-click="cancel_title"
                   >
                     Cancel
                   </button>
                 </div>
               </.form>
             </div>
-          </section>
-          <div :if={@card.status == :in_review} id="review-actions" class="flex flex-wrap gap-2">
-            <button
-              id="review-mark-done"
-              type="button"
-              phx-click="review_mark_done"
-              class="btn btn-sm rounded-[9px] border-none font-semibold text-white"
-              style="background:oklch(0.60 0.13 155);"
+            <.link
+              id={"#{@id}-close"}
+              patch={@close_patch}
+              class="btn btn-ghost btn-sm btn-square"
+              aria-label="Close card drawer"
             >
-              Mark done
-            </button>
-            <button
-              :if={@current_user_id && !user_owner?(@card, @current_user_id)}
-              id="review-pull"
-              type="button"
-              phx-click="review_pull"
-              class="btn btn-sm rounded-[9px] border-none font-semibold text-white"
-              style="background:oklch(0.60 0.14 250);"
-            >
-              Pull — take this card
-            </button>
-          </div>
-          <section class="space-y-2">
-            <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-              Description
-            </h4>
-            <div
-              :if={!@editing_description}
-              id={"#{@id}-description-edit"}
-              role="button"
-              tabindex="0"
-              phx-click="edit_description"
-              class="min-h-16 cursor-text rounded-lg p-1 hover:bg-base-200"
-            >
-              <div
-                :if={@card.description}
-                id={"#{@id}-description-view"}
-                class="md text-sm leading-relaxed"
+              <.icon name="hero-x-mark" class="size-5" />
+            </.link>
+          </header>
+
+          <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
+            <div id={"#{@id}-main"} class="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto p-5">
+              <section
+                :if={@card.status == :needs_input}
+                id="needs-input-panel"
+                class="flex flex-col gap-[11px] rounded-[10px] p-3.5"
+                style="background:oklch(0.975 0.025 75);border:1px solid oklch(0.87 0.07 75);"
               >
-                {Relay.Markdown.to_html(@card.description)}
-              </div>
-              <p :if={!@card.description} class="text-sm italic text-base-content/50">
-                Add a description…
-              </p>
-            </div>
-            <.form
-              :if={@editing_description}
-              for={@description_form}
-              id={"#{@id}-description-form"}
-              phx-submit="save_card_description"
-            >
-              <.input
-                field={@description_form[:description]}
-                type="textarea"
-                id={"#{@id}-description-input"}
-                rows="6"
-                autofocus
-              />
-              <div class="flex items-center gap-2">
-                <.button variant="primary" class="btn btn-primary btn-sm">Save</.button>
-                <button
-                  type="button"
-                  id={"#{@id}-description-cancel"}
-                  class="btn btn-ghost btn-sm"
-                  phx-click="cancel_description"
+                <div class="flex items-center justify-between">
+                  <span
+                    class="font-mono text-[10px] font-semibold tracking-[0.05em]"
+                    style="color:oklch(0.52 0.11 65);"
+                  >
+                    RELAY AI NEEDS YOUR INPUT
+                  </span>
+                  <span
+                    :if={@card.blocked_since}
+                    id="needs-input-waiting"
+                    class="font-mono text-[10px]"
+                    style="color:oklch(0.52 0.11 65);"
+                  >
+                    {waiting_label(@card.blocked_since)}
+                  </span>
+                </div>
+                <div
+                  :if={@question}
+                  id="needs-input-question"
+                  class="md text-[13.5px] leading-normal"
+                  style="color:oklch(0.33 0.03 65);"
                 >
-                  Cancel
-                </button>
-              </div>
-            </.form>
-          </section>
-          <section :if={@card.spec} class="space-y-2">
-            <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-              Spec
-            </h4>
-            <div
-              id={"#{@id}-spec-view"}
-              class="md rounded-lg border border-base-300 bg-base-200/40 p-3 text-sm leading-relaxed"
-            >
-              {Relay.Markdown.to_html(@card.spec)}
-            </div>
-          </section>
-          <details
-            :if={@card.plan}
-            id="card-plan"
-            class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-200/40"
-          >
-            <summary class="collapse-title min-h-0 py-3 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-              Plan
-            </summary>
-            <div class="collapse-content">
-              <div
-                id="card-plan-body"
-                class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
+                  {Relay.Markdown.to_html(@question)}
+                </div>
+                <.form
+                  for={@answer_form}
+                  id="needs-input-form"
+                  class="flex flex-col items-start gap-[11px]"
+                  phx-submit="answer_input"
+                >
+                  <.input
+                    field={@answer_form[:body]}
+                    type="textarea"
+                    id="needs-input-answer"
+                    rows="3"
+                    placeholder="Type your answer — the AI picks up where it left off…"
+                    class="w-full resize-none rounded-[7px] bg-white p-[9px] text-[13px] leading-snug"
+                    style="border:1px solid oklch(0.86 0.05 75);color:oklch(0.30 0.02 255);"
+                  />
+                  <button
+                    id="needs-input-send"
+                    type="submit"
+                    class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
+                    style="background:oklch(0.70 0.13 65);"
+                  >
+                    Send to AI →
+                  </button>
+                </.form>
+              </section>
+              <section
+                :if={@card.status == :in_review}
+                id="review-panel"
+                class="flex flex-col gap-3 rounded-[10px] p-3.5"
+                style="background:oklch(0.975 0.02 155);border:1px solid oklch(0.88 0.05 155);"
               >
-                {Relay.Markdown.to_html(@card.plan)}
-              </div>
-            </div>
-          </details>
-          <dl
-            id={"#{@id}-rail"}
-            class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 border-t border-base-300 pt-4 text-sm"
-          >
-            <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-              Active worker
-            </dt>
-            <dd class="rail-active-worker flex items-center gap-2">
-              <%= if @active_owner do %>
-                <.owner_pill owner={@active_owner} />
-                <span class="rail-active-worker-name text-sm">
-                  {active_worker_names(@card, @active_owner)}
-                </span>
-              <% else %>
-                <span class="text-base-content/50">None</span>
-              <% end %>
-            </dd>
-            <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-              Owners
-            </dt>
-            <dd class="rail-owners space-y-2">
-              <div
-                :for={owner <- @card.owners}
-                class="rail-owner flex items-center gap-2"
-                data-actor-type={owner.actor_type}
-              >
-                <span class="text-sm">{owner_name(owner)}</span>
                 <span
-                  :if={paused_owner?(owner, @active_owner)}
-                  class="rail-owner-paused badge badge-ghost badge-xs"
+                  class="font-mono text-[10px] font-semibold tracking-[0.05em]"
+                  style="color:oklch(0.46 0.10 155);"
                 >
-                  paused
+                  READY FOR YOUR REVIEW
                 </span>
-                <button
-                  type="button"
-                  id={"#{@id}-remove-owner-#{owner_dom_suffix(owner)}"}
-                  class="btn btn-ghost btn-xs btn-square"
-                  phx-click="remove_owner"
-                  phx-value-actor_type={owner.actor_type}
-                  phx-value-user_id={owner.user_id}
-                  aria-label={"Remove #{owner_name(owner)} as owner"}
+                <p class="text-[13px] leading-normal" style="color:oklch(0.36 0.03 155);">
+                  {review_hint(@review_gate)}
+                </p>
+                <div :if={@review_gate && !@reject_open} class="flex gap-2">
+                  <button
+                    id="review-approve"
+                    type="button"
+                    phx-click="review_approve"
+                    class="btn btn-sm flex-1 rounded-lg border-none font-semibold text-white"
+                    style="background:oklch(0.60 0.13 155);"
+                  >
+                    {@review_gate.approve_label}
+                  </button>
+                  <button
+                    id="review-request-changes"
+                    type="button"
+                    phx-click="review_open_reject"
+                    class="btn btn-sm flex-1 rounded-lg bg-white font-semibold"
+                    style="border:1px solid oklch(0.88 0.01 255);color:oklch(0.38 0.02 255);"
+                  >
+                    Request changes
+                  </button>
+                </div>
+                <div
+                  :if={@review_gate && @reject_open}
+                  id="review-reject-panel"
+                  class="flex flex-col gap-2 rounded-lg bg-white p-3"
+                  style="border:1px solid oklch(0.90 0.02 255);"
                 >
-                  <.icon name="hero-x-mark" class="size-3" />
-                </button>
-              </div>
-              <span :if={@card.owners == []} class="text-base-content/50">None</span>
-              <div class="flex flex-wrap gap-2">
+                  <p class="text-xs" style="color:oklch(0.42 0.02 255);">
+                    Sending back to
+                    <b style="color:oklch(0.30 0.02 255);">{@review_gate.reject_to_name}</b>
+                    for the AI to address.
+                  </p>
+                  <.form
+                    for={@reject_form}
+                    id="review-reject-form"
+                    class="flex flex-col gap-2"
+                    phx-submit="review_reject"
+                  >
+                    <.input
+                      field={@reject_form[:note]}
+                      type="textarea"
+                      id="review-request-note"
+                      rows="3"
+                      placeholder="What needs to change? This note goes to the AI…"
+                      class="w-full resize-none rounded-[7px] p-[9px] text-[13px] leading-snug"
+                      style="border:1px solid oklch(0.90 0.006 255);color:oklch(0.30 0.02 255);background:oklch(0.99 0.002 255);"
+                    />
+                    <p
+                      :if={@reject_error}
+                      id="review-note-error"
+                      class="text-xs text-error"
+                    >
+                      {@reject_error}
+                    </p>
+                    <div class="flex items-center gap-2">
+                      <button
+                        id="review-send-back"
+                        type="submit"
+                        class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
+                        style="background:oklch(0.70 0.13 65);"
+                      >
+                        Send back →
+                      </button>
+                      <button
+                        id="review-cancel-reject"
+                        type="button"
+                        phx-click="review_cancel_reject"
+                        class="btn btn-ghost btn-sm text-xs"
+                        style="color:oklch(0.55 0.02 255);"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </.form>
+                </div>
+              </section>
+              <div :if={@card.status == :in_review} id="review-actions" class="flex flex-wrap gap-2">
                 <button
-                  :if={!agent_owner?(@card)}
+                  id="review-mark-done"
                   type="button"
-                  id={"#{@id}-assign-ai"}
-                  class="btn btn-ghost btn-xs"
-                  phx-click="add_owner"
-                  phx-value-actor_type="agent"
+                  phx-click="review_mark_done"
+                  class="btn btn-sm rounded-[9px] border-none font-semibold text-white"
+                  style="background:oklch(0.60 0.13 155);"
                 >
-                  Assign AI
+                  Mark done
                 </button>
                 <button
                   :if={@current_user_id && !user_owner?(@card, @current_user_id)}
+                  id="review-pull"
                   type="button"
-                  id={"#{@id}-add-me"}
-                  class="btn btn-ghost btn-xs"
-                  phx-click="add_owner"
-                  phx-value-actor_type="user"
-                  phx-value-user_id={@current_user_id}
+                  phx-click="review_pull"
+                  class="btn btn-sm rounded-[9px] border-none font-semibold text-white"
+                  style="background:oklch(0.60 0.14 250);"
                 >
-                  Add me
+                  Pull — take this card
                 </button>
               </div>
-            </dd>
-            <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-              Status
-            </dt>
-            <dd class="rail-status">
-              <.form for={@status_form} id={"#{@id}-status-form"} phx-change="set_card_status">
-                <.input
-                  field={@status_form[:status]}
-                  type="select"
-                  options={status_options()}
-                  class="select select-sm w-full"
-                />
-                <.input
-                  :if={@card.status == :working}
-                  field={@status_form[:progress]}
-                  type="number"
-                  min="0"
-                  max="100"
-                  placeholder="Progress %"
-                  class="input input-sm w-full"
-                />
-              </.form>
-            </dd>
-            <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-              Stage
-            </dt>
-            <dd class="rail-stage flex flex-wrap items-center gap-2">
-              {@stage_name}
-              <div :if={@stages != []} id={"#{@id}-move"} class="dropdown">
-                <div tabindex="0" role="button" id={"#{@id}-move-button"} class="btn btn-ghost btn-xs">
-                  Move to… <.icon name="hero-chevron-down" class="size-3" />
-                </div>
-                <ul
+              <section class="space-y-2">
+                <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+                  Description
+                </h4>
+                <div
+                  :if={!@editing_description}
+                  id={"#{@id}-description-edit"}
+                  role="button"
                   tabindex="0"
-                  class="dropdown-content menu z-50 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg"
+                  phx-click="edit_description"
+                  class="min-h-16 cursor-text rounded-lg p-1 hover:bg-base-200"
                 >
-                  <li :for={stage <- @stages}>
+                  <div
+                    :if={@card.description}
+                    id={"#{@id}-description-view"}
+                    class="md text-sm leading-relaxed"
+                  >
+                    {Relay.Markdown.to_html(@card.description)}
+                  </div>
+                  <p :if={!@card.description} class="text-sm italic text-base-content/50">
+                    Add a description…
+                  </p>
+                </div>
+                <.form
+                  :if={@editing_description}
+                  for={@description_form}
+                  id={"#{@id}-description-form"}
+                  phx-submit="save_card_description"
+                >
+                  <.input
+                    field={@description_form[:description]}
+                    type="textarea"
+                    id={"#{@id}-description-input"}
+                    rows="12"
+                    autofocus
+                  />
+                  <div class="flex items-center gap-2">
+                    <.button variant="primary" class="btn btn-primary btn-sm">Save</.button>
                     <button
                       type="button"
-                      id={"#{@id}-move-to-#{stage.id}"}
-                      phx-click="move_card"
-                      phx-value-ref={@ref}
-                      phx-value-stage_id={stage.id}
+                      id={"#{@id}-description-cancel"}
+                      class="btn btn-ghost btn-sm"
+                      phx-click="cancel_description"
                     >
-                      {stage.name}
+                      Cancel
                     </button>
-                  </li>
-                </ul>
-              </div>
-            </dd>
-            <dt
-              :if={@card.branch}
-              class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60"
-            >
-              Branch
-            </dt>
-            <dd :if={@card.branch} class="rail-branch">
-              <span id="card-branch" class="badge badge-ghost badge-sm gap-1 font-mono">
-                <.icon name="hero-share" class="size-3" />
-                {@card.branch}
-              </span>
-            </dd>
-            <dt
-              :if={@card.pr_url}
-              class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60"
-            >
-              PR
-            </dt>
-            <dd :if={@card.pr_url} class="rail-pr">
-              <.link
-                id="card-pr"
-                href={@card.pr_url}
-                target="_blank"
-                class="badge badge-ghost badge-sm gap-1 font-mono"
-              >
-                <.icon name="hero-arrow-top-right-on-square" class="size-3" /> Review PR ↗
-              </.link>
-            </dd>
-            <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-              Tags
-            </dt>
-            <dd class="rail-tags">
-              <span :if={@card.tag} class="badge badge-ghost badge-sm">#{@card.tag}</span>
-              <span :if={!@card.tag} class="text-base-content/50">None</span>
-            </dd>
-            <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-              Dates
-            </dt>
-            <dd class="rail-dates space-y-0.5">
-              <div>Created {Calendar.strftime(@card.inserted_at, "%b %d, %Y")}</div>
-              <div>Updated {Calendar.strftime(@card.updated_at, "%b %d, %Y")}</div>
-            </dd>
-          </dl>
-          <section class="space-y-3 border-t border-base-300 pt-4">
-            <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-              Activity
-            </h4>
-            <ol id={"#{@id}-timeline"} phx-update="stream" class="space-y-3">
-              <li id={"#{@id}-timeline-empty"} class="hidden text-sm text-base-content/50 only:block">
-                No activity yet
-              </li>
-              <li
-                :for={{dom_id, entry} <- @timeline}
-                id={dom_id}
-                class="timeline-entry flex items-start gap-2"
-                data-actor-type={entry.actor_type}
-              >
-                <span class={[
-                  "timeline-avatar flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold",
-                  if(entry.actor_type == :agent,
-                    do: "bg-secondary/15 text-secondary",
-                    else: "bg-primary/15 text-primary"
-                  )
-                ]}>
-                  {timeline_initials(entry)}
-                </span>
-                <div class="min-w-0 flex-1 space-y-0.5">
-                  <div class="flex items-baseline gap-2">
-                    <span class="timeline-author text-sm font-medium">{timeline_author(entry)}</span>
-                    <time class="timeline-time text-xs text-base-content/50">
-                      {Calendar.strftime(entry.inserted_at, "%b %d, %H:%M")}
-                    </time>
                   </div>
-                  <%= case entry do %>
-                    <% %Comment{} = comment -> %>
-                      <div class="timeline-comment-body md text-sm leading-relaxed">
+                </.form>
+              </section>
+              <section :if={@card.spec} class="space-y-2">
+                <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+                  Spec
+                </h4>
+                <div
+                  id={"#{@id}-spec-view"}
+                  class="md rounded-lg border border-base-300 bg-base-200/40 p-3 text-sm leading-relaxed"
+                >
+                  {Relay.Markdown.to_html(@card.spec)}
+                </div>
+              </section>
+              <details
+                :if={@card.plan}
+                id="card-plan"
+                class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-200/40"
+              >
+                <summary class="collapse-title min-h-0 py-3 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+                  Plan
+                </summary>
+                <div class="collapse-content">
+                  <div
+                    id="card-plan-body"
+                    class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
+                  >
+                    {Relay.Markdown.to_html(@card.plan)}
+                  </div>
+                </div>
+              </details>
+
+              <section class="space-y-3 border-t border-base-300 pt-4">
+                <h4 class="text-sm font-semibold text-base-content/80">Conversation</h4>
+                <ol id={"#{@id}-conversation"} phx-update="stream" class="space-y-4">
+                  <li
+                    id={"#{@id}-conversation-empty"}
+                    class="hidden text-sm text-base-content/50 only:block"
+                  >
+                    No comments yet
+                  </li>
+                  <li
+                    :for={{dom_id, comment} <- @conversation}
+                    id={dom_id}
+                    class="timeline-entry flex items-start gap-3"
+                    data-actor-type={comment.actor_type}
+                  >
+                    <span class={[
+                      "timeline-avatar flex size-7 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold",
+                      if(comment.actor_type == :agent,
+                        do: "bg-secondary/15 text-secondary",
+                        else: "bg-primary/15 text-primary"
+                      )
+                    ]}>
+                      {timeline_initials(comment)}
+                    </span>
+                    <div class="min-w-0 flex-1 space-y-1">
+                      <div class="flex items-baseline gap-2">
+                        <span class="timeline-author text-[13px] font-semibold">
+                          {timeline_author(comment)}
+                        </span>
+                        <time class="timeline-time font-mono text-[11px] text-base-content/50">
+                          {Calendar.strftime(comment.inserted_at, "%b %d, %H:%M")}
+                        </time>
+                      </div>
+                      <div class="timeline-comment-body md rounded-lg bg-base-200/60 px-3 py-2 text-sm leading-relaxed">
                         {Relay.Markdown.to_html(comment.body)}
                       </div>
-                    <% %Activity{} = activity -> %>
-                      <p class="timeline-activity-phrase text-sm text-base-content/70">
-                        {activity_phrase(activity)}
-                      </p>
-                  <% end %>
-                </div>
-              </li>
-            </ol>
-            <.form
-              for={@comment_form}
-              id={"#{@id}-comment-form"}
-              phx-change="validate_comment"
-              phx-submit="post_comment"
+                    </div>
+                  </li>
+                </ol>
+                <.form
+                  for={@comment_form}
+                  id={"#{@id}-comment-form"}
+                  phx-change="validate_comment"
+                  phx-submit="post_comment"
+                >
+                  <.input
+                    field={@comment_form[:body]}
+                    type="textarea"
+                    id={"#{@id}-comment-input"}
+                    rows="2"
+                    placeholder="Write a comment…"
+                  />
+                  <.button variant="primary" class="btn btn-primary btn-sm">Comment</.button>
+                </.form>
+              </section>
+
+              <section class="space-y-2 border-t border-base-300 pt-4">
+                <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+                  Activity
+                </h4>
+                <ol id={"#{@id}-activity"} phx-update="stream" class="space-y-1">
+                  <li
+                    id={"#{@id}-activity-empty"}
+                    class="hidden text-sm text-base-content/50 only:block"
+                  >
+                    No activity yet
+                  </li>
+                  <li
+                    :for={{dom_id, entry} <- @activity}
+                    id={dom_id}
+                    class="activity-entry flex items-start gap-2.5 py-1"
+                    data-actor-type={entry.actor_type}
+                  >
+                    <span class={[
+                      "mt-1.5 size-1.5 shrink-0 rounded-full",
+                      if(entry.actor_type == :agent, do: "bg-secondary/60", else: "bg-primary/60")
+                    ]}>
+                    </span>
+                    <div class="flex min-w-0 flex-col">
+                      <span class="timeline-activity-phrase text-[13px] leading-snug text-base-content/70">
+                        {activity_phrase(entry)}
+                      </span>
+                      <time class="timeline-time font-mono text-[11px] text-base-content/45">
+                        {Calendar.strftime(entry.inserted_at, "%b %d, %H:%M")}
+                      </time>
+                    </div>
+                  </li>
+                </ol>
+              </section>
+            </div>
+
+            <dl
+              id={"#{@id}-rail"}
+              class="grid w-full shrink-0 grid-cols-[auto_1fr] content-start gap-x-6 gap-y-3 overflow-y-auto border-t border-base-300 bg-base-200/30 p-5 text-sm lg:w-[220px] lg:border-l lg:border-t-0"
             >
-              <.input
-                field={@comment_form[:body]}
-                type="textarea"
-                id={"#{@id}-comment-input"}
-                rows="2"
-                placeholder="Write a comment…"
-              />
-              <.button variant="primary" class="btn btn-primary btn-sm">Comment</.button>
-            </.form>
-          </section>
+              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+                Active worker
+              </dt>
+              <dd class="rail-active-worker flex items-center gap-2">
+                <%= if @active_owner do %>
+                  <.owner_pill owner={@active_owner} />
+                  <span class="rail-active-worker-name text-sm">
+                    {active_worker_names(@card, @active_owner)}
+                  </span>
+                <% else %>
+                  <span class="text-base-content/50">None</span>
+                <% end %>
+              </dd>
+              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+                Owners
+              </dt>
+              <dd class="rail-owners space-y-2">
+                <div
+                  :for={owner <- @card.owners}
+                  class="rail-owner flex items-center gap-2"
+                  data-actor-type={owner.actor_type}
+                >
+                  <span class="text-sm">{owner_name(owner)}</span>
+                  <span
+                    :if={paused_owner?(owner, @active_owner)}
+                    class="rail-owner-paused badge badge-ghost badge-xs"
+                  >
+                    paused
+                  </span>
+                  <button
+                    type="button"
+                    id={"#{@id}-remove-owner-#{owner_dom_suffix(owner)}"}
+                    class="btn btn-ghost btn-xs btn-square"
+                    phx-click="remove_owner"
+                    phx-value-actor_type={owner.actor_type}
+                    phx-value-user_id={owner.user_id}
+                    aria-label={"Remove #{owner_name(owner)} as owner"}
+                  >
+                    <.icon name="hero-x-mark" class="size-3" />
+                  </button>
+                </div>
+                <span :if={@card.owners == []} class="text-base-content/50">None</span>
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    :if={!agent_owner?(@card)}
+                    type="button"
+                    id={"#{@id}-assign-ai"}
+                    class="btn btn-ghost btn-xs"
+                    phx-click="add_owner"
+                    phx-value-actor_type="agent"
+                  >
+                    Assign AI
+                  </button>
+                  <button
+                    :if={@current_user_id && !user_owner?(@card, @current_user_id)}
+                    type="button"
+                    id={"#{@id}-add-me"}
+                    class="btn btn-ghost btn-xs"
+                    phx-click="add_owner"
+                    phx-value-actor_type="user"
+                    phx-value-user_id={@current_user_id}
+                  >
+                    Add me
+                  </button>
+                </div>
+              </dd>
+              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+                Status
+              </dt>
+              <dd class="rail-status">
+                <.form for={@status_form} id={"#{@id}-status-form"} phx-change="set_card_status">
+                  <.input
+                    field={@status_form[:status]}
+                    type="select"
+                    options={status_options()}
+                    class="select select-sm w-full"
+                  />
+                  <.input
+                    :if={@card.status == :working}
+                    field={@status_form[:progress]}
+                    type="number"
+                    min="0"
+                    max="100"
+                    placeholder="Progress %"
+                    class="input input-sm w-full"
+                  />
+                </.form>
+              </dd>
+              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+                Stage
+              </dt>
+              <dd class="rail-stage flex flex-wrap items-center gap-2">
+                {@stage_name}
+                <div :if={@stages != []} id={"#{@id}-move"} class="dropdown">
+                  <div
+                    tabindex="0"
+                    role="button"
+                    id={"#{@id}-move-button"}
+                    class="btn btn-ghost btn-xs"
+                  >
+                    Move to… <.icon name="hero-chevron-down" class="size-3" />
+                  </div>
+                  <ul
+                    tabindex="0"
+                    class="dropdown-content menu z-50 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg"
+                  >
+                    <li :for={stage <- @stages}>
+                      <button
+                        type="button"
+                        id={"#{@id}-move-to-#{stage.id}"}
+                        phx-click="move_card"
+                        phx-value-ref={@ref}
+                        phx-value-stage_id={stage.id}
+                      >
+                        {stage.name}
+                      </button>
+                    </li>
+                  </ul>
+                </div>
+              </dd>
+              <dt
+                :if={@card.branch}
+                class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60"
+              >
+                Branch
+              </dt>
+              <dd :if={@card.branch} class="rail-branch">
+                <span id="card-branch" class="badge badge-ghost badge-sm gap-1 font-mono">
+                  <.icon name="hero-share" class="size-3" />
+                  {@card.branch}
+                </span>
+              </dd>
+              <dt
+                :if={@card.pr_url}
+                class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60"
+              >
+                PR
+              </dt>
+              <dd :if={@card.pr_url} class="rail-pr">
+                <.link
+                  id="card-pr"
+                  href={@card.pr_url}
+                  target="_blank"
+                  class="badge badge-ghost badge-sm gap-1 font-mono"
+                >
+                  <.icon name="hero-arrow-top-right-on-square" class="size-3" /> Review PR ↗
+                </.link>
+              </dd>
+              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+                Tags
+              </dt>
+              <dd class="rail-tags">
+                <span :if={@card.tag} class="badge badge-ghost badge-sm">#{@card.tag}</span>
+                <span :if={!@card.tag} class="text-base-content/50">None</span>
+              </dd>
+              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+                Dates
+              </dt>
+              <dd class="rail-dates space-y-0.5">
+                <div>Created {Calendar.strftime(@card.inserted_at, "%b %d, %Y")}</div>
+                <div>Updated {Calendar.strftime(@card.updated_at, "%b %d, %Y")}</div>
+              </dd>
+            </dl>
+          </div>
         </aside>
       </div>
     </div>

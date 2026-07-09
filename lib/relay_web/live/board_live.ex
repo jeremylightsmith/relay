@@ -122,11 +122,13 @@ defmodule RelayWeb.BoardLive do
         active_owner={Cards.active_owner_type(@selected_card)}
         close_patch={~p"/board"}
         title_form={@title_form}
+        editing_title={@editing_title}
         editing_description={@editing_description}
         description_form={@description_form}
         status_form={@status_form}
         current_user_id={@current_scope.user.id}
-        timeline={@streams.timeline}
+        conversation={@streams.conversation}
+        activity={@streams.activity}
         comment_form={@comment_form}
         question={@question}
         answer_form={@answer_form}
@@ -157,7 +159,8 @@ defmodule RelayWeb.BoardLive do
       |> assign(:force_open, MapSet.new())
       |> assign(:composing_stage_id, nil)
       |> assign(:compose_form, empty_compose_form())
-      |> stream_configure(:timeline, dom_id: &timeline_dom_id/1)
+      |> stream_configure(:conversation, dom_id: &conversation_dom_id/1)
+      |> stream_configure(:activity, dom_id: &activity_dom_id/1)
 
     socket =
       Enum.reduce(board.stages, socket, fn stage, acc ->
@@ -216,6 +219,10 @@ defmodule RelayWeb.BoardLive do
     {:noreply, push_patch(socket, to: ~p"/board?card=#{ref}")}
   end
 
+  def handle_event("close_drawer", _params, socket) do
+    {:noreply, push_patch(socket, to: ~p"/board")}
+  end
+
   # One move path, two entry points (drag-and-drop hook and the drawer's
   # "Move to…" menu). `index` is the 0-based drop index among the target
   # stage's other cards; when omitted (drawer) the card appends to the
@@ -240,12 +247,26 @@ defmodule RelayWeb.BoardLive do
     end
   end
 
+  def handle_event("edit_title", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    {:noreply,
+     socket
+     |> assign(:editing_title, true)
+     |> assign(:title_form, to_form(%{"title" => card.title}, as: :card))}
+  end
+
+  def handle_event("edit_title", _params, socket), do: {:noreply, socket}
+
+  def handle_event("cancel_title", _params, socket) do
+    {:noreply, assign(socket, :editing_title, false)}
+  end
+
   def handle_event("save_card_title", %{"card" => card_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
     case Cards.update_card(card, card_params) do
       {:ok, card} ->
         {:noreply,
          socket
          |> assign(:selected_card, card)
+         |> assign(:editing_title, false)
          |> assign(:title_form, to_form(%{"title" => card.title}, as: :card))
          |> stream_insert(stream_name(card.stage_id), card)}
 
@@ -340,7 +361,7 @@ defmodule RelayWeb.BoardLive do
       {:ok, comment} ->
         {:noreply,
          socket
-         |> stream_insert(:timeline, comment)
+         |> stream_insert(:conversation, comment)
          |> assign(:comment_form, empty_comment_form())}
 
       {:error, changeset} ->
@@ -459,7 +480,7 @@ defmodule RelayWeb.BoardLive do
 
   def handle_info({:timeline_appended, card_id, entry}, socket) do
     case socket.assigns.selected_card do
-      %Card{id: ^card_id} -> {:noreply, stream_insert(socket, :timeline, entry)}
+      %Card{id: ^card_id} -> {:noreply, insert_timeline_entry(socket, entry)}
       _other -> {:noreply, socket}
     end
   end
@@ -478,6 +499,14 @@ defmodule RelayWeb.BoardLive do
      socket
      |> assign(:board, updated)
      |> assign(:page_title, board.name)}
+  end
+
+  defp insert_timeline_entry(socket, %Schemas.Comment{} = comment) do
+    stream_insert(socket, :conversation, comment)
+  end
+
+  defp insert_timeline_entry(socket, %Schemas.Activity{} = activity) do
+    stream_insert(socket, :activity, activity, at: 0)
   end
 
   # Groups position-ordered stages under their category, keeping the fixed
@@ -615,15 +644,16 @@ defmodule RelayWeb.BoardLive do
   # card so the board card re-renders its colour/badge. Also recomputes
   # the needs-input panel's question from the fresh timeline (MMF 14).
   defp refresh_card(socket, %Card{} = card) do
-    timeline = Activity.list_timeline(card)
+    activity = Activity.list_activity(card)
 
     socket
     |> assign(:selected_card, card)
     |> assign(:status_form, status_form(card))
-    |> assign(:question, latest_question(card, timeline))
+    |> assign(:question, latest_question(card, activity))
     |> assign(:answer_form, empty_answer_form())
     |> assign_review(card)
-    |> stream(:timeline, timeline, reset: true)
+    |> stream(:conversation, Activity.list_conversation(card), reset: true)
+    |> stream(:activity, activity, reset: true)
     |> stream_insert(stream_name(card.stage_id), card)
   end
 
@@ -731,7 +761,8 @@ defmodule RelayWeb.BoardLive do
         |> assign(:selected_card, moved)
         |> assign(:selected_stage, find_stage_by_id(socket, moved.stage_id))
         |> assign_review(moved)
-        |> stream(:timeline, Activity.list_timeline(moved), reset: true)
+        |> stream(:conversation, Activity.list_conversation(moved), reset: true)
+        |> stream(:activity, Activity.list_activity(moved), reset: true)
 
       _ ->
         socket
@@ -789,20 +820,22 @@ defmodule RelayWeb.BoardLive do
 
     case card do
       %Card{} = card ->
-        timeline = Activity.list_timeline(card)
+        activity = Activity.list_activity(card)
 
         socket
         |> assign(:selected_card, card)
         |> assign(:selected_stage, find_stage_by_id(socket, card.stage_id))
         |> assign(:title_form, to_form(%{"title" => card.title}, as: :card))
+        |> assign(:editing_title, false)
         |> assign(:editing_description, false)
         |> assign(:description_form, nil)
         |> assign(:status_form, status_form(card))
         |> assign(:comment_form, empty_comment_form())
-        |> assign(:question, latest_question(card, timeline))
+        |> assign(:question, latest_question(card, activity))
         |> assign(:answer_form, empty_answer_form())
         |> assign_review(card)
-        |> stream(:timeline, timeline, reset: true)
+        |> stream(:conversation, Activity.list_conversation(card), reset: true)
+        |> stream(:activity, activity, reset: true)
 
       nil ->
         socket
@@ -810,6 +843,7 @@ defmodule RelayWeb.BoardLive do
           selected_card: nil,
           selected_stage: nil,
           title_form: nil,
+          editing_title: false,
           editing_description: false,
           description_form: nil,
           status_form: nil,
@@ -821,7 +855,8 @@ defmodule RelayWeb.BoardLive do
           reject_form: nil,
           reject_error: nil
         )
-        |> stream(:timeline, [], reset: true)
+        |> stream(:conversation, [], reset: true)
+        |> stream(:activity, [], reset: true)
     end
   end
 
@@ -841,19 +876,17 @@ defmodule RelayWeb.BoardLive do
   # The panel shows the newest :needs_input question. A human-blocked card
   # (status control — no question recorded) yields nil, and the panel
   # renders with just the composer (spec edge case).
-  defp latest_question(%Card{status: :needs_input}, timeline) do
-    timeline
-    |> Enum.reverse()
-    |> Enum.find_value(fn
+  defp latest_question(%Card{status: :needs_input}, activity) do
+    Enum.find_value(activity, fn
       %Schemas.Activity{type: :needs_input, meta: meta} -> meta["question"]
       _entry -> nil
     end)
   end
 
-  defp latest_question(_card, _timeline), do: nil
+  defp latest_question(_card, _activity), do: nil
 
-  defp timeline_dom_id(%Schemas.Comment{id: id}), do: "timeline-comment-#{id}"
-  defp timeline_dom_id(%Schemas.Activity{id: id}), do: "timeline-activity-#{id}"
+  defp conversation_dom_id(%Schemas.Comment{id: id}), do: "timeline-comment-#{id}"
+  defp activity_dom_id(%Schemas.Activity{id: id}), do: "timeline-activity-#{id}"
 
   defp category_label(:unstarted), do: "Unstarted"
   defp category_label(:planning), do: "Planning"

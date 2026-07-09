@@ -45,7 +45,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     assert has_element?(mdview, "#needs-input-question.md code", "viewer")
     assert has_element?(view, "#needs-input-answer")
     assert has_element?(view, "#needs-input-send", "Send to AI")
-    assert has_element?(view, "#card-drawer-timeline .timeline-activity-phrase", "asked for input")
+    assert has_element?(view, "#card-drawer-activity .timeline-activity-phrase", "asked for input")
   end
 
   test "re-asking shows the newest question, not the old one", %{conn: conn, code: code} do
@@ -72,8 +72,8 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     |> render_submit()
 
     refute has_element?(view, "#needs-input-panel")
-    assert has_element?(view, "#card-drawer-timeline .timeline-comment-body", "The relay-exports bucket")
-    assert has_element?(view, "#card-drawer-timeline .timeline-activity-phrase", "answered the question")
+    assert has_element?(view, "#card-drawer-conversation .timeline-comment-body", "The relay-exports bucket")
+    assert has_element?(view, "#card-drawer-activity .timeline-activity-phrase", "answered the question")
     refute has_element?(view, "#stage-col-#{code.position}-cards .card-needs-input")
 
     reloaded = Cards.get_card_by_ref(board, "RLY-1")

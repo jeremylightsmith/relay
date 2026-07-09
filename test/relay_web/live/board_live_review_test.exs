@@ -78,7 +78,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     refute has_element?(view, "#review-panel")
     assert has_element?(view, "#card-drawer .drawer-stage-chip", "Deploy")
     assert has_element?(view, "#stage-col-#{deploy.position}-cards .board-card", "Review me")
-    assert has_element?(view, "#card-drawer-timeline .timeline-activity-phrase", "approved")
+    assert has_element?(view, "#card-drawer-activity .timeline-activity-phrase", "approved")
 
     entry = reloaded |> Activity.list_timeline() |> Enum.find(&match?(%Schemas.Activity{type: :approved}, &1))
     assert entry.actor_type == :user
@@ -106,8 +106,8 @@ defmodule RelayWeb.BoardLiveReviewTest do
     assert reloaded.status == :working
 
     refute has_element?(view, "#review-panel")
-    assert has_element?(view, "#card-drawer-timeline .timeline-comment-body", "Tighten the error handling")
-    assert has_element?(view, "#card-drawer-timeline .timeline-activity-phrase", "requested changes")
+    assert has_element?(view, "#card-drawer-conversation .timeline-comment-body", "Tighten the error handling")
+    assert has_element?(view, "#card-drawer-activity .timeline-activity-phrase", "requested changes")
 
     timeline = Activity.list_timeline(reloaded)
     note = Enum.find(timeline, &match?(%Comment{body: "Tighten the error handling"}, &1))
@@ -156,7 +156,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     assert reloaded.status == :done
 
     refute has_element?(view, "#review-panel")
-    assert has_element?(view, "#card-drawer-timeline .timeline-activity-phrase", "set status to done")
+    assert has_element?(view, "#card-drawer-activity .timeline-activity-phrase", "set status to done")
 
     entry =
       reloaded
@@ -180,7 +180,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     assert has_element?(view, "#review-panel")
     assert has_element?(view, "#card-drawer-rail .rail-owner", "Test User")
     assert has_element?(view, "#card-drawer-rail .rail-active-worker", "Test User")
-    assert has_element?(view, "#card-drawer-timeline .timeline-activity-phrase", "added Test User as owner")
+    assert has_element?(view, "#card-drawer-activity .timeline-activity-phrase", "added Test User as owner")
 
     reloaded = Cards.get_card_by_ref(board, "RLY-1")
     assert Enum.any?(reloaded.owners, &(&1.actor_type == :user and &1.user_id == user.id))
