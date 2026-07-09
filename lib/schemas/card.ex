@@ -12,7 +12,10 @@ defmodule Schemas.Card do
   design spec authored at the SPEC stage — nullable, cast like
   `description`/`plan`. `archived_at` (RLY-4) soft-hides the card from the
   board; nullable, never cast — set programmatically like `archived_at` on
-  boards.
+  boards. `ai_result` (RLY-18) carries the agent's structured result blob
+  (summary/changes/screens/deploy_url), nullable, cast like `spec`;
+  `sub_tasks` is the card's ordered checklist (RLY-18), written via
+  `Relay.Cards.set_sub_tasks/2`, never cast here.
   """
 
   use Ecto.Schema
@@ -37,10 +40,12 @@ defmodule Schemas.Card do
     field :branch, :string
     field :plan, :string
     field :pr_url, :string
+    field :ai_result, :map
 
     belongs_to :board, Schemas.Board
     belongs_to :stage, Schemas.Stage
     has_many :owners, Schemas.CardOwner
+    has_many :sub_tasks, Schemas.SubTask
     embeds_one :rejection, Schemas.CardRejection, on_replace: :delete
 
     timestamps(type: :utc_datetime)
@@ -48,13 +53,13 @@ defmodule Schemas.Card do
 
   @doc """
   Changeset for user/agent-supplied card attributes (`:title`,
-  `:description`, `:spec`, `:tag`, `:branch`, `:plan`, `:pr_url`). `board_id`,
-  `stage_id`, `position`, and `ref_number` must already be set on the struct
-  and are never cast.
+  `:description`, `:spec`, `:tag`, `:branch`, `:plan`, `:pr_url`,
+  `:ai_result`). `board_id`, `stage_id`, `position`, and `ref_number` must
+  already be set on the struct and are never cast.
   """
   def changeset(card, attrs) do
     card
-    |> cast(attrs, [:title, :description, :spec, :tag, :branch, :plan, :pr_url])
+    |> cast(attrs, [:title, :description, :spec, :tag, :branch, :plan, :pr_url, :ai_result])
     |> validate_required([:title])
     |> unique_constraint([:board_id, :ref_number], name: :cards_board_id_ref_number_index)
   end

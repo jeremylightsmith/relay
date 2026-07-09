@@ -21,6 +21,7 @@ defmodule Relay.Cards do
   alias Schemas.CardOwner
   alias Schemas.CardRejection
   alias Schemas.Stage
+  alias Schemas.SubTask
   alias Schemas.User
 
   # Approve/reject append the card to the bottom of the target stage;
@@ -65,12 +66,11 @@ defmodule Relay.Cards do
   for free.
   """
   def list_cards(%Board{id: board_id}) do
-    Repo.all(
-      from c in Card,
-        where: c.board_id == ^board_id and is_nil(c.archived_at),
-        order_by: [asc: c.stage_id, asc: c.position, asc: c.id],
-        preload: [owners: :user]
-    )
+    Card
+    |> where([c], c.board_id == ^board_id and is_nil(c.archived_at))
+    |> order_by([c], asc: c.stage_id, asc: c.position, asc: c.id)
+    |> Repo.all()
+    |> Repo.preload(card_preloads())
   end
 
   @doc """
@@ -167,6 +167,61 @@ defmodule Relay.Cards do
     |> Repo.update()
     |> preload_owners_result()
     |> broadcast_upserted()
+  end
+
+  @doc """
+  Replaces the card's whole sub-task checklist with `attrs_list` (a list of
+  `%{"title" => ..., "done" => bool?}` maps) inside a transaction: deletes the
+  card's existing sub_tasks and inserts the new list with `position` 0..n. Used by
+  the Plan stage to write the checklist. Returns `{:ok, card}` (sub_tasks preloaded
+  in position order) or `{:error, changeset}`; broadcasts `{:card_upserted, card}`.
+  """
+  def set_sub_tasks(%Card{} = card, attrs_list) when is_list(attrs_list) do
+    result =
+      Repo.transaction(fn ->
+        Repo.delete_all(from st in SubTask, where: st.card_id == ^card.id)
+
+        attrs_list
+        |> Enum.with_index()
+        |> Enum.each(fn {attrs, position} -> insert_sub_task!(card, attrs, position) end)
+
+        reload_with_owners(card)
+      end)
+
+    broadcast_upserted(result)
+  end
+
+  @doc """
+  Sets one sub-task's `done` flag, scoped to `card`. Used by the Code stage (mark an
+  item complete) and the drawer toggle. Returns `{:ok, card}` (reloaded, preloaded)
+  or `{:error, :not_found}` when the id isn't one of the card's sub_tasks; broadcasts
+  `{:card_upserted, card}`.
+  """
+  def set_sub_task_done(%Card{} = card, sub_task_id, done) when is_integer(sub_task_id) and is_boolean(done) do
+    case Repo.get_by(SubTask, id: sub_task_id, card_id: card.id) do
+      %SubTask{} = sub_task ->
+        {:ok, _updated} = sub_task |> SubTask.changeset(%{done: done}) |> Repo.update()
+        broadcast_upserted({:ok, reload_with_owners(card)})
+
+      nil ->
+        {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Sets the card's `ai_result` blob (a string-keyed map) via `update_card/2` (which
+  broadcasts). Plan/Code write the summary + changes + screens.
+  """
+  def update_ai_result(%Card{} = card, ai_result) when is_map(ai_result) do
+    update_card(card, %{ai_result: ai_result})
+  end
+
+  @doc """
+  Pure helper: `%{done: d, total: t}` from a map with a **loaded** `sub_tasks` list
+  (a Card struct or a plain map). Used by both the JSON and the drawer.
+  """
+  def sub_task_progress(%{sub_tasks: sub_tasks}) when is_list(sub_tasks) do
+    %{done: Enum.count(sub_tasks, & &1.done), total: length(sub_tasks)}
   end
 
   @doc """
@@ -748,7 +803,24 @@ defmodule Relay.Cards do
   end
 
   defp preload_owners(nil), do: nil
-  defp preload_owners(card_or_cards), do: Repo.preload(card_or_cards, owners: :user)
+  defp preload_owners(card_or_cards), do: Repo.preload(card_or_cards, card_preloads())
+
+  # Cards travel with their owners (+user) and position-ordered sub_tasks, so the
+  # board columns, the JSON, and any open drawer (including live-refreshed ones)
+  # always have what they render — no downstream re-fetch or NotLoaded guard.
+  defp card_preloads, do: [owners: :user, sub_tasks: from(st in SubTask, order_by: st.position)]
+
+  # Inside set_sub_tasks/2's transaction: insert one checklist item with its
+  # programmatic card_id + position; a bad title rolls the whole replace-all back.
+  defp insert_sub_task!(%Card{} = card, attrs, position) do
+    %SubTask{card_id: card.id, position: position}
+    |> SubTask.changeset(attrs)
+    |> Repo.insert()
+    |> case do
+      {:ok, sub_task} -> sub_task
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
+  end
 
   defp insert_owner_or_rollback(%Card{} = card, actor) do
     case insert_owner(card, actor) do
@@ -779,7 +851,7 @@ defmodule Relay.Cards do
   end
 
   defp reload_with_owners(%Card{} = card) do
-    Card |> Repo.get!(card.id) |> Repo.preload(owners: :user)
+    Card |> Repo.get!(card.id) |> Repo.preload(card_preloads())
   end
 
   defp insert_card(%Stage{} = stage, ref_number, attrs) do
