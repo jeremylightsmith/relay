@@ -512,7 +512,7 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#stage-col-1-cards .board-card.border-l-transparent", "Baton card")
+      assert has_element?(view, "#stage-col-1-cards .board-card.border-l-base-300", "Baton card")
       refute has_element?(view, "#stage-col-1-cards .board-card .card-owners")
       refute has_element?(view, "#stage-col-1-cards .board-card .card-status")
       refute has_element?(view, "#stage-col-1-cards .board-card .card-mismatch")

@@ -116,4 +116,52 @@ defmodule RelayWeb.BoardLiveWipTest do
       refute has_element?(view, ".stage-wip")
     end
   end
+
+  describe "the stage column WIP threshold coloring" do
+    test "under the limit the border and chip stay neutral", %{conn: conn, code: code, user: user} do
+      {:ok, _stage} = Boards.update_stage(code, %{wip_limit: 3})
+      create_cards(code, 2)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#stage-col-4[data-wip=under]")
+      assert chip_style(view, "#stage-col-4") =~ "border:1px solid var(--color-base-300)"
+    end
+
+    test "at the limit the border and chip text turn amber", %{conn: conn, code: code, user: user} do
+      {:ok, _stage} = Boards.update_stage(code, %{wip_limit: 2})
+      create_cards(code, 2)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#stage-col-4[data-wip=at]")
+      assert chip_style(view, "#stage-col-4") =~ "border:1px solid var(--color-warning)"
+      assert chip_style(view, "#stage-col-4 .stage-wip") =~ "color:oklch(0.52 0.13 65)"
+    end
+
+    test "over the limit the border and chip text turn red", %{conn: conn, code: code, user: user} do
+      {:ok, _stage} = Boards.update_stage(code, %{wip_limit: 2})
+      create_cards(code, 3)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#stage-col-4[data-wip=over]")
+      assert chip_style(view, "#stage-col-4") =~ "border:1px solid var(--color-error)"
+      assert chip_style(view, "#stage-col-4 .stage-wip") =~ "color:oklch(0.55 0.16 15)"
+    end
+
+    test "with no limit the border stays neutral and no chip renders", %{conn: conn, code: code, user: user} do
+      create_cards(code, 2)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#stage-col-4[data-wip=none]")
+      assert chip_style(view, "#stage-col-4") =~ "border:1px solid var(--color-base-300)"
+      refute has_element?(view, ".stage-wip")
+    end
+  end
 end

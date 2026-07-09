@@ -789,14 +789,14 @@ defmodule RelayWeb.CoreComponents do
   defp card_accent_class(_mismatch, %{category: :complete}), do: "border-l-success"
   defp card_accent_class(_mismatch, %{active_owner: :ai}), do: "border-l-secondary"
   defp card_accent_class(_mismatch, %{active_owner: :human}), do: "border-l-primary"
-  defp card_accent_class(_mismatch, _assigns), do: "border-l-transparent"
+  defp card_accent_class(_mismatch, _assigns), do: "border-l-base-300"
 
   defp card_accent_color("border-l-error"), do: "var(--color-error)"
   defp card_accent_color("border-l-warning"), do: "var(--color-warning)"
   defp card_accent_color("border-l-success"), do: "var(--color-success)"
   defp card_accent_color("border-l-secondary"), do: "var(--color-secondary)"
   defp card_accent_color("border-l-primary"), do: "var(--color-primary)"
-  defp card_accent_color("border-l-transparent"), do: "transparent"
+  defp card_accent_color("border-l-base-300"), do: "var(--color-base-300)"
 
   defp card_status_label(:working, progress), do: "working · #{progress || 0}%"
   defp card_status_label(:in_review, _progress), do: "ready"
@@ -825,10 +825,20 @@ defmodule RelayWeb.CoreComponents do
   defp owner_hex(:human), do: "var(--color-primary)"
   defp owner_hex(_owner), do: "oklch(0.55 0.02 255)"
 
-  # MMF 11 WIP chip colours (mockup "Relay Board.dc.html" line ~1010):
-  # over-limit rose vs. within-limit neutral.
-  defp wip_chip_colors(true), do: "background:oklch(0.96 0.03 15);color:oklch(0.55 0.16 15);"
-  defp wip_chip_colors(false), do: "background:oklch(0.96 0.006 255);color:oklch(0.48 0.02 255);"
+  # RLY-1 item 9 — WIP threshold: over → red, at → amber, else neutral. Effective
+  # count is the stage's main lane plus its sub-lanes (@total_count); no limit → :none.
+  defp wip_state(_count, nil), do: :none
+  defp wip_state(count, limit) when count > limit, do: :over
+  defp wip_state(count, limit) when count == limit, do: :at
+  defp wip_state(_count, _limit), do: :under
+
+  defp wip_border_color(:over), do: "var(--color-error)"
+  defp wip_border_color(:at), do: "var(--color-warning)"
+  defp wip_border_color(_state), do: "var(--color-base-300)"
+
+  defp wip_chip_colors(:over), do: "background:oklch(0.96 0.03 15);color:oklch(0.55 0.16 15);"
+  defp wip_chip_colors(:at), do: "background:oklch(0.97 0.05 75);color:oklch(0.52 0.13 65);"
+  defp wip_chip_colors(_state), do: "background:oklch(0.96 0.006 255);color:oklch(0.48 0.02 255);"
 
   @doc """
   Renders the card detail drawer (daisyUI `drawer drawer-end`): a scrim
@@ -1785,13 +1795,15 @@ defmodule RelayWeb.CoreComponents do
 
   def stage_column(assigns) do
     sublanes = Enum.map(assigns.sublanes, &Map.put_new(&1, :collapsed, false))
+    total_count = (assigns.count || 0) + Enum.sum(Enum.map(sublanes, & &1.count))
 
     assigns =
       assigns
       |> assign(:sublanes, sublanes)
       |> assign(:labeled, sublanes != [])
       |> assign(:stage_width, 240 + Enum.sum(Enum.map(sublanes, &sublane_width/1)))
-      |> assign(:total_count, (assigns.count || 0) + Enum.sum(Enum.map(sublanes, & &1.count)))
+      |> assign(:total_count, total_count)
+      |> assign(:wip_state, wip_state(total_count, assigns.wip_limit))
 
     ~H"""
     <%= if @collapsed do %>
@@ -1827,7 +1839,8 @@ defmodule RelayWeb.CoreComponents do
       <section
         id={@id}
         class="stage-column"
-        style={"flex:0 0 auto;width:#{@stage_width}px;display:flex;flex-direction:column;height:100%;background:var(--color-base-100);border:1px solid var(--color-base-300);border-radius:14px;overflow:hidden;box-shadow:0 1px 3px oklch(0.5 0.02 255/0.06);"}
+        data-wip={@wip_state}
+        style={"flex:0 0 auto;width:#{@stage_width}px;display:flex;flex-direction:column;height:100%;background:var(--color-base-100);border:1px solid #{wip_border_color(@wip_state)};border-radius:14px;overflow:hidden;box-shadow:0 1px 3px oklch(0.5 0.02 255/0.06);"}
       >
         <header style="display:flex;align-items:center;gap:8px;padding:15px 15px 12px 15px;flex:0 0 auto;border-bottom:1px solid var(--color-base-300);">
           <span
@@ -1850,7 +1863,8 @@ defmodule RelayWeb.CoreComponents do
             :if={@wip_limit}
             class="stage-wip"
             data-over={@total_count > @wip_limit}
-            style={"font-size:11px;font-weight:600;font-family:var(--font-mono);padding:2px 7px;border-radius:5px;flex:0 0 auto;#{wip_chip_colors(@total_count > @wip_limit)}"}
+            data-wip={@wip_state}
+            style={"font-size:11px;font-weight:600;font-family:var(--font-mono);padding:2px 7px;border-radius:5px;flex:0 0 auto;#{wip_chip_colors(@wip_state)}"}
           >
             wip {@total_count}/{@wip_limit}
           </span>
