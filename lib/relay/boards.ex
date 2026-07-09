@@ -8,6 +8,7 @@ defmodule Relay.Boards do
 
   import Ecto.Query
 
+  alias Ecto.Changeset
   alias Relay.Events
   alias Relay.Repo
   alias Schemas.Board
@@ -36,14 +37,15 @@ defmodule Relay.Boards do
   end
 
   @doc """
-  Updates a board's user-editable `name` only — never `slug`, `key`, or
-  `owner_id`, whatever the caller passes. On success broadcasts
-  `{:board_updated, board}` (MMF 18) so every open board retitles live.
-  Returns `{:ok, board} | {:error, changeset}`.
+  Updates a board's user-editable `name` and `slug` — never `key` or
+  `owner_id`, whatever the caller passes. Validates slug format and
+  uniqueness. On success broadcasts `{:board_updated, board}` (MMF 18) so
+  every open board retitles/redirects live. Returns
+  `{:ok, board} | {:error, changeset}`.
   """
   def update_board(%Board{} = board, attrs) do
     board
-    |> Board.changeset(Map.take(attrs, [:name, "name"]))
+    |> Board.changeset(Map.take(attrs, [:name, "name", :slug, "slug"]))
     |> Repo.update()
     |> broadcast_board_updated(board.id)
   end
@@ -51,11 +53,93 @@ defmodule Relay.Boards do
   @doc """
   Returns the user's board with `stages` preloaded in `position` order,
   creating the board (unique slug derived from the user) and seeding the
-  default 7-stage pipeline on first call. Idempotent per user.
+  default 7-stage pipeline on first call. Idempotent per user. Prefers the
+  user's first active (non-archived) board.
   """
   def get_or_create_default_board(%User{} = user) do
-    board = Repo.get_by(Board, owner_id: user.id) || create_default_board!(user)
+    board =
+      case list_boards(user) do
+        [board | _] -> board
+        [] -> create_default_board!(user)
+      end
+
     Repo.preload(board, stages: from(s in Stage, order_by: s.position))
+  end
+
+  @doc "The user's non-archived boards, oldest first (stable inserted_at/id order)."
+  def list_boards(%User{id: user_id}) do
+    Repo.all(
+      from b in Board,
+        where: b.owner_id == ^user_id and is_nil(b.archived_at),
+        order_by: [asc: b.inserted_at, asc: b.id]
+    )
+  end
+
+  @doc """
+  Owner-scoped board lookup by slug, with stages preloaded in position order.
+  Returns an archived board too (still loadable, read-only). nil when the user
+  owns no board with that slug.
+  """
+  def get_board(%User{id: user_id}, slug) when is_binary(slug) do
+    Repo.one(
+      from b in Board,
+        where: b.owner_id == ^user_id and b.slug == ^slug,
+        preload: [stages: ^from(s in Stage, order_by: s.position)]
+    )
+  end
+
+  @doc "Like get_board/2 but raises Ecto.NoResultsError (→ 404) when not found."
+  def get_board!(%User{id: user_id}, slug) when is_binary(slug) do
+    Repo.one!(
+      from b in Board,
+        where: b.owner_id == ^user_id and b.slug == ^slug,
+        preload: [stages: ^from(s in Stage, order_by: s.position)]
+    )
+  end
+
+  @doc """
+  Creates a board for `user`: validates `name`, derives a unique `slug` and a
+  `key` from the name, sets `owner_id` programmatically, and seeds the
+  default 7-stage pipeline — all in one transaction. External callers pass
+  only a name (`%{name: ...}` / `%{"name" => ...}`). Returns the board with
+  stages preloaded.
+  """
+  def create_board(%User{} = user, attrs) do
+    name = fetch_name(attrs)
+
+    changeset =
+      Board.changeset(%Board{owner_id: user.id}, %{
+        name: name,
+        slug: Map.get(attrs, :slug) || unique_slug(slugify(name)),
+        key: Map.get(attrs, :key) || derive_key(name)
+      })
+
+    Repo.transaction(fn ->
+      case Repo.insert(changeset) do
+        {:ok, board} ->
+          seed_stages!(board)
+          Repo.preload(board, stages: from(s in Stage, order_by: s.position))
+
+        {:error, changeset} ->
+          Repo.rollback(changeset)
+      end
+    end)
+  end
+
+  @doc "Archives a board (read-only). Broadcasts {:board_updated, board}."
+  def archive_board(%Board{} = board) do
+    board
+    |> Changeset.change(archived_at: DateTime.truncate(DateTime.utc_now(), :second))
+    |> Repo.update()
+    |> broadcast_board_updated(board.id)
+  end
+
+  @doc "Clears a board's archived state. Broadcasts {:board_updated, board}."
+  def unarchive_board(%Board{} = board) do
+    board
+    |> Changeset.change(archived_at: nil)
+    |> Repo.update()
+    |> broadcast_board_updated(board.id)
   end
 
   @doc "Returns the board's stages in position order."
@@ -248,7 +332,7 @@ defmodule Relay.Boards do
   # board. Validated here (not in the schema) because only the context
   # knows the board.
   defp validate_reject_target(changeset, board_id) do
-    case Ecto.Changeset.get_change(changeset, :reject_to_stage_id) do
+    case Changeset.get_change(changeset, :reject_to_stage_id) do
       nil ->
         changeset
 
@@ -256,7 +340,7 @@ defmodule Relay.Boards do
         if Repo.exists?(from s in Stage, where: s.id == ^target_id and s.board_id == ^board_id and s.lane == :main) do
           changeset
         else
-          Ecto.Changeset.add_error(changeset, :reject_to_stage_id, "must be a main stage on the same board")
+          Changeset.add_error(changeset, :reject_to_stage_id, "must be a main stage on the same board")
         end
     end
   end
@@ -310,7 +394,7 @@ defmodule Relay.Boards do
 
     stage
     |> Stage.changeset(attrs)
-    |> Ecto.Changeset.force_change(:position, position)
+    |> Changeset.force_change(:position, position)
     |> Repo.update!()
   end
 
@@ -374,46 +458,53 @@ defmodule Relay.Boards do
 
   defp create_default_board!(user) do
     {:ok, board} =
-      Repo.transaction(fn ->
-        board =
-          %Board{owner_id: user.id}
-          |> Board.changeset(%{slug: unique_slug(user)})
-          |> Repo.insert!()
-
-        @seed_stages
-        |> Enum.with_index(1)
-        |> Enum.each(fn {{name, owner, category}, position} ->
-          %Stage{board_id: board.id}
-          |> Stage.changeset(%{name: name, position: position, category: category, owner: owner})
-          |> Repo.insert!()
-        end)
-
-        board
-      end)
+      create_board(user, %{
+        name: "My board",
+        slug: unique_slug(slugify(user_source(user))),
+        key: "RLY"
+      })
 
     board
   end
 
-  defp unique_slug(user) do
-    base = slug_base(user)
+  defp seed_stages!(board) do
+    @seed_stages
+    |> Enum.with_index(1)
+    |> Enum.each(fn {{name, owner, category}, position} ->
+      %Stage{board_id: board.id}
+      |> Stage.changeset(%{name: name, position: position, category: category, owner: owner})
+      |> Repo.insert!()
+    end)
+  end
 
+  defp fetch_name(attrs), do: attrs[:name] || attrs["name"] || ""
+
+  # Card-ref key: uppercased alphanumerics of the name, capped at 5 chars,
+  # falling back to "RLY". Refs resolve per-board, so a shared key is harmless.
+  defp derive_key(name) do
+    case name |> to_string() |> String.upcase() |> String.replace(~r/[^A-Z0-9]/, "") |> String.slice(0, 5) do
+      "" -> "RLY"
+      key -> key
+    end
+  end
+
+  defp user_source(user), do: user.name || user.email |> String.split("@") |> hd()
+
+  defp slugify(source) do
+    case source |> to_string() |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-") do
+      "" -> "board"
+      base -> base
+    end
+  end
+
+  defp unique_slug(base) do
     if slug_taken?(base), do: suffixed_slug(base, 2), else: base
   end
 
   defp suffixed_slug(base, n) do
     candidate = "#{base}-#{n}"
-
     if slug_taken?(candidate), do: suffixed_slug(base, n + 1), else: candidate
   end
 
   defp slug_taken?(slug), do: Repo.exists?(from(b in Board, where: b.slug == ^slug))
-
-  defp slug_base(user) do
-    source = user.name || user.email |> String.split("@") |> hd()
-
-    case source |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-") do
-      "" -> "board"
-      base -> base
-    end
-  end
 end

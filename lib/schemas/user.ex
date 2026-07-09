@@ -16,6 +16,8 @@ defmodule Schemas.User do
     field :provider, :string
     field :provider_uid, :string
 
+    has_many :boards, Schemas.Board, foreign_key: :owner_id
+
     timestamps(type: :utc_datetime)
   end
 
