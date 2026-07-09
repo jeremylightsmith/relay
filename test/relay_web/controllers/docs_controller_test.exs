@@ -38,4 +38,27 @@ defmodule RelayWeb.DocsControllerTest do
     assert html =~ "<table>"
     refute html =~ "| --- | --- | --- |"
   end
+
+  test "GET /docs renders the setup guide and is reachable logged out", %{conn: conn} do
+    html = conn |> get(~p"/docs") |> html_response(200)
+
+    assert html =~ "id=\"docs\""
+    assert html =~ "Setup"
+    assert html =~ "Authorization: Bearer"
+    assert html =~ "RELAY_API_KEY"
+  end
+
+  test "GET /docs points to the full REST API reference", %{conn: conn} do
+    html = conn |> get(~p"/docs") |> html_response(200)
+
+    assert html =~ ~p"/docs/api"
+    assert html =~ "/api/board"
+  end
+
+  test "GET /docs renders the CLI table as HTML, not literal markdown pipes", %{conn: conn} do
+    html = conn |> get(~p"/docs") |> html_response(200)
+
+    assert html =~ "<table>"
+    refute html =~ "| --- |"
+  end
 end

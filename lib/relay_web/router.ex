@@ -43,6 +43,7 @@ defmodule RelayWeb.Router do
     get "/", PageController, :home
     get "/privacy", PageController, :privacy
     get "/terms", PageController, :terms
+    get "/docs", DocsController, :index
     get "/docs/api", DocsController, :api
     delete "/logout", AuthController, :delete
 
