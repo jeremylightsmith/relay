@@ -36,7 +36,8 @@
       "from": "Code:Done",
       "done": "Deploy:Done",
       "action": [
-        { "shell": "gh pr merge {branch} --merge --delete-branch" },
+        { "shell": "gh pr update-branch {branch} 2>/dev/null || true" },
+        { "shell": "gh pr merge {branch} --squash --delete-branch" },
         { "shell": "sleep 15 && gh run watch $(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId') --exit-status" }
       ]
     }

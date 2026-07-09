@@ -156,8 +156,8 @@ for (let cycle = 1; cycle <= MAX_CYCLES && !allDone; cycle++) {
   if (!approved) { stalled = picked.task; log(`⚠ Task stuck after ${MAX_ATTEMPTS} attempts: ${picked.task}`); break }
 
   await agent(
-    `In plan.md, change EVERY '- [ ]' step under this task's '### Task N' heading to '- [x]' (the whole task section), ` +
-    `and commit just that plan.md change with message 'Mark ${picked.task} complete'. Change nothing else.\nTask: ${picked.task}`,
+    `In plan.md, change EVERY '- [ ]' step under this task's '### Task N' heading to '- [x]' (the whole task section). ` +
+    `plan.md is a gitignored, throwaway working file: do NOT commit it and do NOT 'git add' it — progress is tracked in the working tree only. Change nothing else.\nTask: ${picked.task}`,
     { phase: 'Execute', model: 'haiku', label: `mark #${cycle}` },
   )
 }
