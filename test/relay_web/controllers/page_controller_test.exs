@@ -38,5 +38,10 @@ defmodule RelayWeb.PageControllerTest do
       assert html =~ ~p"/terms"
       assert html =~ ~p"/privacy"
     end
+
+    test "the sign-in page links to the API docs", %{conn: conn} do
+      html = conn |> get(~p"/") |> html_response(200)
+      assert html =~ ~p"/docs"
+    end
   end
 end
