@@ -120,7 +120,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
             story_card()
             | branch: "rly-12-wire-the-runner",
               plan:
-                "## Task 1 — Schema + API\n\n- [x] migration: add branch + plan\n- [x] cast in Card.changeset/2\n- [ ] PATCH /api/cards/:ref accepts both\n\n## Task 2 — Drawer\n\n- [ ] collapsed Plan section\n- [ ] branch chip in the rail"
+                "## Task 1 — Schema + API\n\n- [x] migration: add branch + plan\n- [x] cast in Card.changeset/2\n- [ ] PATCH /api/cards/:ref accepts both\n\n## Task 2 — Drawer\n\n- [ ] collapsed Plan section\n- [ ] branch chip in the rail",
+              pr_url: "https://github.com/acme/relay/pull/42"
           },
           stage_name: "Code",
           stage_owner: :ai,
@@ -187,6 +188,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
       blocked_since: nil,
       branch: nil,
       plan: nil,
+      pr_url: nil,
       owners: [
         %{id: 1, actor_type: :user, user_id: 1, user: %{name: "Ada Lovelace", email: "ada@example.com"}},
         %{id: 2, actor_type: :agent, user_id: nil, user: nil}

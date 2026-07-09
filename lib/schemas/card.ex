@@ -7,7 +7,8 @@ defmodule Schemas.Card do
   `ref_number` are set programmatically, never cast from input. `branch`
   and `plan` (MMF spec 2026-07-08) carry the runner's git branch and
   implementation plan with the card; both nullable, both cast like
-  `description`.
+  `description`. `pr_url` carries the runner's pull request link with the
+  card; nullable, cast like `branch`/`plan`.
   """
 
   use Ecto.Schema
@@ -29,6 +30,7 @@ defmodule Schemas.Card do
     field :blocked_since, :utc_datetime
     field :branch, :string
     field :plan, :string
+    field :pr_url, :string
 
     belongs_to :board, Schemas.Board
     belongs_to :stage, Schemas.Stage
@@ -39,13 +41,13 @@ defmodule Schemas.Card do
 
   @doc """
   Changeset for user/agent-supplied card attributes (`:title`,
-  `:description`, `:tag`, `:branch`, `:plan`). `board_id`, `stage_id`,
+  `:description`, `:tag`, `:branch`, `:plan`, `:pr_url`). `board_id`, `stage_id`,
   `position`, and `ref_number` must already be set on the struct and are
   never cast.
   """
   def changeset(card, attrs) do
     card
-    |> cast(attrs, [:title, :description, :tag, :branch, :plan])
+    |> cast(attrs, [:title, :description, :tag, :branch, :plan, :pr_url])
     |> validate_required([:title])
     |> unique_constraint([:board_id, :ref_number], name: :cards_board_id_ref_number_index)
   end
