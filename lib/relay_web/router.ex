@@ -66,6 +66,19 @@ defmodule RelayWeb.Router do
     get "/board", BoardRedirectController, :index
   end
 
+  scope "/admin", RelayWeb.Admin do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :admin,
+      on_mount:
+        if(Application.compile_env(:relay, :sql_sandbox),
+          do: [RelayWeb.LiveAcceptance],
+          else: []
+        ) ++ [{RelayWeb.Auth, :require_authenticated}] do
+      live "/api", ApiLive
+    end
+  end
+
   scope "/auth", RelayWeb do
     pipe_through :browser
 
