@@ -25,7 +25,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 61}, as: :card),
           stages: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 7, name: "Done"}],
-          timeline: story_timeline(),
+          conversation: story_conversation(),
+          activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
       },
@@ -44,7 +45,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           status_form: Phoenix.Component.to_form(%{"status" => "queued", "progress" => nil}, as: :card),
           editing_description: true,
           description_form: Phoenix.Component.to_form(%{"description" => ""}, as: :card),
-          timeline: [],
+          conversation: [],
+          activity: [],
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
       },
@@ -68,7 +70,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           status_form: Phoenix.Component.to_form(%{"status" => "needs_input", "progress" => nil}, as: :card),
           question: "Should exports use the billing timezone or the viewer's local timezone?",
           answer_form: Phoenix.Component.to_form(%{"body" => ""}, as: :answer),
-          timeline: story_timeline(),
+          conversation: story_conversation(),
+          activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
       },
@@ -87,7 +90,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
           review_gate: %{approve_label: "Approve → Deploy", reject_to_name: "Code"},
           reject_form: Phoenix.Component.to_form(%{"note" => ""}, as: :reject),
-          timeline: story_timeline(),
+          conversation: story_conversation(),
+          activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
       },
@@ -107,7 +111,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           review_gate: %{approve_label: "Approve → Deploy", reject_to_name: "Code"},
           reject_open: true,
           reject_form: Phoenix.Component.to_form(%{"note" => ""}, as: :reject),
-          timeline: story_timeline(),
+          conversation: story_conversation(),
+          activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
       },
@@ -130,26 +135,18 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 61}, as: :card),
-          timeline: story_timeline(),
+          conversation: story_conversation(),
+          activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
       }
     ]
   end
 
-  defp story_timeline do
+  defp story_conversation do
     ada = %Schemas.User{id: 1, name: "Ada Lovelace", email: "ada@example.com"}
 
     [
-      {"timeline-activity-1",
-       %Schemas.Activity{
-         id: 1,
-         type: :created,
-         meta: %{},
-         actor_type: :user,
-         user: ada,
-         inserted_at: ~U[2026-07-01 09:00:00Z]
-       }},
       {"timeline-comment-1",
        %Schemas.Comment{
          id: 1,
@@ -157,15 +154,6 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
          user: ada,
          body: "Kicking this off — spec draft attached.",
          inserted_at: ~U[2026-07-02 10:15:00Z]
-       }},
-      {"timeline-activity-2",
-       %Schemas.Activity{
-         id: 2,
-         type: :moved,
-         meta: %{"from_stage" => "Spec", "to_stage" => "Code"},
-         actor_type: :agent,
-         user: nil,
-         inserted_at: ~U[2026-07-03 11:00:00Z]
        }},
       {"timeline-comment-2",
        %Schemas.Comment{
@@ -178,10 +166,36 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
     ]
   end
 
+  defp story_activity do
+    ada = %Schemas.User{id: 1, name: "Ada Lovelace", email: "ada@example.com"}
+
+    [
+      {"timeline-activity-2",
+       %Schemas.Activity{
+         id: 2,
+         type: :moved,
+         meta: %{"from_stage" => "Spec", "to_stage" => "Code"},
+         actor_type: :agent,
+         user: nil,
+         inserted_at: ~U[2026-07-03 11:00:00Z]
+       }},
+      {"timeline-activity-1",
+       %Schemas.Activity{
+         id: 1,
+         type: :created,
+         meta: %{},
+         actor_type: :user,
+         user: ada,
+         inserted_at: ~U[2026-07-01 09:00:00Z]
+       }}
+    ]
+  end
+
   defp story_card do
     %{
       title: "Draft the onboarding spec",
       description: "Cover the Google sign-in flow.\n\nList open questions for review.",
+      spec: nil,
       tag: "spec",
       status: :working,
       progress: 61,
