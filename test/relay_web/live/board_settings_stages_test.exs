@@ -18,7 +18,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
   describe "two-pane shell" do
     test "renders the rail with Stages active and stage cards grouped by category",
          %{conn: conn, board: board} do
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       assert has_element?(view, "#settings-rail")
       assert has_element?(view, "#settings-nav-stages", "Stages")
@@ -40,8 +40,9 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       assert has_element?(view, "#stage-#{code.id}-row .stage-owner-swatch[data-owner='ai']")
     end
 
-    test "the API-key pane renders under the keys nav with its ids intact", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+    test "the API-key pane renders under the keys nav with its ids intact", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       view |> element("#settings-nav-keys") |> render_click()
 
@@ -54,8 +55,9 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       refute has_element?(view, "#api-key-pane")
     end
 
-    test "the stages pane always shows all four category groups with add buttons", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+    test "the stages pane always shows all four category groups with add buttons", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       for category <- ["unstarted", "planning", "in_progress", "complete"] do
         assert has_element?(view, "#settings-group-#{category}")
@@ -79,7 +81,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
   describe "editing stages" do
     test "renaming persists and shows on a freshly mounted board", %{conn: conn, board: board} do
       code = stage_named(board, "Code")
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       view
       |> form("#stage-#{code.id}-form", stage: %{name: "Build"})
@@ -88,14 +90,14 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       assert Boards.get_stage(board, code.id).name == "Build"
       assert has_element?(view, "#stage-#{code.id}-name[value='Build']")
 
-      {:ok, board_view, _html} = live(conn, ~p"/board")
+      {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
       assert has_element?(board_view, "#stage-strip-#{code.id} h3", "Build")
     end
 
     test "a blank rename is rejected with a flash and keeps the old name",
          %{conn: conn, board: board} do
       code = stage_named(board, "Code")
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       html = view |> form("#stage-#{code.id}-form", stage: %{name: ""}) |> render_change()
 
@@ -105,7 +107,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
 
     test "the description input persists", %{conn: conn, board: board} do
       code = stage_named(board, "Code")
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       view
       |> form("#stage-#{code.id}-form", stage: %{description: "Agents write the code"})
@@ -118,7 +120,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
          %{conn: conn, board: board} do
       spec = stage_named(board, "Spec")
       plan = stage_named(board, "Plan")
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       view |> element("#stage-#{spec.id}-down") |> render_click()
 
@@ -139,7 +141,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       card = insert(:card, stage: code)
       owner_row = insert(:card_owner, card: card, user: user)
 
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       view |> element("#stage-#{code.id}-owner-human") |> render_click()
 
@@ -156,7 +158,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
   describe "adding and deleting stages" do
     test "add stage creates a renamable default stage in that category",
          %{conn: conn, board: board} do
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       view |> element("#add-stage-unstarted") |> render_click()
 
@@ -169,7 +171,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
 
     test "delete removes an empty stage", %{conn: conn, board: board} do
       deploy = stage_named(board, "Deploy")
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       view |> element("#stage-#{deploy.id}-delete") |> render_click()
 
@@ -180,7 +182,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
     test "deleting a stage with cards flashes and deletes nothing", %{conn: conn, board: board} do
       code = stage_named(board, "Code")
       insert(:card, stage: code)
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       html = view |> element("#stage-#{code.id}-delete") |> render_click()
 
@@ -194,7 +196,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       code = stage_named(board, "Code")
       {:ok, review} = Boards.enable_lane(code, :review)
       insert(:card, stage: review)
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       html = view |> element("#stage-#{code.id}-delete") |> render_click()
 
@@ -206,7 +208,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       [keep | rest] = Enum.filter(board.stages, &(&1.lane == :main))
       Enum.each(rest, fn stage -> {:ok, _} = Boards.delete_stage(stage) end)
 
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
       html = view |> element("#stage-#{keep.id}-delete") |> render_click()
 
       assert html =~ "at least one stage"
@@ -214,7 +216,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
     end
 
     test "add stage to Planning creates a planning stage", %{conn: conn, board: board} do
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       view |> element("#add-stage-planning") |> render_click()
 
@@ -228,7 +230,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
     test "the Done and Review toggles live inside the card and still drive lanes",
          %{conn: conn, board: board} do
       code = stage_named(board, "Code")
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       assert has_element?(view, "#stage-#{code.id}-row #stage-#{code.id}-done-toggle")
       assert has_element?(view, "#stage-#{code.id}-row #stage-#{code.id}-review-toggle")

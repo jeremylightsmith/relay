@@ -28,20 +28,22 @@ defmodule RelayWeb.BoardLiveReviewTest do
     card
   end
 
-  test "no review panel renders for a card that is not in review", %{conn: conn, review: review} do
+  test "no review panel renders for a card that is not in review", %{conn: conn, review: review, user: user} do
     {:ok, _card} = Cards.create_card(review, %{title: "Still queued"})
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    board = Boards.get_or_create_default_board(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
     assert has_element?(view, "#card-drawer")
     refute has_element?(view, "#review-panel")
     refute has_element?(view, "#review-actions")
   end
 
-  test "an in_review card on a gated stage shows the full green panel", %{conn: conn, review: review} do
+  test "an in_review card on a gated stage shows the full green panel", %{conn: conn, review: review, user: user} do
     in_review_card(review)
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    board = Boards.get_or_create_default_board(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
     assert has_element?(view, "#review-panel", "READY FOR YOUR REVIEW")
     assert has_element?(view, "#review-approve", "Approve → Deploy")
@@ -51,10 +53,11 @@ defmodule RelayWeb.BoardLiveReviewTest do
     refute has_element?(view, "#review-request-note")
   end
 
-  test "an in_review card on a non-gated stage shows only Mark done and Pull", %{conn: conn, code: code} do
+  test "an in_review card on a non-gated stage shows only Mark done and Pull", %{conn: conn, code: code, user: user} do
     in_review_card(code)
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    board = Boards.get_or_create_default_board(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
     assert has_element?(view, "#review-panel", "READY FOR YOUR REVIEW")
     refute has_element?(view, "#review-approve")
@@ -67,7 +70,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
        %{conn: conn, user: user, board: board, review: review, deploy: deploy} do
     in_review_card(review)
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
     view |> element("#review-approve") |> render_click()
 
@@ -89,7 +92,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
        %{conn: conn, user: user, board: board, code: code, review: review} do
     in_review_card(review)
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
     view |> element("#review-request-changes") |> render_click()
 
@@ -120,7 +123,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
        %{conn: conn, board: board, review: review} do
     in_review_card(review)
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
     view |> element("#review-request-changes") |> render_click()
     view |> form("#review-reject-form", reject: %{note: "   "}) |> render_submit()
@@ -130,10 +133,11 @@ defmodule RelayWeb.BoardLiveReviewTest do
     assert Cards.get_card_by_ref(board, "RLY-1").status == :in_review
   end
 
-  test "Cancel collapses the note sub-panel back to the button row", %{conn: conn, review: review} do
+  test "Cancel collapses the note sub-panel back to the button row", %{conn: conn, review: review, user: user} do
     in_review_card(review)
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    board = Boards.get_or_create_default_board(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
     view |> element("#review-request-changes") |> render_click()
     assert has_element?(view, "#review-reject-panel")
@@ -148,7 +152,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
        %{conn: conn, user: user, board: board, code: code} do
     in_review_card(code)
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
     view |> element("#review-mark-done") |> render_click()
 
@@ -171,7 +175,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
        %{conn: conn, user: user, board: board, review: review} do
     in_review_card(review)
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
     assert has_element?(view, "#review-pull")
 
     view |> element("#review-pull") |> render_click()
@@ -187,10 +191,11 @@ defmodule RelayWeb.BoardLiveReviewTest do
   end
 
   test "the review and needs-input panels are mutually exclusive by status",
-       %{conn: conn, review: review} do
+       %{conn: conn, review: review, user: user} do
     card = in_review_card(review)
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    board = Boards.get_or_create_default_board(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
     assert has_element?(view, "#review-panel")
     refute has_element?(view, "#needs-input-panel")
 
@@ -202,10 +207,11 @@ defmodule RelayWeb.BoardLiveReviewTest do
   end
 
   test "review transitions from elsewhere update an open drawer live (MMF 18)",
-       %{conn: conn, review: review} do
+       %{conn: conn, review: review, user: user} do
     {:ok, card} = Cards.create_card(review, %{title: "Live review"})
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    board = Boards.get_or_create_default_board(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
     refute has_element?(view, "#review-panel")
 
     {:ok, card} = Cards.set_status(card, %{status: :in_review})

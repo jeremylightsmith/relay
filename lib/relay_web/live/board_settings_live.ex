@@ -37,28 +37,28 @@ defmodule RelayWeb.BoardSettingsLive do
             BOARD
           </div>
           <.link
-            patch={~p"/board/settings?section=general"}
+            patch={~p"/board/#{@board.slug}/settings?section=general"}
             id="settings-nav-general"
             style={nav_style(@section == :general)}
           >
             General
           </.link>
           <.link
-            patch={~p"/board/settings"}
+            patch={~p"/board/#{@board.slug}/settings"}
             id="settings-nav-stages"
             style={nav_style(@section == :stages)}
           >
             Stages
           </.link>
           <.link
-            patch={~p"/board/settings?section=keys"}
+            patch={~p"/board/#{@board.slug}/settings?section=keys"}
             id="settings-nav-keys"
             style={nav_style(@section == :keys)}
           >
             API keys
           </.link>
           <.link
-            navigate={~p"/board"}
+            navigate={~p"/board/#{@board.slug}"}
             id="back-to-board"
             class="font-mono"
             style="margin-top:auto;font-size:11px;color:oklch(0.55 0.02 255);padding:8px 10px;text-decoration:none;"
@@ -459,8 +459,8 @@ defmodule RelayWeb.BoardSettingsLive do
   end
 
   @impl true
-  def mount(_params, _session, socket) do
-    board = Boards.get_or_create_default_board(socket.assigns.current_scope.user)
+  def mount(%{"slug" => slug}, _session, socket) do
+    board = Boards.get_board!(socket.assigns.current_scope.user, slug)
 
     {:ok,
      socket

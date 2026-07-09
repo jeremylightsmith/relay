@@ -34,11 +34,12 @@ defmodule RelayWeb.BoardLiveWipTest do
   end
 
   describe "the stage header WIP chip" do
-    test "within the limit it renders the neutral mockup chip", %{conn: conn, code: code} do
+    test "within the limit it renders the neutral mockup chip", %{conn: conn, code: code, user: user} do
       {:ok, _stage} = Boards.update_stage(code, %{wip_limit: 3})
       create_cards(code, 2)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#stage-col-4 .stage-wip", "wip 2/3")
       refute has_element?(view, "#stage-col-4 .stage-wip[data-over]")
@@ -49,11 +50,12 @@ defmodule RelayWeb.BoardLiveWipTest do
       assert style =~ "font-family:var(--font-mono)"
     end
 
-    test "over the limit it flips to the rose treatment", %{conn: conn, code: code} do
+    test "over the limit it flips to the rose treatment", %{conn: conn, code: code, user: user} do
       {:ok, _stage} = Boards.update_stage(code, %{wip_limit: 3})
       create_cards(code, 4)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#stage-col-4 .stage-wip[data-over]", "wip 4/3")
 
@@ -62,24 +64,26 @@ defmodule RelayWeb.BoardLiveWipTest do
       assert style =~ "color:oklch(0.55 0.16 15)"
     end
 
-    test "no chip renders when wip_limit is nil", %{conn: conn, code: code} do
+    test "no chip renders when wip_limit is nil", %{conn: conn, code: code, user: user} do
       create_cards(code, 2)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#stage-col-4 .stage-count", "2")
       refute has_element?(view, ".stage-wip")
     end
 
     test "sub-lane cards do not count toward used, and sub-lanes never show a chip",
-         %{conn: conn, code: code} do
+         %{conn: conn, code: code, user: user} do
       {:ok, done_lane} = Boards.enable_lane(code, :done)
       {:ok, _stage} = Boards.update_stage(code, %{wip_limit: 2})
       [first, second, _third] = create_cards(code, 3)
       {:ok, _moved} = Cards.move_card(first, done_lane, 0)
       {:ok, _moved} = Cards.move_card(second, done_lane, 1)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#stage-col-4 .stage-wip", "wip 1/2")
       refute has_element?(view, "#stage-col-4 .stage-wip[data-over]")
@@ -87,10 +91,11 @@ defmodule RelayWeb.BoardLiveWipTest do
     end
 
     test "an empty limited stage collapses to the strip, which shows no chip",
-         %{conn: conn, spec: spec} do
+         %{conn: conn, spec: spec, user: user} do
       {:ok, _stage} = Boards.update_stage(spec, %{wip_limit: 3})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#stage-strip-#{spec.id}")
       refute has_element?(view, "#stage-strip-#{spec.id} .stage-wip")
@@ -102,7 +107,7 @@ defmodule RelayWeb.BoardLiveWipTest do
       {:ok, _stage} = Boards.update_stage(code, %{wip_limit: 3})
       create_cards(code, 2)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
       assert has_element?(view, "#stage-col-4 .stage-wip", "wip 2/3")
 
       {:ok, _stage} = Boards.update_stage(Boards.get_stage(board, code.id), %{wip_limit: nil})

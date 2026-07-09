@@ -8,8 +8,9 @@ defmodule RelayWeb.BoardSettingsGeneralTest do
   describe "General pane" do
     setup :register_and_log_in_user
 
-    test "the rail links to General and its pane shows the Board name field + Save", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=general")
+    test "the rail links to General and its pane shows the Board name field + Save", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
 
       assert has_element?(view, "#settings-nav-general")
       assert has_element?(view, "#general-pane")
@@ -20,13 +21,14 @@ defmodule RelayWeb.BoardSettingsGeneralTest do
     test "the Board name field is pre-filled with the current name", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
 
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=general")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
 
       assert view |> element("#board-name-input") |> render() =~ board.name
     end
 
     test "saving a new name persists it, flashes success, and reflects it in the field", %{conn: conn, user: user} do
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=general")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
 
       html =
         view
@@ -41,7 +43,8 @@ defmodule RelayWeb.BoardSettingsGeneralTest do
     test "saving a blank name shows a validation error and leaves the name unchanged", %{conn: conn, user: user} do
       original = Boards.get_or_create_default_board(user).name
 
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=general")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
 
       html =
         view
@@ -55,7 +58,7 @@ defmodule RelayWeb.BoardSettingsGeneralTest do
     test "renaming never changes the board slug or key", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
 
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=general")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
 
       view |> form("#general-form", board: %{name: "Renamed"}) |> render_submit()
 

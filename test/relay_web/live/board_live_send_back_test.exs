@@ -21,21 +21,24 @@ defmodule RelayWeb.BoardLiveSendBackTest do
   test "the amber banner renders for a card with an open rejection and names the target", %{
     conn: conn,
     code: code,
-    review: review
+    review: review,
+    user: user
   } do
     {:ok, card} = Cards.create_card(review, %{title: "Redo me"})
     {:ok, _sent} = Cards.send_back(card, code, "Handle the empty case", :agent)
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    board = Boards.get_or_create_default_board(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
     assert has_element?(view, "#rejection-banner", "Changes requested")
     assert has_element?(view, "#rejection-banner", "Handle the empty case")
     assert has_element?(view, "#rejection-banner", "Code")
   end
 
-  test "no banner for a clean card", %{conn: conn, code: code} do
+  test "no banner for a clean card", %{conn: conn, code: code, user: user} do
     {:ok, _card} = Cards.create_card(code, %{title: "Clean"})
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    board = Boards.get_or_create_default_board(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
     refute has_element?(view, "#rejection-banner")
   end
 
@@ -47,7 +50,7 @@ defmodule RelayWeb.BoardLiveSendBackTest do
   } do
     {:ok, _card} = Cards.create_card(code, %{title: "Bounce me"})
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
     view |> element("#send-back") |> render_click()
     assert has_element?(view, "#send-back-panel")
@@ -70,7 +73,7 @@ defmodule RelayWeb.BoardLiveSendBackTest do
   } do
     {:ok, _card} = Cards.create_card(code, %{title: "Bounce me"})
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
     view |> element("#send-back") |> render_click()
     view |> form("#send-back-form", send_back: %{to: spec.id, note: "   "}) |> render_submit()
 
@@ -82,7 +85,7 @@ defmodule RelayWeb.BoardLiveSendBackTest do
     backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
     {:ok, _card} = Cards.create_card(backlog, %{title: "First"})
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
     assert has_element?(view, "#card-drawer")
     refute has_element?(view, "#send-back")
   end
@@ -96,7 +99,7 @@ defmodule RelayWeb.BoardLiveSendBackTest do
     {:ok, card} = Cards.create_card(review, %{title: "Review me"})
     {:ok, _} = Cards.set_status(card, %{status: :in_review})
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
     view |> element("#review-request-changes") |> render_click()
 
     assert has_element?(view, "#review-reject-target")
@@ -115,7 +118,7 @@ defmodule RelayWeb.BoardLiveSendBackTest do
     {:ok, sent} = Cards.send_back(card, code, "fix", :agent)
     {:ok, _in_review} = Cards.set_status(sent, %{status: :in_review})
 
-    {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
     assert has_element?(view, "#rejection-banner")
 
     view |> element("#review-mark-done") |> render_click()

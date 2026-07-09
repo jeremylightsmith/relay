@@ -51,7 +51,7 @@ defmodule RelayWeb.BoardLive do
               </span>
             </div>
             <.link
-              navigate={~p"/board/settings"}
+              navigate={~p"/board/#{@board.slug}/settings"}
               id="board-settings-link"
               class="btn btn-ghost btn-sm btn-circle"
               aria-label="Board settings"
@@ -120,7 +120,7 @@ defmodule RelayWeb.BoardLive do
         stage_owner={@selected_stage.owner}
         stages={move_targets(@board, @selected_card)}
         active_owner={Cards.active_owner_type(@selected_card)}
-        close_patch={~p"/board"}
+        close_patch={~p"/board/#{@board.slug}"}
         title_form={@title_form}
         editing_title={@editing_title}
         editing_description={@editing_description}
@@ -146,8 +146,8 @@ defmodule RelayWeb.BoardLive do
   end
 
   @impl true
-  def mount(_params, _session, socket) do
-    board = Boards.get_or_create_default_board(socket.assigns.current_scope.user)
+  def mount(%{"slug" => slug}, _session, socket) do
+    board = Boards.get_board!(socket.assigns.current_scope.user, slug)
 
     if connected?(socket), do: Events.subscribe(board.id)
 
@@ -220,11 +220,11 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("select_card", %{"ref" => ref}, socket) do
-    {:noreply, push_patch(socket, to: ~p"/board?card=#{ref}")}
+    {:noreply, push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}?card=#{ref}")}
   end
 
   def handle_event("close_drawer", _params, socket) do
-    {:noreply, push_patch(socket, to: ~p"/board")}
+    {:noreply, push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}")}
   end
 
   # One move path, two entry points (drag-and-drop hook and the drawer's
@@ -880,7 +880,7 @@ defmodule RelayWeb.BoardLive do
   # exactly like mount does. Streams reset from the DB, so this is
   # idempotent and safe to run on the acting session's own echo too.
   defp reload_board(socket) do
-    board = Boards.get_or_create_default_board(socket.assigns.current_scope.user)
+    board = Boards.get_board!(socket.assigns.current_scope.user, socket.assigns.board.slug)
     cards_by_stage = board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
 
     socket =
