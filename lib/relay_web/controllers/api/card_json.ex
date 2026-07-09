@@ -14,6 +14,7 @@ defmodule RelayWeb.Api.CardJSON do
       progress: card.progress,
       branch: card.branch,
       plan: card.plan,
+      spec: card.spec,
       pr_url: card.pr_url,
       stage_id: card.stage_id,
       owners: Enum.map(card.owners, &owner/1),

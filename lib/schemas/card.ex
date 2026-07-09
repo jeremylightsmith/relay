@@ -8,7 +8,9 @@ defmodule Schemas.Card do
   and `plan` (MMF spec 2026-07-08) carry the runner's git branch and
   implementation plan with the card; both nullable, both cast like
   `description`. `pr_url` carries the runner's pull request link with the
-  card; nullable, cast like `branch`/`plan`.
+  card; nullable, cast like `branch`/`plan`. `spec` (RLY-3) carries the
+  design spec authored at the SPEC stage — nullable, cast like
+  `description`/`plan`.
   """
 
   use Ecto.Schema
@@ -18,6 +20,7 @@ defmodule Schemas.Card do
   schema "cards" do
     field :title, :string
     field :description, :string
+    field :spec, :string
     field :position, :integer
     field :tag, :string
     field :ref_number, :integer
@@ -41,13 +44,13 @@ defmodule Schemas.Card do
 
   @doc """
   Changeset for user/agent-supplied card attributes (`:title`,
-  `:description`, `:tag`, `:branch`, `:plan`, `:pr_url`). `board_id`, `stage_id`,
-  `position`, and `ref_number` must already be set on the struct and are
-  never cast.
+  `:description`, `:spec`, `:tag`, `:branch`, `:plan`, `:pr_url`). `board_id`,
+  `stage_id`, `position`, and `ref_number` must already be set on the struct
+  and are never cast.
   """
   def changeset(card, attrs) do
     card
-    |> cast(attrs, [:title, :description, :tag, :branch, :plan, :pr_url])
+    |> cast(attrs, [:title, :description, :spec, :tag, :branch, :plan, :pr_url])
     |> validate_required([:title])
     |> unique_constraint([:board_id, :ref_number], name: :cards_board_id_ref_number_index)
   end
