@@ -347,7 +347,7 @@ fields untouched), are settable via `PATCH /api/cards/:ref`, appear in `GET /api
 
 **Steps**
 
-- [ ] Write the failing drawer tests. In `test/relay_web/live/board_live_test.exs`, add a
+- [x] Write the failing drawer tests. In `test/relay_web/live/board_live_test.exs`, add a
       new describe block after the existing `describe "card drawer" do` block (the module
       already imports `Phoenix.LiveViewTest` and aliases `Relay.Boards` / `Relay.Cards`):
 
@@ -395,7 +395,7 @@ fields untouched), are settable via `PATCH /api/cards/:ref`, appear in `GET /api
     end
   ```
 
-- [ ] Write the failing live-update test. In
+- [x] Write the failing live-update test. In
       `test/relay_web/live/board_live_realtime_test.exs`, add inside the existing
       `describe "API-driven changes update mounted LiveViews" do` block (its setup already
       provides `%{backlog: backlog, token: token}` and the module defines
@@ -420,10 +420,10 @@ fields untouched), are settable via `PATCH /api/cards/:ref`, appear in `GET /api
     end
   ```
 
-- [ ] Run them — expect failures (no `#card-plan` / `#card-branch` elements):
+- [x] Run them — expect failures (no `#card-plan` / `#card-branch` elements):
       `mix test test/relay_web/live/board_live_test.exs test/relay_web/live/board_live_realtime_test.exs`
 
-- [ ] Implement in `lib/relay_web/components/core_components.ex`, inside `card_drawer/1`.
+- [x] Implement in `lib/relay_web/components/core_components.ex`, inside `card_drawer/1`.
 
       First update the `@card` attr doc so the contract names the new fields — replace the
       existing `attr :card, :any` doc string with:
@@ -484,10 +484,10 @@ fields untouched), are settable via `PATCH /api/cards/:ref`, appear in `GET /api
       "Plan" collapse section below the description; a \`branch\` renders as a mono chip in
       the properties rail. Both are read-only here — the runner sets them via the API.`
 
-- [ ] Re-run the two LiveView test files — expect all green:
+- [x] Re-run the two LiveView test files — expect all green:
       `mix test test/relay_web/live/board_live_test.exs test/relay_web/live/board_live_realtime_test.exs`
 
-- [ ] Refresh the storybook story `storybook/core_components/card_drawer.story.exs`
+- [x] Refresh the storybook story `storybook/core_components/card_drawer.story.exs`
       (`card_drawer/1` reads `@card.branch` / `@card.plan` on plain maps, so the story card
       MUST gain both keys or every variation raises `KeyError`).
 
@@ -526,9 +526,9 @@ fields untouched), are settable via `PATCH /api/cards/:ref`, appear in `GET /api
         }
   ```
 
-- [ ] Run `mix precommit` and fix anything it flags.
+- [x] Run `mix precommit` and fix anything it flags.
 
-- [ ] Commit.
+- [x] Commit.
 
 **Deliverable:** an open card drawer shows a collapsed-by-default "Plan" collapse section
 (`details#card-plan`, whitespace-preserved `pre#card-plan-body`) only when the card has a
