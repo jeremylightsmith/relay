@@ -1,7 +1,7 @@
 # API Reference
 
 Relay exposes a small JSON REST API scoped to a single **board**. It is the same
-entry point the `mix relay` CLI uses, so anything the CLI does you can do directly.
+entry point the `bin/relay` CLI uses, so anything the CLI does you can do directly.
 
 ## Base URL & authentication
 
@@ -197,6 +197,6 @@ curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application
 
 ## CLI
 
-Most of the time you'll drive this API through the `mix relay` CLI rather than raw
+Most of the time you'll drive this API through the `bin/relay` CLI rather than raw
 HTTP — it wraps pull/work/hand-back into a few commands. See `docs/agent-integration.md`
 in the repository for the full agent workflow.
