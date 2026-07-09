@@ -326,9 +326,11 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
       {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
+      settings_view |> element("#stage-#{code.id}-name-display") |> render_click()
+
       settings_view
-      |> form("#stage-#{code.id}-form", stage: %{name: "Build"})
-      |> render_change()
+      |> form("#stage-#{code.id}-name-form", stage: %{name: "Build"})
+      |> render_submit()
 
       assert has_element?(board_view, "#stage-strip-#{code.id} h3", "Build")
     end
