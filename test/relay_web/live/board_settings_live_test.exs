@@ -160,6 +160,20 @@ defmodule RelayWeb.BoardSettingsLiveTest do
     end
   end
 
+  describe "back-to-board control" do
+    setup :register_and_log_in_user
+
+    test "renders top-left in the rail as an arrow + label and navigates to the board",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+      assert has_element?(view, "#settings-rail #back-to-board", "Back to board")
+      assert has_element?(view, "#back-to-board .hero-arrow-left")
+      assert has_element?(view, ~s(#back-to-board[href="/board/#{board.slug}"]))
+    end
+  end
+
   defp revealed_secret(view) do
     view
     |> element("#api-key-secret")

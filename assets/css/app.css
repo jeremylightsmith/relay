@@ -117,6 +117,14 @@
   outline-offset: 2px;
   border-radius: var(--radius-field);
 }
+.drop-placeholder {
+  height: 2px;
+  margin: 3px 0;
+  border-radius: 2px;
+  background: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary);
+  pointer-events: none;
+}
 
 /* --- Rendered markdown (card description / spec / plan / comments, RLY-3) --- */
 .md > :first-child { margin-top: 0; }

@@ -25,6 +25,7 @@ const BoardDnD = {
       const card = e.target.closest(CARD_SELECTOR)
       if (card) card.classList.remove("dragging")
       this.clearDropTargets()
+      this.clearPlaceholder()
       this.draggedRef = null
       this.draggedEl = null
     })
@@ -36,17 +37,22 @@ const BoardDnD = {
       e.dataTransfer.dropEffect = "move"
       this.clearDropTargets(zone)
       zone.classList.add("drag-over")
+      this.showPlaceholder(zone, e.clientY)
     })
 
     this.el.addEventListener("dragleave", e => {
       const zone = e.target.closest(ZONE_SELECTOR)
-      if (zone && !zone.contains(e.relatedTarget)) zone.classList.remove("drag-over")
+      if (zone && !zone.contains(e.relatedTarget)) {
+        zone.classList.remove("drag-over")
+        this.clearPlaceholder()
+      }
     })
 
     this.el.addEventListener("drop", e => {
       const zone = e.target.closest(ZONE_SELECTOR)
       if (!zone || !this.draggedRef) return
       e.preventDefault()
+      this.clearPlaceholder()
       this.pushEvent("move_card", {
         ref: this.draggedRef,
         stage_id: zone.dataset.stageId,
@@ -78,6 +84,38 @@ const BoardDnD = {
     this.el.querySelectorAll(`${ZONE_SELECTOR}.drag-over`).forEach(zone => {
       if (zone !== except) zone.classList.remove("drag-over")
     })
+  },
+
+  // Insert a thin line at the computed drop slot, tracking the cursor. Uses the
+  // same midpoint rule as dropIndex, excluding the dragged card and the placeholder.
+  showPlaceholder(zone, y) {
+    const placeholder = this.placeholder()
+    const cards = Array.from(zone.querySelectorAll(CARD_SELECTOR))
+      .filter(el => el !== this.draggedEl)
+    const index = cards.filter(el => {
+      const rect = el.getBoundingClientRect()
+      return y > rect.top + rect.height / 2
+    }).length
+    const before = cards[index]
+    if (before) {
+      zone.insertBefore(placeholder, before)
+    } else {
+      zone.appendChild(placeholder)
+    }
+  },
+
+  placeholder() {
+    if (!this._placeholder) {
+      this._placeholder = document.createElement("div")
+      this._placeholder.className = "drop-placeholder"
+    }
+    return this._placeholder
+  },
+
+  clearPlaceholder() {
+    if (this._placeholder && this._placeholder.parentNode) {
+      this._placeholder.parentNode.removeChild(this._placeholder)
+    }
   },
 }
 
