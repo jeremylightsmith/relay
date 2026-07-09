@@ -169,6 +169,44 @@ defmodule Relay.CardsTest do
       assert updated.position == card.position
       assert updated.ref_number == card.ref_number
     end
+
+    test "persists branch and plan and they survive a reload", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Runner card"})
+
+      assert {:ok, %Card{} = updated} =
+               Cards.update_card(card, %{
+                 branch: "rly-21-card-branch-plan",
+                 plan: "## Task 1\n\n- [ ] add the fields"
+               })
+
+      assert updated.branch == "rly-21-card-branch-plan"
+      assert updated.plan == "## Task 1\n\n- [ ] add the fields"
+
+      reloaded = Repo.get!(Card, card.id)
+      assert reloaded.branch == "rly-21-card-branch-plan"
+      assert reloaded.plan == "## Task 1\n\n- [ ] add the fields"
+    end
+
+    test "setting branch and plan never touches the programmatic fields", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Pinned"})
+
+      assert {:ok, updated} =
+               Cards.update_card(card, %{
+                 branch: "rly-21-card-branch-plan",
+                 plan: "the plan",
+                 board_id: card.board_id + 1,
+                 stage_id: card.stage_id + 1,
+                 position: 99,
+                 ref_number: 99
+               })
+
+      assert updated.branch == "rly-21-card-branch-plan"
+      assert updated.plan == "the plan"
+      assert updated.board_id == card.board_id
+      assert updated.stage_id == card.stage_id
+      assert updated.position == card.position
+      assert updated.ref_number == card.ref_number
+    end
   end
 
   describe "get_card_by_ref/2" do

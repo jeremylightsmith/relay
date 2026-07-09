@@ -80,10 +80,10 @@ defmodule Relay.Cards do
   def ref(%Board{key: key}, %Card{ref_number: ref_number}), do: "#{key}-#{ref_number}"
 
   @doc """
-  Updates a card's user-editable attributes (`:title`, `:description`,
-  `:tag`), returning `{:ok, card}` or `{:error, changeset}`. The
-  programmatic fields (`board_id`, `stage_id`, `position`, `ref_number`)
-  are never cast and cannot be changed here.
+  Updates a card's user/agent-editable attributes (`:title`, `:description`,
+  `:tag`, `:branch`, `:plan`), returning `{:ok, card}` or
+  `{:error, changeset}`. The programmatic fields (`board_id`, `stage_id`,
+  `position`, `ref_number`) are never cast and cannot be changed here.
   """
   def update_card(%Card{} = card, attrs) do
     card

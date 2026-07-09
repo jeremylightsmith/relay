@@ -4,7 +4,10 @@ defmodule Schemas.Card do
   orders cards within their stage; `ref_number` is the per-board sequence
   behind the human-facing ref (board key + number, e.g. RLY-12 — see
   `Relay.Cards.ref/2`). `board_id`, `stage_id`, `position`, and
-  `ref_number` are set programmatically, never cast from input.
+  `ref_number` are set programmatically, never cast from input. `branch`
+  and `plan` (MMF spec 2026-07-08) carry the runner's git branch and
+  implementation plan with the card; both nullable, both cast like
+  `description`.
   """
 
   use Ecto.Schema
@@ -24,6 +27,8 @@ defmodule Schemas.Card do
 
     field :progress, :integer
     field :blocked_since, :utc_datetime
+    field :branch, :string
+    field :plan, :string
 
     belongs_to :board, Schemas.Board
     belongs_to :stage, Schemas.Stage
@@ -33,13 +38,14 @@ defmodule Schemas.Card do
   end
 
   @doc """
-  Changeset for user-supplied card attributes (`:title`, `:description`,
-  `:tag`). `board_id`, `stage_id`, `position`, and `ref_number` must
-  already be set on the struct and are never cast.
+  Changeset for user/agent-supplied card attributes (`:title`,
+  `:description`, `:tag`, `:branch`, `:plan`). `board_id`, `stage_id`,
+  `position`, and `ref_number` must already be set on the struct and are
+  never cast.
   """
   def changeset(card, attrs) do
     card
-    |> cast(attrs, [:title, :description, :tag])
+    |> cast(attrs, [:title, :description, :tag, :branch, :plan])
     |> validate_required([:title])
     |> unique_constraint([:board_id, :ref_number], name: :cards_board_id_ref_number_index)
   end

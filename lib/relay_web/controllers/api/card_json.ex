@@ -12,6 +12,8 @@ defmodule RelayWeb.Api.CardJSON do
       tag: card.tag,
       status: card.status,
       progress: card.progress,
+      branch: card.branch,
+      plan: card.plan,
       stage_id: card.stage_id,
       owners: Enum.map(card.owners, &owner/1),
       active_owner: Cards.active_owner_type(card)

@@ -37,7 +37,7 @@ defmodule RelayWeb.Api.CardController do
   end
 
   defp update_fields(card, params) do
-    case Map.take(params, ["title", "description", "tag"]) do
+    case Map.take(params, ["title", "description", "tag", "branch", "plan"]) do
       empty when map_size(empty) == 0 -> {:ok, card}
       fields -> Cards.update_card(card, fields)
     end
