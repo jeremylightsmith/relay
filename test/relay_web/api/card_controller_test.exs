@@ -145,6 +145,30 @@ defmodule RelayWeb.Api.CardControllerTest do
     assert card_json["pr_url"] == "https://github.com/acme/relay/pull/42"
   end
 
+  test "PATCH sets spec and GET /api/cards/:ref returns it",
+       %{conn: conn, board: board, stage: stage} do
+    card = insert(:card, stage: stage, title: "Spec card")
+
+    body =
+      conn
+      |> patch(~p"/api/cards/#{ref(board, card)}", %{spec: "## Design\n\nThe spec body"})
+      |> json_response(200)
+      |> Map.fetch!("data")
+
+    assert body["spec"] == "## Design\n\nThe spec body"
+
+    fetched = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200) |> Map.fetch!("data")
+    assert fetched["spec"] == "## Design\n\nThe spec body"
+  end
+
+  test "GET /api/cards index includes spec", %{conn: conn, stage: stage} do
+    card = insert(:card, stage: stage, title: "Spec card")
+    {:ok, _card} = Cards.update_card(card, %{spec: "the spec"})
+
+    [card_json] = conn |> get(~p"/api/cards") |> json_response(200) |> Map.fetch!("data")
+    assert card_json["spec"] == "the spec"
+  end
+
   describe "POST /api/cards" do
     test "creates a queued, unowned card in the board's first stage with title only",
          %{conn: conn, stage: stage} do

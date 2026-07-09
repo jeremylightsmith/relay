@@ -1,347 +1,535 @@
-# Plan: RLY-14 — Create cards with the REST API
+# RLY-3 — Card `spec` field + markdown rendering for description / spec / plan
 
 ## Goal
-Add the HTTP + CLI surface for creating a card on the authenticated board. The domain
-work already exists in `Relay.Cards.create_card/3` (ref allocation, append-to-stage,
-`:created` activity log, live broadcast). This plan adds:
-
-1. `POST /api/cards` — a new action on the existing `RelayWeb.Api.CardController`.
-2. `relay create` — a new command on the live Python CLI (`bin/relay`), plus a docs table row.
+Give cards a dedicated **`spec`** field (separate from the brief `description`), point the
+SPEC-stage agent / pipeline config / `bin/relay` at it, and render `description`, `spec`, and
+`plan` as **markdown → sanitized HTML** in the card drawer (with `spec` collapsed by default,
+mirroring `plan`).
 
 ## Architecture
-- **Web layer only + one CLI file.** No context/schema/migration changes — `create_card/3`,
-  `Boards.list_stages/1`, and the shared `CardJSON.show` shape are all reused as-is.
-- The controller `create/2` mirrors the existing `move/2`: board + `:agent` actor come from
-  `conn.assigns.current_board` (set by `RelayWeb.ApiAuth`), a stage is resolved from
-  `params["stage"]` (reusing `move/2`'s private `get_stage/2`), and success renders the
-  standard `:show` view with `put_status(:created)` (mirroring the `comments/2` action).
-- Stage resolution rule: **no `stage` → board's first stage in position order**
-  (`Boards.list_stages/1` |> hd); **explicit `stage` that doesn't resolve → 404**;
-  **missing/blank `title` → 400** (via `Card.changeset`'s `validate_required([:title])` →
-  `FallbackController`'s changeset path).
+- **Data**: new nullable `:text` column `spec` on `cards`, cast exactly like `description`/`plan`.
+- **API/CLI**: `PATCH /api/cards/:ref` accepts `spec`; it appears in both index + show JSON;
+  `bin/relay spec REF TEXT` writes it (parallel to the existing `plan` command).
+- **Pipeline**: `relay_config.json` SPEC stage writes the spec via `relay spec` (not `describe`);
+  PLAN stage reads the `spec` field.
+- **Rendering**: a new domain helper `Relay.Markdown.to_html/1` (MDEx with sanitize enabled)
+  returns a `Phoenix.HTML.safe` value; the drawer interpolates it directly (no `raw/1`).
+- **UI**: description/spec/plan render inside a `.card-markdown` container styled by hand-written,
+  theme-aware CSS (daisyUI has no prose primitive and the Tailwind typography plugin is not
+  vendored — a small scoped CSS block keeps the build tooling unchanged and reads in light + dark).
 
 ## Tech
-Elixir / Phoenix 1.8, Ecto, `Phoenix.ConnTest` for controller tests. Python 3 stdlib for the
-CLI (`bin/relay` is a self-contained `argparse` script, no test framework — verified by
-running the parser).
+Elixir / Phoenix 1.8 / LiveView, Ecto + Postgres, MDEx (promoted to a first-class dep),
+daisyUI + Tailwind v4, `bin/relay` (Python CLI), `relay_config.json` (runner pipeline).
 
-## Global Constraints (from the spec)
-- Owners, status, and position are **not** settable at create time: a new card is `:queued`,
-  unowned, appended to the bottom of its stage (whatever `create_card/3` does). Clients set
-  owners/status with a follow-up `PATCH /api/cards/:ref`.
-- `POST /api/cards` goes in the **existing** authenticated `scope "/api", RelayWeb.Api` block
-  (`pipe_through [:api, :api_auth]`), routed to `CardController.create`.
-- **201 Created** body is the standard `CardJSON.show` shape (card fields + `description` +
-  `timeline`), identical to `GET`/`PATCH`.
-- **400 `invalid`** on missing/blank `title`; **404 `not_found`** on an explicit `stage` id
-  that doesn't resolve to a stage on this board (uncastable *or* unknown id).
-- Passing the raw `params` map through to `create_card/3` is safe — `Card.changeset/2` only
-  casts editable fields; `ref`, `stage`, etc. are ignored.
-- CLI: add to `bin/relay` only. The Elixir `mix relay` CLI (`lib/relay/cli.ex`) is **not**
-  kept in sync with the newer per-card commands (it has no `describe`/`plan`/`branch`/`pr`),
-  so `create` follows the same pattern and is **not** added there.
-- Update the CLI reference table in `docs/agent-integration.md` with the new command.
-
-### Non-goals
-- Bulk/batch create, MMF dedup/import (the follow-up work this card enables).
-- Setting owners/status/position at create time (use existing `PATCH`).
-- Any new UI — creation from the board UI is out of scope.
+## Global Constraints (from AGENTS.md — copied verbatim, apply to every task)
+- Running `mix precommit` is REQUIRED on every development cycle and must pass before work is
+  considered done. It runs compile (warnings as errors), `mix format` (with Styler),
+  `mix credo --strict`, `mix sobelow`, `mix deps.audit`, and the full test suite (warnings as
+  errors). Fix any failure before finishing — never commit work with a failing `mix precommit`.
+- Context boundaries are enforced by `boundary` (wired into the compiler). The web layer
+  (`RelayWeb`) may only call the domain through `Relay`'s exported contexts; contexts may not
+  reach into the web layer. Each context is its own sub-boundary declared in `lib/relay.ex` —
+  when you add a context, give it `use Boundary` and add it to `Relay`'s `exports`.
+- Never use map access syntax on structs; use `Ecto.Changeset.get_field/2` for changesets.
+- Fields set programmatically (e.g. `board_id`) must not be in `cast` calls; `spec` is
+  user/agent-supplied so it *is* cast.
+- HEEx: interpolate values in tag bodies with `{...}`; never call `<.flash_group>` outside
+  `layouts.ex`; class lists use `[...]` syntax.
+- Storybook is the home for reusable components; mirror any theme/CSS change into
+  `assets/css/storybook.css`.
+- Never use `@apply` in raw CSS.
 
 ---
 
-## Task 1: `POST /api/cards` endpoint
+## Task 1: Data + API + CLI + pipeline — carry `spec` end-to-end
 
-Add the route and the `create/2` controller action (with its two stage-resolution helper
-clauses), driven by controller tests covering every response branch.
+Adds the `spec` column, casts it, exposes it over the REST API and `bin/relay`, and repoints the
+pipeline prompts. One coherent vertical slice: after this task a card can carry a `spec` through
+DB → API → CLI, and the SPEC/PLAN agents use it.
 
 **Files**
-- Modify: `lib/relay_web/router.ex` (add the `post "/cards"` route)
-- Modify: `lib/relay_web/controllers/api/card_controller.ex` (add `create/2` + `resolve_create_stage/2`)
-- Test: `test/relay_web/api/card_controller_test.exs` (new `describe "POST /api/cards"` block)
+- Modify: `lib/schemas/card.ex`
+- Create: `priv/repo/migrations/<timestamp>_add_spec_to_cards.exs` (via `mix ecto.gen.migration`)
+- Modify: `lib/relay_web/controllers/api/card_controller.ex`
+- Modify: `lib/relay_web/controllers/api/card_json.ex`
+- Modify: `bin/relay`
+- Modify: `relay_config.json`
+- Test: `test/schemas/card_test.exs` (add cases)
+- Test: `test/relay_web/api/card_controller_test.exs` (add cases)
 
 **Interfaces**
+- Consumes (existing): `Cards.update_card/2 :: (%Schemas.Card{}, map) -> {:ok, %Schemas.Card{}} | {:error, changeset}`;
+  `Cards.ref/2`; `Card.changeset/2`.
+- Produces:
+  - `Schemas.Card` struct gains field `spec :: String.t() | nil`, cast by `Card.changeset/2`.
+  - `RelayWeb.Api.CardJSON.data/2` map gains key `spec: card.spec` (present on index + show).
+  - `bin/relay`: `set_spec(ref, text)` and the `spec REF TEXT` subcommand.
 
-*Consumes* (all already exist — exact signatures this task calls):
-- `Relay.Cards.create_card(%Schemas.Stage{} = stage, attrs :: map, actor :: :agent | {:user, integer})` → `{:ok, %Schemas.Card{}} | {:error, %Ecto.Changeset{}}`. `attrs` may be the raw string-keyed params map.
-- `Relay.Boards.list_stages(%Schemas.Board{})` → `[%Schemas.Stage{}]` in position order.
-- `RelayWeb.Api.CardController.get_stage(board, stage_id)` (existing private helper on this module): integer/integer-string id → `%Schemas.Stage{}`; uncastable/unknown → `nil`.
-- `Relay.Activity.list_timeline(%Schemas.Card{})` → list of activity/comment structs.
-- `CardController` already has `action_fallback RelayWeb.Api.FallbackController`, which maps `{:error, %Ecto.Changeset{}}` → 400 `invalid` and `{:error, :not_found}` → 404, and `{:error, :invalid_request}` → 400 `invalid`.
+### Steps
 
-*Produces*:
-- Route `POST /api/cards` → `RelayWeb.Api.CardController.create/2`.
-- `RelayWeb.Api.CardController.create(conn, params)` — renders `:show` with `put_status(:created)` on success; returns `{:error, ...}` tuples otherwise (handled by the fallback controller).
-
-**Steps**
-
-- [x] Write the failing controller tests. Append this `describe` block to
-  `test/relay_web/api/card_controller_test.exs` (the file's `setup` already provides
-  `conn` with a valid `Bearer` token, `board`, and a persisted `stage` named `"Spec"` at
-  `position: 1` — the board's only/first stage):
-
+- [x] **Failing schema test.** In `test/schemas/card_test.exs`, inside `describe "changeset/2"`,
+  add:
   ```elixir
-  describe "POST /api/cards" do
-    test "creates a queued, unowned card in the board's first stage with title only",
-         %{conn: conn, stage: stage} do
-      body =
-        conn
-        |> post(~p"/api/cards", %{title: "New card"})
-        |> json_response(201)
-        |> Map.fetch!("data")
+  test "casts spec and treats it as optional (nullable)" do
+    changeset = Card.changeset(%Card{}, %{title: "T", spec: "## Design\n\nDetails"})
 
-      assert body["title"] == "New card"
-      assert body["status"] == "queued"
-      assert body["stage_id"] == stage.id
-      assert body["owners"] == []
-      assert body["active_owner"] == nil
-      assert is_binary(body["ref"])
-      # standard show shape includes description + timeline
-      assert Map.has_key?(body, "description")
-      assert is_list(body["timeline"])
-    end
+    assert changeset.valid?
+    assert get_field(changeset, :spec) == "## Design\n\nDetails"
 
-    test "creates a card into an explicit stage id", %{conn: conn, board: board} do
-      other = insert(:stage, board: board, name: "Code", owner: :ai, position: 2)
+    without = Card.changeset(%Card{}, %{title: "T"})
+    assert without.valid?
+    assert get_field(without, :spec) == nil
+  end
+  ```
+- [x] Run `mix test test/schemas/card_test.exs` — expect failure (`spec` is not yet a field/cast;
+  `get_field` returns `nil` for the set case, or a `KeyError`/no-cast so the `== "## Design…"`
+  assertion fails).
+- [x] **Migration.** Run `mix ecto.gen.migration add_spec_to_cards`, then overwrite the generated
+  file body so it reads exactly:
+  ```elixir
+  defmodule Relay.Repo.Migrations.AddSpecToCards do
+    use Ecto.Migration
 
-      body =
-        conn
-        |> post(~p"/api/cards", %{title: "Into code", stage: other.id})
-        |> json_response(201)
-        |> Map.fetch!("data")
-
-      assert body["stage_id"] == other.id
-    end
-
-    test "accepts an integer-string stage id", %{conn: conn, board: board} do
-      other = insert(:stage, board: board, name: "Code", owner: :ai, position: 2)
-
-      body =
-        conn
-        |> post(~p"/api/cards", %{title: "Into code", stage: to_string(other.id)})
-        |> json_response(201)
-        |> Map.fetch!("data")
-
-      assert body["stage_id"] == other.id
-    end
-
-    test "created card appears in GET /api/cards", %{conn: conn} do
-      conn |> post(~p"/api/cards", %{title: "Findable"}) |> json_response(201)
-
-      titles =
-        conn |> get(~p"/api/cards") |> json_response(200) |> Map.fetch!("data") |> Enum.map(& &1["title"])
-
-      assert "Findable" in titles
-    end
-
-    test "records a :created timeline entry attributed to the agent", %{conn: conn} do
-      body = conn |> post(~p"/api/cards", %{title: "Logged"}) |> json_response(201) |> Map.fetch!("data")
-
-      assert Enum.any?(body["timeline"], fn e ->
-               e["kind"] == "activity" and e["type"] == "created" and e["author"]["name"] == "Relay AI"
-             end)
-    end
-
-    test "missing title returns 400", %{conn: conn} do
-      assert conn |> post(~p"/api/cards", %{}) |> json_response(400)
-    end
-
-    test "blank title returns 400", %{conn: conn} do
-      assert conn |> post(~p"/api/cards", %{title: "   "}) |> json_response(400)
-    end
-
-    test "unknown stage id returns 404", %{conn: conn} do
-      assert conn |> post(~p"/api/cards", %{title: "x", stage: 999_999}) |> json_response(404)
-    end
-
-    test "uncastable stage id returns 404", %{conn: conn} do
-      assert conn |> post(~p"/api/cards", %{title: "x", stage: "not-a-number"}) |> json_response(404)
-    end
-
-    test "unauthenticated POST /api/cards returns 401" do
-      build_conn() |> post(~p"/api/cards", %{title: "x"}) |> json_response(401)
+    def change do
+      alter table(:cards) do
+        add :spec, :text
+      end
     end
   end
   ```
+- [x] Run `mix ecto.migrate` (updates the dev DB + `priv/repo/structure.sql`/schema).
+- [x] **Schema field + cast + moduledoc.** In `lib/schemas/card.ex`:
+  - Add the field right after `field :description, :string`:
+    ```elixir
+    field :spec, :string
+    ```
+  - Add `:spec` to the `cast/2` list in `changeset/2` (after `:description`):
+    ```elixir
+    |> cast(attrs, [:title, :description, :spec, :tag, :branch, :plan, :pr_url])
+    ```
+  - Update the moduledoc: after the `branch`/`plan` sentence add
+    `` `spec` (RLY-3) carries the design spec authored at the SPEC stage — nullable, cast like `description`/`plan`. ``
+    and add `:spec` to the changeset `@doc` field list.
+- [x] Run `mix test test/schemas/card_test.exs` — expect pass.
 
-- [x] Run the new tests and confirm they fail (no route yet):
-  `mix test test/relay_web/api/card_controller_test.exs` — expect failures like
-  `no route found for POST /api/cards`.
-
-- [x] Add the route. In `lib/relay_web/router.ex`, inside the
-  `scope "/api", RelayWeb.Api` block, add the `post "/cards"` line directly under the
-  `get "/cards"` line so the collection routes sit together:
-
+- [x] **Failing API test.** In `test/relay_web/api/card_controller_test.exs`, add:
   ```elixir
-    get "/cards", CardController, :index
-    post "/cards", CardController, :create
-    get "/cards/:ref", CardController, :show
-  ```
+  test "PATCH sets spec and GET /api/cards/:ref returns it",
+       %{conn: conn, board: board, stage: stage} do
+    card = insert(:card, stage: stage, title: "Spec card")
 
-- [x] Add the `create/2` action and its stage-resolution helper to
-  `lib/relay_web/controllers/api/card_controller.ex`. Insert `create/2` directly after the
-  `index/2` action (top of the module, near the other read/collection actions), and add the
-  `resolve_create_stage/2` clauses just above the existing private `get_stage/2` helper so the
-  two stage helpers live together:
-
-  ```elixir
-  def create(conn, params) do
-    board = conn.assigns.current_board
-
-    with {:ok, stage} <- resolve_create_stage(board, params["stage"]),
-         {:ok, card} <- Cards.create_card(stage, params, :agent) do
+    body =
       conn
-      |> put_status(:created)
-      |> render(:show, board: board, card: card, timeline: Activity.list_timeline(card))
-    end
+      |> patch(~p"/api/cards/#{ref(board, card)}", %{spec: "## Design\n\nThe spec body"})
+      |> json_response(200)
+      |> Map.fetch!("data")
+
+    assert body["spec"] == "## Design\n\nThe spec body"
+
+    fetched = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200) |> Map.fetch!("data")
+    assert fetched["spec"] == "## Design\n\nThe spec body"
+  end
+
+  test "GET /api/cards index includes spec", %{conn: conn, stage: stage} do
+    card = insert(:card, stage: stage, title: "Spec card")
+    {:ok, _card} = Cards.update_card(card, %{spec: "the spec"})
+
+    [card_json] = conn |> get(~p"/api/cards") |> json_response(200) |> Map.fetch!("data")
+    assert card_json["spec"] == "the spec"
   end
   ```
-
-  and, above `defp get_stage/2`:
-
+- [x] Run `mix test test/relay_web/api/card_controller_test.exs` — expect failure (`spec` not in
+  the allow-list, so PATCH ignores it; and `spec` not in `data/2`, so JSON has no `"spec"` key).
+- [x] **Allow `spec` in the API.** In `lib/relay_web/controllers/api/card_controller.ex`,
+  `update_fields/2`, add `"spec"` to the `Map.take/2` list:
   ```elixir
-  # No stage given -> the board's first stage in position order (Backlog on
-  # the default board). An explicit id that doesn't resolve is a 404 (get_stage
-  # returns nil for uncastable or unknown ids).
-  defp resolve_create_stage(board, nil) do
-    case Boards.list_stages(board) do
-      [stage | _] -> {:ok, stage}
-      [] -> {:error, :invalid_request}
-    end
-  end
-
-  defp resolve_create_stage(board, stage_id) do
-    case get_stage(board, stage_id) do
-      %Schemas.Stage{} = stage -> {:ok, stage}
-      nil -> {:error, :not_found}
-    end
-  end
+  case Map.take(params, ["title", "description", "spec", "tag", "branch", "plan", "pr_url"]) do
   ```
+- [x] **Expose `spec` in JSON.** In `lib/relay_web/controllers/api/card_json.ex`, `data/2`, add
+  `spec: card.spec` right after the `plan:` line:
+  ```elixir
+  plan: card.plan,
+  spec: card.spec,
+  pr_url: card.pr_url,
+  ```
+- [x] Run `mix test test/relay_web/api/card_controller_test.exs` — expect pass.
 
-  Note: `Boards` and `Activity` are already aliased at the top of the module; no new aliases
-  are needed.
+- [x] **`bin/relay` writer + subcommand.** In `bin/relay`:
+  - After `set_description(...)` add:
+    ```python
+    def set_spec(ref, text):
+        return api("PATCH", f"/api/cards/{ref}", {"spec": text})["data"]
+    ```
+  - In `build_parser`, register the subcommand right after the `describe` line:
+    ```python
+    add("spec", _simple(lambda a: set_spec(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
+    ```
+  - In `print_card`, print the spec after the description, before the timeline loop:
+    ```python
+    print(c.get("description") or "(no description)")
+    if c.get("spec"):
+        print("\n--- spec ---")
+        print(c["spec"])
+    for e in c.get("timeline") or []:
+    ```
+- [x] Verify the CLI parses: `python3 bin/relay spec --help` (should show `ref text` usage and
+  exit 0). *(No Elixir test harness exists for the Python CLI; the API test above proves the
+  `spec` field round-trips, which is all the CLI relies on.)*
 
-- [x] Run the tests again and confirm they pass:
-  `mix test test/relay_web/api/card_controller_test.exs` — all green.
+- [x] **Pipeline prompts.** In `relay_config.json`:
+  - `_comment`: change `spec=description` to `spec=spec field`
+    (in `State travels on the card: spec=description, plan=plan field, …`).
+  - SPEC stage action: change
+    `set it as the card's description: \`{relay} describe {ref} @<that file>\``
+    to
+    `set it as the card's spec: \`{relay} spec {ref} @<that file>\``.
+  - PLAN stage action: change `its description is the approved spec` to
+    `` its `spec` field is the approved spec ``.
+- [x] Validate JSON stays parseable: `python3 -c "import json; json.load(open('relay_config.json'))"`.
 
-- [x] Run `mix precommit` and fix any compile/format/credo/test failures.
-
-**Deliverable:** `POST /api/cards` creates a card via the REST API — 201 with the standard
-card shape on success (title-only → first stage; explicit valid stage honored), 400 on
-missing/blank title, 404 on an unknown/uncastable stage, 401 unauthenticated — all covered by
-tests.
-
-**Commit message:** `feat(api): POST /api/cards to create a card`
+- [x] **Deliverable:** a card carries `spec` through DB, API (index + show), and `bin/relay`; the
+  SPEC/PLAN pipeline prompts reference `spec`. Run `mix precommit` — expect green.
+- [x] Commit: `git commit -am "feat(cards): spec field across schema, API, CLI, and pipeline (RLY-3)"`
 
 ---
 
-## Task 2: `relay create` CLI command + docs
+## Task 2: `Relay.Markdown` helper + MDEx dep
 
-Add the `create` command to the live Python CLI (`bin/relay`) and document it in the CLI
-reference table. `bin/relay` has no automated test harness in this repo (it is driven
-manually), so this task's verification is running the argparse parser and a dry help check;
-there is no ExUnit/pytest to write.
+A self-contained domain module that renders card markdown to sanitized HTML. Own module boundary,
+so it is isolated and independently testable.
 
 **Files**
-- Modify: `bin/relay` (new `create_card(...)` helper, `cmd_create(...)` handler, argparse registration)
-- Modify: `docs/agent-integration.md` (add a `relay create` row to the CLI reference table)
+- Modify: `mix.exs` (promote `:mdex` to a first-class dep)
+- Modify: `lib/relay.ex` (export `Markdown`)
+- Create: `lib/relay/markdown.ex`
+- Test: `test/relay/markdown_test.exs`
 
 **Interfaces**
+- Consumes: MDEx (`MDEx.to_html!/2`, `MDEx.Document.default_sanitize_options/0`).
+- Produces: `Relay.Markdown.to_html/1 :: (String.t() | nil) -> Phoenix.HTML.safe()`
+  (returns a `{:safe, iodata}` tuple; `nil -> {:safe, ""}`). Sanitized, so safe to interpolate
+  in HEEx with `{...}` and no `raw/1`.
 
-*Consumes* (existing helpers in `bin/relay`):
-- `api(method, path, body=None)` — makes the authenticated request; raises/`die`s on HTTP error.
-- `resolve_stage_id(name, board=None)` — stage name → id (via `GET /api/board`); `die`s if no such stage.
-- `read_arg(text)` — resolves `-` (stdin) / `@path` (file) / literal; used by `describe`.
-- `print_card(c)` and `emit(args, data, human)` — render a card struct to the console (or JSON with `--json`).
-- The `POST /api/cards` endpoint from Task 1 (returns `{"data": {...card...}}`).
+### Steps
 
-*Produces*:
-- `create_card(title, stage_name=None, description=None, tag=None)` → the created card dict (the `"data"` payload).
-- `relay create TITLE [--stage NAME] [--description TEXT] [--tag TAG] [--json]` subcommand.
+- [x] **Promote MDEx to a first-class dep.** In `mix.exs` `deps/0`, add after
+  `{:bandit, "~> 1.5"},`:
+  ```elixir
 
-**Steps**
-
-- [x] Add the `create_card` helper to `bin/relay`, alongside the other board mutations
-  (place it directly after the `move(...)` function, before `comment(...)`, in the
-  "board mutations" section). It sends `stage` only when a name is given (server default
-  otherwise), and `description`/`tag` only when provided:
-
-  ```python
-  def create_card(title, stage_name=None, description=None, tag=None):
-      body = {"title": title}
-      if stage_name is not None:
-          body["stage"] = resolve_stage_id(stage_name)
-      if description is not None:
-          body["description"] = description
-      if tag is not None:
-          body["tag"] = tag
-      return api("POST", "/api/cards", body)["data"]
+      # --- Markdown rendering for card long-form fields (RLY-3) ---
+      {:mdex, "~> 0.13"},
   ```
+  (Version `~> 0.13` matches the already-locked `0.13.3` pulled transitively via
+  `phoenix_storybook`, so no lock churn.)
+- [x] Run `mix deps.get` — confirm no new download / lock change beyond adding the top-level entry.
 
-- [x] Add the `cmd_create` handler to `bin/relay`, in the "CLI commands" section (place it
-  after `cmd_card`, before `_simple`). `--description` honors `read_arg` (`@file` / `-`
-  stdin), consistent with `describe`; on success it prints the card via `print_card`
-  (or JSON with `--json`), like `card`:
+- [x] **Failing helper test.** Create `test/relay/markdown_test.exs`:
+  ```elixir
+  defmodule Relay.MarkdownTest do
+    use ExUnit.Case, async: true
 
-  ```python
-  def cmd_create(args):
-      card = create_card(
-          args.title,
-          stage_name=args.stage,
-          description=read_arg(args.description) if args.description is not None else None,
-          tag=args.tag,
-      )
-      print(json.dumps(card, indent=2)) if args.json else print_card(card)
+    alias Relay.Markdown
+
+    describe "to_html/1" do
+      test "renders bold markdown to a <strong> element" do
+        {:safe, html} = Markdown.to_html("**bold**")
+        assert html =~ "<strong>bold</strong>"
+      end
+
+      test "renders a heading and a list" do
+        {:safe, html} = Markdown.to_html("# Title\n\n- one\n- two")
+        assert html =~ "<h1>Title</h1>"
+        assert html =~ "<li>one</li>"
+      end
+
+      test "nil renders to an empty safe string" do
+        assert Markdown.to_html(nil) == {:safe, ""}
+      end
+
+      test "always returns a Phoenix.HTML safe value" do
+        assert {:safe, _} = Markdown.to_html("plain text")
+      end
+
+      test "strips a raw <script> tag and its content (XSS guard)" do
+        {:safe, html} = Markdown.to_html("hello <script>alert('xss')</script> world")
+        refute html =~ "<script"
+        refute html =~ "alert('xss')"
+        assert html =~ "hello"
+      end
+    end
+  end
   ```
+- [x] Run `mix test test/relay/markdown_test.exs` — expect failure (`Relay.Markdown` undefined).
 
-- [x] Register the `create` subcommand in `build_parser`. The shared `add(...)` helper only
-  supports positional args + `--json`, so register `create` explicitly (like `watch` does),
-  right after the `add("card", ...)` line:
+- [x] **Implement the module.** Create `lib/relay/markdown.ex`:
+  ```elixir
+  defmodule Relay.Markdown do
+    @moduledoc """
+    Renders card long-form markdown (`description`, `spec`, `plan`) to sanitized
+    HTML for display in the card drawer.
 
-  ```python
-      c = add("create", cmd_create, "title", json_flag=True)
-      c.add_argument("--stage")
-      c.add_argument("--description")
-      c.add_argument("--tag")
+    MDEx renders the markdown with raw-HTML pass-through (`unsafe: true`) and then
+    runs its HTML sanitizer (`MDEx.Document.default_sanitize_options/0`), so any
+    agent- or human-authored markdown has dangerous tags (e.g. `<script>`) and
+    their content stripped before it reaches the page. The result is wrapped as a
+    `Phoenix.HTML.safe` value for direct `{...}` interpolation in HEEx — templates
+    never call `raw/1` on it.
+    """
+
+    use Boundary, deps: []
+
+    @doc """
+    Render markdown to a sanitized `Phoenix.HTML.safe` value. `nil` renders to an
+    empty (safe) string.
+    """
+    @spec to_html(String.t() | nil) :: Phoenix.HTML.safe()
+    def to_html(nil), do: {:safe, ""}
+
+    def to_html(markdown) when is_binary(markdown) do
+      html =
+        MDEx.to_html!(markdown,
+          render: [unsafe: true],
+          sanitize: MDEx.Document.default_sanitize_options()
+        )
+
+      {:safe, html}
+    end
+  end
   ```
-
-  (`add(...)` already adds the `title` positional, wires `--json`, and sets
-  `func=cmd_create`; the three `add_argument` calls add the optional flags, which default to
-  `None` when omitted — matching the `is not None` guards above.)
-
-- [x] Verify the parser wiring without hitting the API. Run:
-  `python3 bin/relay create --help`
-  and confirm the usage line shows `create [--stage STAGE] [--description DESCRIPTION]
-  [--tag TAG] [--json] title`. Also run `python3 -c "import ast; ast.parse(open('bin/relay').read())"`
-  to confirm the file still parses.
-
-- [x] (Optional, if `RELAY_URL`/`RELAY_API_KEY` are set to a running dev server) Smoke it
-  end-to-end: `./bin/relay create "Smoke test card" --tag demo` should print the new card,
-  and `./bin/relay board` should show it in the first stage. Skip if no server is available —
-  Task 1's ExUnit tests already prove the endpoint.
-
-- [x] Add a row to the CLI reference table in `docs/agent-integration.md`, directly under the
-  `bin/relay card RLY-12` row (line ~37):
-
+  *(Building the `{:safe, html}` tuple directly — instead of `Phoenix.HTML.raw/1` — keeps
+  `mix sobelow` clean: there is no `raw/1` call to flag, and the HTML is already sanitized.)*
+- [x] **Export the boundary.** In `lib/relay.ex`, add `Markdown` to the `exports` list:
+  ```elixir
+  exports: [Repo, Mailer, Accounts, Activity, ApiKeys, Boards, Cards, Events, Markdown]
   ```
-  | `bin/relay create "Fix login" --stage Backlog` | Create a new card (title; optional `--stage`/`--description`/`--tag`) |
+- [x] Run `mix test test/relay/markdown_test.exs` — expect pass.
+- [x] **Deliverable:** `Relay.Markdown.to_html/1` renders sanitized markdown and is reachable from
+  the web layer. Run `mix precommit` — expect green.
+- [x] Commit: `git commit -am "feat(markdown): Relay.Markdown sanitized renderer + MDEx dep (RLY-3)"`
+
+---
+
+## Task 3: Drawer UI — render markdown + add the Spec section
+
+Renders description/spec/plan as sanitized HTML in the card drawer, adds a collapsed **Spec**
+section between Description and Plan, and adds theme-aware markdown CSS. Updates the existing drawer
+tests whose assertions assumed raw/`<pre>` rendering.
+
+**Files**
+- Modify: `lib/relay_web/components/core_components.ex` (`card_drawer/1`)
+- Modify: `assets/css/app.css` (add `.card-markdown` block)
+- Modify: `assets/css/storybook.css` (mirror the same block)
+- Test: `test/relay_web/live/board_live_test.exs` (update description + plan tests, add spec tests)
+- Test: `test/relay_web/live/board_live_realtime_test.exs` (update plan assertion)
+
+**Interfaces**
+- Consumes: `Relay.Markdown.to_html/1` (Task 2); `@card.spec` field (Task 1).
+- Produces: drawer DOM — `#card-drawer-description-view.card-markdown`,
+  `details#card-spec` with `#card-spec-body.card-markdown`, and `#card-plan-body.card-markdown`.
+
+### Steps
+
+- [ ] **Update the existing description tests to expect rendered markdown.** In
+  `test/relay_web/live/board_live_test.exs`:
+  - Replace the test `"saving the description persists and renders it whitespace-preserved"`
+    (currently asserts `.whitespace-pre-wrap` and `=~ "Line one\n\nLine two"`) with:
+    ```elixir
+    test "saving the description persists and renders it as markdown",
+         %{conn: conn, card: card} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-description-edit") |> render_click()
+
+      view
+      |> form("#card-drawer-description-form", card: %{description: "para one\n\n**bold** two"})
+      |> render_submit()
+
+      refute has_element?(view, "#card-drawer-description-form")
+      assert has_element?(view, "#card-drawer-description-view.card-markdown")
+
+      rendered = view |> element("#card-drawer-description-view") |> render()
+      assert rendered =~ "<p>para one</p>"
+      assert rendered =~ "<strong>bold</strong>"
+
+      # the edit path keeps the raw markdown source
+      assert Repo.get!(Card, card.id).description == "para one\n\n**bold** two"
+    end
+    ```
+  - In the test `"a saved description survives a fresh deep-link visit"`, change the fixture text
+    to a single line and update the assertions:
+    ```elixir
+    test "a saved description survives a fresh deep-link visit", %{conn: conn, card: card} do
+      {:ok, _card} = Cards.update_card(card, %{description: "Persisted text"})
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-description-view.card-markdown")
+      assert view |> element("#card-drawer-description-view") |> render() =~ "Persisted text"
+    end
+    ```
+- [ ] **Update the existing plan test.** In the `"drawer plan and branch"` describe of
+  `test/relay_web/live/board_live_test.exs`, replace the body of
+  `"a card with a plan renders the Plan section collapsed by default"` assertions with:
+  ```elixir
+      {:ok, _card} = Cards.update_card(card, %{plan: "## Task 1\n\n- [ ] do the thing"})
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "details#card-plan .collapse-title", "Plan")
+      assert has_element?(view, "details#card-plan #card-plan-body.card-markdown", "do the thing")
+      # markdown renders as HTML, not raw source
+      assert view |> element("#card-plan-body") |> render() =~ "<h2>Task 1</h2>"
+      refute has_element?(view, "details#card-plan[open]")
   ```
+  Also add spec coverage in this same describe:
+  ```elixir
+    test "a card with a spec renders the Spec section collapsed by default",
+         %{conn: conn, card: card} do
+      {:ok, _card} = Cards.update_card(card, %{spec: "## Design\n\n**Key** decision"})
 
-- [x] Update the `bin/relay` module docstring usage summary (the `"""..."""` header near the
-  top, around lines 13–19) to mention `create` so `--help`/the header stays accurate. Add it
-  next to `describe`, e.g. change the `describe` usage line to include create:
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
 
+      assert has_element?(view, "details#card-spec .collapse-title", "Spec")
+      assert has_element?(view, "details#card-spec #card-spec-body.card-markdown")
+
+      rendered = view |> element("#card-spec-body") |> render()
+      assert rendered =~ "<h2>Design</h2>"
+      assert rendered =~ "<strong>Key</strong>"
+      # collapsed by default: no open attribute
+      refute has_element?(view, "details#card-spec[open]")
+    end
+
+    test "a card with no spec renders no Spec section", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer")
+      refute has_element?(view, "#card-spec")
+    end
   ```
-    relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF Q
+- [ ] **Update the realtime plan assertion.** In `test/relay_web/live/board_live_realtime_test.exs`,
+  in `"an API branch/plan update refreshes another session's open drawer"`, replace:
+  ```elixir
+      assert has_element?(view, "details#card-plan pre#card-plan-body", "Step 1: do it")
   ```
+  with:
+  ```elixir
+      assert has_element?(view, "details#card-plan #card-plan-body.card-markdown", "Step 1: do it")
+  ```
+- [ ] Run `mix test test/relay_web/live/board_live_test.exs test/relay_web/live/board_live_realtime_test.exs`
+  — expect failure (the drawer still emits `<pre>`/`whitespace-pre-wrap`, has no `#card-spec`, and
+  does not render markdown HTML).
 
-  (Keep the existing columns readable; the exact layout is cosmetic — just ensure `create`
-  appears in the header.)
+- [ ] **Render markdown in the description view.** In `lib/relay_web/components/core_components.ex`,
+  inside `card_drawer/1`, replace the description `<p>` (the `:if={@card.description}` element with
+  id `#{@id}-description-view`) with:
+  ```heex
+  <div
+    :if={@card.description}
+    id={"#{@id}-description-view"}
+    class="card-markdown"
+  >{Relay.Markdown.to_html(@card.description)}</div>
+  ```
+  (Leave the surrounding `#card-drawer-description-edit` click-to-edit wrapper, the
+  `:if={!@card.description}` "Add a description…" placeholder, and the edit `<.form>` textarea
+  unchanged — the textarea keeps binding the raw `@card.description`.)
+- [ ] **Add the Spec section.** Immediately after the Description `</section>` and *before* the
+  Plan `<details>`, insert:
+  ```heex
+  <details
+    :if={@card.spec}
+    id="card-spec"
+    class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-200/40"
+  >
+    <summary class="collapse-title min-h-0 py-3 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+      Spec
+    </summary>
+    <div class="collapse-content">
+      <div id="card-spec-body" class="card-markdown">{Relay.Markdown.to_html(@card.spec)}</div>
+    </div>
+  </details>
+  ```
+- [ ] **Render markdown in the Plan section.** Replace the Plan `<pre id="card-plan-body" …>` body
+  with a rendered container (keep the surrounding `details#card-plan` and its summary as-is):
+  ```heex
+  <div class="collapse-content">
+    <div id="card-plan-body" class="card-markdown">{Relay.Markdown.to_html(@card.plan)}</div>
+  </div>
+  ```
+- [ ] **Add theme-aware markdown CSS.** Append to `assets/css/app.css`:
+  ```css
+  /* --- Rendered card markdown (description / spec / plan): MDEx → sanitized HTML.
+     daisyUI has no prose primitive and the Tailwind typography plugin isn't vendored,
+     so style the small tag set MDEx emits. Colors use daisyUI theme tokens, so it
+     reads in light and dark. --- */
+  .card-markdown {
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--color-base-content);
+    word-break: break-word;
+  }
+  .card-markdown > :first-child { margin-top: 0; }
+  .card-markdown > :last-child { margin-bottom: 0; }
+  .card-markdown h1,
+  .card-markdown h2,
+  .card-markdown h3,
+  .card-markdown h4 {
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 1em 0 0.4em;
+  }
+  .card-markdown h1 { font-size: 1.15rem; }
+  .card-markdown h2 { font-size: 1.05rem; }
+  .card-markdown h3 { font-size: 0.95rem; }
+  .card-markdown p { margin: 0.6em 0; }
+  .card-markdown ul,
+  .card-markdown ol { margin: 0.6em 0; padding-left: 1.4em; }
+  .card-markdown ul { list-style: disc; }
+  .card-markdown ol { list-style: decimal; }
+  .card-markdown li { margin: 0.2em 0; }
+  .card-markdown a { color: var(--color-primary); text-decoration: underline; }
+  .card-markdown strong { font-weight: 600; }
+  .card-markdown code {
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-size: 0.85em;
+    background: var(--color-base-200);
+    padding: 0.1em 0.3em;
+    border-radius: 0.25rem;
+  }
+  .card-markdown pre {
+    background: var(--color-base-200);
+    padding: 0.75rem;
+    border-radius: var(--radius-field);
+    overflow-x: auto;
+    margin: 0.7em 0;
+  }
+  .card-markdown pre code { background: none; padding: 0; }
+  .card-markdown blockquote {
+    border-left: 3px solid var(--color-base-300);
+    padding-left: 0.8em;
+    margin: 0.7em 0;
+    opacity: 0.85;
+  }
+  ```
+- [ ] Mirror the exact same `.card-markdown { … }` CSS block into `assets/css/storybook.css`.
+- [ ] Run `mix test test/relay_web/live/board_live_test.exs test/relay_web/live/board_live_realtime_test.exs`
+  — expect pass.
+- [ ] **Deliverable:** the drawer renders description/spec/plan as sanitized markdown; a collapsed
+  Spec section appears between Description and Plan when the card has a `spec`. Run `mix precommit`
+  — expect green.
+- [ ] Commit: `git commit -am "feat(drawer): render description/spec/plan markdown + Spec section (RLY-3)"`
 
-- [x] Run `mix precommit` to confirm nothing in the Elixir suite regressed (the CLI change is
-  Python-only, but precommit is the project's required green gate).
+---
 
-**Deliverable:** `bin/relay create TITLE [--stage NAME] [--description TEXT] [--tag TAG]
-[--json]` creates a card through the REST API and prints it; the command is documented in the
-`docs/agent-integration.md` CLI reference table.
+## Spec coverage map
+- Data layer (`spec` field, migration, cast, moduledoc) → **Task 1**.
+- API + CLI (`update_fields` allow-list, `card_json` shape, `bin/relay spec` + `print_card`) → **Task 1**.
+- Pipeline / prompts (`relay_config.json` SPEC/PLAN/_comment) → **Task 1**.
+- `Relay.Markdown` helper (MDEx sanitize, `Phoenix.HTML.safe`, dep promotion, boundary export) → **Task 2**.
+- UI (description prose, collapsed Spec section, plan prose, theme-aware CSS) → **Task 3**.
+- Testing (schema, API, markdown helper incl. XSS guard, LiveView drawer) → distributed across
+  Tasks 1–3 alongside each deliverable.
 
-**Commit message:** `feat(cli): relay create command for POST /api/cards`
+## Out of scope (per spec)
+- In-UI editing of `spec`; backfilling existing `description` into `spec`; syntax highlighting in
+  code fences.

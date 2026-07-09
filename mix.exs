@@ -62,6 +62,9 @@ defmodule Relay.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
 
+      # --- Markdown rendering for card long-form fields (RLY-3) ---
+      {:mdex, "~> 0.13"},
+
       # --- Auth: Google OAuth via Ueberauth (MMF 01) ---
       {:ueberauth, "~> 0.10"},
       {:ueberauth_google, "~> 0.12"},

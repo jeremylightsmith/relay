@@ -117,6 +117,10 @@ def set_description(ref, text):
     return api("PATCH", f"/api/cards/{ref}", {"description": text})["data"]
 
 
+def set_spec(ref, text):
+    return api("PATCH", f"/api/cards/{ref}", {"spec": text})["data"]
+
+
 def set_plan(ref, text):
     return api("PATCH", f"/api/cards/{ref}", {"plan": text})["data"]
 
@@ -163,6 +167,9 @@ def print_card(c):
     print(f'{c["ref"]}  {c["title"]}')
     print(f'status: {c.get("status", "?")}   active: {c.get("active_owner") or "-"}   owners: {owners}\n')
     print(c.get("description") or "(no description)")
+    if c.get("spec"):
+        print("\n--- spec ---")
+        print(c["spec"])
     for e in c.get("timeline") or []:
         who = e.get("author", {}).get("name", "?")
         if e.get("kind") == "comment":
@@ -448,6 +455,7 @@ def build_parser():
     add("move", _simple(lambda a: move(a.ref, a.stage)), "ref", "stage", json_flag=True)
     add("status", _simple(lambda a: set_status(a.ref, a.status)), "ref", "status", json_flag=True)
     add("describe", _simple(lambda a: set_description(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
+    add("spec", _simple(lambda a: set_spec(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("plan", _simple(lambda a: set_plan(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("branch", _simple(lambda a: set_branch(a.ref, a.name)), "ref", "name", json_flag=True)
     add("pr", _simple(lambda a: set_pr_url(a.ref, a.url)), "ref", "url", json_flag=True)

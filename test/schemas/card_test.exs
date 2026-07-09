@@ -22,6 +22,17 @@ defmodule Schemas.CardTest do
       assert get_field(changeset, :tag) == "infra"
     end
 
+    test "casts spec and treats it as optional (nullable)" do
+      changeset = Card.changeset(%Card{}, %{title: "T", spec: "## Design\n\nDetails"})
+
+      assert changeset.valid?
+      assert get_field(changeset, :spec) == "## Design\n\nDetails"
+
+      without = Card.changeset(%Card{}, %{title: "T"})
+      assert without.valid?
+      assert get_field(without, :spec) == nil
+    end
+
     test "does not cast programmatically-set fields" do
       changeset = Card.changeset(%Card{}, %{board_id: 99, stage_id: 99, position: 5, ref_number: 7})
 
