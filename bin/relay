@@ -16,6 +16,7 @@ Config (env): RELAY_URL, RELAY_API_KEY  (a board key from /board/settings)
   relay comment REF TEXT      relay move REF STAGE        relay status REF STATUS
   relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF Q
   relay own REF / release REF relay approve REF           relay reject REF NOTE [--to STAGE]
+  relay sub-tasks REF @file   relay check REF ID / uncheck REF ID   relay result REF @file
   relay layout   # config skeleton
 
 TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output.
@@ -154,6 +155,26 @@ def set_branch(ref, name):
 
 def set_pr_url(ref, url):
     return api("PATCH", f"/api/cards/{ref}", {"pr_url": url})["data"]
+
+
+def set_sub_tasks(ref, text):
+    return api("PATCH", f"/api/cards/{ref}", {"sub_tasks": _parse_sub_tasks(text)})["data"]
+
+
+def _parse_sub_tasks(text):
+    """A JSON array (of strings or {title,done} objects) or newline-per-item text."""
+    text = text.strip()
+    if text.startswith("["):
+        return [{"title": i} if isinstance(i, str) else i for i in json.loads(text)]
+    return [{"title": line.strip()} for line in text.splitlines() if line.strip()]
+
+
+def set_sub_task_done(ref, sub_task_id, done):
+    return api("PATCH", f"/api/cards/{ref}/sub-tasks/{sub_task_id}", {"done": done})["data"]
+
+
+def set_result(ref, text):
+    return api("PATCH", f"/api/cards/{ref}", {"ai_result": json.loads(text)})["data"]
 
 
 def move(ref, stage_name):
@@ -535,6 +556,10 @@ def build_parser():
     add("plan", _simple(lambda a: set_plan(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("branch", _simple(lambda a: set_branch(a.ref, a.name)), "ref", "name", json_flag=True)
     add("pr", _simple(lambda a: set_pr_url(a.ref, a.url)), "ref", "url", json_flag=True)
+    add("sub-tasks", _simple(lambda a: set_sub_tasks(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
+    add("check", _simple(lambda a: set_sub_task_done(a.ref, a.id, True)), "ref", "id", json_flag=True)
+    add("uncheck", _simple(lambda a: set_sub_task_done(a.ref, a.id, False)), "ref", "id", json_flag=True)
+    add("result", _simple(lambda a: set_result(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("needs-input", _simple(lambda a: needs_input(a.ref, read_arg(a.question))), "ref", "question", json_flag=True)
     add("own", _simple(lambda a: own(a.ref)), "ref", json_flag=True)
     add("release", _simple(lambda a: release(a.ref)), "ref", json_flag=True)
