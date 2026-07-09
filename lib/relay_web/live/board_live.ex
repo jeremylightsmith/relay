@@ -110,6 +110,9 @@ defmodule RelayWeb.BoardLive do
                 category={category}
                 stage_id={stage.id}
                 collapsed={stage_collapsed?(stage, @stage_counts, @sublanes_by_parent, @force_open)}
+                main_collapsed={
+                  lane_collapsed?(stage.id, :main, @stage_counts, @force_open, @force_closed)
+                }
                 count={Map.fetch!(@stage_counts, stage.id)}
                 wip_limit={stage.wip_limit}
                 board_key={@board.key}
@@ -126,7 +129,8 @@ defmodule RelayWeb.BoardLive do
                       owner: sub.owner,
                       count: Map.fetch!(@stage_counts, sub.id),
                       cards: Map.fetch!(@streams, stream_name(sub.id)),
-                      collapsed: sublane_collapsed?(sub, @stage_counts, @force_open)
+                      collapsed:
+                        lane_collapsed?(sub.id, sub.lane, @stage_counts, @force_open, @force_closed)
                     }
                   end
                 }
@@ -186,6 +190,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
       |> assign(:force_open, MapSet.new())
+      |> assign(:force_closed, MapSet.new())
       |> assign(:composing_stage_id, nil)
       |> assign(:compose_form, empty_compose_form())
       |> stream_configure(:conversation, dom_id: &conversation_dom_id/1)
@@ -287,6 +292,33 @@ defmodule RelayWeb.BoardLive do
     case parse_int(stage_id) do
       nil -> {:noreply, socket}
       id -> {:noreply, update(socket, :force_open, &MapSet.put(&1, id))}
+    end
+  end
+
+  # RLY-1 items 2 & 3 — a lane header/strip click flips that lane's collapse state
+  # for this session only. force_open and force_closed are complementary: entering
+  # one clears the other, so a lane is never forced both ways at once.
+  def handle_event("toggle_collapse", %{"stage-id" => stage_id}, socket) do
+    case resolve_stage(socket, stage_id) do
+      %Stage{id: id, lane: lane} ->
+        collapsed? =
+          lane_collapsed?(id, lane, socket.assigns.stage_counts, socket.assigns.force_open, socket.assigns.force_closed)
+
+        socket =
+          if collapsed? do
+            socket
+            |> update(:force_closed, &MapSet.delete(&1, id))
+            |> update(:force_open, &MapSet.put(&1, id))
+          else
+            socket
+            |> update(:force_open, &MapSet.delete(&1, id))
+            |> update(:force_closed, &MapSet.put(&1, id))
+          end
+
+        {:noreply, socket}
+
+      nil ->
+        {:noreply, socket}
     end
   end
 
@@ -641,10 +673,17 @@ defmodule RelayWeb.BoardLive do
     total == 0 and not MapSet.member?(force_open, stage.id)
   end
 
-  # MMF 12c — a Review/Done sub-lane collapses to its 34px strip when empty
-  # and not force-opened (mockup: laneCollapsed = isSub && laneCards.length === 0).
-  defp sublane_collapsed?(%Stage{} = sub, stage_counts, force_open) do
-    Map.fetch!(stage_counts, sub.id) == 0 and not MapSet.member?(force_open, sub.id)
+  # RLY-1 items 2 & 3 — effective per-session collapse state for a main lane or a
+  # sub-lane: force_closed wins (user-collapsed), then force_open (user-expanded an
+  # empty lane), then the auto default — a sub-lane auto-collapses to its strip when
+  # empty (MMF 12c); a main "In progress" lane never auto-collapses.
+  defp lane_collapsed?(id, lane, stage_counts, force_open, force_closed) do
+    cond do
+      MapSet.member?(force_closed, id) -> true
+      MapSet.member?(force_open, id) -> false
+      lane == :main -> false
+      true -> Map.fetch!(stage_counts, id) == 0
+    end
   end
 
   # Only stages of the user's own board are addressable from events.

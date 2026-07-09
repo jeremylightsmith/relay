@@ -1791,6 +1791,10 @@ defmodule RelayWeb.CoreComponents do
     default: false,
     doc: "render the whole stage as the mockup's 44px dashed strip (still a drop target)"
 
+  attr :main_collapsed, :boolean,
+    default: false,
+    doc: "render the main 'In progress' lane as a 44px strip (RLY-1 item 3)"
+
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
 
   def stage_column(assigns) do
@@ -1884,77 +1888,100 @@ defmodule RelayWeb.CoreComponents do
           </button>
         </header>
         <div style="display:flex;gap:0;flex:1;min-height:0;">
-          <%!-- main / ongoing lane --%>
-          <div style="flex:0 0 240px;width:240px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;">
+          <%!-- main / ongoing lane (RLY-1 item 3: collapsible; item 7: full-height drop zone) --%>
+          <%= if @main_collapsed do %>
             <div
-              :if={@labeled}
-              style="display:flex;align-items:center;gap:6px;padding:11px 15px 7px 15px;flex:0 0 auto;"
+              id={"#{@id}-main-strip"}
+              class="main-lane-strip stage-cards"
+              data-stage-id={@stage_id}
+              phx-click="toggle_collapse"
+              phx-value-stage-id={@stage_id}
+              aria-label="Expand In progress lane"
+              style="flex:0 0 44px;width:44px;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;box-sizing:border-box;cursor:pointer;border-right:1px solid var(--color-base-300);"
             >
-              <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(:ongoing)};"}>
+              <span style={"writing-mode:vertical-rl;transform:rotate(180deg);font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(:ongoing)};white-space:nowrap;"}>
                 In progress
               </span>
-              <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(:ongoing)};opacity:0.7;"}>
+              <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(:ongoing)};opacity:0.7;flex:0 0 auto;"}>
                 {@count}
               </span>
             </div>
-            <div style={"flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:#{if(@labeled, do: "0", else: "13px")} 13px 13px 15px;"}>
-              <div :if={@composing} id={"#{@id}-composer"} phx-click-away="cancel_compose">
-                <.form
-                  for={@compose_form}
-                  id={"#{@id}-compose-form"}
-                  phx-change="validate_card"
-                  phx-submit="create_card"
-                >
-                  <input type="hidden" name="stage_id" value={@stage_id} />
-                  <.input
-                    field={@compose_form[:title]}
-                    type="text"
-                    placeholder="Card title"
-                    autofocus
-                    autocomplete="off"
-                    class="input input-sm w-full"
-                    phx-keydown="cancel_compose"
-                    phx-key="escape"
-                  />
-                  <div class="mt-2 flex items-center gap-2">
-                    <.button variant="primary" class="btn btn-primary btn-xs">Add card</.button>
-                    <button type="button" class="btn btn-ghost btn-xs" phx-click="cancel_compose">
-                      Cancel
-                    </button>
-                  </div>
-                </.form>
-              </div>
+          <% else %>
+            <div style="flex:0 0 240px;width:240px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;">
               <div
-                id={"#{@id}-cards"}
-                phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}
-                data-stage-id={@stage_id}
-                class="stage-cards"
-                style="display:flex;flex-direction:column;gap:8px;"
+                :if={@labeled}
+                id={"#{@id}-main-lane-header"}
+                phx-click="toggle_collapse"
+                phx-value-stage-id={@stage_id}
+                aria-label="Collapse In progress lane"
+                style="display:flex;align-items:center;gap:6px;padding:11px 15px 7px 15px;flex:0 0 auto;cursor:pointer;"
               >
-                <div
-                  id={"#{@id}-empty"}
-                  class="stage-empty hidden only:block"
-                  style="border:1px dashed var(--color-base-300);border-radius:8px;padding:18px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);"
-                >
-                  No cards yet
+                <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(:ongoing)};"}>
+                  In progress
+                </span>
+                <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(:ongoing)};opacity:0.7;"}>
+                  {@count}
+                </span>
+              </div>
+              <div style={"flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:#{if(@labeled, do: "0", else: "13px")} 13px 13px 15px;"}>
+                <div :if={@composing} id={"#{@id}-composer"} phx-click-away="cancel_compose">
+                  <.form
+                    for={@compose_form}
+                    id={"#{@id}-compose-form"}
+                    phx-change="validate_card"
+                    phx-submit="create_card"
+                  >
+                    <input type="hidden" name="stage_id" value={@stage_id} />
+                    <.input
+                      field={@compose_form[:title]}
+                      type="text"
+                      placeholder="Card title"
+                      autofocus
+                      autocomplete="off"
+                      class="input input-sm w-full"
+                      phx-keydown="cancel_compose"
+                      phx-key="escape"
+                    />
+                    <div class="mt-2 flex items-center gap-2">
+                      <.button variant="primary" class="btn btn-primary btn-xs">Add card</.button>
+                      <button type="button" class="btn btn-ghost btn-xs" phx-click="cancel_compose">
+                        Cancel
+                      </button>
+                    </div>
+                  </.form>
                 </div>
-                <.board_card
-                  :for={{dom_id, card} <- @cards}
-                  id={dom_id}
-                  title={card.title}
-                  tag={card.tag}
-                  ref={"#{@board_key}-#{card.ref_number}"}
-                  status={card.status}
-                  progress={card.progress}
-                  owners={card.owners}
-                  active_owner={Cards.active_owner_type(card)}
-                  stage_owner={@owner}
-                  lane={:main}
-                  category={@category}
-                />
+                <div
+                  id={"#{@id}-cards"}
+                  phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}
+                  data-stage-id={@stage_id}
+                  class="stage-cards"
+                  style="flex:1 1 auto;min-height:100%;display:flex;flex-direction:column;gap:8px;"
+                >
+                  <div
+                    id={"#{@id}-empty"}
+                    class="stage-empty hidden only:block"
+                    style="border:1px dashed var(--color-base-300);border-radius:8px;padding:18px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);"
+                  >
+                    No cards yet
+                  </div>
+                  <.board_card
+                    :for={{dom_id, card} <- @cards}
+                    id={dom_id}
+                    title={card.title}
+                    tag={card.tag}
+                    ref={"#{@board_key}-#{card.ref_number}"}
+                    status={card.status}
+                    progress={card.progress}
+                    owners={card.owners}
+                    active_owner={Cards.active_owner_type(card)}
+                    stage_owner={@owner}
+                    lane={:main}
+                    category={@category}
+                  />
+                </div>
               </div>
             </div>
-          </div>
+          <% end %>
           <%!-- Review / Done sub-lanes, side by side; empty ones collapse to 34px strips --%>
           <%= for sub <- @sublanes do %>
             <div
@@ -1962,7 +1989,7 @@ defmodule RelayWeb.CoreComponents do
               id={"sublane-#{sub.id}-strip"}
               class="sublane-strip stage-cards"
               data-stage-id={sub.id}
-              phx-click="expand_stage"
+              phx-click="toggle_collapse"
               phx-value-stage-id={sub.id}
               aria-label={"Expand #{sub.name} lane"}
               style={"flex:0 0 34px;width:34px;display:flex;flex-direction:column;align-items:center;gap:9px;padding:12px 0;box-sizing:border-box;background:#{lane_tint(sub.lane)};border-left:1px solid #{lane_divider(sub.lane)};cursor:pointer;"}
@@ -1990,7 +2017,13 @@ defmodule RelayWeb.CoreComponents do
               id={"sublane-#{sub.id}"}
               style={"flex:0 0 178px;width:178px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;background:#{lane_tint(sub.lane)};border-left:1px solid #{lane_divider(sub.lane)};"}
             >
-              <div style="display:flex;align-items:center;gap:6px;padding:11px 13px 7px 13px;flex:0 0 auto;">
+              <div
+                id={"sublane-#{sub.id}-header"}
+                phx-click="toggle_collapse"
+                phx-value-stage-id={sub.id}
+                aria-label={"Collapse #{sub.name} lane"}
+                style="display:flex;align-items:center;gap:6px;padding:11px 13px 7px 13px;flex:0 0 auto;cursor:pointer;"
+              >
                 <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(sub.lane)};"}>
                   {sub.name}
                 </span>
