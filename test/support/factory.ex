@@ -86,6 +86,20 @@ defmodule Relay.Factory do
   end
 
   # Full-control factory: `card` (when overridden) must be a persisted card.
+  def sub_task_factory(attrs) do
+    {card, attrs} = Map.pop_lazy(attrs, :card, fn -> insert(:card) end)
+
+    sub_task = %Schemas.SubTask{
+      card_id: card.id,
+      title: sequence(:sub_task_title, &"Sub-task #{&1}"),
+      done: false,
+      position: sequence(:sub_task_position, & &1)
+    }
+
+    sub_task |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
+
+  # Full-control factory: `card` (when overridden) must be a persisted card.
   # With a `user`, a human comment; without, an agent ("Relay AI") comment.
   def comment_factory(attrs) do
     {card, attrs} = Map.pop_lazy(attrs, :card, fn -> insert(:card) end)

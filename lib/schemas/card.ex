@@ -34,10 +34,12 @@ defmodule Schemas.Card do
     field :branch, :string
     field :plan, :string
     field :pr_url, :string
+    field :ai_result, :map
 
     belongs_to :board, Schemas.Board
     belongs_to :stage, Schemas.Stage
     has_many :owners, Schemas.CardOwner
+    has_many :sub_tasks, Schemas.SubTask
     embeds_one :rejection, Schemas.CardRejection, on_replace: :delete
 
     timestamps(type: :utc_datetime)
@@ -51,7 +53,7 @@ defmodule Schemas.Card do
   """
   def changeset(card, attrs) do
     card
-    |> cast(attrs, [:title, :description, :spec, :tag, :branch, :plan, :pr_url])
+    |> cast(attrs, [:title, :description, :spec, :tag, :branch, :plan, :pr_url, :ai_result])
     |> validate_required([:title])
     |> unique_constraint([:board_id, :ref_number], name: :cards_board_id_ref_number_index)
   end
