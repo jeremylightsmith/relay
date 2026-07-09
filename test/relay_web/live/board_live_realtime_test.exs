@@ -291,7 +291,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
              |> json_response(200)
 
       assert has_element?(view, "#card-drawer-rail #card-branch", "rly-9-live")
-      assert has_element?(view, "details#card-plan pre#card-plan-body", "Step 1: do it")
+      assert has_element?(view, "details#card-plan #card-plan-body.md", "Step 1: do it")
       refute has_element?(view, "details#card-plan[open]")
     end
   end

@@ -629,6 +629,28 @@ defmodule RelayWeb.BoardLiveTest do
              )
     end
 
+    test "renders description, spec, plan, and comments as markdown-rendered HTML",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _updated} =
+        Cards.update_card(card, %{
+          description: "## Desc head\n\n**descbold**",
+          spec: "## Spec head\n\n**specbold**",
+          plan: "## Plan head\n\n**planbold**"
+        })
+
+      {:ok, _comment} =
+        Relay.Activity.add_comment(card, %{actor: {:user, user.id}, body: "**commentbold** note"})
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      # each long-form field is markdown turned into HTML, not literal text
+      assert has_element?(view, "#card-drawer-description-view h2", "Desc head")
+      assert has_element?(view, "#card-drawer-description-view strong", "descbold")
+      assert has_element?(view, "#card-drawer-spec-view strong", "specbold")
+      assert has_element?(view, "#card-plan-body strong", "planbold")
+      assert has_element?(view, ".timeline-comment-body strong", "commentbold")
+    end
+
     test "visiting the deep link opens the drawer directly", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
 
@@ -709,7 +731,7 @@ defmodule RelayWeb.BoardLiveTest do
              )
     end
 
-    test "saving the description persists and renders it whitespace-preserved",
+    test "saving the description persists and renders it as markdown",
          %{conn: conn, card: card} do
       {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
 
@@ -720,8 +742,9 @@ defmodule RelayWeb.BoardLiveTest do
       |> render_submit()
 
       refute has_element?(view, "#card-drawer-description-form")
-      assert has_element?(view, "#card-drawer-description-view.whitespace-pre-wrap")
-      assert view |> element("#card-drawer-description-view") |> render() =~ "Line one\n\nLine two"
+      # a blank line is markdown for two paragraphs, rendered as HTML
+      assert has_element?(view, "#card-drawer-description-view.md p", "Line one")
+      assert has_element?(view, "#card-drawer-description-view.md p", "Line two")
       assert Repo.get!(Card, card.id).description == "Line one\n\nLine two"
     end
 
@@ -772,8 +795,9 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
 
       assert has_element?(view, "details#card-plan .collapse-title", "Plan")
-      assert has_element?(view, "details#card-plan pre#card-plan-body", "do the thing")
-      assert has_element?(view, "details#card-plan pre.whitespace-pre-wrap")
+      # plan renders as markdown-turned-HTML (heading + list item), not raw text
+      assert has_element?(view, "details#card-plan #card-plan-body.md h2", "Task 1")
+      assert has_element?(view, "details#card-plan #card-plan-body li", "do the thing")
       # collapsed by default: the <details> must NOT carry the open attribute
       refute has_element?(view, "details#card-plan[open]")
     end

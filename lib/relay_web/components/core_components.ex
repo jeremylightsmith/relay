@@ -883,7 +883,7 @@ defmodule RelayWeb.CoreComponents do
   attr :card, :any,
     required: true,
     doc:
-      "a card exposing title, description, tag, status, progress, blocked_since, branch, plan, pr_url, a loaded owners list, inserted_at, and updated_at"
+      "a card exposing title, description, spec, tag, status, progress, blocked_since, branch, plan, pr_url, a loaded owners list, inserted_at, and updated_at"
 
   attr :stage_name, :string, required: true
   attr :stage_owner, :atom, values: [:human, :ai], required: true
@@ -1168,12 +1168,13 @@ defmodule RelayWeb.CoreComponents do
               phx-click="edit_description"
               class="min-h-16 cursor-text rounded-lg p-1 hover:bg-base-200"
             >
-              <p
+              <div
                 :if={@card.description}
                 id={"#{@id}-description-view"}
-                class="whitespace-pre-wrap text-sm leading-relaxed"
-                phx-no-format
-              >{@card.description}</p>
+                class="md text-sm leading-relaxed"
+              >
+                {Relay.Markdown.to_html(@card.description)}
+              </div>
               <p :if={!@card.description} class="text-sm italic text-base-content/50">
                 Add a description…
               </p>
@@ -1204,6 +1205,17 @@ defmodule RelayWeb.CoreComponents do
               </div>
             </.form>
           </section>
+          <section :if={@card.spec} class="space-y-2">
+            <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+              Spec
+            </h4>
+            <div
+              id={"#{@id}-spec-view"}
+              class="md rounded-lg border border-base-300 bg-base-200/40 p-3 text-sm leading-relaxed"
+            >
+              {Relay.Markdown.to_html(@card.spec)}
+            </div>
+          </section>
           <details
             :if={@card.plan}
             id="card-plan"
@@ -1213,11 +1225,12 @@ defmodule RelayWeb.CoreComponents do
               Plan
             </summary>
             <div class="collapse-content">
-              <pre
+              <div
                 id="card-plan-body"
-                class="overflow-x-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-base-content/80"
-                phx-no-format
-              >{@card.plan}</pre>
+                class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
+              >
+                {Relay.Markdown.to_html(@card.plan)}
+              </div>
             </div>
           </details>
           <dl
@@ -1414,10 +1427,9 @@ defmodule RelayWeb.CoreComponents do
                   </div>
                   <%= case entry do %>
                     <% %Comment{} = comment -> %>
-                      <p
-                        class="timeline-comment-body whitespace-pre-wrap text-sm leading-relaxed"
-                        phx-no-format
-                      >{comment.body}</p>
+                      <div class="timeline-comment-body md text-sm leading-relaxed">
+                        {Relay.Markdown.to_html(comment.body)}
+                      </div>
                     <% %Activity{} = activity -> %>
                       <p class="timeline-activity-phrase text-sm text-base-content/70">
                         {activity_phrase(activity)}

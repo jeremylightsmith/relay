@@ -26,6 +26,7 @@
         { "shell": "git fetch origin --prune && git checkout main && git reset --hard origin/main && git checkout -B {branch}" },
         { "shell": "{relay} card {ref} --json | python3 -c 'import json,sys; sys.stdout.write(json.load(sys.stdin).get(\"plan\") or \"\")' > plan.md && test -s plan.md" },
         { "claude": "Run /exec-plan on the current branch to completion using the repo-root plan.md. This is authorized — proceed without asking for confirmation. Do not merge; exec-plan stops before the human-gated finish." },
+        { "shell": "rm -f plan.md" },
         { "shell": "git push -u origin {branch}" },
         { "shell": "url=$(gh pr create --fill --head {branch} --base main) && {relay} branch {ref} {branch} && {relay} pr {ref} \"$url\" && echo \"PR: $url\"" }
       ]
