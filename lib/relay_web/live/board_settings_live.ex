@@ -37,6 +37,13 @@ defmodule RelayWeb.BoardSettingsLive do
             BOARD
           </div>
           <.link
+            patch={~p"/board/settings?section=general"}
+            id="settings-nav-general"
+            style={nav_style(@section == :general)}
+          >
+            General
+          </.link>
+          <.link
             patch={~p"/board/settings"}
             id="settings-nav-stages"
             style={nav_style(@section == :stages)}
@@ -63,6 +70,31 @@ defmodule RelayWeb.BoardSettingsLive do
         <%!-- Content pane — mockup lines ~186-187 --%>
         <div style="flex:1;overflow-y:auto;background:oklch(0.985 0.004 250);">
           <div style="max-width:760px;margin:0 auto;padding:34px 40px 84px 40px;">
+            <section :if={@section == :general} id="general-pane">
+              <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px 0;color:oklch(0.26 0.02 255);">
+                General
+              </h1>
+              <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 18px 0;max-width:560px;">
+                The board's display name, shown in its header.
+              </p>
+              <.form
+                for={@general_form}
+                id="general-form"
+                phx-submit="save_general"
+                style="display:flex;flex-direction:column;gap:12px;max-width:420px;"
+              >
+                <.input
+                  field={@general_form[:name]}
+                  id="board-name-input"
+                  type="text"
+                  label="Board name"
+                />
+                <div>
+                  <button type="submit" id="save-general" class="btn btn-primary btn-sm">Save</button>
+                </div>
+              </.form>
+            </section>
+
             <section :if={@section == :stages} id="stages-pane">
               <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px 0;color:oklch(0.26 0.02 255);">
                 Stages
@@ -437,6 +469,7 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:api_key, ApiKeys.get_key(board))
      |> assign(:revealed_token, nil)
      |> assign(:lane_nonce, %{})
+     |> assign(:general_form, to_form(Boards.change_board(board)))
      |> refresh_stages()}
   end
 
@@ -472,6 +505,20 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:api_key, nil)
      |> assign(:revealed_token, nil)
      |> put_flash(:info, "API key revoked.")}
+  end
+
+  def handle_event("save_general", %{"board" => board_params}, socket) do
+    case Boards.update_board(socket.assigns.board, board_params) do
+      {:ok, board} ->
+        {:noreply,
+         socket
+         |> assign(:board, board)
+         |> assign(:general_form, to_form(Boards.change_board(board)))
+         |> put_flash(:info, "Board name saved.")}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :general_form, to_form(changeset))}
+    end
   end
 
   def handle_event("toggle_lane", %{"stage-id" => stage_id, "lane" => lane}, socket) do
@@ -567,6 +614,7 @@ defmodule RelayWeb.BoardSettingsLive do
     {:noreply, refresh_stages(socket)}
   end
 
+  defp section(%{"section" => "general"}), do: :general
   defp section(%{"section" => "keys"}), do: :keys
   defp section(_params), do: :stages
 
