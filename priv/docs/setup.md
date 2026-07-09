@@ -46,7 +46,7 @@ with request/response examples and the full status/error-code table.
 
 ## CLI quick reference
 
-Most agents drive the API through the `mix relay` CLI rather than raw HTTP. Common commands:
+Most agents drive the API through the `bin/relay` CLI rather than raw HTTP. Common commands:
 
 | Command | What it does |
 | --- | --- |
