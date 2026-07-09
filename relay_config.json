@@ -1,5 +1,5 @@
 {
-  "_comment": "Project config for `relay` (the generic engine reads this — it hardcodes nothing about these columns/agents/skills). `pipeline` lists AI stages left-to-right; the runner works cards right-to-left. Per stage: `from` = column a ready card is pulled from, `done` = where to push when finished (a *:Review lane = human checkpoint, else auto-continues), `action` = ordered steps. Each step is {shell: <cmd>} or {claude: <prompt>}. Templates: {ref} {title} {branch} {stage} {from} {done} {relay} {url}. Regenerate the skeleton from the board with `relay layout`.",
+  "_comment": "Project config for `relay` (the generic engine reads this — it hardcodes nothing about these columns/agents/skills). `pipeline` lists AI stages left-to-right; the runner works cards right-to-left. Per stage: `from` = column a ready card is pulled from, `done` = where to push when finished (a *:Review lane = human checkpoint, else auto-continues), `action` = ordered steps. Each step is {shell: <cmd>} or {claude: <prompt>}; a nonzero shell exit flags the card (invariant 7, no retry-loop). Templates: {ref} {title} {branch} {pr_url} {stage} {from} {done} {relay} {url}. State travels on the card: spec=description, plan=plan field, branch+pr_url=their fields (invariant 4). Regenerate the skeleton from the board with `relay layout`.",
   "poll_interval": 45,
   "pipeline": [
     {
@@ -15,7 +15,7 @@
       "from": "Spec:Done",
       "done": "Plan:Done",
       "action": [
-        { "claude": "You are the AI working Relay card {ref} at the PLAN stage. Read it: `{relay} card {ref}` — its description is the approved spec. Author an implementation plan at the repo root as plan.md following this repo's /write-plan conventions (bite-sized TDD tasks with ACTUAL test + implementation code, no placeholders). Overwrite any existing plan.md. Then STOP. Do not touch git or other cards." }
+        { "claude": "You are the AI working Relay card {ref} at the PLAN stage. Read it: `{relay} card {ref}` — its description is the approved spec. Author a full implementation plan following this repo's /write-plan conventions (bite-sized TDD tasks with ACTUAL test + implementation code, no placeholders). Save it to a temp file, then attach it to the card so it travels with the work (not a shared file): `{relay} plan {ref} @<that file>`. Then STOP. Do not touch git or other cards." }
       ]
     },
     {
@@ -23,9 +23,11 @@
       "from": "Plan:Done",
       "done": "Code:Review",
       "action": [
-        { "shell": "git checkout main && git checkout -B {branch}" },
+        { "shell": "git fetch origin --prune && git checkout main && git reset --hard origin/main && git checkout -B {branch}" },
+        { "shell": "{relay} card {ref} --json | python3 -c 'import json,sys; sys.stdout.write(json.load(sys.stdin).get(\"plan\") or \"\")' > plan.md && test -s plan.md" },
         { "claude": "Run /exec-plan on the current branch to completion using the repo-root plan.md. This is authorized — proceed without asking for confirmation. Do not merge; exec-plan stops before the human-gated finish." },
-        { "shell": "git push -u origin {branch}" }
+        { "shell": "git push -u origin {branch}" },
+        { "shell": "url=$(gh pr create --fill --head {branch} --base main) && {relay} branch {ref} {branch} && {relay} pr {ref} \"$url\" && echo \"PR: $url\"" }
       ]
     },
     {
@@ -33,11 +35,8 @@
       "from": "Code:Done",
       "done": "Deploy:Done",
       "action": [
-        { "shell": "git checkout main && git merge --no-ff {branch} -m 'Merge {branch} ({ref})' && (git ls-files --error-unmatch plan.md >/dev/null 2>&1 && git rm --cached plan.md && git commit -q -m 'chore: untrack throwaway plan.md' || true)" },
-        { "shell": "mix precommit" },
-        { "shell": "git push origin main" },
-        { "shell": "gh run watch $(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId') --exit-status" },
-        { "shell": "git branch -d {branch} || true" }
+        { "shell": "gh pr merge {branch} --merge --delete-branch" },
+        { "shell": "sleep 15 && gh run watch $(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId') --exit-status" }
       ]
     }
   ]

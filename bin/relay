@@ -116,6 +116,18 @@ def set_description(ref, text):
     return api("PATCH", f"/api/cards/{ref}", {"description": text})["data"]
 
 
+def set_plan(ref, text):
+    return api("PATCH", f"/api/cards/{ref}", {"plan": text})["data"]
+
+
+def set_branch(ref, name):
+    return api("PATCH", f"/api/cards/{ref}", {"branch": name})["data"]
+
+
+def set_pr_url(ref, url):
+    return api("PATCH", f"/api/cards/{ref}", {"pr_url": url})["data"]
+
+
 def move(ref, stage_name):
     return api("POST", f"/api/cards/{ref}/move", {"stage": resolve_stage_id(stage_name)})["data"]
 
@@ -319,7 +331,9 @@ def work(card, entry, mode):
     ref = card["ref"]
     n = ref.split("-")[-1]
     vars = {"ref": ref, "title": card["title"], "stage": entry["stage"], "from": entry["from"],
-            "done": entry["done"], "branch": f"rly-{n}-{slug(card['title'])}",
+            "done": entry["done"],
+            "branch": card.get("branch") or f"rly-{n}-{slug(card['title'])}",
+            "pr_url": card.get("pr_url") or "",
             "relay": HERE, "url": os.environ.get("RELAY_URL", "")}
     log(f"→ {ref} '{card['title']}' :: {entry['stage']} ({mode}) — then {entry['done']}")
     if DRY:
@@ -408,6 +422,9 @@ def build_parser():
     add("move", _simple(lambda a: move(a.ref, a.stage)), "ref", "stage", json_flag=True)
     add("status", _simple(lambda a: set_status(a.ref, a.status)), "ref", "status", json_flag=True)
     add("describe", _simple(lambda a: set_description(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
+    add("plan", _simple(lambda a: set_plan(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
+    add("branch", _simple(lambda a: set_branch(a.ref, a.name)), "ref", "name", json_flag=True)
+    add("pr", _simple(lambda a: set_pr_url(a.ref, a.url)), "ref", "url", json_flag=True)
     add("needs-input", _simple(lambda a: needs_input(a.ref, read_arg(a.question))), "ref", "question", json_flag=True)
     add("own", _simple(lambda a: own(a.ref)), "ref", json_flag=True)
     add("release", _simple(lambda a: release(a.ref)), "ref", json_flag=True)

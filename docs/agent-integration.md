@@ -40,6 +40,9 @@ Human output by default; add `--json` for machine output. Non-zero exit on any e
 | `bin/relay move RLY-12 Code` | Move to a stage (by name, e.g. `"Code:Review"`) |
 | `bin/relay status RLY-12 working` | Set status |
 | `bin/relay describe RLY-12 @spec.md` | Set the card's **description** (the spec) |
+| `bin/relay plan RLY-12 @plan.md` | Set the card's **plan** (travels with the card) |
+| `bin/relay branch RLY-12 rly-12-…` | Record the **branch** this card's work lives on |
+| `bin/relay pr RLY-12 <url>` | Record the card's **PR URL** (for the review gate) |
 | `bin/relay needs-input RLY-12 "…"` | Ask the human a question — blocks the card |
 | `bin/relay own RLY-12` / `bin/relay release RLY-12` | Claim for the AI / hand back |
 | `bin/relay approve RLY-12` / `bin/relay reject RLY-12 "note"` | Gate: advance / send back |
