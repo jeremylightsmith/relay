@@ -19,6 +19,7 @@ defmodule Relay.Cards do
   alias Schemas.Board
   alias Schemas.Card
   alias Schemas.CardOwner
+  alias Schemas.CardRejection
   alias Schemas.Stage
   alias Schemas.User
 
@@ -235,7 +236,7 @@ defmodule Relay.Cards do
           emit_stage_changed(moved, previous_stage_id, target_stage, actor)
         end
 
-        moved
+        maybe_clear_rejection(moved)
       end)
 
     case result do
@@ -277,18 +278,73 @@ defmodule Relay.Cards do
   end
 
   @doc """
-  Rejects the card at its approval gate (MMF 13), under the same gate
-  rule as `approve/2` (`{:error, :not_gated}` otherwise). Moves the card
-  to the gate's `reject_to_stage_id` — or, when nil, the gate's own main
-  lane — arriving `:working`/`:queued` by the target's meant-for owner.
-  Posts `note` as a comment from `actor` and logs a `:rejected` activity
-  entry (from/to stage display names plus the note in meta). Reuses
-  `move_card`/`set_status`, so the usual events fire.
+  Rejects the card at its approval gate (MMF 13) — a thin wrapper over
+  `send_back/4`. Resolves the gate under the same rule as `approve/2`
+  (`{:error, :not_gated}` otherwise), picks the target = `opts[:to]` when given
+  else the gate's configured `reject_to` (or the gate's own main lane when
+  unset), then sends the card back. `opts[:to]` may be a `%Stage{}` or a stage
+  id and must satisfy `send_back`'s backward/main-lane rule.
   """
-  def reject(%Card{} = card, note, actor \\ :agent) when is_binary(note) do
+  def reject(%Card{} = card, note, actor \\ :agent, opts \\ []) when is_binary(note) do
     case fetch_gate(card) do
-      {:ok, from_stage, gate} -> route(card, from_stage, reject_target(gate), :rejected, note, actor)
+      {:ok, _from_stage, gate} -> send_back(card, gate_reject_target(gate, opts), note, actor)
       {:error, :not_gated} -> {:error, :not_gated}
+    end
+  end
+
+  @doc """
+  The universal send-back primitive (RLY-30): bounce `card` **backward** to a
+  main-lane `target` (a `%Stage{}` or its id) whose position is at or before the
+  card's current main-lane stage, attributed to `actor`. It moves the card to
+  the bottom of `target` with the target's arrival status, posts `note` as a
+  comment (keeping the human-readable thread intact), logs a `:rejected`
+  activity entry, and sets the card's single open `rejection` embed (snapshotting
+  from/to stage names, the actor's display name, and the timestamp) — replacing
+  any existing open rejection. Returns `{:ok, card}` (rejection set, owners
+  preloaded) or `{:error, :missing_note | :invalid_target | changeset}`. A blank
+  note is rejected before anything moves; a target that is not a main-lane stage
+  on this board, or is positioned after the card's current main stage, is
+  `{:error, :invalid_target}`.
+  """
+  def send_back(card, target, note, actor \\ :agent)
+
+  def send_back(%Card{board_id: board_id} = card, target_id, note, actor)
+      when is_integer(target_id) and is_binary(note) do
+    case Repo.get_by(Stage, id: target_id, board_id: board_id) do
+      %Stage{} = target -> send_back(card, target, note, actor)
+      nil -> {:error, :invalid_target}
+    end
+  end
+
+  def send_back(%Card{} = card, %Stage{} = target, note, actor) when is_binary(note) do
+    from_stage = current_main_stage(card)
+
+    cond do
+      String.trim(note) == "" ->
+        {:error, :missing_note}
+
+      not send_back_target?(card, from_stage, target) ->
+        {:error, :invalid_target}
+
+      true ->
+        with {:ok, moved} <- move_card(card, target, @append_index, actor),
+             {:ok, updated} <- set_status(moved, %{status: arrival_status(target)}, actor),
+             :ok <- attach_note(updated, note, actor) do
+          log_gate(updated, :rejected, actor, from_stage, target, note)
+          {:ok, put_rejection(updated, from_stage, target, note, actor)}
+        end
+    end
+  end
+
+  @doc """
+  Marks the card `:done` in place (the drawer's "Mark done") and clears any open
+  rejection — the work has been accepted. Returns `{:ok, card}` or
+  `{:error, changeset}`.
+  """
+  def mark_done(%Card{} = card, actor \\ :agent) do
+    case set_status(card, %{status: :done}, actor) do
+      {:ok, updated} -> {:ok, clear_rejection(updated)}
+      {:error, changeset} -> {:error, changeset}
     end
   end
 
@@ -356,6 +412,104 @@ defmodule Relay.Cards do
   defp reject_target(%Stage{reject_to_stage_id: nil} = gate), do: gate
   defp reject_target(%Stage{reject_to_stage_id: target_id}), do: Repo.get!(Stage, target_id)
 
+  # The gate reject target: an explicit :to (Stage or id) wins, else the gate's
+  # configured reject_to (or the gate itself when unset). send_back/4 validates it.
+  defp gate_reject_target(gate, opts) do
+    case Keyword.get(opts, :to) do
+      nil -> reject_target(gate)
+      %Stage{} = target -> target
+      id when is_integer(id) -> id
+    end
+  end
+
+  # The main-lane stage governing the card: its own stage when main-lane, else
+  # its sub-lane's parent. Send-back targets are compared against this stage's
+  # position.
+  defp current_main_stage(%Card{stage_id: stage_id}) do
+    stage = Repo.get!(Stage, stage_id)
+    if stage.lane == :main, do: stage, else: Repo.get!(Stage, stage.parent_id)
+  end
+
+  # A valid send-back target is a main-lane stage on the card's board positioned
+  # at or before the card's current main stage (never forward). The gate's
+  # nil-target reject lands the card in its own stage, so "at" (==) is allowed;
+  # the universal drawer control only ever offers strictly-earlier stages.
+  defp send_back_target?(%Card{board_id: bid}, %Stage{} = from, %Stage{lane: :main, board_id: bid} = target),
+    do: target.position <= from.position
+
+  defp send_back_target?(_card, _from, _target), do: false
+
+  # Sets the card's single open rejection embed, replacing any existing one
+  # (on_replace: :delete), then broadcasts the upsert so open drawers show the
+  # banner live (MMF 18).
+  defp put_rejection(%Card{} = card, %Stage{} = from, %Stage{} = to, note, actor) do
+    rejection = %CardRejection{
+      note: note,
+      from_stage_id: from.id,
+      from_stage_name: Boards.stage_display_name(from),
+      to_stage_id: to.id,
+      to_stage_name: Boards.stage_display_name(to),
+      rejected_by: actor_display_name(actor),
+      rejected_at: DateTime.truncate(DateTime.utc_now(), :second)
+    }
+
+    {:ok, updated} =
+      card
+      |> Ecto.Changeset.change()
+      |> Ecto.Changeset.put_embed(:rejection, rejection)
+      |> Repo.update()
+
+    updated = preload_owners(updated)
+    Events.broadcast(updated.board_id, {:card_upserted, updated})
+    updated
+  end
+
+  # Clears an open rejection (approve / mark-done acceptance), broadcasting the
+  # upsert so the drawer banner disappears live. A clean card is a no-op.
+  defp clear_rejection(%Card{rejection: nil} = card), do: card
+
+  defp clear_rejection(%Card{} = card) do
+    {:ok, cleared} =
+      card
+      |> Ecto.Changeset.change()
+      |> Ecto.Changeset.put_embed(:rejection, nil)
+      |> Repo.update()
+
+    cleared = preload_owners(cleared)
+    Events.broadcast(cleared.board_id, {:card_upserted, cleared})
+    cleared
+  end
+
+  # Inside move_card's transaction: an open rejection clears when the card's new
+  # main-lane stage is positioned at/after the stage it was rejected from — the
+  # redo has climbed back to the checkpoint it fell from. A deleted from-stage
+  # (nil) also clears. No broadcast here: move_card's {:card_moved} already
+  # drives every session's re-render from the DB.
+  defp maybe_clear_rejection(%Card{rejection: nil} = card), do: card
+
+  defp maybe_clear_rejection(%Card{rejection: %CardRejection{from_stage_id: from_id}} = card) do
+    dest = current_main_stage(card)
+    from = Repo.get(Stage, from_id)
+
+    if is_nil(from) or dest.position >= from.position do
+      card
+      |> Ecto.Changeset.change()
+      |> Ecto.Changeset.put_embed(:rejection, nil)
+      |> Repo.update!()
+      |> preload_owners()
+    else
+      card
+    end
+  end
+
+  # The rejecter's display name snapshotted into the rejection banner.
+  defp actor_display_name(:agent), do: "Relay AI"
+
+  defp actor_display_name({:user, user_id}) do
+    user = Repo.get!(User, user_id)
+    user.name || user.email
+  end
+
   # Shared approve/reject transition: move to the bottom of `target`, set
   # the arrival status, attach the note (rejects only), then log the
   # :approved/:rejected entry. A nil-target reject resolves to the gate
@@ -366,7 +520,7 @@ defmodule Relay.Cards do
          {:ok, updated} <- set_status(moved, %{status: arrival_status(target)}, actor),
          :ok <- attach_note(updated, note, actor) do
       log_gate(updated, type, actor, from_stage, target, note)
-      {:ok, updated}
+      {:ok, clear_rejection(updated)}
     end
   end
 
@@ -375,7 +529,7 @@ defmodule Relay.Cards do
     case set_status(card, %{status: :done}, actor) do
       {:ok, updated} ->
         log_gate(updated, :approved, actor, from_stage, from_stage, nil)
-        {:ok, updated}
+        {:ok, clear_rejection(updated)}
 
       {:error, changeset} ->
         {:error, changeset}
