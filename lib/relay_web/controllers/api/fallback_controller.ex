@@ -39,6 +39,13 @@ defmodule RelayWeb.Api.FallbackController do
     |> render(:error, code: "missing_note", message: "note is required")
   end
 
+  def call(conn, {:error, :invalid_target}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid_target", message: "target must be a main-lane stage before this card")
+  end
+
   defp changeset_message(changeset) do
     changeset
     |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->

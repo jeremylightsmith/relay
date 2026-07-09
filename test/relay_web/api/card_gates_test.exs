@@ -88,6 +88,79 @@ defmodule RelayWeb.Api.CardGatesTest do
     assert conn |> post(~p"/api/cards/RLY-9999/reject", %{note: "x"}) |> json_response(404)
   end
 
+  test "GET card exposes the open rejection top-level (not in timeline), nil when clean", %{
+    conn: conn,
+    board: board,
+    review: review,
+    code: code
+  } do
+    {:ok, _stage} = Boards.update_stage(review, %{reject_to_stage_id: code.id})
+    card = insert(:card, stage: review)
+
+    clean = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200) |> Map.fetch!("data")
+    assert clean["rejection"] == nil
+
+    {:ok, _rejected} = Cards.reject(card, "Handle the empty case", :agent)
+
+    data = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200) |> Map.fetch!("data")
+    assert data["rejection"]["note"] == "Handle the empty case"
+    assert data["rejection"]["to_stage"] == "Code"
+    assert data["rejection"]["from_stage"] == "Review"
+    assert data["rejection"]["rejected_by"] == "Relay AI"
+    # It is NOT just another timeline comment/activity of its own kind.
+    refute Enum.any?(data["timeline"], &(&1["kind"] == "rejection"))
+  end
+
+  test "POST reject with an explicit :to sends the card there", %{
+    conn: conn,
+    board: board,
+    review: review,
+    code: code
+  } do
+    {:ok, _stage} = Boards.update_stage(review, %{reject_to_stage_id: code.id})
+    card = insert(:card, stage: review)
+
+    data =
+      conn
+      |> post(~p"/api/cards/#{ref(board, card)}/reject", %{note: "spec problem", to: "Code"})
+      |> json_response(200)
+      |> Map.fetch!("data")
+
+    assert data["stage_id"] == code.id
+    assert data["rejection"]["to_stage"] == "Code"
+  end
+
+  test "POST reject with an explicit :to works on a NON-gated card (universal send-back)", %{
+    conn: conn,
+    board: board,
+    code: code,
+    deploy: deploy
+  } do
+    # Deploy (position 3) is not a gate; a target still makes it a valid send-back.
+    card = insert(:card, stage: deploy)
+
+    data =
+      conn
+      |> post(~p"/api/cards/#{ref(board, card)}/reject", %{note: "back to code", to: code.id})
+      |> json_response(200)
+      |> Map.fetch!("data")
+
+    assert data["stage_id"] == code.id
+    assert data["rejection"]["to_stage"] == "Code"
+  end
+
+  test "POST reject with a forward/unknown :to 422s", %{conn: conn, board: board, review: review, deploy: deploy} do
+    card = insert(:card, stage: review)
+
+    assert conn
+           |> post(~p"/api/cards/#{ref(board, card)}/reject", %{note: "x", to: deploy.id})
+           |> json_response(422)
+
+    assert conn
+           |> post(~p"/api/cards/#{ref(board, card)}/reject", %{note: "x", to: "Nonexistent"})
+           |> json_response(422)
+  end
+
   test "GET /api/board stage payloads include the gate fields", %{conn: conn, review: review, code: code} do
     {:ok, _stage} = Boards.update_stage(review, %{reject_to_stage_id: code.id})
 
