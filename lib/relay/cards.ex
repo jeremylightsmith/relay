@@ -36,8 +36,9 @@ defmodule Relay.Cards do
   The next per-board `ref_number` is allocated by locking the board row
   (`SELECT ... FOR UPDATE`) and bumping `Board.card_seq` inside the
   transaction, so refs are sequential and gap-free even under concurrent
-  creates. The card is appended to the bottom of the stage. A successful
-  create logs a `:created` activity entry (MMF 07) attributed to `actor`.
+  creates. The card is inserted at the top of the stage (RLY-1 item 5). A
+  successful create logs a `:created` activity entry (MMF 07) attributed to
+  `actor`.
   """
   def create_card(%Stage{} = stage, attrs, actor \\ :agent) do
     result =
@@ -561,7 +562,7 @@ defmodule Relay.Cards do
 
   # Re-indexes the target stage: its other cards keep their relative
   # order, `card` is inserted at the clamped index, and positions are
-  # rewritten 1..n (updates are no-ops for cards whose row is unchanged).
+  # rewritten 1..n.
   defp place_at(%Card{} = card, %Stage{} = target_stage, index) do
     others =
       Repo.all(
@@ -579,8 +580,20 @@ defmodule Relay.Cards do
     |> Enum.find(&(&1.id == card.id))
   end
 
+  # `card` may be a caller-held reference that's gone stale relative to the
+  # DB (e.g. a card fetched before earlier place_at/3 calls re-indexed its
+  # stage — top-insert on every create means this happens often). force_change
+  # guarantees the UPDATE always writes :stage_id/:position rather than
+  # silently no-op'ing when the stale in-memory value coincidentally matches
+  # the new target.
   defp reposition({%Card{} = card, position}, stage_id) do
-    case Repo.update(Ecto.Changeset.change(card, stage_id: stage_id, position: position)) do
+    changeset =
+      card
+      |> Ecto.Changeset.change()
+      |> Ecto.Changeset.force_change(:stage_id, stage_id)
+      |> Ecto.Changeset.force_change(:position, position)
+
+    case Repo.update(changeset) do
       {:ok, card} -> card
       {:error, changeset} -> Repo.rollback(changeset)
     end
@@ -696,19 +709,18 @@ defmodule Relay.Cards do
   end
 
   defp insert_card(%Stage{} = stage, ref_number, attrs) do
-    %Card{
-      board_id: stage.board_id,
-      stage_id: stage.id,
-      position: next_position(stage),
-      ref_number: ref_number
-    }
-    |> Card.changeset(attrs)
-    |> Repo.insert()
-  end
+    changeset =
+      Card.changeset(
+        %Card{board_id: stage.board_id, stage_id: stage.id, position: 0, ref_number: ref_number},
+        attrs
+      )
 
-  # New cards append to the bottom of the stage. Safe under concurrency
-  # because the caller already holds the board-row lock.
-  defp next_position(%Stage{id: stage_id}) do
-    (Repo.one(from c in Card, where: c.stage_id == ^stage_id, select: max(c.position)) || 0) + 1
+    case Repo.insert(changeset) do
+      # RLY-1 item 5 — new cards land at the TOP of the stage. place_at/3 re-indexes
+      # the whole stage to 1..n, shifting the existing cards down by one. Safe under
+      # concurrency because create_card/3 already holds the board-row lock.
+      {:ok, card} -> {:ok, place_at(card, stage, 0)}
+      {:error, _changeset} = error -> error
+    end
   end
 end

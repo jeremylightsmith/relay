@@ -252,6 +252,33 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#stage-col-1-compose-form")
       assert Repo.all(Card) == []
     end
+
+    test "creating a card inserts it at the top of the stream", %{conn: conn, backlog: backlog, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      expand_stage(view, backlog)
+      view |> element("#stage-col-1-new-card") |> render_click()
+      view |> form("#stage-col-1-compose-form", card: %{title: "First"}) |> render_submit()
+      view |> form("#stage-col-1-compose-form", card: %{title: "Second"}) |> render_submit()
+
+      assert stage_titles(view, 1) == ["Second", "First"]
+
+      {:ok, reloaded, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert stage_titles(reloaded, 1) == ["Second", "First"]
+    end
+
+    test "creating a card pushes a focus event carrying the new card's ref",
+         %{conn: conn, backlog: backlog, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      expand_stage(view, backlog)
+      view |> element("#stage-col-1-new-card") |> render_click()
+      view |> form("#stage-col-1-compose-form", card: %{title: "Focus me"}) |> render_submit()
+
+      assert_push_event(view, "focus_card", %{ref: "RLY-1"})
+    end
   end
 
   describe "lane counts" do
@@ -337,12 +364,12 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      render_hook(view, "move_card", %{"ref" => "RLY-3", "stage_id" => backlog.id, "index" => 0})
+      render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => backlog.id, "index" => 0})
 
-      assert stage_titles(view, 1) == ["Third", "First", "Second"]
+      assert stage_titles(view, 1) == ["First", "Third", "Second"]
 
       {:ok, reloaded, _html} = live(conn, ~p"/board/#{board.slug}")
-      assert stage_titles(reloaded, 1) == ["Third", "First", "Second"]
+      assert stage_titles(reloaded, 1) == ["First", "Third", "Second"]
     end
 
     test "accepts string stage_id and index (phx-value parity)",
@@ -485,7 +512,7 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#stage-col-1-cards .board-card.border-l-transparent", "Baton card")
+      assert has_element?(view, "#stage-col-1-cards .board-card.border-l-base-300", "Baton card")
       refute has_element?(view, "#stage-col-1-cards .board-card .card-owners")
       refute has_element?(view, "#stage-col-1-cards .board-card .card-status")
       refute has_element?(view, "#stage-col-1-cards .board-card .card-mismatch")

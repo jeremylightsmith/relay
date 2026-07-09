@@ -47,17 +47,27 @@ defmodule Relay.CardsTest do
       assert Cards.ref(other_board, b1) == "OPS-1"
     end
 
-    test "appends each new card at the bottom of its stage", %{board: board, stage: stage} do
+    test "inserts each new card at the top of its stage, shifting the rest down",
+         %{board: board, stage: stage} do
       other_stage = insert(:stage, board: board, position: 2)
 
       {:ok, c1} = Cards.create_card(stage, %{title: "A"})
       {:ok, c2} = Cards.create_card(stage, %{title: "B"})
       {:ok, c3} = Cards.create_card(other_stage, %{title: "C"})
 
-      assert c1.position == 1
-      assert c2.position == 2
+      # newest is first; each create re-indexes the stage to 1..n
+      assert c2.position == 1
+      assert Repo.get!(Card, c1.id).position == 2
       assert c3.position == 1
       assert c3.ref_number == 3
+
+      titles =
+        board
+        |> Cards.list_cards()
+        |> Enum.filter(&(&1.stage_id == stage.id))
+        |> Enum.map(& &1.title)
+
+      assert titles == ["B", "A"]
     end
 
     test "returns an error changeset and leaves no ref gap on a blank title",
@@ -100,7 +110,8 @@ defmodule Relay.CardsTest do
       {:ok, b1} = Cards.create_card(stage2, %{title: "B1"})
       {:ok, a2} = Cards.create_card(stage, %{title: "A2"})
 
-      assert Enum.map(Cards.list_cards(board), & &1.id) == [a1.id, a2.id, b1.id]
+      # top-insert: a2 lands above a1 within stage; stage still orders before stage2
+      assert Enum.map(Cards.list_cards(board), & &1.id) == [a2.id, a1.id, b1.id]
     end
 
     test "orders within a stage by position, not insertion order", %{board: board, stage: stage} do
@@ -319,10 +330,11 @@ defmodule Relay.CardsTest do
       {:ok, second} = Cards.create_card(stage, %{title: "Second"})
       {:ok, third} = Cards.create_card(stage, %{title: "Third"})
 
-      assert {:ok, moved} = Cards.move_card(third, stage, 0)
+      # top-insert order is [third, second, first]; move the bottom card to the top
+      assert {:ok, moved} = Cards.move_card(first, stage, 0)
 
       assert moved.stage_id == stage.id
-      assert stage_card_ids(board, stage) == [moved.id, first.id, second.id]
+      assert stage_card_ids(board, stage) == [moved.id, third.id, second.id]
       assert stage_positions(board, stage) == [1, 2, 3]
     end
 

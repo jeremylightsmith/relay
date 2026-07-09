@@ -277,7 +277,7 @@ defmodule RelayWeb.CoreComponentsTest do
     test "renders neutral without active owner or status" do
       html = render_component(&CoreComponents.board_card/1, id: "c1", ref: "RLY-1", title: "T")
 
-      assert html =~ "border-l-transparent"
+      assert html =~ "border-l-base-300"
       refute html =~ "card-owners"
       refute html =~ "card-status"
       refute html =~ "card-mismatch"
@@ -364,7 +364,7 @@ defmodule RelayWeb.CoreComponentsTest do
         )
 
       refute html =~ "card-mismatch"
-      assert html =~ "border-l-transparent"
+      assert html =~ "border-l-base-300"
     end
   end
 end

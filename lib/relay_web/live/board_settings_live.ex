@@ -31,6 +31,15 @@ defmodule RelayWeb.BoardSettingsLive do
           id="settings-rail"
           style="width:210px;flex:0 0 auto;border-right:1px solid oklch(0.93 0.006 255);background:oklch(0.992 0.002 255);padding:22px 14px;display:flex;flex-direction:column;gap:3px;"
         >
+          <.link
+            navigate={~p"/board/#{@board.slug}"}
+            id="back-to-board"
+            class="btn btn-ghost btn-sm justify-start gap-1.5 px-2"
+            style="margin-bottom:10px;color:oklch(0.45 0.02 255);"
+          >
+            <.icon name="hero-arrow-left" class="size-4" />
+            <span class="font-mono" style="font-size:11px;">Back to board</span>
+          </.link>
           <div
             class="font-mono"
             style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);padding:4px 10px 8px 10px;"
@@ -57,14 +66,6 @@ defmodule RelayWeb.BoardSettingsLive do
             style={nav_style(@section == :keys)}
           >
             API keys
-          </.link>
-          <.link
-            navigate={~p"/board/#{@board.slug}"}
-            id="back-to-board"
-            class="font-mono"
-            style="margin-top:auto;font-size:11px;color:oklch(0.55 0.02 255);padding:8px 10px;text-decoration:none;"
-          >
-            ← Back to board
           </.link>
         </nav>
 
