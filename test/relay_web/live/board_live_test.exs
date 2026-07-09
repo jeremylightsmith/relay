@@ -606,7 +606,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert_patch(view, ~p"/board?card=RLY-1")
       assert has_element?(view, "#card-drawer")
-      assert has_element?(view, "#card-drawer-title-input[value='Draft the spec']")
+      assert has_element?(view, "#card-drawer-title-display", "Draft the spec")
       assert has_element?(view, "#card-drawer .drawer-card-ref", "RLY-1")
     end
 
@@ -695,14 +695,31 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#board")
     end
 
+    test "the title shows as read-only text until clicked", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-title-display", "Draft the spec")
+      refute has_element?(view, "#card-drawer-title-form")
+    end
+
+    test "clicking the title opens the inline editor", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-title-display") |> render_click()
+
+      assert has_element?(view, "#card-drawer-title-form textarea#card-drawer-title-input")
+    end
+
     test "saving the title persists and reflects on drawer and board card",
          %{conn: conn, card: card} do
       {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
 
+      view |> element("#card-drawer-title-display") |> render_click()
       view |> form("#card-drawer-title-form", card: %{title: "Sharper title"}) |> render_submit()
 
       assert Repo.get!(Card, card.id).title == "Sharper title"
-      assert has_element?(view, "#card-drawer-title-input[value='Sharper title']")
+      assert has_element?(view, "#card-drawer-title-display", "Sharper title")
+      refute has_element?(view, "#card-drawer-title-form")
       assert has_element?(view, "#stage-col-1-cards .board-card .card-title", "Sharper title")
       refute has_element?(view, "#stage-col-1-cards .board-card .card-title", "Draft the spec")
     end
@@ -710,11 +727,38 @@ defmodule RelayWeb.BoardLiveTest do
     test "a blank title is rejected with an error and nothing changes", %{conn: conn, card: card} do
       {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
 
+      view |> element("#card-drawer-title-display") |> render_click()
       view |> form("#card-drawer-title-form", card: %{title: ""}) |> render_submit()
 
       assert has_element?(view, "#card-drawer-title-form", "can't be blank")
       assert Repo.get!(Card, card.id).title == "Draft the spec"
-      assert has_element?(view, "#stage-col-1-cards .board-card .card-title", "Draft the spec")
+    end
+
+    test "a long title wraps in the header rather than scrolling one line",
+         %{conn: conn, card: card} do
+      {:ok, _} = Cards.update_card(card, %{title: String.duplicate("verylongword ", 15)})
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-title-display.whitespace-pre-wrap.break-words")
+    end
+
+    test "pressing Escape closes the open drawer", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer")
+
+      view |> element("#card-drawer") |> render_keydown(%{"key" => "Escape"})
+
+      assert_patch(view, ~p"/board")
+      refute has_element?(view, "#card-drawer")
+    end
+
+    test "no window-keydown close binding exists when no card is open", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board")
+
+      refute has_element?(view, "#card-drawer")
+      refute has_element?(view, "[phx-window-keydown='close_drawer']")
     end
 
     test "clicking the description area opens the textarea editor", %{conn: conn} do
@@ -775,6 +819,29 @@ defmodule RelayWeb.BoardLiveTest do
       view |> element("#card-drawer-description-edit") |> render_click()
 
       assert view |> element("#card-drawer-description-input") |> render() =~ "Current text"
+    end
+
+    test "the drawer aside is wide on desktop and full width on mobile", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer aside.drawer-panel.w-full")
+      assert render(view) =~ "lg:w-2/3"
+    end
+
+    test "the drawer body has a main column beside a properties rail", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-main #card-drawer-conversation")
+      assert has_element?(view, "#card-drawer-main #card-drawer-activity")
+      assert has_element?(view, "#card-drawer-rail.lg\\:border-l")
+    end
+
+    test "editing the description opens a tall textarea", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      view |> element("#card-drawer-description-edit") |> render_click()
+
+      assert has_element?(view, "#card-drawer-description-input[rows='12']")
     end
   end
 
@@ -1161,11 +1228,9 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#card-drawer-timeline .timeline-activity-phrase",
+               "#card-drawer-activity .timeline-activity-phrase",
                "created this card"
              )
-
-      assert has_element?(view, "#card-drawer-timeline .timeline-author", "Relay AI")
     end
 
     test "a card with no history shows the empty state", %{conn: conn, backlog: backlog} do
@@ -1173,7 +1238,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/board?card=RLY-500")
 
-      assert has_element?(view, "#card-drawer-timeline", "No activity yet")
+      assert has_element?(view, "#card-drawer-activity", "No activity yet")
     end
 
     test "posting a comment persists it and appends it with author and timestamp",
@@ -1240,7 +1305,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#card-drawer-timeline .timeline-activity-phrase",
+               "#card-drawer-activity .timeline-activity-phrase",
                "set status to in_review"
              )
     end
@@ -1253,7 +1318,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#card-drawer-timeline .timeline-activity-phrase",
+               "#card-drawer-activity .timeline-activity-phrase",
                "added #{user.name} as owner"
              )
     end
@@ -1265,16 +1330,14 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#card-drawer-timeline .timeline-activity-phrase",
+               "#card-drawer-activity .timeline-activity-phrase",
                "moved Backlog → Plan"
              )
     end
 
-    test "comments and activity interleave in chronological order",
-         %{conn: conn, user: user, backlog: backlog} do
+    test "the conversation lists comments oldest first", %{conn: conn, user: user, backlog: backlog} do
       card = insert(:card, stage: backlog, title: "History", ref_number: 501, position: 6)
       c1 = insert(:comment, card: card, user: user, body: "Kickoff", inserted_at: ~U[2026-07-01 09:00:00Z])
-      a1 = insert(:activity, card: card, inserted_at: ~U[2026-07-02 09:00:00Z])
       c2 = insert(:comment, card: card, body: "Done", inserted_at: ~U[2026-07-03 09:00:00Z])
 
       {:ok, view, _html} = live(conn, ~p"/board?card=RLY-501")
@@ -1283,14 +1346,27 @@ defmodule RelayWeb.BoardLiveTest do
         view
         |> render()
         |> LazyHTML.from_fragment()
-        |> LazyHTML.query("#card-drawer-timeline > li.timeline-entry[id]")
+        |> LazyHTML.query("#card-drawer-conversation > li.timeline-entry[id]")
         |> LazyHTML.attribute("id")
 
-      assert ids == [
-               "timeline-comment-#{c1.id}",
-               "timeline-activity-#{a1.id}",
-               "timeline-comment-#{c2.id}"
-             ]
+      assert ids == ["timeline-comment-#{c1.id}", "timeline-comment-#{c2.id}"]
+    end
+
+    test "the activity log lists entries newest first", %{conn: conn, backlog: backlog} do
+      card = insert(:card, stage: backlog, title: "Log", ref_number: 502, position: 7)
+      a1 = insert(:activity, card: card, type: :created, inserted_at: ~U[2026-07-01 09:00:00Z])
+      a2 = insert(:activity, card: card, type: :commented, inserted_at: ~U[2026-07-03 09:00:00Z])
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-502")
+
+      ids =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#card-drawer-activity > li.activity-entry[id]")
+        |> LazyHTML.attribute("id")
+
+      assert ids == ["timeline-activity-#{a2.id}", "timeline-activity-#{a1.id}"]
     end
   end
 
