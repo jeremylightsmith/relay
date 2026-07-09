@@ -868,24 +868,51 @@ defmodule RelayWeb.BoardLive do
     stream(socket, stream_name(stage_id), Map.get(cards_by_stage, stage_id, []), reset: true)
   end
 
-  # MMF 11 — soft enforcement: a cross-stage move into a limited stage that
-  # ends up over its WIP limit still succeeds; the acting session just gets
-  # a non-blocking warning flash. `used` reads the freshly recomputed
-  # @stage_counts from apply_move/3. Reorders within the stage never warn,
-  # and only this handler flashes — broadcast-applied moves in handle_info
-  # (other sessions, API moves) stay silent, so the API contract and remote
-  # sessions see only the rose chip.
-  defp maybe_warn_over_wip(socket, %Stage{wip_limit: limit} = target, from_stage_id) when is_integer(limit) do
-    used = Map.fetch!(socket.assigns.stage_counts, target.id)
+  # MMF 11 / RLY-35 — soft enforcement, now sub-lane-aware. A move that lands
+  # in a limited main stage OR any of its sub-lanes still succeeds; the acting
+  # session gets a non-blocking flash when the governing main stage's total
+  # (main + sub-lanes, from the freshly recomputed @stage_counts) is over
+  # limit. A move whose source and target share the same governing main stage
+  # (a reorder, or shuffling between a stage and its own sub-lanes) never
+  # warns, and only this handler flashes — broadcast-applied moves stay silent.
+  defp maybe_warn_over_wip(socket, %Stage{} = target, from_stage_id) do
+    case governing_main_stage(socket, target) do
+      %Stage{wip_limit: limit} = gate when is_integer(limit) ->
+        used = wip_used(socket, gate)
 
-    if target.id != from_stage_id and used > limit do
-      put_flash(socket, :error, "#{target.name} is over its WIP limit — #{used}/#{limit}")
-    else
-      socket
+        if governing_main_id(socket, from_stage_id) != gate.id and used > limit do
+          put_flash(socket, :error, "#{gate.name} is over its WIP limit — #{used}/#{limit}")
+        else
+          socket
+        end
+
+      _ ->
+        socket
     end
   end
 
-  defp maybe_warn_over_wip(socket, _target, _from_stage_id), do: socket
+  # The main-lane stage a WIP limit is charged against: the stage itself when
+  # it's a main lane, else its parent. A move into any sub-lane counts here.
+  defp governing_main_stage(_socket, %Stage{lane: :main} = stage), do: stage
+  defp governing_main_stage(socket, %Stage{parent_id: parent_id}), do: find_stage_by_id(socket, parent_id)
+
+  # The id of the governing main stage for an arbitrary stage id (source of a move).
+  defp governing_main_id(socket, stage_id) do
+    case find_stage_by_id(socket, stage_id) do
+      %Stage{} = stage -> governing_main_stage(socket, stage).id
+      _ -> nil
+    end
+  end
+
+  # Effective WIP count for a main stage: its own cards plus every sub-lane's,
+  # read from the freshly recomputed @stage_counts.
+  defp wip_used(socket, %Stage{id: id}) do
+    counts = socket.assigns.stage_counts
+
+    socket.assigns.sublanes_by_parent
+    |> Map.get(id, [])
+    |> Enum.reduce(Map.fetch!(counts, id), fn sub, acc -> acc + Map.fetch!(counts, sub.id) end)
+  end
 
   defp refresh_selected_after_move(socket, %Card{} = moved) do
     moved_id = moved.id

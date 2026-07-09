@@ -76,5 +76,23 @@ defmodule RelayWeb.BoardLiveWipMoveTest do
       assert has_element?(view, "#stage-col-4-cards .board-card", "Free flow")
       refute has_element?(view, "#flash-error")
     end
+
+    test "moving into a Review sub-lane that pushes the parent over its limit warns",
+         %{conn: conn, spec: spec, code: code, user: user} do
+      {:ok, review} = Boards.enable_lane(code, :review)
+      {:ok, _stage} = Boards.update_stage(code, %{wip_limit: 2})
+      for n <- 1..2, do: {:ok, _card} = Cards.create_card(code, %{title: "Busy #{n}"})
+      {:ok, card} = Cards.create_card(spec, %{title: "Spilling over"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      # RLY-1, RLY-2 are the Code cards; RLY-3 is the Spec card being moved.
+      render_hook(view, "move_card", %{"ref" => "RLY-3", "stage_id" => review.id, "index" => 0})
+
+      assert Repo.get!(Card, card.id).stage_id == review.id
+      assert has_element?(view, "#flash-error", "Code is over its WIP limit — 3/2")
+      assert has_element?(view, "#stage-col-4 .stage-wip[data-over]", "wip 3/2")
+    end
   end
 end
