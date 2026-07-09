@@ -329,7 +329,14 @@ def _stream_claude(prompt):
     runner); --output-format stream-json emits one event per step, streamed here."""
     cmd = ["claude", "-p", prompt, "--dangerously-skip-permissions",
            "--verbose", "--output-format", "stream-json"]
-    proc = subprocess.Popen(cmd, cwd=ROOT, text=True, bufsize=1,
+    # `claude -p` caps how long it waits for a background workflow at 10 minutes
+    # by default (CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, v2.1.182+). /exec-plan runs
+    # far longer than that, so without lifting the cap -p exits mid-run and the
+    # stage ships a PARTIAL plan as if it were done. "0" = wait until the workflow
+    # finishes on its own (it is internally bounded). An explicit env override wins.
+    env = dict(os.environ)
+    env.setdefault("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0")
+    proc = subprocess.Popen(cmd, cwd=ROOT, text=True, bufsize=1, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     for line in proc.stdout:
         line = line.strip()
