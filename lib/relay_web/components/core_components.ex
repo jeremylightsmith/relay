@@ -1012,14 +1012,14 @@ defmodule RelayWeb.CoreComponents do
                 {waiting_label(@card.blocked_since)}
               </span>
             </div>
-            <p
+            <div
               :if={@question}
               id="needs-input-question"
-              class="text-[13.5px] leading-normal"
+              class="md text-[13.5px] leading-normal"
               style="color:oklch(0.33 0.03 65);"
             >
-              {@question}
-            </p>
+              {Relay.Markdown.to_html(@question)}
+            </div>
             <.form
               for={@answer_form}
               id="needs-input-form"

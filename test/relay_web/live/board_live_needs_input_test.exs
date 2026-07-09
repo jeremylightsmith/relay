@@ -36,6 +36,13 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     assert has_element?(view, "#needs-input-panel", "RELAY AI NEEDS YOUR INPUT")
     assert has_element?(view, "#needs-input-question", "Billing timezone or the viewer's?")
     assert has_element?(view, "#needs-input-waiting", "waiting")
+
+    # the question renders markdown as HTML, not literal text
+    {:ok, mdcard} = Cards.create_card(code, %{title: "Markdown ask"})
+    {:ok, _} = Cards.request_input(mdcard, "Use **UTC** or the `viewer` tz?")
+    {:ok, mdview, _html} = live(conn, ~p"/board?card=RLY-#{mdcard.ref_number}")
+    assert has_element?(mdview, "#needs-input-question.md strong", "UTC")
+    assert has_element?(mdview, "#needs-input-question.md code", "viewer")
     assert has_element?(view, "#needs-input-answer")
     assert has_element?(view, "#needs-input-send", "Send to AI")
     assert has_element?(view, "#card-drawer-timeline .timeline-activity-phrase", "asked for input")
