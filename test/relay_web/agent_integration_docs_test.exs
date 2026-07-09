@@ -6,7 +6,8 @@ defmodule Relay.AgentIntegrationDocsTest do
   test "the integration doc documents every bin/relay subcommand" do
     doc = File.read!(@doc_path)
 
-    for cmd <- ~w(board card pull comment move status describe needs-input own release approve reject) do
+    for cmd <-
+          ~w(board card pull comment move status describe needs-input own release approve reject sub-tasks check uncheck result) do
       assert doc =~ "bin/relay #{cmd}", "agent-integration.md is missing `bin/relay #{cmd}`"
     end
 

@@ -17,6 +17,8 @@ defmodule RelayWeb.Api.CardJSON do
       spec: card.spec,
       pr_url: card.pr_url,
       stage_id: card.stage_id,
+      ai_result: card.ai_result,
+      sub_task_progress: Cards.sub_task_progress(card),
       owners: Enum.map(card.owners, &owner/1),
       active_owner: Cards.active_owner_type(card)
     }
@@ -45,6 +47,7 @@ defmodule RelayWeb.Api.CardJSON do
         board
         |> data(card)
         |> Map.put(:description, card.description)
+        |> Map.put(:sub_tasks, Enum.map(card.sub_tasks, &sub_task/1))
         |> Map.put(:timeline, Enum.map(timeline, &entry/1))
     }
   end
@@ -63,6 +66,10 @@ defmodule RelayWeb.Api.CardJSON do
 
   defp author(%{actor_type: :agent}), do: %{type: "agent", name: "Relay AI"}
   defp author(%{actor_type: :user, user: user}), do: %{type: "user", id: user.id, name: user.name || user.email}
+
+  defp sub_task(%Schemas.SubTask{} = st) do
+    %{id: st.id, title: st.title, done: st.done, position: st.position}
+  end
 
   defp owner(%Schemas.CardOwner{actor_type: :agent}), do: %{type: "agent", name: "Relay AI"}
 

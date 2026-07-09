@@ -44,6 +44,9 @@ Human output by default; add `--json` for machine output. Non-zero exit on any e
 | `bin/relay plan RLY-12 @plan.md` | Set the card's **plan** (travels with the card) |
 | `bin/relay branch RLY-12 rly-12-…` | Record the **branch** this card's work lives on |
 | `bin/relay pr RLY-12 <url>` | Record the card's **PR URL** (for the review gate) |
+| `bin/relay sub-tasks RLY-12 @tasks.md` | Set the **sub-task checklist** (newline-per-item or a JSON array) — Plan writes it |
+| `bin/relay check RLY-12 42` / `bin/relay uncheck RLY-12 42` | Toggle one sub-task done/undone by id — Code checks items off |
+| `bin/relay result RLY-12 @result.json` | Set the card's **AI result** blob (summary / changes / screens / deploy_url) |
 | `bin/relay needs-input RLY-12 "…"` | Ask the human a question — blocks the card |
 | `bin/relay own RLY-12` / `bin/relay release RLY-12` | Claim for the AI / hand back |
 | `bin/relay approve RLY-12` / `bin/relay reject RLY-12 "note"` | Gate: advance / send back |

@@ -38,7 +38,9 @@ defmodule RelayWeb.Api.CardController do
     with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
          {:ok, card} <- update_fields(card, params),
          {:ok, card} <- update_status(card, params),
-         {:ok, card} <- update_owners(card, params) do
+         {:ok, card} <- update_owners(card, params),
+         {:ok, card} <- update_ai_result(card, params),
+         {:ok, card} <- update_sub_tasks(card, params) do
       render(conn, :show, board: board, card: card, timeline: Activity.list_timeline(card))
     else
       nil -> {:error, :not_found}
@@ -53,6 +55,20 @@ defmodule RelayWeb.Api.CardController do
       fields -> Cards.update_card(card, fields)
     end
   end
+
+  defp update_ai_result(card, %{"ai_result" => ai_result}) when is_map(ai_result) do
+    Cards.update_ai_result(card, ai_result)
+  end
+
+  defp update_ai_result(_card, %{"ai_result" => _}), do: :error
+  defp update_ai_result(card, _params), do: {:ok, card}
+
+  defp update_sub_tasks(card, %{"sub_tasks" => sub_tasks}) when is_list(sub_tasks) do
+    Cards.set_sub_tasks(card, sub_tasks)
+  end
+
+  defp update_sub_tasks(_card, %{"sub_tasks" => _}), do: :error
+  defp update_sub_tasks(card, _params), do: {:ok, card}
 
   defp update_status(card, %{"status" => status} = params) do
     attrs = params |> Map.take(["progress"]) |> Map.put("status", status)
@@ -99,6 +115,33 @@ defmodule RelayWeb.Api.CardController do
       nil -> {:error, :not_found}
       {:error, changeset} -> {:error, changeset}
       :error -> {:error, :invalid_request}
+    end
+  end
+
+  def toggle_sub_task(conn, %{"ref" => ref, "id" => id, "done" => done}) when is_boolean(done) do
+    board = conn.assigns.current_board
+
+    with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
+         {:ok, sub_task_id} <- parse_int_id(id),
+         {:ok, card} <- Cards.set_sub_task_done(card, sub_task_id, done) do
+      render(conn, :show, board: board, card: card, timeline: Activity.list_timeline(card))
+    else
+      nil -> {:error, :not_found}
+      :error -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def toggle_sub_task(_conn, _params), do: {:error, :invalid_request}
+
+  # An id that doesn't cast to an integer can't match any sub_task; treat it as
+  # not-found rather than letting Ecto raise a CastError.
+  defp parse_int_id(id) when is_integer(id), do: {:ok, id}
+
+  defp parse_int_id(id) when is_binary(id) do
+    case Integer.parse(id) do
+      {int, ""} -> {:ok, int}
+      _ -> :error
     end
   end
 

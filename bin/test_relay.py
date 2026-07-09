@@ -48,6 +48,26 @@ class BannerTest(unittest.TestCase):
         self.assertNotIn("[relay] " + "#" * 64, text.splitlines())
 
 
+class ParseSubTasksTest(unittest.TestCase):
+    def test_newline_text_becomes_title_only_items(self):
+        self.assertEqual(
+            relay._parse_sub_tasks("First\nSecond\n\nThird"),
+            [{"title": "First"}, {"title": "Second"}, {"title": "Third"}],
+        )
+
+    def test_json_array_of_strings_becomes_title_only_items(self):
+        self.assertEqual(
+            relay._parse_sub_tasks('["First", "Second"]'),
+            [{"title": "First"}, {"title": "Second"}],
+        )
+
+    def test_json_array_of_objects_passes_through(self):
+        self.assertEqual(
+            relay._parse_sub_tasks('[{"title": "First", "done": true}]'),
+            [{"title": "First", "done": True}],
+        )
+
+
 class WorkBannerTest(unittest.TestCase):
     CARD = {"ref": "RLY-25", "title": "better relay logging"}
     ENTRY = {"stage": "Spec", "from": "Spec · Ready", "done": "Spec:Review",
