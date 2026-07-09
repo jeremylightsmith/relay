@@ -571,7 +571,10 @@ defmodule RelayWeb.BoardSettingsLive do
      |> put_flash(:info, "API key revoked.")}
   end
 
-  def handle_event("save_general", _params, %{assigns: %{read_only?: true}} = socket) do
+  def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
+        save_general update_stage add_stage delete_stage toggle_gate set_owner
+        toggle_wip bump_wip reorder_stage set_reject_target toggle_lane
+      ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
 
