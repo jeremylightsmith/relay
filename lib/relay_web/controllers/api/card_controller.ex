@@ -12,6 +12,17 @@ defmodule RelayWeb.Api.CardController do
     render(conn, :index, board: board, cards: Cards.list_cards(board))
   end
 
+  def create(conn, params) do
+    board = conn.assigns.current_board
+
+    with {:ok, stage} <- resolve_create_stage(board, params["stage"]),
+         {:ok, card} <- Cards.create_card(stage, params, :agent) do
+      conn
+      |> put_status(:created)
+      |> render(:show, board: board, card: card, timeline: Activity.list_timeline(card))
+    end
+  end
+
   def show(conn, %{"ref" => ref}) do
     board = conn.assigns.current_board
 
@@ -147,6 +158,23 @@ defmodule RelayWeb.Api.CardController do
   # The note is required for rejects (spec: 422 when missing).
   defp reject_note(%{"note" => note}) when is_binary(note) and note != "", do: {:ok, note}
   defp reject_note(_params), do: {:error, :missing_note}
+
+  # No stage given -> the board's first stage in position order (Backlog on
+  # the default board). An explicit id that doesn't resolve is a 404 (get_stage
+  # returns nil for uncastable or unknown ids).
+  defp resolve_create_stage(board, nil) do
+    case Boards.list_stages(board) do
+      [stage | _] -> {:ok, stage}
+      [] -> {:error, :invalid_request}
+    end
+  end
+
+  defp resolve_create_stage(board, stage_id) do
+    case get_stage(board, stage_id) do
+      %Schemas.Stage{} = stage -> {:ok, stage}
+      nil -> {:error, :not_found}
+    end
+  end
 
   # A stage id that doesn't cast to an integer can't match any stage; treat it
   # as not-found rather than letting Ecto raise a CastError.
