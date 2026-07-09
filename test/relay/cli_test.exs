@@ -74,6 +74,52 @@ defmodule Relay.CLITest do
     assert text =~ "hi"
   end
 
+  test "card/2 renders a CHANGES REQUESTED banner above the description when rejected" do
+    stub(fn conn ->
+      Req.Test.json(conn, %{
+        "data" => %{
+          "ref" => "RLY-1",
+          "title" => "Do it",
+          "status" => "queued",
+          "description" => "the details",
+          "owners" => [],
+          "active_owner" => nil,
+          "rejection" => %{
+            "note" => "Handle the empty case",
+            "from_stage" => "Review",
+            "to_stage" => "Code",
+            "rejected_by" => "Jeremy",
+            "rejected_at" => "2026-07-08T00:00:00Z"
+          },
+          "timeline" => []
+        }
+      })
+    end)
+
+    assert {:ok, text} = CLI.card("RLY-1", [])
+    assert text =~ "CHANGES REQUESTED"
+    assert text =~ "sent back to Code"
+    assert text =~ "Handle the empty case"
+    # The banner precedes the description.
+    assert :binary.match(text, "CHANGES REQUESTED") < :binary.match(text, "the details")
+  end
+
+  test "reject/4 posts the note and passes --to when given" do
+    stub(fn conn ->
+      assert conn.method == "POST"
+      assert conn.request_path == "/api/cards/RLY-1/reject"
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      assert Jason.decode!(body) == %{"note" => "spec problem", "to" => "Spec"}
+
+      Req.Test.json(conn, %{
+        "data" => %{"ref" => "RLY-1", "title" => "Do it", "status" => "queued", "active_owner" => nil}
+      })
+    end)
+
+    assert {:ok, text} = CLI.reject("RLY-1", "spec problem", [], "Spec")
+    assert text =~ "RLY-1"
+  end
+
   test "pull/1 returns the first AI-owned card, else an unclaimed card in an AI stage" do
     stub(fn conn ->
       Req.Test.json(conn, %{

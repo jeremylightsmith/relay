@@ -86,6 +86,15 @@ defmodule Relay.CLI do
     end
   end
 
+  @doc "Sends the card back with a note; `to` (stage name/id) overrides the target."
+  def reject(ref, note, opts, to \\ nil) do
+    body = if to, do: %{note: note, to: to}, else: %{note: note}
+
+    with {:ok, %{"data" => card}} <- request(:post, "/api/cards/#{ref}/reject", body) do
+      {:ok, render(opts, card, format_card_line(card))}
+    end
+  end
+
   @doc "Claims the card for the AI agent (replaces owners with the agent)."
   def own(ref, opts) do
     with {:ok, %{"data" => card}} <- request(:patch, "/api/cards/#{ref}", %{owners: ["agent"]}) do
@@ -147,13 +156,28 @@ defmodule Relay.CLI do
     owners = Enum.map_join(card["owners"], ", ", & &1["name"])
 
     """
-    #{card["ref"]}  #{card["title"]}
+    #{rejection_banner(card["rejection"])}#{card["ref"]}  #{card["title"]}
     status: #{card["status"]}   active: #{card["active_owner"] || "-"}   owners: #{owners}
 
     #{card["description"] || "(no description)"}
 
     timeline:
     #{Enum.map_join(card["timeline"] || [], "\n", &format_entry/1)}
+    """
+  end
+
+  # RLY-30: an open rejection reads as an instruction at the very top of the card
+  # the headless AI pass sees — not a buried log line.
+  defp rejection_banner(nil), do: ""
+
+  defp rejection_banner(r) do
+    date = r["rejected_at"] |> to_string() |> String.slice(0, 10)
+
+    """
+    ⚠  CHANGES REQUESTED — sent back to #{r["to_stage"]} by #{r["rejected_by"]} (#{date})
+       #{r["note"]}
+       Address this, then redo the stage.
+
     """
   end
 

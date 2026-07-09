@@ -48,6 +48,36 @@ class BannerTest(unittest.TestCase):
         self.assertNotIn("[relay] " + "#" * 64, text.splitlines())
 
 
+class PrintCardTest(unittest.TestCase):
+    def test_print_card_shows_changes_requested_banner_before_the_ref_line(self):
+        card = {
+            "ref": "RLY-1",
+            "title": "Do it",
+            "status": "queued",
+            "active_owner": None,
+            "owners": [],
+            "description": "the details",
+            "rejection": {
+                "note": "Handle the empty case",
+                "from_stage": "Review",
+                "to_stage": "Code",
+                "rejected_by": "Jeremy",
+                "rejected_at": "2026-07-08T00:00:00Z",
+            },
+        }
+        text = capture(relay.print_card, card)
+
+        self.assertIn("CHANGES REQUESTED", text)
+        self.assertIn("sent back to Code", text)
+        self.assertIn("Handle the empty case", text)
+        self.assertLess(text.index("CHANGES REQUESTED"), text.index("RLY-1"))
+
+    def test_print_card_has_no_banner_for_a_clean_card(self):
+        card = {"ref": "RLY-1", "title": "Do it", "status": "queued", "active_owner": None, "owners": []}
+        text = capture(relay.print_card, card)
+        self.assertNotIn("CHANGES REQUESTED", text)
+
+
 class WorkBannerTest(unittest.TestCase):
     CARD = {"ref": "RLY-25", "title": "better relay logging"}
     ENTRY = {"stage": "Spec", "from": "Spec · Ready", "done": "Spec:Review",

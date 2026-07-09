@@ -88,7 +88,12 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
-          review_gate: %{approve_label: "Approve → Deploy", reject_to_name: "Code"},
+          review_gate: %{
+            approve_label: "Approve → Deploy",
+            reject_to_name: "Code",
+            targets: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 5, name: "Review"}],
+            default_to: 4
+          },
           reject_form: Phoenix.Component.to_form(%{"note" => ""}, as: :reject),
           conversation: story_conversation(),
           activity: story_activity(),
@@ -108,7 +113,12 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
-          review_gate: %{approve_label: "Approve → Deploy", reject_to_name: "Code"},
+          review_gate: %{
+            approve_label: "Approve → Deploy",
+            reject_to_name: "Code",
+            targets: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 5, name: "Review"}],
+            default_to: 4
+          },
           reject_open: true,
           reject_form: Phoenix.Component.to_form(%{"note" => ""}, as: :reject),
           conversation: story_conversation(),
@@ -135,6 +145,58 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 61}, as: :card),
+          conversation: story_conversation(),
+          activity: story_activity(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
+        id: :rejection_banner,
+        attributes: %{
+          id: "story-drawer-7",
+          ref: "RLY-13",
+          card: %{
+            story_card()
+            | status: :queued,
+              progress: nil,
+              rejection: %Schemas.CardRejection{
+                note: "Handle the empty-list case before hand-off.",
+                from_stage_id: 5,
+                from_stage_name: "Review",
+                to_stage_id: 4,
+                to_stage_name: "Code",
+                rejected_by: "Jeremy",
+                rejected_at: ~U[2026-07-08 12:00:00Z]
+              }
+          },
+          stage_name: "Code",
+          stage_owner: :ai,
+          active_owner: :ai,
+          current_user_id: 1,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Wire the runner"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "queued", "progress" => nil}, as: :card),
+          conversation: story_conversation(),
+          activity: story_activity(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
+        id: :send_back_open,
+        attributes: %{
+          id: "story-drawer-8",
+          ref: "RLY-14",
+          card: %{story_card() | status: :working, rejection: nil},
+          stage_name: "Code",
+          stage_owner: :ai,
+          active_owner: :ai,
+          current_user_id: 1,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Wire the runner"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 40}, as: :card),
+          send_back_open: true,
+          send_back_form: Phoenix.Component.to_form(%{"to" => "", "note" => ""}, as: :send_back),
+          send_back_targets: [%{id: 2, name: "Spec"}, %{id: 3, name: "Plan"}],
           conversation: story_conversation(),
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
@@ -203,6 +265,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
       branch: nil,
       plan: nil,
       pr_url: nil,
+      rejection: nil,
       owners: [
         %{id: 1, actor_type: :user, user_id: 1, user: %{name: "Ada Lovelace", email: "ada@example.com"}},
         %{id: 2, actor_type: :agent, user_id: nil, user: nil}

@@ -860,8 +860,10 @@ defmodule RelayWeb.CoreComponents do
   from the timeline composer, and `"answer_input"` (form params
   `answer[body]`) from the needs-input panel's composer, and the MMF 15
   review-panel events: `"review_approve"`, `"review_open_reject"`,
-  `"review_cancel_reject"`, `"review_reject"` (form params `reject[note]`),
-  `"review_mark_done"`, and `"review_pull"`.
+  `"review_cancel_reject"`, `"review_reject"` (form params `reject[note]` +
+  `reject[to]`), `"review_mark_done"`, and `"review_pull"`, and the RLY-30
+  universal send-back events: `"send_back_open"`, `"send_back_cancel"`, and
+  `"send_back"` (form params `send_back[to]` + `send_back[note]`).
 
   ## Examples
 
@@ -948,6 +950,17 @@ defmodule RelayWeb.CoreComponents do
     default: nil,
     doc: "inline prompt shown when Send back was submitted with an empty note"
 
+  attr :send_back_open, :boolean, default: false, doc: "whether the universal send-back panel is expanded"
+  attr :send_back_form, :any, default: nil, doc: "a Phoenix.HTML.Form for send_back[to] + send_back[note]"
+
+  attr :send_back_error, :string,
+    default: nil,
+    doc: "inline prompt shown when Send back was submitted with an empty note or bad target"
+
+  attr :send_back_targets, :list,
+    default: [],
+    doc: "main-lane stages before the card's current one (each %{id, name}); [] hides the universal control"
+
   def card_drawer(assigns) do
     ~H"""
     <div id={@id} class="drawer drawer-end" phx-window-keydown="close_drawer" phx-key="escape">
@@ -1024,6 +1037,18 @@ defmodule RelayWeb.CoreComponents do
 
           <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
             <div id={"#{@id}-main"} class="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto p-5">
+              <section
+                :if={@card.rejection}
+                id="rejection-banner"
+                class="flex flex-col gap-1.5 rounded-[10px] border border-warning/40 bg-warning/10 p-3.5"
+              >
+                <span class="font-mono text-[10px] font-semibold uppercase tracking-[0.05em] text-warning">
+                  Changes requested — sent back to {@card.rejection.to_stage_name} by {@card.rejection.rejected_by}
+                </span>
+                <div class="md text-[13.5px] leading-normal text-base-content/80">
+                  {Relay.Markdown.to_html(@card.rejection.note)}
+                </div>
+              </section>
               <section
                 :if={@card.status == :needs_input}
                 id="needs-input-panel"
@@ -1131,6 +1156,19 @@ defmodule RelayWeb.CoreComponents do
                     class="flex flex-col gap-2"
                     phx-submit="review_reject"
                   >
+                    <select
+                      id="review-reject-target"
+                      name="reject[to]"
+                      class="select select-sm select-bordered w-full"
+                    >
+                      <option
+                        :for={t <- @review_gate.targets}
+                        value={t.id}
+                        selected={t.id == @review_gate.default_to}
+                      >
+                        {t.name}
+                      </option>
+                    </select>
                     <.input
                       field={@reject_form[:note]}
                       type="textarea"
@@ -1190,6 +1228,60 @@ defmodule RelayWeb.CoreComponents do
                   Pull — take this card
                 </button>
               </div>
+              <div :if={@send_back_targets != [] && !@send_back_open} id="send-back-actions">
+                <button
+                  id="send-back"
+                  type="button"
+                  phx-click="send_back_open"
+                  class="btn btn-sm btn-ghost text-warning"
+                >
+                  <.icon name="hero-arrow-uturn-left" class="size-4" /> Send back…
+                </button>
+              </div>
+              <section
+                :if={@send_back_targets != [] && @send_back_open}
+                id="send-back-panel"
+                class="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3"
+              >
+                <.form
+                  for={@send_back_form}
+                  id="send-back-form"
+                  class="flex flex-col gap-2"
+                  phx-submit="send_back"
+                >
+                  <select
+                    id="send-back-target"
+                    name="send_back[to]"
+                    class="select select-sm select-bordered w-full"
+                  >
+                    <option :for={t <- @send_back_targets} value={t.id}>{t.name}</option>
+                  </select>
+                  <.input
+                    field={@send_back_form[:note]}
+                    type="textarea"
+                    id="send-back-note"
+                    rows="3"
+                    placeholder="What needs to change? This note goes to the AI…"
+                    class="textarea textarea-bordered w-full text-[13px]"
+                  />
+                  <p :if={@send_back_error} id="send-back-error" class="text-xs text-error">
+                    {@send_back_error}
+                  </p>
+                  <div class="flex items-center gap-2">
+                    <button id="send-back-submit" type="submit" class="btn btn-sm btn-warning">
+                      Send back →
+                    </button>
+                    <button
+                      id="send-back-cancel"
+                      type="button"
+                      phx-click="send_back_cancel"
+                      class="btn btn-ghost btn-sm"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </.form>
+              </section>
               <section class="space-y-2">
                 <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
                   Description
