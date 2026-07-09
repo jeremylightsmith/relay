@@ -19,12 +19,13 @@ defmodule RelayWeb.BoardLiveWipMoveTest do
 
   describe "soft over-WIP warning on move" do
     test "moving into an at-limit stage still succeeds and warns the acting session",
-         %{conn: conn, spec: spec, code: code} do
+         %{conn: conn, spec: spec, code: code, user: user} do
       {:ok, _stage} = Boards.update_stage(code, %{wip_limit: 3})
       for n <- 1..3, do: {:ok, _card} = Cards.create_card(code, %{title: "Busy #{n}"})
       {:ok, card} = Cards.create_card(spec, %{title: "One more"})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       render_hook(view, "move_card", %{"ref" => "RLY-4", "stage_id" => code.id, "index" => 0})
 
@@ -34,12 +35,13 @@ defmodule RelayWeb.BoardLiveWipMoveTest do
       assert has_element?(view, "#stage-col-4 .stage-wip[data-over]", "wip 4/3")
     end
 
-    test "moving into a stage below its limit does not warn", %{conn: conn, spec: spec, code: code} do
+    test "moving into a stage below its limit does not warn", %{conn: conn, spec: spec, code: code, user: user} do
       {:ok, _stage} = Boards.update_stage(code, %{wip_limit: 3})
       {:ok, _card} = Cards.create_card(code, %{title: "Busy"})
       {:ok, _card} = Cards.create_card(spec, %{title: "Fits fine"})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       render_hook(view, "move_card", %{"ref" => "RLY-2", "stage_id" => code.id, "index" => 0})
 
@@ -48,12 +50,13 @@ defmodule RelayWeb.BoardLiveWipMoveTest do
       assert has_element?(view, "#stage-col-4 .stage-wip", "wip 2/3")
     end
 
-    test "reordering within an already over-limit stage does not warn", %{conn: conn, code: code} do
+    test "reordering within an already over-limit stage does not warn", %{conn: conn, code: code, user: user} do
       {:ok, _stage} = Boards.update_stage(code, %{wip_limit: 1})
       {:ok, _card} = Cards.create_card(code, %{title: "First"})
       {:ok, _card} = Cards.create_card(code, %{title: "Second"})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       render_hook(view, "move_card", %{"ref" => "RLY-2", "stage_id" => code.id, "index" => 0})
 
@@ -61,11 +64,12 @@ defmodule RelayWeb.BoardLiveWipMoveTest do
       assert has_element?(view, "#stage-col-4 .stage-wip[data-over]", "wip 2/1")
     end
 
-    test "moving into an unlimited stage never warns", %{conn: conn, spec: spec, code: code} do
+    test "moving into an unlimited stage never warns", %{conn: conn, spec: spec, code: code, user: user} do
       for n <- 1..3, do: {:ok, _card} = Cards.create_card(code, %{title: "Busy #{n}"})
       {:ok, _card} = Cards.create_card(spec, %{title: "Free flow"})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       render_hook(view, "move_card", %{"ref" => "RLY-4", "stage_id" => code.id, "index" => 0})
 

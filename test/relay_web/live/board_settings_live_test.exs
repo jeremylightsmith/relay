@@ -7,16 +7,17 @@ defmodule RelayWeb.BoardSettingsLiveTest do
   alias Relay.Boards
 
   describe "when logged out" do
-    test "GET /board/settings redirects to the sign-in page", %{conn: conn} do
-      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/board/settings")
+    test "GET /board/:slug/settings redirects to the sign-in page", %{conn: conn} do
+      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/board/anything/settings")
     end
   end
 
   describe "API key pane" do
     setup :register_and_log_in_user
 
-    test "with no key, offers Generate and shows no secret or details", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=keys")
+    test "with no key, offers Generate and shows no secret or details", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
 
       assert has_element?(view, "#generate-key")
       refute has_element?(view, "#api-key-secret")
@@ -24,7 +25,8 @@ defmodule RelayWeb.BoardSettingsLiveTest do
     end
 
     test "generate reveals the full secret once, with copy button and warning", %{conn: conn, user: user} do
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=keys")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
 
       view |> element("#generate-key") |> render_click()
 
@@ -41,11 +43,12 @@ defmodule RelayWeb.BoardSettingsLiveTest do
     end
 
     test "on reload only the masked display shows — never the raw secret", %{conn: conn, user: user} do
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=keys")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
       view |> element("#generate-key") |> render_click()
       secret = revealed_secret(view)
 
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=keys")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
 
       refute has_element?(view, "#api-key-secret")
       refute render(view) =~ secret
@@ -60,7 +63,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, _created} = ApiKeys.create_key(board, user)
 
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=keys")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
 
       assert has_element?(view, "#api-key-name", "Board API key")
       assert has_element?(view, "#api-key-masked")
@@ -75,7 +78,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, %{token: old_token}} = ApiKeys.create_key(board, user)
 
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=keys")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
       view |> element("#regenerate-key") |> render_click()
 
       new_secret = revealed_secret(view)
@@ -85,7 +88,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       assert {:ok, _board} = ApiKeys.authenticate(new_secret)
 
       # reveal is once: a fresh mount shows only the masked display
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=keys")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
       refute has_element?(view, "#api-key-secret")
     end
 
@@ -93,7 +96,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, %{token: token}} = ApiKeys.create_key(board, user)
 
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=keys")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
       view |> element("#revoke-key") |> render_click()
 
       assert has_element?(view, "#generate-key")
@@ -102,10 +105,11 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       assert :error = ApiKeys.authenticate(token)
     end
 
-    test "the board page links to settings", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+    test "the board page links to settings", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#board-settings-link[href='/board/settings']")
+      assert has_element?(view, "#board-settings-link[href='/board/#{board.slug}/settings']")
     end
   end
 
@@ -118,7 +122,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
 
     test "toggling Review on creates the child lane; off removes it", %{conn: conn, board: board} do
       code = Enum.find(board.stages, &(&1.name == "Code"))
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       view |> element("#stage-#{code.id}-review-toggle") |> render_click()
       assert [%{lane: :review}] = Boards.sublanes(code)
@@ -132,7 +136,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       {:ok, review} = Boards.enable_lane(code, :review)
       Relay.Factory.insert(:card, stage: review)
 
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
       html = view |> element("#stage-#{code.id}-review-toggle") |> render_click()
 
       assert html =~ "still has cards"
@@ -145,7 +149,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       {:ok, review} = Boards.enable_lane(code, :review)
       Relay.Factory.insert(:card, stage: review)
 
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
       view |> element("#stage-#{code.id}-review-toggle") |> render_click()
 
       # The blocked toggle bumps a render nonce into the checkbox's id so

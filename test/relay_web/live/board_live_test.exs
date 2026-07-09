@@ -14,8 +14,8 @@ defmodule RelayWeb.BoardLiveTest do
   alias Schemas.Stage
 
   describe "when logged out" do
-    test "GET /board redirects to the sign-in page", %{conn: conn} do
-      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/board")
+    test "GET /board/:slug redirects to the sign-in page", %{conn: conn} do
+      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/board/anything")
     end
   end
 
@@ -23,23 +23,26 @@ defmodule RelayWeb.BoardLiveTest do
     setup :register_and_log_in_user
 
     test "provisions the default board with 7 stages on first visit", %{conn: conn, user: user} do
-      {:ok, _view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, _view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert [%Board{} = board] = Repo.all(Board)
       assert board.owner_id == user.id
       assert Repo.aggregate(Stage, :count) == 7
     end
 
-    test "revisiting does not create a duplicate board", %{conn: conn} do
-      {:ok, _view, _html} = live(conn, ~p"/board")
-      {:ok, _view, _html} = live(conn, ~p"/board")
+    test "revisiting does not create a duplicate board", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, _view, _html} = live(conn, ~p"/board/#{board.slug}")
+      {:ok, _view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert Repo.aggregate(Board, :count) == 1
       assert Repo.aggregate(Stage, :count) == 7
     end
 
-    test "renders the stage columns in position order", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+    test "renders the stage columns in position order", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       names =
         view
@@ -55,7 +58,7 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       [backlog, spec, plan, code, review, deploy, done] = board.stages
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#category-unstarted h2.category-band", "Unstarted")
       assert has_element?(view, "#category-planning h2.category-band", "Planning")
@@ -85,7 +88,7 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       plan = Enum.find(board.stages, &(&1.name == "Plan"))
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#category-planning h2.category-band", "Planning")
       assert has_element?(view, "#category-planning #stage-strip-#{plan.id}", "Plan")
@@ -103,7 +106,7 @@ defmodule RelayWeb.BoardLiveTest do
     test "shows the right Human/AI owner swatch on each stage", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       for stage <- board.stages do
         assert has_element?(
@@ -113,8 +116,9 @@ defmodule RelayWeb.BoardLiveTest do
       end
     end
 
-    test "a fresh board collapses every empty stage to a strip", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+    test "a fresh board collapses every empty stage to a strip", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       document = view |> render() |> LazyHTML.from_fragment()
 
@@ -132,8 +136,9 @@ defmodule RelayWeb.BoardLiveTest do
       %{board: board, backlog: backlog}
     end
 
-    test "a stage's compose CTA reveals the composer for that stage only", %{conn: conn, backlog: backlog} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+    test "a stage's compose CTA reveals the composer for that stage only", %{conn: conn, backlog: backlog, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       expand_stage(view, backlog)
 
@@ -146,8 +151,9 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "submitting the composer creates a card in that stage and clears the input",
-         %{conn: conn, backlog: backlog} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+         %{conn: conn, backlog: backlog, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       expand_stage(view, backlog)
       view |> element("#stage-col-1-new-card") |> render_click()
@@ -173,8 +179,13 @@ defmodule RelayWeb.BoardLiveTest do
       refute input_html =~ "Ship MMF 03"
     end
 
-    test "creating cards assigns per-board incrementing refs shown on the cards", %{conn: conn, backlog: backlog} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+    test "creating cards assigns per-board incrementing refs shown on the cards", %{
+      conn: conn,
+      backlog: backlog,
+      user: user
+    } do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       expand_stage(view, backlog)
       view |> element("#stage-col-1-new-card") |> render_click()
@@ -185,11 +196,12 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#stage-col-1-cards .board-card .card-ref", "RLY-2")
     end
 
-    test "cards persist and re-render in position order on reload", %{conn: conn, backlog: backlog} do
+    test "cards persist and re-render in position order on reload", %{conn: conn, backlog: backlog, user: user} do
       insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
       insert(:card, stage: backlog, title: "First", position: 1, ref_number: 1)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       titles =
         view
@@ -206,15 +218,16 @@ defmodule RelayWeb.BoardLiveTest do
       [_backlog, spec | _rest] = board.stages
       insert(:card, stage: backlog, title: "Only here", position: 1, ref_number: 1)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#stage-col-1-cards .board-card", "Only here")
       refute has_element?(view, "#stage-col-2-cards .board-card")
       assert has_element?(view, "#stage-strip-#{spec.id} .stage-count", "0")
     end
 
-    test "cancel closes the composer without creating a card", %{conn: conn, backlog: backlog} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+    test "cancel closes the composer without creating a card", %{conn: conn, backlog: backlog, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       expand_stage(view, backlog)
       view |> element("#stage-col-1-new-card") |> render_click()
@@ -224,8 +237,13 @@ defmodule RelayWeb.BoardLiveTest do
       assert Repo.all(Card) == []
     end
 
-    test "submitting a blank title keeps the composer open and creates nothing", %{conn: conn, backlog: backlog} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+    test "submitting a blank title keeps the composer open and creates nothing", %{
+      conn: conn,
+      backlog: backlog,
+      user: user
+    } do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       expand_stage(view, backlog)
       view |> element("#stage-col-1-new-card") |> render_click()
@@ -249,7 +267,7 @@ defmodule RelayWeb.BoardLiveTest do
       insert(:card, stage: backlog, title: "One", position: 1, ref_number: 1)
       insert(:card, stage: backlog, title: "Two", position: 2, ref_number: 2)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#stage-col-1 .stage-count", "2")
 
@@ -261,7 +279,7 @@ defmodule RelayWeb.BoardLiveTest do
     test "creating a card bumps its stage's count", %{conn: conn, board: board, backlog: backlog} do
       [_backlog, spec | _rest] = board.stages
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       expand_stage(view, backlog)
       view |> element("#stage-col-1-new-card") |> render_click()
@@ -282,10 +300,11 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "a move_card event moves the card to the target stage and persists across reloads",
-         %{conn: conn, backlog: backlog, spec: spec} do
+         %{conn: conn, backlog: backlog, spec: spec, user: user} do
       {:ok, card} = Cards.create_card(backlog, %{title: "Take the baton"})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => spec.id, "index" => 0})
 
@@ -293,14 +312,15 @@ defmodule RelayWeb.BoardLiveTest do
       refute has_element?(view, "#stage-col-1-cards .board-card")
       assert Repo.get!(Card, card.id).stage_id == spec.id
 
-      {:ok, reloaded, _html} = live(conn, ~p"/board")
+      {:ok, reloaded, _html} = live(conn, ~p"/board/#{board.slug}")
       assert has_element?(reloaded, "#stage-col-2-cards .board-card", "Take the baton")
     end
 
-    test "moving updates both lane counts", %{conn: conn, backlog: backlog, spec: spec} do
+    test "moving updates both lane counts", %{conn: conn, backlog: backlog, spec: spec, user: user} do
       {:ok, _card} = Cards.create_card(backlog, %{title: "Mover"})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => spec.id, "index" => 0})
 
@@ -309,26 +329,28 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "reordering within a stage persists the new order across reloads",
-         %{conn: conn, backlog: backlog} do
+         %{conn: conn, backlog: backlog, user: user} do
       {:ok, _first} = Cards.create_card(backlog, %{title: "First"})
       {:ok, _second} = Cards.create_card(backlog, %{title: "Second"})
       {:ok, _third} = Cards.create_card(backlog, %{title: "Third"})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       render_hook(view, "move_card", %{"ref" => "RLY-3", "stage_id" => backlog.id, "index" => 0})
 
       assert stage_titles(view, 1) == ["Third", "First", "Second"]
 
-      {:ok, reloaded, _html} = live(conn, ~p"/board")
+      {:ok, reloaded, _html} = live(conn, ~p"/board/#{board.slug}")
       assert stage_titles(reloaded, 1) == ["Third", "First", "Second"]
     end
 
     test "accepts string stage_id and index (phx-value parity)",
-         %{conn: conn, backlog: backlog, spec: spec} do
+         %{conn: conn, backlog: backlog, spec: spec, user: user} do
       {:ok, card} = Cards.create_card(backlog, %{title: "Stringly"})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       render_hook(view, "move_card", %{
         "ref" => "RLY-1",
@@ -340,11 +362,12 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "omitting index appends the card to the bottom of the target stage",
-         %{conn: conn, backlog: backlog, spec: spec} do
+         %{conn: conn, backlog: backlog, spec: spec, user: user} do
       {:ok, card} = Cards.create_card(backlog, %{title: "Mover"})
       {:ok, existing} = Cards.create_card(spec, %{title: "Already there"})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => spec.id})
 
@@ -353,11 +376,12 @@ defmodule RelayWeb.BoardLiveTest do
       assert stage_titles(view, 2) == ["Already there", "Mover"]
     end
 
-    test "a ref that is not on this board is rejected", %{conn: conn, spec: spec} do
+    test "a ref that is not on this board is rejected", %{conn: conn, spec: spec, user: user} do
       other_stage = insert(:stage)
       theirs = insert(:card, stage: other_stage, title: "Theirs", position: 1, ref_number: 1)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => spec.id, "index" => 0})
 
@@ -366,11 +390,12 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "a target stage that is not on this board is rejected",
-         %{conn: conn, backlog: backlog} do
+         %{conn: conn, backlog: backlog, user: user} do
       {:ok, card} = Cards.create_card(backlog, %{title: "Stay home"})
       other_stage = insert(:stage)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => other_stage.id, "index" => 0})
 
@@ -378,10 +403,11 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#stage-col-1-cards .board-card", "Stay home")
     end
 
-    test "garbage stage_id or index is ignored", %{conn: conn, backlog: backlog, spec: spec} do
+    test "garbage stage_id or index is ignored", %{conn: conn, backlog: backlog, spec: spec, user: user} do
       {:ok, card} = Cards.create_card(backlog, %{title: "Unmoved"})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => "banana", "index" => 0})
       render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => spec.id, "index" => "banana"})
@@ -391,10 +417,11 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "moving the drawer-selected card refreshes the drawer's stage chip",
-         %{conn: conn, backlog: backlog, plan: plan} do
+         %{conn: conn, backlog: backlog, plan: plan, user: user} do
       {:ok, _card} = Cards.create_card(backlog, %{title: "Chip check"})
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => plan.id, "index" => 0})
 
@@ -412,21 +439,24 @@ defmodule RelayWeb.BoardLiveTest do
       %{board: board, backlog: backlog}
     end
 
-    test "the board mounts the BoardDnD hook", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+    test "the board mounts the BoardDnD hook", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#board[phx-hook='BoardDnD']")
     end
 
-    test "cards are draggable and carry their ref", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+    test "cards are draggable and carry their ref", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#stage-col-1-cards .board-card[draggable='true'][data-ref='RLY-1']")
     end
 
     test "every stage's card container is a drop zone carrying its stage id",
-         %{conn: conn, backlog: backlog} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+         %{conn: conn, backlog: backlog, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#stage-col-1-cards.stage-cards[data-stage-id='#{backlog.id}']")
 
@@ -451,8 +481,9 @@ defmodule RelayWeb.BoardLiveTest do
       %{board: board, backlog: backlog, plan: plan, card: card}
     end
 
-    test "an unowned card renders neutral: transparent accent, no owners, no mismatch", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+    test "an unowned card renders neutral: transparent accent, no owners, no mismatch", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#stage-col-1-cards .board-card.border-l-transparent", "Baton card")
       refute has_element?(view, "#stage-col-1-cards .board-card .card-owners")
@@ -460,10 +491,11 @@ defmodule RelayWeb.BoardLiveTest do
       refute has_element?(view, "#stage-col-1-cards .board-card .card-mismatch")
     end
 
-    test "an unowned card in an AI stage shows no mismatch", %{conn: conn, plan: plan} do
+    test "an unowned card in an AI stage shows no mismatch", %{conn: conn, plan: plan, user: user} do
       {:ok, _card} = Cards.create_card(plan, %{title: "Unowned in Plan"})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       refute has_element?(view, "#stage-col-3-cards .board-card .card-mismatch")
     end
@@ -472,7 +504,8 @@ defmodule RelayWeb.BoardLiveTest do
          %{conn: conn, user: user, card: card} do
       {:ok, _card} = Cards.add_owner(card, {:user, user.id})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(
                view,
@@ -498,7 +531,8 @@ defmodule RelayWeb.BoardLiveTest do
       # this test can demonstrate the clean, no-mismatch violet-AI border.
       {:ok, _moved} = Cards.move_card(card, plan, 0)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(
                view,
@@ -511,10 +545,11 @@ defmodule RelayWeb.BoardLiveTest do
              )
     end
 
-    test "a needs_input card shows the amber NEEDS INPUT box", %{conn: conn, card: card} do
+    test "a needs_input card shows the amber NEEDS INPUT box", %{conn: conn, card: card, user: user} do
       {:ok, _card} = Cards.set_status(card, %{"status" => "needs_input"})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(
                view,
@@ -523,10 +558,11 @@ defmodule RelayWeb.BoardLiveTest do
              )
     end
 
-    test "a working card shows its progress in the status line", %{conn: conn, card: card} do
+    test "a working card shows its progress in the status line", %{conn: conn, card: card, user: user} do
       {:ok, _card} = Cards.set_status(card, %{"status" => "working", "progress" => "61"})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(
                view,
@@ -540,7 +576,8 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, card} = Cards.add_owner(card, {:user, user.id})
       {:ok, _moved} = Cards.move_card(card, plan, 0)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(
                view,
@@ -550,10 +587,11 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "an AI-active card in a human stage shows the red meant-for-humans warning",
-         %{conn: conn, card: card} do
+         %{conn: conn, card: card, user: user} do
       {:ok, _card} = Cards.add_owner(card, :agent)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(
                view,
@@ -566,7 +604,7 @@ defmodule RelayWeb.BoardLiveTest do
          %{conn: conn, board: board, user: user, card: card, plan: plan} do
       {:ok, _card} = Cards.add_owner(card, {:user, user.id})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => plan.id, "index" => 0})
 
@@ -593,31 +631,35 @@ defmodule RelayWeb.BoardLiveTest do
       %{board: board, backlog: backlog, card: card}
     end
 
-    test "no drawer renders without a card param", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+    test "no drawer renders without a card param", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       refute has_element?(view, "#card-drawer")
     end
 
-    test "clicking a board card patches to its ref and opens the drawer", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+    test "clicking a board card patches to its ref and opens the drawer", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       view |> element("#stage-col-1-cards .board-card") |> render_click()
 
-      assert_patch(view, ~p"/board?card=RLY-1")
+      assert_patch(view, ~p"/board/#{board.slug}?card=RLY-1")
       assert has_element?(view, "#card-drawer")
       assert has_element?(view, "#card-drawer-title-display", "Draft the spec")
       assert has_element?(view, "#card-drawer .drawer-card-ref", "RLY-1")
     end
 
-    test "the drawer header shows the stage chip in the owner color", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "the drawer header shows the stage chip in the owner color", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer .drawer-stage-chip.badge-primary", "Backlog")
     end
 
-    test "the properties rail shows stage, tags, and dates", %{conn: conn, card: card} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "the properties rail shows stage, tags, and dates", %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer-rail .rail-stage", "Backlog")
       assert has_element?(view, "#card-drawer-rail .rail-tags", "spec")
@@ -641,7 +683,8 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, _comment} =
         Relay.Activity.add_comment(card, %{actor: {:user, user.id}, body: "**commentbold** note"})
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       # each long-form field is markdown turned into HTML, not literal text
       assert has_element?(view, "#card-drawer-description-view h2", "Desc head")
@@ -651,59 +694,66 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, ".timeline-comment-body strong", "commentbold")
     end
 
-    test "visiting the deep link opens the drawer directly", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "visiting the deep link opens the drawer directly", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer")
       assert has_element?(view, "#card-drawer .drawer-card-ref", "RLY-1")
     end
 
-    test "the close button clears the param and closes the drawer", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "the close button clears the param and closes the drawer", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> element("#card-drawer-close") |> render_click()
 
-      assert_patch(view, ~p"/board")
+      assert_patch(view, ~p"/board/#{board.slug}")
       refute has_element?(view, "#card-drawer")
     end
 
-    test "clicking the scrim clears the param and closes the drawer", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "clicking the scrim clears the param and closes the drawer", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> element("#card-drawer-scrim") |> render_click()
 
-      assert_patch(view, ~p"/board")
+      assert_patch(view, ~p"/board/#{board.slug}")
       refute has_element?(view, "#card-drawer")
     end
 
-    test "an unknown or malformed ref renders no drawer", %{conn: conn} do
+    test "an unknown or malformed ref renders no drawer", %{conn: conn, user: user} do
       for ref <- ["RLY-999", "banana", "RLY-abc"] do
-        {:ok, view, _html} = live(conn, ~p"/board?card=#{ref}")
+        board = Boards.get_or_create_default_board(user)
+        {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
 
         refute has_element?(view, "#card-drawer")
         assert has_element?(view, "#board")
       end
     end
 
-    test "a ref for another user's card does not open the drawer", %{conn: conn} do
+    test "a ref for another user's card does not open the drawer", %{conn: conn, user: user} do
       other_stage = insert(:stage)
       insert(:card, stage: other_stage, title: "Theirs", ref_number: 2, position: 1)
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-2")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-2")
 
       refute has_element?(view, "#card-drawer")
       assert has_element?(view, "#board")
     end
 
-    test "the title shows as read-only text until clicked", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "the title shows as read-only text until clicked", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer-title-display", "Draft the spec")
       refute has_element?(view, "#card-drawer-title-form")
     end
 
-    test "clicking the title opens the inline editor", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "clicking the title opens the inline editor", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> element("#card-drawer-title-display") |> render_click()
 
@@ -711,8 +761,9 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "saving the title persists and reflects on drawer and board card",
-         %{conn: conn, card: card} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+         %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> element("#card-drawer-title-display") |> render_click()
       view |> form("#card-drawer-title-form", card: %{title: "Sharper title"}) |> render_submit()
@@ -724,8 +775,9 @@ defmodule RelayWeb.BoardLiveTest do
       refute has_element?(view, "#stage-col-1-cards .board-card .card-title", "Draft the spec")
     end
 
-    test "a blank title is rejected with an error and nothing changes", %{conn: conn, card: card} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "a blank title is rejected with an error and nothing changes", %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> element("#card-drawer-title-display") |> render_click()
       view |> form("#card-drawer-title-form", card: %{title: ""}) |> render_submit()
@@ -735,34 +787,38 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "a long title wraps in the header rather than scrolling one line",
-         %{conn: conn, card: card} do
+         %{conn: conn, card: card, user: user} do
       {:ok, _} = Cards.update_card(card, %{title: String.duplicate("verylongword ", 15)})
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer-title-display.whitespace-pre-wrap.break-words")
     end
 
-    test "pressing Escape closes the open drawer", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "pressing Escape closes the open drawer", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer")
 
       view |> element("#card-drawer") |> render_keydown(%{"key" => "Escape"})
 
-      assert_patch(view, ~p"/board")
+      assert_patch(view, ~p"/board/#{board.slug}")
       refute has_element?(view, "#card-drawer")
     end
 
-    test "no window-keydown close binding exists when no card is open", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+    test "no window-keydown close binding exists when no card is open", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       refute has_element?(view, "#card-drawer")
       refute has_element?(view, "[phx-window-keydown='close_drawer']")
     end
 
-    test "clicking the description area opens the textarea editor", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "clicking the description area opens the textarea editor", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer-description-edit", "Add a description")
       refute has_element?(view, "#card-drawer-description-form")
@@ -776,8 +832,9 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "saving the description persists and renders it as markdown",
-         %{conn: conn, card: card} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+         %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> element("#card-drawer-description-edit") |> render_click()
 
@@ -792,8 +849,9 @@ defmodule RelayWeb.BoardLiveTest do
       assert Repo.get!(Card, card.id).description == "Line one\n\nLine two"
     end
 
-    test "cancel closes the editor without saving", %{conn: conn, card: card} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "cancel closes the editor without saving", %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> element("#card-drawer-description-edit") |> render_click()
       view |> element("#card-drawer-description-cancel") |> render_click()
@@ -803,41 +861,46 @@ defmodule RelayWeb.BoardLiveTest do
       assert Repo.get!(Card, card.id).description == nil
     end
 
-    test "a saved description survives a fresh deep-link visit", %{conn: conn, card: card} do
+    test "a saved description survives a fresh deep-link visit", %{conn: conn, card: card, user: user} do
       {:ok, _card} = Cards.update_card(card, %{description: "Persisted\ntext"})
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer-description-view")
       assert view |> element("#card-drawer-description-view") |> render() =~ "Persisted\ntext"
     end
 
-    test "editing pre-fills the textarea with the current description", %{conn: conn, card: card} do
+    test "editing pre-fills the textarea with the current description", %{conn: conn, card: card, user: user} do
       {:ok, _card} = Cards.update_card(card, %{description: "Current text"})
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
       view |> element("#card-drawer-description-edit") |> render_click()
 
       assert view |> element("#card-drawer-description-input") |> render() =~ "Current text"
     end
 
-    test "the drawer aside is wide on desktop and full width on mobile", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "the drawer aside is wide on desktop and full width on mobile", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer aside.drawer-panel.w-full")
       assert render(view) =~ "lg:w-2/3"
     end
 
-    test "the drawer body has a main column beside a properties rail", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "the drawer body has a main column beside a properties rail", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer-main #card-drawer-conversation")
       assert has_element?(view, "#card-drawer-main #card-drawer-activity")
       assert has_element?(view, "#card-drawer-rail.lg\\:border-l")
     end
 
-    test "editing the description opens a tall textarea", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "editing the description opens a tall textarea", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> element("#card-drawer-description-edit") |> render_click()
 
@@ -856,10 +919,11 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "a card with a plan renders the Plan section collapsed by default",
-         %{conn: conn, card: card} do
+         %{conn: conn, card: card, user: user} do
       {:ok, _card} = Cards.update_card(card, %{plan: "## Task 1\n\n- [ ] do the thing"})
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "details#card-plan .collapse-title", "Plan")
       # plan renders as markdown-turned-HTML (heading + list item), not raw text
@@ -870,17 +934,19 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "a card with a branch renders the branch chip in the rail",
-         %{conn: conn, card: card} do
+         %{conn: conn, card: card, user: user} do
       {:ok, _card} = Cards.update_card(card, %{branch: "rly-21-card-branch-plan"})
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer-rail #card-branch", "rly-21-card-branch-plan")
       assert has_element?(view, "#card-branch.font-mono")
     end
 
-    test "a card with neither branch nor plan renders neither", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "a card with neither branch nor plan renders neither", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer")
       refute has_element?(view, "#card-plan")
@@ -888,16 +954,18 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "a card with a pr_url renders the PR link in the rail",
-         %{conn: conn, card: card} do
+         %{conn: conn, card: card, user: user} do
       {:ok, _card} = Cards.update_card(card, %{pr_url: "https://github.com/acme/relay/pull/42"})
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer-rail #card-pr[href='https://github.com/acme/relay/pull/42']")
     end
 
-    test "a card with no pr_url renders no PR link", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "a card with no pr_url renders no PR link", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer")
       refute has_element?(view, "#card-pr")
@@ -915,8 +983,9 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "lists every stage except the card's current one",
-         %{conn: conn, backlog: backlog, spec: spec, plan: plan} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+         %{conn: conn, backlog: backlog, spec: spec, plan: plan, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer-move")
       refute has_element?(view, "#card-drawer-move-to-#{backlog.id}")
@@ -929,7 +998,7 @@ defmodule RelayWeb.BoardLiveTest do
       code = Enum.find(board.stages, &(&1.name == "Code"))
       {:ok, review} = Boards.enable_lane(code, :review)
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer-move-to-#{review.id}", "Code · Review")
       refute has_element?(view, "#card-drawer-move-to-#{review.id}", "Code:Review")
@@ -941,7 +1010,7 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, review} = Boards.enable_lane(code, :review)
       {:ok, _moved} = Cards.move_card(card, review, 0)
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer .drawer-stage-chip", "Code · Review")
       assert has_element?(view, "#card-drawer-rail", "Code · Review")
@@ -949,10 +1018,11 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "moving from the drawer persists like a drag and appends to the bottom",
-         %{conn: conn, backlog: backlog, spec: spec, card: card} do
+         %{conn: conn, backlog: backlog, spec: spec, card: card, user: user} do
       {:ok, existing} = Cards.create_card(spec, %{title: "Already in Spec"})
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> element("#card-drawer-move-to-#{spec.id}") |> render_click()
 
@@ -967,8 +1037,9 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#stage-col-2 .stage-count", "2")
     end
 
-    test "the drawer stage chip and menu update after the move", %{conn: conn, plan: plan} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "the drawer stage chip and menu update after the move", %{conn: conn, plan: plan, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> element("#card-drawer-move-to-#{plan.id}") |> render_click()
 
@@ -988,8 +1059,9 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "an unowned card shows None for active worker and owners, with both add controls",
-         %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer-rail .rail-active-worker", "None")
       assert has_element?(view, "#card-drawer-rail .rail-owners", "None")
@@ -999,7 +1071,8 @@ defmodule RelayWeb.BoardLiveTest do
 
     test "Add me makes the current user the active worker and reflects on the board card",
          %{conn: conn, user: user, card: card} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> element("#card-drawer-add-me") |> render_click()
 
@@ -1026,8 +1099,9 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#stage-col-1-cards .board-card[data-active-owner='human']")
     end
 
-    test "Assign AI flips the active worker to AI and pauses the human", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "Assign AI flips the active worker to AI and pauses the human", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> element("#card-drawer-add-me") |> render_click()
       view |> element("#card-drawer-assign-ai") |> render_click()
@@ -1048,8 +1122,9 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#stage-col-1-cards .board-card[data-active-owner='ai']")
     end
 
-    test "releasing the AI returns the baton to the human", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "releasing the AI returns the baton to the human", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> element("#card-drawer-add-me") |> render_click()
       view |> element("#card-drawer-assign-ai") |> render_click()
@@ -1067,7 +1142,8 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "removing the human owner leaves the card unowned", %{conn: conn, user: user} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> element("#card-drawer-add-me") |> render_click()
       view |> element("#card-drawer-remove-owner-user-#{user.id}") |> render_click()
@@ -1078,8 +1154,9 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "setting status from the drawer persists and updates the board card",
-         %{conn: conn, card: card} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+         %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> form("#card-drawer-status-form", card: %{status: "needs_input"}) |> render_change()
 
@@ -1093,8 +1170,9 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "working reveals the progress input; progress shows on the board badge",
-         %{conn: conn, card: card} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+         %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       refute has_element?(view, "#card-drawer-status-form input[name='card[progress]']")
 
@@ -1115,8 +1193,9 @@ defmodule RelayWeb.BoardLiveTest do
              )
     end
 
-    test "an invalid status payload changes nothing", %{conn: conn, card: card} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "an invalid status payload changes nothing", %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view
       |> element("#card-drawer-status-form")
@@ -1125,10 +1204,11 @@ defmodule RelayWeb.BoardLiveTest do
       assert Repo.get!(Card, card.id).status == :queued
     end
 
-    test "adding another user's id as owner is ignored", %{conn: conn} do
+    test "adding another user's id as owner is ignored", %{conn: conn, user: user} do
       other = insert(:user)
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       render_click(view, "add_owner", %{"actor_type" => "user", "user_id" => other.id})
 
@@ -1140,7 +1220,8 @@ defmodule RelayWeb.BoardLiveTest do
   describe "top bar" do
     test "shows the avatar image and a sign out link", %{conn: conn} do
       user = insert(:user, avatar_url: "https://example.com/me.png")
-      {:ok, view, _html} = conn |> log_in_user(user) |> live(~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = conn |> log_in_user(user) |> live(~p"/board/#{board.slug}")
 
       assert has_element?(view, "#user-avatar img")
       assert has_element?(view, "#sign-out")
@@ -1148,7 +1229,8 @@ defmodule RelayWeb.BoardLiveTest do
 
     test "falls back to initials when the user has no avatar image", %{conn: conn} do
       user = insert(:user, avatar_url: nil, name: "Ada Lovelace")
-      {:ok, view, _html} = conn |> log_in_user(user) |> live(~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = conn |> log_in_user(user) |> live(~p"/board/#{board.slug}")
 
       refute has_element?(view, "#user-avatar img")
       assert has_element?(view, "#user-avatar", "AL")
@@ -1160,7 +1242,8 @@ defmodule RelayWeb.BoardLiveTest do
       user = insert(:user)
       conn = conn |> log_in_user(user) |> delete(~p"/logout")
 
-      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/board/#{board.slug}")
     end
   end
 
@@ -1175,7 +1258,8 @@ defmodule RelayWeb.BoardLiveTest do
 
     test "creating a card via the composer logs :created attributed to the signed-in user",
          %{conn: conn, user: user, backlog: backlog} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       expand_stage(view, backlog)
       view |> element("#stage-col-1-new-card") |> render_click()
@@ -1195,7 +1279,7 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, card} = Cards.create_card(backlog, %{title: "Card"})
       [_backlog, spec | _rest] = board.stages
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view
       |> form("#card-drawer-status-form", card: %{status: "in_review"})
@@ -1223,8 +1307,9 @@ defmodule RelayWeb.BoardLiveTest do
       %{board: board, backlog: backlog, plan: plan, card: card}
     end
 
-    test "the drawer shows the agent-attributed created entry", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "the drawer shows the agent-attributed created entry", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(
                view,
@@ -1233,17 +1318,19 @@ defmodule RelayWeb.BoardLiveTest do
              )
     end
 
-    test "a card with no history shows the empty state", %{conn: conn, backlog: backlog} do
+    test "a card with no history shows the empty state", %{conn: conn, backlog: backlog, user: user} do
       insert(:card, stage: backlog, title: "Bare", ref_number: 500, position: 5)
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-500")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-500")
 
       assert has_element?(view, "#card-drawer-activity", "No activity yet")
     end
 
     test "posting a comment persists it and appends it with author and timestamp",
          %{conn: conn, user: user, card: card} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view
       |> form("#card-drawer-comment-form", comment: %{body: "Looks good to me"})
@@ -1270,8 +1357,9 @@ defmodule RelayWeb.BoardLiveTest do
              )
     end
 
-    test "a blank comment is rejected and persists nothing", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "a blank comment is rejected and persists nothing", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view
       |> form("#card-drawer-comment-form", comment: %{body: ""})
@@ -1282,10 +1370,11 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "an agent-authored comment renders with the Relay AI identity",
-         %{conn: conn, card: card} do
+         %{conn: conn, card: card, user: user} do
       comment = insert(:comment, card: card, body: "Implemented — ready for review.")
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#timeline-comment-#{comment.id} .timeline-author", "Relay AI")
 
@@ -1296,8 +1385,9 @@ defmodule RelayWeb.BoardLiveTest do
              )
     end
 
-    test "changing status in the open drawer appends the activity entry live", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "changing status in the open drawer appends the activity entry live", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view
       |> form("#card-drawer-status-form", card: %{status: "in_review"})
@@ -1312,7 +1402,8 @@ defmodule RelayWeb.BoardLiveTest do
 
     test "adding an owner in the open drawer appends the activity entry live",
          %{conn: conn, user: user} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> element("#card-drawer-add-me") |> render_click()
 
@@ -1323,8 +1414,9 @@ defmodule RelayWeb.BoardLiveTest do
              )
     end
 
-    test "moving from the open drawer appends the moved entry live", %{conn: conn, plan: plan} do
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+    test "moving from the open drawer appends the moved entry live", %{conn: conn, plan: plan, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       view |> element("#card-drawer-move-to-#{plan.id}") |> render_click()
 
@@ -1340,7 +1432,8 @@ defmodule RelayWeb.BoardLiveTest do
       c1 = insert(:comment, card: card, user: user, body: "Kickoff", inserted_at: ~U[2026-07-01 09:00:00Z])
       c2 = insert(:comment, card: card, body: "Done", inserted_at: ~U[2026-07-03 09:00:00Z])
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-501")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-501")
 
       ids =
         view
@@ -1352,12 +1445,13 @@ defmodule RelayWeb.BoardLiveTest do
       assert ids == ["timeline-comment-#{c1.id}", "timeline-comment-#{c2.id}"]
     end
 
-    test "the activity log lists entries newest first", %{conn: conn, backlog: backlog} do
+    test "the activity log lists entries newest first", %{conn: conn, backlog: backlog, user: user} do
       card = insert(:card, stage: backlog, title: "Log", ref_number: 502, position: 7)
       a1 = insert(:activity, card: card, type: :created, inserted_at: ~U[2026-07-01 09:00:00Z])
       a2 = insert(:activity, card: card, type: :commented, inserted_at: ~U[2026-07-03 09:00:00Z])
 
-      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-502")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-502")
 
       ids =
         view
@@ -1379,20 +1473,20 @@ defmodule RelayWeb.BoardLiveTest do
       %{conn: Plug.Test.init_test_session(conn, user_id: user.id), board: board, code: code}
     end
 
-    test "renders a stage's review sub-lane stacked with its own count", %{conn: conn, code: code} do
+    test "renders a stage's review sub-lane stacked with its own count", %{conn: conn, code: code, board: board} do
       insert(:card, stage: code, title: "Main work", position: 1, ref_number: 1)
 
-      {:ok, _view, html} = live(conn, ~p"/board")
+      {:ok, _view, html} = live(conn, ~p"/board/#{board.slug}")
       review = code |> Boards.sublanes() |> hd()
       assert html =~ "sublane-#{review.id}"
       assert html =~ "Review"
     end
 
-    test "a card moved into the review sub-lane renders there", %{conn: conn, code: code} do
+    test "a card moved into the review sub-lane renders there", %{conn: conn, code: code, board: board} do
       review = code |> Boards.sublanes() |> hd()
       card = insert(:card, stage: code)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       render_hook(view, "move_card", %{"ref" => card_ref(card), "stage_id" => review.id})
 
@@ -1413,10 +1507,11 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "an empty stage renders the collapsed strip; a stage with a card renders the full column",
-         %{conn: conn, backlog: backlog, spec: spec} do
+         %{conn: conn, backlog: backlog, spec: spec, user: user} do
       {:ok, _card} = Cards.create_card(backlog, %{title: "Keep me open"})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       # non-empty Backlog: full column, no strip
       assert has_element?(view, "#stage-col-1-cards .board-card", "Keep me open")
@@ -1434,15 +1529,17 @@ defmodule RelayWeb.BoardLiveTest do
       assert strip_html =~ "border:1px dashed oklch(0.90 0.006 255)"
     end
 
-    test "the strip is a DnD drop zone carrying its stage id", %{conn: conn, spec: spec} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+    test "the strip is a DnD drop zone carrying its stage id", %{conn: conn, spec: spec, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#stage-strip-#{spec.id}.stage-cards[data-stage-id='#{spec.id}']")
     end
 
     test "clicking a strip force-opens the empty stage for the session",
-         %{conn: conn, backlog: backlog} do
-      {:ok, view, _html} = live(conn, ~p"/board")
+         %{conn: conn, backlog: backlog, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       expand_stage(view, backlog)
 
@@ -1454,10 +1551,11 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "moving the last card out collapses the stage",
-         %{conn: conn, backlog: backlog, spec: spec} do
+         %{conn: conn, backlog: backlog, spec: spec, user: user} do
       {:ok, _card} = Cards.create_card(backlog, %{title: "Last one"})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       refute has_element?(view, "#stage-strip-#{backlog.id}")
 
@@ -1468,10 +1566,11 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "moving a card onto a collapsed strip expands it and the card renders there",
-         %{conn: conn, backlog: backlog, spec: spec} do
+         %{conn: conn, backlog: backlog, spec: spec, user: user} do
       {:ok, _card} = Cards.create_card(backlog, %{title: "Incoming"})
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#stage-strip-#{spec.id}")
 
@@ -1489,7 +1588,7 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, review} = Boards.enable_lane(code, :review)
       insert(:card, stage: review, title: "In review", position: 1, ref_number: 9)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       refute has_element?(view, "#stage-strip-#{code.id}")
       assert has_element?(view, "#sublane-#{review.id}-cards .board-card", "In review")
@@ -1512,10 +1611,10 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "an empty review sub-lane renders its 34px strip inside the expanded stage",
-         %{conn: conn, code: code, review: review} do
+         %{conn: conn, code: code, review: review, board: board} do
       insert(:card, stage: code, title: "Main work", position: 1, ref_number: 1)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(
                view,
@@ -1532,20 +1631,20 @@ defmodule RelayWeb.BoardLiveTest do
       assert strip_html =~ "oklch(0.52 0.12 65)"
     end
 
-    test "a sub-lane with a card renders expanded", %{conn: conn, review: review} do
+    test "a sub-lane with a card renders expanded", %{conn: conn, review: review, board: board} do
       insert(:card, stage: review, title: "Please review", position: 1, ref_number: 1)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#sublane-#{review.id}-cards .board-card", "Please review")
       refute has_element?(view, "#sublane-#{review.id}-strip")
     end
 
     test "moving a card onto the sub-lane strip expands it and the card renders there",
-         %{conn: conn, code: code, review: review} do
+         %{conn: conn, code: code, review: review, board: board} do
       card = insert(:card, stage: code, title: "Ready for review", position: 1, ref_number: 1)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#sublane-#{review.id}-strip")
 
@@ -1560,10 +1659,10 @@ defmodule RelayWeb.BoardLiveTest do
     end
 
     test "clicking the sub-lane strip force-opens the empty lane",
-         %{conn: conn, code: code, review: review} do
+         %{conn: conn, code: code, review: review, board: board} do
       insert(:card, stage: code, title: "Main work", position: 1, ref_number: 1)
 
-      {:ok, view, _html} = live(conn, ~p"/board")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       view |> element("#sublane-#{review.id}-strip") |> render_click()
 

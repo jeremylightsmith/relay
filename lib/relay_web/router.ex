@@ -32,6 +32,10 @@ defmodule RelayWeb.Router do
     plug RelayWeb.ApiAuth
   end
 
+  pipeline :require_authenticated_user do
+    plug :require_authenticated
+  end
+
   scope "/", RelayWeb do
     pipe_through :browser
 
@@ -48,9 +52,16 @@ defmodule RelayWeb.Router do
           do: [RelayWeb.LiveAcceptance],
           else: []
         ) ++ [{RelayWeb.Auth, :require_authenticated}] do
-      live "/board", BoardLive
-      live "/board/settings", BoardSettingsLive
+      live "/boards", BoardsLive
+      live "/board/:slug", BoardLive
+      live "/board/:slug/settings", BoardSettingsLive
     end
+  end
+
+  scope "/", RelayWeb do
+    pipe_through [:browser, :require_authenticated_user]
+
+    get "/board", BoardRedirectController, :index
   end
 
   scope "/auth", RelayWeb do

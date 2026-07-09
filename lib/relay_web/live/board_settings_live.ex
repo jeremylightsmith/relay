@@ -17,6 +17,7 @@ defmodule RelayWeb.BoardSettingsLive do
 
   alias Relay.ApiKeys
   alias Relay.Boards
+  alias Schemas.Board
 
   @categories [:unstarted, :planning, :in_progress, :complete]
 
@@ -37,28 +38,28 @@ defmodule RelayWeb.BoardSettingsLive do
             BOARD
           </div>
           <.link
-            patch={~p"/board/settings?section=general"}
+            patch={~p"/board/#{@board.slug}/settings?section=general"}
             id="settings-nav-general"
             style={nav_style(@section == :general)}
           >
             General
           </.link>
           <.link
-            patch={~p"/board/settings"}
+            patch={~p"/board/#{@board.slug}/settings"}
             id="settings-nav-stages"
             style={nav_style(@section == :stages)}
           >
             Stages
           </.link>
           <.link
-            patch={~p"/board/settings?section=keys"}
+            patch={~p"/board/#{@board.slug}/settings?section=keys"}
             id="settings-nav-keys"
             style={nav_style(@section == :keys)}
           >
             API keys
           </.link>
           <.link
-            navigate={~p"/board"}
+            navigate={~p"/board/#{@board.slug}"}
             id="back-to-board"
             class="font-mono"
             style="margin-top:auto;font-size:11px;color:oklch(0.55 0.02 255);padding:8px 10px;text-decoration:none;"
@@ -75,13 +76,13 @@ defmodule RelayWeb.BoardSettingsLive do
                 General
               </h1>
               <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 18px 0;max-width:560px;">
-                The board's display name, shown in its header.
+                The board's display name and its URL slug (relay.app/&lt;slug&gt;).
               </p>
               <.form
                 for={@general_form}
                 id="general-form"
                 phx-submit="save_general"
-                style="display:flex;flex-direction:column;gap:12px;max-width:420px;"
+                style="display:flex;flex-direction:column;gap:22px;max-width:420px;"
               >
                 <.input
                   field={@general_form[:name]}
@@ -89,10 +90,72 @@ defmodule RelayWeb.BoardSettingsLive do
                   type="text"
                   label="Board name"
                 />
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                  <label
+                    for="board-slug-input"
+                    style="font-size:12px;font-weight:600;color:oklch(0.40 0.02 255);"
+                  >
+                    Board URL
+                  </label>
+                  <div style="display:flex;align-items:center;border:1px solid oklch(0.90 0.006 255);border-radius:9px;overflow:hidden;background:oklch(1 0 0);">
+                    <span
+                      class="font-mono"
+                      style="padding:10px 0 10px 12px;font-size:14px;color:oklch(0.62 0.02 255);"
+                    >
+                      relay.app/
+                    </span>
+                    <input
+                      type="text"
+                      id="board-slug-input"
+                      name="board[slug]"
+                      value={Phoenix.HTML.Form.normalize_value("text", @general_form[:slug].value)}
+                      class="font-mono"
+                      style="flex:1;border:none;padding:10px 12px 10px 2px;font-size:14px;color:oklch(0.28 0.02 255);background:transparent;outline:none;"
+                    />
+                  </div>
+                  <p
+                    :for={msg <- Enum.map(@general_form[:slug].errors, &translate_error/1)}
+                    class="text-sm"
+                    style="color:var(--color-error);"
+                  >
+                    {msg}
+                  </p>
+                </div>
                 <div>
-                  <button type="submit" id="save-general" class="btn btn-primary btn-sm">Save</button>
+                  <button
+                    :if={!@read_only?}
+                    type="submit"
+                    id="save-general"
+                    class="btn btn-primary btn-sm"
+                  >
+                    Save
+                  </button>
                 </div>
               </.form>
+
+              <div
+                :if={!@read_only?}
+                id="danger-zone"
+                style="margin-top:44px;border:1px solid oklch(0.90 0.03 15);border-radius:12px;padding:18px 20px;background:oklch(0.995 0.005 15);max-width:560px;"
+              >
+                <div style="font-size:13px;font-weight:600;color:oklch(0.45 0.14 15);margin-bottom:4px;">
+                  Danger zone
+                </div>
+                <div style="display:flex;align-items:center;gap:16px;">
+                  <span style="font-size:13px;color:oklch(0.50 0.04 15);flex:1;">
+                    Archiving hides this board for everyone. You can restore it later.
+                  </span>
+                  <button
+                    type="button"
+                    id="archive-board-button"
+                    phx-click="archive_board"
+                    data-confirm="Archive this board?"
+                    style="background:oklch(0.98 0.015 15);border:1px solid oklch(0.86 0.06 15);color:oklch(0.52 0.16 15);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;"
+                  >
+                    Archive board
+                  </button>
+                </div>
+              </div>
             </section>
 
             <section :if={@section == :stages} id="stages-pane">
@@ -459,8 +522,8 @@ defmodule RelayWeb.BoardSettingsLive do
   end
 
   @impl true
-  def mount(_params, _session, socket) do
-    board = Boards.get_or_create_default_board(socket.assigns.current_scope.user)
+  def mount(%{"slug" => slug}, _session, socket) do
+    board = Boards.get_board!(socket.assigns.current_scope.user, slug)
 
     {:ok,
      socket
@@ -470,6 +533,7 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:revealed_token, nil)
      |> assign(:lane_nonce, %{})
      |> assign(:general_form, to_form(Boards.change_board(board)))
+     |> assign(:read_only?, Board.archived?(board))
      |> refresh_stages()}
   end
 
@@ -507,18 +571,43 @@ defmodule RelayWeb.BoardSettingsLive do
      |> put_flash(:info, "API key revoked.")}
   end
 
+  def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
+        save_general update_stage add_stage delete_stage toggle_gate set_owner
+        toggle_wip bump_wip reorder_stage set_reject_target toggle_lane
+      ) do
+    {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
+  end
+
   def handle_event("save_general", %{"board" => board_params}, socket) do
-    case Boards.update_board(socket.assigns.board, board_params) do
-      {:ok, board} ->
+    current = socket.assigns.board
+
+    case Boards.update_board(current, board_params) do
+      {:ok, %{slug: slug} = board} when slug == current.slug ->
         {:noreply,
          socket
          |> assign(:board, board)
          |> assign(:general_form, to_form(Boards.change_board(board)))
-         |> put_flash(:info, "Board name saved.")}
+         |> put_flash(:info, "Board saved.")}
+
+      {:ok, board} ->
+        # Slug changed — the current URL is stale, so move to the canonical one.
+        {:noreply,
+         socket
+         |> put_flash(:info, "Board saved.")
+         |> push_navigate(to: ~p"/board/#{board.slug}/settings?section=general")}
 
       {:error, changeset} ->
         {:noreply, assign(socket, :general_form, to_form(changeset))}
     end
+  end
+
+  def handle_event("archive_board", _params, socket) do
+    {:ok, _board} = Boards.archive_board(socket.assigns.board)
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "Board archived.")
+     |> push_navigate(to: ~p"/boards")}
   end
 
   def handle_event("toggle_lane", %{"stage-id" => stage_id, "lane" => lane}, socket) do

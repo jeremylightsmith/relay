@@ -18,7 +18,7 @@ defmodule RelayWeb.BoardSettingsGateTest do
     test "renders the gate toggle off with no reject select by default", %{conn: conn, board: board} do
       review = stage_named(board, "Review")
 
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       assert has_element?(view, "#stage-#{review.id}-gate-toggle")
       refute has_element?(view, "#stage-#{review.id}-gate-toggle[checked]")
@@ -28,7 +28,7 @@ defmodule RelayWeb.BoardSettingsGateTest do
     test "toggling the gate on persists and reveals the reject select", %{conn: conn, board: board} do
       review = stage_named(board, "Review")
 
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
       view |> element("#stage-#{review.id}-gate-toggle") |> render_click()
 
       assert has_element?(view, "#stage-#{review.id}-gate-toggle[checked]")
@@ -41,7 +41,7 @@ defmodule RelayWeb.BoardSettingsGateTest do
       code = stage_named(board, "Code")
       {:ok, _stage} = Boards.update_stage(review, %{approval_gate: true, reject_to_stage_id: code.id})
 
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
       view |> element("#stage-#{review.id}-gate-toggle") |> render_click()
 
       refute has_element?(view, "#stage-#{review.id}-reject-target")
@@ -56,7 +56,7 @@ defmodule RelayWeb.BoardSettingsGateTest do
       {:ok, _stage} = Boards.update_stage(review, %{approval_gate: true})
       {:ok, sublane} = Boards.enable_lane(code, :review)
 
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       assert has_element?(view, "#stage-#{review.id}-reject-target option[value='']", "This stage")
       assert has_element?(view, "#stage-#{review.id}-reject-target option[value='#{code.id}']", "Code")
@@ -69,7 +69,7 @@ defmodule RelayWeb.BoardSettingsGateTest do
       code = stage_named(board, "Code")
       {:ok, _stage} = Boards.update_stage(review, %{approval_gate: true})
 
-      {:ok, view, _html} = live(conn, ~p"/board/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       view
       |> element("#stage-#{review.id}-reject-form")
