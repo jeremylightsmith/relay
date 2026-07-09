@@ -290,14 +290,30 @@ def find_ready(b, cfg):
     for c in b["cards"]:
         by_id.setdefault(c["stage_id"], []).append(c)
 
+    # main stage id -> [its sub-lane stage ids], so a WIP limit counts its whole column
+    children = {}
+    for s in b["stages"]:
+        parent = s.get("parent_id")
+        if parent is not None:
+            children.setdefault(parent, []).append(s["id"])
+
     def cards_in(name):
         s = by_name.get(name)
         return by_id.get(s["id"], []) if s else []
 
+    def used(name):
+        s = by_name.get(name)
+        if not s:
+            return 0
+        total = len(by_id.get(s["id"], []))
+        for child_id in children.get(s["id"], []):
+            total += len(by_id.get(child_id, []))
+        return total
+
     def wip_ok(name):
         s = by_name.get(name)
         limit = s.get("wip_limit") if s else None
-        return not limit or len(cards_in(name)) < limit
+        return not limit or used(name) < limit
 
     for entry in reversed(cfg["pipeline"]):
         for c in cards_in(entry["stage"]):

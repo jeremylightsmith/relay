@@ -98,5 +98,66 @@ class WorkBannerTest(unittest.TestCase):
         self.assertIn("[relay] ## Spec (resume) — then Spec:Review", lines)
 
 
+class FindReadyWipTest(unittest.TestCase):
+    """Sub-lane cards count toward their parent main stage's WIP limit."""
+
+    # Code (main, id 4, wip_limit 2) with Review (id 5) and Done (id 6)
+    # sub-lanes; Plan (id 3) feeds Code.
+    STAGES = [
+        {"id": 3, "name": "Plan", "wip_limit": None, "parent_id": None},
+        {"id": 4, "name": "Code", "wip_limit": 2, "parent_id": None},
+        {"id": 5, "name": "Code:Review", "wip_limit": None, "parent_id": 4},
+        {"id": 6, "name": "Code:Done", "wip_limit": None, "parent_id": 4},
+    ]
+    CFG = {"pipeline": [{"stage": "Code", "from": "Plan", "done": "Code:Review"}]}
+
+    def board(self, cards):
+        return {"stages": self.STAGES, "cards": cards}
+
+    def test_sub_lane_cards_count_toward_the_parent_limit(self):
+        # Code's main lane is empty, but its Review+Done lanes hold 2 cards —
+        # exactly the limit — so a fresh Plan card must NOT be pulled.
+        cards = [
+            {"ref": "RLY-1", "stage_id": 5, "status": "queued"},
+            {"ref": "RLY-2", "stage_id": 6, "status": "queued"},
+            {"ref": "RLY-3", "stage_id": 3, "status": "queued"},
+        ]
+        self.assertIsNone(relay.find_ready(self.board(cards), self.CFG))
+
+    def test_under_limit_across_sub_lanes_pulls_a_fresh_card(self):
+        # Only one card in the whole Code column (in Review) → under the
+        # limit of 2 → the Plan card is pulled fresh into Code.
+        cards = [
+            {"ref": "RLY-1", "stage_id": 5, "status": "queued"},
+            {"ref": "RLY-3", "stage_id": 3, "status": "queued"},
+        ]
+        ready = relay.find_ready(self.board(cards), self.CFG)
+        self.assertIsNotNone(ready)
+        card, entry, mode = ready
+        self.assertEqual(card["ref"], "RLY-3")
+        self.assertEqual(entry["stage"], "Code")
+        self.assertEqual(mode, "fresh")
+
+    def test_main_lane_alone_at_limit_still_blocks(self):
+        # Regression: pre-existing main-only counting still holds.
+        cards = [
+            {"ref": "RLY-1", "stage_id": 4, "status": "queued"},
+            {"ref": "RLY-2", "stage_id": 4, "status": "queued"},
+            {"ref": "RLY-3", "stage_id": 3, "status": "queued"},
+        ]
+        self.assertIsNone(relay.find_ready(self.board(cards), self.CFG))
+
+    def test_no_limit_is_never_full(self):
+        # Plan has no wip_limit, so many cards in it never block its own pull.
+        cards = [{"ref": f"RLY-{n}", "stage_id": 3, "status": "queued"} for n in range(1, 6)]
+        board = {
+            "stages": self.STAGES + [{"id": 2, "name": "Spec", "wip_limit": None, "parent_id": None}],
+            "cards": cards,
+        }
+        cfg = {"pipeline": [{"stage": "Plan", "from": "Spec", "done": "Plan:Done"}]}
+        # Spec is empty so there's nothing to pull, but wip_ok(Plan) must be True (no crash).
+        self.assertIsNone(relay.find_ready(board, cfg))
+
+
 if __name__ == "__main__":
     unittest.main()

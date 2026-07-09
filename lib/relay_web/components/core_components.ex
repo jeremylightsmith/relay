@@ -1849,10 +1849,10 @@ defmodule RelayWeb.CoreComponents do
           <span
             :if={@wip_limit}
             class="stage-wip"
-            data-over={(@count || 0) > @wip_limit}
-            style={"font-size:11px;font-weight:600;font-family:var(--font-mono);padding:2px 7px;border-radius:5px;flex:0 0 auto;#{wip_chip_colors((@count || 0) > @wip_limit)}"}
+            data-over={@total_count > @wip_limit}
+            style={"font-size:11px;font-weight:600;font-family:var(--font-mono);padding:2px 7px;border-radius:5px;flex:0 0 auto;#{wip_chip_colors(@total_count > @wip_limit)}"}
           >
-            wip {@count || 0}/{@wip_limit}
+            wip {@total_count}/{@wip_limit}
           </span>
           <span style="flex:1;"></span>
           <button

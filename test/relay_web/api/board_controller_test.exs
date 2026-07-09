@@ -26,4 +26,31 @@ defmodule RelayWeb.Api.BoardControllerTest do
     assert card_json["active_owner"] == "ai"
     assert [%{"type" => "agent"}] = card_json["owners"]
   end
+
+  test "stage JSON carries wip_limit, lane, and parent_id for sub-lane WIP", %{conn: conn, board: board} do
+    code = insert(:stage, board: board, name: "Code", owner: :ai, position: 1, wip_limit: 3)
+    _review = insert(:stage, board: board, name: "Code:Review", owner: :human, position: 2, lane: :review, parent: code)
+
+    body = conn |> get(~p"/api/board") |> json_response(200)
+
+    main = Enum.find(body["stages"], &(&1["name"] == "Code"))
+    assert main["wip_limit"] == 3
+    assert main["lane"] == "main"
+    assert main["parent_id"] == nil
+
+    sub = Enum.find(body["stages"], &(&1["name"] == "Code:Review"))
+    assert sub["lane"] == "review"
+    assert sub["parent_id"] == code.id
+    assert sub["wip_limit"] == nil
+  end
+
+  test "board card JSON omits heavy plan/spec text", %{conn: conn, board: board} do
+    stage = insert(:stage, board: board, name: "Code", owner: :ai, position: 1)
+    insert(:card, stage: stage, title: "Heavy", plan: "big plan text", spec: "big spec text")
+
+    [card_json] = conn |> get(~p"/api/board") |> json_response(200) |> Map.fetch!("cards")
+
+    refute Map.has_key?(card_json, "plan")
+    refute Map.has_key?(card_json, "spec")
+  end
 end

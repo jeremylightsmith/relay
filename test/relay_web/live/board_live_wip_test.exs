@@ -74,7 +74,7 @@ defmodule RelayWeb.BoardLiveWipTest do
       refute has_element?(view, ".stage-wip")
     end
 
-    test "sub-lane cards do not count toward used, and sub-lanes never show a chip",
+    test "sub-lane cards count toward the parent's WIP total (chip + over-state)",
          %{conn: conn, code: code, user: user} do
       {:ok, done_lane} = Boards.enable_lane(code, :done)
       {:ok, _stage} = Boards.update_stage(code, %{wip_limit: 2})
@@ -85,8 +85,8 @@ defmodule RelayWeb.BoardLiveWipTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#stage-col-4 .stage-wip", "wip 1/2")
-      refute has_element?(view, "#stage-col-4 .stage-wip[data-over]")
+      # 1 card left in Code's main lane + 2 in its Done sub-lane = 3, over the limit of 2.
+      assert has_element?(view, "#stage-col-4 .stage-wip[data-over]", "wip 3/2")
       refute has_element?(view, "#sublane-#{done_lane.id} .stage-wip")
     end
 
