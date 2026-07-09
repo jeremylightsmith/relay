@@ -213,7 +213,7 @@ so it is isolated and independently testable.
 
 ### Steps
 
-- [ ] **Promote MDEx to a first-class dep.** In `mix.exs` `deps/0`, add after
+- [x] **Promote MDEx to a first-class dep.** In `mix.exs` `deps/0`, add after
   `{:bandit, "~> 1.5"},`:
   ```elixir
 
@@ -222,9 +222,9 @@ so it is isolated and independently testable.
   ```
   (Version `~> 0.13` matches the already-locked `0.13.3` pulled transitively via
   `phoenix_storybook`, so no lock churn.)
-- [ ] Run `mix deps.get` — confirm no new download / lock change beyond adding the top-level entry.
+- [x] Run `mix deps.get` — confirm no new download / lock change beyond adding the top-level entry.
 
-- [ ] **Failing helper test.** Create `test/relay/markdown_test.exs`:
+- [x] **Failing helper test.** Create `test/relay/markdown_test.exs`:
   ```elixir
   defmodule Relay.MarkdownTest do
     use ExUnit.Case, async: true
@@ -260,9 +260,9 @@ so it is isolated and independently testable.
     end
   end
   ```
-- [ ] Run `mix test test/relay/markdown_test.exs` — expect failure (`Relay.Markdown` undefined).
+- [x] Run `mix test test/relay/markdown_test.exs` — expect failure (`Relay.Markdown` undefined).
 
-- [ ] **Implement the module.** Create `lib/relay/markdown.ex`:
+- [x] **Implement the module.** Create `lib/relay/markdown.ex`:
   ```elixir
   defmodule Relay.Markdown do
     @moduledoc """
@@ -299,14 +299,14 @@ so it is isolated and independently testable.
   ```
   *(Building the `{:safe, html}` tuple directly — instead of `Phoenix.HTML.raw/1` — keeps
   `mix sobelow` clean: there is no `raw/1` call to flag, and the HTML is already sanitized.)*
-- [ ] **Export the boundary.** In `lib/relay.ex`, add `Markdown` to the `exports` list:
+- [x] **Export the boundary.** In `lib/relay.ex`, add `Markdown` to the `exports` list:
   ```elixir
   exports: [Repo, Mailer, Accounts, Activity, ApiKeys, Boards, Cards, Events, Markdown]
   ```
-- [ ] Run `mix test test/relay/markdown_test.exs` — expect pass.
-- [ ] **Deliverable:** `Relay.Markdown.to_html/1` renders sanitized markdown and is reachable from
+- [x] Run `mix test test/relay/markdown_test.exs` — expect pass.
+- [x] **Deliverable:** `Relay.Markdown.to_html/1` renders sanitized markdown and is reachable from
   the web layer. Run `mix precommit` — expect green.
-- [ ] Commit: `git commit -am "feat(markdown): Relay.Markdown sanitized renderer + MDEx dep (RLY-3)"`
+- [x] Commit: `git commit -am "feat(markdown): Relay.Markdown sanitized renderer + MDEx dep (RLY-3)"`
 
 ---
 
