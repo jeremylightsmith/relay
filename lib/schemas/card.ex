@@ -38,6 +38,7 @@ defmodule Schemas.Card do
     belongs_to :board, Schemas.Board
     belongs_to :stage, Schemas.Stage
     has_many :owners, Schemas.CardOwner
+    embeds_one :rejection, Schemas.CardRejection, on_replace: :delete
 
     timestamps(type: :utc_datetime)
   end
