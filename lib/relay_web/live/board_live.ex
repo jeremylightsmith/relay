@@ -37,7 +37,18 @@ defmodule RelayWeb.BoardLive do
     <Layouts.app flash={@flash} current_scope={@current_scope} wide>
       <div id="board" phx-hook="BoardDnD">
         <div class="flex items-center justify-between px-4 pb-3 pt-1 sm:px-5">
-          <h1 id="board-title" class="text-xl font-semibold">{@board.name}</h1>
+          <div class="flex items-center gap-2">
+            <.link
+              navigate={~p"/boards?from=#{@board.slug}"}
+              id="all-boards-link"
+              title="All boards"
+              class="btn btn-ghost btn-sm btn-circle"
+              aria-label="All boards"
+            >
+              <.icon name="hero-squares-2x2" class="size-5" />
+            </.link>
+            <h1 id="board-title" class="text-xl font-semibold">{@board.name}</h1>
+          </div>
           <div class="flex items-center gap-4">
             <div
               class="hidden items-center gap-3 sm:flex"

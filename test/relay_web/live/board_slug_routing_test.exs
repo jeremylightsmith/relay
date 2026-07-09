@@ -40,5 +40,15 @@ defmodule RelayWeb.BoardSlugRoutingTest do
 
       assert has_element?(view, "#board-settings")
     end
+
+    test "the board header links to the boards home carrying ?from", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert view
+             |> element("#all-boards-link")
+             |> render() =~ "/boards?from=#{board.slug}"
+    end
   end
 end

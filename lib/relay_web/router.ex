@@ -52,6 +52,7 @@ defmodule RelayWeb.Router do
           do: [RelayWeb.LiveAcceptance],
           else: []
         ) ++ [{RelayWeb.Auth, :require_authenticated}] do
+      live "/boards", BoardsLive
       live "/board/:slug", BoardLive
       live "/board/:slug/settings", BoardSettingsLive
     end
