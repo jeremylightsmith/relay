@@ -17,6 +17,7 @@ defmodule Schemas.Board do
     field :slug, :string
     field :key, :string, default: "RLY"
     field :card_seq, :integer, default: 0
+    field :archived_at, :utc_datetime
 
     belongs_to :owner, Schemas.User
     has_many :stages, Schemas.Stage
@@ -35,6 +36,13 @@ defmodule Schemas.Board do
     |> update_change(:name, &String.trim/1)
     |> validate_required([:name, :slug, :key])
     |> validate_length(:name, min: 1, max: 80)
+    |> validate_format(:slug, ~r/\A[a-z0-9]+(?:-[a-z0-9]+)*\z/,
+      message: "must be lowercase letters, numbers, and hyphens"
+    )
     |> unique_constraint(:slug)
   end
+
+  @doc "True when the board has been archived (read-only)."
+  def archived?(%__MODULE__{archived_at: nil}), do: false
+  def archived?(%__MODULE__{}), do: true
 end

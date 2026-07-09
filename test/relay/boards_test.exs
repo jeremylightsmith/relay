@@ -102,25 +102,25 @@ defmodule Relay.BoardsTest do
       refute changeset.valid?
     end
 
-    test "never changes slug, key, or owner_id even when supplied" do
+    test "updates name and slug but never key or owner_id even when supplied" do
       board = Boards.get_or_create_default_board(insert(:user))
-      %{slug: slug, key: key, owner_id: owner_id} = board
+      %{key: key, owner_id: owner_id} = board
 
       assert {:ok, updated} =
                Boards.update_board(board, %{
                  name: "Renamed",
-                 slug: "hacked",
+                 slug: "renamed-slug",
                  key: "HAX",
                  owner_id: -1
                })
 
       assert updated.name == "Renamed"
-      assert updated.slug == slug
+      assert updated.slug == "renamed-slug"
       assert updated.key == key
       assert updated.owner_id == owner_id
 
       reloaded = Repo.get!(Board, board.id)
-      assert reloaded.slug == slug
+      assert reloaded.slug == "renamed-slug"
       assert reloaded.key == key
       assert reloaded.owner_id == owner_id
     end
@@ -131,6 +131,145 @@ defmodule Relay.BoardsTest do
       changeset = Boards.change_board(board)
       assert %Ecto.Changeset{} = changeset
       assert Ecto.Changeset.get_field(changeset, :name) == board.name
+    end
+  end
+
+  describe "create_board/2" do
+    test "creates a named board, derives slug + key, seeds 7 stages" do
+      user = insert(:user)
+
+      assert {:ok, board} = Boards.create_board(user, %{name: "Launch Board"})
+      assert board.owner_id == user.id
+      assert board.name == "Launch Board"
+      assert board.slug == "launch-board"
+      assert board.key == "LAUNC"
+      assert length(board.stages) == 7
+
+      assert Enum.map(board.stages, & &1.name) ==
+               ["Backlog", "Spec", "Plan", "Code", "Review", "Deploy", "Done"]
+    end
+
+    test "accepts string-keyed params (the create form)" do
+      assert {:ok, board} = Boards.create_board(insert(:user), %{"name" => "Ops"})
+      assert board.name == "Ops"
+      assert board.key == "OPS"
+    end
+
+    test "de-duplicates the derived slug against existing boards" do
+      user = insert(:user)
+      {:ok, first} = Boards.create_board(user, %{name: "Ops"})
+      {:ok, second} = Boards.create_board(user, %{name: "Ops"})
+
+      assert first.slug == "ops"
+      assert second.slug == "ops-2"
+    end
+
+    test "falls back to key RLY when the name has no alphanumerics" do
+      assert {:ok, board} = Boards.create_board(insert(:user), %{name: "★ ☆ ★"})
+      assert board.key == "RLY"
+      assert board.slug == "board"
+    end
+
+    test "rejects a blank name and creates nothing" do
+      user = insert(:user)
+      before = Repo.aggregate(Board, :count)
+
+      assert {:error, changeset} = Boards.create_board(user, %{name: "   "})
+      refute changeset.valid?
+      assert Repo.aggregate(Board, :count) == before
+    end
+  end
+
+  describe "list_boards/1" do
+    test "returns the user's non-archived boards, oldest first" do
+      user = insert(:user)
+      {:ok, a} = Boards.create_board(user, %{name: "Alpha"})
+      {:ok, b} = Boards.create_board(user, %{name: "Beta"})
+      {:ok, archived} = Boards.create_board(user, %{name: "Gamma"})
+      {:ok, _} = Boards.archive_board(archived)
+
+      assert Enum.map(Boards.list_boards(user), & &1.id) == [a.id, b.id]
+    end
+
+    test "never returns another user's boards" do
+      {:ok, _mine} = Boards.create_board(insert(:user), %{name: "Mine"})
+      other = insert(:user)
+      {:ok, theirs} = Boards.create_board(other, %{name: "Theirs"})
+
+      refute theirs.id in Enum.map(Boards.list_boards(insert(:user)), & &1.id)
+    end
+  end
+
+  describe "get_board/2 and get_board!/2" do
+    test "returns the owner's board by slug with stages preloaded" do
+      user = insert(:user)
+      {:ok, board} = Boards.create_board(user, %{name: "Ops"})
+
+      found = Boards.get_board(user, "ops")
+      assert found.id == board.id
+      assert length(found.stages) == 7
+    end
+
+    test "returns an archived board (still loadable)" do
+      user = insert(:user)
+      {:ok, board} = Boards.create_board(user, %{name: "Ops"})
+      {:ok, _} = Boards.archive_board(board)
+
+      assert Boards.get_board(user, "ops").id == board.id
+    end
+
+    test "get_board/2 returns nil for a slug the user does not own" do
+      {:ok, board} = Boards.create_board(insert(:user), %{name: "Ops"})
+      assert Boards.get_board(insert(:user), board.slug) == nil
+    end
+
+    test "get_board!/2 raises for a slug the user does not own" do
+      {:ok, board} = Boards.create_board(insert(:user), %{name: "Ops"})
+
+      assert_raise Ecto.NoResultsError, fn ->
+        Boards.get_board!(insert(:user), board.slug)
+      end
+    end
+  end
+
+  describe "update_board/2 slug validation" do
+    test "rejects an invalid slug format and changes nothing" do
+      {:ok, board} = Boards.create_board(insert(:user), %{name: "Ops"})
+
+      assert {:error, changeset} = Boards.update_board(board, %{slug: "Bad Slug"})
+      refute changeset.valid?
+      assert Repo.get!(Board, board.id).slug == board.slug
+    end
+
+    test "rejects a slug already taken by another board" do
+      user = insert(:user)
+      {:ok, _a} = Boards.create_board(user, %{name: "Alpha"})
+      {:ok, b} = Boards.create_board(user, %{name: "Beta"})
+
+      assert {:error, changeset} = Boards.update_board(b, %{slug: "alpha"})
+      refute changeset.valid?
+    end
+  end
+
+  describe "archive_board/1 and unarchive_board/1" do
+    test "archive sets archived_at; unarchive clears it" do
+      {:ok, board} = Boards.create_board(insert(:user), %{name: "Ops"})
+
+      assert {:ok, archived} = Boards.archive_board(board)
+      assert archived.archived_at
+      assert Board.archived?(archived)
+
+      assert {:ok, restored} = Boards.unarchive_board(archived)
+      assert restored.archived_at == nil
+      refute Board.archived?(restored)
+    end
+
+    test "archive broadcasts {:board_updated, board} on the board topic" do
+      {:ok, board} = Boards.create_board(insert(:user), %{name: "Ops"})
+      Relay.Events.subscribe(board.id)
+
+      assert {:ok, _} = Boards.archive_board(board)
+      assert_receive {:board_updated, %Board{archived_at: at}} when not is_nil(at)
     end
   end
 end
