@@ -136,6 +136,10 @@ defmodule RelayWeb.BoardLive do
         reject_open={@reject_open}
         reject_form={@reject_form}
         reject_error={@reject_error}
+        send_back_open={@send_back_open}
+        send_back_form={@send_back_form}
+        send_back_error={@send_back_error}
+        send_back_targets={send_back_targets(@board, @selected_card)}
       />
     </Layouts.app>
     """
@@ -414,17 +418,23 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event(
         "review_reject",
-        %{"reject" => %{"note" => note}},
+        %{"reject" => %{"note" => note} = params},
         %{assigns: %{selected_card: %Card{status: :in_review} = card}} = socket
       ) do
     if String.trim(note) == "" do
       {:noreply,
        assign(socket,
-         reject_form: to_form(%{"note" => note}, as: :reject),
+         reject_form: to_form(params, as: :reject),
          reject_error: "Add a note — the AI needs to know what to change."
        )}
     else
-      case Cards.reject(card, note, current_actor(socket)) do
+      opts =
+        case resolve_stage(socket, params["to"]) do
+          %Stage{} = target -> [to: target]
+          nil -> []
+        end
+
+      case Cards.reject(card, note, current_actor(socket), opts) do
         {:ok, updated} -> {:noreply, refresh_after_review(socket, card, updated)}
         {:error, _reason} -> {:noreply, socket}
       end
@@ -434,7 +444,7 @@ defmodule RelayWeb.BoardLive do
   def handle_event("review_reject", _params, socket), do: {:noreply, socket}
 
   def handle_event("review_mark_done", _params, %{assigns: %{selected_card: %Card{status: :in_review} = card}} = socket) do
-    case Cards.set_status(card, %{status: :done}, current_actor(socket)) do
+    case Cards.mark_done(card, current_actor(socket)) do
       {:ok, updated} -> {:noreply, refresh_card(socket, updated)}
       {:error, _changeset} -> {:noreply, socket}
     end
@@ -448,6 +458,43 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("review_pull", _params, socket), do: {:noreply, socket}
+
+  # RLY-30 — the universal send-back control: any card with an earlier
+  # main-lane stage can be bounced back with a note, not just review gates.
+  def handle_event("send_back_open", _params, socket) do
+    {:noreply, assign(socket, send_back_open: true, send_back_form: empty_send_back_form(), send_back_error: nil)}
+  end
+
+  def handle_event("send_back_cancel", _params, socket) do
+    {:noreply, assign(socket, send_back_open: false, send_back_error: nil)}
+  end
+
+  def handle_event(
+        "send_back",
+        %{"send_back" => %{"note" => note} = params},
+        %{assigns: %{selected_card: %Card{} = card}} = socket
+      ) do
+    if String.trim(note) == "" do
+      {:noreply,
+       assign(socket,
+         send_back_form: to_form(params, as: :send_back),
+         send_back_error: "Add a note — the AI needs to know what to change."
+       )}
+    else
+      {:noreply, do_send_back(socket, card, resolve_stage(socket, params["to"]), note)}
+    end
+  end
+
+  def handle_event("send_back", _params, socket), do: {:noreply, socket}
+
+  defp do_send_back(socket, _card, nil, _note), do: assign(socket, send_back_error: "Pick an earlier stage.")
+
+  defp do_send_back(socket, card, %Stage{} = target, note) do
+    case Cards.send_back(card, target, note, current_actor(socket)) do
+      {:ok, updated} -> refresh_after_review(socket, card, updated)
+      {:error, _reason} -> assign(socket, send_back_error: "Pick an earlier stage.")
+    end
+  end
 
   # MMF 18 — realtime application of Relay.Events broadcasts. Every open
   # session applies every event for its board, including the acting
@@ -674,12 +721,23 @@ defmodule RelayWeb.BoardLive do
       review_gate: review_gate_info(socket, card),
       reject_open: false,
       reject_form: empty_reject_form(),
-      reject_error: nil
+      reject_error: nil,
+      send_back_open: false,
+      send_back_form: empty_send_back_form(),
+      send_back_error: nil
     )
   end
 
   defp assign_review(socket, _card) do
-    assign(socket, review_gate: nil, reject_open: false, reject_form: empty_reject_form(), reject_error: nil)
+    assign(socket,
+      review_gate: nil,
+      reject_open: false,
+      reject_form: empty_reject_form(),
+      reject_error: nil,
+      send_back_open: false,
+      send_back_form: empty_send_back_form(),
+      send_back_error: nil
+    )
   end
 
   # Gate info for the review panel, or nil when the governing stage (the
@@ -691,7 +749,12 @@ defmodule RelayWeb.BoardLive do
     gate = if stage.lane == :main, do: stage, else: find_stage_by_id(socket, stage.parent_id)
 
     if gate && gate.approval_gate do
-      %{approve_label: approve_label(gate), reject_to_name: reject_to_name(socket, gate)}
+      %{
+        approve_label: approve_label(gate),
+        reject_to_name: reject_to_name(socket, gate),
+        targets: gate_reject_targets(socket, card),
+        default_to: gate.reject_to_stage_id || gate.id
+      }
     end
   end
 
@@ -710,6 +773,39 @@ defmodule RelayWeb.BoardLive do
   defp reject_to_name(socket, %Stage{reject_to_stage_id: target_id}), do: find_stage_by_id(socket, target_id).name
 
   defp empty_reject_form, do: to_form(%{"note" => ""}, as: :reject)
+
+  defp empty_send_back_form, do: to_form(%{"to" => "", "note" => ""}, as: :send_back)
+
+  # Universal send-back targets: main-lane stages strictly before the card's
+  # current main stage, in position order. Only called (from the template)
+  # while a card is selected, so no card is not a case to handle here.
+  defp send_back_targets(board, %Card{} = card) do
+    pos = current_main_position(board, card)
+
+    board.stages
+    |> Enum.filter(&(&1.lane == :main and &1.position < pos))
+    |> Enum.sort_by(& &1.position)
+    |> Enum.map(&%{id: &1.id, name: &1.name})
+  end
+
+  # Gate reject picker: main-lane stages at or before the current stage
+  # (the gate's nil-target reject lands in the gate itself, so "at" is allowed).
+  defp gate_reject_targets(socket, %Card{} = card) do
+    board = socket.assigns.board
+    pos = current_main_position(board, card)
+
+    board.stages
+    |> Enum.filter(&(&1.lane == :main and &1.position <= pos))
+    |> Enum.sort_by(& &1.position)
+    |> Enum.map(&%{id: &1.id, name: &1.name})
+  end
+
+  defp current_main_position(board, %Card{stage_id: stage_id}) do
+    by_id = Map.new(board.stages, &{&1.id, &1})
+    stage = Map.fetch!(by_id, stage_id)
+    main = if stage.lane == :main, do: stage, else: Map.fetch!(by_id, stage.parent_id)
+    main.position
+  end
 
   defp status_form(%Card{} = card) do
     to_form(%{"status" => Atom.to_string(card.status), "progress" => card.progress}, as: :card)
@@ -853,7 +949,10 @@ defmodule RelayWeb.BoardLive do
           review_gate: nil,
           reject_open: false,
           reject_form: nil,
-          reject_error: nil
+          reject_error: nil,
+          send_back_open: false,
+          send_back_form: nil,
+          send_back_error: nil
         )
         |> stream(:conversation, [], reset: true)
         |> stream(:activity, [], reset: true)
