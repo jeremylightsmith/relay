@@ -20,7 +20,12 @@ if System.get_env("PHX_SERVER") do
   config :relay, RelayWeb.Endpoint, server: true
 end
 
-config :relay, RelayWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4003"))]
+# The web server binds PORT (default 4003) in dev and prod. In :test the
+# endpoint port stays as config/test.exs sets it (4002), so the suite can run
+# alongside a running dev server (on 4003) without a port clash.
+if config_env() != :test do
+  config :relay, RelayWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4003"))]
+end
 
 # Google OAuth credentials. Dev reads these from .envrc.local (direnv);
 # prod from `fly secrets set`. Test uses static dummies from
