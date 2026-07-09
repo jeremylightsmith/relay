@@ -1,369 +1,347 @@
-# Plan: RLY-10 — Change the name of a board
+# Plan: RLY-14 — Create cards with the REST API
 
 ## Goal
+Add the HTTP + CLI surface for creating a card on the authenticated board. The domain
+work already exists in `Relay.Cards.create_card/3` (ref allocation, append-to-stage,
+`:created` activity log, live broadcast). This plan adds:
 
-Let a board owner rename their board (name only) from a new **General** pane in
-`/board/settings`, and have the board title (`#board-title`) update **live** — in the acting
-session and, via the MMF 18 broadcast, in every other open session on that board.
+1. `POST /api/cards` — a new action on the existing `RelayWeb.Api.CardController`.
+2. `relay create` — a new command on the live Python CLI (`bin/relay`), plus a docs table row.
 
 ## Architecture
-
-This is a **web-layer-only** change. The domain layer is already on `main` (commit
-`5b147f1 feat(boards): update_board/2 with name validation + {:board_updated} broadcast`):
-
-- `Schemas.Board.changeset/2` already casts `:name`, trims it, and validates
-  `required` + `length(min: 1, max: 80)` with `empty_values: []` (a blank submit fails
-  instead of resetting to the "My board" default).
-- `Relay.Boards.change_board/2` returns an unvalidated changeset for the form.
-- `Relay.Boards.update_board/2` casts **only** `:name` (`Map.take(attrs, [:name, "name"])`,
-  so `slug`/`key`/`owner_id` can never be touched), persists, and on success broadcasts
-  `{:board_updated, board}` on `"board:<id>"`.
-- `Relay.Events` already documents the `{:board_updated, board}` event (board carried with
-  **stages not preloaded**).
-
-So NO schema, migration, or context change is needed. Two remaining pieces, one per task:
-
-1. **`RelayWeb.BoardSettingsLive`** — add a **General** nav item + pane with a `Board name`
-   form that saves via `Boards.update_board/2` (save-on-submit), flashes success, and shows
-   validation errors. Default section stays **Stages** (unchanged); General is an explicit
-   `?section=general` nav item placed above Stages.
-2. **`RelayWeb.BoardLive`** — handle the `{:board_updated, board}` broadcast in
-   `handle_info/2`. The LiveView already subscribes to `Relay.Events` in `mount/3` and
-   already renders `<h1 id="board-title">{@board.name}</h1>`; it just doesn't handle this
-   event yet. The broadcast board has stages unloaded, so merge only the name onto the
-   already-loaded `@board` (which the drawer relies on for `@board.stages`).
+- **Web layer only + one CLI file.** No context/schema/migration changes — `create_card/3`,
+  `Boards.list_stages/1`, and the shared `CardJSON.show` shape are all reused as-is.
+- The controller `create/2` mirrors the existing `move/2`: board + `:agent` actor come from
+  `conn.assigns.current_board` (set by `RelayWeb.ApiAuth`), a stage is resolved from
+  `params["stage"]` (reusing `move/2`'s private `get_stage/2`), and success renders the
+  standard `:show` view with `put_status(:created)` (mirroring the `comments/2` action).
+- Stage resolution rule: **no `stage` → board's first stage in position order**
+  (`Boards.list_stages/1` |> hd); **explicit `stage` that doesn't resolve → 404**;
+  **missing/blank `title` → 400** (via `Card.changeset`'s `validate_required([:title])` →
+  `FallbackController`'s changeset path).
 
 ## Tech
+Elixir / Phoenix 1.8, Ecto, `Phoenix.ConnTest` for controller tests. Python 3 stdlib for the
+CLI (`bin/relay` is a self-contained `argparse` script, no test framework — verified by
+running the parser).
 
-- Elixir / Phoenix LiveView 1.8, Ecto, `Phoenix.LiveViewTest`.
-- Forms via `to_form/1` + `<.form for={@form}>` + the imported `<.input>` component.
-- Realtime via `Relay.Events` (Phoenix.PubSub, topic `"board:<board_id>"`).
+## Global Constraints (from the spec)
+- Owners, status, and position are **not** settable at create time: a new card is `:queued`,
+  unowned, appended to the bottom of its stage (whatever `create_card/3` does). Clients set
+  owners/status with a follow-up `PATCH /api/cards/:ref`.
+- `POST /api/cards` goes in the **existing** authenticated `scope "/api", RelayWeb.Api` block
+  (`pipe_through [:api, :api_auth]`), routed to `CardController.create`.
+- **201 Created** body is the standard `CardJSON.show` shape (card fields + `description` +
+  `timeline`), identical to `GET`/`PATCH`.
+- **400 `invalid`** on missing/blank `title`; **404 `not_found`** on an explicit `stage` id
+  that doesn't resolve to a stage on this board (uncastable *or* unknown id).
+- Passing the raw `params` map through to `create_card/3` is safe — `Card.changeset/2` only
+  casts editable fields; `ref`, `stage`, etc. are ignored.
+- CLI: add to `bin/relay` only. The Elixir `mix relay` CLI (`lib/relay/cli.ex`) is **not**
+  kept in sync with the newer per-card commands (it has no `describe`/`plan`/`branch`/`pr`),
+  so `create` follows the same pattern and is **not** added there.
+- Update the CLI reference table in `docs/agent-integration.md` with the new command.
 
-## Global Constraints (from AGENTS.md — apply to every task)
-
-- `mix precommit` is REQUIRED and must pass before work is done — it runs compile
-  (warnings-as-errors), `mix format` (Styler), `mix credo --strict`, `mix sobelow`,
-  `mix deps.audit`, and the full test suite (warnings-as-errors).
-- Context boundaries: `RelayWeb` may only call the domain through `Relay`'s exported
-  contexts (`Relay.Boards`, `Relay.Events`); contexts never reach into the web layer.
-- LiveView/HEEx rules: begin templates with `<Layouts.app flash={@flash} ...>`; always use
-  `<.form for={@form} id="...">` driven by a `to_form/2` assign and the `<.input>` component
-  — never access a changeset in the template; give key elements unique DOM IDs; use the
-  `<.icon>` component for icons.
-- Ecto: fields set programmatically (`owner_id`, `slug`, `key`) must never be cast from
-  user input.
-- Tests: `use RelayWeb.ConnCase, async: true`; log in with the `register_and_log_in_user`
-  setup; assert with `has_element?/2` / `element/2` against DOM IDs, never raw HTML strings.
-- Styler sorts `alias` blocks alphabetically — keep them sorted.
-
----
-
-## Task 1: General settings pane with a Board name editor
-
-Add a **General** nav item + pane to `BoardSettingsLive`. The pane holds a single `Board name`
-field saved on submit through `Boards.update_board/2`, flashing success and surfacing the
-changeset's validation error on a blank name. Default section stays Stages.
-
-### Files
-
-- Modify: `lib/relay_web/live/board_settings_live.ex`
-- Create (test): `test/relay_web/live/board_settings_general_test.exs`
-
-### Interfaces
-
-**Consumes** (already on `main`, do not modify):
-- `Relay.Boards.change_board(%Schemas.Board{}, attrs \\ %{}) :: Ecto.Changeset.t()` — unvalidated changeset for the form.
-- `Relay.Boards.update_board(%Schemas.Board{}, attrs) :: {:ok, %Schemas.Board{}} | {:error, Ecto.Changeset.t()}` — casts `:name` only (`Map.take(attrs, [:name, "name"])`), persists, broadcasts `{:board_updated, board}`. Blank name → `{:error, changeset}` with error `"can't be blank"` on `:name`.
-- `Relay.Boards.get_or_create_default_board(%Schemas.User{}) :: %Schemas.Board{}` — used in tests to read the persisted board.
-
-**Produces** (relied on by Task 2's cross-session test):
-- Settings General pane at `~p"/board/settings?section=general"` with:
-  - nav link `#settings-nav-general`, pane `#general-pane`,
-  - `<.form>` `#general-form` with `phx-submit="save_general"`, input `#board-name-input` bound to `@general_form[:name]`, and a submit `button` reading "Save".
-  - `save_general` persists via `update_board/2`, so an open `BoardLive` receives `{:board_updated, board}`.
-
-### Steps
-
-- [x] **Write the failing test file** `test/relay_web/live/board_settings_general_test.exs`:
-
-```elixir
-defmodule RelayWeb.BoardSettingsGeneralTest do
-  use RelayWeb.ConnCase, async: true
-
-  import Phoenix.LiveViewTest
-
-  alias Relay.Boards
-
-  describe "General pane" do
-    setup :register_and_log_in_user
-
-    test "the rail links to General and its pane shows the Board name field + Save", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=general")
-
-      assert has_element?(view, "#settings-nav-general")
-      assert has_element?(view, "#general-pane")
-      assert has_element?(view, "#board-name-input")
-      assert has_element?(view, "#general-form button", "Save")
-    end
-
-    test "the Board name field is pre-filled with the current name", %{conn: conn, user: user} do
-      board = Boards.get_or_create_default_board(user)
-
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=general")
-
-      assert view |> element("#board-name-input") |> render() =~ board.name
-    end
-
-    test "saving a new name persists it, flashes success, and reflects it in the field", %{conn: conn, user: user} do
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=general")
-
-      html =
-        view
-        |> form("#general-form", board: %{name: "Launch board"})
-        |> render_submit()
-
-      assert html =~ "Board name saved."
-      assert Boards.get_or_create_default_board(user).name == "Launch board"
-      assert view |> element("#board-name-input") |> render() =~ "Launch board"
-    end
-
-    test "saving a blank name shows a validation error and leaves the name unchanged", %{conn: conn, user: user} do
-      original = Boards.get_or_create_default_board(user).name
-
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=general")
-
-      html =
-        view
-        |> form("#general-form", board: %{name: "   "})
-        |> render_submit()
-
-      assert html =~ "can&#39;t be blank"
-      assert Boards.get_or_create_default_board(user).name == original
-    end
-
-    test "renaming never changes the board slug or key", %{conn: conn, user: user} do
-      board = Boards.get_or_create_default_board(user)
-
-      {:ok, view, _html} = live(conn, ~p"/board/settings?section=general")
-
-      view |> form("#general-form", board: %{name: "Renamed"}) |> render_submit()
-
-      updated = Boards.get_or_create_default_board(user)
-      assert updated.slug == board.slug
-      assert updated.key == board.key
-    end
-  end
-end
-```
-
-- [x] **Run it, expect failure:** `mix test test/relay_web/live/board_settings_general_test.exs`
-  (fails — no `#settings-nav-general`, no `general` section, no `save_general` handler).
-
-- [x] **Add the `:general` section clause.** In `lib/relay_web/live/board_settings_live.ex`,
-  update the private `section/1` head (currently `section(%{"section" => "keys"})` then the
-  fallback) to add a `general` clause above the `keys` clause:
-
-```elixir
-  defp section(%{"section" => "general"}), do: :general
-  defp section(%{"section" => "keys"}), do: :keys
-  defp section(_params), do: :stages
-```
-
-- [x] **Assign the form in `mount/3`.** In the `mount/3` assign pipeline (which currently ends
-  `|> assign(:lane_nonce, %{}) |> refresh_stages()`), add the `general_form` assign before
-  `refresh_stages/1`:
-
-```elixir
-     |> assign(:lane_nonce, %{})
-     |> assign(:general_form, to_form(Boards.change_board(board)))
-     |> refresh_stages()}
-```
-
-- [x] **Add the General nav link** to the left rail, immediately **above** the existing Stages
-  link (`#settings-nav-stages`), so the rail reads General → Stages → API keys:
-
-```heex
-          <.link
-            patch={~p"/board/settings?section=general"}
-            id="settings-nav-general"
-            style={nav_style(@section == :general)}
-          >
-            General
-          </.link>
-```
-
-- [x] **Add the General pane** inside the content pane, immediately before the
-  `<section :if={@section == :stages} id="stages-pane">` block:
-
-```heex
-            <section :if={@section == :general} id="general-pane">
-              <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px 0;color:oklch(0.26 0.02 255);">
-                General
-              </h1>
-              <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 18px 0;max-width:560px;">
-                The board's display name, shown in its header.
-              </p>
-              <.form
-                for={@general_form}
-                id="general-form"
-                phx-submit="save_general"
-                style="display:flex;flex-direction:column;gap:12px;max-width:420px;"
-              >
-                <.input field={@general_form[:name]} id="board-name-input" type="text" label="Board name" />
-                <div>
-                  <button type="submit" id="save-general" class="btn btn-primary btn-sm">Save</button>
-                </div>
-              </.form>
-            </section>
-```
-
-- [x] **Add the `save_general` handler.** Place it with the other `handle_event/3` clauses
-  (e.g. just after `handle_event("revoke_key", ...)`):
-
-```elixir
-  def handle_event("save_general", %{"board" => board_params}, socket) do
-    case Boards.update_board(socket.assigns.board, board_params) do
-      {:ok, board} ->
-        {:noreply,
-         socket
-         |> assign(:board, board)
-         |> assign(:general_form, to_form(Boards.change_board(board)))
-         |> put_flash(:info, "Board name saved.")}
-
-      {:error, changeset} ->
-        {:noreply, assign(socket, :general_form, to_form(changeset))}
-    end
-  end
-```
-
-- [x] **Run it, expect pass:** `mix test test/relay_web/live/board_settings_general_test.exs`
-  (5 tests pass). Then run the neighbouring settings suites to confirm no regression:
-  `mix test test/relay_web/live/board_settings_live_test.exs test/relay_web/live/board_settings_stages_test.exs`.
-
-- [x] **Commit:** `feat(settings): General pane with a Board name editor (RLY-10)`
-
-### Deliverable
-
-A working General pane at `/board/settings?section=general`: the field is pre-filled with the
-current name, Save persists a valid name and flashes success, a blank name is rejected inline,
-and `slug`/`key` are never touched. Independently testable via the new test file.
+### Non-goals
+- Bulk/batch create, MMF dedup/import (the follow-up work this card enables).
+- Setting owners/status/position at create time (use existing `PATCH`).
+- Any new UI — creation from the board UI is out of scope.
 
 ---
 
-## Task 2: Board title updates live on `{:board_updated}`
+## Task 1: `POST /api/cards` endpoint
 
-Make `BoardLive` react to the `{:board_updated, board}` broadcast so `#board-title` retitles
-without a reload — in the acting session and in any other open session (including a rename
-driven from the settings General pane built in Task 1).
+Add the route and the `create/2` controller action (with its two stage-resolution helper
+clauses), driven by controller tests covering every response branch.
 
-### Files
+**Files**
+- Modify: `lib/relay_web/router.ex` (add the `post "/cards"` route)
+- Modify: `lib/relay_web/controllers/api/card_controller.ex` (add `create/2` + `resolve_create_stage/2`)
+- Test: `test/relay_web/api/card_controller_test.exs` (new `describe "POST /api/cards"` block)
 
-- Modify: `lib/relay_web/live/board_live.ex`
-- Modify (test): `test/relay_web/live/board_live_realtime_test.exs`
+**Interfaces**
 
-### Interfaces
+*Consumes* (all already exist — exact signatures this task calls):
+- `Relay.Cards.create_card(%Schemas.Stage{} = stage, attrs :: map, actor :: :agent | {:user, integer})` → `{:ok, %Schemas.Card{}} | {:error, %Ecto.Changeset{}}`. `attrs` may be the raw string-keyed params map.
+- `Relay.Boards.list_stages(%Schemas.Board{})` → `[%Schemas.Stage{}]` in position order.
+- `RelayWeb.Api.CardController.get_stage(board, stage_id)` (existing private helper on this module): integer/integer-string id → `%Schemas.Stage{}`; uncastable/unknown → `nil`.
+- `Relay.Activity.list_timeline(%Schemas.Card{})` → list of activity/comment structs.
+- `CardController` already has `action_fallback RelayWeb.Api.FallbackController`, which maps `{:error, %Ecto.Changeset{}}` → 400 `invalid` and `{:error, :not_found}` → 404, and `{:error, :invalid_request}` → 400 `invalid`.
 
-**Consumes:**
-- `Relay.Boards.update_board/2` → broadcasts `{:board_updated, %Schemas.Board{}}` (stages **not** preloaded).
-- `RelayWeb.BoardSettingsLive` General pane / `#general-form` from Task 1 (cross-session test).
-- `BoardLive` already: subscribes via `Events.subscribe(board.id)` in `mount/3`; renders `<h1 id="board-title">{@board.name}</h1>`; keeps stage data in `@stage_groups`/streams but the open drawer reads `@board.stages`.
+*Produces*:
+- Route `POST /api/cards` → `RelayWeb.Api.CardController.create/2`.
+- `RelayWeb.Api.CardController.create(conn, params)` — renders `:show` with `put_status(:created)` on success; returns `{:error, ...}` tuples otherwise (handled by the fallback controller).
 
-**Produces:**
-- `handle_info({:board_updated, %Schemas.Board{} = board}, socket)` clause that re-titles by merging only `name` onto the loaded `@board` (preserving preloaded `stages`) and updating `@page_title`.
+**Steps**
 
-### Steps
+- [x] Write the failing controller tests. Append this `describe` block to
+  `test/relay_web/api/card_controller_test.exs` (the file's `setup` already provides
+  `conn` with a valid `Bearer` token, `board`, and a persisted `stage` named `"Spec"` at
+  `position: 1` — the board's only/first stage):
 
-- [x] **Write the failing tests.** Append two tests inside the existing
-  `describe "two sessions on the same board"` block in
-  `test/relay_web/live/board_live_realtime_test.exs` (its `setup` already provides
-  `%{board: board, backlog: backlog, spec: spec}`). The second test also uses
-  `~p"/board/settings?section=general"`, so it exercises Task 1 end-to-end:
+  ```elixir
+  describe "POST /api/cards" do
+    test "creates a queued, unowned card in the board's first stage with title only",
+         %{conn: conn, stage: stage} do
+      body =
+        conn
+        |> post(~p"/api/cards", %{title: "New card"})
+        |> json_response(201)
+        |> Map.fetch!("data")
 
-```elixir
-    test "a board rename elsewhere retitles the board live in another session",
-         %{conn: conn, board: board} do
-      {:ok, view_b, _html} = live(conn, ~p"/board")
-
-      {:ok, _board} = Boards.update_board(board, %{"name" => "Relayboard HQ"})
-
-      assert has_element?(view_b, "#board-title", "Relayboard HQ")
+      assert body["title"] == "New card"
+      assert body["status"] == "queued"
+      assert body["stage_id"] == stage.id
+      assert body["owners"] == []
+      assert body["active_owner"] == nil
+      assert is_binary(body["ref"])
+      # standard show shape includes description + timeline
+      assert Map.has_key?(body, "description")
+      assert is_list(body["timeline"])
     end
 
-    test "a rename from the settings General pane retitles an open board session",
-         %{conn: conn} do
-      {:ok, view_settings, _html} = live(conn, ~p"/board/settings?section=general")
-      {:ok, view_board, _html} = live(conn, ~p"/board")
+    test "creates a card into an explicit stage id", %{conn: conn, board: board} do
+      other = insert(:stage, board: board, name: "Code", owner: :ai, position: 2)
 
-      view_settings |> form("#general-form", board: %{name: "From settings"}) |> render_submit()
+      body =
+        conn
+        |> post(~p"/api/cards", %{title: "Into code", stage: other.id})
+        |> json_response(201)
+        |> Map.fetch!("data")
 
-      assert has_element?(view_board, "#board-title", "From settings")
+      assert body["stage_id"] == other.id
     end
-```
 
-- [x] **Run them, expect failure:** `mix test test/relay_web/live/board_live_realtime_test.exs`
-  (the new tests fail — `BoardLive` ignores `{:board_updated, _}`, so `#board-title` keeps the
-  old name).
+    test "accepts an integer-string stage id", %{conn: conn, board: board} do
+      other = insert(:stage, board: board, name: "Code", owner: :ai, position: 2)
 
-- [x] **Alias `Schemas.Board`.** In `lib/relay_web/live/board_live.ex` the alias block has
-  `alias Schemas.Card` / `alias Schemas.Stage` but no `Board`. Add it in sorted position
-  (before `Schemas.Card`) so Styler is satisfied:
+      body =
+        conn
+        |> post(~p"/api/cards", %{title: "Into code", stage: to_string(other.id)})
+        |> json_response(201)
+        |> Map.fetch!("data")
 
-```elixir
-  alias Schemas.Board
-  alias Schemas.Card
-  alias Schemas.Stage
-```
+      assert body["stage_id"] == other.id
+    end
 
-- [x] **Add the `handle_info/2` clause.** Place it with the other `{:...}` broadcast handlers
-  (e.g. right after the `handle_info({:stages_changed, _board_id}, socket)` clause). Merge
-  only `name` onto the loaded board so the drawer's `@board.stages` (still preloaded) is
-  never replaced by an unloaded association:
+    test "created card appears in GET /api/cards", %{conn: conn} do
+      conn |> post(~p"/api/cards", %{title: "Findable"}) |> json_response(201)
 
-```elixir
-  # RLY-10 — a board rename (this or another session): retitle live. The
-  # broadcast board carries no preloaded stages, so merge just the name onto
-  # the already-loaded @board (the open drawer reads @board.stages).
-  def handle_info({:board_updated, %Board{} = board}, socket) do
-    updated = %{socket.assigns.board | name: board.name}
+      titles =
+        conn |> get(~p"/api/cards") |> json_response(200) |> Map.fetch!("data") |> Enum.map(& &1["title"])
 
-    {:noreply,
-     socket
-     |> assign(:board, updated)
-     |> assign(:page_title, board.name)}
+      assert "Findable" in titles
+    end
+
+    test "records a :created timeline entry attributed to the agent", %{conn: conn} do
+      body = conn |> post(~p"/api/cards", %{title: "Logged"}) |> json_response(201) |> Map.fetch!("data")
+
+      assert Enum.any?(body["timeline"], fn e ->
+               e["kind"] == "activity" and e["type"] == "created" and e["author"]["name"] == "Relay AI"
+             end)
+    end
+
+    test "missing title returns 400", %{conn: conn} do
+      assert conn |> post(~p"/api/cards", %{}) |> json_response(400)
+    end
+
+    test "blank title returns 400", %{conn: conn} do
+      assert conn |> post(~p"/api/cards", %{title: "   "}) |> json_response(400)
+    end
+
+    test "unknown stage id returns 404", %{conn: conn} do
+      assert conn |> post(~p"/api/cards", %{title: "x", stage: 999_999}) |> json_response(404)
+    end
+
+    test "uncastable stage id returns 404", %{conn: conn} do
+      assert conn |> post(~p"/api/cards", %{title: "x", stage: "not-a-number"}) |> json_response(404)
+    end
+
+    test "unauthenticated POST /api/cards returns 401" do
+      build_conn() |> post(~p"/api/cards", %{title: "x"}) |> json_response(401)
+    end
   end
-```
+  ```
 
-- [x] **Run them, expect pass:** `mix test test/relay_web/live/board_live_realtime_test.exs`
-  (both new tests pass, existing ones stay green).
+- [x] Run the new tests and confirm they fail (no route yet):
+  `mix test test/relay_web/api/card_controller_test.exs` — expect failures like
+  `no route found for POST /api/cards`.
 
-- [x] **Commit:** `feat(board): retitle live on {:board_updated} broadcast (RLY-10)`
+- [x] Add the route. In `lib/relay_web/router.ex`, inside the
+  `scope "/api", RelayWeb.Api` block, add the `post "/cards"` line directly under the
+  `get "/cards"` line so the collection routes sit together:
 
-### Deliverable
+  ```elixir
+    get "/cards", CardController, :index
+    post "/cards", CardController, :create
+    get "/cards/:ref", CardController, :show
+  ```
 
-Renaming a board — from the acting session's settings pane or from any other open session —
-updates `#board-title` on every open `/board` live, with no reload. Fulfils the spec's
-two-session acceptance criterion.
+- [x] Add the `create/2` action and its stage-resolution helper to
+  `lib/relay_web/controllers/api/card_controller.ex`. Insert `create/2` directly after the
+  `index/2` action (top of the module, near the other read/collection actions), and add the
+  `resolve_create_stage/2` clauses just above the existing private `get_stage/2` helper so the
+  two stage helpers live together:
+
+  ```elixir
+  def create(conn, params) do
+    board = conn.assigns.current_board
+
+    with {:ok, stage} <- resolve_create_stage(board, params["stage"]),
+         {:ok, card} <- Cards.create_card(stage, params, :agent) do
+      conn
+      |> put_status(:created)
+      |> render(:show, board: board, card: card, timeline: Activity.list_timeline(card))
+    end
+  end
+  ```
+
+  and, above `defp get_stage/2`:
+
+  ```elixir
+  # No stage given -> the board's first stage in position order (Backlog on
+  # the default board). An explicit id that doesn't resolve is a 404 (get_stage
+  # returns nil for uncastable or unknown ids).
+  defp resolve_create_stage(board, nil) do
+    case Boards.list_stages(board) do
+      [stage | _] -> {:ok, stage}
+      [] -> {:error, :invalid_request}
+    end
+  end
+
+  defp resolve_create_stage(board, stage_id) do
+    case get_stage(board, stage_id) do
+      %Schemas.Stage{} = stage -> {:ok, stage}
+      nil -> {:error, :not_found}
+    end
+  end
+  ```
+
+  Note: `Boards` and `Activity` are already aliased at the top of the module; no new aliases
+  are needed.
+
+- [x] Run the tests again and confirm they pass:
+  `mix test test/relay_web/api/card_controller_test.exs` — all green.
+
+- [x] Run `mix precommit` and fix any compile/format/credo/test failures.
+
+**Deliverable:** `POST /api/cards` creates a card via the REST API — 201 with the standard
+card shape on success (title-only → first stage; explicit valid stage honored), 400 on
+missing/blank title, 404 on an unknown/uncastable stage, 401 unauthenticated — all covered by
+tests.
+
+**Commit message:** `feat(api): POST /api/cards to create a card`
 
 ---
 
-## Final verification
+## Task 2: `relay create` CLI command + docs
 
-- [ ] Run the full suite for the touched surface:
-  `mix test test/relay_web/live/board_settings_general_test.exs test/relay_web/live/board_live_realtime_test.exs test/relay_web/live/board_settings_live_test.exs`
-- [ ] Run `mix precommit` and fix any failure before considering the work done.
+Add the `create` command to the live Python CLI (`bin/relay`) and document it in the CLI
+reference table. `bin/relay` has no automated test harness in this repo (it is driven
+manually), so this task's verification is running the argparse parser and a dry help check;
+there is no ExUnit/pytest to write.
 
-## Spec coverage map
+**Files**
+- Modify: `bin/relay` (new `create_card(...)` helper, `cmd_create(...)` handler, argparse registration)
+- Modify: `docs/agent-integration.md` (add a `relay create` row to the CLI reference table)
 
-- General pane in `/board/settings`, name field + Save, persists → **Task 1**.
-- Blank/invalid name rejected with a message; `slug`/`key` never touched → **Task 1** (tests
-  4 & 5) + domain `update_board/2` already on `main`.
-- `#board-title` reflects the new name live in the acting session → **Task 1** save handler
-  re-assigns `@board`, and the acting `/board` session receives `{:board_updated}` → **Task 2**.
-- `#board-title` updates live in other open sessions without reload (MMF 18) → **Task 2**.
-- Existing Stages + API keys panes unchanged → **Task 1** keeps default section Stages and
-  only adds a nav item + pane (regression-checked against the existing settings suites).
+**Interfaces**
 
-## Out of scope (do not implement)
+*Consumes* (existing helpers in `bin/relay`):
+- `api(method, path, body=None)` — makes the authenticated request; raises/`die`s on HTTP error.
+- `resolve_stage_id(name, board=None)` — stage name → id (via `GET /api/board`); `die`s if no such stage.
+- `read_arg(text)` — resolves `-` (stdin) / `@path` (file) / literal; used by `describe`.
+- `print_card(c)` and `emit(args, data, human)` — render a card struct to the console (or JSON with `--json`).
+- The `POST /api/cards` endpoint from Task 1 (returns `{"data": {...card...}}`).
 
-Board URL slug editing, the Danger zone / archive, inline rename from the board header,
-multiple boards, and any board-name history/audit — all deferred to the rest of MMF 19.
+*Produces*:
+- `create_card(title, stage_name=None, description=None, tag=None)` → the created card dict (the `"data"` payload).
+- `relay create TITLE [--stage NAME] [--description TEXT] [--tag TAG] [--json]` subcommand.
+
+**Steps**
+
+- [ ] Add the `create_card` helper to `bin/relay`, alongside the other board mutations
+  (place it directly after the `move(...)` function, before `comment(...)`, in the
+  "board mutations" section). It sends `stage` only when a name is given (server default
+  otherwise), and `description`/`tag` only when provided:
+
+  ```python
+  def create_card(title, stage_name=None, description=None, tag=None):
+      body = {"title": title}
+      if stage_name is not None:
+          body["stage"] = resolve_stage_id(stage_name)
+      if description is not None:
+          body["description"] = description
+      if tag is not None:
+          body["tag"] = tag
+      return api("POST", "/api/cards", body)["data"]
+  ```
+
+- [ ] Add the `cmd_create` handler to `bin/relay`, in the "CLI commands" section (place it
+  after `cmd_card`, before `_simple`). `--description` honors `read_arg` (`@file` / `-`
+  stdin), consistent with `describe`; on success it prints the card via `print_card`
+  (or JSON with `--json`), like `card`:
+
+  ```python
+  def cmd_create(args):
+      card = create_card(
+          args.title,
+          stage_name=args.stage,
+          description=read_arg(args.description) if args.description is not None else None,
+          tag=args.tag,
+      )
+      print(json.dumps(card, indent=2)) if args.json else print_card(card)
+  ```
+
+- [ ] Register the `create` subcommand in `build_parser`. The shared `add(...)` helper only
+  supports positional args + `--json`, so register `create` explicitly (like `watch` does),
+  right after the `add("card", ...)` line:
+
+  ```python
+      c = add("create", cmd_create, "title", json_flag=True)
+      c.add_argument("--stage")
+      c.add_argument("--description")
+      c.add_argument("--tag")
+  ```
+
+  (`add(...)` already adds the `title` positional, wires `--json`, and sets
+  `func=cmd_create`; the three `add_argument` calls add the optional flags, which default to
+  `None` when omitted — matching the `is not None` guards above.)
+
+- [ ] Verify the parser wiring without hitting the API. Run:
+  `python3 bin/relay create --help`
+  and confirm the usage line shows `create [--stage STAGE] [--description DESCRIPTION]
+  [--tag TAG] [--json] title`. Also run `python3 -c "import ast; ast.parse(open('bin/relay').read())"`
+  to confirm the file still parses.
+
+- [ ] (Optional, if `RELAY_URL`/`RELAY_API_KEY` are set to a running dev server) Smoke it
+  end-to-end: `./bin/relay create "Smoke test card" --tag demo` should print the new card,
+  and `./bin/relay board` should show it in the first stage. Skip if no server is available —
+  Task 1's ExUnit tests already prove the endpoint.
+
+- [ ] Add a row to the CLI reference table in `docs/agent-integration.md`, directly under the
+  `bin/relay card RLY-12` row (line ~37):
+
+  ```
+  | `bin/relay create "Fix login" --stage Backlog` | Create a new card (title; optional `--stage`/`--description`/`--tag`) |
+  ```
+
+- [ ] Update the `bin/relay` module docstring usage summary (the `"""..."""` header near the
+  top, around lines 13–19) to mention `create` so `--help`/the header stays accurate. Add it
+  next to `describe`, e.g. change the `describe` usage line to include create:
+
+  ```
+    relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF Q
+  ```
+
+  (Keep the existing columns readable; the exact layout is cosmetic — just ensure `create`
+  appears in the header.)
+
+- [ ] Run `mix precommit` to confirm nothing in the Elixir suite regressed (the CLI change is
+  Python-only, but precommit is the project's required green gate).
+
+**Deliverable:** `bin/relay create TITLE [--stage NAME] [--description TEXT] [--tag TAG]
+[--json]` creates a card through the REST API and prints it; the command is documented in the
+`docs/agent-integration.md` CLI reference table.
+
+**Commit message:** `feat(cli): relay create command for POST /api/cards`
