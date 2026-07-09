@@ -1293,35 +1293,6 @@ defmodule RelayWeb.CoreComponents do
                   read_class="min-h-16 p-1 text-sm leading-relaxed"
                 />
               </section>
-              <section :if={@card.spec} class="space-y-2">
-                <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                  Spec
-                </h4>
-                <div
-                  id={"#{@id}-spec-view"}
-                  class="md rounded-lg border border-base-300 bg-base-200/40 p-3 text-sm leading-relaxed"
-                >
-                  {Relay.Markdown.to_html(@card.spec)}
-                </div>
-              </section>
-              <details
-                :if={@card.plan}
-                id="card-plan"
-                class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-200/40"
-              >
-                <summary class="collapse-title min-h-0 py-3 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                  Plan
-                </summary>
-                <div class="collapse-content">
-                  <div
-                    id="card-plan-body"
-                    class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
-                  >
-                    {Relay.Markdown.to_html(@card.plan)}
-                  </div>
-                </div>
-              </details>
-
               <section class="space-y-3 border-t border-base-300 pt-4">
                 <h4 class="text-sm font-semibold text-base-content/80">Conversation</h4>
                 <ol id={"#{@id}-conversation"} phx-update="stream" class="space-y-4">
@@ -1378,6 +1349,38 @@ defmodule RelayWeb.CoreComponents do
                   <.button variant="primary" class="btn btn-primary btn-sm">Comment</.button>
                 </.form>
               </section>
+
+              <details
+                :if={@card.spec}
+                id={"#{@id}-spec"}
+                class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-200/40"
+              >
+                <summary class="collapse-title min-h-0 py-3 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+                  Spec
+                </summary>
+                <div class="collapse-content">
+                  <div id={"#{@id}-spec-view"} class="md text-sm leading-relaxed">
+                    {Relay.Markdown.to_html(@card.spec)}
+                  </div>
+                </div>
+              </details>
+              <details
+                :if={@card.plan}
+                id="card-plan"
+                class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-200/40"
+              >
+                <summary class="collapse-title min-h-0 py-3 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+                  Plan
+                </summary>
+                <div class="collapse-content">
+                  <div
+                    id="card-plan-body"
+                    class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
+                  >
+                    {Relay.Markdown.to_html(@card.plan)}
+                  </div>
+                </div>
+              </details>
 
               <section class="space-y-2 border-t border-base-300 pt-4">
                 <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
