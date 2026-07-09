@@ -46,6 +46,16 @@ defmodule Relay.ContextBroadcastsTest do
       refute_receive {:card_upserted, _card}, 100
     end
 
+    test "update_card with branch and plan broadcasts {:card_upserted, card} carrying them",
+         %{backlog: backlog} do
+      {:ok, %Card{id: card_id} = card} = Cards.create_card(backlog, %{title: "Runner"})
+      assert_receive {:card_upserted, %Card{id: ^card_id}}
+
+      {:ok, _card} = Cards.update_card(card, %{branch: "rly-9-live", plan: "Step 1: do it"})
+
+      assert_receive {:card_upserted, %Card{id: ^card_id, branch: "rly-9-live", plan: "Step 1: do it"}}
+    end
+
     test "set_status broadcasts {:card_upserted, card}", %{backlog: backlog} do
       {:ok, %Card{id: card_id} = card} = Cards.create_card(backlog, %{title: "Status"})
 

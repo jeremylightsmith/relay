@@ -84,4 +84,36 @@ defmodule RelayWeb.Api.CardControllerTest do
     assert conn |> patch(~p"/api/cards/#{ref(board, card)}", %{owners: ["user:abc"]}) |> json_response(400)
     assert conn |> patch(~p"/api/cards/#{ref(board, card)}", %{owners: ["user:"]}) |> json_response(400)
   end
+
+  test "PATCH sets branch and plan and GET /api/cards/:ref returns them",
+       %{conn: conn, board: board, stage: stage} do
+    card = insert(:card, stage: stage, title: "Runner card")
+
+    body =
+      conn
+      |> patch(~p"/api/cards/#{ref(board, card)}", %{
+        branch: "rly-21-card-branch-plan",
+        plan: "## Task 1\n\nDo the thing"
+      })
+      |> json_response(200)
+      |> Map.fetch!("data")
+
+    assert body["branch"] == "rly-21-card-branch-plan"
+    assert body["plan"] == "## Task 1\n\nDo the thing"
+
+    fetched = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200) |> Map.fetch!("data")
+    assert fetched["branch"] == "rly-21-card-branch-plan"
+    assert fetched["plan"] == "## Task 1\n\nDo the thing"
+  end
+
+  test "GET /api/board card JSON includes branch and plan", %{conn: conn, stage: stage} do
+    card = insert(:card, stage: stage, title: "Runner card")
+    {:ok, _card} = Cards.update_card(card, %{branch: "rly-21-b", plan: "the plan"})
+
+    body = conn |> get(~p"/api/board") |> json_response(200)
+
+    assert [card_json] = body["cards"]
+    assert card_json["branch"] == "rly-21-b"
+    assert card_json["plan"] == "the plan"
+  end
 end

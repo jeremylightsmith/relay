@@ -110,6 +110,28 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           timeline: story_timeline(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
+      },
+      %Variation{
+        id: :with_branch_and_plan,
+        attributes: %{
+          id: "story-drawer-6",
+          ref: "RLY-12",
+          card: %{
+            story_card()
+            | branch: "rly-12-wire-the-runner",
+              plan:
+                "## Task 1 — Schema + API\n\n- [x] migration: add branch + plan\n- [x] cast in Card.changeset/2\n- [ ] PATCH /api/cards/:ref accepts both\n\n## Task 2 — Drawer\n\n- [ ] collapsed Plan section\n- [ ] branch chip in the rail"
+          },
+          stage_name: "Code",
+          stage_owner: :ai,
+          active_owner: :ai,
+          current_user_id: 1,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 61}, as: :card),
+          timeline: story_timeline(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
       }
     ]
   end
@@ -163,6 +185,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
       status: :working,
       progress: 61,
       blocked_since: nil,
+      branch: nil,
+      plan: nil,
       owners: [
         %{id: 1, actor_type: :user, user_id: 1, user: %{name: "Ada Lovelace", email: "ada@example.com"}},
         %{id: 2, actor_type: :agent, user_id: nil, user: nil}

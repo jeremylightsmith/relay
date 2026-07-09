@@ -842,6 +842,11 @@ defmodule RelayWeb.CoreComponents do
   are `patch` links to `close_patch`, so closing is a URL change the
   parent LiveView handles in `handle_params/3`.
 
+  When the card carries a runner `plan` it renders in a collapsed-by-default
+  "Plan" collapse section below the description; a `branch` renders as a mono
+  chip in the properties rail. Both are read-only here — the runner sets them
+  via the API.
+
   Events emitted (handled by the parent LiveView): `"save_card_title"`
   (form params `card[title]`) on title submit, `"edit_description"` when
   the description view is clicked, `"cancel_description"` on Cancel,
@@ -877,7 +882,7 @@ defmodule RelayWeb.CoreComponents do
   attr :card, :any,
     required: true,
     doc:
-      "a card exposing title, description, tag, status, progress, blocked_since, a loaded owners list, inserted_at, and updated_at"
+      "a card exposing title, description, tag, status, progress, blocked_since, branch, plan, a loaded owners list, inserted_at, and updated_at"
 
   attr :stage_name, :string, required: true
   attr :stage_owner, :atom, values: [:human, :ai], required: true
@@ -1198,6 +1203,22 @@ defmodule RelayWeb.CoreComponents do
               </div>
             </.form>
           </section>
+          <details
+            :if={@card.plan}
+            id="card-plan"
+            class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-200/40"
+          >
+            <summary class="collapse-title min-h-0 py-3 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+              Plan
+            </summary>
+            <div class="collapse-content">
+              <pre
+                id="card-plan-body"
+                class="overflow-x-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-base-content/80"
+                phx-no-format
+              >{@card.plan}</pre>
+            </div>
+          </details>
           <dl
             id={"#{@id}-rail"}
             class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 border-t border-base-300 pt-4 text-sm"
@@ -1316,6 +1337,18 @@ defmodule RelayWeb.CoreComponents do
                   </li>
                 </ul>
               </div>
+            </dd>
+            <dt
+              :if={@card.branch}
+              class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60"
+            >
+              Branch
+            </dt>
+            <dd :if={@card.branch} class="rail-branch">
+              <span id="card-branch" class="badge badge-ghost badge-sm gap-1 font-mono">
+                <.icon name="hero-share" class="size-3" />
+                {@card.branch}
+              </span>
             </dd>
             <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
               Tags

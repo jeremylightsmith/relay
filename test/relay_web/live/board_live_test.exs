@@ -755,6 +755,48 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
+  describe "drawer plan and branch" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      {:ok, card} = Cards.create_card(backlog, %{title: "Wire the runner"})
+      %{board: board, backlog: backlog, card: card}
+    end
+
+    test "a card with a plan renders the Plan section collapsed by default",
+         %{conn: conn, card: card} do
+      {:ok, _card} = Cards.update_card(card, %{plan: "## Task 1\n\n- [ ] do the thing"})
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "details#card-plan .collapse-title", "Plan")
+      assert has_element?(view, "details#card-plan pre#card-plan-body", "do the thing")
+      assert has_element?(view, "details#card-plan pre.whitespace-pre-wrap")
+      # collapsed by default: the <details> must NOT carry the open attribute
+      refute has_element?(view, "details#card-plan[open]")
+    end
+
+    test "a card with a branch renders the branch chip in the rail",
+         %{conn: conn, card: card} do
+      {:ok, _card} = Cards.update_card(card, %{branch: "rly-21-card-branch-plan"})
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-rail #card-branch", "rly-21-card-branch-plan")
+      assert has_element?(view, "#card-branch.font-mono")
+    end
+
+    test "a card with neither branch nor plan renders neither", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer")
+      refute has_element?(view, "#card-plan")
+      refute has_element?(view, "#card-branch")
+    end
+  end
+
   describe "drawer move menu" do
     setup :register_and_log_in_user
 
