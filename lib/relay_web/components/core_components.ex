@@ -977,6 +977,8 @@ defmodule RelayWeb.CoreComponents do
       "whether the open card itself is archived (RLY-4): shows the read-only archived banner + Restore and suppresses the edit/status/move affordances"
 
   def card_drawer(assigns) do
+    assigns = assign(assigns, :sub_task_progress, Cards.sub_task_progress(assigns.card))
+
     ~H"""
     <div id={@id} class="drawer drawer-end" phx-window-keydown="close_drawer" phx-key="escape">
       <input
@@ -1310,6 +1312,118 @@ defmodule RelayWeb.CoreComponents do
                     </button>
                   </div>
                 </.form>
+              </section>
+              <section :if={@card.sub_tasks != []} id="sub-tasks" class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+                    Sub-tasks
+                  </h4>
+                  <span id="sub-tasks-count" class="font-mono text-[10px] text-base-content/60">
+                    {@sub_task_progress.done}/{@sub_task_progress.total}
+                  </span>
+                </div>
+                <div class="h-1 w-full overflow-hidden rounded-full bg-base-300">
+                  <div
+                    class="h-full rounded-full bg-success transition-all"
+                    style={"width:#{sub_task_pct(@sub_task_progress)}%"}
+                  />
+                </div>
+                <ul class="space-y-1">
+                  <li
+                    :for={st <- @card.sub_tasks}
+                    id={"sub-task-#{st.id}"}
+                    class="flex items-start gap-2"
+                  >
+                    <button
+                      type="button"
+                      phx-click="toggle_sub_task"
+                      phx-value-id={st.id}
+                      class={[
+                        "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
+                        if(st.done,
+                          do: "border-success bg-success text-white",
+                          else: "border-base-300 hover:border-success"
+                        )
+                      ]}
+                      aria-label={if(st.done, do: "Mark incomplete", else: "Mark complete")}
+                    >
+                      <.icon :if={st.done} name="hero-check" class="size-3" />
+                    </button>
+                    <span class={[
+                      "text-sm leading-snug",
+                      st.done && "text-base-content/50 line-through"
+                    ]}>
+                      {st.title}
+                    </span>
+                  </li>
+                </ul>
+              </section>
+              <section :if={@card.ai_result} id="ai-result" class="space-y-2">
+                <h4
+                  class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em]"
+                  style="color:oklch(0.55 0.16 295);"
+                >
+                  AI Result
+                </h4>
+                <div
+                  class="space-y-3 rounded-[10px] border p-3.5"
+                  style="border-color:oklch(0.88 0.05 295);background:oklch(0.985 0.01 295);"
+                >
+                  <div
+                    :if={@card.ai_result["summary"]}
+                    id="ai-result-summary"
+                    class="md text-sm leading-relaxed"
+                  >
+                    {Relay.Markdown.to_html(@card.ai_result["summary"])}
+                  </div>
+                  <ul
+                    :if={@card.ai_result["changes"] not in [nil, []]}
+                    id="ai-result-changes"
+                    class="space-y-1"
+                  >
+                    <li
+                      :for={change <- @card.ai_result["changes"]}
+                      class="flex items-start gap-2 text-sm"
+                    >
+                      <.icon name="hero-check" class="mt-0.5 size-4 shrink-0 text-success" />
+                      <span>{change}</span>
+                    </li>
+                  </ul>
+                  <div
+                    :if={@card.ai_result["screens"] not in [nil, []]}
+                    id="ai-result-screens"
+                    class="flex flex-wrap gap-2"
+                  >
+                    <figure :for={screen <- @card.ai_result["screens"]} class="w-32 space-y-1">
+                      <img
+                        :if={screen["url"]}
+                        src={screen["url"]}
+                        alt={screen["caption"] || "Screenshot"}
+                        class="w-full rounded border border-base-300"
+                      />
+                      <div
+                        :if={!screen["url"]}
+                        class="aspect-video w-full rounded bg-gradient-to-br from-primary/30 to-secondary/30"
+                      />
+                      <figcaption
+                        :if={screen["caption"]}
+                        class="text-[11px] leading-tight text-base-content/60"
+                      >
+                        {screen["caption"]}
+                      </figcaption>
+                    </figure>
+                  </div>
+                  <a
+                    :if={@card.ai_result["deploy_url"]}
+                    id="ai-result-deploy"
+                    href={@card.ai_result["deploy_url"]}
+                    target="_blank"
+                    rel="noopener"
+                    class="inline-flex items-center gap-1 text-xs font-medium text-secondary"
+                  >
+                    View deployment ↗
+                  </a>
+                </div>
               </section>
               <section class="space-y-2">
                 <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
@@ -1655,6 +1769,10 @@ defmodule RelayWeb.CoreComponents do
     </div>
     """
   end
+
+  # SUB-TASKS progress bar width; an empty list is 0% (never divides by zero).
+  defp sub_task_pct(%{total: 0}), do: 0
+  defp sub_task_pct(%{done: done, total: total}), do: round(done * 100 / total)
 
   defp status_options do
     [

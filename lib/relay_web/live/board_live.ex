@@ -306,7 +306,7 @@ defmodule RelayWeb.BoardLive do
         compose create_card move_card save_card_title save_card_description
         set_card_status add_owner remove_owner post_comment answer_input
         review_approve review_reject review_mark_done review_pull send_back
-        save_board_name archive_card restore_card
+        save_board_name archive_card restore_card toggle_sub_task
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -564,6 +564,19 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("set_card_status", _params, socket), do: {:noreply, socket}
+
+  # SUB-TASKS panel toggle (RLY-18): flip the item's done flag and refresh the
+  # drawer + board card so the done/total count and stage badge stay in sync.
+  def handle_event("toggle_sub_task", %{"id" => id}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    with %{id: sub_task_id, done: done} <- Enum.find(card.sub_tasks, &(to_string(&1.id) == id)),
+         {:ok, updated} <- Cards.set_sub_task_done(card, sub_task_id, !done) do
+      {:noreply, refresh_card(socket, updated)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("toggle_sub_task", _params, socket), do: {:noreply, socket}
 
   # Owner changes are explicit drawer actions. Adding a :user owner is
   # restricted to the signed-in user (MVP boards are single-human; members
