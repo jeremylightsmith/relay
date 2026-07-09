@@ -1,7 +1,11 @@
 defmodule RelayWeb.Admin.ApiLive do
   @moduledoc """
   Live table of the last 200 inbound API requests (in-memory; cleared on
-  restart). Debug view at `/admin/api`, gated to any authenticated user.
+  restart), scoped to the signed-in user's own boards. Debug view at
+  `/admin/api`, gated to any authenticated user — but each user only ever
+  sees entries whose `board.owner_id` matches their own user id (entries
+  with no attributable board, e.g. rejected/unauthenticated requests, are
+  shown to no one).
 
   Subscribes to `RelayWeb.ApiLog`'s `"api_log"` topic and appends new entries
   to a LiveView stream; each row expands (client-side, via `JS.toggle`) to show
@@ -15,16 +19,26 @@ defmodule RelayWeb.Admin.ApiLive do
   def mount(_params, _session, socket) do
     if connected?(socket), do: ApiLog.subscribe()
 
+    user_id = socket.assigns.current_scope.user.id
+
     {:ok,
      socket
      |> assign(:page_title, "API requests")
-     |> stream(:requests, ApiLog.list())}
+     |> assign(:user_id, user_id)
+     |> stream(:requests, Enum.filter(ApiLog.list(), &own?(&1, user_id)))}
   end
 
   @impl true
   def handle_info({:api_log, entry}, socket) do
-    {:noreply, stream_insert(socket, :requests, entry, at: 0)}
+    if own?(entry, socket.assigns.user_id) do
+      {:noreply, stream_insert(socket, :requests, entry, at: 0)}
+    else
+      {:noreply, socket}
+    end
   end
+
+  defp own?(%{board: %{owner_id: owner_id}}, user_id), do: owner_id == user_id
+  defp own?(_entry, _user_id), do: false
 
   @impl true
   def render(assigns) do
@@ -33,7 +47,7 @@ defmodule RelayWeb.Admin.ApiLive do
       <div class="mx-auto max-w-5xl px-4 py-8">
         <h1 class="text-2xl font-semibold">API requests</h1>
         <p class="mt-1 text-sm text-base-content/60">
-          Live view of the last 200 inbound API requests. In-memory only — cleared on restart.
+          Live view of the last 200 inbound API requests to your boards. In-memory only — cleared on restart.
         </p>
 
         <div

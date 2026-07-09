@@ -5,8 +5,9 @@ defmodule RelayWeb.Plugs.ApiLogger do
   so rejected (401) requests are captured too.
 
   Records a monotonic start, then via `register_before_send/2` computes the
-  duration and reads the final status + authenticated board. The Authorization
-  header/token is never recorded.
+  duration and reads the final status + authenticated board (including its
+  `owner_id`, so `RelayWeb.Admin.ApiLive` can scope the view to the signed-in
+  user's own boards). The Authorization header/token is never recorded.
   """
   import Plug.Conn
 
@@ -38,7 +39,7 @@ defmodule RelayWeb.Plugs.ApiLogger do
 
   defp board_info(conn) do
     case conn.assigns[:current_board] do
-      %{name: name, key: key} -> %{name: name, key: key}
+      %{name: name, key: key, owner_id: owner_id} -> %{name: name, key: key, owner_id: owner_id}
       _ -> nil
     end
   end

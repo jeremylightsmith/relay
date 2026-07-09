@@ -43,18 +43,36 @@ defmodule RelayWeb.Admin.ApiLiveTest do
       assert html =~ "No API requests recorded yet"
     end
 
-    test "renders recorded requests", %{conn: conn} do
-      ApiLog.record(sample(%{path: "/api/cards/RLY-9", status: 200}))
+    test "renders recorded requests for a board the user owns", %{conn: conn, user: user} do
+      ApiLog.record(
+        sample(%{
+          path: "/api/cards/RLY-9",
+          status: 200,
+          board: %{name: "My board", key: "RLY", owner_id: user.id}
+        })
+      )
+
       _ = :sys.get_state(ApiLog)
 
       {:ok, _view, html} = live(conn, ~p"/admin/api")
       assert html =~ "/api/cards/RLY-9"
     end
 
-    test "appends a new request live on a PubSub broadcast", %{conn: conn} do
+    test "appends a new request live on a PubSub broadcast for a board the user owns", %{
+      conn: conn,
+      user: user
+    } do
       {:ok, view, _html} = live(conn, ~p"/admin/api")
 
-      ApiLog.record(sample(%{method: "POST", path: "/api/cards/RLY-9/move", status: 201}))
+      ApiLog.record(
+        sample(%{
+          method: "POST",
+          path: "/api/cards/RLY-9/move",
+          status: 201,
+          board: %{name: "My board", key: "RLY", owner_id: user.id}
+        })
+      )
+
       # Synchronize with the (separate) ApiLog process and the LiveView process
       # so the broadcast is guaranteed to be applied before we render — avoids
       # a race between the async cast/broadcast and this assertion.
@@ -62,6 +80,51 @@ defmodule RelayWeb.Admin.ApiLiveTest do
       _ = :sys.get_state(view.pid)
 
       assert render(view) =~ "/api/cards/RLY-9/move"
+    end
+
+    test "does not render another user's board requests", %{conn: conn} do
+      other_user = insert(:user)
+
+      ApiLog.record(
+        sample(%{
+          path: "/api/cards/OTH-1",
+          status: 200,
+          board: %{name: "Other board", key: "OTH", owner_id: other_user.id}
+        })
+      )
+
+      _ = :sys.get_state(ApiLog)
+
+      {:ok, _view, html} = live(conn, ~p"/admin/api")
+      refute html =~ "/api/cards/OTH-1"
+      assert html =~ "No API requests recorded yet"
+    end
+
+    test "does not render requests with no attributable board", %{conn: conn} do
+      ApiLog.record(sample(%{path: "/api/board", status: 401, board: nil}))
+      _ = :sys.get_state(ApiLog)
+
+      {:ok, _view, html} = live(conn, ~p"/admin/api")
+      refute html =~ "/api/board"
+      assert html =~ "No API requests recorded yet"
+    end
+
+    test "does not append another user's board request received live", %{conn: conn} do
+      other_user = insert(:user)
+      {:ok, view, _html} = live(conn, ~p"/admin/api")
+
+      ApiLog.record(
+        sample(%{
+          path: "/api/cards/OTH-2",
+          status: 200,
+          board: %{name: "Other board", key: "OTH", owner_id: other_user.id}
+        })
+      )
+
+      _ = :sys.get_state(ApiLog)
+      _ = :sys.get_state(view.pid)
+
+      refute render(view) =~ "/api/cards/OTH-2"
     end
   end
 end

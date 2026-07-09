@@ -33,7 +33,7 @@ defmodule RelayWeb.Plugs.ApiLoggerTest do
     assert entry.status == 200
     assert entry.method == "GET"
     assert is_integer(entry.duration_ms)
-    assert entry.board == %{name: board.name, key: board.key}
+    assert entry.board == %{name: board.name, key: board.key, owner_id: board.owner_id}
   end
 
   test "records a rejected (401) API request with no board", %{conn: conn} do
