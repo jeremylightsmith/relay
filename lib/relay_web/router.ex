@@ -42,6 +42,7 @@ defmodule RelayWeb.Router do
     get "/", PageController, :home
     get "/privacy", PageController, :privacy
     get "/terms", PageController, :terms
+    get "/docs/api", DocsController, :api
     delete "/logout", AuthController, :delete
 
     # In test, RelayWeb.LiveAcceptance must run first so the auth hook's DB query
