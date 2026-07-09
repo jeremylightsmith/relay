@@ -26,6 +26,7 @@ defmodule RelayWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
+    plug RelayWeb.Plugs.ApiLogger
   end
 
   pipeline :api_auth do
