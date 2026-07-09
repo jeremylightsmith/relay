@@ -258,6 +258,23 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       assert has_element?(view, "#timeline-comment-#{comment.id} .timeline-comment-body", "From the agent")
       assert has_element?(view, "#timeline-comment-#{comment.id} .timeline-author", "Relay AI")
     end
+
+    test "an API branch/plan update refreshes another session's open drawer",
+         %{conn: conn, backlog: backlog, token: token} do
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Runner card"})
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+      refute has_element?(view, "#card-plan")
+
+      assert token
+             |> api_conn()
+             |> patch(~p"/api/cards/RLY-1", %{branch: "rly-9-live", plan: "Step 1: do it"})
+             |> json_response(200)
+
+      assert has_element?(view, "#card-drawer-rail #card-branch", "rly-9-live")
+      assert has_element?(view, "details#card-plan pre#card-plan-body", "Step 1: do it")
+      refute has_element?(view, "details#card-plan[open]")
+    end
   end
 
   describe "stage configuration changes reflect on open boards (MMF 12)" do
