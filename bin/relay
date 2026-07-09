@@ -47,6 +47,20 @@ def log(msg):
     print(f"[relay] {msg}", flush=True)
 
 
+def banner(lines):
+    """Print a prominent #-rule banner around `lines` in the runner feed.
+
+    Every physical line goes through log(), so it keeps the "[relay] " prefix and
+    interleaves/greps cleanly with the rest of the streamed feed. Fixed 63-wide rule
+    (no terminal-width detection) so logs and CI output stay deterministic."""
+    rule = "#" * 63
+    log("")
+    log(rule)
+    for line in lines:
+        log(f"## {line}")
+    log(rule)
+
+
 # ============================ REST API client ============================
 
 def env(name):
@@ -364,7 +378,10 @@ def work(card, entry, mode):
             "branch": card.get("branch") or f"rly-{n}-{slug(card['title'])}",
             "pr_url": card.get("pr_url") or "",
             "relay": HERE, "url": os.environ.get("RELAY_URL", "")}
-    log(f"→ {ref} '{card['title']}' :: {entry['stage']} ({mode}) — then {entry['done']}")
+    banner([
+        f"→ {ref}  {card['title']}",
+        f"{entry['stage']} ({mode}) — then {entry['done']}",
+    ])
     if DRY:
         for step in entry["action"]:
             run_step(step, vars)
