@@ -25,6 +25,7 @@ defmodule RelayWeb.BoardLive do
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Events
+  alias Schemas.Board
   alias Schemas.Card
   alias Schemas.Stage
 
@@ -465,6 +466,18 @@ defmodule RelayWeb.BoardLive do
 
   def handle_info({:stages_changed, _board_id}, socket) do
     {:noreply, reload_board(socket)}
+  end
+
+  # RLY-10 — a board rename (this or another session): retitle live. The
+  # broadcast board carries no preloaded stages, so merge just the name onto
+  # the already-loaded @board (the open drawer reads @board.stages).
+  def handle_info({:board_updated, %Board{} = board}, socket) do
+    updated = %{socket.assigns.board | name: board.name}
+
+    {:noreply,
+     socket
+     |> assign(:board, updated)
+     |> assign(:page_title, board.name)}
   end
 
   # Groups position-ordered stages under their category, keeping the fixed
