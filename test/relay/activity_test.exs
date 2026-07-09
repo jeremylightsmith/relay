@@ -117,4 +117,76 @@ defmodule Relay.ActivityTest do
       assert Activity.list_timeline(card) == []
     end
   end
+
+  describe "list_conversation/1" do
+    test "returns only comments, oldest first, with users preloaded", %{card: card, user: user} do
+      c1 = insert(:comment, card: card, user: user, body: "First", inserted_at: ~U[2026-07-07 10:00:10Z])
+      _a = insert(:activity, card: card, type: :created, meta: %{}, inserted_at: ~U[2026-07-07 10:00:20Z])
+      c2 = insert(:comment, card: card, body: "Second", inserted_at: ~U[2026-07-07 10:00:30Z])
+
+      conversation = Activity.list_conversation(card)
+
+      assert Enum.all?(conversation, &match?(%Comment{}, &1))
+      assert Enum.map(conversation, & &1.id) == [c1.id, c2.id]
+      assert [first, second] = conversation
+      assert first.user.name == "Ada Lovelace"
+      assert second.user == nil
+    end
+
+    test "breaks ties at the same timestamp by id ascending", %{card: card} do
+      at = ~U[2026-07-07 12:00:00Z]
+      a = insert(:comment, card: card, inserted_at: at)
+      b = insert(:comment, card: card, inserted_at: at)
+
+      assert Enum.map(Activity.list_conversation(card), & &1.id) == [a.id, b.id]
+    end
+
+    test "excludes other cards' comments", %{card: card} do
+      insert(:comment, card: insert(:card))
+      mine = insert(:comment, card: card)
+
+      assert Enum.map(Activity.list_conversation(card), & &1.id) == [mine.id]
+    end
+
+    test "returns [] for a card with no comments", %{card: card} do
+      insert(:activity, card: card, type: :created)
+      assert Activity.list_conversation(card) == []
+    end
+  end
+
+  describe "list_activity/1" do
+    test "returns only activity entries, newest first, with users preloaded", %{card: card, user: user} do
+      a1 = insert(:activity, card: card, type: :created, meta: %{}, inserted_at: ~U[2026-07-07 10:00:00Z])
+      _c = insert(:comment, card: card, body: "hi", inserted_at: ~U[2026-07-07 10:00:10Z])
+      a2 = insert(:activity, card: card, user: user, inserted_at: ~U[2026-07-07 10:00:20Z])
+
+      activity = Activity.list_activity(card)
+
+      assert Enum.all?(activity, &match?(%Schemas.Activity{}, &1))
+      assert Enum.map(activity, & &1.id) == [a2.id, a1.id]
+      assert [newest, oldest] = activity
+      assert newest.user.id == user.id
+      assert oldest.user == nil
+    end
+
+    test "breaks ties at the same timestamp by id descending", %{card: card} do
+      at = ~U[2026-07-07 12:00:00Z]
+      a = insert(:activity, card: card, inserted_at: at)
+      b = insert(:activity, card: card, inserted_at: at)
+
+      assert Enum.map(Activity.list_activity(card), & &1.id) == [b.id, a.id]
+    end
+
+    test "excludes other cards' entries", %{card: card} do
+      insert(:activity, card: insert(:card))
+      mine = insert(:activity, card: card)
+
+      assert Enum.map(Activity.list_activity(card), & &1.id) == [mine.id]
+    end
+
+    test "returns [] for a card with no activity", %{card: card} do
+      insert(:comment, card: card)
+      assert Activity.list_activity(card) == []
+    end
+  end
 end

@@ -85,6 +85,35 @@ defmodule Relay.Activity do
     Enum.sort_by(comments ++ activities, & &1.inserted_at, DateTime)
   end
 
+  @doc """
+  The card's conversation: its comments only, ascending by `inserted_at`
+  (ties break by id), so the newest sits at the bottom — chat convention,
+  with the composer pinned below. Each comment has its `:user` preloaded
+  (`nil` for the agent).
+  """
+  def list_conversation(%Card{id: card_id}) do
+    Repo.all(
+      from c in Comment,
+        where: c.card_id == ^card_id,
+        order_by: [asc: c.inserted_at, asc: c.id],
+        preload: :user
+    )
+  end
+
+  @doc """
+  The card's activity log: its activity entries only, descending by
+  `inserted_at` (ties break by id), so the newest sits at the top. Each
+  entry has its `:user` preloaded (`nil` for the agent).
+  """
+  def list_activity(%Card{id: card_id}) do
+    Repo.all(
+      from a in Schemas.Activity,
+        where: a.card_id == ^card_id,
+        order_by: [desc: a.inserted_at, desc: a.id],
+        preload: :user
+    )
+  end
+
   # MMF 18: announce the new timeline entry to every open board session.
   # Receivers apply the payload struct directly (no DB re-read), so this
   # is safe even when the log happens inside a caller's transaction.
