@@ -139,6 +139,25 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       assert has_element?(view_b, "#stage-strip-#{backlog.id} .stage-count", "0")
       assert has_element?(view_b, "#stage-col-2-cards .board-card", "Last one")
     end
+
+    test "a board rename elsewhere retitles the board live in another session",
+         %{conn: conn, board: board} do
+      {:ok, view_b, _html} = live(conn, ~p"/board")
+
+      {:ok, _board} = Boards.update_board(board, %{"name" => "Relayboard HQ"})
+
+      assert has_element?(view_b, "#board-title", "Relayboard HQ")
+    end
+
+    test "a rename from the settings General pane retitles an open board session",
+         %{conn: conn} do
+      {:ok, view_settings, _html} = live(conn, ~p"/board/settings?section=general")
+      {:ok, view_board, _html} = live(conn, ~p"/board")
+
+      view_settings |> form("#general-form", board: %{name: "From settings"}) |> render_submit()
+
+      assert has_element?(view_board, "#board-title", "From settings")
+    end
   end
 
   describe "board scoping" do

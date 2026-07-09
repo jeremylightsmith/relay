@@ -273,7 +273,7 @@ driven from the settings General pane built in Task 1).
 
 ### Steps
 
-- [ ] **Write the failing tests.** Append two tests inside the existing
+- [x] **Write the failing tests.** Append two tests inside the existing
   `describe "two sessions on the same board"` block in
   `test/relay_web/live/board_live_realtime_test.exs` (its `setup` already provides
   `%{board: board, backlog: backlog, spec: spec}`). The second test also uses
@@ -300,11 +300,11 @@ driven from the settings General pane built in Task 1).
     end
 ```
 
-- [ ] **Run them, expect failure:** `mix test test/relay_web/live/board_live_realtime_test.exs`
+- [x] **Run them, expect failure:** `mix test test/relay_web/live/board_live_realtime_test.exs`
   (the new tests fail — `BoardLive` ignores `{:board_updated, _}`, so `#board-title` keeps the
   old name).
 
-- [ ] **Alias `Schemas.Board`.** In `lib/relay_web/live/board_live.ex` the alias block has
+- [x] **Alias `Schemas.Board`.** In `lib/relay_web/live/board_live.ex` the alias block has
   `alias Schemas.Card` / `alias Schemas.Stage` but no `Board`. Add it in sorted position
   (before `Schemas.Card`) so Styler is satisfied:
 
@@ -314,7 +314,7 @@ driven from the settings General pane built in Task 1).
   alias Schemas.Stage
 ```
 
-- [ ] **Add the `handle_info/2` clause.** Place it with the other `{:...}` broadcast handlers
+- [x] **Add the `handle_info/2` clause.** Place it with the other `{:...}` broadcast handlers
   (e.g. right after the `handle_info({:stages_changed, _board_id}, socket)` clause). Merge
   only `name` onto the loaded board so the drawer's `@board.stages` (still preloaded) is
   never replaced by an unloaded association:
@@ -333,10 +333,10 @@ driven from the settings General pane built in Task 1).
   end
 ```
 
-- [ ] **Run them, expect pass:** `mix test test/relay_web/live/board_live_realtime_test.exs`
+- [x] **Run them, expect pass:** `mix test test/relay_web/live/board_live_realtime_test.exs`
   (both new tests pass, existing ones stay green).
 
-- [ ] **Commit:** `feat(board): retitle live on {:board_updated} broadcast (RLY-10)`
+- [x] **Commit:** `feat(board): retitle live on {:board_updated} broadcast (RLY-10)`
 
 ### Deliverable
 
