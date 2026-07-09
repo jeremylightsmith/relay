@@ -1,8 +1,13 @@
 // Autonomous execution engine for an approved repo-root plan.md, run entirely on the
 // Claude Code subscription. Invoked by the /exec-plan command.
 //
-//   manager loop (pick → implement(TDD) → spec review → quality review → mark),
+//   manager loop (pick → sync→origin/main → implement(TDD) → spec review → quality review → mark),
 //   then mix precommit, then a whole-branch review with a bounded fix loop.
+//
+// Each cycle first keeps the branch current with origin/main: a cheap haiku `sync` agent
+// detects drift (a no-op in the common case) and only on a real conflict spawns a sonnet
+// `rebaser` agent to resolve it; if that can't be done safely the run halts with status
+// "rebase-conflict" and the branch is left un-mangled (rebase aborted).
 //
 // Every agent() is a *fresh, context-isolated* subagent that shares only the repo
 // working tree. So state (task name, reviewer findings) is threaded through the prompt
@@ -71,6 +76,23 @@ const IMPL = {
   },
 }
 
+const SYNC = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['result', 'detail'],
+  properties: {
+    result: {
+      type: 'string',
+      enum: ['clean', 'conflict', 'skip'],
+      description: 'clean = branch is current with origin/main (no-op or clean rebase). conflict = a rebase would conflict (aborted; rebaser must resolve). skip = could not fetch (offline / no remote); sync skipped, run proceeds.',
+    },
+    detail: {
+      type: 'string',
+      description: 'On conflict: the conflicting file list + short summary (or the fact that uncommitted tracked changes were present). Else: one-line note.',
+    },
+  },
+}
+
 const SMOKE = {
   type: 'object',
   additionalProperties: false,
@@ -106,6 +128,7 @@ phase('Execute')
 let allDone = false
 let stalled = null
 let blocked = null
+let rebaseConflict = null
 
 for (let cycle = 1; cycle <= MAX_CYCLES && !allDone; cycle++) {
   const picked = await agent(
@@ -116,6 +139,39 @@ for (let cycle = 1; cycle <= MAX_CYCLES && !allDone; cycle++) {
   )
   if (!picked || picked.all_done) { allDone = true; break }
   log(`Task ${cycle}: ${picked.task}`)
+
+  // --- keep the branch current with origin/main: cheap detect, escalate real conflicts ---
+  // origin/main rarely moves between two tasks of one run, so the common case is one no-op
+  // haiku call. Only a real conflict spawns the (sonnet) rebaser.
+  const sync = await agent(
+    'You are a mechanical git sync step for an autonomous feature branch. Keep this branch ' +
+    'current with `origin/main`. Do EXACTLY this, in order, and NEVER resolve a conflict yourself:\n' +
+    '1. `git fetch origin main` (best-effort). If it fails (offline / no remote), return result:"skip".\n' +
+    '2. If `git rev-list HEAD..origin/main` is EMPTY (origin/main has no commits absent from HEAD), ' +
+    'return result:"clean" and do nothing else — this is the overwhelmingly common case.\n' +
+    '3. If `git status --porcelain` shows any uncommitted TRACKED changes, do NOT stash or guess: ' +
+    'return result:"conflict" with that fact in detail.\n' +
+    '4. Otherwise run `git rebase origin/main`. If it completes with no conflicts, return result:"clean".\n' +
+    '5. On conflict, run `git rebase --abort` (leave the branch untouched) and return result:"conflict" ' +
+    'with the conflicting file list + a short summary in detail.\n' +
+    'You DETECT only — you never resolve. Return the structured result.',
+    { schema: SYNC, phase: 'Execute', model: 'haiku', label: `sync #${cycle}` },
+  )
+  if (sync && sync.result === 'conflict') {
+    const rebase = await agent(
+      role('rebaser',
+        'The cheap sync step detected a conflict rebasing this branch onto origin/main ' +
+        '(already fetched). Detail from sync:\n' + (sync.detail || '(none)') +
+        '\n\nPerform the rebase, resolve every conflict preserving both intents, and leave the ' +
+        'branch green (`mix precommit`). If you cannot, `git rebase --abort` and report failure.'),
+      { agentType: 'general-purpose', model: 'sonnet', schema: VERDICT, phase: 'Execute', effort: 'high', label: `rebase #${cycle}` },
+    )
+    if (!rebase || !rebase.pass) {
+      rebaseConflict = { conflictTask: picked.task, detail: (rebase && rebase.findings) || 'Rebaser failed to return a verdict.' }
+      log(`⛔ rebase-conflict before: ${picked.task}`)
+      break
+    }
+  }
 
   // implement → spec → quality, looping back to implement on any Fix.
   // Prompts/models for these three live in .claude/agents/; we pass only dynamic context.
@@ -162,6 +218,7 @@ for (let cycle = 1; cycle <= MAX_CYCLES && !allDone; cycle++) {
   )
 }
 
+if (rebaseConflict) return { status: 'rebase-conflict', conflictTask: rebaseConflict.conflictTask, detail: rebaseConflict.detail }
 if (blocked) return { status: 'blocked', blockedTask: blocked.task, implementerStatus: blocked.status, detail: blocked.detail }
 if (stalled) return { status: 'stalled', stalledTask: stalled }
 

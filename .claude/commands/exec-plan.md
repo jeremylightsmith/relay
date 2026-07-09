@@ -38,6 +38,12 @@ Read the workflow's returned object and report faithfully:
   (`blockedTask`, `implementerStatus`, `detail`) and the run halted before reviewing it.
   Relay the `detail` verbatim — it says what's stuck and what would unblock — and help the
   user resolve it (provide context, fix the plan, or split the task) before re-launching.
+- `status: "rebase-conflict"` — before starting a task, the branch could not be cleanly
+  rebased onto `origin/main`: the cheap `sync` step found a conflict and the `rebaser` agent
+  could not safely resolve it, so the run halted with the branch left un-mangled (rebase
+  aborted). `conflictTask` names the task it halted before; relay `detail` verbatim, help the
+  human resolve the conflict on the branch (rebase it onto `origin/main` by hand), then
+  relaunch with `resumeFromRunId` to continue.
 - `status: "stalled"` — a task failed review 6 times (`stalledTask`). Report it; do not
   paper over it. Offer `/workflows` logs and the `systematic-debugging` skill.
 - `status: "review-loop-exhausted"` — final review still had blocking findings after 3

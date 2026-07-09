@@ -27,6 +27,17 @@ Complete the current branch's work.
    4. Discard the work (require typed "discard" confirmation)
 5. **Execute** the chosen option. For merge: checkout base, merge, re-run `mix precommit`
    on the result, then delete the feature branch. Never discard without typed confirmation.
+   - **Option 2 (push / create / promote PR) — rebase onto `origin/main` first, before any
+     push.** `git fetch origin main`; if `origin/main` advanced
+     (`git rev-list HEAD..origin/main` is non-empty), `git rebase origin/main` and resolve any
+     conflicts **preserving both intents** (understand the code; don't blindly pick a side),
+     then **re-run `mix precommit`** on the rebased result. If conflicts can't be safely
+     resolved or `mix precommit` can't be made green, `git rebase --abort` and STOP with a
+     report — do NOT push a guessed resolution. Because the rebase rewrote history, the push
+     depends on whether a PR already exists: if one does, the push MUST be
+     `git push --force-with-lease` (a plain push would be rejected and force-with-lease is the
+     deliberate, safe form); a first-time push is a normal `git push -u`. **Local merge-back
+     (option 1) is unaffected — do NOT rebase for option 1.**
    - **If this branch shipped a roadmap MMF, archive it as part of finishing:** `git mv` its
      `docs/roadmap/*.md` into `docs/roadmap/done/`, move its row to the **## Done** table in
      `docs/roadmap/index.md`, and repoint any spec back-links to `done/`.
