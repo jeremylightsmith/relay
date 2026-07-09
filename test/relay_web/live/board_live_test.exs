@@ -847,10 +847,10 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      assert has_element?(view, "#card-drawer-description-edit", "Add a description")
+      assert has_element?(view, "#card-drawer-description-display", "Add a description")
       refute has_element?(view, "#card-drawer-description-form")
 
-      view |> element("#card-drawer-description-edit") |> render_click()
+      view |> element("#card-drawer-description-display") |> render_click()
 
       assert has_element?(
                view,
@@ -863,7 +863,7 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      view |> element("#card-drawer-description-edit") |> render_click()
+      view |> element("#card-drawer-description-display") |> render_click()
 
       view
       |> form("#card-drawer-description-form", card: %{description: "Line one\n\nLine two"})
@@ -880,11 +880,11 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      view |> element("#card-drawer-description-edit") |> render_click()
+      view |> element("#card-drawer-description-display") |> render_click()
       view |> element("#card-drawer-description-cancel") |> render_click()
 
       refute has_element?(view, "#card-drawer-description-form")
-      assert has_element?(view, "#card-drawer-description-edit", "Add a description")
+      assert has_element?(view, "#card-drawer-description-display", "Add a description")
       assert Repo.get!(Card, card.id).description == nil
     end
 
@@ -903,7 +903,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
-      view |> element("#card-drawer-description-edit") |> render_click()
+      view |> element("#card-drawer-description-display") |> render_click()
 
       assert view |> element("#card-drawer-description-input") |> render() =~ "Current text"
     end
@@ -929,9 +929,31 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      view |> element("#card-drawer-description-edit") |> render_click()
+      view |> element("#card-drawer-description-display") |> render_click()
 
       assert has_element?(view, "#card-drawer-description-input[rows='12']")
+    end
+
+    test "the title editor carries the InlineEdit hook wired to its cancel button", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      view |> element("#card-drawer-title-display") |> render_click()
+
+      # The hook consumes Escape (cancel + stopPropagation) so it never reaches
+      # the drawer's phx-window-keydown="close_drawer".
+      assert has_element?(view, ~s(#card-drawer-title-input[phx-hook="InlineEdit"]))
+      assert has_element?(view, ~s(#card-drawer-title-input[data-cancel-id="card-drawer-title-cancel"]))
+      assert has_element?(view, "#card-drawer-title-cancel")
+      # The window-level close binding is still present for a not-editing Escape.
+      assert has_element?(view, "[phx-window-keydown='close_drawer']")
+    end
+
+    test "the composer textareas submit on ⌘/Ctrl+Enter via the SubmitOnCmdEnter hook", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      assert has_element?(view, ~s(#card-drawer-comment-input[phx-hook="SubmitOnCmdEnter"]))
     end
   end
 
