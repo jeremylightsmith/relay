@@ -32,4 +32,10 @@ defmodule RelayWeb.DocsControllerTest do
     assert html =~ "missing_note"
     assert html =~ "invalid_target"
   end
+
+  test "renders the status/error-code table as HTML, not literal markdown pipes", %{conn: conn} do
+    html = conn |> get(~p"/docs/api") |> html_response(200)
+    assert html =~ "<table>"
+    refute html =~ "| --- | --- | --- |"
+  end
 end

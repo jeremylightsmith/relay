@@ -24,6 +24,7 @@ defmodule Relay.Markdown do
     html =
       MDEx.to_html!(markdown,
         render: [unsafe: true],
+        extension: [table: true],
         sanitize: MDEx.Document.default_sanitize_options()
       )
 
