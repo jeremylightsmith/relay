@@ -36,6 +36,18 @@ defmodule RelayWeb.BoardLive do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} wide>
       <div id="board" phx-hook="BoardDnD">
+        <div
+          :if={@read_only?}
+          id="read-only-banner"
+          class="mx-4 mb-2 mt-2 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm sm:mx-5"
+          style="background:oklch(0.97 0.04 85);border:1px solid oklch(0.85 0.09 85);color:oklch(0.42 0.09 85);"
+        >
+          <.icon name="hero-archive-box" class="size-4" />
+          <span class="flex-1">This board is archived and read-only.</span>
+          <button type="button" id="restore-board-button" phx-click="restore_board" class="btn btn-sm">
+            Restore
+          </button>
+        </div>
         <div class="flex items-center justify-between px-4 pb-3 pt-1 sm:px-5">
           <div class="flex items-center gap-2">
             <.link
@@ -104,6 +116,7 @@ defmodule RelayWeb.BoardLive do
                 cards={Map.fetch!(@streams, stream_name(stage.id))}
                 composing={@composing_stage_id == stage.id}
                 compose_form={@compose_form}
+                read_only={@read_only?}
                 sublanes={
                   for sub <- Map.get(@sublanes_by_parent, stage.id, []) do
                     %{
@@ -168,6 +181,7 @@ defmodule RelayWeb.BoardLive do
       socket
       |> assign(:page_title, board.name)
       |> assign(:board, board)
+      |> assign(:read_only?, Board.archived?(board))
       |> assign(:stage_groups, group_stages(board.stages))
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
@@ -191,6 +205,16 @@ defmodule RelayWeb.BoardLive do
   end
 
   @impl true
+  def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket)
+      when event in ~w(compose create_card move_card) do
+    {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
+  end
+
+  def handle_event("restore_board", _params, socket) do
+    {:ok, _board} = Boards.unarchive_board(socket.assigns.board)
+    {:noreply, reload_board(socket)}
+  end
+
   def handle_event("compose", %{"stage-id" => stage_id}, socket) do
     {:noreply,
      socket
@@ -551,12 +575,13 @@ defmodule RelayWeb.BoardLive do
   # broadcast board carries no preloaded stages, so merge just the name onto
   # the already-loaded @board (the open drawer reads @board.stages).
   def handle_info({:board_updated, %Board{} = board}, socket) do
-    updated = %{socket.assigns.board | name: board.name}
+    updated = %{socket.assigns.board | name: board.name, archived_at: board.archived_at}
 
     {:noreply,
      socket
      |> assign(:board, updated)
-     |> assign(:page_title, board.name)}
+     |> assign(:page_title, board.name)
+     |> assign(:read_only?, Board.archived?(updated))}
   end
 
   defp insert_timeline_entry(socket, %Schemas.Comment{} = comment) do
@@ -897,6 +922,7 @@ defmodule RelayWeb.BoardLive do
     socket =
       socket
       |> assign(:board, board)
+      |> assign(:read_only?, Board.archived?(board))
       |> assign(:stage_groups, group_stages(board.stages))
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))

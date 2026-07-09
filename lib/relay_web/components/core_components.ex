@@ -1781,6 +1781,8 @@ defmodule RelayWeb.CoreComponents do
     default: false,
     doc: "render the whole stage as the mockup's 44px dashed strip (still a drop target)"
 
+  attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
+
   def stage_column(assigns) do
     sublanes = Enum.map(assigns.sublanes, &Map.put_new(&1, :collapsed, false))
 
@@ -1854,7 +1856,7 @@ defmodule RelayWeb.CoreComponents do
           </span>
           <span style="flex:1;"></span>
           <button
-            :if={!@composing}
+            :if={!@composing and !@read_only}
             type="button"
             id={"#{@id}-new-card"}
             class="stage-compose"

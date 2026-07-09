@@ -17,6 +17,7 @@ defmodule RelayWeb.BoardSettingsLive do
 
   alias Relay.ApiKeys
   alias Relay.Boards
+  alias Schemas.Board
 
   @categories [:unstarted, :planning, :in_progress, :complete]
 
@@ -121,9 +122,40 @@ defmodule RelayWeb.BoardSettingsLive do
                   </p>
                 </div>
                 <div>
-                  <button type="submit" id="save-general" class="btn btn-primary btn-sm">Save</button>
+                  <button
+                    :if={!@read_only?}
+                    type="submit"
+                    id="save-general"
+                    class="btn btn-primary btn-sm"
+                  >
+                    Save
+                  </button>
                 </div>
               </.form>
+
+              <div
+                :if={!@read_only?}
+                id="danger-zone"
+                style="margin-top:44px;border:1px solid oklch(0.90 0.03 15);border-radius:12px;padding:18px 20px;background:oklch(0.995 0.005 15);max-width:560px;"
+              >
+                <div style="font-size:13px;font-weight:600;color:oklch(0.45 0.14 15);margin-bottom:4px;">
+                  Danger zone
+                </div>
+                <div style="display:flex;align-items:center;gap:16px;">
+                  <span style="font-size:13px;color:oklch(0.50 0.04 15);flex:1;">
+                    Archiving hides this board for everyone. You can restore it later.
+                  </span>
+                  <button
+                    type="button"
+                    id="archive-board-button"
+                    phx-click="archive_board"
+                    data-confirm="Archive this board?"
+                    style="background:oklch(0.98 0.015 15);border:1px solid oklch(0.86 0.06 15);color:oklch(0.52 0.16 15);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;"
+                  >
+                    Archive board
+                  </button>
+                </div>
+              </div>
             </section>
 
             <section :if={@section == :stages} id="stages-pane">
@@ -501,6 +533,7 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:revealed_token, nil)
      |> assign(:lane_nonce, %{})
      |> assign(:general_form, to_form(Boards.change_board(board)))
+     |> assign(:read_only?, Board.archived?(board))
      |> refresh_stages()}
   end
 
@@ -538,6 +571,10 @@ defmodule RelayWeb.BoardSettingsLive do
      |> put_flash(:info, "API key revoked.")}
   end
 
+  def handle_event("save_general", _params, %{assigns: %{read_only?: true}} = socket) do
+    {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
+  end
+
   def handle_event("save_general", %{"board" => board_params}, socket) do
     current = socket.assigns.board
 
@@ -559,6 +596,15 @@ defmodule RelayWeb.BoardSettingsLive do
       {:error, changeset} ->
         {:noreply, assign(socket, :general_form, to_form(changeset))}
     end
+  end
+
+  def handle_event("archive_board", _params, socket) do
+    {:ok, _board} = Boards.archive_board(socket.assigns.board)
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "Board archived.")
+     |> push_navigate(to: ~p"/boards")}
   end
 
   def handle_event("toggle_lane", %{"stage-id" => stage_id, "lane" => lane}, socket) do
