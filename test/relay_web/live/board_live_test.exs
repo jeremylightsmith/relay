@@ -795,6 +795,22 @@ defmodule RelayWeb.BoardLiveTest do
       refute has_element?(view, "#card-plan")
       refute has_element?(view, "#card-branch")
     end
+
+    test "a card with a pr_url renders the PR link in the rail",
+         %{conn: conn, card: card} do
+      {:ok, _card} = Cards.update_card(card, %{pr_url: "https://github.com/acme/relay/pull/42"})
+
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-rail #card-pr[href='https://github.com/acme/relay/pull/42']")
+    end
+
+    test "a card with no pr_url renders no PR link", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/board?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer")
+      refute has_element?(view, "#card-pr")
+    end
   end
 
   describe "drawer move menu" do

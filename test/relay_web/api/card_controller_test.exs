@@ -116,4 +116,32 @@ defmodule RelayWeb.Api.CardControllerTest do
     assert card_json["branch"] == "rly-21-b"
     assert card_json["plan"] == "the plan"
   end
+
+  test "PATCH sets pr_url and GET /api/cards/:ref returns it",
+       %{conn: conn, board: board, stage: stage} do
+    card = insert(:card, stage: stage, title: "Runner card")
+
+    body =
+      conn
+      |> patch(~p"/api/cards/#{ref(board, card)}", %{
+        pr_url: "https://github.com/acme/relay/pull/42"
+      })
+      |> json_response(200)
+      |> Map.fetch!("data")
+
+    assert body["pr_url"] == "https://github.com/acme/relay/pull/42"
+
+    fetched = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200) |> Map.fetch!("data")
+    assert fetched["pr_url"] == "https://github.com/acme/relay/pull/42"
+  end
+
+  test "GET /api/board card JSON includes pr_url", %{conn: conn, stage: stage} do
+    card = insert(:card, stage: stage, title: "Runner card")
+    {:ok, _card} = Cards.update_card(card, %{pr_url: "https://github.com/acme/relay/pull/42"})
+
+    body = conn |> get(~p"/api/board") |> json_response(200)
+
+    assert [card_json] = body["cards"]
+    assert card_json["pr_url"] == "https://github.com/acme/relay/pull/42"
+  end
 end

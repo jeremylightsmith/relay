@@ -844,7 +844,8 @@ defmodule RelayWeb.CoreComponents do
 
   When the card carries a runner `plan` it renders in a collapsed-by-default
   "Plan" collapse section below the description; a `branch` renders as a mono
-  chip in the properties rail. Both are read-only here — the runner sets them
+  chip in the properties rail; a `pr_url` renders as a "Review PR ↗" link chip
+  in the properties rail. All three are read-only here — the runner sets them
   via the API.
 
   Events emitted (handled by the parent LiveView): `"save_card_title"`
@@ -882,7 +883,7 @@ defmodule RelayWeb.CoreComponents do
   attr :card, :any,
     required: true,
     doc:
-      "a card exposing title, description, tag, status, progress, blocked_since, branch, plan, a loaded owners list, inserted_at, and updated_at"
+      "a card exposing title, description, tag, status, progress, blocked_since, branch, plan, pr_url, a loaded owners list, inserted_at, and updated_at"
 
   attr :stage_name, :string, required: true
   attr :stage_owner, :atom, values: [:human, :ai], required: true
@@ -1349,6 +1350,22 @@ defmodule RelayWeb.CoreComponents do
                 <.icon name="hero-share" class="size-3" />
                 {@card.branch}
               </span>
+            </dd>
+            <dt
+              :if={@card.pr_url}
+              class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60"
+            >
+              PR
+            </dt>
+            <dd :if={@card.pr_url} class="rail-pr">
+              <.link
+                id="card-pr"
+                href={@card.pr_url}
+                target="_blank"
+                class="badge badge-ghost badge-sm gap-1 font-mono"
+              >
+                <.icon name="hero-arrow-top-right-on-square" class="size-3" /> Review PR ↗
+              </.link>
             </dd>
             <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
               Tags
