@@ -3,7 +3,7 @@ defmodule RelayWeb.Api.CardJSON do
 
   alias Relay.Cards
 
-  @doc "The shared card shape. `board` supplies the ref + key."
+  @doc "The shared card shape. `board` supplies the ref + key. Heavy plan/spec live on show/1."
   def data(board, card) do
     %{
       id: card.id,
@@ -13,8 +13,6 @@ defmodule RelayWeb.Api.CardJSON do
       status: card.status,
       progress: card.progress,
       branch: card.branch,
-      plan: card.plan,
-      spec: card.spec,
       pr_url: card.pr_url,
       stage_id: card.stage_id,
       owners: Enum.map(card.owners, &owner/1),
@@ -23,7 +21,7 @@ defmodule RelayWeb.Api.CardJSON do
     }
   end
 
-  @doc "The shared stage shape."
+  @doc "The shared stage shape. lane/parent_id/wip_limit let the CLI charge sub-lanes to their parent."
   def stage(stage) do
     %{
       id: stage.id,
@@ -32,7 +30,10 @@ defmodule RelayWeb.Api.CardJSON do
       owner: stage.owner,
       position: stage.position,
       approval_gate: stage.approval_gate,
-      reject_to_stage_id: stage.reject_to_stage_id
+      reject_to_stage_id: stage.reject_to_stage_id,
+      wip_limit: stage.wip_limit,
+      lane: stage.lane,
+      parent_id: stage.parent_id
     }
   end
 
@@ -46,6 +47,8 @@ defmodule RelayWeb.Api.CardJSON do
         board
         |> data(card)
         |> Map.put(:description, card.description)
+        |> Map.put(:plan, card.plan)
+        |> Map.put(:spec, card.spec)
         |> Map.put(:timeline, Enum.map(timeline, &entry/1))
     }
   end

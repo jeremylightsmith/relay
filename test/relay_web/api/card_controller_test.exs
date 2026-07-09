@@ -22,6 +22,24 @@ defmodule RelayWeb.Api.CardControllerTest do
     assert "A" in titles and "B" in titles
   end
 
+  test "GET /api/cards list omits plan and spec", %{conn: conn, stage: stage} do
+    insert(:card, stage: stage, plan: "p", spec: "s")
+
+    [card_json] = conn |> get(~p"/api/cards") |> json_response(200) |> Map.fetch!("data")
+
+    refute Map.has_key?(card_json, "plan")
+    refute Map.has_key?(card_json, "spec")
+  end
+
+  test "GET /api/cards/:ref detail still returns plan and spec", %{conn: conn, board: board, stage: stage} do
+    card = insert(:card, stage: stage, plan: "the plan", spec: "the spec")
+
+    body = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200) |> Map.fetch!("data")
+
+    assert body["plan"] == "the plan"
+    assert body["spec"] == "the spec"
+  end
+
   test "GET /api/cards/:ref returns the card with its timeline", %{conn: conn, board: board, stage: stage} do
     card = insert(:card, stage: stage, title: "Read me", description: "details")
     {:ok, _} = Activity.add_comment(card, %{actor: :agent, body: "hello from AI"})
@@ -106,7 +124,7 @@ defmodule RelayWeb.Api.CardControllerTest do
     assert fetched["plan"] == "## Task 1\n\nDo the thing"
   end
 
-  test "GET /api/board card JSON includes branch and plan", %{conn: conn, stage: stage} do
+  test "GET /api/board card JSON includes branch but omits plan", %{conn: conn, stage: stage} do
     card = insert(:card, stage: stage, title: "Runner card")
     {:ok, _card} = Cards.update_card(card, %{branch: "rly-21-b", plan: "the plan"})
 
@@ -114,7 +132,7 @@ defmodule RelayWeb.Api.CardControllerTest do
 
     assert [card_json] = body["cards"]
     assert card_json["branch"] == "rly-21-b"
-    assert card_json["plan"] == "the plan"
+    refute Map.has_key?(card_json, "plan")
   end
 
   test "PATCH sets pr_url and GET /api/cards/:ref returns it",
@@ -161,12 +179,12 @@ defmodule RelayWeb.Api.CardControllerTest do
     assert fetched["spec"] == "## Design\n\nThe spec body"
   end
 
-  test "GET /api/cards index includes spec", %{conn: conn, stage: stage} do
+  test "GET /api/cards index omits spec", %{conn: conn, stage: stage} do
     card = insert(:card, stage: stage, title: "Spec card")
     {:ok, _card} = Cards.update_card(card, %{spec: "the spec"})
 
     [card_json] = conn |> get(~p"/api/cards") |> json_response(200) |> Map.fetch!("data")
-    assert card_json["spec"] == "the spec"
+    refute Map.has_key?(card_json, "spec")
   end
 
   describe "POST /api/cards" do
