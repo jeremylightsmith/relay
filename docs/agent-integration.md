@@ -41,8 +41,8 @@ Human output by default; add `--json` for machine output. Non-zero exit on any e
 | `bin/relay status RLY-12 working` | Set status |
 | `bin/relay describe RLY-12 @spec.md` | Set the card's **description** (the spec) |
 | `bin/relay needs-input RLY-12 "…"` | Ask the human a question — blocks the card |
-| `bin/relay own / release RLY-12` | Claim for the AI / hand back |
-| `bin/relay approve / reject RLY-12 "note"` | Gate: advance / send back |
+| `bin/relay own RLY-12` / `bin/relay release RLY-12` | Claim for the AI / hand back |
+| `bin/relay approve RLY-12` / `bin/relay reject RLY-12 "note"` | Gate: advance / send back |
 
 Text args accept `-` (stdin) or `@path` (file) for long content (specs, plans).
 
