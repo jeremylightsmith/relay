@@ -1,89 +1,136 @@
-# Working Relay from Claude Code
+# Working Relay from an agent (CLI + autonomous board runner)
 
-Relay is programmable over a small REST API (MMF 09) and a `mix relay` CLI (MMF 10). This guide
-shows how a Claude Code session pulls a card, works it, and hands it back — the "passing the
-baton" loop, driven from the terminal.
+Relay is programmable over a REST API (MMF 09) and a single `bin/relay` tool. That tool is two
+things in one:
 
-> **Scope:** this documents the CLI and gives *example* Claude Code constructs. Wiring your own
-> `.claude/` setup is a copy-and-adapt step — this repo does not ship those as live config.
+- a **CLI** — read the board and drive a card (`bin/relay board`, `move`, `comment`, …);
+- a **board runner** — run with no arguments (`bin/relay watch`) and it watches the board and
+  drives *ready* cards through a pipeline autonomously, "passing the baton" between humans and AI.
+
+`bin/relay` is generic — it knows the REST API and how to watch/dispatch, but **nothing** about
+any particular board's columns, agents, or skills. All of that lives in **`relay_config.json`**.
+This split is deliberate: another team customizes the runner by editing config, not code.
+
+---
 
 ## Setup
 
-1. Mint a board API key: open `/board/settings` in Relay → **Generate key** → copy the
-   `relay_…` secret (shown once).
-2. Export the two env vars Claude Code's shell will use:
+1. **Mint a board API key:** in Relay, open `/board/settings` → **API keys** → Generate (shown
+   once). Every write is attributed to the board's AI agent ("Relay AI").
+2. **Configure the environment** the agent's shell uses (e.g. in `.envrc.local`, gitignored):
 
    ```bash
    export RELAY_URL="https://<your-relay-host>"
    export RELAY_API_KEY="relay_xxxxxxxxxxxx_…"
    ```
+3. **Confirm access:** `./bin/relay board` should print your board.
 
-## CLI reference
+`bin/relay` is zero-dependency (Python 3 stdlib only), so it runs anywhere the agent does.
 
-Every command prints human-readable text by default; add `--json` for machine output. Non-zero
-exit on any error (bad env, auth, unknown ref, HTTP error).
+## CLI
+
+Human output by default; add `--json` for machine output. Non-zero exit on any error.
 
 | Command | What it does |
 |---|---|
-| `mix relay board` | The board: stages with their cards |
-| `mix relay card RLY-12` | One card with description + timeline |
-| `mix relay pull` | The next card to work: AI-owned first, else an unclaimed card in an AI stage |
-| `mix relay comment RLY-12 "on it"` | Post a comment (as Relay AI) |
-| `mix relay move RLY-12 Code` | Move the card to a stage (by name) |
-| `mix relay status RLY-12 working` | Set status (`queued`/`working`/`needs_input`/`in_review`/`done`) |
-| `mix relay needs-input RLY-12 "Which region?"` | Flag needs_input + record the question |
-| `mix relay own RLY-12` | Claim the card for the AI |
-| `mix relay release RLY-12` | Clear owners (hand back) |
+| `bin/relay board` | The board: stages with their cards |
+| `bin/relay card RLY-12` | One card: description, plan, branch, timeline |
+| `bin/relay pull` | (advisory) the next ready card per the config |
+| `bin/relay comment RLY-12 "…"` | Post a comment (as Relay AI) |
+| `bin/relay move RLY-12 Code` | Move to a stage (by name, e.g. `"Code:Review"`) |
+| `bin/relay status RLY-12 working` | Set status |
+| `bin/relay describe RLY-12 @spec.md` | Set the card's **description** (the spec) |
+| `bin/relay needs-input RLY-12 "…"` | Ask the human a question — blocks the card |
+| `bin/relay own / release RLY-12` | Claim for the AI / hand back |
+| `bin/relay approve / reject RLY-12 "note"` | Gate: advance / send back |
 
-## The baton loop
+Text args accept `-` (stdin) or `@path` (file) for long content (specs, plans).
 
-```bash
-ref=$(mix relay pull --json | jq -r '.ref')   # find the next AI card
-mix relay own "$ref"                            # take the baton
-mix relay status "$ref" working                 # ...work it...
-mix relay comment "$ref" "Implemented X, tests green"
-mix relay move "$ref" Review                     # hand to a human stage
-mix relay release "$ref"
-```
+## The runner
 
-## Example Claude Code setup (copy & adapt)
+`bin/relay watch` polls the board and, on any change, works the single **rightmost ready** card
+one hop, then re-polls. It is cheap when idle — it fingerprints the board and only spends model
+tokens when there is actual work.
 
-A **skill** that documents the loop for a session — `.claude/skills/work-relay-card/SKILL.md`:
+Reasoning stages run headless Claude (`claude -p --dangerously-skip-permissions --output-format
+stream-json`, streamed as a live feed); mechanical stages (git, deploy) run shell. The pipeline —
+which columns are AI columns, what to run at each, and where finished work goes — is entirely in
+`relay_config.json`. Regenerate a skeleton from your board with `bin/relay layout`.
 
-```markdown
----
-description: Pull a Relay card, do the work, hand it back via the mix relay CLI.
----
+- **Watch it live:** `bin/relay watch` prints a `🤖`/`🔧` play-by-play of each headless step.
+- **One pass:** `bin/relay watch --once`. **Dry run (no tokens, no mutations):** `--dry-run`.
 
-1. `mix relay pull` to get your card (its ref + description).
-2. `mix relay own <ref>` and `mix relay status <ref> working`.
-3. Do the work in the repo (TDD).
-4. `mix relay comment <ref> "<what you did>"`; if blocked, `mix relay needs-input <ref> "<question>"`.
-5. `mix relay move <ref> Review` and `mix relay release <ref>` when done.
-```
+### Auth: subscription vs API tokens
 
-An **agent** that works a single card — `.claude/agents/relay-worker.md`:
+Headless `claude -p` uses whatever authentication the local Claude CLI has. If it is logged into
+a **Claude subscription** (Max includes Claude Code), the runner bills against the subscription —
+**no `ANTHROPIC_API_KEY` needed**. If that env var *is* set, Claude Code uses the metered API
+instead. Subscription **rate limits** are the ceiling; when hit, `claude -p` is throttled (it does
+not silently fall back to paid API). Working one card at a time keeps this manageable.
 
-```markdown
----
-name: relay-worker
-description: Works one Relay card end-to-end from pull to hand-back.
-tools: [Bash, Read, Edit, Write]
 ---
 
-You work exactly one Relay card. Use the `work-relay-card` skill's loop. Never touch a card that
-isn't the one you pulled. Report the final ref + status as your result.
+## Operating invariants
+
+These are the rules the runner relies on. Break one and cards corrupt each other's work. If you
+build your own runner or agents, honor these:
+
+1. **One agent works in a repo directory at a time.** A `git checkout` (or branch/file edit) is
+   *global to the working directory* — two agents on two branches in one directory overwrite each
+   other. Serialize (one card at a time), or give each agent its own **clone or `git worktree`**.
+   Do **not** run the runner and an interactive session in the same working tree at once.
+
+2. **Many cards are in flight, moving back and forth between stages.** A card may be specced, then
+   sit for review, then planned much later, while other cards pass through. So **state must live on
+   the board/card, never in the working tree.** Nothing durable may depend on "what's currently
+   checked out" or a shared repo-root scratch file.
+
+3. **Each card owns its own branch — commit at the end of every step, checkout at the start.**
+   Because the working tree is shared and cards interleave, every step must:
+   - **begin** by `git checkout`-ing the card's branch (restore its context — the card carries its
+     `branch` field for exactly this), and
+   - **end** by committing its work (never leave uncommitted changes for the next card to inherit).
+   A step must be self-contained: it cannot assume the tree is where it left it.
+
+4. **Work travels *with the card*, not in shared repo files.** The **spec** is the card's
+   `description`; the **plan** is the card's `plan` field. A step materializes these into the repo
+   just-in-time (inside the card's branch) and never relies on a shared `plan.md` that another card
+   will clobber. (This is why `Card` has `branch` + `plan` fields, API-read/writable.)
+
+5. **Readiness is positional and prioritized.** A card is *ready* when the column immediately to its
+   right is an AI column (`Next up → Spec`, `Spec:Done → Plan`, `Plan:Done → Code`, `Code:Done →
+   Deploy`). Work **right-to-left** (finish what's furthest along first). Two guards: **respect WIP
+   limits** (don't pull into a full AI column) and **skip blocked cards** (anything in
+   `needs_input`).
+
+6. **Finish a stage by pushing to the next column — Review if it exists, else Done.** A `*:Review`
+   sub-lane is a human checkpoint (the runner stops; a human approves it into `*:Done`); a `*:Done`
+   sub-lane auto-continues (the runner picks it up for the next AI stage). The board's sub-lane
+   layout *is* the human-checkpoint configuration.
+
+7. **On failure, flag the card — never retry-loop.** If a step fails, set the card to `needs_input`
+   with the reason. Because blocked cards are skipped (invariant 5), a flagged card is not retried
+   until a human clears it. Idempotent, no infinite loops.
+
+8. **Ask, don't guess.** If a reasoning stage needs clarification, it calls `bin/relay needs-input`
+   and stops; the human answers in the drawer; the card unblocks and resumes on a later tick.
+   Verification (`mix precommit` + the exec-plan review + the acceptance-smoke "eyes") is baked into
+   the Code stage, so nothing merges unreviewed; Deploy = merge + push, gated on CI going green.
+
+## Customizing (`relay_config.json`)
+
+The config is the whole contract. Per AI stage:
+
+```json
+{ "stage": "Spec", "from": "Next up", "done": "Spec:Review",
+  "action": [ { "claude": "…design and `{relay} describe {ref} @<file>`…" } ] }
 ```
 
-A **workflow** (sketch) that pulls and fans out one worker per available card:
+- `from` — the column a ready card is pulled from; `stage` — the AI column it's moved into;
+  `done` — where to push when finished (`*:Review` = checkpoint, `*:Done` = auto-continue).
+- `action` — ordered steps, each `{ "shell": "…" }` or `{ "claude": "…" }`. Templates available:
+  `{ref} {title} {branch} {stage} {from} {done} {relay} {url}`.
 
-```js
-// .claude/workflows/work-relay-board.js — sketch
-const refs = JSON.parse(await sh("mix relay pull --json")) // extend to list multiple
-await parallel(refs.map(r => () => agent(`Work Relay card ${r.ref}`, { agentType: "relay-worker" })))
-```
-
-## Dogfood
-
-To validate: point the env vars at a real board, run `mix relay pull`, work the card, and hand
-it back — then adapt the examples above into your own `.claude/` setup.
+To honor invariant 3, every `action` should start by checking out `{branch}` and end by
+committing. To honor invariant 4, the Plan step writes to the card's `plan` field and the Code
+step materializes it inside `{branch}`.
