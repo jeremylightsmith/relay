@@ -847,10 +847,10 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      assert has_element?(view, "#card-drawer-description-edit", "Add a description")
+      assert has_element?(view, "#card-drawer-description-display", "Add a description")
       refute has_element?(view, "#card-drawer-description-form")
 
-      view |> element("#card-drawer-description-edit") |> render_click()
+      view |> element("#card-drawer-description-display") |> render_click()
 
       assert has_element?(
                view,
@@ -863,7 +863,7 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      view |> element("#card-drawer-description-edit") |> render_click()
+      view |> element("#card-drawer-description-display") |> render_click()
 
       view
       |> form("#card-drawer-description-form", card: %{description: "Line one\n\nLine two"})
@@ -880,11 +880,11 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      view |> element("#card-drawer-description-edit") |> render_click()
+      view |> element("#card-drawer-description-display") |> render_click()
       view |> element("#card-drawer-description-cancel") |> render_click()
 
       refute has_element?(view, "#card-drawer-description-form")
-      assert has_element?(view, "#card-drawer-description-edit", "Add a description")
+      assert has_element?(view, "#card-drawer-description-display", "Add a description")
       assert Repo.get!(Card, card.id).description == nil
     end
 
@@ -903,7 +903,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
-      view |> element("#card-drawer-description-edit") |> render_click()
+      view |> element("#card-drawer-description-display") |> render_click()
 
       assert view |> element("#card-drawer-description-input") |> render() =~ "Current text"
     end
@@ -929,9 +929,31 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      view |> element("#card-drawer-description-edit") |> render_click()
+      view |> element("#card-drawer-description-display") |> render_click()
 
       assert has_element?(view, "#card-drawer-description-input[rows='12']")
+    end
+
+    test "the title editor carries the InlineEdit hook wired to its cancel button", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      view |> element("#card-drawer-title-display") |> render_click()
+
+      # The hook consumes Escape (cancel + stopPropagation) so it never reaches
+      # the drawer's phx-window-keydown="close_drawer".
+      assert has_element?(view, ~s(#card-drawer-title-input[phx-hook="InlineEdit"]))
+      assert has_element?(view, ~s(#card-drawer-title-input[data-cancel-id="card-drawer-title-cancel"]))
+      assert has_element?(view, "#card-drawer-title-cancel")
+      # The window-level close binding is still present for a not-editing Escape.
+      assert has_element?(view, "[phx-window-keydown='close_drawer']")
+    end
+
+    test "the composer textareas submit on ⌘/Ctrl+Enter via the SubmitOnCmdEnter hook", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      assert has_element?(view, ~s(#card-drawer-comment-input[phx-hook="SubmitOnCmdEnter"]))
     end
   end
 
@@ -1241,6 +1263,66 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert Repo.all(CardOwner) == []
       assert has_element?(view, "#card-drawer-rail .rail-active-worker", "None")
+    end
+  end
+
+  describe "board header rename" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      %{board: Boards.get_or_create_default_board(user)}
+    end
+
+    test "the header name is click-to-edit and opens an editor", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#board-title #board-name-display", board.name)
+      refute has_element?(view, "#board-name-form")
+
+      view |> element("#board-name-display") |> render_click()
+
+      assert has_element?(view, "#board-name-form #board-name-input")
+    end
+
+    test "saving a new name persists it and returns to the read state", %{conn: conn, board: board, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#board-name-display") |> render_click()
+      view |> form("#board-name-form", board: %{name: "Launch board"}) |> render_submit()
+
+      refute has_element?(view, "#board-name-form")
+      assert has_element?(view, "#board-title #board-name-display", "Launch board")
+      assert Boards.get_or_create_default_board(user).name == "Launch board"
+    end
+
+    test "a blank name is rejected inline and nothing changes", %{conn: conn, board: board, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#board-name-display") |> render_click()
+      html = view |> form("#board-name-form", board: %{name: ""}) |> render_submit()
+
+      assert html =~ "should be at least 1 character"
+      assert Boards.get_or_create_default_board(user).name == board.name
+    end
+
+    test "cancel restores the read state without saving", %{conn: conn, board: board, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#board-name-display") |> render_click()
+      view |> element("#board-name-cancel") |> render_click()
+
+      refute has_element?(view, "#board-name-form")
+      assert has_element?(view, "#board-name-display", board.name)
+      assert Boards.get_or_create_default_board(user).name == board.name
+    end
+
+    test "renaming from the header never changes the slug", %{conn: conn, board: board, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#board-name-display") |> render_click()
+      view |> form("#board-name-form", board: %{name: "Renamed"}) |> render_submit()
+
+      assert Boards.get_or_create_default_board(user).slug == board.slug
     end
   end
 

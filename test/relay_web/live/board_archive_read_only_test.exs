@@ -117,7 +117,7 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       events = [
-        {"update_stage", %{"stage_id" => "#{stage.id}", "stage" => %{"name" => "sneaky"}}},
+        {"save_stage", %{"stage_id" => "#{stage.id}", "stage" => %{"name" => "sneaky"}}},
         {"add_stage", %{"category" => "unstarted"}},
         {"delete_stage", %{"stage-id" => "#{stage.id}"}},
         {"toggle_gate", %{"stage-id" => "#{stage.id}"}},

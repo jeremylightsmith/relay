@@ -998,42 +998,20 @@ defmodule RelayWeb.CoreComponents do
                 </span>
                 <span class="drawer-card-ref font-mono text-xs text-base-content/60">{@ref}</span>
               </div>
-              <div
-                :if={!@editing_title}
-                id={"#{@id}-title-display"}
-                role="button"
-                tabindex="0"
-                phx-click="edit_title"
-                class="cursor-text whitespace-pre-wrap break-words rounded-md px-1 text-lg font-semibold leading-[1.3] hover:bg-base-200"
-              >
-                {@card.title}
-              </div>
-              <.form
-                :if={@editing_title}
-                for={@title_form}
-                id={"#{@id}-title-form"}
-                phx-submit="save_card_title"
-              >
-                <.input
-                  field={@title_form[:title]}
-                  type="textarea"
-                  id={"#{@id}-title-input"}
-                  rows="2"
-                  autofocus
-                  class="textarea textarea-bordered w-full text-lg font-semibold leading-[1.3]"
-                />
-                <div class="mt-2 flex items-center gap-2">
-                  <.button variant="primary" class="btn btn-primary btn-sm">Save</.button>
-                  <button
-                    type="button"
-                    id={"#{@id}-title-cancel"}
-                    class="btn btn-ghost btn-sm"
-                    phx-click="cancel_title"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </.form>
+              <.editable_text
+                id={"#{@id}-title"}
+                value={@card.title}
+                editing={@editing_title}
+                form={@title_form}
+                field={:title}
+                edit_event="edit_title"
+                save_event="save_card_title"
+                cancel_event="cancel_title"
+                read_class="whitespace-pre-wrap break-words px-1 text-lg font-semibold leading-[1.3]"
+                input_class="textarea textarea-bordered w-full text-lg font-semibold leading-[1.3]"
+                multiline
+                rows="2"
+              />
             </div>
             <.link
               id={"#{@id}-close"}
@@ -1103,6 +1081,7 @@ defmodule RelayWeb.CoreComponents do
                     placeholder="Type your answer — the AI picks up where it left off…"
                     class="w-full resize-none rounded-[7px] bg-white p-[9px] text-[13px] leading-snug"
                     style="border:1px solid oklch(0.86 0.05 75);color:oklch(0.30 0.02 255);"
+                    phx-hook="SubmitOnCmdEnter"
                   />
                   <button
                     id="needs-input-send"
@@ -1187,6 +1166,7 @@ defmodule RelayWeb.CoreComponents do
                       placeholder="What needs to change? This note goes to the AI…"
                       class="w-full resize-none rounded-[7px] p-[9px] text-[13px] leading-snug"
                       style="border:1px solid oklch(0.90 0.006 255);color:oklch(0.30 0.02 255);background:oklch(0.99 0.002 255);"
+                      phx-hook="SubmitOnCmdEnter"
                     />
                     <p
                       :if={@reject_error}
@@ -1273,6 +1253,7 @@ defmodule RelayWeb.CoreComponents do
                     rows="3"
                     placeholder="What needs to change? This note goes to the AI…"
                     class="textarea textarea-bordered w-full text-[13px]"
+                    phx-hook="SubmitOnCmdEnter"
                   />
                   <p :if={@send_back_error} id="send-back-error" class="text-xs text-error">
                     {@send_back_error}
@@ -1296,50 +1277,21 @@ defmodule RelayWeb.CoreComponents do
                 <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
                   Description
                 </h4>
-                <div
-                  :if={!@editing_description}
-                  id={"#{@id}-description-edit"}
-                  role="button"
-                  tabindex="0"
-                  phx-click="edit_description"
-                  class="min-h-16 cursor-text rounded-lg p-1 hover:bg-base-200"
-                >
-                  <div
-                    :if={@card.description}
-                    id={"#{@id}-description-view"}
-                    class="md text-sm leading-relaxed"
-                  >
-                    {Relay.Markdown.to_html(@card.description)}
-                  </div>
-                  <p :if={!@card.description} class="text-sm italic text-base-content/50">
-                    Add a description…
-                  </p>
-                </div>
-                <.form
-                  :if={@editing_description}
-                  for={@description_form}
-                  id={"#{@id}-description-form"}
-                  phx-submit="save_card_description"
-                >
-                  <.input
-                    field={@description_form[:description]}
-                    type="textarea"
-                    id={"#{@id}-description-input"}
-                    rows="12"
-                    autofocus
-                  />
-                  <div class="flex items-center gap-2">
-                    <.button variant="primary" class="btn btn-primary btn-sm">Save</.button>
-                    <button
-                      type="button"
-                      id={"#{@id}-description-cancel"}
-                      class="btn btn-ghost btn-sm"
-                      phx-click="cancel_description"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </.form>
+                <.editable_text
+                  id={"#{@id}-description"}
+                  value={@card.description}
+                  editing={@editing_description}
+                  form={@description_form}
+                  field={:description}
+                  edit_event="edit_description"
+                  save_event="save_card_description"
+                  cancel_event="cancel_description"
+                  placeholder="Add a description…"
+                  markdown
+                  multiline
+                  rows="12"
+                  read_class="min-h-16 p-1 text-sm leading-relaxed"
+                />
               </section>
               <section :if={@card.spec} class="space-y-2">
                 <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
@@ -1421,6 +1373,7 @@ defmodule RelayWeb.CoreComponents do
                     id={"#{@id}-comment-input"}
                     rows="2"
                     placeholder="Write a comment…"
+                    phx-hook="SubmitOnCmdEnter"
                   />
                   <.button variant="primary" class="btn btn-primary btn-sm">Comment</.button>
                 </.form>
@@ -2094,6 +2047,119 @@ defmodule RelayWeb.CoreComponents do
     <span class={[@name, @class]} />
     """
   end
+
+  @doc """
+  Renders a click-to-edit free-text field — the app-wide paradigm for editing
+  names, titles, and descriptions (RLY-5).
+
+  The read state shows the value (or a muted placeholder when blank) with an
+  editability affordance: a text cursor, a faint hover tint, a `hero-pencil-square`
+  that fades in on hover/focus, and a keyboard focus ring. It is reachable by
+  keyboard (`tabindex="0"`) and opens on click **and** on Enter/Space. The edit
+  state swaps in an input/textarea pre-filled with the current value plus visible
+  Save and Cancel controls.
+
+  The parent LiveView owns the `editing` flag and the `form`; the `InlineEdit`
+  JS hook owns focus, caret-at-end, ⌘/Ctrl+Enter to save, and Escape / click-away
+  to cancel. Pass `multiline` for a textarea (Enter inserts a newline; only
+  ⌘/Ctrl+Enter saves); single-line inputs also save on plain Enter.
+
+  ## Examples
+
+      <.editable_text
+        id="card-drawer-title"
+        value={@card.title}
+        editing={@editing_title}
+        form={@title_form}
+        field={:title}
+        edit_event="edit_title"
+        save_event="save_card_title"
+        cancel_event="cancel_title"
+      />
+  """
+  attr :id, :string, required: true
+  attr :editing, :boolean, default: false
+  attr :value, :string, default: nil
+  attr :placeholder, :string, default: "Add text…"
+  attr :multiline, :boolean, default: false
+  attr :markdown, :boolean, default: false
+  attr :form, :any, default: nil, doc: "the Phoenix form rendered in the edit state"
+  attr :field, :atom, default: nil, doc: "the form field key, e.g. :title"
+  attr :edit_event, :string, required: true
+  attr :save_event, :string, required: true
+  attr :cancel_event, :string, required: true
+  attr :edit_attrs, :map, default: %{}, doc: "extra attrs (e.g. phx-value-*) for the read display"
+  attr :rows, :string, default: "3"
+  attr :read_class, :any, default: nil
+  attr :read_style, :string, default: nil
+  attr :input_class, :any, default: nil
+  slot :hidden, doc: "hidden inputs to include in the save form (e.g. a stage_id)"
+
+  def editable_text(assigns) do
+    ~H"""
+    <div id={@id} class="editable-text">
+      <div
+        :if={!@editing}
+        id={"#{@id}-display"}
+        role="button"
+        tabindex="0"
+        phx-click={@edit_event}
+        phx-hook="InlineEdit"
+        data-inline-role="display"
+        style={@read_style}
+        class={[
+          "group/edit relative cursor-text rounded-md hover:bg-base-200",
+          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary",
+          @read_class
+        ]}
+        {@edit_attrs}
+      >
+        <div :if={@markdown && !editable_blank?(@value)} id={"#{@id}-view"} class="md">
+          {Relay.Markdown.to_html(@value)}
+        </div>
+        <span :if={!@markdown && !editable_blank?(@value)}>{@value}</span>
+        <span :if={editable_blank?(@value)} class="italic text-base-content/50">{@placeholder}</span>
+        <.icon
+          name="hero-pencil-square"
+          class="pointer-events-none absolute right-1 top-1 size-4 opacity-0 transition-opacity group-hover/edit:opacity-60 group-focus-visible/edit:opacity-60"
+        />
+      </div>
+      <.form
+        :if={@editing}
+        for={@form}
+        id={"#{@id}-form"}
+        phx-submit={@save_event}
+        phx-click-away={@cancel_event}
+      >
+        {render_slot(@hidden)}
+        <.input
+          field={@form[@field]}
+          type={if(@multiline, do: "textarea", else: "text")}
+          id={"#{@id}-input"}
+          rows={@multiline && @rows}
+          phx-hook="InlineEdit"
+          data-cancel-id={"#{@id}-cancel"}
+          class={@input_class}
+        />
+        <div class="mt-2 flex items-center gap-2">
+          <.button variant="primary" class="btn btn-primary btn-sm" id={"#{@id}-save"}>Save</.button>
+          <button
+            type="button"
+            id={"#{@id}-cancel"}
+            class="btn btn-ghost btn-sm"
+            phx-click={@cancel_event}
+          >
+            Cancel
+          </button>
+        </div>
+      </.form>
+    </div>
+    """
+  end
+
+  defp editable_blank?(nil), do: true
+  defp editable_blank?(value) when is_binary(value), do: String.trim(value) == ""
+  defp editable_blank?(_), do: false
 
   ## JS Commands
 

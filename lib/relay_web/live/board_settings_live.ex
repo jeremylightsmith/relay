@@ -196,73 +196,88 @@ defmodule RelayWeb.BoardSettingsLive do
                     id={"stage-#{stage.id}-row"}
                     style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:13px;padding:16px 18px;display:flex;flex-direction:column;gap:14px;"
                   >
-                    <form
-                      id={"stage-#{stage.id}-form"}
-                      phx-change="update_stage"
-                      style="display:flex;flex-direction:column;gap:14px;"
-                    >
-                      <input type="hidden" name="stage_id" value={stage.id} />
-                      <div style="display:flex;align-items:center;gap:10px;">
-                        <span
-                          class="stage-owner-swatch"
-                          data-owner={stage.owner}
-                          style={"width:9px;height:9px;border-radius:3px;flex:0 0 auto;background:#{owner_color(stage.owner)};"}
-                        >
-                        </span>
-                        <input
+                    <div style="display:flex;align-items:center;gap:10px;">
+                      <span
+                        class="stage-owner-swatch"
+                        data-owner={stage.owner}
+                        style={"width:9px;height:9px;border-radius:3px;flex:0 0 auto;background:#{owner_color(stage.owner)};"}
+                      >
+                      </span>
+                      <div style="flex:1;">
+                        <.editable_text
                           id={"stage-#{stage.id}-name"}
-                          type="text"
-                          name="stage[name]"
                           value={stage.name}
-                          phx-debounce="300"
-                          style="flex:1;border:none;outline:none;font-size:15px;font-weight:600;letter-spacing:-0.01em;color:oklch(0.26 0.02 255);background:transparent;"
-                        />
-                        <div style="display:flex;align-items:center;gap:2px;">
-                          <button
-                            type="button"
-                            id={"stage-#{stage.id}-up"}
-                            phx-click="reorder_stage"
-                            phx-value-stage-id={stage.id}
-                            phx-value-direction="up"
-                            title="Move up"
-                            style="width:26px;height:26px;border-radius:6px;border:1px solid oklch(0.91 0.006 255);background:oklch(1 0 0);color:oklch(0.50 0.02 255);font-size:12px;padding:0;"
-                          >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            id={"stage-#{stage.id}-down"}
-                            phx-click="reorder_stage"
-                            phx-value-stage-id={stage.id}
-                            phx-value-direction="down"
-                            title="Move down"
-                            style="width:26px;height:26px;border-radius:6px;border:1px solid oklch(0.91 0.006 255);background:oklch(1 0 0);color:oklch(0.50 0.02 255);font-size:12px;padding:0;"
-                          >
-                            ↓
-                          </button>
-                          <button
-                            type="button"
-                            id={"stage-#{stage.id}-delete"}
-                            phx-click="delete_stage"
-                            phx-value-stage-id={stage.id}
-                            data-confirm="Delete this stage?"
-                            title="Delete stage"
-                            style="width:26px;height:26px;border-radius:6px;border:1px solid oklch(0.90 0.03 15);background:oklch(0.98 0.015 15);color:oklch(0.55 0.14 15);font-size:14px;padding:0;margin-left:4px;"
-                          >
-                            ×
-                          </button>
-                        </div>
+                          editing={@editing_stage == {stage.id, "name"}}
+                          form={@stage_form}
+                          field={:name}
+                          edit_event="edit_stage"
+                          cancel_event="cancel_stage"
+                          save_event="save_stage"
+                          edit_attrs={
+                            %{"phx-value-stage-id" => stage.id, "phx-value-field" => "name"}
+                          }
+                          read_style="font-size:15px;font-weight:600;letter-spacing:-0.01em;color:oklch(0.26 0.02 255);"
+                        >
+                          <:hidden>
+                            <input type="hidden" name="stage_id" value={stage.id} />
+                          </:hidden>
+                        </.editable_text>
                       </div>
-                      <input
-                        id={"stage-#{stage.id}-description"}
-                        type="text"
-                        name="stage[description]"
-                        value={stage.description}
-                        placeholder="Describe what happens in this stage…"
-                        phx-debounce="300"
-                        style="border:1px solid oklch(0.92 0.006 255);border-radius:8px;padding:8px 11px;font-size:13px;color:oklch(0.42 0.02 255);background:oklch(0.99 0.002 255);outline:none;"
-                      />
-                    </form>
+                      <div style="display:flex;align-items:center;gap:2px;">
+                        <button
+                          type="button"
+                          id={"stage-#{stage.id}-up"}
+                          phx-click="reorder_stage"
+                          phx-value-stage-id={stage.id}
+                          phx-value-direction="up"
+                          title="Move up"
+                          style="width:26px;height:26px;border-radius:6px;border:1px solid oklch(0.91 0.006 255);background:oklch(1 0 0);color:oklch(0.50 0.02 255);font-size:12px;padding:0;"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          id={"stage-#{stage.id}-down"}
+                          phx-click="reorder_stage"
+                          phx-value-stage-id={stage.id}
+                          phx-value-direction="down"
+                          title="Move down"
+                          style="width:26px;height:26px;border-radius:6px;border:1px solid oklch(0.91 0.006 255);background:oklch(1 0 0);color:oklch(0.50 0.02 255);font-size:12px;padding:0;"
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          id={"stage-#{stage.id}-delete"}
+                          phx-click="delete_stage"
+                          phx-value-stage-id={stage.id}
+                          data-confirm="Delete this stage?"
+                          title="Delete stage"
+                          style="width:26px;height:26px;border-radius:6px;border:1px solid oklch(0.90 0.03 15);background:oklch(0.98 0.015 15);color:oklch(0.55 0.14 15);font-size:14px;padding:0;margin-left:4px;"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                    <.editable_text
+                      id={"stage-#{stage.id}-description"}
+                      value={stage.description}
+                      placeholder="Describe what happens in this stage…"
+                      editing={@editing_stage == {stage.id, "description"}}
+                      form={@stage_form}
+                      field={:description}
+                      edit_event="edit_stage"
+                      cancel_event="cancel_stage"
+                      save_event="save_stage"
+                      edit_attrs={
+                        %{"phx-value-stage-id" => stage.id, "phx-value-field" => "description"}
+                      }
+                      read_style="font-size:13px;color:oklch(0.42 0.02 255);"
+                    >
+                      <:hidden>
+                        <input type="hidden" name="stage_id" value={stage.id} />
+                      </:hidden>
+                    </.editable_text>
                     <%!-- Controls row — OWNER / WIP (MMF 11) / DONE COLUMN (mockup lines ~241-262). --%>
                     <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
                       <div style="display:flex;align-items:center;gap:9px;">
@@ -535,6 +550,8 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:lane_nonce, %{})
      |> assign(:general_form, to_form(Boards.change_board(board)))
      |> assign(:read_only?, Board.archived?(board))
+     |> assign(:editing_stage, nil)
+     |> assign(:stage_form, nil)
      |> refresh_stages()}
   end
 
@@ -573,7 +590,7 @@ defmodule RelayWeb.BoardSettingsLive do
   end
 
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
-        save_general update_stage add_stage delete_stage toggle_gate set_owner
+        save_general edit_stage save_stage add_stage delete_stage toggle_gate set_owner
         toggle_wip bump_wip reorder_stage set_reject_target toggle_lane
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
@@ -625,16 +642,34 @@ defmodule RelayWeb.BoardSettingsLive do
     {:noreply, apply_lane_result(socket, result, stage.id, lane)}
   end
 
-  def handle_event("update_stage", %{"stage_id" => stage_id, "stage" => stage_params}, socket) do
+  def handle_event("edit_stage", %{"stage-id" => stage_id, "field" => field}, socket)
+      when field in ~w(name description) do
+    stage = find_stage(socket, stage_id)
+    value = Map.get(stage, String.to_existing_atom(field))
+
+    {:noreply,
+     socket
+     |> assign(:editing_stage, {stage.id, field})
+     |> assign(:stage_form, to_form(%{field => value}, as: :stage))}
+  end
+
+  def handle_event("cancel_stage", _params, socket) do
+    {:noreply, assign(socket, editing_stage: nil, stage_form: nil)}
+  end
+
+  def handle_event("save_stage", %{"stage_id" => stage_id, "stage" => stage_params}, socket) do
     stage = find_stage(socket, stage_id)
     attrs = Map.take(stage_params, ["name", "description"])
 
     case Boards.update_stage(stage, attrs) do
       {:ok, _stage} ->
-        {:noreply, refresh_stages(socket)}
+        {:noreply,
+         socket
+         |> assign(editing_stage: nil, stage_form: nil)
+         |> refresh_stages()}
 
-      {:error, _changeset} ->
-        {:noreply, socket |> put_flash(:error, "Stage name cannot be blank.") |> refresh_stages()}
+      {:error, changeset} ->
+        {:noreply, assign(socket, :stage_form, to_form(changeset))}
     end
   end
 

@@ -35,8 +35,8 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       assert has_element?(view, "#add-stage-unstarted")
       assert has_element?(view, "#add-stage-in_progress")
       assert has_element?(view, "#add-stage-complete")
-      assert has_element?(view, "#stage-#{code.id}-name[value='Code']")
-      assert has_element?(view, "#stage-#{code.id}-description")
+      assert has_element?(view, "#stage-#{code.id}-name-display", "Code")
+      assert has_element?(view, "#stage-#{code.id}-description-display")
       assert has_element?(view, "#stage-#{code.id}-row .stage-owner-swatch[data-owner='ai']")
     end
 
@@ -79,41 +79,70 @@ defmodule RelayWeb.BoardSettingsStagesTest do
   end
 
   describe "editing stages" do
-    test "renaming persists and shows on a freshly mounted board", %{conn: conn, board: board} do
+    test "the name and description render as click-to-edit read displays", %{conn: conn, board: board} do
       code = stage_named(board, "Code")
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
-      view
-      |> form("#stage-#{code.id}-form", stage: %{name: "Build"})
-      |> render_change()
+      assert has_element?(view, "#stage-#{code.id}-name-display", "Code")
+      assert has_element?(view, "#stage-#{code.id}-description-display")
+      refute has_element?(view, "#stage-#{code.id}-name-form")
+    end
 
+    test "renaming a stage persists on explicit save and shows on the board", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+      view |> element("#stage-#{code.id}-name-display") |> render_click()
+
+      view
+      |> form("#stage-#{code.id}-name-form", stage: %{name: "Build"})
+      |> render_submit()
+
+      refute has_element?(view, "#stage-#{code.id}-name-form")
+      assert has_element?(view, "#stage-#{code.id}-name-display", "Build")
       assert Boards.get_stage(board, code.id).name == "Build"
-      assert has_element?(view, "#stage-#{code.id}-name[value='Build']")
 
       {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
       assert has_element?(board_view, "#stage-strip-#{code.id} h3", "Build")
     end
 
-    test "a blank rename is rejected with a flash and keeps the old name",
-         %{conn: conn, board: board} do
+    test "a blank rename is rejected inline and keeps the old name", %{conn: conn, board: board} do
       code = stage_named(board, "Code")
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
-      html = view |> form("#stage-#{code.id}-form", stage: %{name: ""}) |> render_change()
+      view |> element("#stage-#{code.id}-name-display") |> render_click()
 
-      assert html =~ "Stage name cannot be blank"
+      html =
+        view
+        |> form("#stage-#{code.id}-name-form", stage: %{name: ""})
+        |> render_submit()
+
+      assert html =~ "blank"
       assert Boards.get_stage(board, code.id).name == "Code"
     end
 
-    test "the description input persists", %{conn: conn, board: board} do
+    test "editing the description persists on explicit save", %{conn: conn, board: board} do
       code = stage_named(board, "Code")
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
+      view |> element("#stage-#{code.id}-description-display") |> render_click()
+
       view
-      |> form("#stage-#{code.id}-form", stage: %{description: "Agents write the code"})
-      |> render_change()
+      |> form("#stage-#{code.id}-description-form", stage: %{description: "Agents write the code"})
+      |> render_submit()
 
       assert Boards.get_stage(board, code.id).description == "Agents write the code"
+    end
+
+    test "cancel discards the edit", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+      view |> element("#stage-#{code.id}-name-display") |> render_click()
+      view |> element("#stage-#{code.id}-name-cancel") |> render_click()
+
+      refute has_element?(view, "#stage-#{code.id}-name-form")
+      assert has_element?(view, "#stage-#{code.id}-name-display", "Code")
     end
 
     test "the arrows reorder stages and crossing a band adopts the category",
@@ -166,7 +195,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       assert new_stage.category == :unstarted
       assert new_stage.owner == :human
       assert has_element?(view, "#settings-group-unstarted #stage-#{new_stage.id}-row")
-      assert has_element?(view, "#stage-#{new_stage.id}-name")
+      assert has_element?(view, "#stage-#{new_stage.id}-name-display")
     end
 
     test "delete removes an empty stage", %{conn: conn, board: board} do
