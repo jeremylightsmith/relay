@@ -302,6 +302,20 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("set_card_status", _params, socket), do: {:noreply, socket}
 
+  def handle_event("toggle_sub_task", %{"id" => id}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    with %{id: sub_task_id, done: done} <- Enum.find(card.sub_tasks, &(to_string(&1.id) == id)),
+         {:ok, updated} <- Cards.set_sub_task_done(card, sub_task_id, !done) do
+      {:noreply,
+       socket
+       |> assign(:selected_card, updated)
+       |> stream_insert(stream_name(updated.stage_id), updated)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("toggle_sub_task", _params, socket), do: {:noreply, socket}
+
   # Owner changes are explicit drawer actions. Adding a :user owner is
   # restricted to the signed-in user (MVP boards are single-human; members
   # arrive in MMF 17); anything unresolvable is a silent no-op.
