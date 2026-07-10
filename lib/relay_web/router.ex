@@ -37,6 +37,10 @@ defmodule RelayWeb.Router do
     plug :require_authenticated
   end
 
+  pipeline :require_superadmin_user do
+    plug :require_superadmin
+  end
+
   scope "/", RelayWeb do
     pipe_through :browser
 
@@ -68,14 +72,14 @@ defmodule RelayWeb.Router do
   end
 
   scope "/admin", RelayWeb.Admin do
-    pipe_through [:browser, :require_authenticated_user]
+    pipe_through [:browser, :require_superadmin_user]
 
     live_session :admin,
       on_mount:
         if(Application.compile_env(:relay, :sql_sandbox),
           do: [RelayWeb.LiveAcceptance],
           else: []
-        ) ++ [{RelayWeb.Auth, :require_authenticated}] do
+        ) ++ [{RelayWeb.Auth, :require_superadmin}] do
       live "/api", ApiLive
     end
   end

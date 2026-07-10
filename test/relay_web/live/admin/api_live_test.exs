@@ -29,14 +29,27 @@ defmodule RelayWeb.Admin.ApiLiveTest do
     )
   end
 
+  defp log_in_superadmin(%{conn: conn}) do
+    admin = insert(:user, email: "jeremy.lightsmith@gmail.com")
+    %{conn: log_in_user(conn, admin), user: admin}
+  end
+
   describe "when logged out" do
     test "redirects to the sign-in page", %{conn: conn} do
       assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/admin/api")
     end
   end
 
-  describe "when logged in" do
+  describe "when logged in as a non-superadmin" do
     setup :register_and_log_in_user
+
+    test "is denied and redirected to the sign-in page", %{conn: conn} do
+      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/admin/api")
+    end
+  end
+
+  describe "when logged in as the superadmin" do
+    setup :log_in_superadmin
 
     test "shows an empty state when nothing has been recorded", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/admin/api")

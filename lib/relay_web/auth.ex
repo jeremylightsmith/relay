@@ -32,6 +32,18 @@ defmodule RelayWeb.Auth do
     end
   end
 
+  @doc "Plug: redirects unless the current user is a superadmin (gates /admin)."
+  def require_superadmin(conn, _opts) do
+    if Scope.superadmin?(conn.assigns[:current_scope]) do
+      conn
+    else
+      conn
+      |> put_flash(:error, "You are not authorized to access this page.")
+      |> redirect(to: ~p"/")
+      |> halt()
+    end
+  end
+
   @doc "Renews the session, stores the user id, and redirects to the board."
   def log_in_user(conn, user) do
     conn
@@ -67,6 +79,21 @@ defmodule RelayWeb.Auth do
       socket =
         socket
         |> Phoenix.LiveView.put_flash(:error, "You must sign in to access this page.")
+        |> Phoenix.LiveView.redirect(to: ~p"/")
+
+      {:halt, socket}
+    end
+  end
+
+  def on_mount(:require_superadmin, _params, session, socket) do
+    socket = mount_current_scope(socket, session)
+
+    if Scope.superadmin?(socket.assigns.current_scope) do
+      {:cont, socket}
+    else
+      socket =
+        socket
+        |> Phoenix.LiveView.put_flash(:error, "You are not authorized to access this page.")
         |> Phoenix.LiveView.redirect(to: ~p"/")
 
       {:halt, socket}
