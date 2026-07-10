@@ -24,7 +24,7 @@ defmodule Relay.Events do
   mutation that triggered it.
   """
 
-  use Boundary, deps: []
+  use Boundary, deps: [Relay.BoardWatch]
 
   @pubsub Relay.PubSub
 
@@ -34,12 +34,23 @@ defmodule Relay.Events do
   end
 
   @doc """
-  Broadcasts `event` to every subscriber of `board_id`'s topic.
-  Fire-and-forget: errors are swallowed and `:ok` is always returned.
+  Broadcasts `event` to every subscriber of `board_id`'s topic and bumps the
+  board's version (RLY-12). Fire-and-forget: PubSub and version-bump errors are
+  swallowed and `:ok` is always returned, so neither can fail the mutation that
+  triggered it.
   """
   def broadcast(board_id, event) do
     _ = Phoenix.PubSub.broadcast(@pubsub, topic(board_id), event)
+    _ = bump_version(board_id)
     :ok
+  end
+
+  defp bump_version(board_id) do
+    Relay.BoardWatch.bump(board_id)
+  rescue
+    _ -> :error
+  catch
+    _, _ -> :error
   end
 
   defp topic(board_id), do: "board:#{board_id}"

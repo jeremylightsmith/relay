@@ -13,5 +13,16 @@ defmodule Relay do
 
   use Boundary,
     deps: [Schemas],
-    exports: [Repo, Mailer, Accounts, Activity, ApiKeys, Boards, Cards, Events, Markdown]
+    exports: [
+      Repo,
+      Mailer,
+      Accounts,
+      Activity,
+      ApiKeys,
+      BoardWatch,
+      Boards,
+      Cards,
+      Events,
+      Markdown
+    ]
 end
