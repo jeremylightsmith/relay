@@ -34,17 +34,21 @@ Then invoke the Workflow tool with the committed script:
 The workflow runs in the background; a task-notification arrives when it completes.
 While it runs, the user can watch live progress with `/workflows`.
 
-When the workflow completes (however it ends), delete the transient plan so it never becomes a
-shared file another card clobbers:
-
-    rm -f plan.md
+`plan.md` is also the **only** record of per-task progress (`execute-plan.js` flips each
+task's `- [ ]` to `- [x]` as it completes, and re-reads the file each cycle to pick the next
+unchecked task) — nothing writes progress back to the card. So do NOT delete it unconditionally
+here; whether it survives the run depends on how the run ends (see On completion below).
 
 ## On completion
 Read the workflow's returned object and report faithfully:
 - `status: "ready"` — all tasks done, precommit passed, whole-branch review approved, AND the
   acceptance smoke drove the feature successfully. Surface `smoke.summary` and the
   `smoke.screenshots` paths so the user can eyeball them, then suggest `/finish` to merge /
-  open the PR (the human-gated step).
+  open the PR (the human-gated step). The run is fully done, so now delete the transient plan
+  so it never becomes a shared file another card clobbers:
+
+      rm -f plan.md
+
 - `status: "blocked"` — the implementer escalated `BLOCKED`/`NEEDS_CONTEXT` on a task
   (`blockedTask`, `implementerStatus`, `detail`) and the run halted before reviewing it.
   Relay the `detail` verbatim — it says what's stuck and what would unblock — and help the
@@ -67,9 +71,14 @@ Read the workflow's returned object and report faithfully:
   smoke and what would unblock it (e.g. start the dev server, install the browser), and offer
   to re-run once resolved.
 
+For every status above other than `ready`, **leave `plan.md` in place** — do NOT `rm -f` it.
+It holds the `- [x]` progress `execute-plan.js` tracks, and deleting it would lose every
+completed task's state before the human has a chance to resume.
+
 ## Notes
-- The plan lives on the card; `plan.md` is only a transient materialization exec-plan creates
-  and deletes around the run. Never commit `plan.md`.
+- The plan lives on the card; `plan.md` is only a transient materialization exec-plan creates.
+  It is deleted only on a successful `ready` completion (see On completion above); every other
+  status leaves it in place. Never commit `plan.md`.
 - To resume after an interruption or a script edit: progress is tracked ONLY as `- [x]` boxes
   in the on-disk `plan.md`, never on the card — `execute-plan.js` re-reads `plan.md` each cycle
   and nothing writes progress back to the card. So if `plan.md` still exists in the

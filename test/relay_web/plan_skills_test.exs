@@ -65,5 +65,22 @@ defmodule Relay.PlanSkillsTest do
       assert doc =~ "only re-materialize"
       refute doc =~ "re-materialize `plan.md` from the card and relaunch"
     end
+
+    test "does not delete plan.md unconditionally right after launch, before any status is known",
+         %{doc: doc} do
+      refute doc =~ "however it ends"
+    end
+
+    test "only deletes plan.md on the successful ready completion, after the status is known",
+         %{doc: doc} do
+      {on_completion_idx, _} = :binary.match(doc, "## On completion")
+      {rm_idx, _} = :binary.match(doc, "rm -f plan.md")
+      assert rm_idx > on_completion_idx
+    end
+
+    test "keeps plan.md on every halt status so a resumed run finds its completed-task progress",
+         %{doc: doc} do
+      assert doc =~ "leave `plan.md` in place"
+    end
   end
 end
