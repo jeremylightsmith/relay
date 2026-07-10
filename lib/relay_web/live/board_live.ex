@@ -86,6 +86,16 @@ defmodule RelayWeb.BoardLive do
                 <span style="width:8px;height:8px;border-radius:2px;background:var(--color-primary);"></span>HUMAN
               </span>
             </div>
+            <button
+              type="button"
+              id="archived-cards-button"
+              phx-click="open_archived"
+              class="btn btn-ghost btn-sm gap-1.5"
+              aria-label="Archived cards"
+            >
+              <.icon name="hero-archive-box" class="size-5" />
+              <span class="font-mono text-xs">{@archived_count}</span>
+            </button>
             <.link
               navigate={~p"/board/#{@board.slug}/settings"}
               id="board-settings-link"
@@ -183,6 +193,69 @@ defmodule RelayWeb.BoardLive do
         send_back_targets={send_back_targets(@board, @selected_card)}
         archived={Card.archived?(@selected_card)}
       />
+      <div
+        :if={@archived_open}
+        id="archived-modal"
+        class="modal modal-open"
+        role="dialog"
+        aria-label="Archived cards"
+      >
+        <div class="modal-box max-w-2xl">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold">Archived cards</h3>
+            <button
+              type="button"
+              id="archived-modal-close"
+              phx-click="close_archived"
+              class="btn btn-sm btn-circle btn-ghost"
+              aria-label="Close"
+            >
+              <.icon name="hero-x-mark" class="size-4" />
+            </button>
+          </div>
+          <ul id="archived-list" class="mt-4 divide-y divide-base-200">
+            <li
+              :for={card <- @archived_cards}
+              id={"archived-row-#{card.id}"}
+              class="flex items-center gap-3 py-2.5"
+            >
+              <button
+                type="button"
+                id={"open-archived-card-#{card.id}"}
+                phx-click="open_archived_card"
+                phx-value-ref={Cards.ref(@board, card)}
+                class="min-w-0 flex-1 text-left"
+              >
+                <div class="flex items-baseline gap-2">
+                  <span class="font-mono text-xs text-base-content/60">
+                    {Cards.ref(@board, card)}
+                  </span>
+                  <span class="truncate font-medium">{card.title}</span>
+                </div>
+                <div class="text-xs text-base-content/50">
+                  {drawer_stage_name(card.stage, @board.stages)} · archived {Calendar.strftime(
+                    card.archived_at,
+                    "%b %d, %Y"
+                  )}
+                </div>
+              </button>
+              <button
+                type="button"
+                id={"archived-restore-#{card.id}"}
+                phx-click="restore_card"
+                phx-value-ref={Cards.ref(@board, card)}
+                class="btn btn-sm"
+              >
+                Restore
+              </button>
+            </li>
+            <li :if={@archived_cards == []} class="py-3 text-sm text-base-content/50">
+              No archived cards.
+            </li>
+          </ul>
+        </div>
+        <label class="modal-backdrop" phx-click="close_archived">Close</label>
+      </div>
     </Layouts.app>
     """
   end
@@ -318,6 +391,25 @@ defmodule RelayWeb.BoardLive do
     else
       _ -> {:noreply, socket}
     end
+  end
+
+  def handle_event("open_archived", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:archived_open, true)
+     |> assign(:archived_cards, Cards.list_archived_cards(socket.assigns.board))}
+  end
+
+  def handle_event("close_archived", _params, socket) do
+    {:noreply, assign(socket, :archived_open, false)}
+  end
+
+  # A row click: close the modal and open that card's drawer (URL-driven).
+  def handle_event("open_archived_card", %{"ref" => ref}, socket) do
+    {:noreply,
+     socket
+     |> assign(:archived_open, false)
+     |> push_patch(to: ~p"/board/#{socket.assigns.board.slug}?card=#{ref}")}
   end
 
   # One move path, two entry points (drag-and-drop hook and the drawer's
