@@ -53,4 +53,33 @@ defmodule RelayWeb.Api.BoardControllerTest do
     refute Map.has_key?(card_json, "plan")
     refute Map.has_key?(card_json, "spec")
   end
+
+  describe "GET /api/board/version" do
+    test "returns 200 with an integer version and a matching ETag header", %{conn: conn} do
+      conn = get(conn, ~p"/api/board/version")
+
+      assert %{"version" => version} = json_response(conn, 200)
+      assert is_integer(version)
+      assert [etag] = get_resp_header(conn, "etag")
+      assert etag == Integer.to_string(version)
+    end
+
+    test "the version strictly increases after a board mutation", %{conn: conn, board: board} do
+      before =
+        conn |> get(~p"/api/board/version") |> json_response(200) |> Map.fetch!("version")
+
+      stage = insert(:stage, board: board, name: "Plan", owner: :ai, position: 1)
+      {:ok, _card} = Relay.Cards.create_card(stage, %{title: "New card"})
+
+      after_version =
+        conn |> get(~p"/api/board/version") |> json_response(200) |> Map.fetch!("version")
+
+      assert after_version > before
+    end
+
+    test "an unauthenticated request is rejected with 401" do
+      conn = get(build_conn(), ~p"/api/board/version")
+      assert json_response(conn, 401)
+    end
+  end
 end

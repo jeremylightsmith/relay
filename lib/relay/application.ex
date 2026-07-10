@@ -14,8 +14,7 @@ defmodule Relay.Application do
       {DNSCluster, query: Application.get_env(:relay, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Relay.PubSub},
       RelayWeb.ApiLog,
-      # Start a worker by calling: Relay.Worker.start_link(arg)
-      # {Relay.Worker, arg},
+      Relay.BoardWatch,
       # Start to serve requests, typically the last entry
       RelayWeb.Endpoint
     ]

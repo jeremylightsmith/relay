@@ -86,6 +86,42 @@ defmodule Relay.ApiKeysTest do
     end
   end
 
+  describe "authenticate/1 last_used_at throttling" do
+    test "writes last_used_at when it was never set" do
+      board = insert(:board)
+      {:ok, %{token: token}} = ApiKeys.create_key(board, insert(:user))
+
+      assert {:ok, _board} = ApiKeys.authenticate(token)
+      assert %DateTime{} = ApiKeys.get_key(board).last_used_at
+    end
+
+    test "skips the write when last_used_at is recent" do
+      board = insert(:board)
+      {:ok, %{api_key: key, token: token}} = ApiKeys.create_key(board, insert(:user))
+
+      # 5s ago: inside the 60s throttle window, but far enough from "now" that
+      # this can't accidentally match an unthrottled write's timestamp.
+      recent = DateTime.utc_now() |> DateTime.add(-5, :second) |> DateTime.truncate(:second)
+      key |> Ecto.Changeset.change(last_used_at: recent) |> Repo.update!()
+
+      assert {:ok, _board} = ApiKeys.authenticate(token)
+      assert ApiKeys.get_key(board).last_used_at == recent
+    end
+
+    test "writes last_used_at when the stored value is stale" do
+      board = insert(:board)
+      {:ok, %{api_key: key, token: token}} = ApiKeys.create_key(board, insert(:user))
+
+      stale =
+        DateTime.utc_now() |> DateTime.add(-120, :second) |> DateTime.truncate(:second)
+
+      key |> Ecto.Changeset.change(last_used_at: stale) |> Repo.update!()
+
+      assert {:ok, _board} = ApiKeys.authenticate(token)
+      assert DateTime.after?(ApiKeys.get_key(board).last_used_at, stale)
+    end
+  end
+
   describe "regenerate/1" do
     test "replaces the secret on the same row; the old token stops authenticating" do
       board = insert(:board)
