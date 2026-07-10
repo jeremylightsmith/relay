@@ -1,8 +1,9 @@
 ---
-description: Autonomously execute the approved repo-root plan.md via the Claude Workflow engine.
+description: Autonomously execute a card's plan via the Claude Workflow engine.
 ---
 
-Run the approved `plan.md` to completion using the Claude Workflow engine. Each task is
+Run `/exec-plan <ref>` to completion using the Claude Workflow engine. The card ref comes from
+`$ARGUMENTS`; the plan is read **from the card**, not a durable shared file. Each task is
 TDD-implemented, passed through sequential spec-compliance then code-quality review, and
 committed; then `mix precommit` runs, then a whole-branch review with a bounded fix loop,
 then an **acceptance smoke** that drives the feature end-to-end through the running app
@@ -10,9 +11,9 @@ then an **acceptance smoke** that drives the feature end-to-end through the runn
 The orchestration lives in `.claude/workflows/execute-plan.js`.
 
 ## Preflight — verify BEFORE launching (stop and report if any fails)
-1. **`plan.md` exists at the repo root** with at least one unchecked `- [ ]` task.
-   If missing, stop and tell the user to produce it with `/brainstorm` → `/write-plan`.
-   Do NOT invent a plan.
+1. **The card has a non-empty `plan`.** Read it: `./bin/relay card <ref> --json` (field
+   `plan`). If it is empty, stop and tell the user to produce it with `/brainstorm <ref>` →
+   `/write-plan <ref>`. Do NOT invent a plan.
 2. **Clean-ish working tree on a feature branch** (not `main`). Run `git status` and
    `git branch --show-current`. If on `main`, stop and tell the user to branch first.
    If there are unrelated uncommitted changes, surface them and ask before proceeding.
@@ -21,19 +22,33 @@ The orchestration lives in `.claude/workflows/execute-plan.js`.
    get an explicit go-ahead. ($ARGUMENTS may say "yes"/"go" to skip this confirmation.)
 
 ## Launch
-Invoke the Workflow tool with the committed script:
+`execute-plan.js` reads a repo-root `plan.md` (it is unchanged). Materialize the card's plan
+into that **transient** file just before launching:
+
+    ./bin/relay card <ref> --json | jq -r '.plan // ""' > plan.md
+
+Then invoke the Workflow tool with the committed script:
 
     Workflow({ scriptPath: ".claude/workflows/execute-plan.js" })
 
 The workflow runs in the background; a task-notification arrives when it completes.
 While it runs, the user can watch live progress with `/workflows`.
 
+`plan.md` is also the **only** record of per-task progress (`execute-plan.js` flips each
+task's `- [ ]` to `- [x]` as it completes, and re-reads the file each cycle to pick the next
+unchecked task) — nothing writes progress back to the card. So do NOT delete it unconditionally
+here; whether it survives the run depends on how the run ends (see On completion below).
+
 ## On completion
 Read the workflow's returned object and report faithfully:
 - `status: "ready"` — all tasks done, precommit passed, whole-branch review approved, AND the
   acceptance smoke drove the feature successfully. Surface `smoke.summary` and the
   `smoke.screenshots` paths so the user can eyeball them, then suggest `/finish` to merge /
-  open the PR (the human-gated step).
+  open the PR (the human-gated step). The run is fully done, so now delete the transient plan
+  so it never becomes a shared file another card clobbers:
+
+      rm -f plan.md
+
 - `status: "blocked"` — the implementer escalated `BLOCKED`/`NEEDS_CONTEXT` on a task
   (`blockedTask`, `implementerStatus`, `detail`) and the run halted before reviewing it.
   Relay the `detail` verbatim — it says what's stuck and what would unblock — and help the
@@ -56,8 +71,20 @@ Read the workflow's returned object and report faithfully:
   smoke and what would unblock it (e.g. start the dev server, install the browser), and offer
   to re-run once resolved.
 
+For every status above other than `ready`, **leave `plan.md` in place** — do NOT `rm -f` it.
+It holds the `- [x]` progress `execute-plan.js` tracks, and deleting it would lose every
+completed task's state before the human has a chance to resume.
+
 ## Notes
-- To resume after an interruption or a script edit, relaunch with
+- The plan lives on the card; `plan.md` is only a transient materialization exec-plan creates.
+  It is deleted only on a successful `ready` completion (see On completion above); every other
+  status leaves it in place. Never commit `plan.md`.
+- To resume after an interruption or a script edit: progress is tracked ONLY as `- [x]` boxes
+  in the on-disk `plan.md`, never on the card — `execute-plan.js` re-reads `plan.md` each cycle
+  and nothing writes progress back to the card. So if `plan.md` still exists in the
+  working tree, leave it as-is; only re-materialize it from the card (the `Launch` step above)
+  if it is missing. Re-materializing while it still exists would reset every box to `- [ ]` and
+  re-run already-completed tasks. Then relaunch with
   `Workflow({ scriptPath: ".claude/workflows/execute-plan.js", resumeFromRunId: "<id>" })`.
 - The script does NOT open a PR — that is intentionally the human-gated `/finish` step.
 - Edit `.claude/workflows/execute-plan.js` to change models, review depth, or the loop.

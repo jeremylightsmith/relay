@@ -7,7 +7,7 @@
       "from": "Next up",
       "done": "Spec:Review",
       "action": [
-        { "claude": "You are the AI working Relay card {ref} at the SPEC stage. Read it: {relay} card {ref}. If {relay} card {ref} shows a CHANGES REQUESTED block, treat resolving that feedback as the primary goal of this pass. Design this feature — decide scope, keep it tight. If you genuinely need clarification, ask the human instead of guessing: `{relay} needs-input {ref} \"<your question>\"` then STOP. Otherwise write a concise design spec, save it to a temp file, and set it as the card's spec: `{relay} spec {ref} @<that file>`. Then STOP. Do not touch git or other cards." }
+        { "claude": "You are the AI working Relay card {ref} at the SPEC stage. Run /brainstorm {ref} to completion — headless, no human to dialogue with. It reads the card (honoring any CHANGES REQUESTED block), designs the feature, and writes the spec back to the card, or calls {relay} needs-input {ref} \"<question>\" if it genuinely needs clarification. This is authorized; proceed without asking. Then STOP. Do not touch git or other cards." }
       ]
     },
     {
@@ -15,7 +15,7 @@
       "from": "Spec:Done",
       "done": "Plan:Done",
       "action": [
-        { "claude": "You are the AI working Relay card {ref} at the PLAN stage. Read it: `{relay} card {ref}` — its `spec` field is the approved spec. If {relay} card {ref} shows a CHANGES REQUESTED block, treat resolving that feedback as the primary goal of this pass. Author a full implementation plan following this repo's /write-plan conventions (bite-sized TDD tasks with ACTUAL test + implementation code, no placeholders). Save it to a temp file, then attach it to the card so it travels with the work (not a shared file): `{relay} plan {ref} @<that file>`. Then STOP. Do not touch git or other cards." }
+        { "claude": "You are the AI working Relay card {ref} at the PLAN stage. Run /write-plan {ref} to completion — it reads the approved spec from the card and writes the implementation plan back to the card. This is authorized; proceed without asking. Then STOP. Do not touch git or other cards." }
       ]
     },
     {
@@ -24,9 +24,7 @@
       "done": "Code:Review",
       "action": [
         { "shell": "git fetch origin --prune && git checkout main && git reset --hard origin/main && git checkout -B {branch}" },
-        { "shell": "{relay} card {ref} --json | python3 -c 'import json,sys; sys.stdout.write(json.load(sys.stdin).get(\"plan\") or \"\")' > plan.md && test -s plan.md" },
-        { "claude": "You are the AI working Relay card {ref} at the CODE stage. If {relay} card {ref} shows a CHANGES REQUESTED block, treat resolving that feedback as the primary goal of this pass. Run /exec-plan on the current branch to completion using the repo-root plan.md. This is authorized — proceed without asking for confirmation. Do not merge; exec-plan stops before the human-gated finish." },
-        { "shell": "rm -f plan.md" },
+        { "claude": "You are the AI working Relay card {ref} at the CODE stage. Run /exec-plan {ref} on the current branch to completion — it materializes the plan from the card into a transient plan.md, runs the workflow, and cleans up after itself. This is authorized — proceed without asking for confirmation. Do not merge; exec-plan stops before the human-gated finish." },
         { "shell": "git push -u origin {branch}" },
         { "shell": "url=$(gh pr create --fill --head {branch} --base main) && {relay} branch {ref} {branch} && {relay} pr {ref} \"$url\" && echo \"PR: $url\"" }
       ]

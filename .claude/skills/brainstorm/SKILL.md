@@ -7,6 +7,10 @@ description: Use BEFORE any feature, component, UI, or behavior work, and before
 
 Turn an idea into a fully-formed design through collaborative dialogue.
 
+This skill takes an **optional card ref** as its first argument (`$ARGUMENTS`), e.g.
+`/brainstorm RLY-42`. The **card is the home for this unit of work** — its `spec` field, read
+and written with `./bin/relay`, is where the approved design lives, never a shared repo file.
+
 <HARD-GATE>
 Do NOT write code, scaffold, run a plan, or take any implementation action until a design is
 presented AND the user approves it. This applies to EVERY project regardless of perceived
@@ -18,8 +22,21 @@ helper, a config tweak, a copy change. "Simple" work is exactly where unexamined
 cause the most wasted effort. The design can be a few sentences, but you MUST present it and
 get approval before moving on.
 
+## Which card?
+- **Ref given** (`/brainstorm RLY-42`) → read that card first (`./bin/relay card <ref>`) for
+  context and brainstorm against it. If `./bin/relay card <ref>` shows a **CHANGES REQUESTED**
+  block, treat resolving that feedback as this pass's primary goal. On approval, write the
+  spec back to that card.
+- **No ref given** → first confirm with the user that the goal is to **create a new card**. On
+  confirmation, create it and capture its ref:
+
+      ./bin/relay create "<title>" --stage <stage> --json
+
+  Brainstorm as usual, then write the approved spec to the new card and report its ref.
+
 ## Process
-1. Explore current project context (files, docs, recent commits).
+1. Explore current project context (files, docs, recent commits). If a card ref was given,
+   read the card first (above) for context.
 2. Ask clarifying questions ONE at a time (prefer multiple-choice). Understand purpose,
    constraints, success criteria. If the request is really several subsystems, decompose
    first and brainstorm the first piece.
@@ -50,7 +67,19 @@ get approval before moving on.
   NOT propose unrelated refactoring; stay focused on the current goal.
 
 ## After approval
-- Write the spec to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and commit it.
+- Write the approved spec to the **card**, not a shared repo file. Save it to a temp file and:
+
+      ./bin/relay spec <ref> @<tmpfile>
+
+  Do **NOT** write or commit a spec file under a shared `docs/…` specs directory — that home is
+  retired; work travels with the card.
 - Self-review: placeholder scan, internal consistency, scope, ambiguity — fix inline.
-- Tell the user the path and ask them to review. Then point them to `/write-plan <spec>`.
-  Do NOT start implementation or launch execution.
+- Point the user to `/write-plan <ref>`. Do NOT start implementation or launch execution.
+
+## Headless / runner use (no human to dialogue with)
+When the board runner invokes this skill there is no human to approve interactively — the
+board's `Spec:Review` lane *is* the approval gate. Produce the design and either write the spec
+to the card (`./bin/relay spec <ref> @<tmpfile>`) and stop, or, if you genuinely need
+clarification, ask and stop instead of guessing:
+
+    ./bin/relay needs-input <ref> "<your question>"
