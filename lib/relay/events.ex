@@ -12,6 +12,9 @@ defmodule Relay.Events do
       (title/description/tag, status, owners); `card` arrives with
       owners preloaded.
     * `{:card_moved, card, from_stage_id}` — cross- or within-stage move.
+    * `{:card_archived, card}` — a card was archived (soft-hidden); receivers
+      drop it from its column and close its drawer. Restore reuses
+      `{:card_upserted, card}`.
     * `{:timeline_appended, card_id, entry}` — a new `Schemas.Comment` or
       `Schemas.Activity` entry (with `:user` preloaded).
     * `{:stages_changed, board_id}` — any stage/config change; coarse on

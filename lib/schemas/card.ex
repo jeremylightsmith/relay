@@ -10,7 +10,9 @@ defmodule Schemas.Card do
   `description`. `pr_url` carries the runner's pull request link with the
   card; nullable, cast like `branch`/`plan`. `spec` (RLY-3) carries the
   design spec authored at the SPEC stage — nullable, cast like
-  `description`/`plan`.
+  `description`/`plan`. `archived_at` (RLY-4) soft-hides the card from the
+  board; nullable, never cast — set programmatically like `archived_at` on
+  boards.
   """
 
   use Ecto.Schema
@@ -31,6 +33,7 @@ defmodule Schemas.Card do
 
     field :progress, :integer
     field :blocked_since, :utc_datetime
+    field :archived_at, :utc_datetime
     field :branch, :string
     field :plan, :string
     field :pr_url, :string
@@ -92,4 +95,8 @@ defmodule Schemas.Card do
         changeset
     end
   end
+
+  @doc "True when the card has been archived (soft-hidden from the board)."
+  def archived?(%__MODULE__{archived_at: nil}), do: false
+  def archived?(%__MODULE__{}), do: true
 end
