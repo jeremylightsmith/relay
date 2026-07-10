@@ -79,7 +79,8 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
         {"review_reject", %{"reject" => %{"note" => "nope"}}},
         {"review_mark_done", %{}},
         {"review_pull", %{}},
-        {"send_back", %{"send_back" => %{"note" => "sneaky"}}}
+        {"send_back", %{"send_back" => %{"note" => "sneaky"}}},
+        {"archive_card", %{"ref" => "RLY-1"}}
       ]
 
       for {event, params} <- events do
