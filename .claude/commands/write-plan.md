@@ -17,8 +17,10 @@ context, so authoring in-context is how those decisions reach the plan.
 
        ./bin/relay card <ref> --json
 
-   Read it fully. If `./bin/relay card <ref>` shows a **CHANGES REQUESTED** block, treat
-   resolving that feedback as this pass's primary goal.
+   If the `spec` field is empty or missing, stop — there's no approved spec to plan from. Tell
+   the user to produce one first with `/brainstorm <ref>`, then come back to `/write-plan <ref>`.
+   Do NOT invent a spec. Otherwise, read it fully. If `./bin/relay card <ref>` shows a
+   **CHANGES REQUESTED** block, treat resolving that feedback as this pass's primary goal.
 2. **Author the plan** in-context, following the guidance below.
 3. **Self-review** (checklist at the end), fixing inline.
 4. **Write the plan to the card.** Save it to a temp file and attach it so it travels with the

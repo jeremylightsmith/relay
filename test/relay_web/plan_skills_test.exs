@@ -26,6 +26,10 @@ defmodule Relay.PlanSkillsTest do
       assert doc =~ "/exec-plan"
     end
 
+    test "points back to /brainstorm when the card has no approved spec", %{doc: doc} do
+      assert doc =~ "/brainstorm"
+    end
+
     test "no longer resolves the spec from a shared docs/superpowers/specs path", %{doc: doc} do
       refute doc =~ "docs/superpowers/specs"
     end
