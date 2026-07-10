@@ -12,6 +12,7 @@ import importlib.machinery
 import importlib.util
 import io
 import os
+import tempfile
 import unittest
 
 RELAY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "relay")
@@ -157,6 +158,75 @@ class FindReadyWipTest(unittest.TestCase):
         cfg = {"pipeline": [{"stage": "Plan", "from": "Spec", "done": "Plan:Done"}]}
         # Spec is empty so there's nothing to pull, but wip_ok(Plan) must be True (no crash).
         self.assertIsNone(relay.find_ready(board, cfg))
+
+
+class TickVersionGateTest(unittest.TestCase):
+    """The watch loop's version gate: cheap outer poll, fingerprint inner gate."""
+
+    PATCHED = ("DRY", "STATE_PATH", "get_board_version", "get_board",
+               "find_ready", "work", "log")
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in self.PATCHED}
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+        tmp.close()
+        self._state_path = tmp.name
+        relay.STATE_PATH = self._state_path
+        relay.DRY = False
+        relay.log = lambda *a, **k: None
+        self.worked = []
+        relay.work = lambda *a, **k: self.worked.append(a)
+        relay.find_ready = lambda b, cfg: None  # default: nothing ready
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            setattr(relay, k, v)
+        os.remove(self._state_path)
+
+    def _seed_state(self, **kw):
+        import json
+        json.dump(kw, open(self._state_path, "w"))
+
+    def test_unchanged_version_skips_the_board_fetch(self):
+        self._seed_state(version=7, fingerprint="fp")
+        relay.get_board_version = lambda: 7
+        fetched = []
+        relay.get_board = lambda: fetched.append(True) or {"cards": [], "stages": []}
+
+        self.assertFalse(relay.tick({}))
+        self.assertEqual(fetched, [])  # cheap gate: no full-board fetch at all
+
+    def test_changed_version_fetches_scans_and_works(self):
+        self._seed_state(version=7, fingerprint="old")
+        relay.get_board_version = lambda: 8
+        relay.get_board = lambda: {"cards": [{"ref": "RLY-1", "stage_id": 1}], "stages": []}
+        relay.find_ready = lambda b, cfg: ({"ref": "RLY-1"}, {"stage": "Code"}, "fresh")
+
+        self.assertTrue(relay.tick({}))
+        self.assertEqual(len(self.worked), 1)
+
+    def test_version_bump_without_readiness_change_short_circuits(self):
+        board = {"cards": [{"ref": "RLY-1", "stage_id": 1, "status": None, "active_owner": None}]}
+        self._seed_state(version=1, fingerprint=relay.fingerprint(board))
+        relay.get_board_version = lambda: 2  # version moved (e.g. a comment)
+        relay.get_board = lambda: board
+        scanned = []
+        relay.find_ready = lambda b, cfg: scanned.append(True)
+
+        self.assertFalse(relay.tick({}))
+        self.assertEqual(scanned, [])  # inner fingerprint gate stops us before find_ready
+
+    def test_missing_endpoint_falls_back_to_fingerprint(self):
+        # Older server: the version endpoint 404s → get_board_version() is None.
+        # tick still fetches the board and uses the fingerprint gate.
+        board = {"cards": [{"ref": "RLY-1", "stage_id": 1, "status": None, "active_owner": None}]}
+        self._seed_state(version=None, fingerprint=relay.fingerprint(board))
+        relay.get_board_version = lambda: None
+        fetched = []
+        relay.get_board = lambda: fetched.append(True) or board
+
+        self.assertFalse(relay.tick({}))
+        self.assertEqual(fetched, [True])  # board WAS fetched despite the version gate
 
 
 if __name__ == "__main__":
