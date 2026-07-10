@@ -721,6 +721,56 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, ".timeline-comment-body strong", "commentbold")
     end
 
+    test "spec and plan sit collapsed between Conversation and Activity",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _updated} = Cards.update_card(card, %{spec: "The spec body", plan: "The plan body"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      # both are <details> wrappers around the preserved content ids
+      assert has_element?(view, "details#card-drawer-spec #card-drawer-spec-view")
+      assert has_element?(view, "details#card-plan #card-plan-body")
+
+      # collapsed by default — neither has the open attribute
+      refute has_element?(view, "details#card-drawer-spec[open]")
+      refute has_element?(view, "details#card-plan[open]")
+
+      # DOM order: Conversation → Spec → Plan → Activity
+      conv = index_of(html, ~s(id="card-drawer-conversation"))
+      spec = index_of(html, ~s(id="card-drawer-spec"))
+      plan = index_of(html, ~s(id="card-plan"))
+      activity = index_of(html, ~s(id="card-drawer-activity"))
+
+      assert conv < spec
+      assert spec < plan
+      assert plan < activity
+    end
+
+    test "with a spec but no plan, only the Spec block appears before Activity",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _updated} = Cards.update_card(card, %{spec: "Spec only"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      assert has_element?(view, "details#card-drawer-spec #card-drawer-spec-view")
+      refute has_element?(view, "#card-plan")
+
+      spec = index_of(html, ~s(id="card-drawer-spec"))
+      activity = index_of(html, ~s(id="card-drawer-activity"))
+      assert spec < activity
+    end
+
+    test "with neither spec nor plan, nothing renders between Conversation and Activity",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      refute has_element?(view, "#card-drawer-spec-view")
+      refute has_element?(view, "#card-plan")
+    end
+
     test "visiting the deep link opens the drawer directly", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
@@ -1790,5 +1840,11 @@ defmodule RelayWeb.BoardLiveTest do
     |> LazyHTML.from_fragment()
     |> LazyHTML.query("#stage-col-#{position}-cards .board-card .card-title")
     |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+  end
+
+  # Byte offset of `needle` in `html`, for asserting DOM element ordering.
+  defp index_of(html, needle) do
+    {pos, _len} = :binary.match(html, needle)
+    pos
   end
 end

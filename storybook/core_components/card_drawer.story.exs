@@ -134,6 +134,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           card: %{
             story_card()
             | branch: "rly-12-wire-the-runner",
+              spec:
+                "## Goal\n\nWire the runner end-to-end so an agent can pull a card, work it, and hand it back.\n\n## Acceptance\n\n- `PATCH /api/cards/:ref` accepts `branch` + `plan`\n- The drawer shows collapsed **Spec** and **Plan** blocks immediately before Activity",
               plan:
                 "## Task 1 — Schema + API\n\n- [x] migration: add branch + plan\n- [x] cast in Card.changeset/2\n- [ ] PATCH /api/cards/:ref accepts both\n\n## Task 2 — Drawer\n\n- [ ] collapsed Plan section\n- [ ] branch chip in the rail",
               pr_url: "https://github.com/acme/relay/pull/42"
