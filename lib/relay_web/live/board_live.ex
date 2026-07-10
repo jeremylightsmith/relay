@@ -306,7 +306,7 @@ defmodule RelayWeb.BoardLive do
         compose create_card move_card save_card_title save_card_description
         set_card_status add_owner remove_owner post_comment answer_input
         review_approve review_reject review_mark_done review_pull send_back
-        save_board_name archive_card
+        save_board_name archive_card restore_card
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
