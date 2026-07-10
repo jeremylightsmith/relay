@@ -20,6 +20,7 @@ defmodule Relay.ApiKeys do
   @default_name "Board API key"
   @prefix_bytes 6
   @secret_bytes 32
+  @last_used_throttle_seconds 60
 
   @doc """
   Creates the board's API key. Returns `{:ok, %{api_key: key, token: raw}}` —
@@ -76,22 +77,40 @@ defmodule Relay.ApiKeys do
 
   @doc """
   Authenticates a raw `relay_<prefix>_<secret>` token: looks the key up by
-  prefix, constant-time compares the secret's hash, bumps `last_used_at`,
-  and returns `{:ok, board}`. Any malformed, unknown, or revoked token
-  returns `:error`. This is what MMF 09's API authentication calls.
+  prefix, constant-time compares the secret's hash, bumps `last_used_at`
+  (throttled to at most once per minute), and returns `{:ok, board}`. Any
+  malformed, unknown, or revoked token returns `:error`. This is what MMF
+  09's API authentication calls.
   """
   def authenticate(raw_token) when is_binary(raw_token) do
     with ["relay", prefix, secret] <- String.split(raw_token, "_", parts: 3),
          %ApiKey{} = key <- Repo.get_by(ApiKey, token_prefix: prefix),
          true <- Plug.Crypto.secure_compare(hash_secret(secret), key.token_hash) do
-      key
-      |> Ecto.Changeset.change(last_used_at: DateTime.truncate(DateTime.utc_now(), :second))
-      |> Repo.update!()
+      touch_last_used(key)
 
       {:ok, Repo.preload(key, :board).board}
     else
       _not_authenticated -> :error
     end
+  end
+
+  # Throttle the last_used_at write so a once-per-minute poll (RLY-12) doesn't
+  # write a row on every request. Only writes when never used or the stored
+  # timestamp is older than the threshold, keeping the auth path near-free.
+  defp touch_last_used(%ApiKey{last_used_at: last_used_at} = key) do
+    now = DateTime.truncate(DateTime.utc_now(), :second)
+
+    if stale?(last_used_at, now) do
+      key
+      |> Ecto.Changeset.change(last_used_at: now)
+      |> Repo.update!()
+    end
+  end
+
+  defp stale?(nil, _now), do: true
+
+  defp stale?(last_used_at, now) do
+    DateTime.diff(now, last_used_at, :second) >= @last_used_throttle_seconds
   end
 
   defp generate_token do

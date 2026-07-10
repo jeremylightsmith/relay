@@ -90,6 +90,7 @@ defmodule RelayWeb.Router do
     pipe_through [:api, :api_auth]
 
     get "/board", BoardController, :show
+    get "/board/version", BoardController, :version
     get "/cards", CardController, :index
     post "/cards", CardController, :create
     get "/cards/:ref", CardController, :show
