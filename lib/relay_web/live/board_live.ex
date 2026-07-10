@@ -86,6 +86,16 @@ defmodule RelayWeb.BoardLive do
                 <span style="width:8px;height:8px;border-radius:2px;background:var(--color-primary);"></span>HUMAN
               </span>
             </div>
+            <button
+              type="button"
+              id="archived-cards-button"
+              phx-click="open_archived"
+              class="btn btn-ghost btn-sm gap-1.5"
+              aria-label="Archived cards"
+            >
+              <.icon name="hero-archive-box" class="size-5" />
+              <span class="font-mono text-xs">{@archived_count}</span>
+            </button>
             <.link
               navigate={~p"/board/#{@board.slug}/settings"}
               id="board-settings-link"
@@ -181,7 +191,71 @@ defmodule RelayWeb.BoardLive do
         send_back_form={@send_back_form}
         send_back_error={@send_back_error}
         send_back_targets={send_back_targets(@board, @selected_card)}
+        archived={Card.archived?(@selected_card)}
       />
+      <div
+        :if={@archived_open}
+        id="archived-modal"
+        class="modal modal-open"
+        role="dialog"
+        aria-label="Archived cards"
+      >
+        <div class="modal-box max-w-2xl">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold">Archived cards</h3>
+            <button
+              type="button"
+              id="archived-modal-close"
+              phx-click="close_archived"
+              class="btn btn-sm btn-circle btn-ghost"
+              aria-label="Close"
+            >
+              <.icon name="hero-x-mark" class="size-4" />
+            </button>
+          </div>
+          <ul id="archived-list" class="mt-4 divide-y divide-base-200">
+            <li
+              :for={card <- @archived_cards}
+              id={"archived-row-#{card.id}"}
+              class="flex items-center gap-3 py-2.5"
+            >
+              <button
+                type="button"
+                id={"open-archived-card-#{card.id}"}
+                phx-click="open_archived_card"
+                phx-value-ref={Cards.ref(@board, card)}
+                class="min-w-0 flex-1 text-left"
+              >
+                <div class="flex items-baseline gap-2">
+                  <span class="font-mono text-xs text-base-content/60">
+                    {Cards.ref(@board, card)}
+                  </span>
+                  <span class="truncate font-medium">{card.title}</span>
+                </div>
+                <div class="text-xs text-base-content/50">
+                  {drawer_stage_name(card.stage, @board.stages)} · archived {Calendar.strftime(
+                    card.archived_at,
+                    "%b %d, %Y"
+                  )}
+                </div>
+              </button>
+              <button
+                type="button"
+                id={"archived-restore-#{card.id}"}
+                phx-click="restore_card"
+                phx-value-ref={Cards.ref(@board, card)}
+                class="btn btn-sm"
+              >
+                Restore
+              </button>
+            </li>
+            <li :if={@archived_cards == []} class="py-3 text-sm text-base-content/50">
+              No archived cards.
+            </li>
+          </ul>
+        </div>
+        <label class="modal-backdrop" phx-click="close_archived">Close</label>
+      </div>
     </Layouts.app>
     """
   end
@@ -199,6 +273,9 @@ defmodule RelayWeb.BoardLive do
       |> assign(:page_title, board.name)
       |> assign(:board, board)
       |> assign(:read_only?, Board.archived?(board))
+      |> assign(:archived_count, Cards.count_archived_cards(board))
+      |> assign(:archived_open, false)
+      |> assign(:archived_cards, [])
       |> assign(:stage_groups, group_stages(board.stages))
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
@@ -229,7 +306,7 @@ defmodule RelayWeb.BoardLive do
         compose create_card move_card save_card_title save_card_description
         set_card_status add_owner remove_owner post_comment answer_input
         review_approve review_reject review_mark_done review_pull send_back
-        save_board_name
+        save_board_name archive_card restore_card
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -285,6 +362,54 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("close_drawer", _params, socket) do
     {:noreply, push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}")}
+  end
+
+  def handle_event("archive_card", %{"ref" => ref}, socket) do
+    with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
+         {:ok, archived} <- Cards.archive_card(card, current_actor(socket)) do
+      {:noreply,
+       socket
+       |> apply_archive(archived)
+       |> push_patch(to: ~p"/board/#{socket.assigns.board.slug}")
+       |> put_flash(:info, "Card archived.")}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("restore_card", %{"ref" => ref}, socket) do
+    with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
+         {:ok, _restored} <- Cards.unarchive_card(card, current_actor(socket)) do
+      # unarchive broadcasts {:card_upserted, card}; this session's own
+      # handle_info re-inserts the card + recomputes counts. Locally just
+      # refresh the archived count, close the modal, and flash.
+      {:noreply,
+       socket
+       |> assign_archived_count()
+       |> assign(:archived_open, false)
+       |> put_flash(:info, "Card restored.")}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("open_archived", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:archived_open, true)
+     |> assign(:archived_cards, Cards.list_archived_cards(socket.assigns.board))}
+  end
+
+  def handle_event("close_archived", _params, socket) do
+    {:noreply, assign(socket, :archived_open, false)}
+  end
+
+  # A row click: close the modal and open that card's drawer (URL-driven).
+  def handle_event("open_archived_card", %{"ref" => ref}, socket) do
+    {:noreply,
+     socket
+     |> assign(:archived_open, false)
+     |> push_patch(to: ~p"/board/#{socket.assigns.board.slug}?card=#{ref}")}
   end
 
   # One move path, two entry points (drag-and-drop hook and the drawer's
@@ -622,6 +747,7 @@ defmodule RelayWeb.BoardLive do
        socket
        |> stream_insert(stream_name(card.stage_id), card)
        |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, cards_by_stage))
+       |> assign_archived_count()
        |> maybe_refresh_drawer(card)}
     else
       # The card sits in a stage this socket hasn't loaded yet (e.g. a
@@ -633,6 +759,17 @@ defmodule RelayWeb.BoardLive do
   def handle_info({:card_moved, %Card{} = moved, from_stage_id}, socket) do
     if find_stage_by_id(socket, moved.stage_id) do
       {:noreply, apply_move(socket, from_stage_id, moved)}
+    else
+      {:noreply, reload_board(socket)}
+    end
+  end
+
+  # RLY-4 — a card was archived elsewhere: drop it from its column here too
+  # (idempotent on the acting session's own echo) and close this session's
+  # drawer if the archived card is the one open here.
+  def handle_info({:card_archived, %Card{} = card}, socket) do
+    if find_stage_by_id(socket, card.stage_id) do
+      {:noreply, socket |> apply_archive(card) |> close_drawer_if_selected(card)}
     else
       {:noreply, reload_board(socket)}
     end
@@ -950,6 +1087,31 @@ defmodule RelayWeb.BoardLive do
     stream(socket, stream_name(stage_id), Map.get(cards_by_stage, stage_id, []), reset: true)
   end
 
+  # RLY-4 — a card was archived (locally or via broadcast): drop it from its
+  # column, recompute every stage count from the DB (list_cards now excludes
+  # archived, so counts fall for free — idempotent on the acting session's own
+  # echo), and refresh the archived-count badge.
+  defp apply_archive(socket, %Card{} = card) do
+    cards_by_stage = socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
+
+    socket
+    |> stream_delete(stream_name(card.stage_id), card)
+    |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, cards_by_stage))
+    |> assign_archived_count()
+  end
+
+  # Close the drawer when the just-archived card is the one open here.
+  defp close_drawer_if_selected(socket, %Card{id: id}) do
+    case socket.assigns.selected_card do
+      %Card{id: ^id} -> push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}")
+      _other -> socket
+    end
+  end
+
+  defp assign_archived_count(socket) do
+    assign(socket, :archived_count, Cards.count_archived_cards(socket.assigns.board))
+  end
+
   # MMF 11 / RLY-35 — soft enforcement, now sub-lane-aware. A move that lands
   # in a limited main stage OR any of its sub-lanes still succeeds; the acting
   # session gets a non-blocking flash when the governing main stage's total
@@ -1038,6 +1200,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:stage_groups, group_stages(board.stages))
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
+      |> assign_archived_count()
 
     board.stages
     |> Enum.reduce(socket, fn stage, acc ->

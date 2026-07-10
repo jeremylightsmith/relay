@@ -113,4 +113,21 @@ defmodule Schemas.CardTest do
       assert changeset.valid?
     end
   end
+
+  describe "archived?/1" do
+    test "false when archived_at is nil" do
+      refute Card.archived?(%Card{archived_at: nil})
+    end
+
+    test "true when archived_at is set" do
+      assert Card.archived?(%Card{archived_at: DateTime.utc_now()})
+    end
+
+    test "archived_at is never cast from user input" do
+      changeset =
+        Card.changeset(%Card{}, %{title: "T", archived_at: DateTime.utc_now()})
+
+      assert get_field(changeset, :archived_at) == nil
+    end
+  end
 end

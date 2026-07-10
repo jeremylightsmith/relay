@@ -10,7 +10,8 @@ defmodule Schemas.Activity do
   nothing emits it in MMF 07. `:needs_input` (MMF 14) carries
   `meta: %{"question" => ...}` — the AI blocked the card on a human
   question. `:input_answered` (MMF 14) marks the human's answer, with
-  empty meta.
+  empty meta. `:archived` / `:unarchived` (RLY-4) record a card being
+  soft-hidden from the board and restored, with empty meta.
   """
 
   use Ecto.Schema
@@ -26,7 +27,9 @@ defmodule Schemas.Activity do
     :approved,
     :rejected,
     :needs_input,
-    :input_answered
+    :input_answered,
+    :archived,
+    :unarchived
   ]
 
   schema "activities" do

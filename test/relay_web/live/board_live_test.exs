@@ -1005,6 +1005,119 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(view, ~s(#card-drawer-comment-input[phx-hook="SubmitOnCmdEnter"]))
     end
+
+    test "Archive removes the card from the board, closes the drawer, and flashes", %{
+      conn: conn,
+      user: user
+    } do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      html = view |> element("#archive-card-button") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      refute has_element?(view, "#card-drawer")
+      refute has_element?(view, "#stage-col-1-cards .board-card", "Draft the spec")
+      # the stage's only card was just archived, so it auto-collapses to its
+      # strip (MMF 12c) — the count still reads 0 there.
+      assert has_element?(view, "#stage-strip-#{backlog.id} .stage-count", "0")
+      assert html =~ "Card archived."
+      assert board |> Cards.list_archived_cards() |> Enum.map(& &1.title) == ["Draft the spec"]
+    end
+
+    test "opening an archived card by URL shows the banner + Restore, hides edit actions, and logs the phrase",
+         %{conn: conn, user: user, card: card} do
+      {:ok, _archived} = Cards.archive_card(card, {:user, user.id})
+      board = Boards.get_or_create_default_board(user)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      assert has_element?(view, "#card-archived-banner")
+      assert has_element?(view, "#restore-card-button")
+      refute has_element?(view, "#archive-card-button")
+      refute has_element?(view, "#card-drawer-status-form")
+
+      assert has_element?(
+               view,
+               "#card-drawer-activity .timeline-activity-phrase",
+               "archived this card"
+             )
+    end
+
+    test "Restore from the drawer banner returns the card to the board", %{
+      conn: conn,
+      user: user,
+      card: card
+    } do
+      {:ok, _archived} = Cards.archive_card(card)
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      view |> element("#restore-card-button") |> render_click()
+
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Draft the spec")
+      refute has_element?(view, "#card-archived-banner")
+      assert Cards.get_card_by_ref(board, "RLY-1").archived_at == nil
+    end
+  end
+
+  describe "archived cards modal" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      {:ok, keep} = Cards.create_card(backlog, %{title: "Stay on board"})
+      {:ok, gone} = Cards.create_card(backlog, %{title: "Archived one"})
+      {:ok, _gone} = Cards.archive_card(gone)
+      %{board: board, backlog: backlog, keep: keep}
+    end
+
+    test "the header button shows the archived count", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#archived-cards-button", "1")
+    end
+
+    test "opening the modal lists the archived card with its stage and a Restore button",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#archived-cards-button") |> render_click()
+
+      assert has_element?(view, "#archived-modal")
+      assert has_element?(view, "#archived-list", "Archived one")
+      assert has_element?(view, "#archived-list", "RLY-2")
+      assert has_element?(view, "#archived-list", "Backlog")
+      assert has_element?(view, "#archived-restore-#{archived_id(board)}")
+      refute has_element?(view, "#archived-list", "Stay on board")
+    end
+
+    test "Restore from the modal returns the card to the board and drops the count",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      view |> element("#archived-cards-button") |> render_click()
+
+      view |> element("#archived-restore-#{archived_id(board)}") |> render_click()
+
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Archived one")
+      assert has_element?(view, "#archived-cards-button", "0")
+      assert Cards.count_archived_cards(board) == 0
+    end
+
+    test "clicking a row opens that card's drawer and closes the modal",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      view |> element("#archived-cards-button") |> render_click()
+
+      view |> element("#open-archived-card-#{archived_id(board)}") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=RLY-2")
+      assert has_element?(view, "#card-drawer")
+      assert has_element?(view, "#card-archived-banner")
+      refute has_element?(view, "#archived-modal")
+    end
   end
 
   describe "drawer plan and branch" do
@@ -1847,4 +1960,6 @@ defmodule RelayWeb.BoardLiveTest do
     {pos, _len} = :binary.match(html, needle)
     pos
   end
+
+  defp archived_id(board), do: board |> Cards.list_archived_cards() |> hd() |> Map.fetch!(:id)
 end

@@ -167,6 +167,23 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
       assert has_element?(view_board, "#board-title", "From settings")
     end
+
+    test "a card archived in session A disappears from session B and closes B's open drawer",
+         %{conn: conn, backlog: backlog, user: user} do
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Archive me"})
+      board = Boards.get_or_create_default_board(user)
+
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      view_a |> element("#archive-card-button") |> render_click()
+
+      refute has_element?(view_b, "#stage-col-1-cards .board-card", "Archive me")
+      # the stage's only card was just archived, so it auto-collapses to its
+      # strip (MMF 12c) — the count still reads 0 there, for both sessions.
+      assert has_element?(view_b, "#stage-strip-#{backlog.id} .stage-count", "0")
+      refute has_element?(view_b, "#card-drawer")
+    end
   end
 
   describe "board scoping" do

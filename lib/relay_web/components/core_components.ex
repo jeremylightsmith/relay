@@ -971,6 +971,11 @@ defmodule RelayWeb.CoreComponents do
     default: [],
     doc: "main-lane stages before the card's current one (each %{id, name}); [] hides the universal control"
 
+  attr :archived, :boolean,
+    default: false,
+    doc:
+      "whether the open card itself is archived (RLY-4): shows the read-only archived banner + Restore and suppresses the edit/status/move affordances"
+
   def card_drawer(assigns) do
     ~H"""
     <div id={@id} class="drawer drawer-end" phx-window-keydown="close_drawer" phx-key="escape">
@@ -999,6 +1004,7 @@ defmodule RelayWeb.CoreComponents do
                 <span class="drawer-card-ref font-mono text-xs text-base-content/60">{@ref}</span>
               </div>
               <.editable_text
+                :if={!@archived}
                 id={"#{@id}-title"}
                 value={@card.title}
                 editing={@editing_title}
@@ -1012,6 +1018,13 @@ defmodule RelayWeb.CoreComponents do
                 multiline
                 rows="2"
               />
+              <h2
+                :if={@archived}
+                id={"#{@id}-title-archived"}
+                class="whitespace-pre-wrap break-words px-1 text-lg font-semibold leading-[1.3]"
+              >
+                {@card.title}
+              </h2>
             </div>
             <.link
               id={"#{@id}-close"}
@@ -1026,6 +1039,24 @@ defmodule RelayWeb.CoreComponents do
           <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
             <div id={"#{@id}-main"} class="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto p-5">
               <section
+                :if={@archived}
+                id="card-archived-banner"
+                class="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm"
+                style="background:oklch(0.97 0.04 85);border:1px solid oklch(0.85 0.09 85);color:oklch(0.42 0.09 85);"
+              >
+                <.icon name="hero-archive-box" class="size-4" />
+                <span class="flex-1">This card is archived.</span>
+                <button
+                  type="button"
+                  id="restore-card-button"
+                  phx-click="restore_card"
+                  phx-value-ref={@ref}
+                  class="btn btn-sm"
+                >
+                  Restore
+                </button>
+              </section>
+              <section
                 :if={@card.rejection}
                 id="rejection-banner"
                 class="flex flex-col gap-1.5 rounded-[10px] border border-warning/40 bg-warning/10 p-3.5"
@@ -1038,7 +1069,7 @@ defmodule RelayWeb.CoreComponents do
                 </div>
               </section>
               <section
-                :if={@card.status == :needs_input}
+                :if={@card.status == :needs_input and !@archived}
                 id="needs-input-panel"
                 class="flex flex-col gap-[11px] rounded-[10px] p-3.5"
                 style="background:oklch(0.975 0.025 75);border:1px solid oklch(0.87 0.07 75);"
@@ -1094,7 +1125,7 @@ defmodule RelayWeb.CoreComponents do
                 </.form>
               </section>
               <section
-                :if={@card.status == :in_review}
+                :if={@card.status == :in_review and !@archived}
                 id="review-panel"
                 class="flex flex-col gap-3 rounded-[10px] p-3.5"
                 style="background:oklch(0.975 0.02 155);border:1px solid oklch(0.88 0.05 155);"
@@ -1197,7 +1228,11 @@ defmodule RelayWeb.CoreComponents do
                   </.form>
                 </div>
               </section>
-              <div :if={@card.status == :in_review} id="review-actions" class="flex flex-wrap gap-2">
+              <div
+                :if={@card.status == :in_review and !@archived}
+                id="review-actions"
+                class="flex flex-wrap gap-2"
+              >
                 <button
                   id="review-mark-done"
                   type="button"
@@ -1218,7 +1253,10 @@ defmodule RelayWeb.CoreComponents do
                   Pull — take this card
                 </button>
               </div>
-              <div :if={@send_back_targets != [] && !@send_back_open} id="send-back-actions">
+              <div
+                :if={@send_back_targets != [] && !@send_back_open && !@archived}
+                id="send-back-actions"
+              >
                 <button
                   id="send-back"
                   type="button"
@@ -1229,7 +1267,7 @@ defmodule RelayWeb.CoreComponents do
                 </button>
               </div>
               <section
-                :if={@send_back_targets != [] && @send_back_open}
+                :if={@send_back_targets != [] && @send_back_open && !@archived}
                 id="send-back-panel"
                 class="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3"
               >
@@ -1278,6 +1316,7 @@ defmodule RelayWeb.CoreComponents do
                   Description
                 </h4>
                 <.editable_text
+                  :if={!@archived}
                   id={"#{@id}-description"}
                   value={@card.description}
                   editing={@editing_description}
@@ -1292,6 +1331,13 @@ defmodule RelayWeb.CoreComponents do
                   rows="12"
                   read_class="min-h-16 p-1 text-sm leading-relaxed"
                 />
+                <div
+                  :if={@archived}
+                  id={"#{@id}-description-archived"}
+                  class="md min-h-16 p-1 text-sm leading-relaxed"
+                >
+                  {Relay.Markdown.to_html(@card.description || "_No description._")}
+                </div>
               </section>
               <section class="space-y-3 border-t border-base-300 pt-4">
                 <h4 class="text-sm font-semibold text-base-content/80">Conversation</h4>
@@ -1333,6 +1379,7 @@ defmodule RelayWeb.CoreComponents do
                   </li>
                 </ol>
                 <.form
+                  :if={!@archived}
                   for={@comment_form}
                   id={"#{@id}-comment-form"}
                   phx-change="validate_comment"
@@ -1451,6 +1498,7 @@ defmodule RelayWeb.CoreComponents do
                     paused
                   </span>
                   <button
+                    :if={!@archived}
                     type="button"
                     id={"#{@id}-remove-owner-#{owner_dom_suffix(owner)}"}
                     class="btn btn-ghost btn-xs btn-square"
@@ -1463,7 +1511,7 @@ defmodule RelayWeb.CoreComponents do
                   </button>
                 </div>
                 <span :if={@card.owners == []} class="text-base-content/50">None</span>
-                <div class="flex flex-wrap gap-2">
+                <div :if={!@archived} class="flex flex-wrap gap-2">
                   <button
                     :if={!agent_owner?(@card)}
                     type="button"
@@ -1491,7 +1539,12 @@ defmodule RelayWeb.CoreComponents do
                 Status
               </dt>
               <dd class="rail-status">
-                <.form for={@status_form} id={"#{@id}-status-form"} phx-change="set_card_status">
+                <.form
+                  :if={!@archived}
+                  for={@status_form}
+                  id={"#{@id}-status-form"}
+                  phx-change="set_card_status"
+                >
                   <.input
                     field={@status_form[:status]}
                     type="select"
@@ -1508,13 +1561,14 @@ defmodule RelayWeb.CoreComponents do
                     class="input input-sm w-full"
                   />
                 </.form>
+                <.status_badge :if={@archived} status={@card.status} progress={@card.progress} />
               </dd>
               <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
                 Stage
               </dt>
               <dd class="rail-stage flex flex-wrap items-center gap-2">
                 {@stage_name}
-                <div :if={@stages != []} id={"#{@id}-move"} class="dropdown">
+                <div :if={@stages != [] and !@archived} id={"#{@id}-move"} class="dropdown">
                   <div
                     tabindex="0"
                     role="button"
@@ -1540,6 +1594,17 @@ defmodule RelayWeb.CoreComponents do
                     </li>
                   </ul>
                 </div>
+                <button
+                  :if={!@archived}
+                  type="button"
+                  id="archive-card-button"
+                  phx-click="archive_card"
+                  phx-value-ref={@ref}
+                  data-confirm="Archive this card? You can restore it from Archived."
+                  class="btn btn-ghost btn-xs text-base-content/60"
+                >
+                  <.icon name="hero-archive-box" class="size-3.5" /> Archive
+                </button>
               </dd>
               <dt
                 :if={@card.branch}
@@ -1667,6 +1732,8 @@ defmodule RelayWeb.CoreComponents do
   defp activity_phrase(%Activity{type: :needs_input}), do: "asked for input"
 
   defp activity_phrase(%Activity{type: :input_answered}), do: "answered the question"
+  defp activity_phrase(%Activity{type: :archived}), do: "archived this card"
+  defp activity_phrase(%Activity{type: :unarchived}), do: "restored this card"
 
   # The one-line hint under READY FOR YOUR REVIEW (MMF 15): a gated stage
   # offers the approve/send-back pair; an ungated one only the standalone

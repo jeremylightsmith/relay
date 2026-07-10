@@ -59,16 +59,90 @@ defmodule Relay.Cards do
   end
 
   @doc """
-  Returns all of `board`'s cards, ordered by stage then `position` — the
-  render order within each stage column.
+  Returns all of `board`'s non-archived cards, ordered by stage then
+  `position` — the render order within each stage column. Archived cards
+  (RLY-4) are excluded, so they drop out of every stage/category/WIP count
+  for free.
   """
   def list_cards(%Board{id: board_id}) do
     Repo.all(
       from c in Card,
-        where: c.board_id == ^board_id,
+        where: c.board_id == ^board_id and is_nil(c.archived_at),
         order_by: [asc: c.stage_id, asc: c.position, asc: c.id],
         preload: [owners: :user]
     )
+  end
+
+  @doc """
+  Archives `card` (RLY-4): a reversible soft-hide. Stamps `archived_at`
+  (truncated UTC, like boards), attributes an `:archived` activity to
+  `actor` (`:agent | {:user, user_id}`, defaults to `:agent`), and
+  broadcasts `{:card_archived, card}` so open boards drop it from its
+  column. Idempotent-friendly: archiving an already-archived card is a
+  harmless re-stamp that logs nothing new (only the active→archived
+  transition logs `:archived`). Returns `{:ok, card}` with owners
+  preloaded.
+  """
+  def archive_card(%Card{} = card, actor \\ :agent) do
+    was_active? = is_nil(card.archived_at)
+
+    {:ok, archived} =
+      card
+      |> Ecto.Changeset.change(archived_at: DateTime.truncate(DateTime.utc_now(), :second))
+      |> Repo.update()
+
+    archived = preload_owners(archived)
+
+    if was_active? do
+      {:ok, _entry} = Activity.log(archived, %{type: :archived, actor: actor})
+    end
+
+    Events.broadcast(archived.board_id, {:card_archived, archived})
+    {:ok, archived}
+  end
+
+  @doc """
+  Restores an archived `card` (RLY-4): clears `archived_at`, attributes an
+  `:unarchived` activity to `actor`, and broadcasts the existing
+  `{:card_upserted, card}` so open boards re-insert it through the current
+  upsert handler (no dedicated restore event). Only the archived→active
+  transition logs and broadcasts; restoring an already-active card is a
+  no-op. Returns `{:ok, card}` with owners preloaded.
+  """
+  def unarchive_card(%Card{} = card, actor \\ :agent) do
+    was_archived? = not is_nil(card.archived_at)
+
+    {:ok, restored} =
+      card
+      |> Ecto.Changeset.change(archived_at: nil)
+      |> Repo.update()
+
+    restored = preload_owners(restored)
+
+    if was_archived? do
+      {:ok, _entry} = Activity.log(restored, %{type: :unarchived, actor: actor})
+      Events.broadcast(restored.board_id, {:card_upserted, restored})
+    end
+
+    {:ok, restored}
+  end
+
+  @doc """
+  The board's archived cards, most-recently-archived first, with `:stage`
+  and `owners` preloaded — the "Archived cards" modal's list.
+  """
+  def list_archived_cards(%Board{id: board_id}) do
+    Repo.all(
+      from c in Card,
+        where: c.board_id == ^board_id and not is_nil(c.archived_at),
+        order_by: [desc: c.archived_at, desc: c.id],
+        preload: [:stage, owners: :user]
+    )
+  end
+
+  @doc "How many of the board's cards are archived (the header button's badge)."
+  def count_archived_cards(%Board{id: board_id}) do
+    Repo.aggregate(from(c in Card, where: c.board_id == ^board_id and not is_nil(c.archived_at)), :count)
   end
 
   @doc """

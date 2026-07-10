@@ -128,6 +128,14 @@ defmodule Relay.CardsTest do
 
       assert Enum.map(Cards.list_cards(board), & &1.id) == [mine.id]
     end
+
+    test "excludes archived cards", %{board: board, stage: stage} do
+      {:ok, keep} = Cards.create_card(stage, %{title: "Keep"})
+      {:ok, hide} = Cards.create_card(stage, %{title: "Hide"})
+      {:ok, _archived} = Cards.archive_card(hide)
+
+      assert Enum.map(Cards.list_cards(board), & &1.id) == [keep.id]
+    end
   end
 
   describe "update_card/2" do
@@ -277,6 +285,18 @@ defmodule Relay.CardsTest do
       {:ok, _theirs} = Cards.create_card(other_stage, %{title: "Theirs"})
 
       assert Cards.get_card_by_ref(board, "RLY-1") == nil
+    end
+
+    test "still returns an archived card (loadable by ref, like archived boards)", %{
+      board: board,
+      stage: stage
+    } do
+      {:ok, card} = Cards.create_card(stage, %{title: "Archived but linkable"})
+      {:ok, _archived} = Cards.archive_card(card)
+
+      assert %Card{id: id, archived_at: at} = Cards.get_card_by_ref(board, "RLY-1")
+      assert id == card.id
+      assert at
     end
   end
 
@@ -624,6 +644,126 @@ defmodule Relay.CardsTest do
       target = insert(:stage, board: board, position: 2)
       {:ok, moved} = Cards.move_card(created, target, 0)
       assert moved.owners == []
+    end
+  end
+
+  describe "archive_card/2 and unarchive_card/2" do
+    test "archive stamps archived_at and preserves stage/position/owners", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Retire me"})
+      {:ok, _owner} = Cards.add_owner(card, :agent)
+      card = Cards.get_card_by_ref(Repo.get!(Board, stage.board_id), "RLY-1")
+
+      assert {:ok, archived} = Cards.archive_card(card)
+
+      assert archived.archived_at
+      assert Card.archived?(archived)
+      assert archived.stage_id == card.stage_id
+      assert archived.position == card.position
+      assert Enum.map(archived.owners, & &1.actor_type) == [:agent]
+    end
+
+    test "archive logs :archived attributed to the actor", %{stage: stage} do
+      user = insert(:user, name: "Ada Lovelace")
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      {:ok, archived} = Cards.archive_card(card, {:user, user.id})
+
+      assert [_created, %Schemas.Activity{type: :archived, actor_type: :user, user_id: uid, meta: %{}}] =
+               activities(archived)
+
+      assert uid == user.id
+    end
+
+    test "archiving an already-archived card re-stamps but does not log twice", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+      {:ok, once} = Cards.archive_card(card)
+
+      {:ok, twice} = Cards.archive_card(once)
+
+      assert twice.archived_at
+      assert Enum.count(activities(twice), &(&1.type == :archived)) == 1
+    end
+
+    test "archive broadcasts {:card_archived, card}", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+      Relay.Events.subscribe(card.board_id)
+
+      assert {:ok, _} = Cards.archive_card(card)
+      assert_receive {:card_archived, %Card{id: id, archived_at: at}}
+      assert id == card.id
+      assert at
+    end
+
+    test "unarchive clears archived_at and logs :unarchived", %{stage: stage} do
+      user = insert(:user, name: "Ada Lovelace")
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+      {:ok, archived} = Cards.archive_card(card)
+
+      assert {:ok, restored} = Cards.unarchive_card(archived, {:user, user.id})
+
+      assert restored.archived_at == nil
+      refute Card.archived?(restored)
+
+      assert [_created, _archived, %Schemas.Activity{type: :unarchived, actor_type: :user}] =
+               activities(restored)
+    end
+
+    test "unarchive broadcasts {:card_upserted, card} (reuses the upsert event)", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+      {:ok, archived} = Cards.archive_card(card)
+      Relay.Events.subscribe(card.board_id)
+
+      assert {:ok, _} = Cards.unarchive_card(archived)
+      assert_receive {:card_upserted, %Card{archived_at: nil}}
+    end
+
+    test "unarchiving an active card is a no-op that logs nothing", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      assert {:ok, same} = Cards.unarchive_card(card)
+
+      assert same.archived_at == nil
+      assert Enum.map(activities(same), & &1.type) == [:created]
+    end
+  end
+
+  describe "list_archived_cards/1" do
+    test "returns only archived cards, most-recently-archived first, with stage + owners", %{
+      board: board,
+      stage: stage
+    } do
+      {:ok, active} = Cards.create_card(stage, %{title: "Active"})
+      {:ok, first} = Cards.create_card(stage, %{title: "First archived"})
+      {:ok, second} = Cards.create_card(stage, %{title: "Second archived"})
+      {:ok, _first} = Cards.archive_card(first)
+      {:ok, _second} = Cards.archive_card(second)
+
+      # archived_at is truncated to the second, so both archives tie; the
+      # `desc: id` tiebreak in list_archived_cards/1 puts the later-created
+      # (higher-id) "Second archived" first — deterministic without sleeping.
+      archived = Cards.list_archived_cards(board)
+
+      assert Enum.map(archived, & &1.title) == ["Second archived", "First archived"]
+      refute active.id in Enum.map(archived, & &1.id)
+      assert %Schemas.Stage{} = hd(archived).stage
+      assert is_list(hd(archived).owners)
+    end
+
+    test "returns [] when nothing is archived", %{board: board, stage: stage} do
+      {:ok, _active} = Cards.create_card(stage, %{title: "Active"})
+      assert Cards.list_archived_cards(board) == []
+    end
+  end
+
+  describe "count_archived_cards/1" do
+    test "counts only archived cards on the board", %{board: board, stage: stage} do
+      {:ok, _active} = Cards.create_card(stage, %{title: "Active"})
+      {:ok, a} = Cards.create_card(stage, %{title: "A"})
+      {:ok, b} = Cards.create_card(stage, %{title: "B"})
+      {:ok, _a} = Cards.archive_card(a)
+      {:ok, _b} = Cards.archive_card(b)
+
+      assert Cards.count_archived_cards(board) == 2
     end
   end
 
