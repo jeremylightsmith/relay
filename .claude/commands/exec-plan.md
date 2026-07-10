@@ -25,7 +25,7 @@ The orchestration lives in `.claude/workflows/execute-plan.js`.
 `execute-plan.js` reads a repo-root `plan.md` (it is unchanged). Materialize the card's plan
 into that **transient** file just before launching:
 
-    ./bin/relay card <ref> --json | python3 -c 'import json,sys; sys.stdout.write(json.load(sys.stdin).get("plan") or "")' > plan.md
+    ./bin/relay card <ref> --json | jq -r '.plan // ""' > plan.md
 
 Then invoke the Workflow tool with the committed script:
 
@@ -70,7 +70,12 @@ Read the workflow's returned object and report faithfully:
 ## Notes
 - The plan lives on the card; `plan.md` is only a transient materialization exec-plan creates
   and deletes around the run. Never commit `plan.md`.
-- To resume after an interruption or a script edit, re-materialize `plan.md` from the card and
-  relaunch with `Workflow({ scriptPath: ".claude/workflows/execute-plan.js", resumeFromRunId: "<id>" })`.
+- To resume after an interruption or a script edit: progress is tracked ONLY as `- [x]` boxes
+  in the on-disk `plan.md`, never on the card — `execute-plan.js` re-reads `plan.md` each cycle
+  and nothing writes progress back to the card. So if `plan.md` still exists in the
+  working tree, leave it as-is; only re-materialize it from the card (the `Launch` step above)
+  if it is missing. Re-materializing while it still exists would reset every box to `- [ ]` and
+  re-run already-completed tasks. Then relaunch with
+  `Workflow({ scriptPath: ".claude/workflows/execute-plan.js", resumeFromRunId: "<id>" })`.
 - The script does NOT open a PR — that is intentionally the human-gated `/finish` step.
 - Edit `.claude/workflows/execute-plan.js` to change models, review depth, or the loop.

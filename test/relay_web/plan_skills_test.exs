@@ -53,5 +53,17 @@ defmodule Relay.PlanSkillsTest do
     test "still launches the unchanged execute-plan.js workflow", %{doc: doc} do
       assert doc =~ "execute-plan.js"
     end
+
+    test "extracts the card's plan with jq, not an undeclared python3 dependency", %{doc: doc} do
+      assert doc =~ "jq -r"
+      refute doc =~ "python3"
+    end
+
+    test "resume note preserves on-disk plan.md progress instead of unconditionally re-materializing",
+         %{doc: doc} do
+      assert doc =~ "progress is tracked"
+      assert doc =~ "only re-materialize"
+      refute doc =~ "re-materialize `plan.md` from the card and relaunch"
+    end
   end
 end
