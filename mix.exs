@@ -122,7 +122,8 @@ defmodule Relay.MixProject do
         "credo --strict",
         "sobelow --config",
         "deps.audit",
-        "test"
+        "test",
+        "cmd python3 bin/test_relay.py"
       ]
     ]
   end
