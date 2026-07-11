@@ -498,7 +498,8 @@ defmodule RelayWeb.CoreComponents do
 
   `working` appends the stored progress percentage when present
   (`working·61%`); `needs_input` renders the amber NEEDS INPUT treatment;
-  `done` is green; `in_review` blue; `queued` neutral.
+  `in_review` blue; `ready` neutral (Done is a derivation, not a status —
+  see `Relay.Cards.done?/2` — and is rendered by callers, not this badge).
 
   ## Examples
 
@@ -506,7 +507,7 @@ defmodule RelayWeb.CoreComponents do
       <.status_badge status={:needs_input} />
   """
   attr :status, :atom,
-    values: [:queued, :working, :needs_input, :in_review, :done],
+    values: [:ready, :working, :needs_input, :in_review],
     required: true
 
   attr :progress, :integer, default: nil
@@ -523,18 +524,16 @@ defmodule RelayWeb.CoreComponents do
     """
   end
 
-  defp status_badge_class(:queued), do: "badge-ghost"
+  defp status_badge_class(:ready), do: "badge-ghost"
   defp status_badge_class(:working), do: "badge-secondary"
   defp status_badge_class(:needs_input), do: "badge-warning"
   defp status_badge_class(:in_review), do: "badge-primary"
-  defp status_badge_class(:done), do: "badge-success"
 
   defp status_badge_label(:working, progress) when is_integer(progress), do: "working·#{progress}%"
-  defp status_badge_label(:queued, _progress), do: "queued"
+  defp status_badge_label(:ready, _progress), do: "ready"
   defp status_badge_label(:working, _progress), do: "working"
   defp status_badge_label(:needs_input, _progress), do: "NEEDS INPUT"
   defp status_badge_label(:in_review, _progress), do: "in review"
-  defp status_badge_label(:done, _progress), do: "done"
 
   @doc """
   Renders the owner avatar cluster for a card — the mockup's "who holds the
@@ -664,9 +663,15 @@ defmodule RelayWeb.CoreComponents do
   @doc """
   Renders a single kanban card matching the hi-fi mockup
   (`docs/designs/Relay Board.dc.html`): title, an accent left border keyed to
-  the baton state (blue human / violet AI / amber needs-input / green done /
-  red mismatch), an optional violet progress bar while working, the amber
-  NEEDS INPUT box, a mono status line + `#tag`, and the owner avatar cluster.
+  status (amber needs-you / violet working / red mismatch / quiet otherwise),
+  an optional violet progress bar while working, the amber needs-you box, a
+  mono status line + `#tag`, and the owner avatar cluster.
+
+  Done is a pure derivation (RLY-48, `Relay.Cards.done?/2`), not a stored
+  status: a `:ready` card at the board's terminal stage grays its title via
+  `done`; a `:ready` card in a mid-board Done sub-lane shows the green
+  `card-ready-chip` instead (via `stage_type`); a plain parked `:ready` card
+  elsewhere renders quiet, with no chip.
 
   The red mismatch warning (MMF 06) still fires when the card's active-owner
   type conflicts with the stage it sits in (`stage_owner`) — display-only,
@@ -708,8 +713,21 @@ defmodule RelayWeb.CoreComponents do
     doc: "the stage's \"meant for\" designation, for the mismatch warning"
 
   attr :status, :atom,
-    values: [:queued, :working, :needs_input, :in_review, :done, nil],
+    values: [:ready, :working, :needs_input, :in_review, nil],
     default: nil
+
+  attr :stage_type, :atom,
+    values: [:queue, :work, :planning, :review, :done, nil],
+    default: nil,
+    doc: "the card's stage behavior type — distinguishes the three :ready renderings"
+
+  attr :done, :boolean,
+    default: false,
+    doc: "derived Done: a :ready card at the board's terminal stage (Relay.Cards.done?/2)"
+
+  attr :question, :string,
+    default: nil,
+    doc: "the latest needs_input question, echoed as a one-line preview on needs_input cards"
 
   attr :progress, :integer, default: nil
   attr :owners, :list, default: [], doc: "the card's loaded owner rows, for the avatar cluster"
@@ -717,19 +735,20 @@ defmodule RelayWeb.CoreComponents do
   attr :lane, :atom,
     values: [:main, :review, :done, nil],
     default: :main,
-    doc: "which sub-lane the card sits in (a :done lane greens the accent)"
+    doc: "which sub-lane the card sits in — cosmetic only (stage_column also derives stage_type)"
 
   attr :category, :atom,
     values: [:unstarted, :planning, :in_progress, :complete, nil],
     default: nil,
-    doc: "the stage's category (a :complete stage greens the accent)"
+    doc: "the stage's category — cosmetic only (accent is keyed on status, not category)"
 
   def board_card(assigns) do
-    accent_class = card_accent_class(mismatch(assigns.active_owner, assigns.stage_owner), assigns)
+    mismatch = mismatch(assigns.active_owner, assigns.stage_owner)
+    accent_class = card_accent_class(mismatch, assigns)
 
     assigns =
       assigns
-      |> assign(:mismatch, mismatch(assigns.active_owner, assigns.stage_owner))
+      |> assign(:mismatch, mismatch)
       |> assign(:accent_class, accent_class)
       |> assign(:accent_color, card_accent_color(accent_class))
 
@@ -742,13 +761,15 @@ defmodule RelayWeb.CoreComponents do
       tabindex="0"
       draggable="true"
       data-ref={@ref}
+      data-status={@status}
+      data-done={to_string(@done)}
       data-active-owner={@active_owner}
       phx-click="select_card"
       phx-value-ref={@ref}
     >
       <span
         class="card-title"
-        style="font-size:12.5px;font-weight:500;line-height:1.35;letter-spacing:-0.01em;color:var(--color-base-content);"
+        style={"font-size:12.5px;font-weight:500;line-height:1.35;letter-spacing:-0.01em;color:#{if(@done, do: "oklch(0.62 0.02 255)", else: "var(--color-base-content)")};"}
       >
         {@title}
       </span>
@@ -775,17 +796,38 @@ defmodule RelayWeb.CoreComponents do
         <span style="width:6px;height:6px;border-radius:50%;background:var(--color-warning);flex:0 0 auto;">
         </span>
         <span style="font-size:10px;font-weight:600;letter-spacing:0.03em;color:oklch(0.52 0.11 65);font-family:var(--font-mono);">
-          NEEDS INPUT
+          needs you
         </span>
       </div>
+      <p
+        :if={@status == :needs_input && @question}
+        class="card-question-preview truncate"
+        style="font-size:11px;line-height:1.3;color:oklch(0.50 0.04 65);margin:0;"
+      >
+        {@question}
+      </p>
       <div style="display:flex;align-items:center;gap:7px;">
         <span
-          :if={card_status_label(@status, @progress)}
+          :if={@status == :working}
           class="card-status"
           data-status={@status}
-          style={"font-size:11px;font-family:var(--font-mono);color:#{card_status_color(@status)};"}
+          style="font-size:11px;font-family:var(--font-mono);color:oklch(0.52 0.10 292);"
         >
-          {card_status_label(@status, @progress)}
+          {if(@progress, do: "working · #{@progress}%", else: "working")}
+        </span>
+        <span
+          :if={@status == :in_review}
+          class="card-review-chip badge badge-sm badge-warning font-medium"
+          style="font-size:10px;"
+        >
+          review
+        </span>
+        <span
+          :if={@status == :ready && @stage_type == :done && !@done}
+          class="card-ready-chip badge badge-sm badge-success font-medium"
+          style="font-size:10px;"
+        >
+          ready
         </span>
         <span
           :if={@tag && @status != :working}
@@ -810,40 +852,26 @@ defmodule RelayWeb.CoreComponents do
   defp mismatch_message(:meant_for_agents), do: "This stage is meant to be used by agents"
   defp mismatch_message(:meant_for_humans), do: "This stage is meant for humans"
 
-  # Accent precedence mirrors the mockup's decorateCard: mismatch (Relay's own
-  # red case) wins, then needs-input amber, then the green "finished" states
-  # (done status, a Done sub-lane, or a Complete-category stage), then the
-  # stage-owner colour.
+  # RLY-48: the left-border accent is keyed on status. Relay's own red mismatch case wins;
+  # then amber for the two needs-you states; violet for working; everything else (all :ready
+  # renderings, unowned) is quiet base-300. The green "done" affordance moved off the border
+  # (there is no :done status) — a terminal ready card grays instead (see the title style).
   #
   # The returned `border-l-*` string is a *semantic/test hook only* — it is NOT
   # what paints the border. The actual 3px accent colour is set inline in
   # board_card/1 via card_accent_color/1 (an inline `style` beats the class, so
   # the class carries no colour). Do not delete these classes as "unused": the
-  # board/card tests select on them (e.g. `.border-l-primary`, `.border-l-error`).
+  # board/card tests select on them (e.g. `.border-l-warning`, `.border-l-error`).
   defp card_accent_class(mismatch, _assigns) when not is_nil(mismatch), do: "border-l-error"
   defp card_accent_class(_mismatch, %{status: :needs_input}), do: "border-l-warning"
-  defp card_accent_class(_mismatch, %{status: :done}), do: "border-l-success"
-  defp card_accent_class(_mismatch, %{lane: :done}), do: "border-l-success"
-  defp card_accent_class(_mismatch, %{category: :complete}), do: "border-l-success"
-  defp card_accent_class(_mismatch, %{active_owner: :ai}), do: "border-l-secondary"
-  defp card_accent_class(_mismatch, %{active_owner: :human}), do: "border-l-primary"
+  defp card_accent_class(_mismatch, %{status: :in_review}), do: "border-l-warning"
+  defp card_accent_class(_mismatch, %{status: :working}), do: "border-l-secondary"
   defp card_accent_class(_mismatch, _assigns), do: "border-l-base-300"
 
   defp card_accent_color("border-l-error"), do: "var(--color-error)"
   defp card_accent_color("border-l-warning"), do: "var(--color-warning)"
-  defp card_accent_color("border-l-success"), do: "var(--color-success)"
   defp card_accent_color("border-l-secondary"), do: "var(--color-secondary)"
-  defp card_accent_color("border-l-primary"), do: "var(--color-primary)"
   defp card_accent_color("border-l-base-300"), do: "var(--color-base-300)"
-
-  defp card_status_label(:working, nil), do: "working"
-  defp card_status_label(:working, progress), do: "working · #{progress}%"
-  defp card_status_label(:in_review, _progress), do: "ready"
-  defp card_status_label(:done, _progress), do: "done"
-  defp card_status_label(_status, _progress), do: nil
-
-  defp card_status_color(:working), do: "oklch(0.52 0.10 292)"
-  defp card_status_color(_status), do: "oklch(0.50 0.10 155)"
 
   defp sublane_width(%{collapsed: true}), do: 34
   defp sublane_width(_sub), do: 178
@@ -1024,8 +1052,15 @@ defmodule RelayWeb.CoreComponents do
     doc:
       "whether the open card itself is archived (RLY-4): shows the read-only archived banner + Restore and suppresses the edit/status/move affordances"
 
+  attr :done, :boolean,
+    default: false,
+    doc: "derived Done (Relay.Cards.done?/2): shows a Done pill in the header; no banner below"
+
   def card_drawer(assigns) do
-    assigns = assign(assigns, :sub_task_progress, Cards.sub_task_progress(assigns.card))
+    assigns =
+      assigns
+      |> assign(:sub_task_progress, Cards.sub_task_progress(assigns.card))
+      |> assign(:working_progress, board_card_progress(assigns.card))
 
     ~H"""
     <div id={@id} class="drawer drawer-end" phx-window-keydown="close_drawer" phx-key="escape">
@@ -1052,6 +1087,13 @@ defmodule RelayWeb.CoreComponents do
                   {@stage_name}
                 </span>
                 <span class="drawer-card-ref font-mono text-xs text-base-content/60">{@ref}</span>
+                <span
+                  :if={@done}
+                  id="drawer-done-pill"
+                  class="badge badge-success badge-sm font-medium"
+                >
+                  Done
+                </span>
               </div>
               <.editable_text
                 :if={!@archived}
@@ -1116,6 +1158,40 @@ defmodule RelayWeb.CoreComponents do
                 </span>
                 <div class="md text-[13.5px] leading-normal text-base-content/80">
                   {Relay.Markdown.to_html(@card.rejection.note)}
+                </div>
+              </section>
+              <section
+                :if={@card.status == :working and !@archived}
+                id="working-strip"
+                class="flex items-center gap-2.5 rounded-[10px] px-4 py-3"
+                style="background:oklch(0.97 0.03 292);border:1px solid oklch(0.90 0.05 292);"
+              >
+                <span
+                  class="working-pulse"
+                  style="width:7px;height:7px;border-radius:50%;background:oklch(0.56 0.16 292);animation:relaypulse 1.4s ease-in-out infinite;flex:0 0 auto;"
+                >
+                </span>
+                <span class="text-[12.5px] font-semibold" style="color:oklch(0.48 0.12 292);">
+                  Relay AI is working
+                </span>
+                <span
+                  :if={@working_progress}
+                  id="working-strip-pct"
+                  class="font-mono text-[11px]"
+                  style="color:oklch(0.52 0.10 292);"
+                >
+                  {@working_progress}%
+                </span>
+                <span style="flex:1;"></span>
+                <div
+                  class="h-[5px] w-24 overflow-hidden rounded-[3px]"
+                  style="background:oklch(0.93 0.02 292);"
+                >
+                  <div
+                    class="h-full rounded-[3px]"
+                    style={"width:#{@working_progress || 0}%;background:var(--color-secondary);"}
+                  >
+                  </div>
                 </div>
               </section>
               <section

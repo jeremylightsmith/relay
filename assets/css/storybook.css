@@ -112,3 +112,6 @@
   outline-offset: 2px;
   border-radius: var(--radius-field);
 }
+
+/* RLY-48: the drawer's "Relay AI is working" strip pulse. */
+@keyframes relaypulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }

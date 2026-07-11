@@ -35,14 +35,14 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-2",
           ref: "RLY-8",
-          card: %{story_card() | description: nil, tag: nil, status: :queued, progress: nil, owners: []},
+          card: %{story_card() | description: nil, tag: nil, status: :ready, progress: nil, owners: []},
           stage_name: "Spec",
           stage_owner: :human,
           active_owner: nil,
           current_user_id: 1,
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Wire the drawer"}, as: :card),
-          status_form: Phoenix.Component.to_form(%{"status" => "queued", "progress" => nil}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "ready", "progress" => nil}, as: :card),
           editing_description: true,
           description_form: Phoenix.Component.to_form(%{"description" => ""}, as: :card),
           conversation: [],
@@ -159,7 +159,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           ref: "RLY-13",
           card: %{
             story_card()
-            | status: :queued,
+            | status: :ready,
               progress: nil,
               rejection: %Schemas.CardRejection{
                 note: "Handle the empty-list case before hand-off.",
@@ -177,7 +177,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           current_user_id: 1,
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Wire the runner"}, as: :card),
-          status_form: Phoenix.Component.to_form(%{"status" => "queued", "progress" => nil}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "ready", "progress" => nil}, as: :card),
           conversation: story_conversation(),
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
@@ -217,6 +217,54 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
           conversation: story_conversation(),
           activity: story_activity(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
+        id: :working_strip,
+        attributes: %{
+          id: "story-drawer-working",
+          ref: "RLY-20",
+          card: %{
+            story_card()
+            | status: :working,
+              progress: nil,
+              sub_tasks: [
+                %{id: 1, title: "Add the sub_tasks table + schema", done: true, position: 0},
+                %{id: 2, title: "Wire the PATCH sub_tasks API", done: true, position: 1},
+                %{id: 3, title: "Render the drawer panels", done: true, position: 2},
+                %{id: 4, title: "Wire the runner hand-off", done: false, position: 3},
+                %{id: 5, title: "Docs", done: false, position: 4}
+              ]
+          },
+          stage_name: "Code",
+          stage_owner: :ai,
+          active_owner: :ai,
+          current_user_id: 1,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Wire the runner"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 61}, as: :card),
+          conversation: [],
+          activity: [],
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
+        id: :terminal_done,
+        attributes: %{
+          id: "story-drawer-done",
+          ref: "RLY-21",
+          card: %{story_card() | status: :ready, progress: nil},
+          done: true,
+          stage_name: "Done",
+          stage_owner: :human,
+          active_owner: :human,
+          current_user_id: 1,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Ship the landing page"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "ready", "progress" => nil}, as: :card),
+          conversation: [],
+          activity: [],
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
       }
