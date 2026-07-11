@@ -371,6 +371,36 @@
                     </div>
                     <span style="flex:1;min-width:180px;font-size:11px;line-height:1.4;color:oklch(0.55 0.02 255);">Both are optional lanes at the end of a stage — <b style="color:oklch(0.40 0.02 255);">Review</b> holds finished work for a human to approve or reject; <b style="color:oklch(0.40 0.02 255);">Done</b> parks it, ready for the next stage to pull.</span>
                   </div>
+                  <sc-if value="{{ st.showRejectRoute }}" hint-placeholder-val="{{ false }}">
+                    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px dashed oklch(0.94 0.006 255);padding-top:12px;">
+                      <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.44 0.11 195);">ON REJECT, SEND TO</span>
+                      <div style="position:relative;">
+                        <button onClick="{{ st.onToggleRejectMenu }}" style="display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:oklch(0.34 0.09 205);background:oklch(0.985 0.02 195);border:1px solid oklch(0.86 0.06 195);border-radius:8px;padding:6px 10px;cursor:pointer;min-width:120px;" style-hover="border-color:oklch(0.72 0.09 195);">
+                          <span style="width:7px;height:7px;border-radius:2px;background:oklch(0.55 0.11 195);flex:0 0 auto;"></span>
+                          <span style="flex:1;text-align:left;">{{ st.rejectRouteName }}</span>
+                          <span style="font-size:9px;color:oklch(0.50 0.06 205);">▾</span>
+                        </button>
+                        <sc-if value="{{ st.rejectMenuOpen }}" hint-placeholder-val="{{ false }}">
+                          <div style="position:absolute;top:calc(100% + 4px);left:0;z-index:5;background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);border-radius:9px;box-shadow:0 6px 20px oklch(0.5 0.03 255/0.14);padding:4px;display:flex;flex-direction:column;gap:1px;min-width:160px;max-height:230px;overflow-y:auto;">
+                            <sc-for list="{{ st.rejectRouteOptions }}" as="ro" hint-placeholder-count="3">
+                              <div onClick="{{ ro.onPick }}" style="{{ ro.rowStyle }}">
+                                <span style="flex:1;font-size:13px;color:oklch(0.30 0.02 255);">{{ ro.label }}</span>
+                                <sc-if value="{{ ro.selected }}" hint-placeholder-val="{{ false }}"><span style="font-size:11px;color:oklch(0.44 0.11 195);">✓</span></sc-if>
+                              </div>
+                            </sc-for>
+                          </div>
+                        </sc-if>
+                      </div>
+                      <span style="flex:1;min-width:180px;font-size:11px;line-height:1.4;color:oklch(0.55 0.02 255);">Rejected cards return here to be re-planned — the reviewer doesn't choose a destination.</span>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ st.showSubReviewHint }}" hint-placeholder-val="{{ false }}">
+                    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px dashed oklch(0.94 0.006 255);padding-top:12px;">
+                      <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.52 0.11 65);">ON REJECT, SEND TO</span>
+                      <span style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:oklch(0.44 0.03 65);background:oklch(0.985 0.02 75);border:1px solid oklch(0.90 0.04 70);border-radius:8px;padding:6px 10px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.70 0.11 65);flex:0 0 auto;"></span>{{ st.subReviewRejectName }}</span>
+                      <span style="flex:1;min-width:180px;font-size:11px;line-height:1.4;color:oklch(0.55 0.02 255);">A review sub-lane always rejects back into its own stage — nothing to configure.</span>
+                    </div>
+                  </sc-if>
                 </div>
               </sc-for>
             </div>
@@ -528,14 +558,10 @@
                 </sc-if>
                 <sc-if value="{{ drawer.sendBackOpen }}" hint-placeholder-val="{{ false }}">
                   <div style="display:flex;flex-direction:column;gap:10px;background:oklch(1 0 0);border:1px solid oklch(0.88 0.04 65);border-radius:8px;padding:12px;">
-                    <span style="font-size:11.5px;font-weight:600;color:oklch(0.50 0.11 65);">Reject — which stage should it go back to?</span>
-                    <sc-for list="{{ drawer.backTargets }}" as="bt" hint-placeholder-count="2">
-                      <div onClick="{{ bt.onPick }}" style="{{ bt.rowStyle }}">
-                        <span style="{{ bt.radioStyle }}"></span>
-                        <span style="{{ bt.dotStyle }}"></span>
-                        <span style="font-size:13px;font-weight:500;color:oklch(0.30 0.02 255);">{{ bt.name }}</span>
-                      </div>
-                    </sc-for>
+                    <div style="display:flex;align-items:center;gap:9px;background:oklch(0.985 0.02 195);border:1px solid oklch(0.90 0.03 195);border-radius:8px;padding:9px 11px;">
+                      <span style="font-size:13px;color:oklch(0.44 0.11 195);line-height:1;">↩</span>
+                      <span style="font-size:12.5px;line-height:1.45;color:oklch(0.38 0.04 210);">Returns to <b style="color:oklch(0.34 0.09 205);">{{ drawer.sendBackName }}</b> — the reject target set on this stage.</span>
+                    </div>
                     <textarea value="{{ sendBackText }}" onChange="{{ onSendBackInput }}" placeholder="What needs to change? This note goes back with the card…" rows="3" style="width:100%;border:1px solid oklch(0.90 0.006 255);border-radius:7px;padding:9px;outline:none;resize:none;font-size:13px;line-height:1.45;color:oklch(0.30 0.02 255);background:oklch(0.99 0.002 255);"></textarea>
                     <div style="display:flex;gap:8px;align-items:center;">
                       <button onClick="{{ onSendBack }}" style="background:oklch(0.62 0.14 65);color:oklch(1 0 0);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;">Reject → {{ drawer.sendBackName }}</button>
@@ -1066,8 +1092,12 @@ class Component extends DCLogic {
   openSendBack(id) {
     const card = this.findCard(id); if (!card) return;
     const i = this.stageIndex(card.stageId);
-    const isReview = card.sub === 'review';
-    const def = isReview ? card.stageId : (this.state.stages[i - 1] ? this.state.stages[i - 1].id : null);
+    const stage = this.state.stages.find(x => x.id === card.stageId) || {};
+    const prevId = this.state.stages[i - 1] ? this.state.stages[i - 1].id : null;
+    let def;
+    if (stage.type === 'review') def = stage.rejectTo || prevId;   // top-level review → target configured in stage settings
+    else if (card.sub === 'review') def = card.stageId;            // sub-lane review → back to its own stage · In progress
+    else def = prevId;
     this.setState({ sendBackOpen: true, sendBackStage: def, sendBackText: '', rejectOpen: false });
   }
   closeSendBack() { this.setState({ sendBackOpen: false, sendBackStage: null, sendBackText: '' }); }
@@ -1293,7 +1323,7 @@ class Component extends DCLogic {
     // Settings rows + groups
     const segActive = { fontSize: '12px', fontWeight: 600, padding: '6px 13px', borderRadius: '6px', background: 'oklch(1 0 0)', color: 'oklch(0.30 0.02 255)', border: 'none', boxShadow: '0 1px 2px oklch(0.5 0.03 255/0.12)', whiteSpace: 'nowrap' };
     const segIdle = { fontSize: '12px', fontWeight: 600, padding: '6px 13px', borderRadius: '6px', background: 'transparent', color: 'oklch(0.52 0.02 255)', border: 'none', whiteSpace: 'nowrap' };
-    const settingsRows = s.stages.map(st => ({
+    const settingsRows = s.stages.map(st => { const _curType = st.type || typeForCat[st.category] || 'work'; const _isTopReview = _curType === 'review'; const _idx = s.stages.findIndex(x => x.id === st.id); const _prev = s.stages[_idx - 1]; const _others = s.stages.filter(x => x.id !== st.id); const _curReject = st.rejectTo || (_isTopReview && _prev ? _prev.id : null); return ({
       id: st.id, name: st.name, description: st.description, category: st.category, ownerColor: ownerColor(st.owner),
       stageType: st.type || typeForCat[st.category] || 'work',
       stageTypeLabel: typeLabels[st.type || typeForCat[st.category] || 'work'],
@@ -1314,13 +1344,20 @@ class Component extends DCLogic {
       reviewToggleStyle: { width: '38px', height: '22px', borderRadius: '11px', border: 'none', padding: 0, position: 'relative', background: st.hasReview ? BLUE : 'oklch(0.88 0.01 255)', transition: 'background 0.15s' },
       reviewKnobStyle: { position: 'absolute', top: '2px', left: st.hasReview ? '18px' : '2px', width: '18px', height: '18px', borderRadius: '50%', background: 'oklch(1 0 0)', transition: 'left 0.15s', display: 'block' },
       onToggleReview: () => this.updateStage(st.id, { hasReview: !st.hasReview }),
+      showRejectRoute: _isTopReview,
+      rejectRouteName: (s.stages.find(x => x.id === _curReject) || {}).name || 'Choose stage…',
+      rejectMenuOpen: s.rejectMenuFor === st.id,
+      onToggleRejectMenu: () => this.setState(cur => ({ rejectMenuFor: cur.rejectMenuFor === st.id ? null : st.id })),
+      rejectRouteOptions: _others.map(x => ({ label: x.name, selected: _curReject === x.id, onPick: () => { this.updateStage(st.id, { rejectTo: x.id }); this.setState({ rejectMenuFor: null }); }, rowStyle: { display: 'flex', alignItems: 'center', gap: '9px', padding: '7px 9px', borderRadius: '7px', cursor: 'pointer', background: _curReject === x.id ? 'oklch(0.96 0.03 195)' : 'transparent' } })),
+      showSubReviewHint: !!st.hasReview && !_isTopReview,
+      subReviewRejectName: st.name + ' · In progress',
       onName: (e) => this.updateStage(st.id, { name: e.target.value }), onDesc: (e) => this.updateStage(st.id, { description: e.target.value }),
       onToggleAI: () => this.updateStage(st.id, { owner: st.owner === 'ai' ? 'human' : 'ai' }),
       onCatUnstarted: () => this.setCategory(st.id, 'unstarted'), onCatStarted: () => this.setCategory(st.id, 'started'), onCatComplete: () => this.setCategory(st.id, 'completed'),
       onToggleLimit: () => this.updateStage(st.id, { wip: st.wip == null ? 3 : null }), onWipUp: () => this.bumpWip(st.id, 1), onWipDown: () => this.bumpWip(st.id, -1),
       onToggleDone: () => this.updateStage(st.id, { hasDone: !st.hasDone }),
       onUp: () => this.moveStage(st.id, -1), onDown: () => this.moveStage(st.id, 1), onDelete: () => this.deleteStage(st.id),
-    }));
+    }); });
     const settingsGroups = [];
     s.stages.forEach((st, i) => {
       const row = settingsRows[i]; const last = settingsGroups[settingsGroups.length - 1];
@@ -1452,7 +1489,7 @@ class Component extends DCLogic {
         rowStyle: { display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 9px', borderRadius: '8px', cursor: 'pointer', border: '1px solid ' + (s.sendBackStage === x.id ? 'oklch(0.72 0.10 65)' : 'oklch(0.93 0.006 255)'), background: s.sendBackStage === x.id ? 'oklch(0.975 0.02 65)' : 'oklch(1 0 0)' },
         radioStyle: { width: '15px', height: '15px', borderRadius: '50%', flex: '0 0 auto', border: '1.5px solid ' + (s.sendBackStage === x.id ? 'oklch(0.66 0.12 65)' : 'oklch(0.80 0.01 255)'), background: s.sendBackStage === x.id ? 'oklch(0.70 0.13 65)' : 'oklch(1 0 0)', boxShadow: s.sendBackStage === x.id ? 'inset 0 0 0 2.5px oklch(1 0 0)' : 'none', boxSizing: 'border-box' },
         dotStyle: { width: '7px', height: '7px', borderRadius: '3px', flex: '0 0 auto', background: x.owner === 'ai' ? VIOLET : BLUE } }));
-      const sendBackName = (s.stages.find(x => x.id === s.sendBackStage) || {}).name || '';
+      const sendBackName = ((s.stages.find(x => x.id === s.sendBackStage) || {}).name || '') + (s.sendBackStage === selStage.id ? ' · In progress' : '');
 
       drawer = {
         open: true, title: sel.title, cardRef: 'RLY-' + (100 + this.stageIndex(selStage.id) + sel.id.length),
