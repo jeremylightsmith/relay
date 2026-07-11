@@ -131,6 +131,39 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ ~s(id="stage-col-1-new-card")
     end
 
+    test "compose + button has a ≥44px tap target with a visually small glyph" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-1",
+          name: "Backlog",
+          type: :queue,
+          stage_id: 7
+        )
+
+      assert html =~ ~s(id="stage-col-1-new-card")
+      # ≥44×44px hit area (mobile tap target); glyph stays 15px
+      assert html =~ "min-width:44px"
+      assert html =~ "min-height:44px"
+      assert html =~ "font-size:15px"
+    end
+
+    test "composer input is ≥16px (no iOS zoom) and its buttons are ≥44px tall" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-1",
+          name: "Backlog",
+          type: :queue,
+          stage_id: 7,
+          composing: true,
+          compose_form: to_form(%{"title" => ""}, as: :card)
+        )
+
+      # 16px input font prevents iOS auto-zoom on focus
+      assert html =~ ~s(class="commit-field-input text-base")
+      # Add card / Cancel are comfortable tap targets
+      assert html =~ "min-h-[44px]"
+    end
+
     test "collapsed renders the mockup's 44px dashed strip instead of the column" do
       html =
         render_component(&CoreComponents.stage_column/1,

@@ -2065,7 +2065,7 @@ defmodule RelayWeb.CoreComponents do
             phx-value-stage-id={@stage_id}
             title="Add work"
             aria-label="New card"
-            style="width:22px;height:22px;border-radius:6px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:oklch(0.45 0.02 255);font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex:0 0 auto;"
+            style="min-width:44px;min-height:44px;border-radius:6px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:oklch(0.45 0.02 255);font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex:0 0 auto;"
           >
             +
           </button>
@@ -2123,12 +2123,19 @@ defmodule RelayWeb.CoreComponents do
                       placeholder="Card title"
                       autofocus
                       autocomplete="off"
+                      input_class="text-base"
                       phx-keydown="cancel_compose"
                       phx-key="escape"
                     />
                     <div class="mt-2 flex items-center gap-2">
-                      <.button variant="primary" class="btn btn-primary btn-xs">Add card</.button>
-                      <button type="button" class="btn btn-ghost btn-xs" phx-click="cancel_compose">
+                      <.button variant="primary" class="btn btn-primary btn-xs min-h-[44px]">
+                        Add card
+                      </.button>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-xs min-h-[44px]"
+                        phx-click="cancel_compose"
+                      >
                         Cancel
                       </button>
                     </div>
