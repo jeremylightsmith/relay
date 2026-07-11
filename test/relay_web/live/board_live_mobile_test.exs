@@ -31,6 +31,11 @@ defmodule RelayWeb.BoardLiveMobileTest do
       assert view |> element("#board-title-cluster") |> render() =~ "min-w-0"
       assert view |> element("#board-title") |> render() =~ "truncate"
 
+      # The editable board-name <input> (the default, non-read-only path) must itself
+      # ellipsis-truncate: text-overflow on the ancestor <h1> never reaches into a
+      # nested <input>'s own text box, so the truncate class has to sit on the input.
+      assert view |> element("#board-name-input") |> render() =~ "truncate"
+
       # The three header icon buttons are ≥44px tap targets and stay inline.
       assert view |> element("#all-boards-link") |> render() =~ "min-h-[44px]"
       assert view |> element("#all-boards-link") |> render() =~ "min-w-[44px]"

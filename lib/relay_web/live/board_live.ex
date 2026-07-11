@@ -68,7 +68,7 @@ defmodule RelayWeb.BoardLive do
                 field={:name}
                 save_event="save_board_name"
                 cancel_event="cancel_board_name"
-                input_class="text-xl font-semibold"
+                input_class="truncate text-xl font-semibold"
               />
               <span :if={@read_only?}>{@board.name}</span>
             </h1>
