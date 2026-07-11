@@ -104,11 +104,11 @@ defmodule Relay.CardsNeedsInputTest do
       assert entry.user_id == user.id
     end
 
-    test "on a human-meant stage: returns the card to :queued", %{human_stage: stage} do
+    test "on a human-meant stage: returns the card to :ready", %{human_stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "Human next"})
       {:ok, card} = Cards.request_input(card, "Ready?")
 
-      assert {:ok, %Card{status: :queued, blocked_since: nil}} =
+      assert {:ok, %Card{status: :ready, blocked_since: nil}} =
                Cards.answer_input(card, "Yes", :agent)
     end
   end
@@ -169,7 +169,7 @@ defmodule Relay.CardsNeedsInputTest do
       {:ok, approved} = Cards.approve(blocked)
 
       assert approved.stage_id == next.id
-      assert approved.status == :queued
+      assert approved.status == :ready
       assert approved.blocked_since == nil
     end
   end

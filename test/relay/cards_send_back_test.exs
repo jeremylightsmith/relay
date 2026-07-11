@@ -42,7 +42,7 @@ defmodule Relay.CardsSendBackTest do
 
       assert {:ok, %Card{} = sent} = Cards.send_back(card, spec, "This is really a spec problem", :agent)
       assert sent.stage_id == spec.id
-      assert sent.status == :queued
+      assert sent.status == :ready
 
       assert %Schemas.CardRejection{} = rejection = sent.rejection
       assert rejection.note == "This is really a spec problem"
@@ -133,7 +133,7 @@ defmodule Relay.CardsSendBackTest do
       card = insert(:card, stage: review)
       {:ok, sent} = Cards.send_back(card, code, "fix it", :agent)
       {:ok, done} = Cards.mark_done(sent, :agent)
-      assert done.status == :done
+      assert done.status == :ready
       assert done.rejection == nil
     end
   end

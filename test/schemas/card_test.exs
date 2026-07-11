@@ -66,17 +66,34 @@ defmodule Schemas.CardTest do
   end
 
   describe "status and progress" do
-    test "a new card defaults to :queued" do
+    test "a new card defaults to :ready" do
       card = insert(:card)
 
       reloaded = Repo.get!(Card, card.id)
-      assert reloaded.status == :queued
+      assert reloaded.status == :ready
     end
 
     test "changeset/2 does not cast status" do
-      changeset = Card.changeset(%Card{}, %{title: "T", status: "done"})
+      changeset = Card.changeset(%Card{}, %{title: "T", status: "in_review"})
 
-      assert get_field(changeset, :status) == :queued
+      assert get_field(changeset, :status) == :ready
+    end
+
+    test "status enum is the four RLY-48 values, defaulting to :ready" do
+      assert %Card{}.status == :ready
+
+      ok = Card.status_changeset(%Card{}, %{status: :in_review})
+      assert ok.valid?
+
+      bad = Card.status_changeset(%Card{}, %{status: :queued})
+      refute bad.valid?
+      assert %{status: ["is invalid"]} = errors_on(bad)
+    end
+
+    test "entering :ready clears blocked_since" do
+      blocked = %Card{status: :needs_input, blocked_since: ~U[2026-07-01 00:00:00Z]}
+      changeset = Card.status_changeset(blocked, %{status: :ready})
+      assert Ecto.Changeset.get_change(changeset, :blocked_since) == nil
     end
   end
 

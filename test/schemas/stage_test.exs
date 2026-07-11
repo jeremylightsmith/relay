@@ -18,23 +18,23 @@ defmodule Schemas.StageTest do
     assert Stage.default_type(:complete) == :done
   end
 
-  test "default_status and valid_status? follow the ADR matrix" do
-    assert Stage.default_status(:queue) == :queued
+  test "default_status and valid_status? follow the RLY-48 matrix" do
+    assert Stage.default_status(:queue) == :ready
     assert Stage.default_status(:work) == :working
     assert Stage.default_status(:planning) == :working
     assert Stage.default_status(:review) == :in_review
-    assert Stage.default_status(:done) == :done
+    assert Stage.default_status(:done) == :ready
 
-    assert Stage.valid_status?(:queued, :queue)
+    assert Stage.valid_status?(:ready, :queue)
     refute Stage.valid_status?(:working, :queue)
     assert Stage.valid_status?(:working, :work)
-    assert Stage.valid_status?(:queued, :planning)
+    assert Stage.valid_status?(:ready, :planning)
     assert Stage.valid_status?(:needs_input, :work)
     refute Stage.valid_status?(:in_review, :work)
     assert Stage.valid_status?(:in_review, :review)
-    assert Stage.valid_status?(:done, :review)
+    assert Stage.valid_status?(:ready, :review)
     refute Stage.valid_status?(:working, :done)
-    assert Stage.valid_status?(:done, :done)
+    assert Stage.valid_status?(:ready, :done)
   end
 
   test "ai_enabled is forced false unless the type is work or planning" do

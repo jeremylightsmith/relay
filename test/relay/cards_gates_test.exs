@@ -51,7 +51,7 @@ defmodule Relay.CardsGatesTest do
       assert approved.status == :working
     end
 
-    test "arrives :queued when the next main stage is queue-type" do
+    test "arrives :ready when the next main stage is queue-type" do
       board = insert(:board)
 
       gate =
@@ -69,7 +69,7 @@ defmodule Relay.CardsGatesTest do
 
       assert {:ok, approved} = Cards.approve(card)
       assert approved.stage_id == verify.id
-      assert approved.status == :queued
+      assert approved.status == :ready
     end
 
     test "skips sub-lane stages when finding the next stage", %{review: review, deploy: deploy} do
@@ -93,13 +93,14 @@ defmodule Relay.CardsGatesTest do
       assert approved.status == :working
     end
 
-    test "at the last main stage sets :done in place", %{done: done} do
+    test "at the last main stage sets :ready in place (derives Done)", %{board: board, done: done} do
       card = insert(:card, stage: done)
       {:ok, card} = Cards.set_status(card, %{status: :in_review})
 
       assert {:ok, approved} = Cards.approve(card)
       assert approved.stage_id == done.id
-      assert approved.status == :done
+      assert approved.status == :ready
+      assert Cards.done?(approved, Boards.list_stages(board))
     end
 
     test "logs an :approved activity with from/to stage names", %{review: review} do

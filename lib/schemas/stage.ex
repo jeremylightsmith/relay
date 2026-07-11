@@ -52,18 +52,18 @@ defmodule Schemas.Stage do
   def default_type(:in_progress), do: :work
   def default_type(:complete), do: :done
 
-  @doc "The status a card takes when it enters a stage of this type (ADR 0003)."
-  def default_status(:queue), do: :queued
+  @doc "The status a card takes when it enters a stage of this type (ADR 0003 + RLY-48)."
+  def default_status(:queue), do: :ready
   def default_status(:work), do: :working
   def default_status(:planning), do: :working
   def default_status(:review), do: :in_review
-  def default_status(:done), do: :done
+  def default_status(:done), do: :ready
 
-  @doc "Whether `status` is valid for a stage of `type` (ADR 0003 validity matrix)."
-  def valid_status?(status, :queue), do: status == :queued
-  def valid_status?(status, type) when type in [:work, :planning], do: status in [:working, :queued, :needs_input]
-  def valid_status?(status, :review), do: status in [:in_review, :done]
-  def valid_status?(status, :done), do: status == :done
+  @doc "Whether `status` is valid for a stage of `type` (RLY-48 validity matrix)."
+  def valid_status?(status, :queue), do: status == :ready
+  def valid_status?(status, type) when type in [:work, :planning], do: status in [:working, :ready, :needs_input]
+  def valid_status?(status, :review), do: status in [:in_review, :ready]
+  def valid_status?(status, :done), do: status == :ready
 
   # ai_enabled only applies to work/planning; every other type zeroes it (create + type change).
   defp normalize_ai_enabled(changeset) do

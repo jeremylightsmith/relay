@@ -225,8 +225,8 @@ defmodule Relay.Cards do
   end
 
   @doc """
-  Sets the card's baton status (`:queued | :working | :needs_input |
-  :in_review | :done`) from `attrs`, attributed to `actor` (`:agent |
+  Sets the card's baton status (`:ready | :working | :needs_input |
+  :in_review`) from `attrs`, attributed to `actor` (`:agent |
   {:user, user_id}`, defaults to `:agent`), returning `{:ok, card}`
   (owners preloaded) or `{:error, changeset}`. Status only ever changes
   through this explicit call — never as a side effect of moving a card.
@@ -359,6 +359,88 @@ defmodule Relay.Cards do
       owners != [] -> :human
       true -> nil
     end
+  end
+
+  @doc """
+  Derived Done: a `:ready` card parked at the board's **terminal** stage (the last top-level
+  stage in `stages`, `Relay.Boards.terminal_stage/1`). A `:ready` card in a *mid-board* Done
+  sub-lane is NOT done — it is merely parked. Pure; takes the board's in-memory stage list.
+  """
+  def done?(%{status: :ready, stage_id: stage_id}, stages) do
+    case Boards.terminal_stage(stages) do
+      %Stage{id: ^stage_id} -> true
+      _ -> false
+    end
+  end
+
+  def done?(_card, _stages), do: false
+
+  @doc """
+  Derived "ready awaiting a human": a `:ready` card whose **puller** (the stage that works it
+  next) exists and is not an AI-enabled work/planning stage. A card parked in an AI work stage
+  is ambient (its own agent pulls it); parked before a human stage it is on a human; parked at
+  the terminal stage the puller is `nil`, so it is Done, not awaiting-human. Pure.
+  """
+  def ready_awaiting_human?(%{status: :ready} = card, stages) do
+    case worker_stage(card, stages) do
+      %Stage{type: type, ai_enabled: true} when type in [:work, :planning] -> false
+      %Stage{} -> true
+      nil -> false
+    end
+  end
+
+  def ready_awaiting_human?(_card, _stages), do: false
+
+  @doc """
+  The two-bucket "needs-you" fact: `:needs_input`/`:in_review` always count, plus
+  ready-awaiting-human. NOTE this is deliberately broader than the board's amber accent (which
+  is `status in [:needs_input, :in_review]` only) — a ready-awaiting-human card counts in
+  rollups but is NOT painted amber (RLY-48 §2.3). Pure.
+  """
+  def needs_you?(%{status: status} = card, stages) do
+    status in [:needs_input, :in_review] or ready_awaiting_human?(card, stages)
+  end
+
+  # The stage that pulls a parked card next: its own stage when that is a work/planning stage
+  # (its worker starts it in place), else the next main stage (nil at the terminal stage).
+  defp worker_stage(%{stage_id: stage_id}, stages) do
+    case Enum.find(stages, &(&1.id == stage_id)) do
+      %Stage{type: type} = current when type in [:work, :planning] -> current
+      %Stage{} = current -> next_main_stage(stages, current)
+      nil -> nil
+    end
+  end
+
+  # The next top-level stage after `current`'s governing main stage (its own id when main-lane,
+  # else its sub-lane parent), by position. nil when `current`'s main stage is the terminal one.
+  defp next_main_stage(stages, %Stage{} = current) do
+    governing_id = current.parent_id || current.id
+
+    stages
+    |> Enum.filter(&is_nil(&1.parent_id))
+    |> Enum.sort_by(& &1.position)
+    |> Enum.drop_while(&(&1.id != governing_id))
+    |> Enum.drop(1)
+    |> List.first()
+  end
+
+  @doc """
+  The board's three-way needs-you rollup: `%{needs_input: n, in_review: n, awaiting_human: n}`
+  (total needs-you = their sum). Loads the board's active cards + stages once and folds the
+  derivations. Used by the board API payload (§6.1) and the boards-home tiles (§6.3).
+  """
+  def needs_you_rollup(%Board{} = board) do
+    stages = Boards.list_stages(board)
+    cards = list_cards(board)
+
+    Enum.reduce(cards, %{needs_input: 0, in_review: 0, awaiting_human: 0}, fn card, acc ->
+      cond do
+        card.status == :needs_input -> Map.update!(acc, :needs_input, &(&1 + 1))
+        card.status == :in_review -> Map.update!(acc, :in_review, &(&1 + 1))
+        ready_awaiting_human?(card, stages) -> Map.update!(acc, :awaiting_human, &(&1 + 1))
+        true -> acc
+      end
+    end)
   end
 
   @doc """
@@ -579,12 +661,12 @@ defmodule Relay.Cards do
   end
 
   @doc """
-  Marks the card `:done` in place (the drawer's "Mark done") and clears any open
-  rejection — the work has been accepted. Returns `{:ok, card}` or
+  Marks the card `:ready` in place (the drawer's "Mark done") and clears any open rejection —
+  a card parked at the terminal stage then derives as Done. Returns `{:ok, card}` or
   `{:error, changeset}`.
   """
   def mark_done(%Card{} = card, actor \\ :agent) do
-    case set_status(card, %{status: :done}, actor) do
+    case set_status(card, %{status: :ready}, actor) do
       {:ok, updated} -> {:ok, clear_rejection(updated)}
       {:error, changeset} -> {:error, changeset}
     end
@@ -611,7 +693,7 @@ defmodule Relay.Cards do
   @doc """
   Answers a blocked card's question (MMF 14): posts `answer` as a comment
   from `actor`, flips status to `:working` when the card's stage is meant
-  for the AI (the agent resumes) or `:queued` otherwise — clearing
+  for the AI (the agent resumes) or `:ready` otherwise — clearing
   `blocked_since` — and logs an `:input_answered` activity entry. The
   answer reaches the agent through the existing `GET /api/cards/:ref`
   timeline; no new endpoint. The comment posts first, so a blank answer
@@ -746,9 +828,9 @@ defmodule Relay.Cards do
     end
   end
 
-  # Approve at the board's last main stage: :done in place, no move.
+  # Approve at the board's last main stage: :ready in place, no move (derives Done).
   defp approve_in_place(%Card{} = card, from_stage, actor) do
-    case set_status(card, %{status: :done}, actor) do
+    case set_status(card, %{status: :ready}, actor) do
       {:ok, updated} ->
         log_gate(updated, :approved, actor, from_stage, from_stage, nil)
         {:ok, clear_rejection(updated)}
