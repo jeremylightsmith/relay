@@ -112,6 +112,23 @@
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
+/* RLY-59: PhoenixStorybook ships its own unlayered chrome CSS that defaults the
+   sandbox to `serif` (the "weird font") and the chrome to a generic system sans.
+   Force both onto Relay's Helvetica Neue so the storybook matches the app.
+
+   Why !important: the library's rules are UNLAYERED, but our custom rules land in a
+   cascade layer, so a plain (normal) declaration here loses regardless of specificity.
+   A layered !important is the reliable override. (Same cascade-layer gotcha already
+   documented for `.commit-pill.hidden` below.) Scope is font-family ONLY — chrome
+   colors, layout, and the library's components are untouched (RLY-59 scope (a)).
+   Icons (.fa*, heroicons) and `--font-mono` set their own font-family ON the element,
+   so this ancestor rule never overrides them — it only fills in text that was
+   inheriting serif/system-sans. */
+.psb,
+.psb-sandbox {
+  font-family: var(--font-sans) !important;
+}
+
 /* --- Drag-and-drop affordances (classes toggled by the BoardDnD hook) --- */
 .board-card.dragging {
   opacity: 0.5;
