@@ -183,3 +183,6 @@
   border: 1px solid color-mix(in oklch, currentColor 15%, transparent);
   padding: 0.3em 0.6em;
 }
+
+/* RLY-48: the drawer's "Relay AI is working" strip pulse. */
+@keyframes relaypulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }

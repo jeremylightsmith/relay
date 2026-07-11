@@ -89,7 +89,7 @@ defmodule Relay.CLITest do
         "data" => %{
           "ref" => "RLY-1",
           "title" => "Do it",
-          "status" => "queued",
+          "status" => "ready",
           "description" => "the details",
           "owners" => [],
           "active_owner" => nil,
@@ -121,7 +121,7 @@ defmodule Relay.CLITest do
       assert Jason.decode!(body) == %{"note" => "spec problem", "to" => "Spec"}
 
       Req.Test.json(conn, %{
-        "data" => %{"ref" => "RLY-1", "title" => "Do it", "status" => "queued", "active_owner" => nil}
+        "data" => %{"ref" => "RLY-1", "title" => "Do it", "status" => "ready", "active_owner" => nil}
       })
     end)
 
@@ -155,7 +155,7 @@ defmodule Relay.CLITest do
           %{
             "ref" => "RLY-1",
             "title" => "Human card",
-            "status" => "queued",
+            "status" => "ready",
             "stage_id" => 1,
             "owners" => [],
             "active_owner" => nil
@@ -163,7 +163,49 @@ defmodule Relay.CLITest do
           %{
             "ref" => "RLY-2",
             "title" => "Unclaimed AI-stage",
-            "status" => "queued",
+            "status" => "ready",
+            "stage_id" => 2,
+            "owners" => [],
+            "active_owner" => nil
+          }
+        ]
+      })
+    end)
+
+    assert {:ok, text} = CLI.pull([])
+    assert text =~ "RLY-2"
+    refute text =~ "RLY-1"
+  end
+
+  test "pull/1 skips an unclaimed card that is derived done" do
+    stub(fn conn ->
+      Req.Test.json(conn, %{
+        "board" => %{"name" => "B", "key" => "RLY"},
+        "stages" => [
+          %{
+            "id" => 2,
+            "name" => "Code",
+            "type" => "work",
+            "ai_enabled" => true,
+            "category" => "in_progress",
+            "position" => 2
+          }
+        ],
+        "cards" => [
+          %{
+            "ref" => "RLY-1",
+            "title" => "Parked, derived done",
+            "status" => "ready",
+            "done" => true,
+            "stage_id" => 2,
+            "owners" => [],
+            "active_owner" => nil
+          },
+          %{
+            "ref" => "RLY-2",
+            "title" => "Unclaimed AI-stage",
+            "status" => "ready",
+            "done" => false,
             "stage_id" => 2,
             "owners" => [],
             "active_owner" => nil
@@ -233,7 +275,7 @@ defmodule Relay.CLITest do
             "data" => %{
               "ref" => "RLY-1",
               "title" => "X",
-              "status" => "queued",
+              "status" => "ready",
               "stage_id" => 7,
               "active_owner" => "ai",
               "owners" => []

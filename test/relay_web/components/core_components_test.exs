@@ -81,9 +81,11 @@ defmodule RelayWeb.CoreComponentsTest do
           stage_id: 4,
           board_key: "RLY",
           cards: [
-            {"cards-1", %{title: "First card", tag: "infra", ref_number: 1, status: :queued, sub_tasks: [], owners: []}},
+            {"cards-1",
+             %{id: 1, title: "First card", tag: "infra", ref_number: 1, status: :ready, sub_tasks: [], owners: []}},
             {"cards-2",
              %{
+               id: 2,
                title: "Second card",
                tag: nil,
                ref_number: 2,
@@ -222,7 +224,7 @@ defmodule RelayWeb.CoreComponentsTest do
           count: 1,
           board_key: "RLY",
           cards: [
-            {"cards-1", %{title: "Main work", tag: nil, ref_number: 1, status: :queued, sub_tasks: [], owners: []}}
+            {"cards-1", %{id: 1, title: "Main work", tag: nil, ref_number: 1, status: :ready, sub_tasks: [], owners: []}}
           ],
           sublanes: [
             %{id: 401, name: "Review", lane: :review, owner: :human, count: 0, cards: [], collapsed: true},
@@ -256,11 +258,10 @@ defmodule RelayWeb.CoreComponentsTest do
   describe "status_badge/1" do
     test "renders each status with its colour token and label" do
       for {status, class, label} <- [
-            {:queued, "badge-ghost", "queued"},
+            {:ready, "badge-ghost", "ready"},
             {:working, "badge-secondary", "working"},
             {:needs_input, "badge-warning", "NEEDS INPUT"},
-            {:in_review, "badge-primary", "in review"},
-            {:done, "badge-success", "done"}
+            {:in_review, "badge-primary", "in review"}
           ] do
         html = render_component(&CoreComponents.status_badge/1, status: status)
 
@@ -270,7 +271,7 @@ defmodule RelayWeb.CoreComponentsTest do
       end
     end
 
-    test "working includes the progress percentage when present" do
+    test "working appends progress when present" do
       html = render_component(&CoreComponents.status_badge/1, status: :working, progress: 61)
 
       assert html =~ "working·61%"
@@ -293,7 +294,7 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ "card-mismatch"
     end
 
-    test "human active renders the blue border and owner avatar" do
+    test "a ready, human-active card is quiet — no owner accent" do
       html =
         render_component(&CoreComponents.board_card/1,
           id: "c2",
@@ -301,11 +302,11 @@ defmodule RelayWeb.CoreComponentsTest do
           title: "T",
           active_owner: :human,
           stage_owner: :human,
-          status: :queued,
+          status: :ready,
           owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}]
         )
 
-      assert html =~ "border-l-primary"
+      assert html =~ "border-l-base-300"
       assert html =~ ~s(data-active-owner="human")
       assert html =~ "card-owners"
       assert html =~ ~s(data-actor-type="user")
@@ -359,7 +360,7 @@ defmodule RelayWeb.CoreComponentsTest do
           title: "T",
           active_owner: :human,
           stage_owner: :ai,
-          status: :queued
+          status: :ready
         )
 
       assert html =~ "border-l-error"
@@ -375,7 +376,7 @@ defmodule RelayWeb.CoreComponentsTest do
           title: "T",
           active_owner: :ai,
           stage_owner: :human,
-          status: :queued
+          status: :ready
         )
 
       assert html =~ "border-l-error"
@@ -393,6 +394,182 @@ defmodule RelayWeb.CoreComponentsTest do
 
       refute html =~ "card-mismatch"
       assert html =~ "border-l-base-300"
+    end
+
+    test "in_review paints amber and shows the review chip" do
+      html =
+        render_component(&CoreComponents.board_card/1, %{
+          id: "c",
+          ref: "RLY-1",
+          title: "T",
+          status: :in_review
+        })
+
+      assert html =~ "border-l-warning"
+      assert html =~ "card-review-chip"
+      assert html =~ "review"
+    end
+
+    test "needs_input paints amber, shows the needs-you chip and the question preview" do
+      html =
+        render_component(&CoreComponents.board_card/1, %{
+          id: "c",
+          ref: "RLY-2",
+          title: "T",
+          status: :needs_input,
+          question: "Which locales ship first?"
+        })
+
+      assert html =~ "border-l-warning"
+      assert html =~ "card-needs-input"
+      assert html =~ "card-question-preview"
+      assert html =~ "Which locales ship first?"
+    end
+
+    test "ready in a Done sub-lane shows the green ready chip" do
+      html =
+        render_component(&CoreComponents.board_card/1, %{
+          id: "c",
+          ref: "RLY-3",
+          title: "T",
+          status: :ready,
+          stage_type: :done,
+          done: false
+        })
+
+      assert html =~ "card-ready-chip"
+      refute html =~ "border-l-warning"
+    end
+
+    test "ready at the terminal stage renders grayed Done, no chip" do
+      html =
+        render_component(&CoreComponents.board_card/1, %{
+          id: "c",
+          ref: "RLY-4",
+          title: "T",
+          status: :ready,
+          stage_type: :done,
+          done: true
+        })
+
+      assert html =~ ~s(data-done="true")
+      refute html =~ "card-ready-chip"
+      refute html =~ "card-review-chip"
+    end
+
+    test "a plain parked ready card is quiet — no chip, no amber" do
+      html =
+        render_component(&CoreComponents.board_card/1, %{
+          id: "c",
+          ref: "RLY-5",
+          title: "T",
+          status: :ready,
+          stage_type: :queue
+        })
+
+      refute html =~ "border-l-warning"
+      refute html =~ "card-ready-chip"
+      refute html =~ "card-review-chip"
+    end
+  end
+
+  describe "card_drawer/1" do
+    defp drawer_card(overrides) do
+      Map.merge(
+        %{
+          title: "T",
+          status: :ready,
+          blocked_since: nil,
+          rejection: nil,
+          sub_tasks: [],
+          tag: nil,
+          description: nil,
+          spec: nil,
+          plan: nil,
+          pr_url: nil,
+          branch: nil,
+          ai_result: nil,
+          owners: [],
+          inserted_at: ~U[2026-07-01 00:00:00Z],
+          updated_at: ~U[2026-07-01 00:00:00Z]
+        },
+        overrides
+      )
+    end
+
+    defp drawer_attrs(card_overrides, extra) do
+      card = drawer_card(card_overrides)
+
+      Map.merge(
+        %{
+          id: "card-drawer",
+          ref: "RLY-1",
+          card: card,
+          stage_name: "Code",
+          stage_owner: :ai,
+          close_patch: "/board",
+          title_form: to_form(%{"title" => card.title}, as: :card),
+          comment_form: to_form(%{"body" => ""}, as: :comment),
+          conversation: [],
+          activity: []
+        },
+        extra
+      )
+    end
+
+    test "working shows the pulsing strip with sub-task-derived progress" do
+      attrs =
+        drawer_attrs(
+          %{
+            status: :working,
+            sub_tasks: [
+              %{id: 1, title: "a", done: true},
+              %{id: 2, title: "b", done: false}
+            ]
+          },
+          %{}
+        )
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      assert html =~ ~s(id="working-strip")
+      assert html =~ "Relay AI is working"
+      assert html =~ ~s(id="working-strip-pct")
+      assert html =~ "50%"
+    end
+
+    test "working with no sub-tasks shows the strip but no percentage" do
+      attrs = drawer_attrs(%{status: :working}, %{})
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      assert html =~ ~s(id="working-strip")
+      refute html =~ ~s(id="working-strip-pct")
+    end
+
+    test "no working strip when not working" do
+      attrs = drawer_attrs(%{status: :ready}, %{})
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      refute html =~ ~s(id="working-strip")
+    end
+
+    test "done shows the header Done pill" do
+      attrs = drawer_attrs(%{status: :ready}, %{done: true})
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      assert html =~ ~s(id="drawer-done-pill")
+      assert html =~ "Done"
+    end
+
+    test "not done shows no Done pill" do
+      attrs = drawer_attrs(%{status: :ready}, %{done: false})
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      refute html =~ ~s(id="drawer-done-pill")
     end
   end
 

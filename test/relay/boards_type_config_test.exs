@@ -33,7 +33,7 @@ defmodule Relay.BoardsTypeConfigTest do
     {:ok, queue} = Boards.update_stage(code, %{type: :queue})
     :ok = Cards.snap_cards_in(queue)
 
-    assert Relay.Repo.reload!(card).status == :queued
+    assert Relay.Repo.reload!(card).status == :ready
   end
 
   test "previous_main_stage returns the nearest earlier main stage", %{board: board} do

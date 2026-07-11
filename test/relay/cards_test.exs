@@ -389,14 +389,14 @@ defmodule Relay.CardsTest do
       {:ok, card} = Cards.set_status(card, %{status: :working})
 
       assert {:ok, moved} = Cards.move_card(card, backlog, 0)
-      assert moved.status == :queued
+      assert moved.status == :ready
     end
 
     test "a status already valid for the destination survives the move", %{work_stage: work, backlog_stage: backlog} do
       {:ok, card} = Cards.create_card(backlog, %{title: "x"})
 
       assert {:ok, moved} = Cards.move_card(card, work, 0)
-      assert moved.status == :queued
+      assert moved.status == :ready
     end
 
     test "needs_input -> queue clears blocked_since", %{work_stage: work, backlog_stage: backlog} do
@@ -405,7 +405,7 @@ defmodule Relay.CardsTest do
       assert card.blocked_since
 
       {:ok, moved} = Cards.move_card(card, backlog, 0)
-      assert moved.status == :queued
+      assert moved.status == :ready
       assert is_nil(moved.blocked_since)
     end
 
@@ -475,7 +475,7 @@ defmodule Relay.CardsTest do
       # Reaching a Done stage keeps Relay AI as the owner (provenance).
       assert {:ok, in_done} = Cards.move_card(at_work, done_stage, 0)
       assert [%{actor_type: :agent}] = in_done.owners
-      assert in_done.status == :done
+      assert in_done.status == :ready
     end
   end
 
@@ -495,7 +495,7 @@ defmodule Relay.CardsTest do
 
       assert {:error, %Ecto.Changeset{}} = Cards.set_status(card, %{"status" => "banana"})
 
-      assert Repo.get!(Card, card.id).status == :queued
+      assert Repo.get!(Card, card.id).status == :ready
     end
   end
 
@@ -681,10 +681,9 @@ defmodule Relay.CardsTest do
 
       {:ok, moved} = Cards.move_card(card, review, 0)
 
-      # ADR 0003 — :queued isn't valid in a :review-type stage, so the snap also logs a
-      # :status_changed entry alongside the :moved one.
-      assert [_created, %Schemas.Activity{type: :moved, meta: meta}, %Schemas.Activity{type: :status_changed}] =
-               activities(moved)
+      # RLY-48 — :ready is valid in a :review-type stage (parked pending human review), so no
+      # snap/status_changed fires here; only the :moved entry is logged.
+      assert [_created, %Schemas.Activity{type: :moved, meta: meta}] = activities(moved)
 
       assert meta == %{"from_stage" => stage.name, "to_stage" => "Code · Review"}
     end
@@ -706,7 +705,7 @@ defmodule Relay.CardsTest do
       assert [_created, %Schemas.Activity{type: :status_changed, actor_type: :user, meta: meta}] =
                activities(updated)
 
-      assert meta == %{"from_status" => "queued", "to_status" => "in_review"}
+      assert meta == %{"from_status" => "ready", "to_status" => "in_review"}
     end
 
     test "a same-status re-set does not log", %{stage: stage} do

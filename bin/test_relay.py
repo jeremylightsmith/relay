@@ -228,6 +228,17 @@ class WorkOwnershipTest(unittest.TestCase):
         # it still pushes the finished card to the done stage
         self.assertIn("move", names)
 
+    def test_work_auto_continue_sets_ready_not_a_done_status(self):
+        entry = {**self.ENTRY, "done": "Plan:Done"}  # not a :Review checkpoint -> auto-continue
+        relay.work(self.CARD, entry, "fresh")
+        set_status_calls = [c for c in self.calls if c[0] == "set_status"]
+        self.assertIn(("set_status", "RLY-9", "ready"), set_status_calls)
+
+    def test_work_review_checkpoint_sets_in_review(self):
+        relay.work(self.CARD, self.ENTRY, "fresh")  # self.ENTRY["done"] == "Code:Review"
+        set_status_calls = [c for c in self.calls if c[0] == "set_status"]
+        self.assertIn(("set_status", "RLY-9", "in_review"), set_status_calls)
+
 
 class BuildPoolsTest(unittest.TestCase):
     def test_shared_pool_has_n_slots_all_one_worktree(self):

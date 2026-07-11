@@ -43,7 +43,7 @@ defmodule Relay.CLI do
       pick =
         Enum.find(cards, &(&1["active_owner"] == "ai")) ||
           Enum.find(cards, fn c ->
-            c["active_owner"] == nil and ai_enabled?[c["stage_id"]] and c["status"] != "done"
+            c["active_owner"] == nil and ai_enabled?[c["stage_id"]] and c["done"] != true
           end)
 
       case pick do
@@ -72,7 +72,7 @@ defmodule Relay.CLI do
     end
   end
 
-  @doc "Sets the card's status (queued|working|needs_input|in_review|done)."
+  @doc "Sets the card's status (ready|working|needs_input|in_review)."
   def status(ref, status, opts) do
     with {:ok, %{"data" => card}} <- request(:patch, "/api/cards/#{ref}", %{status: status}) do
       {:ok, render(opts, card, format_card_line(card))}

@@ -28,10 +28,10 @@ default (the status a card takes when it has no valid status to keep) is:
 
 | Stage type | Valid statuses | Default on entry |
 | --- | --- | --- |
-| `queue` | `queued` | `queued` |
-| `work` / `planning` | `working`, `queued`, `needs_input` | `working` |
-| `review` | `in_review`, `done` | `in_review` |
-| `done` | `done` | `done` |
+| `queue` | `ready` | `ready` |
+| `work` / `planning` | `working`, `ready`, `needs_input` | `working` |
+| `review` | `in_review`, `ready` | `in_review` |
+| `done` | `ready` | `ready` |
 
 Encoded as `Schemas.Stage.valid_status?/2` and `Schemas.Stage.default_status/1` — pure,
 stateless functions with no DB access, so every caller (contexts, LiveView, tests) shares
@@ -42,16 +42,16 @@ Notable choices baked into the matrix:
 - **`work`/`planning` default to `:working` regardless of `ai_enabled`.** This is a *pull*
   model: a card lands "in motion" whether the stage is AI-listened or human-worked, and
   `ai_enabled` only decides whether Relay's agent polls it — it doesn't gate the status.
-- **`:queued` means "parked, ready to be pulled"** — valid in `work`/`planning` stages too
+- **`:ready` means "parked, ready to be pulled"** — valid in `work`/`planning` stages too
   (not just `queue`), so a card can wait its turn in a busy work column without an
   artificial bounce through a queue stage.
 - **`:needs_input` is kept valid in `work`/`planning`** so a card dragged (or approved) into
   a work-type stage while blocked on a human doesn't silently drop its open question — the
   snap (below) only overrides an *invalid* status, and `needs_input` is explicitly valid
   there.
-- **`:done` is valid in `review`** for two reasons: approving from the board's last main
+- **`:ready` is valid in `review`** for two reasons: approving from the board's last main
   stage completes the card in place (no next main stage to move to — see
-  `Relay.Cards.approve/2`), and an already-`:done` card that later passes back through a
+  `Relay.Cards.approve/2`), and an already-`:ready` card that later passes back through a
   review stage (e.g. a redo that climbs past its origin) must not be silently reopened.
 
 **The snap rule is one code path.** `Relay.Cards.move_card/4` — the single funnel every
@@ -77,16 +77,14 @@ re-applies to a stage's **resident cards** when its `type` changes in settings, 
   question stays open — but is force-resolved (to that type's default) the moment it lands
   somewhere `needs_input` isn't valid (`queue`, `review`, `done`).
 
-### Deliberate deviation: `done`-type stages snap to `:done`, not `:ready`
+### Update (RLY-48): the card-sub-state reframe landed
 
-The spec's sketched card-state model distinguishes a card mid-board that's finished its
-current stage's work ("ready to advance") from one that has reached the board's terminal
-`Done` column. This ADR does **not** introduce that distinction yet: every `done`-type stage
-— whether it's the board's terminal column or an earlier "Done sub-lane" a card visits
-mid-flow — snaps a card straight to `:done`. That is a deliberate, temporary simplification:
-introducing a `:ready` status and the mid-board/terminal-done split is deferred to a later,
-dedicated card-sub-state reframe. Until then, `:done` is overloaded to mean "this stage's
-work is finished," and the matrix above should be read with that caveat.
+The deferral described here has been resolved. RLY-48 collapsed `:queued` and `:done` into a
+single stored `:ready` status ("parked, no work happening") and made **Done a derivation**: a
+`:ready` card at the board's terminal stage (`Relay.Boards.terminal_stage/1`) reads as Done,
+while a `:ready` card in a mid-board Done sub-lane is merely parked. `:done` remains a stage
+`type`; it is no longer a card *status*. See `Relay.Cards.done?/2`,
+`Relay.Cards.ready_awaiting_human?/2`, and `Relay.Cards.needs_you?/2`.
 
 ## Alternatives considered
 

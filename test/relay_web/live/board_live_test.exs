@@ -536,7 +536,7 @@ defmodule RelayWeb.BoardLiveTest do
       refute has_element?(view, "#stage-col-3-cards .board-card .card-mismatch")
     end
 
-    test "a human-owned card renders blue with a human owner avatar",
+    test "a human-owned card renders quiet with a human owner avatar (RLY-48: accent is status-keyed, not owner-keyed)",
          %{conn: conn, user: user, card: card} do
       {:ok, _card} = Cards.add_owner(card, {:user, user.id})
 
@@ -545,7 +545,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#stage-col-1-cards .board-card[data-active-owner='human'].border-l-primary"
+               "#stage-col-1-cards .board-card[data-active-owner='human'].border-l-base-300"
              )
 
       assert has_element?(
@@ -554,7 +554,7 @@ defmodule RelayWeb.BoardLiveTest do
              )
     end
 
-    test "adding the agent as an owner flips the card to violet AI",
+    test "adding the agent as an owner renders quiet (RLY-48: accent is status-keyed, not owner-keyed)",
          %{conn: conn, user: user, card: card, plan: plan} do
       {:ok, card} = Cards.add_owner(card, {:user, user.id})
       {:ok, card} = Cards.add_owner(card, :agent)
@@ -564,7 +564,7 @@ defmodule RelayWeb.BoardLiveTest do
       # AI-active card in a human stage shows the red meant-for-humans
       # warning") and the mismatch rule overrides the border to
       # border-l-error. Move the card into Plan — an AI-owned stage — so
-      # this test can demonstrate the clean, no-mismatch violet-AI border.
+      # this test can demonstrate the clean, no-mismatch quiet accent.
       {:ok, _moved} = Cards.move_card(card, plan, 0)
 
       board = Boards.get_or_create_default_board(user)
@@ -572,7 +572,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#stage-col-3-cards .board-card[data-active-owner='ai'].border-l-secondary"
+               "#stage-col-3-cards .board-card[data-active-owner='ai'].border-l-base-300"
              )
 
       assert has_element?(
@@ -581,7 +581,7 @@ defmodule RelayWeb.BoardLiveTest do
              )
     end
 
-    test "a needs_input card shows the amber NEEDS INPUT box", %{conn: conn, card: card, user: user} do
+    test "a needs_input card shows the amber needs-you box", %{conn: conn, card: card, user: user} do
       {:ok, _card} = Cards.set_status(card, %{"status" => "needs_input"})
 
       board = Boards.get_or_create_default_board(user)
@@ -590,7 +590,7 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(
                view,
                "#stage-col-1-cards .board-card.border-l-warning .card-needs-input",
-               "NEEDS INPUT"
+               "needs you"
              )
     end
 
@@ -658,7 +658,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       moved = Cards.get_card_by_ref(board, "RLY-1")
       assert moved.stage_id == plan.id
-      assert moved.status == :queued
+      assert moved.status == :ready
       assert [%{actor_type: :user}] = moved.owners
 
       assert has_element?(
@@ -1648,9 +1648,9 @@ defmodule RelayWeb.BoardLiveTest do
     test "drawer actions (owners, move) log user-attributed entries",
          %{conn: conn, user: user, board: board, backlog: backlog} do
       {:ok, card} = Cards.create_card(backlog, %{title: "Card"})
-      # Review is a review-type stage; the freshly-created card is :queued, which
-      # isn't valid there, so the move also triggers an implicit ADR 0003 status
-      # snap to :in_review — exercised here alongside owners/move attribution.
+      # Review is a review-type stage; the freshly-created card is :ready, which is
+      # valid there (RLY-48 matrix), so the move is a plain reparent — no implicit
+      # status snap — exercised here alongside owners/move attribution.
       review = Enum.find(board.stages, &(&1.name == "Review"))
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
@@ -1660,7 +1660,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       entries = Repo.all(from a in Schemas.Activity, where: a.card_id == ^card.id, order_by: a.id)
 
-      assert Enum.map(entries, & &1.type) == [:created, :owners_changed, :moved, :status_changed]
+      assert Enum.map(entries, & &1.type) == [:created, :owners_changed, :moved]
 
       [_created | user_entries] = entries
       assert Enum.all?(user_entries, &(&1.actor_type == :user and &1.user_id == user.id))

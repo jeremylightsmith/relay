@@ -96,7 +96,7 @@ defmodule Relay.ContextBroadcastsTest do
 
       {:ok, _answered} = Cards.answer_input(blocked, "Yes — go ahead", {:user, user.id})
 
-      assert_receive {:card_upserted, %Card{id: ^card_id, status: :queued, blocked_since: nil}}
+      assert_receive {:card_upserted, %Card{id: ^card_id, status: :ready, blocked_since: nil}}
       assert_receive {:timeline_appended, ^card_id, %Schemas.Comment{body: "Yes — go ahead"}}
       assert_receive {:timeline_appended, ^card_id, %Schemas.Activity{type: :input_answered}}
     end

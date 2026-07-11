@@ -155,6 +155,18 @@ defmodule Relay.Boards do
   end
 
   @doc """
+  The board's terminal stage: the last top-level (`parent_id == nil`) stage by `position`
+  from an in-memory `stages` list (almost always `type: :done`). `nil` for an empty list.
+  A `:ready` card sitting here derives as Done (`Relay.Cards.done?/2`).
+  """
+  def terminal_stage(stages) when is_list(stages) do
+    stages
+    |> Enum.filter(&is_nil(&1.parent_id))
+    |> Enum.sort_by(& &1.position)
+    |> List.last()
+  end
+
+  @doc """
   Enables a `:review` or `:done` sub-lane on `parent` (a main stage),
   creating the child stage with `type:` review/done and `ai_enabled: false`.
   Idempotent.

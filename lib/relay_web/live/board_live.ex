@@ -140,6 +140,8 @@ defmodule RelayWeb.BoardLive do
                 count={Map.fetch!(@stage_counts, stage.id)}
                 wip_limit={stage.wip_limit}
                 board_key={@board.key}
+                terminal={stage.id == @terminal_stage_id}
+                questions={@needs_input_questions}
                 cards={Map.fetch!(@streams, stream_name(stage.id))}
                 composing={@composing_stage_id == stage.id}
                 compose_form={@compose_form}
@@ -172,6 +174,7 @@ defmodule RelayWeb.BoardLive do
         stage_owner={stage_owner(@selected_stage)}
         stages={move_targets(@board, @selected_card)}
         active_owner={Cards.active_owner_type(@selected_card)}
+        done={Cards.done?(@selected_card, @board.stages)}
         close_patch={~p"/board/#{@board.slug}"}
         title_form={@title_form}
         editing_title={@editing_title}
@@ -275,6 +278,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:stage_groups, group_stages(board.stages))
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
+      |> assign_board_derivations(board)
       |> assign(:force_open, MapSet.new())
       |> assign(:force_closed, MapSet.new())
       |> assign(:composing_stage_id, nil)
@@ -699,6 +703,7 @@ defmodule RelayWeb.BoardLive do
 
       {:noreply,
        socket
+       |> assign(:needs_input_questions, Cards.needs_input_questions(socket.assigns.board))
        |> stream_insert(stream_name(card.stage_id), card)
        |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, cards_by_stage))
        |> assign_archived_count()
@@ -800,6 +805,21 @@ defmodule RelayWeb.BoardLive do
   # recomputed from the grouped cards (mount, moves) and bumped on create.
   defp stage_counts(stages, cards_by_stage) do
     Map.new(stages, fn stage -> {stage.id, length(Map.get(cards_by_stage, stage.id, []))} end)
+  end
+
+  # RLY-48 board derivations: the terminal stage id (for the Done rendering) and the per-card
+  # needs_input question previews. Cheap; recomputed alongside the stage counts.
+  defp assign_board_derivations(socket, board) do
+    socket
+    |> assign(:terminal_stage_id, terminal_stage_id(board.stages))
+    |> assign(:needs_input_questions, Cards.needs_input_questions(board))
+  end
+
+  defp terminal_stage_id(stages) do
+    case Boards.terminal_stage(stages) do
+      %Stage{id: id} -> id
+      nil -> nil
+    end
   end
 
   # MMF 12c — a stage auto-collapses to the mockup's strip only when it is
@@ -1144,6 +1164,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:stage_groups, group_stages(board.stages))
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
+      |> assign_board_derivations(board)
       |> assign_archived_count()
 
     board.stages

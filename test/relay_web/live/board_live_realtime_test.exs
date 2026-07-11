@@ -48,20 +48,21 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
     end
 
     test "a status change in session A's drawer re-renders the board card in session B",
-         %{conn: conn, board: board, backlog: backlog, user: user} do
-      {:ok, _card} = Cards.create_card(backlog, %{title: "Ready for review"})
-      # Review is a review-type stage; the freshly-created card is :queued, which
-      # isn't valid there, so the move triggers an implicit ADR 0003 status snap
-      # to :in_review — this is the only drawer-driven status-change path left.
+         %{conn: conn, board: board, user: user} do
+      # A fresh card always arrives :ready (the schema default); flip it :in_review
+      # so the drawer's review-approve button is live — approving moves it to Deploy
+      # (:work, ai_enabled), snapping status to :working (RLY-48 default_status).
       review = Enum.find(board.stages, &(&1.name == "Review"))
+      {:ok, card} = Cards.create_card(review, %{title: "Ready for review"})
+      {:ok, _card} = Cards.set_status(card, %{"status" => "in_review"})
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view_a, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
       {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      view_a |> element("#card-drawer-move-to-#{review.id}") |> render_click()
+      view_a |> element("#review-approve") |> render_click()
 
-      assert has_element?(view_b, ".board-card .card-status[data-status='in_review']")
+      assert has_element?(view_b, ".board-card .card-status[data-status='working']")
     end
 
     test "a status change made elsewhere refreshes another session's open drawer",
@@ -295,7 +296,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
       assert token |> api_conn() |> patch(~p"/api/cards/RLY-1", %{status: "needs_input"}) |> json_response(200)
 
-      assert has_element?(view, "#stage-col-1-cards .board-card .card-needs-input", "NEEDS INPUT")
+      assert has_element?(view, "#stage-col-1-cards .board-card .card-needs-input", "needs you")
     end
 
     test "an API comment appends to an open drawer's timeline", %{conn: conn, backlog: backlog, token: token, user: user} do

@@ -7,12 +7,11 @@ defmodule Storybook.Components.CoreComponents.StatusBadge do
 
   def variations do
     [
-      %Variation{id: :queued, attributes: %{status: :queued}},
+      %Variation{id: :ready, attributes: %{status: :ready}},
       %Variation{id: :working, attributes: %{status: :working}},
       %Variation{id: :working_with_progress, attributes: %{status: :working, progress: 61}},
       %Variation{id: :needs_input, attributes: %{status: :needs_input}},
-      %Variation{id: :in_review, attributes: %{status: :in_review}},
-      %Variation{id: :done, attributes: %{status: :done}}
+      %Variation{id: :in_review, attributes: %{status: :in_review}}
     ]
   end
 end

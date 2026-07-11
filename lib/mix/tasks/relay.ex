@@ -59,7 +59,7 @@ defmodule Mix.Tasks.Relay do
       pull                       next AI card to work
       comment REF "text"         post a comment
       move REF STAGE             move to a stage (by name)
-      status REF STATUS          set status
+      status REF STATUS          set status (ready|working|needs_input|in_review)
       needs-input REF "question" flag needs_input with a question
       reject REF "note" [--to STAGE]  send the card back with a note
       own REF                    claim the card for the AI

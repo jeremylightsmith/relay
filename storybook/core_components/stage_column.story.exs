@@ -38,6 +38,7 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           cards: [
             {"story-card-1",
              %{
+               id: 1,
                title: "Wire up Google sign-in",
                tag: "auth",
                ref_number: 1,
@@ -47,10 +48,11 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
              }},
             {"story-card-2",
              %{
+               id: 2,
                title: "Render the stage columns",
                tag: "ui",
                ref_number: 2,
-               status: :queued,
+               status: :ready,
                progress: nil,
                owners: []
              }}
@@ -70,6 +72,7 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           cards: [
             {"story-card-3",
              %{
+               id: 3,
                title: "Wire up Google sign-in",
                tag: "auth",
                ref_number: 3,
@@ -89,6 +92,7 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
               cards: [
                 {"story-card-4",
                  %{
+                   id: 4,
                    title: "Approve the sign-in flow",
                    tag: nil,
                    ref_number: 4,
@@ -117,6 +121,7 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           cards: [
             {"story-card-5",
              %{
+               id: 5,
                title: "Implement the API",
                tag: "api",
                ref_number: 5,
@@ -159,6 +164,7 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           cards: [
             {"story-card-wip-1",
              %{
+               id: 6,
                title: "Wire up Google sign-in",
                tag: "auth",
                ref_number: 6,
@@ -168,10 +174,11 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
              }},
             {"story-card-wip-2",
              %{
+               id: 7,
                title: "Render the stage columns",
                tag: "ui",
                ref_number: 7,
-               status: :queued,
+               status: :ready,
                progress: nil,
                owners: []
              }}
@@ -194,6 +201,7 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           cards: [
             {"story-card-wip-3",
              %{
+               id: 8,
                title: "Ship the WIP chip",
                tag: "ui",
                ref_number: 8,
@@ -203,15 +211,17 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
              }},
             {"story-card-wip-4",
              %{
+               id: 9,
                title: "Fix the flaky deploy",
                tag: "infra",
                ref_number: 9,
-               status: :queued,
+               status: :ready,
                progress: nil,
                owners: []
              }},
             {"story-card-wip-5",
              %{
+               id: 10,
                title: "Add the settings stepper",
                tag: nil,
                ref_number: 10,
@@ -221,10 +231,11 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
              }},
             {"story-card-wip-6",
              %{
+               id: 11,
                title: "Write the move warning",
                tag: nil,
                ref_number: 11,
-               status: :queued,
+               status: :ready,
                progress: nil,
                owners: []
              }}
