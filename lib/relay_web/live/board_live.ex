@@ -177,7 +177,6 @@ defmodule RelayWeb.BoardLive do
         editing_title={@editing_title}
         editing_description={@editing_description}
         description_form={@description_form}
-        status_form={@status_form}
         current_user_id={@current_scope.user.id}
         conversation={@streams.conversation}
         activity={@streams.activity}
@@ -188,10 +187,6 @@ defmodule RelayWeb.BoardLive do
         reject_open={@reject_open}
         reject_form={@reject_form}
         reject_error={@reject_error}
-        send_back_open={@send_back_open}
-        send_back_form={@send_back_form}
-        send_back_error={@send_back_error}
-        send_back_targets={send_back_targets(@board, @selected_card)}
         archived={Card.archived?(@selected_card)}
       />
       <div
@@ -305,8 +300,8 @@ defmodule RelayWeb.BoardLive do
   @impl true
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
         compose create_card move_card save_card_title save_card_description
-        set_card_status add_owner remove_owner take_over post_comment answer_input
-        review_approve review_reject review_mark_done review_pull send_back
+        add_owner remove_owner take_over post_comment answer_input
+        review_approve review_reject
         save_board_name archive_card restore_card toggle_sub_task
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
@@ -556,18 +551,6 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("save_card_description", _params, socket), do: {:noreply, socket}
 
-  def handle_event("set_card_status", %{"card" => card_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
-    case Cards.set_status(card, card_params, current_actor(socket)) do
-      {:ok, card} ->
-        {:noreply, refresh_card(socket, card)}
-
-      {:error, changeset} ->
-        {:noreply, assign(socket, :status_form, to_form(changeset))}
-    end
-  end
-
-  def handle_event("set_card_status", _params, socket), do: {:noreply, socket}
-
   # SUB-TASKS panel toggle (RLY-18): flip the item's done flag and refresh the
   # drawer + board card so the done/total count and stage badge stay in sync.
   def handle_event("toggle_sub_task", %{"id" => id}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
@@ -697,22 +680,6 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("review_reject", _params, socket), do: {:noreply, socket}
 
-  def handle_event("review_mark_done", _params, %{assigns: %{selected_card: %Card{status: :in_review} = card}} = socket) do
-    case Cards.mark_done(card, current_actor(socket)) do
-      {:ok, updated} -> {:noreply, refresh_card(socket, updated)}
-      {:error, _changeset} -> {:noreply, socket}
-    end
-  end
-
-  def handle_event("review_mark_done", _params, socket), do: {:noreply, socket}
-
-  def handle_event("review_pull", _params, %{assigns: %{selected_card: %Card{status: :in_review} = card}} = socket) do
-    actor = current_actor(socket)
-    apply_owner_change(socket, Cards.add_owner(card, actor, actor))
-  end
-
-  def handle_event("review_pull", _params, socket), do: {:noreply, socket}
-
   # RLY-47 — "Take over": flip ownership to the signed-in user (drops the AI via the
   # exclusivity invariant). Status is untouched — provenance changes, not the baton's substate.
   def handle_event("take_over", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
@@ -720,43 +687,6 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("take_over", _params, socket), do: {:noreply, socket}
-
-  # RLY-30 — the universal send-back control: any card with an earlier
-  # main-lane stage can be bounced back with a note, not just review gates.
-  def handle_event("send_back_open", _params, socket) do
-    {:noreply, assign(socket, send_back_open: true, send_back_form: empty_send_back_form(), send_back_error: nil)}
-  end
-
-  def handle_event("send_back_cancel", _params, socket) do
-    {:noreply, assign(socket, send_back_open: false, send_back_error: nil)}
-  end
-
-  def handle_event(
-        "send_back",
-        %{"send_back" => %{"note" => note} = params},
-        %{assigns: %{selected_card: %Card{} = card}} = socket
-      ) do
-    if String.trim(note) == "" do
-      {:noreply,
-       assign(socket,
-         send_back_form: to_form(params, as: :send_back),
-         send_back_error: "Add a note — the AI needs to know what to change."
-       )}
-    else
-      {:noreply, do_send_back(socket, card, resolve_stage(socket, params["to"]), note)}
-    end
-  end
-
-  def handle_event("send_back", _params, socket), do: {:noreply, socket}
-
-  defp do_send_back(socket, _card, nil, _note), do: assign(socket, send_back_error: "Pick an earlier stage.")
-
-  defp do_send_back(socket, card, %Stage{} = target, note) do
-    case Cards.send_back(card, target, note, current_actor(socket)) do
-      {:ok, updated} -> refresh_after_review(socket, card, updated)
-      {:error, _reason} -> assign(socket, send_back_error: "Pick an earlier stage.")
-    end
-  end
 
   # MMF 18 — realtime application of Relay.Events broadcasts. Every open
   # session applies every event for its board, including the acting
@@ -987,7 +917,6 @@ defmodule RelayWeb.BoardLive do
 
     socket
     |> assign(:selected_card, card)
-    |> assign(:status_form, status_form(card))
     |> assign(:question, latest_question(card, activity))
     |> assign(:answer_form, empty_answer_form())
     |> assign_review(card)
@@ -998,7 +927,7 @@ defmodule RelayWeb.BoardLive do
 
   # Approve/reject moved the card: re-stream the source and target stage
   # columns (and counts) exactly like any move, then refresh the drawer to
-  # the updated card — status form, review panel, and timeline included.
+  # the updated card — review panel and timeline included.
   defp refresh_after_review(socket, %Card{} = before, %Card{} = updated) do
     socket
     |> apply_move(before.stage_id, updated)
@@ -1013,10 +942,7 @@ defmodule RelayWeb.BoardLive do
       review_gate: review_gate_info(socket, card),
       reject_open: false,
       reject_form: empty_reject_form(),
-      reject_error: nil,
-      send_back_open: false,
-      send_back_form: empty_send_back_form(),
-      send_back_error: nil
+      reject_error: nil
     )
   end
 
@@ -1025,10 +951,7 @@ defmodule RelayWeb.BoardLive do
       review_gate: nil,
       reject_open: false,
       reject_form: empty_reject_form(),
-      reject_error: nil,
-      send_back_open: false,
-      send_back_form: empty_send_back_form(),
-      send_back_error: nil
+      reject_error: nil
     )
   end
 
@@ -1071,8 +994,6 @@ defmodule RelayWeb.BoardLive do
 
   defp empty_reject_form, do: to_form(%{"note" => ""}, as: :reject)
 
-  defp empty_send_back_form, do: to_form(%{"to" => "", "note" => ""}, as: :send_back)
-
   # Universal send-back targets: main stages strictly before the card's
   # current main stage, in position order. Only called (from the template)
   # while a card is selected, so no card is not a case to handle here.
@@ -1090,10 +1011,6 @@ defmodule RelayWeb.BoardLive do
     stage = Map.fetch!(by_id, stage_id)
     main = if is_nil(stage.parent_id), do: stage, else: Map.fetch!(by_id, stage.parent_id)
     main.position
-  end
-
-  defp status_form(%Card{} = card) do
-    to_form(%{"status" => Atom.to_string(card.status), "progress" => card.progress}, as: :card)
   end
 
   # The move already persisted; stream items can't be reordered in
@@ -1264,7 +1181,6 @@ defmodule RelayWeb.BoardLive do
         |> assign(:editing_title, false)
         |> assign(:editing_description, false)
         |> assign(:description_form, nil)
-        |> assign(:status_form, status_form(card))
         |> assign(:comment_form, empty_comment_form())
         |> assign(:question, latest_question(card, activity))
         |> assign(:answer_form, empty_answer_form())
@@ -1281,17 +1197,13 @@ defmodule RelayWeb.BoardLive do
           editing_title: false,
           editing_description: false,
           description_form: nil,
-          status_form: nil,
           comment_form: nil,
           question: nil,
           answer_form: nil,
           review_gate: nil,
           reject_open: false,
           reject_form: nil,
-          reject_error: nil,
-          send_back_open: false,
-          send_back_form: nil,
-          send_back_error: nil
+          reject_error: nil
         )
         |> stream(:conversation, [], reset: true)
         |> stream(:activity, [], reset: true)

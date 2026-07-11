@@ -184,27 +184,6 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         }
       },
       %Variation{
-        id: :send_back_open,
-        attributes: %{
-          id: "story-drawer-8",
-          ref: "RLY-14",
-          card: %{story_card() | status: :working, rejection: nil},
-          stage_name: "Code",
-          stage_owner: :ai,
-          active_owner: :ai,
-          current_user_id: 1,
-          close_patch: "/storybook/core_components/card_drawer",
-          title_form: Phoenix.Component.to_form(%{"title" => "Wire the runner"}, as: :card),
-          status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 40}, as: :card),
-          send_back_open: true,
-          send_back_form: Phoenix.Component.to_form(%{"to" => "", "note" => ""}, as: :send_back),
-          send_back_targets: [%{id: 2, name: "Spec"}, %{id: 3, name: "Plan"}],
-          conversation: story_conversation(),
-          activity: story_activity(),
-          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
-        }
-      },
-      %Variation{
         id: :sub_tasks_and_result,
         attributes: %{
           id: "story-drawer-9",

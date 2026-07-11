@@ -81,14 +81,20 @@ defmodule RelayWeb.CoreComponentsTest do
           stage_id: 4,
           board_key: "RLY",
           cards: [
-            {"cards-1", %{title: "First card", tag: "infra", ref_number: 1, status: :queued, progress: nil, owners: []}},
+            {"cards-1", %{title: "First card", tag: "infra", ref_number: 1, status: :queued, sub_tasks: [], owners: []}},
             {"cards-2",
              %{
                title: "Second card",
                tag: nil,
                ref_number: 2,
                status: :working,
-               progress: 40,
+               sub_tasks: [
+                 %{done: true},
+                 %{done: true},
+                 %{done: false},
+                 %{done: false},
+                 %{done: false}
+               ],
                owners: [%{actor_type: :agent}]
              }}
           ]
@@ -216,7 +222,7 @@ defmodule RelayWeb.CoreComponentsTest do
           count: 1,
           board_key: "RLY",
           cards: [
-            {"cards-1", %{title: "Main work", tag: nil, ref_number: 1, status: :queued, progress: nil, owners: []}}
+            {"cards-1", %{title: "Main work", tag: nil, ref_number: 1, status: :queued, sub_tasks: [], owners: []}}
           ],
           sublanes: [
             %{id: 401, name: "Review", lane: :review, owner: :human, count: 0, cards: [], collapsed: true},
@@ -325,6 +331,24 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(data-actor-type="agent")
       assert html =~ "working · 61%"
       refute html =~ "card-mismatch"
+    end
+
+    test "a working card with no progress shows a plain label and no bar" do
+      html =
+        render_component(&CoreComponents.board_card/1,
+          id: "c9",
+          ref: "RLY-9",
+          title: "T",
+          active_owner: :ai,
+          stage_owner: :ai,
+          status: :working,
+          owners: [%{actor_type: :agent}]
+        )
+
+      assert html =~ ~s(data-status="working")
+      assert html =~ "working"
+      refute html =~ "working · "
+      refute html =~ "height:5px;border-radius:3px;background:oklch(0.93 0.02 292)"
     end
 
     test "a human-active card in an AI stage warns it is meant for agents" do

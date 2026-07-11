@@ -226,13 +226,12 @@ defmodule Relay.Cards do
 
   @doc """
   Sets the card's baton status (`:queued | :working | :needs_input |
-  :in_review | :done`) and optional `progress` (0–100) from `attrs`,
-  attributed to `actor` (`:agent | {:user, user_id}`, defaults to
-  `:agent`), returning `{:ok, card}` (owners preloaded) or
-  `{:error, changeset}`. Status only ever changes through this explicit
-  call — never as a side effect of moving a card. Logs a
-  `:status_changed` activity entry (MMF 07) only when the status value
-  actually changes (a progress-only update logs nothing). Entering
+  :in_review | :done`) from `attrs`, attributed to `actor` (`:agent |
+  {:user, user_id}`, defaults to `:agent`), returning `{:ok, card}`
+  (owners preloaded) or `{:error, changeset}`. Status only ever changes
+  through this explicit call — never as a side effect of moving a card.
+  Logs a `:status_changed` activity entry (MMF 07) only when the status
+  value actually changes (a same-status re-set logs nothing). Entering
   `:needs_input` stamps `blocked_since` and leaving it clears it (MMF 14,
   managed in `Schemas.Card.status_changeset/2`).
   """

@@ -9,7 +9,7 @@ defmodule RelayWeb.Api.BoardControllerTest do
 
   test "returns the key's board with stages and cards (status + owners)", %{conn: conn, board: board} do
     stage = insert(:stage, board: board, name: "Plan", type: :work, ai_enabled: true, position: 1)
-    card = insert(:card, stage: stage, title: "Ship it", status: :working, progress: 40)
+    card = insert(:card, stage: stage, title: "Ship it", status: :working)
     insert(:card_owner, card: card)
 
     other = insert(:board)

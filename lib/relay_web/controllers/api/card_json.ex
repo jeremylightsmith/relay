@@ -11,7 +11,6 @@ defmodule RelayWeb.Api.CardJSON do
       title: card.title,
       tag: card.tag,
       status: card.status,
-      progress: card.progress,
       branch: card.branch,
       pr_url: card.pr_url,
       stage_id: card.stage_id,

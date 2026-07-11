@@ -761,7 +761,7 @@ defmodule RelayWeb.CoreComponents do
         {mismatch_message(@mismatch)}
       </p>
       <div
-        :if={@status == :working}
+        :if={@status == :working and @progress != nil}
         style="height:5px;border-radius:3px;background:oklch(0.93 0.02 292);overflow:hidden;"
       >
         <div style={"height:100%;width:#{@progress || 0}%;background:var(--color-secondary);border-radius:3px;"}>
@@ -836,7 +836,8 @@ defmodule RelayWeb.CoreComponents do
   defp card_accent_color("border-l-primary"), do: "var(--color-primary)"
   defp card_accent_color("border-l-base-300"), do: "var(--color-base-300)"
 
-  defp card_status_label(:working, progress), do: "working · #{progress || 0}%"
+  defp card_status_label(:working, nil), do: "working"
+  defp card_status_label(:working, progress), do: "working · #{progress}%"
   defp card_status_label(:in_review, _progress), do: "ready"
   defp card_status_label(:done, _progress), do: "done"
   defp card_status_label(_status, _progress), do: nil
@@ -929,17 +930,14 @@ defmodule RelayWeb.CoreComponents do
   `"save_card_description"` (form params `card[description]`) on save,
   `"move_card"` (phx-value ref + stage_id, no index — the server appends
   to the target stage's bottom) when a "Move to…" target is picked,
-  `"set_card_status"` (form params `card[status]` + `card[progress]`) on
-  status/progress change, `"add_owner"` / `"remove_owner"` (phx-value
+  `"add_owner"` / `"remove_owner"` (phx-value
   `actor_type` + `user_id`) from the owners rail's controls,
   `"validate_comment"` / `"post_comment"` (form params `comment[body]`)
   from the timeline composer, and `"answer_input"` (form params
   `answer[body]`) from the needs-input panel's composer, and the MMF 15
   review-panel events: `"review_approve"`, `"review_open_reject"`,
-  `"review_cancel_reject"`, `"review_reject"` (form params `reject[note]` +
-  `reject[to]`), `"review_mark_done"`, and `"review_pull"`, and the RLY-30
-  universal send-back events: `"send_back_open"`, `"send_back_cancel"`, and
-  `"send_back"` (form params `send_back[to]` + `send_back[note]`).
+  `"review_cancel_reject"`, and `"review_reject"` (form params `reject[note]` +
+  `reject[to]`).
 
   ## Examples
 
@@ -951,7 +949,6 @@ defmodule RelayWeb.CoreComponents do
         stage_owner={:human}
         close_patch={~p"/board"}
         title_form={@title_form}
-        status_form={@status_form}
       />
   """
   attr :id, :string, required: true
@@ -960,7 +957,7 @@ defmodule RelayWeb.CoreComponents do
   attr :card, :any,
     required: true,
     doc:
-      "a card exposing title, description, spec, tag, status, progress, blocked_since, branch, plan, pr_url, a loaded owners list, inserted_at, and updated_at"
+      "a card exposing title, description, spec, tag, status, blocked_since, branch, plan, pr_url, a loaded owners list, inserted_at, and updated_at"
 
   attr :stage_name, :string, required: true
   attr :stage_owner, :atom, values: [:human, :ai], required: true
@@ -978,10 +975,6 @@ defmodule RelayWeb.CoreComponents do
   attr :description_form, :any,
     default: nil,
     doc: "a Phoenix.HTML.Form for card[description]; required when editing_description"
-
-  attr :status_form, :any,
-    required: true,
-    doc: "a Phoenix.HTML.Form for card[status] + card[progress]"
 
   attr :current_user_id, :integer,
     default: nil,
@@ -1025,17 +1018,6 @@ defmodule RelayWeb.CoreComponents do
   attr :reject_error, :string,
     default: nil,
     doc: "inline prompt shown when Send back was submitted with an empty note"
-
-  attr :send_back_open, :boolean, default: false, doc: "whether the universal send-back panel is expanded"
-  attr :send_back_form, :any, default: nil, doc: "a Phoenix.HTML.Form for send_back[to] + send_back[note]"
-
-  attr :send_back_error, :string,
-    default: nil,
-    doc: "inline prompt shown when Send back was submitted with an empty note or bad target"
-
-  attr :send_back_targets, :list,
-    default: [],
-    doc: "main-lane stages before the card's current one (each %{id, name}); [] hides the universal control"
 
   attr :archived, :boolean,
     default: false,
@@ -1294,89 +1276,6 @@ defmodule RelayWeb.CoreComponents do
                     </div>
                   </.form>
                 </div>
-              </section>
-              <div
-                :if={@card.status == :in_review and !@archived}
-                id="review-actions"
-                class="flex flex-wrap gap-2"
-              >
-                <button
-                  id="review-mark-done"
-                  type="button"
-                  phx-click="review_mark_done"
-                  class="btn btn-sm rounded-[9px] border-none font-semibold text-white"
-                  style="background:oklch(0.60 0.13 155);"
-                >
-                  Mark done
-                </button>
-                <button
-                  :if={@current_user_id && !user_owner?(@card, @current_user_id)}
-                  id="review-pull"
-                  type="button"
-                  phx-click="review_pull"
-                  class="btn btn-sm rounded-[9px] border-none font-semibold text-white"
-                  style="background:oklch(0.60 0.14 250);"
-                >
-                  Pull — take this card
-                </button>
-              </div>
-              <div
-                :if={@send_back_targets != [] && !@send_back_open && !@archived}
-                id="send-back-actions"
-              >
-                <button
-                  id="send-back"
-                  type="button"
-                  phx-click="send_back_open"
-                  class="btn btn-sm btn-ghost text-warning"
-                >
-                  <.icon name="hero-arrow-uturn-left" class="size-4" /> Send back…
-                </button>
-              </div>
-              <section
-                :if={@send_back_targets != [] && @send_back_open && !@archived}
-                id="send-back-panel"
-                class="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3"
-              >
-                <.form
-                  for={@send_back_form}
-                  id="send-back-form"
-                  class="flex flex-col gap-2"
-                  phx-submit="send_back"
-                >
-                  <select
-                    id="send-back-target"
-                    name="send_back[to]"
-                    class="select select-sm select-bordered w-full"
-                  >
-                    <option :for={t <- @send_back_targets} value={t.id}>{t.name}</option>
-                  </select>
-                  <.input
-                    field={@send_back_form[:note]}
-                    type="textarea"
-                    id="send-back-note"
-                    rows="3"
-                    placeholder="What needs to change? This note goes to the AI…"
-                    class="textarea textarea-bordered w-full text-[13px]"
-                    phx-hook="SubmitOnCmdEnter"
-                  />
-                  <p :if={@send_back_error} id="send-back-error" class="text-xs text-error">
-                    {@send_back_error}
-                  </p>
-                  <div class="flex items-center gap-2">
-                    <button id="send-back-submit" type="submit" class="btn btn-sm btn-warning">
-                      Send back →
-                    </button>
-                    <button
-                      id="send-back-cancel"
-                      type="button"
-                      phx-click="send_back_cancel"
-                      class="btn btn-ghost btn-sm"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </.form>
               </section>
               <section class="space-y-2">
                 <.section_label>Description</.section_label>
@@ -1774,33 +1673,10 @@ defmodule RelayWeb.CoreComponents do
                 </div>
               </div>
 
-              <%!-- STATUS: transitional — removed when buttons-only-for-decisions lands (RLY-*) --%>
               <div class="rail-section flex flex-col gap-2">
                 <.section_label>Status</.section_label>
                 <div class="rail-status">
-                  <.form
-                    :if={!@archived}
-                    for={@status_form}
-                    id={"#{@id}-status-form"}
-                    phx-change="set_card_status"
-                  >
-                    <.input
-                      field={@status_form[:status]}
-                      type="select"
-                      options={status_options()}
-                      class="select select-sm w-full"
-                    />
-                    <.input
-                      :if={@card.status == :working}
-                      field={@status_form[:progress]}
-                      type="number"
-                      min="0"
-                      max="100"
-                      placeholder="Progress %"
-                      class="input input-sm w-full"
-                    />
-                  </.form>
-                  <.status_badge :if={@archived} status={@card.status} progress={@card.progress} />
+                  <.status_badge status={@card.status} />
                 </div>
               </div>
 
@@ -1859,15 +1735,18 @@ defmodule RelayWeb.CoreComponents do
   defp sub_task_pct(%{total: 0}), do: 0
   defp sub_task_pct(%{done: done, total: total}), do: round(done * 100 / total)
 
-  defp status_options do
-    [
-      {"Queued", "queued"},
-      {"Working", "working"},
-      {"Needs input", "needs_input"},
-      {"In review", "in_review"},
-      {"Done", "done"}
-    ]
+  # Working progress is derived from the card's sub-tasks (RLY-37): done/total as
+  # a percentage, or nil when there are none — a working card with no checklist
+  # shows no bar and a plain "working" label. Real cards always carry a loaded
+  # sub_tasks list (card_preloads/0); the fallback clause tolerates bare test maps.
+  defp board_card_progress(%{sub_tasks: sub_tasks}) when is_list(sub_tasks) do
+    case Cards.sub_task_progress(%{sub_tasks: sub_tasks}) do
+      %{total: 0} -> nil
+      %{done: done, total: total} -> round(done * 100 / total)
+    end
   end
+
+  defp board_card_progress(_card), do: nil
 
   defp owner_name(%{actor_type: :agent}), do: "Relay AI"
   defp owner_name(%{actor_type: :user, user: user}), do: user.name || user.email
@@ -1936,9 +1815,9 @@ defmodule RelayWeb.CoreComponents do
   defp activity_phrase(%Activity{type: :unarchived}), do: "restored this card"
 
   # The one-line hint under READY FOR YOUR REVIEW (MMF 15): a gated stage
-  # offers the approve/send-back pair; an ungated one only the standalone
-  # Mark done / Pull actions.
-  defp review_hint(nil), do: "Relay AI finished this. Mark it done, or pull the card to take it over."
+  # offers the approve/send-back pair; an ungated one has no drawer decision
+  # button (RLY-37) — move it forward by drag or Move to… when ready.
+  defp review_hint(nil), do: "Relay AI finished this. Drag it or use Move to… when you're ready."
 
   defp review_hint(_gate), do: "Relay AI finished this. Approve to move it forward, or send it back with a note."
 
@@ -1964,7 +1843,8 @@ defmodule RelayWeb.CoreComponents do
 
   `cards` accepts a LiveView stream (preferred) or a list of
   `{dom_id, card}` tuples; each card needs `title`, `tag`, `ref_number`,
-  `status`, `progress`, and a loaded `owners` list. Each lane body is its own
+  `status`, a loaded `owners` list, and (for the derived working-progress
+  bar/label) a loaded `sub_tasks` list. Each lane body is its own
   `phx-update="stream"` drop zone carrying `data-stage-id` (the main stage id
   for the ongoing lane, each child stage id for the sub-lanes) — the DnD
   contract is unchanged. The empty-state placeholder is CSS-hidden
@@ -2186,7 +2066,7 @@ defmodule RelayWeb.CoreComponents do
                     tag={card.tag}
                     ref={"#{@board_key}-#{card.ref_number}"}
                     status={card.status}
-                    progress={card.progress}
+                    progress={board_card_progress(card)}
                     owners={card.owners}
                     active_owner={Cards.active_owner_type(card)}
                     stage_owner={@main_owner}
@@ -2267,7 +2147,7 @@ defmodule RelayWeb.CoreComponents do
                   tag={card.tag}
                   ref={"#{@board_key}-#{card.ref_number}"}
                   status={card.status}
-                  progress={card.progress}
+                  progress={board_card_progress(card)}
                   owners={card.owners}
                   active_owner={Cards.active_owner_type(card)}
                   stage_owner={sub.owner}

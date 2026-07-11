@@ -66,29 +66,26 @@ defmodule Schemas.CardTest do
   end
 
   describe "status and progress" do
-    test "a new card defaults to :queued with nil progress" do
+    test "a new card defaults to :queued" do
       card = insert(:card)
 
       reloaded = Repo.get!(Card, card.id)
       assert reloaded.status == :queued
-      assert reloaded.progress == nil
     end
 
-    test "changeset/2 does not cast status or progress" do
-      changeset = Card.changeset(%Card{}, %{title: "T", status: "done", progress: 90})
+    test "changeset/2 does not cast status" do
+      changeset = Card.changeset(%Card{}, %{title: "T", status: "done"})
 
       assert get_field(changeset, :status) == :queued
-      assert get_field(changeset, :progress) == nil
     end
   end
 
   describe "status_changeset/2" do
-    test "casts status and progress" do
-      changeset = Card.status_changeset(%Card{}, %{status: "working", progress: 40})
+    test "casts status only" do
+      changeset = Card.status_changeset(%Card{}, %{status: "working"})
 
       assert changeset.valid?
       assert get_field(changeset, :status) == :working
-      assert get_field(changeset, :progress) == 40
     end
 
     test "rejects an unknown status" do
@@ -98,19 +95,11 @@ defmodule Schemas.CardTest do
       assert "is invalid" in errors_on(changeset).status
     end
 
-    test "rejects progress outside 0..100" do
-      for bad <- [-1, 101] do
-        changeset = Card.status_changeset(%Card{}, %{status: "working", progress: bad})
-
-        refute changeset.valid?
-        assert Map.has_key?(errors_on(changeset), :progress)
-      end
-    end
-
-    test "allows nil progress" do
-      changeset = Card.status_changeset(%Card{}, %{status: "working"})
+    test "ignores a progress key (progress is no longer stored)" do
+      changeset = Card.status_changeset(%Card{}, %{status: "working", progress: 40})
 
       assert changeset.valid?
+      refute Map.has_key?(changeset.changes, :progress)
     end
   end
 

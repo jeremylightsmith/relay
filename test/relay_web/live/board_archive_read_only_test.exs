@@ -70,16 +70,12 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
       events = [
         {"save_card_title", %{"card" => %{"title" => "sneaky"}}},
         {"save_card_description", %{"card" => %{"description" => "sneaky"}}},
-        {"set_card_status", %{"card" => %{"status" => "in_review"}}},
         {"add_owner", %{"actor_type" => "agent"}},
         {"remove_owner", %{"actor_type" => "agent"}},
         {"post_comment", %{"comment" => %{"body" => "sneaky"}}},
         {"answer_input", %{"answer" => %{"body" => "sneaky"}}},
         {"review_approve", %{}},
         {"review_reject", %{"reject" => %{"note" => "nope"}}},
-        {"review_mark_done", %{}},
-        {"review_pull", %{}},
-        {"send_back", %{"send_back" => %{"note" => "sneaky"}}},
         {"archive_card", %{"ref" => "RLY-1"}},
         {"restore_card", %{"ref" => "RLY-1"}},
         {"toggle_sub_task", %{"id" => "1"}}
