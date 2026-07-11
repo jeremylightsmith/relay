@@ -177,7 +177,7 @@ defmodule RelayWeb.BoardSettingsLive do
                 <b style="color:oklch(0.34 0.02 255);">Complete</b>
                 — so everyone knows what a stage <i>means</i>. Use the arrows to move a stage
                 up or down — cross into another category and it takes on that meaning. Set
-                each stage's owner, WIP limit, and whether finished work waits in a Done sub-column.
+                whether each stage is AI-enabled, its WIP limit, and whether it has Review and Done lanes.
               </p>
 
               <%!-- All four groups always render so an emptied category stays reachable. --%>

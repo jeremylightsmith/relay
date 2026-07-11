@@ -842,11 +842,16 @@ defmodule RelayWeb.BoardLive do
     |> Map.new(fn {parent_id, children} -> {parent_id, Enum.sort_by(children, &lane_order/1)} end)
   end
 
+  # Sub-lanes should only ever be :review/:done (Schemas.Stage.validate_child_type/1
+  # enforces this on write), but a stray/legacy row must degrade rather than 500 the
+  # whole board — sort it last rather than raising.
   defp lane_order(%Stage{type: :review}), do: 0
   defp lane_order(%Stage{type: :done}), do: 1
+  defp lane_order(%Stage{}), do: 2
 
   defp lane_label(:review), do: "Review"
   defp lane_label(:done), do: "Done"
+  defp lane_label(type), do: type |> Atom.to_string() |> String.capitalize()
 
   # The owner dot's color: derived from ai_enabled (RLY-46 — the type/ai_enabled model
   # replaces the owner column; the stage_type_icon redesign lands in its own task).

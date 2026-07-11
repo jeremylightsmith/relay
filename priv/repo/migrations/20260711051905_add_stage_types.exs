@@ -13,6 +13,8 @@ defmodule Relay.Repo.Migrations.AddStageTypes do
     UPDATE stages SET type = CASE
       WHEN parent_id IS NOT NULL AND lane = 'review' THEN 'review'
       WHEN parent_id IS NOT NULL AND lane = 'done'   THEN 'done'
+      WHEN parent_id IS NOT NULL AND name ILIKE '%review%' THEN 'review'
+      WHEN parent_id IS NOT NULL THEN 'done'
       WHEN approval_gate THEN 'review'
       WHEN name ILIKE '%review%' THEN 'review'
       WHEN category = 'unstarted' THEN 'queue'
