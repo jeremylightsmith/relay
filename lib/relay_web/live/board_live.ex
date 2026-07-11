@@ -60,16 +60,15 @@ defmodule RelayWeb.BoardLive do
               <.icon name="hero-squares-2x2" class="size-5" />
             </.link>
             <h1 id="board-title" class="text-xl font-semibold">
-              <.editable_text
+              <.boxed_field
                 :if={!@read_only?}
                 id="board-name"
                 value={@board.name}
-                editing={@editing_board_name}
                 form={@board_name_form}
                 field={:name}
-                edit_event="edit_board_name"
                 save_event="save_board_name"
                 cancel_event="cancel_board_name"
+                input_class="text-xl font-semibold"
               />
               <span :if={@read_only?}>{@board.name}</span>
             </h1>
@@ -180,6 +179,10 @@ defmodule RelayWeb.BoardLive do
         editing_title={@editing_title}
         editing_description={@editing_description}
         description_form={@description_form}
+        editing_spec={@editing_spec}
+        editing_plan={@editing_plan}
+        spec_form={@spec_form}
+        plan_form={@plan_form}
         current_user_id={@current_scope.user.id}
         conversation={@streams.conversation}
         activity={@streams.activity}
@@ -283,7 +286,6 @@ defmodule RelayWeb.BoardLive do
       |> assign(:force_closed, MapSet.new())
       |> assign(:composing_stage_id, nil)
       |> assign(:compose_form, empty_compose_form())
-      |> assign(:editing_board_name, false)
       |> assign(:board_name_form, to_form(Boards.change_board(board)))
       |> stream_configure(:conversation, dom_id: &conversation_dom_id/1)
       |> stream_configure(:activity, dom_id: &activity_dom_id/1)
@@ -304,6 +306,7 @@ defmodule RelayWeb.BoardLive do
   @impl true
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
         compose create_card move_card save_card_title save_card_description
+        save_card_spec save_card_plan
         add_owner remove_owner take_over post_comment answer_input
         review_approve review_reject
         save_board_name archive_card restore_card toggle_sub_task
@@ -478,15 +481,8 @@ defmodule RelayWeb.BoardLive do
     {:noreply, assign(socket, :editing_title, false)}
   end
 
-  def handle_event("edit_board_name", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:editing_board_name, true)
-     |> assign(:board_name_form, to_form(Boards.change_board(socket.assigns.board)))}
-  end
-
   def handle_event("cancel_board_name", _params, socket) do
-    {:noreply, assign(socket, :editing_board_name, false)}
+    {:noreply, assign(socket, :board_name_form, to_form(Boards.change_board(socket.assigns.board)))}
   end
 
   def handle_event("save_board_name", %{"board" => board_params}, socket) do
@@ -496,7 +492,6 @@ defmodule RelayWeb.BoardLive do
          socket
          |> assign(:board, %{socket.assigns.board | name: board.name})
          |> assign(:page_title, board.name)
-         |> assign(:editing_board_name, false)
          |> assign(:board_name_form, to_form(Boards.change_board(board)))}
 
       {:error, changeset} ->
@@ -554,6 +549,66 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("save_card_description", _params, socket), do: {:noreply, socket}
+
+  def handle_event("edit_spec", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    {:noreply,
+     socket
+     |> assign(:editing_spec, true)
+     |> assign(:spec_form, to_form(%{"spec" => card.spec || ""}, as: :card))}
+  end
+
+  def handle_event("edit_spec", _params, socket), do: {:noreply, socket}
+
+  def handle_event("cancel_spec", _params, socket) do
+    {:noreply, assign(socket, editing_spec: false, spec_form: nil)}
+  end
+
+  def handle_event("save_card_spec", %{"card" => card_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    case Cards.update_card(card, Map.take(card_params, ["spec"])) do
+      {:ok, card} ->
+        {:noreply,
+         socket
+         |> assign(:selected_card, card)
+         |> assign(:editing_spec, false)
+         |> assign(:spec_form, nil)
+         |> stream_insert(stream_name(card.stage_id), card)}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :spec_form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("save_card_spec", _params, socket), do: {:noreply, socket}
+
+  def handle_event("edit_plan", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    {:noreply,
+     socket
+     |> assign(:editing_plan, true)
+     |> assign(:plan_form, to_form(%{"plan" => card.plan || ""}, as: :card))}
+  end
+
+  def handle_event("edit_plan", _params, socket), do: {:noreply, socket}
+
+  def handle_event("cancel_plan", _params, socket) do
+    {:noreply, assign(socket, editing_plan: false, plan_form: nil)}
+  end
+
+  def handle_event("save_card_plan", %{"card" => card_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    case Cards.update_card(card, Map.take(card_params, ["plan"])) do
+      {:ok, card} ->
+        {:noreply,
+         socket
+         |> assign(:selected_card, card)
+         |> assign(:editing_plan, false)
+         |> assign(:plan_form, nil)
+         |> stream_insert(stream_name(card.stage_id), card)}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :plan_form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("save_card_plan", _params, socket), do: {:noreply, socket}
 
   # SUB-TASKS panel toggle (RLY-18): flip the item's done flag and refresh the
   # drawer + board card so the done/total count and stage badge stay in sync.
@@ -755,7 +810,8 @@ defmodule RelayWeb.BoardLive do
      socket
      |> assign(:board, updated)
      |> assign(:page_title, board.name)
-     |> assign(:read_only?, Board.archived?(updated))}
+     |> assign(:read_only?, Board.archived?(updated))
+     |> assign(:board_name_form, to_form(Boards.change_board(updated)))}
   end
 
   defp insert_timeline_entry(socket, %Schemas.Comment{} = comment) do
@@ -1202,6 +1258,10 @@ defmodule RelayWeb.BoardLive do
         |> assign(:editing_title, false)
         |> assign(:editing_description, false)
         |> assign(:description_form, nil)
+        |> assign(:editing_spec, false)
+        |> assign(:editing_plan, false)
+        |> assign(:spec_form, nil)
+        |> assign(:plan_form, nil)
         |> assign(:comment_form, empty_comment_form())
         |> assign(:question, latest_question(card, activity))
         |> assign(:answer_form, empty_answer_form())
@@ -1218,6 +1278,10 @@ defmodule RelayWeb.BoardLive do
           editing_title: false,
           editing_description: false,
           description_form: nil,
+          editing_spec: false,
+          editing_plan: false,
+          spec_form: nil,
+          plan_form: nil,
           comment_form: nil,
           question: nil,
           answer_form: nil,

@@ -25,14 +25,14 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/relay"
 import topbar from "../vendor/topbar"
 import BoardDnD from "./hooks/board_dnd"
-import InlineEdit from "./hooks/inline_edit"
+import CommitField from "./hooks/commit_field"
 import SubmitOnCmdEnter from "./hooks/submit_on_cmd_enter"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, BoardDnD, InlineEdit, SubmitOnCmdEnter},
+  hooks: {...colocatedHooks, BoardDnD, CommitField, SubmitOnCmdEnter},
 })
 
 // Show progress bar on live navigation and form submits

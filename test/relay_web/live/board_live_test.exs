@@ -738,24 +738,22 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#card-drawer-description-view h2", "Desc head")
       assert has_element?(view, "#card-drawer-description-view strong", "descbold")
       assert has_element?(view, "#card-drawer-spec-view strong", "specbold")
-      assert has_element?(view, "#card-plan-body strong", "planbold")
+      assert has_element?(view, "#card-plan-view strong", "planbold")
       assert has_element?(view, ".timeline-comment-body strong", "commentbold")
     end
 
-    test "spec and plan sit collapsed between Description and Conversation",
+    test "spec and plan sit between Description and Conversation, editable at rest",
          %{conn: conn, card: card, user: user} do
       {:ok, _updated} = Cards.update_card(card, %{spec: "The spec body", plan: "The plan body"})
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      # both are <details> wrappers around the preserved content ids
-      assert has_element?(view, "details#card-drawer-spec #card-drawer-spec-view")
-      assert has_element?(view, "details#card-plan #card-plan-body")
-
-      # collapsed by default — neither has the open attribute
-      refute has_element?(view, "details#card-drawer-spec[open]")
-      refute has_element?(view, "details#card-plan[open]")
+      # both render as click-to-edit boxed fields, not <details> disclosures
+      assert has_element?(view, "#card-drawer-spec-view")
+      assert has_element?(view, "#card-plan-view")
+      refute has_element?(view, "details#card-drawer-spec")
+      refute has_element?(view, "details#card-plan")
 
       # DOM order (mockup order): Description → Spec → Plan → Conversation → Activity
       description = index_of(html, ~s(id="card-drawer-description"))
@@ -817,28 +815,30 @@ defmodule RelayWeb.BoardLiveTest do
              "main-column sections are out of mockup order: #{inspect(Enum.zip(order, positions))}"
     end
 
-    test "with a spec but no plan, only the Spec block appears before Activity",
+    test "with a spec but no plan, the spec shows content and the plan shows its placeholder",
          %{conn: conn, card: card, user: user} do
       {:ok, _updated} = Cards.update_card(card, %{spec: "Spec only"})
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      assert has_element?(view, "details#card-drawer-spec #card-drawer-spec-view")
-      refute has_element?(view, "#card-plan")
+      assert has_element?(view, "#card-drawer-spec-view")
+      assert has_element?(view, "#card-plan-display", "Add a plan")
 
       spec = index_of(html, ~s(id="card-drawer-spec"))
       activity = index_of(html, ~s(id="card-drawer-activity"))
       assert spec < activity
     end
 
-    test "with neither spec nor plan, nothing renders between Conversation and Activity",
+    test "with neither spec nor plan, both fields show their empty-state placeholders",
          %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       refute has_element?(view, "#card-drawer-spec-view")
-      refute has_element?(view, "#card-plan")
+      refute has_element?(view, "#card-plan-view")
+      assert has_element?(view, "#card-drawer-spec-display", "Add a spec")
+      assert has_element?(view, "#card-plan-display", "Add a plan")
     end
 
     test "visiting the deep link opens the drawer directly", %{conn: conn, user: user} do
@@ -904,7 +904,9 @@ defmodule RelayWeb.BoardLiveTest do
 
       view |> element("#card-drawer-title-display") |> render_click()
 
-      assert has_element?(view, "#card-drawer-title-form textarea#card-drawer-title-input")
+      assert has_element?(view, "#card-drawer-title-form input#card-drawer-title-input")
+      assert has_element?(view, "#card-drawer-title-save")
+      assert has_element?(view, "#card-drawer-title-cancel")
     end
 
     test "saving the title persists and reflects on drawer and board card",
@@ -1055,7 +1057,51 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#card-drawer-description-input[rows='12']")
     end
 
-    test "the title editor carries the InlineEdit hook wired to its cancel button", %{conn: conn, user: user} do
+    test "editing and saving the spec persists via update_card and renders markdown",
+         %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      view |> element("#card-drawer-spec-display") |> render_click()
+      assert has_element?(view, "#card-drawer-spec-form textarea#card-drawer-spec-input")
+
+      view
+      |> form("#card-drawer-spec-form", card: %{spec: "## Spec\n\nDo the thing."})
+      |> render_submit()
+
+      refute has_element?(view, "#card-drawer-spec-form")
+      assert has_element?(view, "#card-drawer-spec-view.md", "Do the thing.")
+      assert Repo.get!(Card, card.id).spec == "## Spec\n\nDo the thing."
+    end
+
+    test "editing and saving the plan persists via update_card",
+         %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      view |> element("#card-plan-display") |> render_click()
+
+      view
+      |> form("#card-plan-form", card: %{plan: "1. step one"})
+      |> render_submit()
+
+      assert has_element?(view, "#card-plan-view.md", "step one")
+      assert Repo.get!(Card, card.id).plan == "1. step one"
+    end
+
+    test "cancelling a spec edit returns to the rest state without saving",
+         %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      view |> element("#card-drawer-spec-display") |> render_click()
+      view |> element("#card-drawer-spec-cancel") |> render_click()
+
+      refute has_element?(view, "#card-drawer-spec-form")
+      assert Repo.get!(Card, card.id).spec == card.spec
+    end
+
+    test "the title editor carries the CommitField hook wired to its cancel button", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
@@ -1063,11 +1109,20 @@ defmodule RelayWeb.BoardLiveTest do
 
       # The hook consumes Escape (cancel + stopPropagation) so it never reaches
       # the drawer's phx-window-keydown="close_drawer".
-      assert has_element?(view, ~s(#card-drawer-title-input[phx-hook="InlineEdit"]))
+      assert has_element?(view, ~s(#card-drawer-title-input[phx-hook="CommitField"]))
       assert has_element?(view, ~s(#card-drawer-title-input[data-cancel-id="card-drawer-title-cancel"]))
       assert has_element?(view, "#card-drawer-title-cancel")
       # The window-level close binding is still present for a not-editing Escape.
       assert has_element?(view, "[phx-window-keydown='close_drawer']")
+    end
+
+    test "the drawer has no pencil icons or legacy editable-text controls",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      refute has_element?(view, "#card-drawer .hero-pencil-square")
+      refute has_element?(view, "#card-drawer .editable-text")
     end
 
     test "the composer textareas submit on ⌘/Ctrl+Enter via the SubmitOnCmdEnter hook", %{conn: conn, user: user} do
@@ -1249,19 +1304,16 @@ defmodule RelayWeb.BoardLiveTest do
       %{board: board, backlog: backlog, card: card}
     end
 
-    test "a card with a plan renders the Plan section collapsed by default",
+    test "a card with a plan renders it as markdown at rest",
          %{conn: conn, card: card, user: user} do
       {:ok, _card} = Cards.update_card(card, %{plan: "## Task 1\n\n- [ ] do the thing"})
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      assert has_element?(view, "details#card-plan .collapse-title", "Plan")
       # plan renders as markdown-turned-HTML (heading + list item), not raw text
-      assert has_element?(view, "details#card-plan #card-plan-body.md h2", "Task 1")
-      assert has_element?(view, "details#card-plan #card-plan-body li", "do the thing")
-      # collapsed by default: the <details> must NOT carry the open attribute
-      refute has_element?(view, "details#card-plan[open]")
+      assert has_element?(view, "#card-plan-view.md h2", "Task 1")
+      assert has_element?(view, "#card-plan-view li", "do the thing")
     end
 
     test "a card with a branch renders the branch chip in the rail",
@@ -1280,7 +1332,8 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer")
-      refute has_element?(view, "#card-plan")
+      refute has_element?(view, "#card-plan-view")
+      assert has_element?(view, "#card-plan-display", "Add a plan")
       refute has_element?(view, "#card-branch")
     end
 
@@ -1535,53 +1588,44 @@ defmodule RelayWeb.BoardLiveTest do
       %{board: Boards.get_or_create_default_board(user)}
     end
 
-    test "the header name is click-to-edit and opens an editor", %{conn: conn, board: board} do
+    test "the header name is an always-editable box with no click-to-edit affordance",
+         %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#board-title #board-name-display", board.name)
-      refute has_element?(view, "#board-name-form")
-
-      view |> element("#board-name-display") |> render_click()
-
-      assert has_element?(view, "#board-name-form #board-name-input")
+      assert has_element?(view, "#board-title #board-name-form #board-name-input")
+      refute has_element?(view, "#board-name-display")
     end
 
-    test "saving a new name persists it and returns to the read state", %{conn: conn, board: board, user: user} do
+    test "saving a new name persists it and stays editable", %{conn: conn, board: board, user: user} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      view |> element("#board-name-display") |> render_click()
       view |> form("#board-name-form", board: %{name: "Launch board"}) |> render_submit()
 
-      refute has_element?(view, "#board-name-form")
-      assert has_element?(view, "#board-title #board-name-display", "Launch board")
+      assert view |> element("#board-name-input") |> render() =~ "Launch board"
       assert Boards.get_or_create_default_board(user).name == "Launch board"
     end
 
     test "a blank name is rejected inline and nothing changes", %{conn: conn, board: board, user: user} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      view |> element("#board-name-display") |> render_click()
       html = view |> form("#board-name-form", board: %{name: ""}) |> render_submit()
 
       assert html =~ "should be at least 1 character"
       assert Boards.get_or_create_default_board(user).name == board.name
     end
 
-    test "cancel restores the read state without saving", %{conn: conn, board: board, user: user} do
+    test "cancel reverts the input to the saved name without saving", %{conn: conn, board: board, user: user} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      view |> element("#board-name-display") |> render_click()
       view |> element("#board-name-cancel") |> render_click()
 
-      refute has_element?(view, "#board-name-form")
-      assert has_element?(view, "#board-name-display", board.name)
+      assert view |> element("#board-name-input") |> render() =~ board.name
       assert Boards.get_or_create_default_board(user).name == board.name
     end
 
     test "renaming from the header never changes the slug", %{conn: conn, board: board, user: user} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      view |> element("#board-name-display") |> render_click()
       view |> form("#board-name-form", board: %{name: "Renamed"}) |> render_submit()
 
       assert Boards.get_or_create_default_board(user).slug == board.slug

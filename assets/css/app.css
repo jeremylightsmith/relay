@@ -35,6 +35,10 @@
   --color-base-200: oklch(0.22 0.018 255);
   --color-base-300: oklch(0.30 0.02 255);
   --color-base-content: oklch(0.96 0.006 255);
+  --color-field-bg: oklch(0.24 0.02 255);
+  --color-field-border: oklch(0.34 0.02 255);
+  --color-field-border-hover: oklch(0.44 0.02 255);
+  --color-field-hover: oklch(0.30 0.02 255);
   --color-primary: oklch(0.65 0.15 250);
   --color-primary-content: oklch(0.98 0.01 250);
   --color-secondary: oklch(0.64 0.17 292);
@@ -71,6 +75,10 @@
   --color-base-200: oklch(0.985 0.004 250);    /* Canvas — page background */
   --color-base-300: oklch(0.92 0.006 255);     /* Line — borders */
   --color-base-content: oklch(0.26 0.02 255);  /* Ink — headings/text */
+  --color-field-bg: oklch(0.99 0.002 255);
+  --color-field-border: oklch(0.90 0.006 255);
+  --color-field-border-hover: oklch(0.80 0.01 255);
+  --color-field-hover: oklch(0.968 0.004 255);
   --color-primary: oklch(0.60 0.14 250);       /* Human · blue */
   --color-primary-content: oklch(0.98 0.01 250);
   --color-secondary: oklch(0.56 0.16 292);     /* AI · violet */
@@ -183,6 +191,104 @@
   border: 1px solid color-mix(in oklch, currentColor 15%, transparent);
   padding: 0.3em 0.6em;
 }
+
+/* --- Editable fields: InlineField / BoxedField (RLY-49) --- */
+.inline-field-rest {
+  cursor: text;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  font-weight: 600;
+  color: var(--color-base-content);
+}
+.inline-field-rest:hover {
+  background: var(--color-field-hover);
+  border-color: var(--color-base-300);
+}
+.inline-field-rest:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 0;
+}
+.commit-field-rest { cursor: text; border-radius: 8px; }
+.commit-field-rest:hover .commit-field-placeholder { border-color: var(--color-field-border-hover); }
+.commit-field-placeholder {
+  border: 1px dashed var(--color-field-border);
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: oklch(0.60 0.02 255);
+  font-style: italic;
+}
+.commit-field-input {
+  width: 100%;
+  min-height: 0;
+  border: 1px solid var(--color-field-border);
+  background: var(--color-field-bg);
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: var(--color-base-content);
+}
+textarea.commit-field-input { min-height: 64px; }
+.commit-field-input:hover { border-color: var(--color-field-border-hover); }
+.commit-field-input:focus,
+.commit-field-input:focus-visible {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-primary) 14%, transparent);
+}
+.commit-field-mono { font-family: var(--font-mono); }
+.commit-field-form { position: relative; }
+.commit-field-prefixed {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--color-field-border);
+  background: var(--color-field-bg);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.commit-field-prefixed:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-primary) 14%, transparent);
+}
+.commit-field-prefix { padding: 9px 0 9px 11px; color: oklch(0.62 0.02 255); font-size: 14px; }
+.commit-field-bare {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  padding: 9px 11px 9px 2px;
+  color: var(--color-base-content);
+}
+.commit-pill {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px 4px 4px;
+  background: var(--color-base-100);
+  border: 1px solid var(--color-field-border);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px oklch(0.5 0.03 255 / 0.18);
+}
+/* Unlayered .commit-pill beats Tailwind's layered .hidden utility on
+   specificity alone, so the "hidden until dirty" pill never actually hides.
+   This higher-specificity, still-unlayered rule restores the override. */
+.commit-pill.hidden { display: none; }
+.commit-pill-save,
+.commit-pill-cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.commit-pill-save { background: var(--color-primary); color: var(--color-primary-content); border: none; }
+.commit-pill-cancel { background: var(--color-base-100); color: oklch(0.55 0.02 255); border: 1px solid var(--color-field-border); }
+.commit-pill-hint { font-family: var(--font-mono); font-size: 10px; color: oklch(0.60 0.02 255); }
 
 /* RLY-48: the drawer's "Relay AI is working" strip pulse. */
 @keyframes relaypulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }

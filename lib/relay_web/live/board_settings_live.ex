@@ -87,60 +87,41 @@ defmodule RelayWeb.BoardSettingsLive do
               <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 18px 0;max-width:560px;">
                 The board's display name and its URL slug (relay.app/&lt;slug&gt;).
               </p>
-              <.form
-                for={@general_form}
-                id="general-form"
-                phx-submit="save_general"
-                style="display:flex;flex-direction:column;gap:22px;max-width:420px;"
-              >
-                <.input
-                  field={@general_form[:name]}
-                  id="board-name-input"
-                  type="text"
-                  label="Board name"
-                />
+              <div style="display:flex;flex-direction:column;gap:22px;max-width:420px;">
+                <div>
+                  <label style="font-size:12px;font-weight:600;color:oklch(0.40 0.02 255);">
+                    Board name
+                  </label>
+                  <.boxed_field
+                    :if={!@read_only?}
+                    id="board-name"
+                    value={@board.name}
+                    form={@general_form}
+                    field={:name}
+                    save_event="save_board_name"
+                    cancel_event="cancel_board_name"
+                  />
+                  <span :if={@read_only?} style="font-size:14px;">{@board.name}</span>
+                </div>
                 <div style="display:flex;flex-direction:column;gap:8px;">
-                  <label
-                    for="board-slug-input"
-                    style="font-size:12px;font-weight:600;color:oklch(0.40 0.02 255);"
-                  >
+                  <label style="font-size:12px;font-weight:600;color:oklch(0.40 0.02 255);">
                     Board URL
                   </label>
-                  <div style="display:flex;align-items:center;border:1px solid oklch(0.90 0.006 255);border-radius:9px;overflow:hidden;background:oklch(1 0 0);">
-                    <span
-                      class="font-mono"
-                      style="padding:10px 0 10px 12px;font-size:14px;color:oklch(0.62 0.02 255);"
-                    >
-                      relay.app/
-                    </span>
-                    <input
-                      type="text"
-                      id="board-slug-input"
-                      name="board[slug]"
-                      value={Phoenix.HTML.Form.normalize_value("text", @general_form[:slug].value)}
-                      class="font-mono"
-                      style="flex:1;border:none;padding:10px 12px 10px 2px;font-size:14px;color:oklch(0.28 0.02 255);background:transparent;outline:none;"
-                    />
-                  </div>
-                  <p
-                    :for={msg <- Enum.map(@general_form[:slug].errors, &translate_error/1)}
-                    class="text-sm"
-                    style="color:var(--color-error);"
-                  >
-                    {msg}
-                  </p>
-                </div>
-                <div>
-                  <button
+                  <.boxed_field
                     :if={!@read_only?}
-                    type="submit"
-                    id="save-general"
-                    class="btn btn-primary btn-sm"
-                  >
-                    Save
-                  </button>
+                    id="board-slug"
+                    value={@board.slug}
+                    form={@general_form}
+                    field={:slug}
+                    prefix="relay.app/"
+                    save_event="save_board_slug"
+                    cancel_event="cancel_board_slug"
+                  />
+                  <span :if={@read_only?} class="font-mono" style="font-size:14px;">
+                    relay.app/{@board.slug}
+                  </span>
                 </div>
-              </.form>
+              </div>
 
               <div
                 :if={!@read_only?}
@@ -207,7 +188,7 @@ defmodule RelayWeb.BoardSettingsLive do
                     <div style="display:flex;align-items:center;gap:10px;">
                       <.stage_type_icon type={stage.type} />
                       <div style="flex:1;">
-                        <.editable_text
+                        <.inline_field
                           id={"stage-#{stage.id}-name"}
                           value={stage.name}
                           editing={@editing_stage == {stage.id, "name"}}
@@ -219,12 +200,12 @@ defmodule RelayWeb.BoardSettingsLive do
                           edit_attrs={
                             %{"phx-value-stage-id" => stage.id, "phx-value-field" => "name"}
                           }
-                          read_style="font-size:15px;font-weight:600;letter-spacing:-0.01em;color:oklch(0.26 0.02 255);"
+                          read_class="text-[15px] font-semibold tracking-[-0.01em]"
                         >
                           <:hidden>
                             <input type="hidden" name="stage_id" value={stage.id} />
                           </:hidden>
-                        </.editable_text>
+                        </.inline_field>
                       </div>
                       <div style="display:flex;align-items:center;gap:2px;">
                         <button
@@ -262,10 +243,12 @@ defmodule RelayWeb.BoardSettingsLive do
                         </button>
                       </div>
                     </div>
-                    <.editable_text
+                    <.boxed_field
                       id={"stage-#{stage.id}-description"}
                       value={stage.description}
                       placeholder="Describe what happens in this stage…"
+                      multiline
+                      rows="3"
                       editing={@editing_stage == {stage.id, "description"}}
                       form={@stage_form}
                       field={:description}
@@ -275,12 +258,11 @@ defmodule RelayWeb.BoardSettingsLive do
                       edit_attrs={
                         %{"phx-value-stage-id" => stage.id, "phx-value-field" => "description"}
                       }
-                      read_style="font-size:13px;color:oklch(0.42 0.02 255);"
                     >
                       <:hidden>
                         <input type="hidden" name="stage_id" value={stage.id} />
                       </:hidden>
-                    </.editable_text>
+                    </.boxed_field>
                     <%!-- TYPE dropdown + AI-ENABLED toggle (RLY-46). --%>
                     <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
                       <div style="display:flex;align-items:center;gap:9px;">
@@ -576,33 +558,53 @@ defmodule RelayWeb.BoardSettingsLive do
   end
 
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
-        save_general edit_stage save_stage add_stage delete_stage
+        save_board_name save_board_slug edit_stage save_stage add_stage delete_stage
         toggle_wip bump_wip reorder_stage toggle_lane set_type toggle_ai
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
 
-  def handle_event("save_general", %{"board" => board_params}, socket) do
-    current = socket.assigns.board
-
-    case Boards.update_board(current, board_params) do
-      {:ok, %{slug: slug} = board} when slug == current.slug ->
+  def handle_event("save_board_name", %{"board" => %{"name" => _} = params}, socket) do
+    case Boards.update_board(socket.assigns.board, Map.take(params, ["name"])) do
+      {:ok, board} ->
         {:noreply,
          socket
          |> assign(:board, board)
          |> assign(:general_form, to_form(Boards.change_board(board)))
-         |> put_flash(:info, "Board saved.")}
+         |> put_flash(:info, "Board name saved.")}
 
-      {:ok, board} ->
-        # Slug changed — the current URL is stale, so move to the canonical one.
+      {:error, changeset} ->
+        {:noreply, assign(socket, :general_form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("save_board_slug", %{"board" => %{"slug" => _} = params}, socket) do
+    current = socket.assigns.board
+
+    case Boards.update_board(current, Map.take(params, ["slug"])) do
+      {:ok, %{slug: slug} = board} when slug == current.slug ->
         {:noreply,
          socket
-         |> put_flash(:info, "Board saved.")
+         |> assign(:board, board)
+         |> assign(:general_form, to_form(Boards.change_board(board)))}
+
+      {:ok, board} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Board URL saved.")
          |> push_navigate(to: ~p"/board/#{board.slug}/settings?section=general")}
 
       {:error, changeset} ->
         {:noreply, assign(socket, :general_form, to_form(changeset))}
     end
+  end
+
+  def handle_event("cancel_board_name", _params, socket) do
+    {:noreply, assign(socket, :general_form, to_form(Boards.change_board(socket.assigns.board)))}
+  end
+
+  def handle_event("cancel_board_slug", _params, socket) do
+    {:noreply, assign(socket, :general_form, to_form(Boards.change_board(socket.assigns.board)))}
   end
 
   def handle_event("archive_board", _params, socket) do

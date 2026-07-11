@@ -19,7 +19,7 @@ defmodule RelayWeb.BoardSlugRoutingTest do
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#board-title", board.name)
+      assert view |> element("#board-title #board-name-input") |> render() =~ board.name
     end
 
     test "a slug the user does not own is a 404", %{conn: conn} do

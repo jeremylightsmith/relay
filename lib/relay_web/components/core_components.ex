@@ -1004,6 +1004,11 @@ defmodule RelayWeb.CoreComponents do
     default: nil,
     doc: "a Phoenix.HTML.Form for card[description]; required when editing_description"
 
+  attr :editing_spec, :boolean, default: false
+  attr :editing_plan, :boolean, default: false
+  attr :spec_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[spec]"
+  attr :plan_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[plan]"
+
   attr :current_user_id, :integer,
     default: nil,
     doc: "the signed-in user's id, for the Add me owner control"
@@ -1095,7 +1100,7 @@ defmodule RelayWeb.CoreComponents do
                   Done
                 </span>
               </div>
-              <.editable_text
+              <.inline_field
                 :if={!@archived}
                 id={"#{@id}-title"}
                 value={@card.title}
@@ -1106,9 +1111,7 @@ defmodule RelayWeb.CoreComponents do
                 save_event="save_card_title"
                 cancel_event="cancel_title"
                 read_class="break-words px-1 text-lg font-semibold leading-[1.3]"
-                input_class="textarea textarea-bordered w-full text-lg font-semibold leading-[1.3]"
-                multiline
-                rows="2"
+                input_class="text-lg font-semibold leading-[1.3]"
               />
               <h2
                 :if={@archived}
@@ -1230,14 +1233,14 @@ defmodule RelayWeb.CoreComponents do
                   class="flex flex-col items-start gap-[11px]"
                   phx-submit="answer_input"
                 >
-                  <.input
-                    field={@answer_form[:body]}
-                    type="textarea"
+                  <.boxed_field
                     id="needs-input-answer"
+                    commit={:form}
+                    multiline
                     rows="3"
+                    form={@answer_form}
+                    field={:body}
                     placeholder="Type your answer — the AI picks up where it left off…"
-                    class="w-full resize-none rounded-[7px] bg-white p-[9px] text-[13px] leading-snug"
-                    style="border:1px solid oklch(0.86 0.05 75);color:oklch(0.30 0.02 255);"
                     phx-hook="SubmitOnCmdEnter"
                   />
                   <button
@@ -1314,14 +1317,14 @@ defmodule RelayWeb.CoreComponents do
                         {t.name}
                       </option>
                     </select>
-                    <.input
-                      field={@reject_form[:note]}
-                      type="textarea"
+                    <.boxed_field
                       id="review-request-note"
+                      commit={:form}
+                      multiline
                       rows="3"
+                      form={@reject_form}
+                      field={:note}
                       placeholder="What needs to change? This note goes to the AI…"
-                      class="w-full resize-none rounded-[7px] p-[9px] text-[13px] leading-snug"
-                      style="border:1px solid oklch(0.90 0.006 255);color:oklch(0.30 0.02 255);background:oklch(0.99 0.002 255);"
                       phx-hook="SubmitOnCmdEnter"
                     />
                     <p
@@ -1353,9 +1356,9 @@ defmodule RelayWeb.CoreComponents do
                   </.form>
                 </div>
               </section>
-              <section class="space-y-2">
+              <section id={"#{@id}-description"} class="space-y-2">
                 <.section_label>Description</.section_label>
-                <.editable_text
+                <.boxed_field
                   :if={!@archived}
                   id={"#{@id}-description"}
                   value={@card.description}
@@ -1369,7 +1372,6 @@ defmodule RelayWeb.CoreComponents do
                   markdown
                   multiline
                   rows="12"
-                  read_class="min-h-16 p-1 text-sm leading-relaxed"
                 />
                 <div
                   :if={@archived}
@@ -1380,54 +1382,56 @@ defmodule RelayWeb.CoreComponents do
                 </div>
               </section>
 
-              <%!--
-                Plain <details>/<summary> rather than daisyUI's `collapse` component:
-                Tailwind ships its own `.collapse` utility (`visibility: collapse`, for
-                table rows) under the same class name, and since these blocks are direct
-                children of the `flex flex-col` main column, that utility wins the layer
-                cascade over daisyUI's component and collapses the whole flex item to
-                ~0 height — regardless of the [open] state. Native <details> already gives
-                us a labeled, click-to-expand section for free.
-              --%>
-              <details
-                :if={@card.spec}
-                id={"#{@id}-spec"}
-                class="group rounded-lg border border-base-300 bg-base-200/40"
-              >
-                <summary class="collapse-title flex min-h-0 cursor-pointer list-none items-center gap-1.5 px-3.5 py-3 [&::-webkit-details-marker]:hidden">
-                  <.icon
-                    name="hero-chevron-right"
-                    class="size-3 shrink-0 text-base-content/50 transition-transform group-open:rotate-90"
-                  />
-                  <.section_label>Spec</.section_label>
-                </summary>
-                <div class="border-t border-base-300 px-3.5 pb-3.5 pt-3">
-                  <div id={"#{@id}-spec-view"} class="md text-sm leading-relaxed">
-                    {Relay.Markdown.to_html(@card.spec)}
-                  </div>
+              <section :if={!@archived} id={"#{@id}-spec"} class="space-y-2">
+                <.section_label>Spec</.section_label>
+                <.boxed_field
+                  id={"#{@id}-spec"}
+                  value={@card.spec}
+                  editing={@editing_spec}
+                  form={@spec_form}
+                  field={:spec}
+                  edit_event="edit_spec"
+                  save_event="save_card_spec"
+                  cancel_event="cancel_spec"
+                  placeholder="Add a spec…"
+                  markdown
+                  multiline
+                  rows="14"
+                />
+              </section>
+              <section :if={@archived && @card.spec} id={"#{@id}-spec-archived"} class="space-y-2">
+                <.section_label>Spec</.section_label>
+                <div id={"#{@id}-spec-view"} class="md text-sm leading-relaxed">
+                  {Relay.Markdown.to_html(@card.spec)}
                 </div>
-              </details>
-              <details
-                :if={@card.plan}
-                id="card-plan"
-                class="group rounded-lg border border-base-300 bg-base-200/40"
-              >
-                <summary class="collapse-title flex min-h-0 cursor-pointer list-none items-center gap-1.5 px-3.5 py-3 [&::-webkit-details-marker]:hidden">
-                  <.icon
-                    name="hero-chevron-right"
-                    class="size-3 shrink-0 text-base-content/50 transition-transform group-open:rotate-90"
-                  />
-                  <.section_label>Plan</.section_label>
-                </summary>
-                <div class="border-t border-base-300 px-3.5 pb-3.5 pt-3">
-                  <div
-                    id="card-plan-body"
-                    class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
-                  >
-                    {Relay.Markdown.to_html(@card.plan)}
-                  </div>
+              </section>
+
+              <section :if={!@archived} id="card-plan" class="space-y-2">
+                <.section_label>Plan</.section_label>
+                <.boxed_field
+                  id="card-plan"
+                  value={@card.plan}
+                  editing={@editing_plan}
+                  form={@plan_form}
+                  field={:plan}
+                  edit_event="edit_plan"
+                  save_event="save_card_plan"
+                  cancel_event="cancel_plan"
+                  placeholder="Add a plan…"
+                  markdown
+                  multiline
+                  rows="16"
+                />
+              </section>
+              <section :if={@archived && @card.plan} id="card-plan-archived" class="space-y-2">
+                <.section_label>Plan</.section_label>
+                <div
+                  id="card-plan-body"
+                  class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
+                >
+                  {Relay.Markdown.to_html(@card.plan)}
                 </div>
-              </details>
+              </section>
 
               <section :if={@card.ai_result} id="ai-result" class="space-y-2">
                 <.section_label accent="text-secondary">AI Result</.section_label>
@@ -1580,11 +1584,13 @@ defmodule RelayWeb.CoreComponents do
                   phx-change="validate_comment"
                   phx-submit="post_comment"
                 >
-                  <.input
-                    field={@comment_form[:body]}
-                    type="textarea"
+                  <.boxed_field
                     id={"#{@id}-comment-input"}
+                    commit={:form}
+                    multiline
                     rows="2"
+                    form={@comment_form}
+                    field={:body}
                     placeholder="Write a comment…"
                     phx-hook="SubmitOnCmdEnter"
                   />
@@ -2106,13 +2112,14 @@ defmodule RelayWeb.CoreComponents do
                     phx-submit="create_card"
                   >
                     <input type="hidden" name="stage_id" value={@stage_id} />
-                    <.input
-                      field={@compose_form[:title]}
-                      type="text"
+                    <.boxed_field
+                      id={"#{@id}-compose-title"}
+                      commit={:form}
+                      form={@compose_form}
+                      field={:title}
                       placeholder="Card title"
                       autofocus
                       autocomplete="off"
-                      class="input input-sm w-full"
                       phx-keydown="cancel_compose"
                       phx-key="escape"
                     />
@@ -2275,81 +2282,74 @@ defmodule RelayWeb.CoreComponents do
     """
   end
 
+  defp field_blank?(nil), do: true
+  defp field_blank?(value) when is_binary(value), do: String.trim(value) == ""
+  defp field_blank?(_), do: false
+
+  attr :id, :string, required: true
+  attr :cancel_event, :string, required: true
+  attr :hint, :string, default: "Enter · Esc"
+  attr :hidden, :boolean, default: false
+
+  defp commit_pill(assigns) do
+    ~H"""
+    <div id={"#{@id}-pill"} class={["commit-pill", @hidden && "hidden"]}>
+      <button type="submit" id={"#{@id}-save"} class="commit-pill-save" aria-label="Save">
+        <.icon name="hero-check" class="size-3.5" />
+      </button>
+      <button
+        type="button"
+        id={"#{@id}-cancel"}
+        class="commit-pill-cancel"
+        phx-click={@cancel_event}
+        aria-label="Cancel"
+      >
+        <.icon name="hero-x-mark" class="size-3.5" />
+      </button>
+      <span class="commit-pill-hint">{@hint}</span>
+    </div>
+    """
+  end
+
   @doc """
-  Renders a click-to-edit free-text field — the app-wide paradigm for editing
-  names, titles, and descriptions (RLY-5).
-
-  The read state shows the value (or a muted placeholder when blank) with an
-  editability affordance: a text cursor, a faint hover tint, a `hero-pencil-square`
-  that fades in on hover/focus, and a keyboard focus ring. It is reachable by
-  keyboard (`tabindex="0"`) and opens on click **and** on Enter/Space. The edit
-  state swaps in an input/textarea pre-filled with the current value plus visible
-  Save and Cancel controls.
-
-  The parent LiveView owns the `editing` flag and the `form`; the `InlineEdit`
-  JS hook owns focus, caret-at-end, ⌘/Ctrl+Enter to save, and Escape / click-away
-  to cancel. Pass `multiline` for a textarea (Enter inserts a newline; only
-  ⌘/Ctrl+Enter saves); single-line inputs also save on plain Enter.
-
-  ## Examples
-
-      <.editable_text
-        id="card-drawer-title"
-        value={@card.title}
-        editing={@editing_title}
-        form={@title_form}
-        field={:title}
-        edit_event="edit_title"
-        save_event="save_card_title"
-        cancel_event="cancel_title"
-      />
+  A plain-text field for primary content that *is* the thing (card title, stage
+  name). Reads as text with a quiet hover tint; editing swaps in a single-line
+  input with the blue focus ring and a floating ✓/✕ commit pill (Enter saves,
+  Esc reverts). The parent LiveView owns `editing` and `form`; the `CommitField`
+  JS hook owns focus/caret-at-end and the keyboard chord.
   """
   attr :id, :string, required: true
   attr :editing, :boolean, default: false
   attr :value, :string, default: nil
-  attr :placeholder, :string, default: "Add text…"
-  attr :multiline, :boolean, default: false
-  attr :markdown, :boolean, default: false
-  attr :form, :any, default: nil, doc: "the Phoenix form rendered in the edit state"
-  attr :field, :atom, default: nil, doc: "the form field key, e.g. :title"
+  attr :placeholder, :string, default: "Untitled"
+  attr :form, :any, default: nil
+  attr :field, :atom, default: nil
   attr :edit_event, :string, required: true
   attr :save_event, :string, required: true
   attr :cancel_event, :string, required: true
-  attr :edit_attrs, :map, default: %{}, doc: "extra attrs (e.g. phx-value-*) for the read display"
-  attr :rows, :string, default: "3"
+  attr :edit_attrs, :map, default: %{}
   attr :read_class, :any, default: nil
-  attr :read_style, :string, default: nil
   attr :input_class, :any, default: nil
-  slot :hidden, doc: "hidden inputs to include in the save form (e.g. a stage_id)"
+  slot :hidden
 
-  def editable_text(assigns) do
+  def inline_field(assigns) do
     ~H"""
-    <div id={@id} class="editable-text">
+    <div id={@id} class="inline-field">
       <div
         :if={!@editing}
         id={"#{@id}-display"}
         role="button"
         tabindex="0"
         phx-click={@edit_event}
-        phx-hook="InlineEdit"
-        data-inline-role="display"
-        style={@read_style}
-        class={[
-          "group/edit relative cursor-text rounded-md hover:bg-base-200",
-          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary",
-          @read_class
-        ]}
+        phx-hook="CommitField"
+        data-field-role="display"
+        class={["inline-field-rest", @read_class]}
         {@edit_attrs}
       >
-        <div :if={@markdown && !editable_blank?(@value)} id={"#{@id}-view"} class="md">
-          {Relay.Markdown.to_html(@value)}
-        </div>
-        <span :if={!@markdown && !editable_blank?(@value)} class="whitespace-pre-wrap">{@value}</span>
-        <span :if={editable_blank?(@value)} class="italic text-base-content/50">{@placeholder}</span>
-        <.icon
-          name="hero-pencil-square"
-          class="pointer-events-none absolute right-1 top-1 size-4 opacity-0 transition-opacity group-hover/edit:opacity-60 group-focus-visible/edit:opacity-60"
-        />
+        <span :if={!field_blank?(@value)} class="whitespace-pre-wrap">{@value}</span>
+        <span :if={field_blank?(@value)} class="font-normal italic text-base-content/50">
+          {@placeholder}
+        </span>
       </div>
       <.form
         :if={@editing}
@@ -2357,36 +2357,178 @@ defmodule RelayWeb.CoreComponents do
         id={"#{@id}-form"}
         phx-submit={@save_event}
         phx-click-away={@cancel_event}
+        class="commit-field-form"
       >
         {render_slot(@hidden)}
         <.input
           field={@form[@field]}
-          type={if(@multiline, do: "textarea", else: "text")}
+          type="text"
           id={"#{@id}-input"}
-          rows={@multiline && @rows}
-          phx-hook="InlineEdit"
+          class={["commit-field-input", @input_class]}
+          phx-hook="CommitField"
+          data-field-role="edit"
+          data-commit="enter"
+          data-autofocus="true"
           data-cancel-id={"#{@id}-cancel"}
-          class={@input_class}
         />
-        <div class="mt-2 flex items-center gap-2">
-          <.button variant="primary" class="btn btn-primary btn-sm" id={"#{@id}-save"}>Save</.button>
-          <button
-            type="button"
-            id={"#{@id}-cancel"}
-            class="btn btn-ghost btn-sm"
-            phx-click={@cancel_event}
-          >
-            Cancel
-          </button>
-        </div>
+        <.commit_pill id={@id} cancel_event={@cancel_event} hint="Enter · Esc" />
       </.form>
     </div>
     """
   end
 
-  defp editable_blank?(nil), do: true
-  defp editable_blank?(value) when is_binary(value), do: String.trim(value) == ""
-  defp editable_blank?(_), do: false
+  @doc """
+  A form field you fill in. Always visibly a box; single-line and multi-line share
+  identical styling. `commit={:form}` renders only a styled input bound to
+  `@form[@field]` (the parent form's button submits). `commit={:self}` owns its own
+  commit via ⌘/Ctrl+Enter or ✓, reverting on Esc/✕: with `edit_event` set it is a
+  server-toggled rest↔edit field (markdown renders at rest); without `edit_event` it
+  is always editable and the pill appears once dirty (board name/slug).
+  """
+  attr :id, :string, required: true
+  attr :commit, :atom, values: [:self, :form], default: :self
+  attr :value, :string, default: nil
+  attr :placeholder, :string, default: nil
+  attr :multiline, :boolean, default: false
+  attr :markdown, :boolean, default: false
+  attr :rows, :string, default: "6"
+  attr :editing, :boolean, default: false
+  attr :form, :any, default: nil
+  attr :field, :atom, default: nil
+  attr :edit_event, :string, default: nil
+  attr :save_event, :string, default: nil
+  attr :cancel_event, :string, default: nil
+  attr :edit_attrs, :map, default: %{}
+  attr :prefix, :string, default: nil
+  attr :input_class, :any, default: nil
+  attr :rest, :global, include: ~w(autocomplete)
+  slot :hidden
+
+  def boxed_field(%{commit: :form} = assigns) do
+    ~H"""
+    <.input
+      field={@form[@field]}
+      type={if(@multiline, do: "textarea", else: "text")}
+      id={@id}
+      rows={@multiline && @rows}
+      placeholder={@placeholder}
+      class={["commit-field-input", @input_class]}
+      {@rest}
+    />
+    """
+  end
+
+  def boxed_field(%{commit: :self, editing: true} = assigns) do
+    ~H"""
+    <.form
+      for={@form}
+      id={"#{@id}-form"}
+      phx-submit={@save_event}
+      phx-click-away={@cancel_event}
+      class="commit-field-form"
+    >
+      {render_slot(@hidden)}
+      <.input
+        field={@form[@field]}
+        type={if(@multiline, do: "textarea", else: "text")}
+        id={"#{@id}-input"}
+        rows={@multiline && @rows}
+        class={["commit-field-input", @markdown && "commit-field-mono", @input_class]}
+        phx-hook="CommitField"
+        data-field-role="edit"
+        data-commit={if(@multiline, do: "cmd-enter", else: "enter")}
+        data-autofocus="true"
+        data-dirty-pill="true"
+        data-cancel-id={"#{@id}-cancel"}
+      />
+      <.commit_pill
+        id={@id}
+        cancel_event={@cancel_event}
+        hint={if(@multiline, do: "⌘↵ · Esc", else: "Enter · Esc")}
+        hidden
+      />
+    </.form>
+    """
+  end
+
+  def boxed_field(%{commit: :self, edit_event: edit_event} = assigns) when is_binary(edit_event) do
+    ~H"""
+    <div
+      id={"#{@id}-display"}
+      role="button"
+      tabindex="0"
+      phx-click={@edit_event}
+      phx-hook="CommitField"
+      data-field-role="display"
+      class="commit-field-rest"
+      {@edit_attrs}
+    >
+      <div :if={@markdown && !field_blank?(@value)} id={"#{@id}-view"} class="md">
+        {Relay.Markdown.to_html(@value)}
+      </div>
+      <div
+        :if={!@markdown && !field_blank?(@value)}
+        id={"#{@id}-view"}
+        class="commit-field-input whitespace-pre-wrap"
+      >
+        {@value}
+      </div>
+      <div :if={field_blank?(@value)} class="commit-field-placeholder">
+        {@placeholder}
+      </div>
+    </div>
+    """
+  end
+
+  def boxed_field(%{commit: :self} = assigns) do
+    ~H"""
+    <.form for={@form} id={"#{@id}-form"} phx-submit={@save_event} class="commit-field-form">
+      <div :if={@prefix} class="commit-field-prefixed">
+        <span class="commit-field-prefix font-mono">{@prefix}</span>
+        <input
+          type="text"
+          id={"#{@id}-input"}
+          name={@form[@field].name}
+          value={Phoenix.HTML.Form.normalize_value("text", @form[@field].value)}
+          phx-hook="CommitField"
+          data-field-role="edit"
+          data-commit="enter"
+          data-dirty-pill="true"
+          data-cancel-id={"#{@id}-cancel"}
+          class={["commit-field-bare font-mono", @input_class]}
+        />
+      </div>
+      <.input
+        :if={!@prefix}
+        field={@form[@field]}
+        type={if(@multiline, do: "textarea", else: "text")}
+        id={"#{@id}-input"}
+        rows={@multiline && @rows}
+        placeholder={@placeholder}
+        class={["commit-field-input", @input_class]}
+        phx-hook="CommitField"
+        data-field-role="edit"
+        data-commit={if(@multiline, do: "cmd-enter", else: "enter")}
+        data-dirty-pill="true"
+        data-cancel-id={"#{@id}-cancel"}
+      />
+      <p
+        :for={msg <- Enum.map(@form[@field].errors, &translate_error/1)}
+        :if={@prefix}
+        id={"#{@id}-error"}
+        class="mt-1 text-sm text-error"
+      >
+        {msg}
+      </p>
+      <.commit_pill
+        id={@id}
+        cancel_event={@cancel_event}
+        hint={if(@multiline, do: "⌘↵ · Esc", else: "Enter · Esc")}
+        hidden
+      />
+    </.form>
+    """
+  end
 
   ## JS Commands
 

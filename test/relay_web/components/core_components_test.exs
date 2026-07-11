@@ -573,127 +573,144 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
-  describe "editable_text/1" do
-    test "read state renders the value, the affordance, the pencil, and the edit hook" do
+  describe "inline_field/1" do
+    test "rest state renders the value with no pencil icon and no form" do
       html =
-        render_component(&CoreComponents.editable_text/1,
-          id: "et-title",
-          value: "Draft the spec",
-          edit_event: "edit_title",
-          save_event: "save_card_title",
-          cancel_event: "cancel_title"
+        render_component(&CoreComponents.inline_field/1,
+          id: "if-title",
+          value: "Draft the onboarding spec",
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
         )
 
-      assert html =~ ~s(id="et-title-display")
-      assert html =~ "Draft the spec"
-      assert html =~ ~s(phx-click="edit_title")
-      assert html =~ ~s(role="button")
-      assert html =~ ~s(tabindex="0")
-      assert html =~ "cursor-text"
-      assert html =~ "hover:bg-base-200"
-      assert html =~ "hero-pencil-square"
-      assert html =~ ~s(phx-hook="InlineEdit")
-      assert html =~ ~s(data-inline-role="display")
-      refute html =~ ~s(id="et-title-form")
+      assert html =~ ~s(id="if-title-display")
+      assert html =~ "Draft the onboarding spec"
+      refute html =~ "hero-pencil-square"
+      refute html =~ ~s(id="if-title-form")
     end
 
-    test "read state shows the placeholder when the value is blank" do
+    test "blank value shows the placeholder" do
       html =
-        render_component(&CoreComponents.editable_text/1,
-          id: "et-empty",
+        render_component(&CoreComponents.inline_field/1,
+          id: "if-title",
+          value: "",
+          placeholder: "Untitled",
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
+        )
+
+      assert html =~ "Untitled"
+    end
+
+    test "editing state renders a single-line input, the pill, and Enter hint" do
+      html =
+        render_component(&CoreComponents.inline_field/1,
+          id: "if-title",
+          editing: true,
+          field: :title,
+          form: Phoenix.Component.to_form(%{"title" => "Draft"}, as: :card),
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
+        )
+
+      assert html =~ ~s(id="if-title-form")
+      assert html =~ ~s(<input)
+      assert html =~ ~s(data-commit="enter")
+      assert html =~ ~s(id="if-title-save")
+      assert html =~ ~s(id="if-title-cancel")
+      assert html =~ "Enter · Esc"
+    end
+  end
+
+  describe "boxed_field/1" do
+    test ":form mode renders only a styled bound input" do
+      html =
+        render_component(&CoreComponents.boxed_field/1,
+          id: "bf-comment-input",
+          commit: :form,
+          multiline: true,
+          field: :body,
+          form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment),
+          placeholder: "Write a comment…"
+        )
+
+      assert html =~ ~s(id="bf-comment-input")
+      assert html =~ "commit-field-input"
+      assert html =~ "Write a comment…"
+      refute html =~ "commit-pill"
+    end
+
+    test ":self markdown rest renders markdown, blank shows dashed placeholder" do
+      filled =
+        render_component(&CoreComponents.boxed_field/1,
+          id: "bf-desc",
+          markdown: true,
+          multiline: true,
+          value: "# Hi",
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
+        )
+
+      assert filled =~ ~s(id="bf-desc-view")
+      assert filled =~ ~s(class="md")
+
+      blank =
+        render_component(&CoreComponents.boxed_field/1,
+          id: "bf-desc",
+          markdown: true,
+          multiline: true,
           value: "",
           placeholder: "Add a description…",
-          edit_event: "edit_description",
-          save_event: "save_card_description",
-          cancel_event: "cancel_description"
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
         )
 
-      assert html =~ "Add a description…"
-      assert html =~ "text-base-content/50"
+      assert blank =~ "commit-field-placeholder"
+      assert blank =~ "Add a description…"
     end
 
-    test "read state renders markdown when markdown is set" do
+    test ":self markdown editing renders a mono textarea with a dirty-gated pill" do
       html =
-        render_component(&CoreComponents.editable_text/1,
-          id: "et-desc",
-          value: "Line one\n\nLine two",
+        render_component(&CoreComponents.boxed_field/1,
+          id: "bf-desc",
           markdown: true,
-          edit_event: "edit_description",
-          save_event: "save_card_description",
-          cancel_event: "cancel_description"
-        )
-
-      assert html =~ ~s(id="et-desc-view")
-      assert html =~ ~s(class="md")
-      # Relay.Markdown.to_html/1 turns the blank line into two <p> paragraphs
-      # (rendered raw, mirroring the existing drawer description view).
-      assert html =~ "<p>"
-      assert html =~ "Line one"
-      assert html =~ "Line two"
-    end
-
-    test "edit state renders the pre-filled input, the hook wiring, and Save/Cancel" do
-      form = to_form(%{"title" => "Draft the spec"}, as: :card)
-
-      html =
-        render_component(&CoreComponents.editable_text/1,
-          id: "et-title",
-          editing: true,
-          form: form,
-          field: :title,
-          edit_event: "edit_title",
-          save_event: "save_card_title",
-          cancel_event: "cancel_title"
-        )
-
-      assert html =~ ~s(id="et-title-form")
-      assert html =~ ~s(phx-submit="save_card_title")
-      assert html =~ ~s(phx-click-away="cancel_title")
-      assert html =~ ~s(id="et-title-input")
-      assert html =~ ~s(name="card[title]")
-      assert html =~ "Draft the spec"
-      assert html =~ ~s(phx-hook="InlineEdit")
-      assert html =~ ~s(data-cancel-id="et-title-cancel")
-      assert html =~ ~s(id="et-title-save")
-      assert html =~ ~s(id="et-title-cancel")
-      assert html =~ ~s(phx-click="cancel_title")
-      refute html =~ ~s(id="et-title-display")
-    end
-
-    test "multiline edit state renders a textarea with the given rows" do
-      form = to_form(%{"description" => "Body"}, as: :card)
-
-      html =
-        render_component(&CoreComponents.editable_text/1,
-          id: "et-desc",
-          editing: true,
           multiline: true,
-          rows: "12",
-          form: form,
+          editing: true,
           field: :description,
-          edit_event: "edit_description",
-          save_event: "save_card_description",
-          cancel_event: "cancel_description"
+          form: Phoenix.Component.to_form(%{"description" => "raw"}, as: :card),
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
         )
 
+      assert html =~ ~s(id="bf-desc-input")
       assert html =~ ~s(<textarea)
-      assert html =~ ~s(id="et-desc-input")
-      assert html =~ ~s(rows="12")
+      assert html =~ "commit-field-mono"
+      assert html =~ ~s(data-commit="cmd-enter")
+      assert html =~ ~s(data-dirty-pill="true")
+      assert html =~ ~s(class="commit-pill hidden")
+      assert html =~ "⌘↵ · Esc"
     end
 
-    test "edit_attrs are spread onto the read display for parameterised fields (stages)" do
+    test ":self always-editable with a prefix renders the prefixed box" do
       html =
-        render_component(&CoreComponents.editable_text/1,
-          id: "et-stage",
-          value: "Code",
-          edit_event: "edit_stage",
-          save_event: "save_stage",
-          cancel_event: "cancel_stage",
-          edit_attrs: %{"phx-value-stage-id" => 3, "phx-value-field" => "name"}
+        render_component(&CoreComponents.boxed_field/1,
+          id: "bf-slug",
+          field: :slug,
+          form: Phoenix.Component.to_form(%{"slug" => "my-board"}, as: :board),
+          prefix: "relay.app/",
+          save_event: "save_board_slug",
+          cancel_event: "cancel_board_slug"
         )
 
-      assert html =~ ~s(phx-value-stage-id="3")
-      assert html =~ ~s(phx-value-field="name")
+      assert html =~ "relay.app/"
+      assert html =~ "commit-field-prefixed"
+      assert html =~ ~s(id="bf-slug-input")
     end
   end
 
