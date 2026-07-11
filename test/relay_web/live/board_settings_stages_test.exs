@@ -281,4 +281,43 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       assert has_element?(view, "#stage-#{code.id}-row", "Finished work waits in")
     end
   end
+
+  describe "reject route (ON REJECT, SEND TO)" do
+    test "a top-level review stage shows the dropdown and persists a pick", %{conn: conn, board: board} do
+      review = stage_named(board, "Review")
+      plan = stage_named(board, "Plan")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+      assert has_element?(view, "#stage-#{review.id}-row", "ON REJECT, SEND TO")
+      assert has_element?(view, "#stage-#{review.id}-reject-route")
+
+      view |> element("#stage-#{review.id}-reject-to-#{plan.id}") |> render_click()
+
+      assert Repo.get!(Schemas.Stage, review.id).reject_to_stage_id == plan.id
+      assert has_element?(view, "#stage-#{review.id}-reject-route", "Plan")
+    end
+
+    test "a non-review stage shows no reject-route control", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+      refute has_element?(view, "#stage-#{code.id}-reject-route")
+      refute has_element?(view, "#stage-#{code.id}-row", "ON REJECT, SEND TO")
+    end
+
+    test "a stage with a review sub-lane shows the fixed own-stage hint", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      {:ok, _sublane} = Boards.enable_lane(code, :review)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+      assert has_element?(
+               view,
+               "#stage-#{code.id}-row",
+               "always rejects back into its own stage — nothing to configure"
+             )
+    end
+  end
 end

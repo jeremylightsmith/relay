@@ -14,10 +14,14 @@ defmodule RelayWeb.BoardSettingsLive do
   RLY-46: each stage row carries a TYPE dropdown (`queue | work | planning |
   review | done`, `set_type` event, re-snaps resident cards to the new type's
   valid status) and — for work/planning stages only — a violet AI-ENABLED
-  toggle (`toggle_ai` event, "Relay AI listens here"). The approve/reject
-  config that used to live here (the approval-gate toggle + reject-target
-  picker) is gone: gating is now implicit in `type: :review`, and the reject
-  target is chosen at reject time on the board (`Boards.previous_main_stage/1`).
+  toggle (`toggle_ai` event, "Relay AI listens here"). The old approval-gate
+  toggle is gone: gating is now implicit in `type: :review`.
+
+  RLY-57: a top-level review stage (`type: :review`, no `parent_id`) carries an
+  "ON REJECT, SEND TO" dropdown (`set_reject_to` event) that persists
+  `stage.reject_to_stage_id`; a review sub-lane always rejects back into its
+  own parent stage and shows a fixed hint instead. When no `reject_to_stage_id`
+  is set, the effective target falls back to `Boards.previous_main_stage/1`.
   """
 
   use RelayWeb, :live_view
@@ -26,6 +30,7 @@ defmodule RelayWeb.BoardSettingsLive do
   alias Relay.Boards
   alias Relay.Cards
   alias Schemas.Board
+  alias Schemas.Stage
 
   @categories [:unstarted, :planning, :in_progress, :complete]
 
@@ -375,6 +380,46 @@ defmodule RelayWeb.BoardSettingsLive do
                         />
                       </div>
                     </div>
+                    <div
+                      :if={stage.type == :review and is_nil(stage.parent_id)}
+                      style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px dashed oklch(0.94 0.006 255);padding-top:12px;"
+                    >
+                      <span class="font-mono" style="font-size:11px;color:oklch(0.44 0.11 195);">
+                        ON REJECT, SEND TO
+                      </span>
+                      <details class="dropdown" id={"stage-#{stage.id}-reject-route"}>
+                        <summary
+                          class="btn btn-sm btn-outline gap-2"
+                          style="color:oklch(0.34 0.09 205);border-color:oklch(0.86 0.06 195);"
+                        >
+                          <span style="width:7px;height:7px;border-radius:2px;background:oklch(0.55 0.11 195);">
+                          </span>
+                          {reject_route_name(stage, @stages)}
+                        </summary>
+                        <ul class="menu dropdown-content z-10 w-44 rounded-box bg-base-100 p-1 shadow">
+                          <li :for={opt <- reject_route_options(stage, @stages)}>
+                            <button
+                              type="button"
+                              id={"stage-#{stage.id}-reject-to-#{opt.id}"}
+                              phx-click="set_reject_to"
+                              phx-value-stage-id={stage.id}
+                              phx-value-target-id={opt.id}
+                              class="flex items-center gap-2"
+                            >
+                              <span class="flex-1 text-left">{opt.name}</span>
+                              <.icon
+                                :if={opt.id == effective_reject_to(stage)}
+                                name="hero-check"
+                                class="size-4"
+                              />
+                            </button>
+                          </li>
+                        </ul>
+                      </details>
+                      <span style="flex:1;min-width:180px;font-size:11px;line-height:1.4;color:oklch(0.55 0.02 255);">
+                        Rejected cards return here to be re-planned — the reviewer doesn't choose a destination.
+                      </span>
+                    </div>
                     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px dashed oklch(0.94 0.006 255);padding-top:12px;">
                       <div style="display:flex;align-items:center;gap:10px;">
                         <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
@@ -395,8 +440,8 @@ defmodule RelayWeb.BoardSettingsLive do
                         style="font-size:11px;line-height:1.4;color:oklch(0.55 0.02 255);"
                       >
                         Finished work waits in <b style="color:oklch(0.40 0.02 255);">Review</b>
-                        for a human to approve. Rejected work returns to this stage's
-                        In progress lane.
+                        for a human to approve. A review sub-lane always rejects back into its own
+                        stage — nothing to configure.
                       </span>
                     </div>
                   </div>
@@ -559,7 +604,7 @@ defmodule RelayWeb.BoardSettingsLive do
 
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
         save_board_name save_board_slug edit_stage save_stage add_stage delete_stage
-        toggle_wip bump_wip reorder_stage toggle_lane set_type toggle_ai
+        toggle_wip bump_wip reorder_stage toggle_lane set_type toggle_ai set_reject_to
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -621,6 +666,12 @@ defmodule RelayWeb.BoardSettingsLive do
     stage = find_stage(socket, stage_id)
     {:ok, updated} = Boards.update_stage(stage, %{type: String.to_existing_atom(type)})
     :ok = Cards.snap_cards_in(updated)
+    {:noreply, refresh_stages(socket)}
+  end
+
+  def handle_event("set_reject_to", %{"stage-id" => stage_id, "target-id" => target_id}, socket) do
+    stage = find_stage(socket, stage_id)
+    {:ok, _stage} = Boards.update_stage(stage, %{reject_to_stage_id: parse_target(target_id)})
     {:noreply, refresh_stages(socket)}
   end
 
@@ -743,6 +794,37 @@ defmodule RelayWeb.BoardSettingsLive do
     id = String.to_integer(stage_id)
     Enum.find(socket.assigns.stages, &(&1.id == id))
   end
+
+  # The effective reject target id: the explicit reject_to, else the previous main stage.
+  defp effective_reject_to(stage) do
+    case stage.reject_to_stage_id do
+      nil ->
+        case Boards.previous_main_stage(stage) do
+          %Stage{id: id} -> id
+          nil -> nil
+        end
+
+      id ->
+        id
+    end
+  end
+
+  # Selectable reject targets: the board's other main stages, in position order.
+  defp reject_route_options(stage, stages) do
+    stages
+    |> Enum.reject(&(&1.id == stage.id))
+    |> Enum.sort_by(& &1.position)
+  end
+
+  defp reject_route_name(stage, stages) do
+    case effective_reject_to(stage) do
+      nil -> "Previous stage"
+      id -> (Enum.find(stages, &(&1.id == id)) || %{name: "Previous stage"}).name
+    end
+  end
+
+  defp parse_target(""), do: nil
+  defp parse_target(id), do: String.to_integer(id)
 
   defp lane_atom("review"), do: :review
   defp lane_atom("done"), do: :done
