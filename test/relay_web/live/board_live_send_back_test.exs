@@ -50,7 +50,7 @@ defmodule RelayWeb.BoardLiveSendBackTest do
     refute has_element?(view, "#send-back-panel")
   end
 
-  test "the gate reject panel exposes a target picker defaulting to the configured reject_to", %{
+  test "the gate reject panel is note-only and routes to the derived destination", %{
     conn: conn,
     board: board,
     code: code,
@@ -62,10 +62,11 @@ defmodule RelayWeb.BoardLiveSendBackTest do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
     view |> element("#review-request-changes") |> render_click()
 
-    assert has_element?(view, "#review-reject-target")
+    refute has_element?(view, "#review-reject-target")
+    assert has_element?(view, "#review-send-back", "Reject → Code")
 
     view
-    |> form("#review-reject-form", reject: %{to: code.id, note: "Tighten it"})
+    |> form("#review-reject-form", reject: %{note: "Tighten it"})
     |> render_submit()
 
     reloaded = Cards.get_card_by_ref(board, "RLY-1")

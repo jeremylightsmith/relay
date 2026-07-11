@@ -1038,7 +1038,7 @@ defmodule RelayWeb.CoreComponents do
   attr :review_gate, :any,
     default: nil,
     doc:
-      "MMF 15 gate info for an :in_review card on a review-type stage — %{approve_label, targets, default_to, can_reject}; nil when the card is not in a review-type stage"
+      "MMF 15 gate info for an :in_review card on a review-type stage — %{approve_label, reject_target_name, can_reject}; nil when the card is not in a review-type stage"
 
   attr :reject_open, :boolean,
     default: false,
@@ -1298,28 +1298,25 @@ defmodule RelayWeb.CoreComponents do
                   class="flex flex-col gap-2 rounded-lg bg-white p-3"
                   style="border:1px solid oklch(0.90 0.02 255);"
                 >
-                  <p class="text-xs" style="color:oklch(0.42 0.02 255);">
-                    Send back to an earlier stage for the AI to address.
-                  </p>
+                  <div
+                    class="flex items-center gap-2 rounded-lg px-3 py-2"
+                    style="background:oklch(0.985 0.02 195);border:1px solid oklch(0.90 0.03 195);"
+                  >
+                    <span class="text-[13px] leading-none" style="color:oklch(0.44 0.11 195);">
+                      ↩
+                    </span>
+                    <span class="text-[12.5px] leading-normal" style="color:oklch(0.38 0.04 210);">
+                      Returns to
+                      <b style="color:oklch(0.34 0.09 205);">{@review_gate.reject_target_name}</b>
+                      — the reject target set on this stage.
+                    </span>
+                  </div>
                   <.form
                     for={@reject_form}
                     id="review-reject-form"
                     class="flex flex-col gap-2"
                     phx-submit="review_reject"
                   >
-                    <select
-                      id="review-reject-target"
-                      name="reject[to]"
-                      class="select select-sm select-bordered w-full"
-                    >
-                      <option
-                        :for={t <- @review_gate.targets}
-                        value={t.id}
-                        selected={t.id == @review_gate.default_to}
-                      >
-                        {t.name}
-                      </option>
-                    </select>
                     <.boxed_field
                       id="review-request-note"
                       commit={:form}
@@ -1342,9 +1339,9 @@ defmodule RelayWeb.CoreComponents do
                         id="review-send-back"
                         type="submit"
                         class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
-                        style="background:oklch(0.70 0.13 65);"
+                        style="background:oklch(0.62 0.14 65);"
                       >
-                        Send back →
+                        Reject → {@review_gate.reject_target_name}
                       </button>
                       <button
                         id="review-cancel-reject"
