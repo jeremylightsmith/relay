@@ -480,29 +480,22 @@ defmodule Relay.CardsTest do
   end
 
   describe "set_status/3" do
-    test "sets status and progress and preloads owners", %{stage: stage} do
+    test "sets status and preloads owners", %{stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "T"})
 
-      assert {:ok, %Card{} = updated} =
-               Cards.set_status(card, %{"status" => "working", "progress" => "40"})
+      assert {:ok, %Card{} = updated} = Cards.set_status(card, %{"status" => "working"})
 
       assert updated.status == :working
-      assert updated.progress == 40
       assert updated.owners == []
       assert Repo.get!(Card, card.id).status == :working
     end
 
-    test "returns an error changeset and persists nothing on invalid input", %{stage: stage} do
+    test "returns an error changeset and persists nothing on invalid status", %{stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "T"})
 
       assert {:error, %Ecto.Changeset{}} = Cards.set_status(card, %{"status" => "banana"})
 
-      assert {:error, %Ecto.Changeset{}} =
-               Cards.set_status(card, %{"status" => "working", "progress" => "250"})
-
-      reloaded = Repo.get!(Card, card.id)
-      assert reloaded.status == :queued
-      assert reloaded.progress == nil
+      assert Repo.get!(Card, card.id).status == :queued
     end
   end
 
@@ -716,11 +709,11 @@ defmodule Relay.CardsTest do
       assert meta == %{"from_status" => "queued", "to_status" => "in_review"}
     end
 
-    test "a progress-only change does not log", %{stage: stage} do
+    test "a same-status re-set does not log", %{stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "T"})
-      {:ok, card} = Cards.set_status(card, %{"status" => "working", "progress" => "10"})
+      {:ok, card} = Cards.set_status(card, %{"status" => "working"})
 
-      {:ok, card} = Cards.set_status(card, %{"status" => "working", "progress" => "50"})
+      {:ok, card} = Cards.set_status(card, %{"status" => "working"})
 
       assert Enum.map(activities(card), & &1.type) == [:created, :status_changed]
     end

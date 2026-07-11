@@ -59,9 +59,9 @@ defmodule Relay.ContextBroadcastsTest do
     test "set_status broadcasts {:card_upserted, card}", %{backlog: backlog} do
       {:ok, %Card{id: card_id} = card} = Cards.create_card(backlog, %{title: "Status"})
 
-      {:ok, _card} = Cards.set_status(card, %{"status" => "working", "progress" => "40"})
+      {:ok, _card} = Cards.set_status(card, %{"status" => "working"})
 
-      assert_receive {:card_upserted, %Card{id: ^card_id, status: :working, progress: 40}}
+      assert_receive {:card_upserted, %Card{id: ^card_id, status: :working}}
     end
 
     test "set_owners, add_owner, and remove_owner broadcast {:card_upserted, card} with owners preloaded",

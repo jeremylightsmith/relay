@@ -761,7 +761,7 @@ defmodule RelayWeb.CoreComponents do
         {mismatch_message(@mismatch)}
       </p>
       <div
-        :if={@status == :working}
+        :if={@status == :working and @progress != nil}
         style="height:5px;border-radius:3px;background:oklch(0.93 0.02 292);overflow:hidden;"
       >
         <div style={"height:100%;width:#{@progress || 0}%;background:var(--color-secondary);border-radius:3px;"}>
@@ -836,7 +836,8 @@ defmodule RelayWeb.CoreComponents do
   defp card_accent_color("border-l-primary"), do: "var(--color-primary)"
   defp card_accent_color("border-l-base-300"), do: "var(--color-base-300)"
 
-  defp card_status_label(:working, progress), do: "working · #{progress || 0}%"
+  defp card_status_label(:working, nil), do: "working"
+  defp card_status_label(:working, progress), do: "working · #{progress}%"
   defp card_status_label(:in_review, _progress), do: "ready"
   defp card_status_label(:done, _progress), do: "done"
   defp card_status_label(_status, _progress), do: nil
@@ -1734,6 +1735,19 @@ defmodule RelayWeb.CoreComponents do
   defp sub_task_pct(%{total: 0}), do: 0
   defp sub_task_pct(%{done: done, total: total}), do: round(done * 100 / total)
 
+  # Working progress is derived from the card's sub-tasks (RLY-37): done/total as
+  # a percentage, or nil when there are none — a working card with no checklist
+  # shows no bar and a plain "working" label. Real cards always carry a loaded
+  # sub_tasks list (card_preloads/0); the fallback clause tolerates bare test maps.
+  defp board_card_progress(%{sub_tasks: sub_tasks}) when is_list(sub_tasks) do
+    case Cards.sub_task_progress(%{sub_tasks: sub_tasks}) do
+      %{total: 0} -> nil
+      %{done: done, total: total} -> round(done * 100 / total)
+    end
+  end
+
+  defp board_card_progress(_card), do: nil
+
   defp owner_name(%{actor_type: :agent}), do: "Relay AI"
   defp owner_name(%{actor_type: :user, user: user}), do: user.name || user.email
 
@@ -2051,7 +2065,7 @@ defmodule RelayWeb.CoreComponents do
                     tag={card.tag}
                     ref={"#{@board_key}-#{card.ref_number}"}
                     status={card.status}
-                    progress={card.progress}
+                    progress={board_card_progress(card)}
                     owners={card.owners}
                     active_owner={Cards.active_owner_type(card)}
                     stage_owner={@main_owner}
@@ -2132,7 +2146,7 @@ defmodule RelayWeb.CoreComponents do
                   tag={card.tag}
                   ref={"#{@board_key}-#{card.ref_number}"}
                   status={card.status}
-                  progress={card.progress}
+                  progress={board_card_progress(card)}
                   owners={card.owners}
                   active_owner={Cards.active_owner_type(card)}
                   stage_owner={sub.owner}

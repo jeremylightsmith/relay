@@ -136,11 +136,11 @@ defmodule Relay.CardsNeedsInputTest do
       assert unblocked.blocked_since == nil
     end
 
-    test "a progress-only update while blocked keeps blocked_since", %{ai_stage: stage} do
+    test "a same-status re-set while blocked keeps blocked_since", %{ai_stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "Hold"})
       {:ok, blocked} = Cards.set_status(card, %{status: :needs_input})
 
-      {:ok, still_blocked} = Cards.set_status(blocked, %{status: :needs_input, progress: 40})
+      {:ok, still_blocked} = Cards.set_status(blocked, %{status: :needs_input})
 
       assert still_blocked.blocked_since == blocked.blocked_since
     end

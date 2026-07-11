@@ -594,8 +594,10 @@ defmodule RelayWeb.BoardLiveTest do
              )
     end
 
-    test "a working card shows its progress in the status line", %{conn: conn, card: card, user: user} do
-      {:ok, _card} = Cards.set_status(card, %{"status" => "working", "progress" => "61"})
+    test "a working card derives its progress from sub-tasks in the status line", %{conn: conn, card: card, user: user} do
+      insert(:sub_task, card: card, done: true)
+      insert(:sub_task, card: card, done: false)
+      {:ok, _card} = Cards.set_status(card, %{"status" => "working"})
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
@@ -603,8 +605,18 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(
                view,
                "#stage-col-1-cards .board-card .card-status[data-status='working']",
-               "working · 61%"
+               "working · 50%"
              )
+    end
+
+    test "a working card with no sub-tasks shows a plain working label", %{conn: conn, card: card, user: user} do
+      {:ok, _card} = Cards.set_status(card, %{"status" => "working"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#stage-col-1-cards .board-card .card-status[data-status='working']", "working")
+      refute render(view) =~ "working · "
     end
 
     test "a human-active card in an AI stage shows the red meant-for-agents warning",
