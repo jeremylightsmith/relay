@@ -1,6 +1,7 @@
 defmodule RelayWeb.Api.BoardController do
   use RelayWeb, :controller
 
+  alias Relay.AgentLog
   alias Relay.Boards
   alias Relay.BoardWatch
   alias Relay.Cards
@@ -18,5 +19,11 @@ defmodule RelayWeb.Api.BoardController do
     conn
     |> put_resp_header("etag", Integer.to_string(version))
     |> json(%{version: version})
+  end
+
+  def logs(conn, params) do
+    entries = Map.get(params, "_json", [])
+    :ok = AgentLog.record(conn.assigns.current_board.id, entries)
+    send_resp(conn, 200, "")
   end
 end

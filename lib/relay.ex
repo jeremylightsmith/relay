@@ -18,6 +18,7 @@ defmodule Relay do
       Mailer,
       Accounts,
       Activity,
+      AgentLog,
       ApiKeys,
       BoardWatch,
       Boards,

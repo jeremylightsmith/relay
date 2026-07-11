@@ -22,6 +22,7 @@ defmodule RelayWeb.BoardLive do
   use RelayWeb, :live_view
 
   alias Relay.Activity
+  alias Relay.AgentLog
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Events
@@ -85,6 +86,16 @@ defmodule RelayWeb.BoardLive do
                 <span style="width:8px;height:8px;border-radius:2px;background:var(--color-primary);"></span>HUMAN
               </span>
             </div>
+            <button
+              type="button"
+              id="agent-logs-button"
+              phx-click={if(@logs_open, do: "close_logs", else: "open_logs")}
+              class={["btn btn-ghost btn-sm", @logs_open && "btn-active"]}
+              aria-label="Agent log"
+              aria-pressed={to_string(@logs_open)}
+            >
+              <.icon name="hero-command-line" class="size-5" />
+            </button>
             <button
               type="button"
               id="archived-cards-button"
@@ -261,6 +272,51 @@ defmodule RelayWeb.BoardLive do
         </div>
         <label class="modal-backdrop" phx-click="close_archived">Close</label>
       </div>
+      <div
+        :if={@logs_open}
+        id="agent-log-sheet"
+        class="fixed inset-x-0 bottom-0 z-40 border-t border-base-300 bg-base-100/95 shadow-2xl backdrop-blur"
+        role="log"
+        aria-label="Agent log"
+      >
+        <div class="flex items-center justify-between border-b border-base-200 px-4 py-1.5">
+          <div class="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-base-content/60">
+            <.icon name="hero-command-line" class="size-4" /> Agent log
+          </div>
+          <button
+            type="button"
+            id="agent-log-close"
+            phx-click="close_logs"
+            class="btn btn-ghost btn-xs btn-circle"
+            aria-label="Close agent log"
+          >
+            <.icon name="hero-x-mark" class="size-4" />
+          </button>
+        </div>
+        <div
+          id="agent-log-lines"
+          phx-update="stream"
+          class="h-48 overflow-y-auto px-4 py-2 font-mono text-xs leading-relaxed"
+        >
+          <div
+            id="agent-log-empty"
+            class="hidden py-6 text-center text-base-content/50 only:block"
+          >
+            Waiting for agent activity…
+          </div>
+          <div
+            :for={{dom_id, entry} <- @streams.agent_logs}
+            id={dom_id}
+            class={["flex gap-2 py-0.5", agent_log_class(entry.kind)]}
+          >
+            <span class="shrink-0 text-base-content/40">
+              {Calendar.strftime(entry.ts, "%H:%M:%S")}
+            </span>
+            <span :if={entry.ref} class="shrink-0 text-base-content/60">[{entry.ref}]</span>
+            <span class="whitespace-pre-wrap break-all">{entry.text}</span>
+          </div>
+        </div>
+      </div>
     </Layouts.app>
     """
   end
@@ -281,6 +337,9 @@ defmodule RelayWeb.BoardLive do
       |> assign(:archived_count, Cards.count_archived_cards(board))
       |> assign(:archived_open, false)
       |> assign(:archived_cards, [])
+      |> assign(:logs_open, false)
+      |> assign(:agent_log_ids, [])
+      |> stream_configure(:agent_logs, dom_id: &"agent-log-#{&1.id}")
       |> assign(:stage_groups, group_stages(board.stages))
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
@@ -408,6 +467,26 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("close_archived", _params, socket) do
     {:noreply, assign(socket, :archived_open, false)}
+  end
+
+  def handle_event("open_logs", _params, socket) do
+    if connected?(socket), do: AgentLog.subscribe(socket.assigns.board.id)
+
+    {:noreply,
+     socket
+     |> assign(:logs_open, true)
+     |> assign(:agent_log_ids, [])
+     |> stream(:agent_logs, [], reset: true)}
+  end
+
+  def handle_event("close_logs", _params, socket) do
+    AgentLog.unsubscribe(socket.assigns.board.id)
+
+    {:noreply,
+     socket
+     |> assign(:logs_open, false)
+     |> assign(:agent_log_ids, [])
+     |> stream(:agent_logs, [], reset: true)}
   end
 
   # A row click: close the modal and open that card's drawer (URL-driven).
@@ -815,6 +894,18 @@ defmodule RelayWeb.BoardLive do
      |> assign(:page_title, board.name)
      |> assign(:read_only?, Board.archived?(updated))
      |> assign(:board_name_form, to_form(Boards.change_board(updated)))}
+  end
+
+  @impl true
+  def handle_info({:agent_log, entry}, socket) do
+    {kept, dropped} = Enum.split([entry.id | socket.assigns.agent_log_ids], 500)
+
+    socket =
+      Enum.reduce(dropped, stream_insert(socket, :agent_logs, entry, at: 0), fn id, acc ->
+        stream_delete_by_dom_id(acc, :agent_logs, "agent-log-#{id}")
+      end)
+
+    {:noreply, assign(socket, :agent_log_ids, kept)}
   end
 
   defp insert_timeline_entry(socket, %Schemas.Comment{} = comment) do
@@ -1362,4 +1453,8 @@ defmodule RelayWeb.BoardLive do
 
   defp category_dot_style(:complete),
     do: "width:9px;height:9px;border-radius:50%;background:var(--color-success);display:block;flex:0 0 auto;"
+
+  defp agent_log_class(:error), do: "text-error"
+  defp agent_log_class(:lifecycle), do: "text-base-content/60"
+  defp agent_log_class(_), do: "text-base-content"
 end
