@@ -21,6 +21,17 @@ context, so authoring in-context is how those decisions reach the plan.
    the user to produce one first with `/brainstorm <ref>`, then come back to `/write-plan <ref>`.
    Do NOT invent a spec. Otherwise, read it fully. If `./bin/relay card <ref>` shows a
    **CHANGES REQUESTED** block, treat resolving that feedback as this pass's primary goal.
+
+   **Delta re-plan (rejected card):** if the card already has a **non-empty `plan`** AND an open
+   `rejection` (the `rejection` field is non-null, i.e. a `CHANGES REQUESTED` block is shown),
+   do NOT re-plan greenfield. The card has shipped work that a reviewer sent back. Instead:
+   (a) read the rejection `note` — it is usually "X is wrong," meaning X already exists but is
+   broken or half-built; (b) **check what is actually implemented against the code** (read the
+   repo / `git log` / `git diff main...` for this card's branch) to see what shipped; (c) write a
+   plan covering **only the delta** — the fix the note asks for plus any genuine gaps — never
+   re-planning or rebuilding work that already shipped and passed. Because the plan then contains
+   only the new work, the branch diff matches the plan and `/exec-plan`'s `final-reviewer` needs
+   no special-casing.
 2. **Author the plan** in-context, following the guidance below.
 3. **Self-review** (checklist at the end), fixing inline.
 4. **Write the plan to the card.** Save it to a temp file and attach it so it travels with the
