@@ -957,7 +957,7 @@ defmodule RelayWeb.CoreComponents do
   attr :card, :any,
     required: true,
     doc:
-      "a card exposing title, description, spec, tag, status, progress, blocked_since, branch, plan, pr_url, a loaded owners list, inserted_at, and updated_at"
+      "a card exposing title, description, spec, tag, status, blocked_since, branch, plan, pr_url, a loaded owners list, inserted_at, and updated_at"
 
   attr :stage_name, :string, required: true
   attr :stage_owner, :atom, values: [:human, :ai], required: true
