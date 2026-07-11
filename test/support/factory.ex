@@ -46,7 +46,8 @@ defmodule Relay.Factory do
       name: sequence(:stage_name, &"Stage #{&1}"),
       position: sequence(:stage_position, & &1),
       category: :unstarted,
-      owner: :human,
+      type: :queue,
+      ai_enabled: false,
       board: build(:board)
     }
   end

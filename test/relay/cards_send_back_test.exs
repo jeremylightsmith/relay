@@ -6,34 +6,32 @@ defmodule Relay.CardsSendBackTest do
   alias Relay.Cards
   alias Schemas.Card
 
-  # Positions 1-5: Spec | Plan | Code | Review (gate → Code) | Done (gate, last).
+  # Positions 1-5: Spec (queue) | Plan (planning) | Code (work) | Review (review, previous main =
+  # Code) | Done (done, last).
   setup do
     board = insert(:board, key: "RLY")
-    spec = insert(:stage, board: board, name: "Spec", owner: :human, category: :unstarted, position: 1)
-    plan = insert(:stage, board: board, name: "Plan", owner: :ai, category: :planning, position: 2)
-    code = insert(:stage, board: board, name: "Code", owner: :ai, category: :in_progress, position: 3)
+    spec = insert(:stage, board: board, name: "Spec", type: :queue, category: :unstarted, position: 1)
+    plan = insert(:stage, board: board, name: "Plan", type: :planning, ai_enabled: true, category: :planning, position: 2)
+    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, category: :in_progress, position: 3)
 
     review =
       insert(:stage,
         board: board,
         name: "Review",
-        owner: :human,
+        type: :review,
         category: :in_progress,
-        position: 4,
-        approval_gate: true
+        position: 4
       )
 
     done =
       insert(:stage,
         board: board,
         name: "Done",
-        owner: :human,
+        type: :done,
         category: :complete,
-        position: 5,
-        approval_gate: true
+        position: 5
       )
 
-    {:ok, review} = Boards.update_stage(review, %{reject_to_stage_id: code.id})
     %{board: board, spec: spec, plan: plan, code: code, review: review, done: done}
   end
 
@@ -140,8 +138,8 @@ defmodule Relay.CardsSendBackTest do
     end
   end
 
-  describe "reject/4 (gate wrapper)" do
-    test "defaults the target to the gate's configured reject_to", %{review: review, code: code} do
+  describe "reject/4 (review-position wrapper)" do
+    test "defaults the target to the previous main stage", %{review: review, code: code} do
       card = insert(:card, stage: review)
       assert {:ok, rejected} = Cards.reject(card, "missing edge cases", :agent)
       assert rejected.stage_id == code.id
@@ -154,9 +152,9 @@ defmodule Relay.CardsSendBackTest do
       assert rejected.stage_id == spec.id
     end
 
-    test "returns {:error, :not_gated} on a non-gated stage without a target", %{code: code} do
+    test "returns {:error, :not_in_review} on a non-review stage without a target", %{code: code} do
       card = insert(:card, stage: code)
-      assert {:error, :not_gated} = Cards.reject(card, "nope", :agent)
+      assert {:error, :not_in_review} = Cards.reject(card, "nope", :agent)
     end
   end
 end

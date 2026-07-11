@@ -2,15 +2,20 @@ defmodule RelayWeb.BoardSettingsLive do
   @moduledoc """
   Board settings (`/board/settings`) — the mockup's two-pane Board Settings
   (MMF 12): a 210px `BOARD` rail navigating between the **Stages** pane
-  (rename / describe / reorder / add / delete stages, the meant-for owner
-  segmented control, and the MMF 10b Review/Done sub-lane toggles) and the
-  **API keys** pane (MMF 08, markup unchanged — restyling it is out of
-  scope; General and Members arrive with MMFs 19/17).
+  (rename / describe / reorder / add / delete stages, and the MMF 10b
+  Review/Done sub-lane toggles) and the **API keys** pane (MMF 08, markup
+  unchanged — restyling it is out of scope; General and Members arrive with
+  MMFs 19/17).
 
   All stage mutations go through `Relay.Boards`, which broadcasts
   `{:stages_changed, board_id}` (MMF 18) so every open board re-renders
-  live. `Stage.owner` is the *meant-for* designation only — changing it
-  never touches any card's owner rows.
+  live.
+
+  RLY-46: the stage's `type`/`ai_enabled` dropdown + AI toggle (replacing the
+  owner segmented control) and the approve/reject config (now implicit in
+  `type: :review`, replacing the approval-gate toggle + reject-target picker)
+  are a follow-up task — this pane only shows a read-only owner swatch in the
+  meantime.
   """
 
   use RelayWeb, :live_view
@@ -199,8 +204,8 @@ defmodule RelayWeb.BoardSettingsLive do
                     <div style="display:flex;align-items:center;gap:10px;">
                       <span
                         class="stage-owner-swatch"
-                        data-owner={stage.owner}
-                        style={"width:9px;height:9px;border-radius:3px;flex:0 0 auto;background:#{owner_color(stage.owner)};"}
+                        data-owner={stage_owner(stage)}
+                        style={"width:9px;height:9px;border-radius:3px;flex:0 0 auto;background:#{owner_color(stage_owner(stage))};"}
                       >
                       </span>
                       <div style="flex:1;">
@@ -278,35 +283,10 @@ defmodule RelayWeb.BoardSettingsLive do
                         <input type="hidden" name="stage_id" value={stage.id} />
                       </:hidden>
                     </.editable_text>
-                    <%!-- Controls row — OWNER / WIP (MMF 11) / DONE COLUMN (mockup lines ~241-262). --%>
+                    <%!-- Controls row — WIP (MMF 11) / DONE COLUMN (mockup lines ~241-262). The
+                         type dropdown + AI toggle (RLY-46, replacing the owner segmented control)
+                         is a follow-up task. --%>
                     <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
-                      <div style="display:flex;align-items:center;gap:9px;">
-                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
-                          OWNER
-                        </span>
-                        <div style="display:inline-flex;background:oklch(0.96 0.004 255);border:1px solid oklch(0.91 0.006 255);border-radius:8px;padding:3px;gap:2px;">
-                          <button
-                            type="button"
-                            id={"stage-#{stage.id}-owner-human"}
-                            phx-click="set_owner"
-                            phx-value-stage-id={stage.id}
-                            phx-value-owner="human"
-                            style={segment_style(stage.owner == :human)}
-                          >
-                            Human
-                          </button>
-                          <button
-                            type="button"
-                            id={"stage-#{stage.id}-owner-ai"}
-                            phx-click="set_owner"
-                            phx-value-stage-id={stage.id}
-                            phx-value-owner="ai"
-                            style={segment_style(stage.owner == :ai)}
-                          >
-                            AI
-                          </button>
-                        </div>
-                      </div>
                       <div style="display:flex;align-items:center;gap:9px;">
                         <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
                           WIP
@@ -393,43 +373,6 @@ defmodule RelayWeb.BoardSettingsLive do
                         for a human to approve. Rejected work returns to this stage's
                         In progress lane.
                       </span>
-                    </div>
-                    <%!-- MMF 13 — APPROVAL GATE + SEND REJECTS TO, in the card's mono-label row
-                         idiom (the mockup ships no literal gate controls). A nil target means
-                         "Rejected work returns to this stage's In progress lane". --%>
-                    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                      <div style="display:flex;align-items:center;gap:10px;">
-                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
-                          APPROVAL GATE
-                        </span>
-                        <input
-                          id={"stage-#{stage.id}-gate-toggle"}
-                          type="checkbox"
-                          class="toggle toggle-sm"
-                          checked={stage.approval_gate}
-                          phx-click="toggle_gate"
-                          phx-value-stage-id={stage.id}
-                        />
-                      </div>
-                      <form
-                        :if={stage.approval_gate}
-                        id={"stage-#{stage.id}-reject-form"}
-                        phx-change="set_reject_target"
-                        style="display:flex;align-items:center;gap:10px;"
-                      >
-                        <input type="hidden" name="stage_id" value={stage.id} />
-                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
-                          SEND REJECTS TO
-                        </span>
-                        <.input
-                          type="select"
-                          id={"stage-#{stage.id}-reject-target"}
-                          name="reject_to_stage_id"
-                          value={stage.reject_to_stage_id}
-                          options={reject_options(stage, @stages)}
-                          class="select select-sm w-auto"
-                        />
-                      </form>
                     </div>
                   </div>
                 </div>
@@ -590,8 +533,8 @@ defmodule RelayWeb.BoardSettingsLive do
   end
 
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
-        save_general edit_stage save_stage add_stage delete_stage toggle_gate set_owner
-        toggle_wip bump_wip reorder_stage set_reject_target toggle_lane
+        save_general edit_stage save_stage add_stage delete_stage
+        toggle_wip bump_wip reorder_stage toggle_lane
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -673,11 +616,6 @@ defmodule RelayWeb.BoardSettingsLive do
     end
   end
 
-  def handle_event("set_owner", %{"stage-id" => stage_id, "owner" => owner}, socket) when owner in ["human", "ai"] do
-    {:ok, _stage} = Boards.update_stage(find_stage(socket, stage_id), %{owner: owner_atom(owner)})
-    {:noreply, refresh_stages(socket)}
-  end
-
   # MMF 11 — the mockup's onToggleLimit (line ~1102): enabling defaults the
   # limit to 3, disabling clears it (nil = no limit, chip hidden, enforcement off).
   def handle_event("toggle_wip", %{"stage-id" => stage_id}, socket) do
@@ -719,26 +657,6 @@ defmodule RelayWeb.BoardSettingsLive do
     end
   end
 
-  # MMF 13 — toggling the gate off also clears its reject target, so a
-  # re-enabled gate starts back at the default ("This stage").
-  def handle_event("toggle_gate", %{"stage-id" => stage_id}, socket) do
-    stage = find_stage(socket, stage_id)
-
-    attrs =
-      if stage.approval_gate,
-        do: %{approval_gate: false, reject_to_stage_id: nil},
-        else: %{approval_gate: true}
-
-    {:ok, _stage} = Boards.update_stage(stage, attrs)
-    {:noreply, refresh_stages(socket)}
-  end
-
-  def handle_event("set_reject_target", %{"stage_id" => stage_id, "reject_to_stage_id" => target}, socket) do
-    stage = find_stage(socket, stage_id)
-    {:ok, _stage} = Boards.update_stage(stage, %{reject_to_stage_id: parse_reject_target(target)})
-    {:noreply, refresh_stages(socket)}
-  end
-
   defp section(%{"section" => "general"}), do: :general
   defp section(%{"section" => "keys"}), do: :keys
   defp section(_params), do: :stages
@@ -748,7 +666,7 @@ defmodule RelayWeb.BoardSettingsLive do
   # emptied category keeps its "+ Add stage" button.
   defp refresh_stages(socket) do
     board = socket.assigns.board
-    mains = board |> Boards.list_stages() |> Enum.filter(&(&1.lane == :main))
+    mains = board |> Boards.list_stages() |> Enum.filter(&is_nil(&1.parent_id))
 
     groups =
       Enum.map(@categories, fn category ->
@@ -769,19 +687,6 @@ defmodule RelayWeb.BoardSettingsLive do
 
   defp lane_atom("review"), do: :review
   defp lane_atom("done"), do: :done
-
-  # "" is the select's "This stage" default — reject_to_stage_id nil.
-  defp parse_reject_target(""), do: nil
-  defp parse_reject_target(id), do: String.to_integer(id)
-
-  # "This stage" (nil target) plus every OTHER main stage on the board.
-  # `stages` is the mains-only list refresh_stages/1 assigns.
-  defp reject_options(stage, stages) do
-    [{"This stage", ""} | for(s <- stages, s.id != stage.id, do: {s.name, s.id})]
-  end
-
-  defp owner_atom("human"), do: :human
-  defp owner_atom("ai"), do: :ai
 
   defp direction_atom("up"), do: :up
   defp direction_atom("down"), do: :down
@@ -818,8 +723,8 @@ defmodule RelayWeb.BoardSettingsLive do
   defp lane_map(board) do
     board
     |> Boards.list_stages()
-    |> Enum.filter(&(&1.lane != :main))
-    |> Enum.group_by(& &1.parent_id, & &1.lane)
+    |> Enum.filter(&(not is_nil(&1.parent_id)))
+    |> Enum.group_by(& &1.parent_id, & &1.type)
     |> Map.new(fn {parent_id, lanes} -> {parent_id, MapSet.new(lanes)} end)
   end
 
@@ -838,18 +743,6 @@ defmodule RelayWeb.BoardSettingsLive do
       "background:transparent;color:oklch(0.44 0.02 255);"
   end
 
-  # The mockup's segActive / segIdle (lines ~1084-1085).
-  defp segment_style(true) do
-    "font-size:12px;font-weight:600;padding:6px 13px;border-radius:6px;" <>
-      "background:oklch(1 0 0);color:oklch(0.30 0.02 255);border:none;" <>
-      "box-shadow:0 1px 2px oklch(0.5 0.03 255 / 0.12);white-space:nowrap;"
-  end
-
-  defp segment_style(false) do
-    "font-size:12px;font-weight:600;padding:6px 13px;border-radius:6px;" <>
-      "background:transparent;color:oklch(0.52 0.02 255);border:none;white-space:nowrap;"
-  end
-
   # The mockup's limitToggleStyle (line ~1092): blue-tinted when On.
   defp wip_toggle_style(true) do
     "font-size:12px;font-weight:600;padding:5px 12px;border-radius:7px;" <>
@@ -864,6 +757,12 @@ defmodule RelayWeb.BoardSettingsLive do
   # Human = blue, AI = violet (theme tokens in app.css).
   defp owner_color(:human), do: "var(--color-primary)"
   defp owner_color(:ai), do: "var(--color-secondary)"
+
+  # The owner swatch color: derived from ai_enabled (RLY-46 — the type/ai_enabled
+  # model replaces the owner column; a proper type dropdown + AI toggle is a
+  # follow-up task).
+  defp stage_owner(%Schemas.Stage{ai_enabled: true}), do: :ai
+  defp stage_owner(%Schemas.Stage{}), do: :human
 
   defp category_band_label(:unstarted), do: "UNSTARTED"
   defp category_band_label(:planning), do: "PLANNING"

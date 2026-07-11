@@ -362,9 +362,13 @@ defmodule Relay.Cards do
       Repo.transaction(fn ->
         moved = preload_owners(place_at(card, target_stage, index))
 
-        if moved.stage_id != previous_stage_id do
-          emit_stage_changed(moved, previous_stage_id, target_stage, actor)
-        end
+        moved =
+          if moved.stage_id == previous_stage_id do
+            moved
+          else
+            emit_stage_changed(moved, previous_stage_id, target_stage, actor)
+            snap_status(moved, target_stage, actor)
+          end
 
         maybe_clear_rejection(moved)
       end)
@@ -379,48 +383,77 @@ defmodule Relay.Cards do
     end
   end
 
+  # ADR 0003 snap: keep the card's status if it's valid for the destination type, else set the
+  # type's default. Only ever called on a cross-stage move.
+  defp snap_status(%Card{} = card, %Stage{} = target, actor) do
+    if Stage.valid_status?(card.status, target.type) do
+      card
+    else
+      {:ok, updated} = set_status(card, %{status: Stage.default_status(target.type)}, actor)
+      updated
+    end
+  end
+
   @doc """
-  Approves the card past its approval gate (MMF 13). Allowed when the
-  card's stage — or its parent, for a card sitting in a sub-lane — has
-  `approval_gate` set; otherwise returns `{:error, :not_gated}`. Moves
-  the card to the bottom of the next main stage by position (sub-lane
-  children are never "next"; from a sub-lane, next = the first main
-  stage after the parent), arriving `:working` when that stage is meant
-  for AI and `:queued` when meant for a human. At the board's last main
-  stage there is no move — the card's status becomes `:done` in place.
-  Logs an `:approved` activity entry (from/to stage display names in
-  meta) attributed to `actor`, and reuses `move_card`/`set_status`, so
-  the usual `{:card_moved}`/`{:card_upserted}`/`{:timeline_appended}`
-  events fire. Reused verbatim by the API (MMF 09) and the drawer
-  (MMF 15).
+  Re-snaps every card currently in `stage` to a status valid for the stage's `type` (ADR 0003):
+  a card whose status is already valid is left alone; otherwise it takes the type's default via
+  `set_status/2` (broadcasting the change). Called after a stage's type changes in settings.
+  """
+  def snap_cards_in(%Stage{} = stage) do
+    Card
+    |> where([c], c.stage_id == ^stage.id and is_nil(c.archived_at))
+    |> Repo.all()
+    |> preload_owners()
+    |> Enum.each(fn card ->
+      if !Stage.valid_status?(card.status, stage.type) do
+        {:ok, _} = set_status(card, %{status: Stage.default_status(stage.type)}, :agent)
+      end
+    end)
+  end
+
+  @doc """
+  Approves the card past its review-position stage (ADR 0003). Allowed when the card's
+  current stage is `:review`-type; otherwise returns `{:error, :not_in_review}`. Moves
+  the card to the bottom of the next main stage by position (sub-lane children are never
+  "next"; from a sub-lane, next = the first main stage after the parent), arriving with
+  the destination type's default status via the `move_card/4` snap. At the board's last
+  main stage there is no move — the card's status becomes `:done` in place. Logs an
+  `:approved` activity entry (from/to stage display names in meta) attributed to `actor`,
+  and reuses `move_card`/`set_status`, so the usual
+  `{:card_moved}`/`{:card_upserted}`/`{:timeline_appended}` events fire. Reused verbatim
+  by the API (MMF 09) and the drawer (MMF 15).
   """
   def approve(%Card{} = card, actor \\ :agent) do
-    case fetch_gate(card) do
-      {:ok, from_stage, gate} ->
-        case Boards.next_main_stage(gate) do
-          nil -> approve_in_place(card, from_stage, actor)
-          %Stage{} = target -> route(card, from_stage, target, :approved, nil, actor)
-        end
+    stage = current_stage(card)
 
-      {:error, :not_gated} ->
-        {:error, :not_gated}
+    if stage.type == :review do
+      case Boards.next_main_stage(current_main_stage(card)) do
+        nil -> approve_in_place(card, stage, actor)
+        %Stage{} = target -> route(card, stage, target, :approved, nil, actor)
+      end
+    else
+      {:error, :not_in_review}
     end
   end
 
   @doc """
-  Rejects the card at its approval gate (MMF 13) — a thin wrapper over
-  `send_back/4`. Resolves the gate under the same rule as `approve/2`
-  (`{:error, :not_gated}` otherwise), picks the target = `opts[:to]` when given
-  else the gate's configured `reject_to` (or the gate's own main lane when
-  unset), then sends the card back. `opts[:to]` may be a `%Stage{}` or a stage
-  id and must satisfy `send_back`'s backward/main-lane rule.
+  Rejects the card from its review-type stage — a thin wrapper over `send_back/4`.
+  `{:error, :not_in_review}` when the card isn't in a review-type stage. Target = `opts[:to]`
+  (a `%Stage{}` or stage id) when given, else the previous main stage; `{:error, :invalid_target}`
+  when the review stage has no earlier main stage. Note is required (`:missing_note`).
   """
   def reject(%Card{} = card, note, actor \\ :agent, opts \\ []) when is_binary(note) do
-    case fetch_gate(card) do
-      {:ok, _from_stage, gate} -> send_back(card, gate_reject_target(gate, opts), note, actor)
-      {:error, :not_gated} -> {:error, :not_gated}
+    stage = current_stage(card)
+
+    if stage.type == :review do
+      reject_to(card, Keyword.get(opts, :to) || Boards.previous_main_stage(current_main_stage(card)), note, actor)
+    else
+      {:error, :not_in_review}
     end
   end
+
+  defp reject_to(_card, nil, _note, _actor), do: {:error, :invalid_target}
+  defp reject_to(card, target, note, actor), do: send_back(card, target, note, actor)
 
   @doc """
   The universal send-back primitive (RLY-30): bounce `card` **backward** to a
@@ -458,10 +491,9 @@ defmodule Relay.Cards do
 
       true ->
         with {:ok, moved} <- move_card(card, target, @append_index, actor),
-             {:ok, updated} <- set_status(moved, %{status: arrival_status(target)}, actor),
-             :ok <- attach_note(updated, note, actor) do
-          log_gate(updated, :rejected, actor, from_stage, target, note)
-          {:ok, put_rejection(updated, from_stage, target, note, actor)}
+             :ok <- attach_note(moved, note, actor) do
+          log_gate(moved, :rejected, actor, from_stage, target, note)
+          {:ok, put_rejection(moved, from_stage, target, note, actor)}
         end
     end
   end
@@ -514,9 +546,11 @@ defmodule Relay.Cards do
     end
   end
 
-  # Where an answered card resumes: the stage's meant-for owner decides
+  # Where an answered card resumes: the stage type's default status decides
   # (same rule as approve/reject arrivals).
-  defp resume_status(%Card{stage_id: stage_id}), do: arrival_status(Repo.get!(Stage, stage_id))
+  defp resume_status(%Card{stage_id: stage_id}) do
+    Stage.default_status(Repo.get!(Stage, stage_id).type)
+  end
 
   defp parse_ref_number(%Board{key: key}, ref) do
     prefix = key <> "-"
@@ -530,41 +564,22 @@ defmodule Relay.Cards do
     end
   end
 
-  # The gate governing the card: its own stage when main-lane, else the
-  # sub-lane's parent. {:error, :not_gated} when that stage isn't a gate.
-  defp fetch_gate(%Card{stage_id: stage_id}) do
-    stage = Repo.get!(Stage, stage_id)
-    gate = if stage.lane == :main, do: stage, else: Repo.get!(Stage, stage.parent_id)
-
-    if gate.approval_gate, do: {:ok, stage, gate}, else: {:error, :not_gated}
-  end
-
-  defp reject_target(%Stage{reject_to_stage_id: nil} = gate), do: gate
-  defp reject_target(%Stage{reject_to_stage_id: target_id}), do: Repo.get!(Stage, target_id)
-
-  # The gate reject target: an explicit :to (Stage or id) wins, else the gate's
-  # configured reject_to (or the gate itself when unset). send_back/4 validates it.
-  defp gate_reject_target(gate, opts) do
-    case Keyword.get(opts, :to) do
-      nil -> reject_target(gate)
-      %Stage{} = target -> target
-      id when is_integer(id) -> id
-    end
-  end
+  # A card is "in review position" iff its current stage is review-type (main or sub-lane).
+  defp current_stage(%Card{stage_id: stage_id}), do: Repo.get!(Stage, stage_id)
 
   # The main-lane stage governing the card: its own stage when main-lane, else
   # its sub-lane's parent. Send-back targets are compared against this stage's
   # position.
   defp current_main_stage(%Card{stage_id: stage_id}) do
     stage = Repo.get!(Stage, stage_id)
-    if stage.lane == :main, do: stage, else: Repo.get!(Stage, stage.parent_id)
+    if is_nil(stage.parent_id), do: stage, else: Repo.get!(Stage, stage.parent_id)
   end
 
   # A valid send-back target is a main-lane stage on the card's board positioned
   # at or before the card's current main stage (never forward). The gate's
   # nil-target reject lands the card in its own stage, so "at" (==) is allowed;
   # the universal drawer control only ever offers strictly-earlier stages.
-  defp send_back_target?(%Card{board_id: bid}, %Stage{} = from, %Stage{lane: :main, board_id: bid} = target),
+  defp send_back_target?(%Card{board_id: bid}, %Stage{} = from, %Stage{parent_id: nil, board_id: bid} = target),
     do: target.position <= from.position
 
   defp send_back_target?(_card, _from, _target), do: false
@@ -640,17 +655,14 @@ defmodule Relay.Cards do
     user.name || user.email
   end
 
-  # Shared approve/reject transition: move to the bottom of `target`, set
-  # the arrival status, attach the note (rejects only), then log the
-  # :approved/:rejected entry. A nil-target reject resolves to the gate
-  # itself, so a main-lane card "moves" within its own stage (no :moved
-  # entry — move_card only logs cross-stage moves).
+  # Shared approve/reject transition: move to the bottom of `target` (the snap in
+  # move_card/4 sets the arrival status), attach the note (rejects only), then log the
+  # :approved/:rejected entry.
   defp route(%Card{} = card, from_stage, %Stage{} = target, type, note, actor) do
     with {:ok, moved} <- move_card(card, target, @append_index, actor),
-         {:ok, updated} <- set_status(moved, %{status: arrival_status(target)}, actor),
-         :ok <- attach_note(updated, note, actor) do
-      log_gate(updated, type, actor, from_stage, target, note)
-      {:ok, clear_rejection(updated)}
+         :ok <- attach_note(moved, note, actor) do
+      log_gate(moved, type, actor, from_stage, target, note)
+      {:ok, clear_rejection(moved)}
     end
   end
 
@@ -665,9 +677,6 @@ defmodule Relay.Cards do
         {:error, changeset}
     end
   end
-
-  defp arrival_status(%Stage{owner: :ai}), do: :working
-  defp arrival_status(%Stage{owner: :human}), do: :queued
 
   defp attach_note(_card, nil, _actor), do: :ok
 

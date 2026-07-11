@@ -16,14 +16,16 @@ defmodule Relay.Boards do
   alias Schemas.Stage
   alias Schemas.User
 
+  # {name, category, type, ai_enabled}
   @seed_stages [
-    {"Backlog", :human, :unstarted},
-    {"Spec", :human, :unstarted},
-    {"Plan", :ai, :planning},
-    {"Code", :ai, :in_progress},
-    {"Review", :human, :in_progress},
-    {"Deploy", :ai, :in_progress},
-    {"Done", :human, :complete}
+    {"Backlog", :unstarted, :queue, false},
+    {"Next up", :unstarted, :queue, false},
+    {"Spec", :planning, :planning, true},
+    {"Plan", :planning, :planning, true},
+    {"Code", :in_progress, :work, true},
+    {"Review", :in_progress, :review, false},
+    {"Deploy", :in_progress, :work, true},
+    {"Done", :complete, :done, false}
   ]
 
   @category_order [:unstarted, :planning, :in_progress, :complete]
@@ -53,7 +55,7 @@ defmodule Relay.Boards do
   @doc """
   Returns the user's board with `stages` preloaded in `position` order,
   creating the board (unique slug derived from the user) and seeding the
-  default 7-stage pipeline on first call. Idempotent per user. Prefers the
+  default 8-stage pipeline on first call. Idempotent per user. Prefers the
   user's first active (non-archived) board.
   """
   def get_or_create_default_board(%User{} = user) do
@@ -100,7 +102,7 @@ defmodule Relay.Boards do
   @doc """
   Creates a board for `user`: validates `name`, derives a unique `slug` and a
   `key` from the name, sets `owner_id` programmatically, and seeds the
-  default 7-stage pipeline — all in one transaction. External callers pass
+  default 8-stage pipeline — all in one transaction. External callers pass
   only a name (`%{name: ...}` / `%{"name" => ...}`). Returns the board with
   stages preloaded.
   """
@@ -154,22 +156,22 @@ defmodule Relay.Boards do
 
   @doc """
   Enables a `:review` or `:done` sub-lane on `parent` (a main stage),
-  creating the child stage with the predictable owner (review → :human,
-  done → the parent's owner). Idempotent — returns the existing child if
-  the lane is already enabled.
+  creating the child stage with `type:` review/done and `ai_enabled: false`.
+  Idempotent.
   """
-  def enable_lane(%Stage{lane: :main} = parent, lane) when lane in [:review, :done] do
+  def enable_lane(%Stage{parent_id: nil} = parent, lane) when lane in [:review, :done] do
     case get_sublane(parent, lane) do
       %Stage{} = existing ->
         {:ok, existing}
 
       nil ->
-        %Stage{board_id: parent.board_id, parent_id: parent.id, lane: lane}
+        %Stage{board_id: parent.board_id, parent_id: parent.id}
         |> Stage.changeset(%{
           name: "#{parent.name}:#{lane_word(lane)}",
           position: next_position(parent.board_id),
           category: parent.category,
-          owner: lane_owner(lane, parent)
+          type: lane,
+          ai_enabled: false
         })
         |> Repo.insert()
         |> broadcast_stages_changed(parent.board_id)
@@ -201,23 +203,17 @@ defmodule Relay.Boards do
     Repo.all(
       from s in Stage,
         where: s.parent_id == ^parent.id,
-        order_by: fragment("array_position(ARRAY['review','done'], ?)", s.lane)
+        order_by: fragment("array_position(ARRAY['review','done'], ?)", s.type)
     )
   end
 
   @doc """
-  Updates a main stage's editable configuration (name, description, owner,
-  WIP limit — and the MMF 13 gate fields `approval_gate` /
-  `reject_to_stage_id`). The reject target must be a main-lane stage on
-  the same board (nil means "this stage"). Broadcasts
-  `{:stages_changed, board_id}` on success. `owner` is the stage's
-  *meant-for* designation only — this never touches any card's
-  `card_owners` rows.
+  Updates a stage's editable configuration (name, description, type, ai_enabled, WIP limit).
+  `ai_enabled` is normalized by the changeset. Broadcasts `{:stages_changed, board_id}`.
   """
   def update_stage(%Stage{} = stage, attrs) do
     stage
     |> Stage.changeset(attrs)
-    |> validate_reject_target(stage.board_id)
     |> Repo.update()
     |> broadcast_stages_changed(stage.board_id)
   end
@@ -227,11 +223,22 @@ defmodule Relay.Boards do
   when `stage` is the board's last main stage. Sub-lane children are
   never "next" — MMF 13's approve routing advances through this.
   """
-  def next_main_stage(%Stage{lane: :main} = stage) do
+  def next_main_stage(%Stage{parent_id: nil} = stage) do
     stage.board_id
     |> main_stages()
     |> Enum.drop_while(&(&1.id != stage.id))
     |> Enum.at(1)
+  end
+
+  @doc """
+  The nearest main stage strictly before `stage` in board order, or nil when `stage` is the
+  board's first main stage. The default reject target for a card in a review-type stage.
+  """
+  def previous_main_stage(%Stage{parent_id: nil} = stage) do
+    stage.board_id
+    |> main_stages()
+    |> Enum.take_while(&(&1.id != stage.id))
+    |> List.last()
   end
 
   @doc """
@@ -245,7 +252,7 @@ defmodule Relay.Boards do
   or relative order changes. Already in the first category moving up (or
   the last moving down) it is a no-op: `{:ok, stage}`, no broadcast.
   """
-  def reorder_stage(%Stage{lane: :main} = stage, direction) when direction in [:up, :down] do
+  def reorder_stage(%Stage{parent_id: nil} = stage, direction) when direction in [:up, :down] do
     mains = main_stages(stage.board_id)
     index = Enum.find_index(mains, &(&1.id == stage.id))
     stage = Enum.at(mains, index)
@@ -263,7 +270,7 @@ defmodule Relay.Boards do
   end
 
   @doc """
-  Appends a new main stage (name "New stage", owner `:human`) at the end of
+  Appends a new main stage (name "New stage", the category's default type) at the end of
   `category` — an empty category appends right after every earlier
   category's stages. Broadcasts on success.
   """
@@ -274,7 +281,13 @@ defmodule Relay.Boards do
         shift_positions_from(board_id, position)
 
         %Stage{board_id: board_id}
-        |> Stage.changeset(%{name: "New stage", position: position, category: category, owner: :human})
+        |> Stage.changeset(%{
+          name: "New stage",
+          position: position,
+          category: category,
+          type: Stage.default_type(category),
+          ai_enabled: false
+        })
         |> Repo.insert!()
       end)
 
@@ -288,7 +301,7 @@ defmodule Relay.Boards do
   cards, `{:error, :last_stage}` for the board's only main stage. Sub-lane
   children are never directly deletable (only via `disable_lane/2`).
   """
-  def delete_stage(%Stage{lane: :main} = stage) do
+  def delete_stage(%Stage{parent_id: nil} = stage) do
     cond do
       length(main_stages(stage.board_id)) == 1 ->
         {:error, :last_stage}
@@ -311,38 +324,21 @@ defmodule Relay.Boards do
   stage name (e.g. the `:moved` activity phrase) through this instead of
   the raw `Stage.name`.
   """
-  def stage_display_name(%Stage{lane: :main} = stage), do: stage.name
+  def stage_display_name(%Stage{parent_id: nil} = stage), do: stage.name
 
-  def stage_display_name(%Stage{parent_id: parent_id, lane: lane}) do
+  def stage_display_name(%Stage{parent_id: parent_id, type: type}) do
     parent = Repo.get!(Stage, parent_id)
-    "#{parent.name} · #{lane_word(lane)}"
+    "#{parent.name} · #{lane_word(type)}"
   end
 
   defp get_sublane(%Stage{} = parent, lane) do
-    Repo.get_by(Stage, parent_id: parent.id, lane: lane)
+    Repo.get_by(Stage, parent_id: parent.id, type: lane)
   end
 
   @position_park_offset 1_000_000
 
   defp main_stages(board_id) do
-    Repo.all(from s in Stage, where: s.board_id == ^board_id and s.lane == :main, order_by: s.position)
-  end
-
-  # MMF 13: a gate may only send rejects to a main-lane stage on its own
-  # board. Validated here (not in the schema) because only the context
-  # knows the board.
-  defp validate_reject_target(changeset, board_id) do
-    case Changeset.get_change(changeset, :reject_to_stage_id) do
-      nil ->
-        changeset
-
-      target_id ->
-        if Repo.exists?(from s in Stage, where: s.id == ^target_id and s.board_id == ^board_id and s.lane == :main) do
-          changeset
-        else
-          Changeset.add_error(changeset, :reject_to_stage_id, "must be a main stage on the same board")
-        end
-    end
+    Repo.all(from s in Stage, where: s.board_id == ^board_id and is_nil(s.parent_id), order_by: s.position)
   end
 
   defp fetch_neighbor(_list, index) when index < 0, do: nil
@@ -446,9 +442,6 @@ defmodule Relay.Boards do
 
   defp broadcast_board_updated({:error, _changeset} = result, _board_id), do: result
 
-  defp lane_owner(:review, _parent), do: :human
-  defp lane_owner(:done, %Stage{owner: owner}), do: owner
-
   defp lane_word(:review), do: "Review"
   defp lane_word(:done), do: "Done"
 
@@ -470,9 +463,9 @@ defmodule Relay.Boards do
   defp seed_stages!(board) do
     @seed_stages
     |> Enum.with_index(1)
-    |> Enum.each(fn {{name, owner, category}, position} ->
+    |> Enum.each(fn {{name, category, type, ai_enabled}, position} ->
       %Stage{board_id: board.id}
-      |> Stage.changeset(%{name: name, position: position, category: category, owner: owner})
+      |> Stage.changeset(%{name: name, position: position, category: category, type: type, ai_enabled: ai_enabled})
       |> Repo.insert!()
     end)
   end

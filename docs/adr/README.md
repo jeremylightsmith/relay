@@ -11,6 +11,7 @@ that supersedes the old one (update the old one's status to `Superseded by NNNN`
 | --- | --- | --- |
 | [0001](0001-client-architecture.md) | Client architecture: LiveView-first with a thin native wrapper | Accepted |
 | [0002](0002-module-boundaries-and-schemas-peer.md) | Module boundaries (`boundary`) + a `Schemas` peer | Accepted |
+| [0003](0003-card-state-stage-type-validity.md) | Card state × stage type validity | Accepted |
 
 ## Format
 

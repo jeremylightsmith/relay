@@ -129,7 +129,7 @@ defmodule RelayWeb.BoardLive do
                 :for={stage <- stages}
                 id={"stage-col-#{stage.position}"}
                 name={stage.name}
-                owner={stage.owner}
+                owner={stage_owner(stage)}
                 category={category}
                 stage_id={stage.id}
                 collapsed={stage_collapsed?(stage, @stage_counts, @sublanes_by_parent, @force_open)}
@@ -147,13 +147,13 @@ defmodule RelayWeb.BoardLive do
                   for sub <- Map.get(@sublanes_by_parent, stage.id, []) do
                     %{
                       id: sub.id,
-                      name: lane_label(sub.lane),
-                      lane: sub.lane,
-                      owner: sub.owner,
+                      name: lane_label(sub.type),
+                      lane: sub.type,
+                      owner: stage_owner(sub),
                       count: Map.fetch!(@stage_counts, sub.id),
                       cards: Map.fetch!(@streams, stream_name(sub.id)),
                       collapsed:
-                        lane_collapsed?(sub.id, sub.lane, @stage_counts, @force_open, @force_closed)
+                        lane_collapsed?(sub.id, sub.type, @stage_counts, @force_open, @force_closed)
                     }
                   end
                 }
@@ -168,7 +168,7 @@ defmodule RelayWeb.BoardLive do
         ref={Cards.ref(@board, @selected_card)}
         card={@selected_card}
         stage_name={drawer_stage_name(@selected_stage, @board.stages)}
-        stage_owner={@selected_stage.owner}
+        stage_owner={stage_owner(@selected_stage)}
         stages={move_targets(@board, @selected_card)}
         active_owner={Cards.active_owner_type(@selected_card)}
         close_patch={~p"/board/#{@board.slug}"}
@@ -441,7 +441,9 @@ defmodule RelayWeb.BoardLive do
   # one clears the other, so a lane is never forced both ways at once.
   def handle_event("toggle_collapse", %{"stage-id" => stage_id}, socket) do
     case resolve_stage(socket, stage_id) do
-      %Stage{id: id, lane: lane} ->
+      %Stage{id: id, parent_id: parent_id, type: type} ->
+        lane = if is_nil(parent_id), do: :main, else: type
+
         collapsed? =
           lane_collapsed?(id, lane, socket.assigns.stage_counts, socket.assigns.force_open, socket.assigns.force_closed)
 
@@ -824,7 +826,7 @@ defmodule RelayWeb.BoardLive do
   # category order and dropping empty categories (per spec: headers render
   # only for non-empty categories).
   defp group_stages(stages) do
-    groups = stages |> Enum.filter(&(&1.lane == :main)) |> Enum.group_by(& &1.category)
+    groups = stages |> Enum.filter(&is_nil(&1.parent_id)) |> Enum.group_by(& &1.category)
 
     @category_order
     |> Enum.map(&{&1, Map.get(groups, &1, [])})
@@ -834,16 +836,21 @@ defmodule RelayWeb.BoardLive do
   # Children grouped under their parent's id, each list ordered Review→Done.
   defp sublanes_by_parent(stages) do
     stages
-    |> Enum.filter(&(&1.lane != :main))
+    |> Enum.filter(&(not is_nil(&1.parent_id)))
     |> Enum.group_by(& &1.parent_id)
     |> Map.new(fn {parent_id, children} -> {parent_id, Enum.sort_by(children, &lane_order/1)} end)
   end
 
-  defp lane_order(%Stage{lane: :review}), do: 0
-  defp lane_order(%Stage{lane: :done}), do: 1
+  defp lane_order(%Stage{type: :review}), do: 0
+  defp lane_order(%Stage{type: :done}), do: 1
 
   defp lane_label(:review), do: "Review"
   defp lane_label(:done), do: "Done"
+
+  # The owner dot's color: derived from ai_enabled (RLY-46 — the type/ai_enabled model
+  # replaces the owner column; the stage_type_icon redesign lands in its own task).
+  defp stage_owner(%Stage{ai_enabled: true}), do: :ai
+  defp stage_owner(%Stage{}), do: :human
 
   # Streams can't be counted, so lane counts live in their own assign,
   # recomputed from the grouped cards (mount, moves) and bumped on create.
@@ -905,11 +912,11 @@ defmodule RelayWeb.BoardLive do
     |> Enum.map(&%{id: &1.id, name: move_target_name(&1, stages_by_id)})
   end
 
-  defp move_target_name(%Stage{lane: :main} = stage, _stages_by_id), do: stage.name
+  defp move_target_name(%Stage{parent_id: nil} = stage, _stages_by_id), do: stage.name
 
   defp move_target_name(%Stage{parent_id: parent_id} = stage, stages_by_id) do
     parent = Map.fetch!(stages_by_id, parent_id)
-    "#{parent.name} · #{lane_label(stage.lane)}"
+    "#{parent.name} · #{lane_label(stage.type)}"
   end
 
   # The drawer header chip and "Stage" rail label render whatever stage
@@ -1011,20 +1018,21 @@ defmodule RelayWeb.BoardLive do
     )
   end
 
-  # Gate info for the review panel, or nil when the governing stage (the
-  # card's own main-lane stage, or the sub-lane's parent) is not an
-  # approval gate — mirroring Cards.approve/reject's :not_gated guard so
+  # Gate info for the review panel, or nil when the card's current stage isn't
+  # review-type — mirroring Cards.approve/reject's :not_in_review guard (ADR 0003) so
   # Approve/Request-changes only render where the transition can succeed.
   defp review_gate_info(socket, %Card{} = card) do
     stage = find_stage_by_id(socket, card.stage_id)
-    gate = if stage.lane == :main, do: stage, else: find_stage_by_id(socket, stage.parent_id)
 
-    if gate && gate.approval_gate do
+    if stage.type == :review do
+      main = if is_nil(stage.parent_id), do: stage, else: find_stage_by_id(socket, stage.parent_id)
+      default_target = Boards.previous_main_stage(main) || main
+
       %{
-        approve_label: approve_label(gate),
-        reject_to_name: reject_to_name(socket, gate),
+        approve_label: approve_label(main),
+        reject_to_name: default_target.name,
         targets: gate_reject_targets(socket, card),
-        default_to: gate.reject_to_stage_id || gate.id
+        default_to: default_target.id
       }
     end
   end
@@ -1038,35 +1046,30 @@ defmodule RelayWeb.BoardLive do
     end
   end
 
-  # Mirrors Cards.reject/3 routing: the gate's configured target, or the
-  # gate's own main lane when unset.
-  defp reject_to_name(_socket, %Stage{reject_to_stage_id: nil} = gate), do: gate.name
-  defp reject_to_name(socket, %Stage{reject_to_stage_id: target_id}), do: find_stage_by_id(socket, target_id).name
-
   defp empty_reject_form, do: to_form(%{"note" => ""}, as: :reject)
 
   defp empty_send_back_form, do: to_form(%{"to" => "", "note" => ""}, as: :send_back)
 
-  # Universal send-back targets: main-lane stages strictly before the card's
+  # Universal send-back targets: main stages strictly before the card's
   # current main stage, in position order. Only called (from the template)
   # while a card is selected, so no card is not a case to handle here.
   defp send_back_targets(board, %Card{} = card) do
     pos = current_main_position(board, card)
 
     board.stages
-    |> Enum.filter(&(&1.lane == :main and &1.position < pos))
+    |> Enum.filter(&(is_nil(&1.parent_id) and &1.position < pos))
     |> Enum.sort_by(& &1.position)
     |> Enum.map(&%{id: &1.id, name: &1.name})
   end
 
-  # Gate reject picker: main-lane stages at or before the current stage
-  # (the gate's nil-target reject lands in the gate itself, so "at" is allowed).
+  # Gate reject picker: main stages at or before the current stage
+  # (the default reject lands in the previous main stage, so "at" is allowed).
   defp gate_reject_targets(socket, %Card{} = card) do
     board = socket.assigns.board
     pos = current_main_position(board, card)
 
     board.stages
-    |> Enum.filter(&(&1.lane == :main and &1.position <= pos))
+    |> Enum.filter(&(is_nil(&1.parent_id) and &1.position <= pos))
     |> Enum.sort_by(& &1.position)
     |> Enum.map(&%{id: &1.id, name: &1.name})
   end
@@ -1074,7 +1077,7 @@ defmodule RelayWeb.BoardLive do
   defp current_main_position(board, %Card{stage_id: stage_id}) do
     by_id = Map.new(board.stages, &{&1.id, &1})
     stage = Map.fetch!(by_id, stage_id)
-    main = if stage.lane == :main, do: stage, else: Map.fetch!(by_id, stage.parent_id)
+    main = if is_nil(stage.parent_id), do: stage, else: Map.fetch!(by_id, stage.parent_id)
     main.position
   end
 
@@ -1150,7 +1153,7 @@ defmodule RelayWeb.BoardLive do
 
   # The main-lane stage a WIP limit is charged against: the stage itself when
   # it's a main lane, else its parent. A move into any sub-lane counts here.
-  defp governing_main_stage(_socket, %Stage{lane: :main} = stage), do: stage
+  defp governing_main_stage(_socket, %Stage{parent_id: nil} = stage), do: stage
   defp governing_main_stage(socket, %Stage{parent_id: parent_id}), do: find_stage_by_id(socket, parent_id)
 
   # The id of the governing main stage for an arbitrary stage id (source of a move).
