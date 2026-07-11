@@ -16,6 +16,20 @@ defmodule RelayWeb.BoardsLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} wide>
+      <:title>
+        <span id="boards-title">Your boards</span>
+      </:title>
+      <:actions>
+        <button
+          type="button"
+          id="top-bar-new-board"
+          phx-click="new_board"
+          class="btn btn-sm border-none font-semibold text-white"
+          style="background:oklch(0.60 0.14 250);"
+        >
+          <span class="text-[15px] leading-none">+</span> New board
+        </button>
+      </:actions>
       <div id="boards-home" class="mx-auto max-w-[1120px] px-7 py-9">
         <div class="flex items-start justify-between gap-5">
           <h1 class="m-0 text-[27px] font-semibold tracking-tight" style="color:oklch(0.24 0.02 255);">

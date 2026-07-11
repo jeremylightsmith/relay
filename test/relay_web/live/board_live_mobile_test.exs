@@ -27,21 +27,16 @@ defmodule RelayWeb.BoardLiveMobileTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      # Left cluster can shrink; the title truncates instead of pushing actions off-screen.
-      assert view |> element("#board-title-cluster") |> render() =~ "min-w-0"
-      assert view |> element("#board-title") |> render() =~ "truncate"
-
-      # The editable board-name <input> (the default, non-read-only path) must itself
-      # ellipsis-truncate: text-overflow on the ancestor <h1> never reaches into a
-      # nested <input>'s own text box, so the truncate class has to sit on the input.
+      # The bar title truncates instead of pushing actions off-screen on narrow screens.
+      assert view |> element("#top-bar-title") |> render() =~ "min-w-0"
+      # The editable board-name <input> itself ellipsis-truncates (truncate must sit on the input).
       assert view |> element("#board-name-input") |> render() =~ "truncate"
 
-      # The three header icon buttons are ≥44px tap targets and stay inline.
-      assert view |> element("#all-boards-link") |> render() =~ "min-h-[44px]"
-      assert view |> element("#all-boards-link") |> render() =~ "min-w-[44px]"
-      assert view |> element("#archived-cards-button") |> render() =~ "min-h-[44px]"
+      # The interactive bar controls are ≥44px tap targets.
       assert view |> element("#board-settings-link") |> render() =~ "min-h-[44px]"
       assert view |> element("#board-settings-link") |> render() =~ "min-w-[44px]"
+      assert view |> element("#user-avatar") |> render() =~ "min-h-[44px]"
+      assert view |> element("#user-avatar") |> render() =~ "min-w-[44px]"
     end
   end
 end
