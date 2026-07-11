@@ -321,7 +321,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
-      refute has_element?(view, "#card-plan")
+      refute has_element?(view, "#card-plan-view")
 
       assert token
              |> api_conn()
@@ -329,8 +329,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
              |> json_response(200)
 
       assert has_element?(view, "#card-drawer-rail #card-branch", "rly-9-live")
-      assert has_element?(view, "details#card-plan #card-plan-body.md", "Step 1: do it")
-      refute has_element?(view, "details#card-plan[open]")
+      assert has_element?(view, "#card-plan-view.md", "Step 1: do it")
     end
   end
 

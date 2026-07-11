@@ -1004,6 +1004,11 @@ defmodule RelayWeb.CoreComponents do
     default: nil,
     doc: "a Phoenix.HTML.Form for card[description]; required when editing_description"
 
+  attr :editing_spec, :boolean, default: false
+  attr :editing_plan, :boolean, default: false
+  attr :spec_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[spec]"
+  attr :plan_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[plan]"
+
   attr :current_user_id, :integer,
     default: nil,
     doc: "the signed-in user's id, for the Add me owner control"
@@ -1377,54 +1382,56 @@ defmodule RelayWeb.CoreComponents do
                 </div>
               </section>
 
-              <%!--
-                Plain <details>/<summary> rather than daisyUI's `collapse` component:
-                Tailwind ships its own `.collapse` utility (`visibility: collapse`, for
-                table rows) under the same class name, and since these blocks are direct
-                children of the `flex flex-col` main column, that utility wins the layer
-                cascade over daisyUI's component and collapses the whole flex item to
-                ~0 height — regardless of the [open] state. Native <details> already gives
-                us a labeled, click-to-expand section for free.
-              --%>
-              <details
-                :if={@card.spec}
-                id={"#{@id}-spec"}
-                class="group rounded-lg border border-base-300 bg-base-200/40"
-              >
-                <summary class="collapse-title flex min-h-0 cursor-pointer list-none items-center gap-1.5 px-3.5 py-3 [&::-webkit-details-marker]:hidden">
-                  <.icon
-                    name="hero-chevron-right"
-                    class="size-3 shrink-0 text-base-content/50 transition-transform group-open:rotate-90"
-                  />
-                  <.section_label>Spec</.section_label>
-                </summary>
-                <div class="border-t border-base-300 px-3.5 pb-3.5 pt-3">
-                  <div id={"#{@id}-spec-view"} class="md text-sm leading-relaxed">
-                    {Relay.Markdown.to_html(@card.spec)}
-                  </div>
+              <section :if={!@archived} id={"#{@id}-spec"} class="space-y-2">
+                <.section_label>Spec</.section_label>
+                <.boxed_field
+                  id={"#{@id}-spec"}
+                  value={@card.spec}
+                  editing={@editing_spec}
+                  form={@spec_form}
+                  field={:spec}
+                  edit_event="edit_spec"
+                  save_event="save_card_spec"
+                  cancel_event="cancel_spec"
+                  placeholder="Add a spec…"
+                  markdown
+                  multiline
+                  rows="14"
+                />
+              </section>
+              <section :if={@archived && @card.spec} id={"#{@id}-spec-archived"} class="space-y-2">
+                <.section_label>Spec</.section_label>
+                <div id={"#{@id}-spec-view"} class="md text-sm leading-relaxed">
+                  {Relay.Markdown.to_html(@card.spec)}
                 </div>
-              </details>
-              <details
-                :if={@card.plan}
-                id="card-plan"
-                class="group rounded-lg border border-base-300 bg-base-200/40"
-              >
-                <summary class="collapse-title flex min-h-0 cursor-pointer list-none items-center gap-1.5 px-3.5 py-3 [&::-webkit-details-marker]:hidden">
-                  <.icon
-                    name="hero-chevron-right"
-                    class="size-3 shrink-0 text-base-content/50 transition-transform group-open:rotate-90"
-                  />
-                  <.section_label>Plan</.section_label>
-                </summary>
-                <div class="border-t border-base-300 px-3.5 pb-3.5 pt-3">
-                  <div
-                    id="card-plan-body"
-                    class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
-                  >
-                    {Relay.Markdown.to_html(@card.plan)}
-                  </div>
+              </section>
+
+              <section :if={!@archived} id="card-plan" class="space-y-2">
+                <.section_label>Plan</.section_label>
+                <.boxed_field
+                  id="card-plan"
+                  value={@card.plan}
+                  editing={@editing_plan}
+                  form={@plan_form}
+                  field={:plan}
+                  edit_event="edit_plan"
+                  save_event="save_card_plan"
+                  cancel_event="cancel_plan"
+                  placeholder="Add a plan…"
+                  markdown
+                  multiline
+                  rows="16"
+                />
+              </section>
+              <section :if={@archived && @card.plan} id="card-plan-archived" class="space-y-2">
+                <.section_label>Plan</.section_label>
+                <div
+                  id="card-plan-body"
+                  class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
+                >
+                  {Relay.Markdown.to_html(@card.plan)}
                 </div>
-              </details>
+              </section>
 
               <section :if={@card.ai_result} id="ai-result" class="space-y-2">
                 <.section_label accent="text-secondary">AI Result</.section_label>
