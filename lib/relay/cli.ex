@@ -33,17 +33,17 @@ defmodule Relay.CLI do
 
   @doc """
   The next card the agent should work: an AI-owned card first, otherwise an
-  unclaimed card sitting in an AI-owned stage (not done).
+  unclaimed card sitting in an AI-enabled stage (not done).
   """
   def pull(opts) do
     with {:ok, board} <- request(:get, "/api/board") do
-      stage_owner = Map.new(board["stages"], &{&1["id"], &1["owner"]})
+      ai_enabled? = Map.new(board["stages"], &{&1["id"], &1["ai_enabled"] == true})
       cards = board["cards"]
 
       pick =
         Enum.find(cards, &(&1["active_owner"] == "ai")) ||
           Enum.find(cards, fn c ->
-            c["active_owner"] == nil and stage_owner[c["stage_id"]] == "ai" and c["status"] != "done"
+            c["active_owner"] == nil and ai_enabled?[c["stage_id"]] and c["status"] != "done"
           end)
 
       case pick do
@@ -146,7 +146,7 @@ defmodule Relay.CLI do
       Enum.map_join(board["stages"], "\n\n", fn stage ->
         cards = Map.get(by_stage, stage["id"], [])
         cards_text = if cards == [], do: "  (empty)", else: Enum.map_join(cards, "\n", &("  " <> format_card_line(&1)))
-        "#{stage["name"]} (#{stage["owner"]})\n#{cards_text}"
+        "#{stage["name"]} (#{stage["type"]})\n#{cards_text}"
       end)
 
     "#{header}\n\n#{stage_lines}"

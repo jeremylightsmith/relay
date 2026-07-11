@@ -244,7 +244,7 @@ def cmd_board(args):
         by_stage.setdefault(c["stage_id"], []).append(c)
     print(f'{b["board"]["name"]} ({b["board"]["key"]})\n')
     for s in b["stages"]:
-        print(f'{s["name"]} ({s["owner"]})')
+        print(f'{s["name"]} ({s["type"]})')
         for c in by_stage.get(s["id"], []) or []:
             print("  " + card_line(c))
         if not by_stage.get(s["id"]):
@@ -291,9 +291,9 @@ def cmd_comment(args):
 def cmd_layout(args):
     """Print a relay_config.json pipeline skeleton derived from the live board."""
     b = get_board()
-    ai = [s for s in b["stages"] if s["owner"] == "ai"]
+    ai = [s for s in b["stages"] if s.get("ai_enabled")]
     print(json.dumps({"poll_interval": 45, "pipeline": [
-        {"stage": s["name"], "from": "<column left of it>", "done": "<its :Review or :Done>",
+        {"stage": s["name"], "from": "<column left of it>", "done": "<its Review/Done sub-stage>",
          "action": [{"claude": "<what to do for {ref}>"}]} for s in ai
     ]}, indent=2))
 

@@ -202,8 +202,7 @@ defmodule RelayWeb.Api.CardController do
   defp reject_note(%{"note" => note}) when is_binary(note) and note != "", do: {:ok, note}
   defp reject_note(_params), do: {:error, :missing_note}
 
-  # With an explicit target, route through the universal send-back (works on
-  # non-gated cards too); without, the gate flow.
+  # No explicit target -> Cards.reject defaults to the previous main stage (review position).
   defp do_reject(_board, card, note, nil), do: Cards.reject(card, note, :agent)
   defp do_reject(_board, card, note, ""), do: Cards.reject(card, note, :agent)
 

@@ -7,7 +7,7 @@ defmodule RelayWeb.Api.CardControllerTest do
   setup %{conn: conn} do
     board = insert(:board)
     {:ok, %{token: token}} = Relay.ApiKeys.create_key(board, board.owner)
-    stage = insert(:stage, board: board, name: "Spec", owner: :human, position: 1)
+    stage = insert(:stage, board: board, name: "Spec", position: 1)
     conn = put_req_header(conn, "authorization", "Bearer " <> token)
     {:ok, conn: conn, board: board, stage: stage}
   end
@@ -208,7 +208,7 @@ defmodule RelayWeb.Api.CardControllerTest do
     end
 
     test "creates a card into an explicit stage id", %{conn: conn, board: board} do
-      other = insert(:stage, board: board, name: "Code", owner: :ai, position: 2)
+      other = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 2)
 
       body =
         conn
@@ -220,7 +220,7 @@ defmodule RelayWeb.Api.CardControllerTest do
     end
 
     test "accepts an integer-string stage id", %{conn: conn, board: board} do
-      other = insert(:stage, board: board, name: "Code", owner: :ai, position: 2)
+      other = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 2)
 
       body =
         conn

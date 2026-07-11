@@ -23,18 +23,16 @@ defmodule RelayWeb.Api.CardJSON do
     }
   end
 
-  @doc "The shared stage shape. lane/parent_id/wip_limit let the CLI charge sub-lanes to their parent."
+  @doc "The shared stage shape. type/ai_enabled drive behavior; parent_id/wip_limit let the CLI charge sub-lanes to their parent."
   def stage(stage) do
     %{
       id: stage.id,
       name: stage.name,
       category: stage.category,
-      owner: stage.owner,
+      type: stage.type,
+      ai_enabled: stage.ai_enabled,
       position: stage.position,
-      approval_gate: stage.approval_gate,
-      reject_to_stage_id: stage.reject_to_stage_id,
       wip_limit: stage.wip_limit,
-      lane: stage.lane,
       parent_id: stage.parent_id
     }
   end
