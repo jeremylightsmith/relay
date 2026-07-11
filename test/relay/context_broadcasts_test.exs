@@ -72,10 +72,10 @@ defmodule Relay.ContextBroadcastsTest do
       assert_receive {:card_upserted, %Card{id: ^card_id, owners: [%{actor_type: :user}]}}
 
       {:ok, _card} = Cards.add_owner(card, :agent)
-      assert_receive {:card_upserted, %Card{id: ^card_id, owners: owners}} when length(owners) == 2
+      assert_receive {:card_upserted, %Card{id: ^card_id, owners: [%{actor_type: :agent}]}}
 
       {:ok, _card} = Cards.remove_owner(card, :agent)
-      assert_receive {:card_upserted, %Card{id: ^card_id, owners: [%{actor_type: :user}]}}
+      assert_receive {:card_upserted, %Card{id: ^card_id, owners: []}}
     end
 
     test "request_input broadcasts the blocked card and both timeline entries", %{spec: spec} do

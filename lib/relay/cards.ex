@@ -268,26 +268,67 @@ defmodule Relay.Cards do
   end
 
   @doc """
+  Assigns Relay AI as the card's sole owner (RLY-47 hand-off), attributed to
+  `actor`. A thin wrapper over `set_owners/3`; clears any human owners
+  (exclusivity, rule 2). Status is untouched. Returns `{:ok, card}` or
+  `{:error, changeset}`.
+  """
+  def assign_ai(%Card{} = card, actor \\ :agent), do: set_owners(card, [:agent], actor)
+
+  @doc """
+  Flips ownership to the human `{:user, id}` (RLY-47 "Take over"), attributed to
+  that user. A thin wrapper over `set_owners/3`; drops the AI (exclusivity, rule
+  2). Status is untouched — provenance changes, the baton's substate does not.
+  Returns `{:ok, card}` or `{:error, changeset}`.
+  """
+  def take_over(%Card{} = card, {:user, _id} = actor), do: set_owners(card, [actor], actor)
+
+  @doc """
   Adds one owner actor to the card, attributed to `actor`
   (`:agent | {:user, user_id}`, defaults to `:agent`), returning
-  `{:ok, card}` with owners preloaded. Adding an actor that is already an
-  owner is an ok no-op that logs nothing; otherwise logs an
-  `:owners_changed` activity entry (MMF 07) with the owner label.
+  `{:ok, card}` with owners preloaded. Enforces the RLY-47 AI-exclusivity
+  invariant: Relay AI and humans never co-own a card. Assigning `:agent`
+  clears every human owner (rule 2); adding a `{:user, id}` owner to an
+  AI-owned card removes the agent first (take-over). Adding an actor that is
+  already an owner is an ok no-op that logs nothing; otherwise logs an
+  `:owners_changed` activity entry.
   """
-  def add_owner(%Card{} = card, owner_actor, actor \\ :agent) do
+  def add_owner(card, owner_actor, actor \\ :agent)
+
+  def add_owner(%Card{} = card, :agent, actor) do
+    already_owner? = Repo.exists?(owner_query(card, :agent))
+
+    result =
+      Repo.transaction(fn ->
+        Repo.delete_all(from o in CardOwner, where: o.card_id == ^card.id and o.actor_type == ^:user)
+        {:ok, _owner} = insert_owner(card, :agent)
+
+        if not already_owner? do
+          log_owners_changed(card, actor, %{"action" => "added", "owner" => owner_label(:agent)})
+        end
+
+        reload_with_owners(card)
+      end)
+
+    broadcast_upserted(result)
+  end
+
+  def add_owner(%Card{} = card, {:user, _user_id} = owner_actor, actor) do
     already_owner? = Repo.exists?(owner_query(card, owner_actor))
 
-    case insert_owner(card, owner_actor) do
-      {:ok, _owner} ->
+    result =
+      Repo.transaction(fn ->
+        Repo.delete_all(from o in CardOwner, where: o.card_id == ^card.id and o.actor_type == ^:agent)
+        insert_owner_or_rollback(card, owner_actor)
+
         if not already_owner? do
           log_owners_changed(card, actor, %{"action" => "added", "owner" => owner_label(owner_actor)})
         end
 
-        broadcast_upserted({:ok, reload_with_owners(card)})
+        reload_with_owners(card)
+      end)
 
-      {:error, changeset} ->
-        {:error, changeset}
-    end
+    broadcast_upserted(result)
   end
 
   @doc """
@@ -309,10 +350,9 @@ defmodule Relay.Cards do
 
   @doc """
   Derives who holds the baton from the (preloaded) owner list: `:ai` when
-  the agent is among the owners (human owners render paused), `:human`
-  when only humans own it, `nil` when unowned. Never stored — always
-  derived. Accepts any map with a loaded `owners` list so components can
-  use it on plain maps too.
+  the agent is among the owners, `:human` when only humans own it, `nil`
+  when unowned. Never stored — always derived. Accepts any map with a
+  loaded `owners` list so components can use it on plain maps too.
   """
   def active_owner_type(%{owners: owners}) when is_list(owners) do
     cond do
@@ -367,7 +407,10 @@ defmodule Relay.Cards do
             moved
           else
             emit_stage_changed(moved, previous_stage_id, target_stage, actor)
-            snap_status(moved, target_stage, actor)
+
+            moved
+            |> snap_status(target_stage, actor)
+            |> maybe_claim(target_stage, actor)
           end
 
         maybe_clear_rejection(moved)
@@ -392,6 +435,44 @@ defmodule Relay.Cards do
       {:ok, updated} = set_status(card, %{status: Stage.default_status(target.type)}, actor)
       updated
     end
+  end
+
+  # RLY-47 — the design's five stage "types" are DERIVED from the schema; there is no
+  # stage `type`-per-design column. A "Work/Planning" stage is a main-lane stage whose
+  # behavior type is :work or :planning; review gates and Queue/Done never claim (rule 5).
+  defp work_stage?(%Stage{parent_id: nil, type: type}) when type in [:work, :planning], do: true
+  defp work_stage?(_), do: false
+
+  # An AI-enabled work stage: a Work/Planning stage with ai_enabled true.
+  defp ai_stage?(%Stage{ai_enabled: true} = stage), do: work_stage?(stage)
+  defp ai_stage?(_), do: false
+
+  # The claim rule (RLY-47): an UNOWNED card claims an owner when it ENTERS a stage.
+  # An already-owned card keeps its owners through every move — this single guard
+  # delivers rules 5 (reviews never transfer) and 6 (no hand-back): ownership is never
+  # stripped and never handed back.
+  defp maybe_claim(%Card{owners: owners} = card, _target, _actor) when owners != [], do: card
+
+  defp maybe_claim(%Card{} = card, %Stage{} = target, actor) do
+    cond do
+      # rule 1: entering an AI-enabled work stage delegates to Relay AI, whoever moved it.
+      ai_stage?(target) -> put_owners(card, [:agent], actor)
+      # rule 3: a human pulling a card into a human-only work stage becomes its owner.
+      work_stage?(target) and match?({:user, _}, actor) -> put_owners(card, [actor], actor)
+      # Queue, Done, Review, or an agent moving into a human-only stage: leave unowned.
+      true -> card
+    end
+  end
+
+  # Replaces the owner list from INSIDE an already-open transaction (the claim runs inside
+  # move_card/4's txn). Mirrors set_owners/3's delete-all + insert but does NOT open its own
+  # transaction or broadcast — move_card's {:card_moved} already re-renders every session
+  # from the freshly-owned card.
+  defp put_owners(%Card{} = card, actors, actor) do
+    Repo.delete_all(from o in CardOwner, where: o.card_id == ^card.id)
+    Enum.each(actors, &insert_owner_or_rollback(card, &1))
+    log_owners_changed(card, actor, %{"action" => "set", "owners" => Enum.map(actors, &owner_label/1)})
+    reload_with_owners(card)
   end
 
   @doc """

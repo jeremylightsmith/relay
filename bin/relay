@@ -313,6 +313,12 @@ def blocked(card):
     return card.get("status") == "needs_input"
 
 
+def human_owned(card):
+    # rule 4 — a card a human owns is off-limits to the agent; AI-owned and
+    # unowned cards stay eligible. active_owner is "ai" | "human" | None.
+    return card.get("active_owner") == "human"
+
+
 def find_ready(b, cfg):
     """(card, entry, mode) for the next card to work — right-to-left priority; resume before fresh."""
     by_name = {s["name"]: s for s in b["stages"]}
@@ -347,11 +353,11 @@ def find_ready(b, cfg):
 
     for entry in reversed(cfg["pipeline"]):
         for c in cards_in(entry["stage"]):
-            if c.get("status") == "working" and not blocked(c):
+            if c.get("status") == "working" and not blocked(c) and not human_owned(c):
                 return c, entry, "resume"
         if wip_ok(entry["stage"]):
             for c in cards_in(entry["from"]):
-                if not blocked(c):
+                if not blocked(c) and not human_owned(c):
                     return c, entry, "fresh"
     return None
 
@@ -454,7 +460,6 @@ def work(card, entry, mode):
         for step in entry["action"]:
             run_step(step, vars)
         return
-    own(ref)
     if mode == "fresh":
         move(ref, entry["stage"])
     set_status(ref, "working")
@@ -467,7 +472,6 @@ def work(card, entry, mode):
     comment(ref, f"{entry['stage']} done → pushing to {entry['done']}")
     move(ref, entry["done"])
     set_status(ref, "in_review" if entry["done"].lower().endswith(":review") else "queued")
-    release(ref)
     log(f"  ✓ {ref} pushed to {entry['done']}")
 
 
