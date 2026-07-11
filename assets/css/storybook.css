@@ -25,6 +25,7 @@
 @theme {
   --font-sans: "Helvetica Neue", Helvetica, -apple-system, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --breakpoint-drawer: 45rem; /* 720px — the mobile↔desktop divide for the card drawer */
 }
 
 @plugin "../vendor/daisyui-theme" {

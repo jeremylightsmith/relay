@@ -1036,7 +1036,7 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer aside.drawer-panel.w-full")
-      assert render(view) =~ "lg:w-[min(760px,94vw)]"
+      assert render(view) =~ "drawer:w-[min(760px,94vw)]"
     end
 
     test "the drawer body has a main column beside a properties rail", %{conn: conn, user: user} do
@@ -1045,7 +1045,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(view, "#card-drawer-main #card-drawer-conversation")
       assert has_element?(view, "#card-drawer-main #card-drawer-activity")
-      assert has_element?(view, "#card-drawer-rail.lg\\:border-l")
+      assert has_element?(view, "#card-drawer-rail.drawer\\:border-l")
     end
 
     test "editing the description opens a tall textarea", %{conn: conn, user: user} do
