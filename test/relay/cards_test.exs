@@ -417,6 +417,68 @@ defmodule Relay.CardsTest do
     end
   end
 
+  describe "the claim rule on move (RLY-47)" do
+    setup %{board: board} do
+      %{
+        ai_stage: insert(:stage, board: board, type: :planning, ai_enabled: true, position: 20),
+        human_work: insert(:stage, board: board, type: :work, ai_enabled: false, position: 21),
+        queue_stage: insert(:stage, board: board, type: :queue, ai_enabled: false, position: 22),
+        done_stage: insert(:stage, board: board, type: :done, ai_enabled: false, position: 23),
+        review_stage: insert(:stage, board: board, type: :review, ai_enabled: false, position: 24),
+        user: insert(:user)
+      }
+    end
+
+    test "an unowned card entering an AI-enabled stage claims Relay AI (rule 1), even on a human drag",
+         %{stage: stage, ai_stage: ai_stage, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "x"})
+
+      assert {:ok, moved} = Cards.move_card(card, ai_stage, 0, {:user, user.id})
+      assert [%{actor_type: :agent}] = moved.owners
+    end
+
+    test "an unowned card + a human move into a human-only work stage claims that human (rule 3)",
+         %{stage: stage, human_work: human_work, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "x"})
+
+      assert {:ok, moved} = Cards.move_card(card, human_work, 0, {:user, user.id})
+      assert [%{actor_type: :user, user_id: uid}] = moved.owners
+      assert uid == user.id
+    end
+
+    test "an agent move into a human-only work stage leaves the card unowned",
+         %{stage: stage, human_work: human_work} do
+      {:ok, card} = Cards.create_card(stage, %{title: "x"})
+
+      assert {:ok, moved} = Cards.move_card(card, human_work, 0, :agent)
+      assert moved.owners == []
+    end
+
+    test "moves into Queue, Done, or a Review gate never claim — not even a human into Review (rule 5)",
+         %{stage: stage, queue_stage: queue_stage, done_stage: done_stage, review_stage: review_stage, user: user} do
+      for target <- [queue_stage, done_stage, review_stage] do
+        {:ok, card} = Cards.create_card(stage, %{title: "x"})
+        assert {:ok, moved} = Cards.move_card(card, target, 0, {:user, user.id})
+        assert moved.owners == [], "expected no claim moving into a #{target.type} stage"
+      end
+    end
+
+    test "an already-owned card keeps its owners across moves — no hand-back (rules 5 & 6)",
+         %{stage: stage, human_work: human_work, done_stage: done_stage, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "x"})
+      {:ok, card} = Cards.assign_ai(card)
+
+      # A human moving an AI-owned card does NOT claim it (already owned → untouched).
+      assert {:ok, at_work} = Cards.move_card(card, human_work, 0, {:user, user.id})
+      assert [%{actor_type: :agent}] = at_work.owners
+
+      # Reaching a Done stage keeps Relay AI as the owner (provenance).
+      assert {:ok, in_done} = Cards.move_card(at_work, done_stage, 0)
+      assert [%{actor_type: :agent}] = in_done.owners
+      assert in_done.status == :done
+    end
+  end
+
   describe "set_status/3" do
     test "sets status and progress and preloads owners", %{stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "T"})
@@ -468,14 +530,15 @@ defmodule Relay.CardsTest do
       assert owner.user_id == nil
     end
 
-    test "add_owner/3 is idempotent", %{card: card, user: user} do
+    test "add_owner/3 is idempotent per actor", %{card: card, user: user} do
       {:ok, _card} = Cards.add_owner(card, {:user, user.id})
       {:ok, updated} = Cards.add_owner(card, {:user, user.id})
-      {:ok, _card} = Cards.add_owner(card, :agent)
-      {:ok, updated_again} = Cards.add_owner(card, :agent)
-
       assert length(updated.owners) == 1
-      assert length(updated_again.owners) == 2
+
+      {:ok, _card} = Cards.add_owner(card, :agent)
+      {:ok, again} = Cards.add_owner(card, :agent)
+      # exclusivity: assigning AI cleared the human, so AI is the sole owner
+      assert [%{actor_type: :agent}] = again.owners
     end
 
     test "add_owner/3 returns an error changeset for an unknown user id", %{card: card} do
@@ -485,16 +548,54 @@ defmodule Relay.CardsTest do
 
     test "remove_owner/3 removes only the matching actor and is idempotent",
          %{card: card, user: user} do
+      other = insert(:user)
       {:ok, _card} = Cards.add_owner(card, {:user, user.id})
-      {:ok, _card} = Cards.add_owner(card, :agent)
+      {:ok, _card} = Cards.add_owner(card, {:user, other.id})
 
-      assert {:ok, %Card{} = updated} = Cards.remove_owner(card, :agent)
-      assert [%{actor_type: :user}] = updated.owners
+      assert {:ok, %Card{} = updated} = Cards.remove_owner(card, {:user, other.id})
+      assert [%{actor_type: :user, user_id: uid}] = updated.owners
+      assert uid == user.id
 
-      assert {:ok, %Card{} = again} = Cards.remove_owner(card, :agent)
-      assert [%{actor_type: :user}] = again.owners
+      assert {:ok, %Card{} = again} = Cards.remove_owner(card, {:user, other.id})
+      assert [%{user_id: ^uid}] = again.owners
 
       assert {:ok, %Card{owners: []}} = Cards.remove_owner(card, {:user, user.id})
+    end
+
+    test "add_owner/3 with :agent clears human owners (AI exclusivity, rule 2)",
+         %{card: card, user: user} do
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+
+      assert {:ok, updated} = Cards.add_owner(card, :agent)
+      assert [%{actor_type: :agent}] = updated.owners
+    end
+
+    test "add_owner/3 with a human on an AI-owned card removes the agent (take-over, rule 2)",
+         %{card: card, user: user} do
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      assert {:ok, updated} = Cards.add_owner(card, {:user, user.id})
+      assert [%{actor_type: :user, user_id: uid}] = updated.owners
+      assert uid == user.id
+    end
+
+    test "assign_ai/2 makes Relay AI the sole owner and logs :owners_changed",
+         %{card: card, user: user} do
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+
+      assert {:ok, updated} = Cards.assign_ai(card)
+      assert [%{actor_type: :agent}] = updated.owners
+      assert Enum.any?(activities(card), &(&1.type == :owners_changed))
+    end
+
+    test "take_over/2 makes the user the sole owner and logs :owners_changed",
+         %{card: card, user: user} do
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      assert {:ok, updated} = Cards.take_over(card, {:user, user.id})
+      assert [%{actor_type: :user, user_id: uid}] = updated.owners
+      assert uid == user.id
+      assert Enum.any?(activities(card), &(&1.type == :owners_changed))
     end
 
     test "set_owners/3 replaces the owner list atomically", %{card: card, user: user} do
@@ -534,9 +635,7 @@ defmodule Relay.CardsTest do
       assert Cards.active_owner_type(card) == :human
     end
 
-    test "returns :ai when the agent is among the owners, even with humans",
-         %{card: card, user: user} do
-      {:ok, card} = Cards.add_owner(card, {:user, user.id})
+    test "returns :ai for an AI-owned card", %{card: card} do
       {:ok, card} = Cards.add_owner(card, :agent)
 
       assert Cards.active_owner_type(card) == :ai
