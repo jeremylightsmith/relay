@@ -444,6 +444,25 @@ defmodule Relay.Cards do
   end
 
   @doc """
+  A `card_id => latest :needs_input question` map for the board's `:needs_input` cards, for the
+  board's collapsed-card question previews (RLY-48 §3). One indexed query; empty when no card is
+  blocked. A blocked card with no recorded question (e.g. a manual status flip) is absent.
+  """
+  def needs_input_questions(%Board{id: board_id}) do
+    from(a in Schemas.Activity,
+      join: c in Card,
+      on: c.id == a.card_id,
+      where: c.board_id == ^board_id and c.status == :needs_input and a.type == :needs_input,
+      order_by: [asc: a.card_id, desc: a.inserted_at, desc: a.id],
+      select: {a.card_id, a.meta}
+    )
+    |> Repo.all()
+    |> Enum.reduce(%{}, fn {card_id, meta}, acc ->
+      Map.put_new(acc, card_id, meta["question"])
+    end)
+  end
+
+  @doc """
   Fetches the card a human-facing ref (e.g. `"RLY-12"`) points at on
   `board`, or `nil` when the ref does not parse against the board's key
   or no such card exists on that board. Scoping by `board_id` means a

@@ -55,5 +55,21 @@ defmodule RelayWeb.BoardsLiveTest do
       assert to =~ ~r{^/board/[a-z0-9-]+/settings$}
       assert Repo.aggregate(Board, :count) == 2
     end
+
+    test "a board tile shows its needs-you count", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      review = Enum.find(board.stages, &(&1.type == :review))
+      Relay.Factory.insert(:card, board: board, stage: review, status: :in_review)
+
+      {:ok, view, _html} = live(conn, ~p"/boards")
+      assert has_element?(view, "#board-needs-you-#{board.slug}")
+    end
+
+    test "no needs-you badge when nothing needs a human", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+
+      {:ok, view, _html} = live(conn, ~p"/boards")
+      refute has_element?(view, "#board-needs-you-#{board.slug}")
+    end
   end
 end

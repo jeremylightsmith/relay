@@ -81,9 +81,11 @@ defmodule RelayWeb.CoreComponentsTest do
           stage_id: 4,
           board_key: "RLY",
           cards: [
-            {"cards-1", %{title: "First card", tag: "infra", ref_number: 1, status: :queued, sub_tasks: [], owners: []}},
+            {"cards-1",
+             %{id: 1, title: "First card", tag: "infra", ref_number: 1, status: :ready, sub_tasks: [], owners: []}},
             {"cards-2",
              %{
+               id: 2,
                title: "Second card",
                tag: nil,
                ref_number: 2,
@@ -222,7 +224,7 @@ defmodule RelayWeb.CoreComponentsTest do
           count: 1,
           board_key: "RLY",
           cards: [
-            {"cards-1", %{title: "Main work", tag: nil, ref_number: 1, status: :queued, sub_tasks: [], owners: []}}
+            {"cards-1", %{id: 1, title: "Main work", tag: nil, ref_number: 1, status: :ready, sub_tasks: [], owners: []}}
           ],
           sublanes: [
             %{id: 401, name: "Review", lane: :review, owner: :human, count: 0, cards: [], collapsed: true},

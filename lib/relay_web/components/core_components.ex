@@ -1977,6 +1977,9 @@ defmodule RelayWeb.CoreComponents do
 
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
 
+  attr :terminal, :boolean, default: false, doc: "true when this is the board's terminal (Done) stage"
+  attr :questions, :map, default: %{}, doc: "card_id => latest needs_input question, for previews"
+
   def stage_column(assigns) do
     sublanes = Enum.map(assigns.sublanes, &Map.put_new(&1, :collapsed, false))
     total_count = (assigns.count || 0) + Enum.sum(Enum.map(sublanes, & &1.count))
@@ -2142,6 +2145,9 @@ defmodule RelayWeb.CoreComponents do
                     tag={card.tag}
                     ref={"#{@board_key}-#{card.ref_number}"}
                     status={card.status}
+                    stage_type={@type}
+                    done={@terminal and card.status == :ready}
+                    question={Map.get(@questions, card.id)}
                     progress={board_card_progress(card)}
                     owners={card.owners}
                     active_owner={Cards.active_owner_type(card)}
@@ -2223,6 +2229,9 @@ defmodule RelayWeb.CoreComponents do
                   tag={card.tag}
                   ref={"#{@board_key}-#{card.ref_number}"}
                   status={card.status}
+                  stage_type={sub.lane}
+                  done={false}
+                  question={Map.get(@questions, card.id)}
                   progress={board_card_progress(card)}
                   owners={card.owners}
                   active_owner={Cards.active_owner_type(card)}

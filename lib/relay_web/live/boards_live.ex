@@ -70,8 +70,18 @@ defmodule RelayWeb.BoardsLive do
                   CURRENT
                 </span>
               </div>
-              <span class="font-mono text-[11.5px]" style="color:oklch(0.58 0.02 255);">
+              <span
+                class="flex items-center gap-2 font-mono text-[11.5px]"
+                style="color:oklch(0.58 0.02 255);"
+              >
                 {meta_label(b)}
+                <span
+                  :if={b.needs_you_count > 0}
+                  id={"board-needs-you-#{b.slug}"}
+                  class="badge badge-warning badge-sm font-medium"
+                >
+                  {b.needs_you_count} need you
+                </span>
               </span>
               <span class="font-mono text-[10.5px]" style="color:oklch(0.62 0.02 255);">
                 Updated {updated_label(b.updated_at)}
@@ -123,11 +133,14 @@ defmodule RelayWeb.BoardsLive do
 
   defp load_boards(user) do
     for board <- Boards.list_boards(user) do
+      rollup = Cards.needs_you_rollup(board)
+
       %{
         slug: board.slug,
         name: board.name,
         updated_at: board.updated_at,
-        card_count: length(Cards.list_cards(board))
+        card_count: length(Cards.list_cards(board)),
+        needs_you_count: rollup.needs_input + rollup.in_review + rollup.awaiting_human
       }
     end
   end

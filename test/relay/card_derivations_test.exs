@@ -118,4 +118,31 @@ defmodule Relay.CardDerivationsTest do
       assert Cards.needs_you_rollup(ctx.board) == %{needs_input: 1, in_review: 1, awaiting_human: 1}
     end
   end
+
+  describe "needs_input_questions/1" do
+    test "maps needs_input card ids to their latest question", %{board: board, ai_work: ai_work} do
+      card = insert(:card, board: board, stage: ai_work, status: :needs_input)
+
+      insert(:activity,
+        card: card,
+        type: :needs_input,
+        meta: %{"question" => "First?"},
+        inserted_at: ~U[2026-07-01 00:00:00Z]
+      )
+
+      insert(:activity,
+        card: card,
+        type: :needs_input,
+        meta: %{"question" => "Latest?"},
+        inserted_at: ~U[2026-07-02 00:00:00Z]
+      )
+
+      other = insert(:card, board: board, stage: ai_work, status: :working)
+      insert(:activity, card: other, type: :needs_input, meta: %{"question" => "stale"})
+
+      map = Cards.needs_input_questions(board)
+      assert map[card.id] == "Latest?"
+      refute Map.has_key?(map, other.id)
+    end
+  end
 end

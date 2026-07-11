@@ -68,7 +68,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, _blocked} = Cards.request_input(card, "Which bucket?")
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
-    assert has_element?(view, "#stage-col-#{code.position}-cards .card-needs-input", "NEEDS INPUT")
+    assert has_element?(view, "#stage-col-#{code.position}-cards .card-needs-input", "needs you")
 
     view
     |> form("#needs-input-form", answer: %{body: "The relay-exports bucket"})
@@ -91,7 +91,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     assert answer.actor_type == :user
   end
 
-  test "answering a human-stage card returns it to :queued",
+  test "answering a human-stage card returns it to :ready",
        %{conn: conn, board: board, backlog: backlog} do
     {:ok, card} = Cards.create_card(backlog, %{title: "Human next"})
     {:ok, _blocked} = Cards.request_input(card, "Ready to start?")
@@ -101,7 +101,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     view |> form("#needs-input-form", answer: %{body: "Yes, go"}) |> render_submit()
 
     refute has_element?(view, "#needs-input-panel")
-    assert Cards.get_card_by_ref(board, "RLY-1").status == :queued
+    assert Cards.get_card_by_ref(board, "RLY-1").status == :ready
   end
 
   test "a human-blocked card (status control, no question) still gets the composer",
