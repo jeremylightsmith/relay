@@ -875,6 +875,38 @@ defmodule RelayWeb.CoreComponents do
   defp wip_chip_colors(_state), do: "background:oklch(0.96 0.006 255);color:oklch(0.48 0.02 255);"
 
   @doc """
+  The drawer's mono-uppercase section label (main headings + rail labels).
+
+  Renders the shared label treatment
+  (`font-mono text-[10px] font-semibold uppercase tracking-[0.06em]`). Pass `accent`
+  (a full text-color class such as `text-secondary`) to tint it — e.g. the violet
+  AI Result heading — which replaces the default muted color.
+
+  ## Examples
+
+      <.section_label>Owners</.section_label>
+      <.section_label accent="text-secondary">AI Result</.section_label>
+  """
+  attr :accent, :string,
+    default: nil,
+    doc: "a full text-color class (e.g. \"text-secondary\") used instead of the muted default"
+
+  attr :class, :any, default: nil
+  slot :inner_block, required: true
+
+  def section_label(assigns) do
+    ~H"""
+    <span class={[
+      "font-mono text-[10px] font-semibold uppercase tracking-[0.06em]",
+      @accent || "text-base-content/60",
+      @class
+    ]}>
+      {render_slot(@inner_block)}
+    </span>
+    """
+  end
+
+  @doc """
   Renders the card detail drawer (daisyUI `drawer drawer-end`): a scrim
   plus a right-side panel with the card's stage chip (stage name in the
   Human/AI owner color), its ref, an editable title, the plain-text

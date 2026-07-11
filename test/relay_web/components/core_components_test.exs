@@ -495,4 +495,33 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(phx-value-field="name")
     end
   end
+
+  describe "section_label/1" do
+    test "renders a mono uppercase label with the default muted token" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <CoreComponents.section_label>Owners</CoreComponents.section_label>
+        """)
+
+      assert html =~ "Owners"
+      assert html =~ "font-mono"
+      assert html =~ "uppercase"
+      assert html =~ "text-base-content/60"
+    end
+
+    test "an accent class replaces the default muted token" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <CoreComponents.section_label accent="text-secondary">AI Result</CoreComponents.section_label>
+        """)
+
+      assert html =~ "AI Result"
+      assert html =~ "text-secondary"
+      refute html =~ "text-base-content/60"
+    end
+  end
 end
