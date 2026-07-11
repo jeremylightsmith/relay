@@ -229,5 +229,75 @@ class TickVersionGateTest(unittest.TestCase):
         self.assertEqual(fetched, [True])  # board WAS fetched despite the version gate
 
 
+class FindReadyOwnershipTest(unittest.TestCase):
+    """Rule 4: the runner never pulls a human-owned card; AI-owned/unowned stay eligible."""
+
+    STAGES = [
+        {"id": 3, "name": "Plan", "wip_limit": None, "parent_id": None},
+        {"id": 4, "name": "Code", "wip_limit": None, "parent_id": None},
+    ]
+    CFG = {"pipeline": [{"stage": "Code", "from": "Plan", "done": "Code:Review"}]}
+
+    def board(self, cards):
+        return {"stages": self.STAGES, "cards": cards}
+
+    def test_skips_a_human_owned_card_in_from(self):
+        cards = [{"ref": "RLY-1", "stage_id": 3, "status": "queued", "active_owner": "human"}]
+        self.assertIsNone(relay.find_ready(self.board(cards), self.CFG))
+
+    def test_pulls_an_unowned_card_fresh(self):
+        cards = [{"ref": "RLY-1", "stage_id": 3, "status": "queued", "active_owner": None}]
+        ready = relay.find_ready(self.board(cards), self.CFG)
+        self.assertIsNotNone(ready)
+        self.assertEqual(ready[0]["ref"], "RLY-1")
+        self.assertEqual(ready[2], "fresh")
+
+    def test_resumes_an_ai_owned_working_card(self):
+        cards = [{"ref": "RLY-2", "stage_id": 4, "status": "working", "active_owner": "ai"}]
+        ready = relay.find_ready(self.board(cards), self.CFG)
+        self.assertIsNotNone(ready)
+        self.assertEqual(ready[2], "resume")
+
+    def test_skips_a_human_owned_working_card_in_stage(self):
+        cards = [{"ref": "RLY-3", "stage_id": 4, "status": "working", "active_owner": "human"}]
+        self.assertIsNone(relay.find_ready(self.board(cards), self.CFG))
+
+
+class WorkOwnershipTest(unittest.TestCase):
+    """Rule 6: work() no longer own()s before or release()s after — the server claims on move."""
+
+    CARD = {"ref": "RLY-9", "title": "t"}
+    ENTRY = {"stage": "Code", "from": "Plan", "done": "Code:Review",
+             "action": [{"shell": "echo hi"}]}
+    PATCHED = ("DRY", "own", "release", "move", "set_status", "comment",
+               "run_step", "get_card", "log", "flag")
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in self.PATCHED}
+        relay.DRY = False
+        self.calls = []
+        relay.own = lambda ref: self.calls.append(("own", ref))
+        relay.release = lambda ref: self.calls.append(("release", ref))
+        relay.move = lambda ref, stage: self.calls.append(("move", ref, stage))
+        relay.set_status = lambda ref, status: self.calls.append(("set_status", ref, status))
+        relay.comment = lambda ref, body: self.calls.append(("comment", ref))
+        relay.flag = lambda ref, msg: self.calls.append(("flag", ref))
+        relay.run_step = lambda step, vars: True
+        relay.get_card = lambda ref: {"status": "in_review"}
+        relay.log = lambda *a, **k: None
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            setattr(relay, k, v)
+
+    def test_work_neither_owns_nor_releases(self):
+        relay.work(self.CARD, self.ENTRY, "fresh")
+        names = [c[0] for c in self.calls]
+        self.assertNotIn("own", names)
+        self.assertNotIn("release", names)
+        # it still pushes the finished card to the done stage
+        self.assertIn("move", names)
+
+
 if __name__ == "__main__":
     unittest.main()
