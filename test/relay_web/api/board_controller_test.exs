@@ -8,7 +8,7 @@ defmodule RelayWeb.Api.BoardControllerTest do
   end
 
   test "returns the key's board with stages and cards (status + owners)", %{conn: conn, board: board} do
-    stage = insert(:stage, board: board, name: "Plan", owner: :ai, position: 1)
+    stage = insert(:stage, board: board, name: "Plan", type: :work, ai_enabled: true, position: 1)
     card = insert(:card, stage: stage, title: "Ship it", status: :working, progress: 40)
     insert(:card_owner, card: card)
 
@@ -18,7 +18,7 @@ defmodule RelayWeb.Api.BoardControllerTest do
     body = conn |> get(~p"/api/board") |> json_response(200)
 
     assert body["board"]["key"] == board.key
-    assert Enum.any?(body["stages"], &(&1["name"] == "Plan" and &1["owner"] == "ai"))
+    assert Enum.any?(body["stages"], &(&1["name"] == "Plan" and &1["type"] == "work" and &1["ai_enabled"] == true))
 
     assert [card_json] = body["cards"]
     assert card_json["title"] == "Ship it"
@@ -27,25 +27,25 @@ defmodule RelayWeb.Api.BoardControllerTest do
     assert [%{"type" => "agent"}] = card_json["owners"]
   end
 
-  test "stage JSON carries wip_limit, lane, and parent_id for sub-lane WIP", %{conn: conn, board: board} do
-    code = insert(:stage, board: board, name: "Code", owner: :ai, position: 1, wip_limit: 3)
-    _review = insert(:stage, board: board, name: "Code:Review", owner: :human, position: 2, lane: :review, parent: code)
+  test "stage JSON carries wip_limit, type, and parent_id for sub-lane WIP", %{conn: conn, board: board} do
+    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1, wip_limit: 3)
+    _review = insert(:stage, board: board, name: "Code:Review", type: :review, position: 2, parent: code)
 
     body = conn |> get(~p"/api/board") |> json_response(200)
 
     main = Enum.find(body["stages"], &(&1["name"] == "Code"))
     assert main["wip_limit"] == 3
-    assert main["lane"] == "main"
+    assert main["type"] == "work"
     assert main["parent_id"] == nil
 
     sub = Enum.find(body["stages"], &(&1["name"] == "Code:Review"))
-    assert sub["lane"] == "review"
+    assert sub["type"] == "review"
     assert sub["parent_id"] == code.id
     assert sub["wip_limit"] == nil
   end
 
   test "board card JSON omits heavy plan/spec text", %{conn: conn, board: board} do
-    stage = insert(:stage, board: board, name: "Code", owner: :ai, position: 1)
+    stage = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
     insert(:card, stage: stage, title: "Heavy", plan: "big plan text", spec: "big spec text")
 
     [card_json] = conn |> get(~p"/api/board") |> json_response(200) |> Map.fetch!("cards")
@@ -68,7 +68,7 @@ defmodule RelayWeb.Api.BoardControllerTest do
       before =
         conn |> get(~p"/api/board/version") |> json_response(200) |> Map.fetch!("version")
 
-      stage = insert(:stage, board: board, name: "Plan", owner: :ai, position: 1)
+      stage = insert(:stage, board: board, name: "Plan", type: :work, ai_enabled: true, position: 1)
       {:ok, _card} = Relay.Cards.create_card(stage, %{title: "New card"})
 
       after_version =

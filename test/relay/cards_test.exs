@@ -376,6 +376,47 @@ defmodule Relay.CardsTest do
     end
   end
 
+  describe "cross-stage move snaps status to the destination type's default (ADR 0003)" do
+    setup %{board: board} do
+      %{
+        work_stage: insert(:stage, board: board, type: :work, position: 10),
+        backlog_stage: insert(:stage, board: board, type: :queue, position: 11)
+      }
+    end
+
+    test "an invalid status snaps to the destination type's default", %{work_stage: work, backlog_stage: backlog} do
+      {:ok, card} = Cards.create_card(work, %{title: "x"})
+      {:ok, card} = Cards.set_status(card, %{status: :working})
+
+      assert {:ok, moved} = Cards.move_card(card, backlog, 0)
+      assert moved.status == :queued
+    end
+
+    test "a status already valid for the destination survives the move", %{work_stage: work, backlog_stage: backlog} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "x"})
+
+      assert {:ok, moved} = Cards.move_card(card, work, 0)
+      assert moved.status == :queued
+    end
+
+    test "needs_input -> queue clears blocked_since", %{work_stage: work, backlog_stage: backlog} do
+      {:ok, card} = Cards.create_card(work, %{title: "blocked"})
+      {:ok, card} = Cards.set_status(card, %{status: :needs_input})
+      assert card.blocked_since
+
+      {:ok, moved} = Cards.move_card(card, backlog, 0)
+      assert moved.status == :queued
+      assert is_nil(moved.blocked_since)
+    end
+
+    test "a same-stage reorder does not change status", %{work_stage: work} do
+      {:ok, a} = Cards.create_card(work, %{title: "a"})
+      {:ok, a} = Cards.set_status(a, %{status: :needs_input})
+      {:ok, moved} = Cards.move_card(a, work, 0)
+      assert moved.status == :needs_input
+    end
+  end
+
   describe "set_status/3" do
     test "sets status and progress and preloads owners", %{stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "T"})
@@ -548,7 +589,11 @@ defmodule Relay.CardsTest do
 
       {:ok, moved} = Cards.move_card(card, review, 0)
 
-      assert [_created, %Schemas.Activity{type: :moved, meta: meta}] = activities(moved)
+      # ADR 0003 — :queued isn't valid in a :review-type stage, so the snap also logs a
+      # :status_changed entry alongside the :moved one.
+      assert [_created, %Schemas.Activity{type: :moved, meta: meta}, %Schemas.Activity{type: :status_changed}] =
+               activities(moved)
+
       assert meta == %{"from_stage" => stage.name, "to_stage" => "Code · Review"}
     end
 

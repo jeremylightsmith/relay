@@ -7,7 +7,7 @@ defmodule Relay.BoardsTest do
   alias Schemas.Stage
 
   describe "get_or_create_default_board/1" do
-    test "creates a board with defaults and the 7 seeded stages, in position order" do
+    test "creates a board with defaults and the 8 seeded stages, in position order" do
       user = insert(:user, name: "Ada Lovelace")
 
       board = Boards.get_or_create_default_board(user)
@@ -18,13 +18,14 @@ defmodule Relay.BoardsTest do
       assert board.slug == "ada-lovelace"
 
       assert [
-               %Stage{name: "Backlog", position: 1, owner: :human, category: :unstarted},
-               %Stage{name: "Spec", position: 2, owner: :human, category: :unstarted},
-               %Stage{name: "Plan", position: 3, owner: :ai, category: :planning},
-               %Stage{name: "Code", position: 4, owner: :ai, category: :in_progress},
-               %Stage{name: "Review", position: 5, owner: :human, category: :in_progress},
-               %Stage{name: "Deploy", position: 6, owner: :ai, category: :in_progress},
-               %Stage{name: "Done", position: 7, owner: :human, category: :complete}
+               %Stage{name: "Backlog", position: 1, type: :queue, ai_enabled: false, category: :unstarted},
+               %Stage{name: "Next up", position: 2, type: :queue, ai_enabled: false, category: :unstarted},
+               %Stage{name: "Spec", position: 3, type: :planning, ai_enabled: true, category: :planning},
+               %Stage{name: "Plan", position: 4, type: :planning, ai_enabled: true, category: :planning},
+               %Stage{name: "Code", position: 5, type: :work, ai_enabled: true, category: :in_progress},
+               %Stage{name: "Review", position: 6, type: :review, ai_enabled: false, category: :in_progress},
+               %Stage{name: "Deploy", position: 7, type: :work, ai_enabled: true, category: :in_progress},
+               %Stage{name: "Done", position: 8, type: :done, ai_enabled: false, category: :complete}
              ] = board.stages
     end
 
@@ -36,7 +37,7 @@ defmodule Relay.BoardsTest do
 
       assert board1.id == board2.id
       assert Repo.aggregate(Board, :count) == 1
-      assert Repo.aggregate(Stage, :count) == 7
+      assert Repo.aggregate(Stage, :count) == 8
     end
 
     test "derives the slug from the email local part when the user has no name" do
@@ -135,7 +136,7 @@ defmodule Relay.BoardsTest do
   end
 
   describe "create_board/2" do
-    test "creates a named board, derives slug + key, seeds 7 stages" do
+    test "creates a named board, derives slug + key, seeds 8 stages" do
       user = insert(:user)
 
       assert {:ok, board} = Boards.create_board(user, %{name: "Launch Board"})
@@ -143,10 +144,10 @@ defmodule Relay.BoardsTest do
       assert board.name == "Launch Board"
       assert board.slug == "launch-board"
       assert board.key == "LAUNC"
-      assert length(board.stages) == 7
+      assert length(board.stages) == 8
 
       assert Enum.map(board.stages, & &1.name) ==
-               ["Backlog", "Spec", "Plan", "Code", "Review", "Deploy", "Done"]
+               ["Backlog", "Next up", "Spec", "Plan", "Code", "Review", "Deploy", "Done"]
     end
 
     test "accepts string-keyed params (the create form)" do
@@ -207,7 +208,7 @@ defmodule Relay.BoardsTest do
 
       found = Boards.get_board(user, "ops")
       assert found.id == board.id
-      assert length(found.stages) == 7
+      assert length(found.stages) == 8
     end
 
     test "returns an archived board (still loadable)" do

@@ -25,11 +25,11 @@ defmodule RelayWeb.Api.FallbackController do
     |> render(:error, code: "invalid", message: "Invalid request")
   end
 
-  def call(conn, {:error, :not_gated}) do
+  def call(conn, {:error, :not_in_review}) do
     conn
     |> put_status(:unprocessable_entity)
     |> put_view(json: ErrorJSON)
-    |> render(:error, code: "not_gated", message: "This card's stage is not an approval gate")
+    |> render(:error, code: "not_in_review", message: "This card is not in a review stage")
   end
 
   def call(conn, {:error, :missing_note}) do

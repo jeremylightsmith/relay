@@ -8,13 +8,13 @@ defmodule RelayWeb.BoardLiveSendBackTest do
 
   setup :register_and_log_in_user
 
-  # Default pipeline: Backlog1 | Spec2 | Plan3 | Code4 | Review5 | Deploy6 | Done7.
+  # Default pipeline: Backlog | Next up | Spec | Plan | Code | Review(:review type) | Deploy | Done.
+  # Review is review-type by seed default, so it's already a gate — no setup needed.
   setup %{user: user} do
     board = Boards.get_or_create_default_board(user)
     code = Enum.find(board.stages, &(&1.name == "Code"))
     spec = Enum.find(board.stages, &(&1.name == "Spec"))
     review = Enum.find(board.stages, &(&1.name == "Review"))
-    {:ok, review} = Boards.update_stage(review, %{approval_gate: true, reject_to_stage_id: code.id})
     %{board: board, spec: spec, code: code, review: review}
   end
 

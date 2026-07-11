@@ -10,8 +10,8 @@ defmodule Relay.CardsNeedsInputTest do
 
   setup do
     board = insert(:board, key: "RLY")
-    ai_stage = insert(:stage, board: board, name: "Code", owner: :ai, position: 1)
-    human_stage = insert(:stage, board: board, name: "Check", owner: :human, position: 2)
+    ai_stage = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
+    human_stage = insert(:stage, board: board, name: "Check", type: :queue, position: 2)
     %{board: board, ai_stage: ai_stage, human_stage: human_stage}
   end
 
@@ -145,16 +145,31 @@ defmodule Relay.CardsNeedsInputTest do
       assert still_blocked.blocked_since == blocked.blocked_since
     end
 
-    test "approve out of :needs_input clears blocked_since", %{board: board} do
-      gate = insert(:stage, board: board, name: "Gate", position: 3, owner: :human, approval_gate: true)
-      next = insert(:stage, board: board, name: "Deploy", position: 4, owner: :ai)
+    test "approve into a work-type stage keeps :needs_input (ADR 0003 — valid there so a dragged blocked card doesn't drop its question)",
+         %{board: board} do
+      gate = insert(:stage, board: board, name: "Gate", position: 3, type: :review)
+      next = insert(:stage, board: board, name: "Deploy", position: 4, type: :work, ai_enabled: true)
       {:ok, card} = Cards.create_card(gate, %{title: "Gated"})
       {:ok, blocked} = Cards.request_input(card, "Approve the config?")
 
       {:ok, approved} = Cards.approve(blocked)
 
       assert approved.stage_id == next.id
-      assert approved.status == :working
+      assert approved.status == :needs_input
+      assert approved.blocked_since
+    end
+
+    test "approve into a queue-type stage clears :needs_input (invalid there, snaps to the default)",
+         %{board: board} do
+      gate = insert(:stage, board: board, name: "Gate", position: 3, type: :review)
+      next = insert(:stage, board: board, name: "Backlog", position: 4, type: :queue)
+      {:ok, card} = Cards.create_card(gate, %{title: "Gated"})
+      {:ok, blocked} = Cards.request_input(card, "Approve the config?")
+
+      {:ok, approved} = Cards.approve(blocked)
+
+      assert approved.stage_id == next.id
+      assert approved.status == :queued
       assert approved.blocked_since == nil
     end
   end

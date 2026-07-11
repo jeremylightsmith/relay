@@ -45,15 +45,15 @@ defmodule RelayWeb.BoardLiveCollapseTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#stage-col-4-main-lane-header")
-      refute has_element?(view, "#stage-col-4-main-strip")
+      assert has_element?(view, "#stage-col-5-main-lane-header")
+      refute has_element?(view, "#stage-col-5-main-strip")
 
-      view |> element("#stage-col-4-main-lane-header") |> render_click()
-      assert has_element?(view, "#stage-col-4-main-strip")
+      view |> element("#stage-col-5-main-lane-header") |> render_click()
+      assert has_element?(view, "#stage-col-5-main-strip")
 
-      view |> element("#stage-col-4-main-strip") |> render_click()
-      refute has_element?(view, "#stage-col-4-main-strip")
-      assert has_element?(view, "#stage-col-4-main-lane-header")
+      view |> element("#stage-col-5-main-strip") |> render_click()
+      refute has_element?(view, "#stage-col-5-main-strip")
+      assert has_element?(view, "#stage-col-5-main-lane-header")
     end
   end
 end

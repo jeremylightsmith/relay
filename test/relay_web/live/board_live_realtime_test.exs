@@ -352,7 +352,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       assert has_element?(board_view, "#stage-strip-#{code.id} h3", "Build")
     end
 
-    test "an owner change re-tints the column and flips the card mismatch flag",
+    test "an AI-enabled toggle re-tints the column and flips the card mismatch flag",
          %{conn: conn, board: board} do
       code = Enum.find(board.stages, &(&1.name == "Code"))
       {:ok, card} = Cards.create_card(code, %{title: "Agent task"})
@@ -361,14 +361,14 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
       {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
-      # :ai stage + agent owner: no mismatch yet
+      # ai_enabled stage + agent owner: no mismatch yet
       refute has_element?(board_view, "#stage-col-#{code.position} .card-mismatch")
 
-      settings_view |> element("#stage-#{code.id}-owner-human") |> render_click()
+      settings_view |> element("#stage-#{code.id}-ai-toggle") |> render_click()
 
       assert has_element?(
                board_view,
-               "#stage-col-#{code.position} .stage-owner-swatch[data-owner='human']"
+               "#stage-col-#{code.position} .stage-type-icon[data-type='work']"
              )
 
       assert has_element?(board_view, "#stage-col-#{code.position} .card-mismatch")
@@ -378,15 +378,16 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
     test "reordering swaps the columns and keeps card streams attached",
          %{conn: conn, board: board} do
-      [backlog, spec | _rest] = board.stages
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      next_up = Enum.find(board.stages, &(&1.name == "Next up"))
       {:ok, _card} = Cards.create_card(backlog, %{title: "Ride along"})
 
       {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
       {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
-      settings_view |> element("#stage-#{spec.id}-up") |> render_click()
+      settings_view |> element("#stage-#{next_up.id}-up") |> render_click()
 
-      assert has_element?(board_view, "#stage-strip-#{spec.id} h3", "Spec")
+      assert has_element?(board_view, "#stage-strip-#{next_up.id} h3", "Next up")
       assert has_element?(board_view, "#stage-col-2 h3", "Backlog")
       assert has_element?(board_view, "#stage-col-2-cards .board-card", "Ride along")
     end

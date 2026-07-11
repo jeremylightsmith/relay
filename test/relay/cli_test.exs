@@ -21,7 +21,16 @@ defmodule Relay.CLITest do
     stub(fn conn ->
       Req.Test.json(conn, %{
         "board" => %{"name" => "My board", "key" => "RLY"},
-        "stages" => [%{"id" => 1, "name" => "Spec", "owner" => "human", "category" => "unstarted", "position" => 1}],
+        "stages" => [
+          %{
+            "id" => 1,
+            "name" => "Spec",
+            "type" => "queue",
+            "ai_enabled" => false,
+            "category" => "unstarted",
+            "position" => 1
+          }
+        ],
         "cards" => [
           %{
             "ref" => "RLY-1",
@@ -125,8 +134,22 @@ defmodule Relay.CLITest do
       Req.Test.json(conn, %{
         "board" => %{"name" => "B", "key" => "RLY"},
         "stages" => [
-          %{"id" => 1, "name" => "Spec", "owner" => "human", "category" => "unstarted", "position" => 1},
-          %{"id" => 2, "name" => "Code", "owner" => "ai", "category" => "in_progress", "position" => 2}
+          %{
+            "id" => 1,
+            "name" => "Spec",
+            "type" => "queue",
+            "ai_enabled" => false,
+            "category" => "unstarted",
+            "position" => 1
+          },
+          %{
+            "id" => 2,
+            "name" => "Code",
+            "type" => "work",
+            "ai_enabled" => true,
+            "category" => "in_progress",
+            "position" => 2
+          }
         ],
         "cards" => [
           %{
@@ -191,7 +214,14 @@ defmodule Relay.CLITest do
           Req.Test.json(conn, %{
             "board" => %{"name" => "B", "key" => "RLY"},
             "stages" => [
-              %{"id" => 7, "name" => "Code", "owner" => "ai", "category" => "in_progress", "position" => 2}
+              %{
+                "id" => 7,
+                "name" => "Code",
+                "type" => "work",
+                "ai_enabled" => true,
+                "category" => "in_progress",
+                "position" => 2
+              }
             ],
             "cards" => []
           })
