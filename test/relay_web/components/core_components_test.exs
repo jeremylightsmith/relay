@@ -689,26 +689,29 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ ~s(id="drawer-done-pill")
     end
 
-    test "below 720px the drawer body is a single scroll container; ≥720px keeps two columns" do
+    test "below 720px the whole drawer panel scrolls (header included); ≥720px keeps two columns" do
       attrs = drawer_attrs(%{status: :ready}, %{})
       html = render_component(&CoreComponents.card_drawer/1, attrs)
 
-      # Panel: full-screen below 720px (w-full h-dvh); desktop width only at drawer: (720px)
+      # Panel IS the scroll container below 720px (header scrolls with content); at drawer: it
+      # stops scrolling and hands scroll back to the two columns (pinned header restored).
       assert html =~
-               "drawer-panel flex h-dvh w-full flex-col bg-base-100 shadow-xl drawer:w-[min(760px,94vw)]"
+               "drawer-panel flex h-dvh w-full flex-col overflow-y-auto bg-base-100 shadow-xl drawer:overflow-hidden drawer:w-[min(760px,94vw)]"
 
-      # Body wrapper: single scroll container below 720px; hands scroll back to children at drawer:
+      # Body wrapper: content-sized column below 720px (no own scroll); flex-1 two-column row at drawer:.
       assert html =~
-               "flex min-h-0 flex-1 flex-col overflow-y-auto drawer:flex-row drawer:overflow-hidden"
+               "flex min-h-0 flex-none flex-col drawer:flex-1 drawer:flex-row drawer:overflow-hidden"
 
-      # Main column: content-sized + no own scroll below 720px; flex-1 + own scroll at drawer:
-      assert html =~
-               ~s(id="card-drawer-main")
+      # Regression: the body no longer owns the scroll below 720px.
+      refute html =~ "flex min-h-0 flex-1 flex-col overflow-y-auto drawer:flex-row drawer:overflow-hidden"
+
+      # Main column: content-sized + no own scroll below 720px; flex-1 + own scroll at drawer: (UNCHANGED).
+      assert html =~ ~s(id="card-drawer-main")
 
       assert html =~
                "flex min-w-0 flex-none flex-col gap-6 p-5 drawer:flex-1 drawer:overflow-y-auto"
 
-      # Properties rail: full-width top-border below 720px; side panel + own scroll at drawer:
+      # Properties rail: full-width top-border below 720px; side panel + own scroll at drawer: (UNCHANGED).
       assert html =~ ~s(id="card-drawer-rail")
 
       assert html =~

@@ -1081,7 +1081,7 @@ defmodule RelayWeb.CoreComponents do
         <.link id={"#{@id}-scrim"} patch={@close_patch} class="drawer-overlay">
           <span class="sr-only">Close</span>
         </.link>
-        <aside class="drawer-panel flex h-dvh w-full flex-col bg-base-100 shadow-xl drawer:w-[min(760px,94vw)]">
+        <aside class="drawer-panel flex h-dvh w-full flex-col overflow-y-auto bg-base-100 shadow-xl drawer:overflow-hidden drawer:w-[min(760px,94vw)]">
           <header class="flex items-start gap-3 border-b border-base-300 p-5">
             <div class="flex min-w-0 flex-1 flex-col gap-1.5">
               <div class="flex items-center gap-2">
@@ -1131,7 +1131,7 @@ defmodule RelayWeb.CoreComponents do
             </.link>
           </header>
 
-          <div class="flex min-h-0 flex-1 flex-col overflow-y-auto drawer:flex-row drawer:overflow-hidden">
+          <div class="flex min-h-0 flex-none flex-col drawer:flex-1 drawer:flex-row drawer:overflow-hidden">
             <div
               id={"#{@id}-main"}
               class="flex min-w-0 flex-none flex-col gap-6 p-5 drawer:flex-1 drawer:overflow-y-auto"
