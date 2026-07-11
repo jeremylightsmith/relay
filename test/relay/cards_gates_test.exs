@@ -140,13 +140,13 @@ defmodule Relay.CardsGatesTest do
     end
   end
 
-  describe "reject/4" do
-    test "routes to an explicit target with arrival status, note comment, and :rejected entry",
+  describe "reject/3" do
+    test "routes to the previous main stage with arrival status, note comment, and :rejected entry",
          %{review: review, code: code} do
       card = insert(:card, stage: review)
       {:ok, card} = Cards.set_status(card, %{status: :in_review})
 
-      assert {:ok, rejected} = Cards.reject(card, "Specs are missing edge cases", :agent, to: code)
+      assert {:ok, rejected} = Cards.reject(card, "Specs are missing edge cases", :agent)
       assert rejected.stage_id == code.id
       assert rejected.status == :working
 
@@ -163,14 +163,14 @@ defmodule Relay.CardsGatesTest do
              }
     end
 
-    test "defaults to the previous main stage for a sub-lane card", %{review: review, code: code} do
+    test "a sub-lane card routes back to its own parent main stage", %{review: review} do
       {:ok, sublane} = Boards.enable_lane(review, :review)
       card = insert(:card, stage: sublane)
       {:ok, card} = Cards.set_status(card, %{status: :in_review})
 
       assert {:ok, rejected} = Cards.reject(card, "Please tighten the copy")
-      assert rejected.stage_id == code.id
-      assert rejected.status == :working
+      assert rejected.stage_id == review.id
+      assert rejected.status == :in_review
     end
 
     test "defaults to the previous main stage for a main-lane card", %{review: review, code: code} do
@@ -190,11 +190,11 @@ defmodule Relay.CardsGatesTest do
       assert {:error, :invalid_target} = Cards.reject(card, "nope")
     end
 
-    test "never touches the card's owners", %{review: review, code: code} do
+    test "never touches the card's owners", %{review: review} do
       card = insert(:card, stage: review)
       insert(:card_owner, card: card)
 
-      {:ok, rejected} = Cards.reject(card, "Redo", :agent, to: code)
+      {:ok, rejected} = Cards.reject(card, "Redo", :agent)
       assert [%{actor_type: :agent}] = rejected.owners
     end
 

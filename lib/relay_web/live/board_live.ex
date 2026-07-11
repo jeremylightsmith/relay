@@ -806,13 +806,7 @@ defmodule RelayWeb.BoardLive do
          reject_error: "Add a note — the AI needs to know what to change."
        )}
     else
-      opts =
-        case resolve_stage(socket, params["to"]) do
-          %Stage{} = target -> [to: target]
-          nil -> []
-        end
-
-      case Cards.reject(card, note, current_actor(socket), opts) do
+      case Cards.reject(card, note, current_actor(socket)) do
         {:ok, updated} -> {:noreply, refresh_after_review(socket, card, updated)}
         {:error, _reason} -> {:noreply, socket}
       end

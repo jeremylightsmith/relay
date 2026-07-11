@@ -227,7 +227,7 @@ defmodule RelayWeb.Api.CardController do
 
     with {:ok, note} <- reject_note(params),
          %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
-         {:ok, card} <- do_reject(board, card, note, params["to"]) do
+         {:ok, card} <- Cards.reject(card, note, :agent) do
       render(conn, :show,
         board: board,
         card: card,
@@ -243,25 +243,6 @@ defmodule RelayWeb.Api.CardController do
   # The note is required for rejects (spec: 422 when missing).
   defp reject_note(%{"note" => note}) when is_binary(note) and note != "", do: {:ok, note}
   defp reject_note(_params), do: {:error, :missing_note}
-
-  # No explicit target -> Cards.reject defaults to the previous main stage (review position).
-  defp do_reject(_board, card, note, nil), do: Cards.reject(card, note, :agent)
-  defp do_reject(_board, card, note, ""), do: Cards.reject(card, note, :agent)
-
-  defp do_reject(board, card, note, to) do
-    case resolve_reject_target(board, to) do
-      %Schemas.Stage{} = target -> Cards.send_back(card, target, note, :agent)
-      nil -> {:error, :invalid_target}
-    end
-  end
-
-  # `to` is a stage id (int or numeric string) or a stage name on this board.
-  defp resolve_reject_target(board, to) do
-    case get_stage(board, to) do
-      %Schemas.Stage{} = stage -> stage
-      nil -> Enum.find(Boards.list_stages(board), &(&1.name == to))
-    end
-  end
 
   # No stage given -> the board's first stage in position order (Backlog on
   # the default board). An explicit id that doesn't resolve is a 404 (get_stage

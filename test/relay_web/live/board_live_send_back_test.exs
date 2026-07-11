@@ -20,12 +20,11 @@ defmodule RelayWeb.BoardLiveSendBackTest do
 
   test "the amber banner renders for a card with an open rejection and names the target", %{
     conn: conn,
-    code: code,
     review: review,
     user: user
   } do
     {:ok, card} = Cards.create_card(review, %{title: "Redo me"})
-    {:ok, _sent} = Cards.send_back(card, code, "Handle the empty case", :agent)
+    {:ok, _sent} = Cards.reject(card, "Handle the empty case", :agent)
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")

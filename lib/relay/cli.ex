@@ -86,11 +86,9 @@ defmodule Relay.CLI do
     end
   end
 
-  @doc "Sends the card back with a note; `to` (stage name/id) overrides the target."
-  def reject(ref, note, opts, to \\ nil) do
-    body = if to, do: %{note: note, to: to}, else: %{note: note}
-
-    with {:ok, %{"data" => card}} <- request(:post, "/api/cards/#{ref}/reject", body) do
+  @doc "Rejects the card with a note; routing is derived from its review stage."
+  def reject(ref, note, opts) do
+    with {:ok, %{"data" => card}} <- request(:post, "/api/cards/#{ref}/reject", %{note: note}) do
       {:ok, render(opts, card, format_card_line(card))}
     end
   end

@@ -618,66 +618,58 @@ defmodule Relay.Cards do
   end
 
   @doc """
-  Rejects the card from its review-type stage — a thin wrapper over `send_back/4`.
-  `{:error, :not_in_review}` when the card isn't in a review-type stage. Target = `opts[:to]`
-  (a `%Stage{}` or stage id) when given, else the previous main stage; `{:error, :invalid_target}`
-  when the review stage has no earlier main stage. Note is required (`:missing_note`).
+  Rejects the card from its review-type stage back to a **derived** destination — the reviewer
+  never picks one. A review **sub-lane** returns to its own parent main stage; a **top-level**
+  review stage uses its configured `reject_to_stage_id`, else the previous main stage. Moves the
+  card to the destination (arrival status via `move_card/4`'s snap), posts `note` as a comment,
+  logs a `:rejected` entry, and sets the single open `rejection` embed. Returns `{:ok, card}` or
+  `{:error, :not_in_review | :missing_note | :invalid_target | changeset}`.
   """
-  def reject(%Card{} = card, note, actor \\ :agent, opts \\ []) when is_binary(note) do
+  def reject(%Card{} = card, note, actor \\ :agent) when is_binary(note) do
     stage = current_stage(card)
 
-    if stage.type == :review do
-      reject_to(card, Keyword.get(opts, :to) || Boards.previous_main_stage(current_main_stage(card)), note, actor)
-    else
-      {:error, :not_in_review}
+    cond do
+      stage.type != :review -> {:error, :not_in_review}
+      String.trim(note) == "" -> {:error, :missing_note}
+      true -> do_reject(card, stage, note, actor)
     end
   end
 
-  defp reject_to(_card, nil, _note, _actor), do: {:error, :invalid_target}
-  defp reject_to(card, target, note, actor), do: send_back(card, target, note, actor)
-
-  @doc """
-  The universal send-back primitive (RLY-30): bounce `card` **backward** to a
-  main-lane `target` (a `%Stage{}` or its id) whose position is at or before the
-  card's current main-lane stage, attributed to `actor`. It moves the card to
-  the bottom of `target` with the target's arrival status, posts `note` as a
-  comment (keeping the human-readable thread intact), logs a `:rejected`
-  activity entry, and sets the card's single open `rejection` embed (snapshotting
-  from/to stage names, the actor's display name, and the timestamp) — replacing
-  any existing open rejection. Returns `{:ok, card}` (rejection set, owners
-  preloaded) or `{:error, :missing_note | :invalid_target | changeset}`. A blank
-  note is rejected before anything moves; a target that is not a main-lane stage
-  on this board, or is positioned after the card's current main stage, is
-  `{:error, :invalid_target}`.
-  """
-  def send_back(card, target, note, actor \\ :agent)
-
-  def send_back(%Card{board_id: board_id} = card, target_id, note, actor)
-      when is_integer(target_id) and is_binary(note) do
-    case Repo.get_by(Stage, id: target_id, board_id: board_id) do
-      %Stage{} = target -> send_back(card, target, note, actor)
-      nil -> {:error, :invalid_target}
-    end
-  end
-
-  def send_back(%Card{} = card, %Stage{} = target, note, actor) when is_binary(note) do
+  defp do_reject(card, stage, note, actor) do
     from_stage = current_main_stage(card)
 
-    cond do
-      String.trim(note) == "" ->
-        {:error, :missing_note}
-
-      not send_back_target?(card, from_stage, target) ->
-        {:error, :invalid_target}
-
-      true ->
-        with {:ok, moved} <- move_card(card, target, @append_index, actor),
-             :ok <- attach_note(moved, note, actor) do
-          log_gate(moved, :rejected, actor, from_stage, target, note)
-          {:ok, put_rejection(moved, from_stage, target, note, actor)}
-        end
+    case reject_destination(stage, from_stage) do
+      nil -> {:error, :invalid_target}
+      %Stage{} = target -> move_and_reject(card, from_stage, target, note, actor)
     end
   end
+
+  defp move_and_reject(card, from_stage, target, note, actor) do
+    with {:ok, moved} <- move_card(card, target, @append_index, actor),
+         :ok <- attach_note(moved, note, actor) do
+      log_gate(moved, :rejected, actor, from_stage, target, note)
+      {:ok, put_rejection(moved, from_stage, target, note, actor)}
+    end
+  end
+
+  @doc """
+  The stage a reject from this card would land on, or `nil` when the card is not in a review-type
+  stage or no destination exists (a first-column top-level review with no `reject_to`). Used by the
+  drawer to *show* the destination without moving the card.
+  """
+  def reject_target(%Card{} = card) do
+    stage = current_stage(card)
+    if stage.type == :review, do: reject_destination(stage, current_main_stage(card))
+  end
+
+  # Sub-lane review → its own parent main stage (== the card's current_main_stage).
+  defp reject_destination(%Stage{parent_id: parent_id}, from_stage) when not is_nil(parent_id), do: from_stage
+
+  # Top-level review → configured reject_to, else the previous main stage.
+  defp reject_destination(%Stage{parent_id: nil, reject_to_stage_id: nil} = stage, _from),
+    do: Boards.previous_main_stage(stage)
+
+  defp reject_destination(%Stage{parent_id: nil, reject_to_stage_id: target_id}, _from), do: Repo.get(Stage, target_id)
 
   @doc """
   Marks the card `:ready` in place (the drawer's "Mark done") and clears any open rejection —
@@ -755,15 +747,6 @@ defmodule Relay.Cards do
     stage = Repo.get!(Stage, stage_id)
     if is_nil(stage.parent_id), do: stage, else: Repo.get!(Stage, stage.parent_id)
   end
-
-  # A valid send-back target is a main-lane stage on the card's board positioned
-  # at or before the card's current main stage (never forward). The gate's
-  # nil-target reject lands the card in its own stage, so "at" (==) is allowed;
-  # the universal drawer control only ever offers strictly-earlier stages.
-  defp send_back_target?(%Card{board_id: bid}, %Stage{} = from, %Stage{parent_id: nil, board_id: bid} = target),
-    do: target.position <= from.position
-
-  defp send_back_target?(_card, _from, _target), do: false
 
   # Sets the card's single open rejection embed, replacing any existing one
   # (on_replace: :delete), then broadcasts the upsert so open drawers show the
