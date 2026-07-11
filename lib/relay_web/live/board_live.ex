@@ -305,7 +305,7 @@ defmodule RelayWeb.BoardLive do
   @impl true
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
         compose create_card move_card save_card_title save_card_description
-        set_card_status add_owner remove_owner post_comment answer_input
+        set_card_status add_owner remove_owner take_over post_comment answer_input
         review_approve review_reject review_mark_done review_pull send_back
         save_board_name archive_card restore_card toggle_sub_task
       ) do
@@ -712,6 +712,14 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("review_pull", _params, socket), do: {:noreply, socket}
+
+  # RLY-47 — "Take over": flip ownership to the signed-in user (drops the AI via the
+  # exclusivity invariant). Status is untouched — provenance changes, not the baton's substate.
+  def handle_event("take_over", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    apply_owner_change(socket, Cards.take_over(card, current_actor(socket)))
+  end
+
+  def handle_event("take_over", _params, socket), do: {:noreply, socket}
 
   # RLY-30 — the universal send-back control: any card with an earlier
   # main-lane stage can be bounced back with a note, not just review gates.

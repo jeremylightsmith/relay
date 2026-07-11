@@ -1638,12 +1638,15 @@ defmodule RelayWeb.CoreComponents do
                   data-actor-type={owner.actor_type}
                 >
                   <span class="text-sm">{owner_name(owner)}</span>
-                  <span
-                    :if={paused_owner?(owner, @active_owner)}
-                    class="rail-owner-paused badge badge-ghost badge-xs"
+                  <button
+                    :if={!@archived and owner.actor_type == :agent}
+                    type="button"
+                    id={"#{@id}-take-over"}
+                    class="rail-take-over btn btn-primary btn-xs"
+                    phx-click="take_over"
                   >
-                    paused
-                  </span>
+                    Take over
+                  </button>
                   <button
                     :if={!@archived}
                     type="button"
@@ -1670,7 +1673,10 @@ defmodule RelayWeb.CoreComponents do
                     Assign AI
                   </button>
                   <button
-                    :if={@current_user_id && !user_owner?(@card, @current_user_id)}
+                    :if={
+                      @current_user_id && !user_owner?(@card, @current_user_id) &&
+                        !agent_owner?(@card)
+                    }
                     type="button"
                     id={"#{@id}-add-me"}
                     class="btn btn-ghost btn-xs"
@@ -1817,18 +1823,16 @@ defmodule RelayWeb.CoreComponents do
     ]
   end
 
-  defp owner_name(%{actor_type: :agent}), do: "AI Agent"
+  defp owner_name(%{actor_type: :agent}), do: "Relay AI"
   defp owner_name(%{actor_type: :user, user: user}), do: user.name || user.email
 
-  defp active_worker_names(_card, :ai), do: "AI Agent"
+  defp active_worker_names(_card, :ai), do: "Relay AI"
 
   defp active_worker_names(card, :human) do
     card.owners
     |> Enum.filter(&(&1.actor_type == :user))
     |> Enum.map_join(", ", &owner_name/1)
   end
-
-  defp paused_owner?(owner, active_owner), do: active_owner == :ai and owner.actor_type == :user
 
   defp agent_owner?(card), do: Enum.any?(card.owners, &(&1.actor_type == :agent))
 

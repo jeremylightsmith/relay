@@ -308,7 +308,6 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
       sub_tasks: [],
       ai_result: nil,
       owners: [
-        %{id: 1, actor_type: :user, user_id: 1, user: %{name: "Ada Lovelace", email: "ada@example.com"}},
         %{id: 2, actor_type: :agent, user_id: nil, user: nil}
       ],
       inserted_at: ~U[2026-07-01 09:00:00Z],

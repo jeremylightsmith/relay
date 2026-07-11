@@ -1322,7 +1322,8 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#stage-col-1-cards .board-card[data-active-owner='human']")
     end
 
-    test "Assign AI flips the active worker to AI and pauses the human", %{conn: conn, user: user} do
+    test "Assign AI makes Relay AI the sole owner: Take over shows, add controls hide",
+         %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
@@ -1335,23 +1336,28 @@ defmodule RelayWeb.BoardLiveTest do
                "AI"
              )
 
-      assert has_element?(
-               view,
-               "#card-drawer-rail .rail-owner[data-actor-type='user'] .rail-owner-paused",
-               "paused"
-             )
+      # exclusivity: the human owner is gone; no paused badge remains
+      refute has_element?(view, "#card-drawer-rail .rail-owner[data-actor-type='user']")
+      refute has_element?(view, "#card-drawer-rail .rail-owner-paused")
 
+      # Take over is the affordance next to Relay AI; Add me / Assign AI are hidden
+      assert has_element?(view, "#card-drawer-take-over")
+      refute has_element?(view, "#card-drawer-add-me")
       refute has_element?(view, "#card-drawer-assign-ai")
+
       assert has_element?(view, "#stage-col-1-cards .board-card[data-active-owner='ai']")
     end
 
-    test "releasing the AI returns the baton to the human", %{conn: conn, user: user} do
+    test "Take over flips ownership to the current user and leaves status untouched",
+         %{conn: conn, user: user, card: card} do
+      {:ok, _card} = Cards.set_status(card, %{"status" => "working"})
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      view |> element("#card-drawer-add-me") |> render_click()
-      view |> element("#card-drawer-assign-ai") |> render_click()
-      view |> element("#card-drawer-remove-owner-agent") |> render_click()
+      assert has_element?(view, "#card-drawer-take-over")
+      view |> element("#card-drawer-take-over") |> render_click()
 
       assert has_element?(
                view,
@@ -1359,9 +1365,23 @@ defmodule RelayWeb.BoardLiveTest do
                "Human"
              )
 
+      assert has_element?(view, "#card-drawer-rail .rail-owner[data-actor-type='user']", "Test User")
       refute has_element?(view, "#card-drawer-rail .rail-owner[data-actor-type='agent']")
-      assert has_element?(view, "#card-drawer-assign-ai")
-      refute has_element?(view, "#card-drawer-rail .rail-owner-paused")
+      refute has_element?(view, "#card-drawer-take-over")
+
+      reloaded = Cards.get_card_by_ref(board, "RLY-1")
+      assert [%{actor_type: :user, user_id: uid}] = reloaded.owners
+      assert uid == user.id
+      assert reloaded.status == :working
+    end
+
+    test "an AI-owned card renders the Relay AI owner label", %{conn: conn, user: user, card: card} do
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-rail .rail-owner[data-actor-type='agent']", "Relay AI")
     end
 
     test "removing the human owner leaves the card unowned", %{conn: conn, user: user} do
