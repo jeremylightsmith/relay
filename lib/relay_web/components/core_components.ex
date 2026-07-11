@@ -929,8 +929,7 @@ defmodule RelayWeb.CoreComponents do
   `"save_card_description"` (form params `card[description]`) on save,
   `"move_card"` (phx-value ref + stage_id, no index — the server appends
   to the target stage's bottom) when a "Move to…" target is picked,
-  `"set_card_status"` (form params `card[status]` + `card[progress]`) on
-  status/progress change, `"add_owner"` / `"remove_owner"` (phx-value
+  `"add_owner"` / `"remove_owner"` (phx-value
   `actor_type` + `user_id`) from the owners rail's controls,
   `"validate_comment"` / `"post_comment"` (form params `comment[body]`)
   from the timeline composer, and `"answer_input"` (form params
@@ -951,7 +950,6 @@ defmodule RelayWeb.CoreComponents do
         stage_owner={:human}
         close_patch={~p"/board"}
         title_form={@title_form}
-        status_form={@status_form}
       />
   """
   attr :id, :string, required: true
@@ -978,10 +976,6 @@ defmodule RelayWeb.CoreComponents do
   attr :description_form, :any,
     default: nil,
     doc: "a Phoenix.HTML.Form for card[description]; required when editing_description"
-
-  attr :status_form, :any,
-    required: true,
-    doc: "a Phoenix.HTML.Form for card[status] + card[progress]"
 
   attr :current_user_id, :integer,
     default: nil,
@@ -1774,33 +1768,10 @@ defmodule RelayWeb.CoreComponents do
                 </div>
               </div>
 
-              <%!-- STATUS: transitional — removed when buttons-only-for-decisions lands (RLY-*) --%>
               <div class="rail-section flex flex-col gap-2">
                 <.section_label>Status</.section_label>
                 <div class="rail-status">
-                  <.form
-                    :if={!@archived}
-                    for={@status_form}
-                    id={"#{@id}-status-form"}
-                    phx-change="set_card_status"
-                  >
-                    <.input
-                      field={@status_form[:status]}
-                      type="select"
-                      options={status_options()}
-                      class="select select-sm w-full"
-                    />
-                    <.input
-                      :if={@card.status == :working}
-                      field={@status_form[:progress]}
-                      type="number"
-                      min="0"
-                      max="100"
-                      placeholder="Progress %"
-                      class="input input-sm w-full"
-                    />
-                  </.form>
-                  <.status_badge :if={@archived} status={@card.status} progress={@card.progress} />
+                  <.status_badge status={@card.status} />
                 </div>
               </div>
 
@@ -1858,16 +1829,6 @@ defmodule RelayWeb.CoreComponents do
   # SUB-TASKS progress bar width; an empty list is 0% (never divides by zero).
   defp sub_task_pct(%{total: 0}), do: 0
   defp sub_task_pct(%{done: done, total: total}), do: round(done * 100 / total)
-
-  defp status_options do
-    [
-      {"Queued", "queued"},
-      {"Working", "working"},
-      {"Needs input", "needs_input"},
-      {"In review", "in_review"},
-      {"Done", "done"}
-    ]
-  end
 
   defp owner_name(%{actor_type: :agent}), do: "Relay AI"
   defp owner_name(%{actor_type: :user, user: user}), do: user.name || user.email

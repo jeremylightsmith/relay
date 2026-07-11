@@ -70,7 +70,6 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
       events = [
         {"save_card_title", %{"card" => %{"title" => "sneaky"}}},
         {"save_card_description", %{"card" => %{"description" => "sneaky"}}},
-        {"set_card_status", %{"card" => %{"status" => "in_review"}}},
         {"add_owner", %{"actor_type" => "agent"}},
         {"remove_owner", %{"actor_type" => "agent"}},
         {"post_comment", %{"comment" => %{"body" => "sneaky"}}},

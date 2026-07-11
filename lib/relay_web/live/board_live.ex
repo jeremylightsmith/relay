@@ -177,7 +177,6 @@ defmodule RelayWeb.BoardLive do
         editing_title={@editing_title}
         editing_description={@editing_description}
         description_form={@description_form}
-        status_form={@status_form}
         current_user_id={@current_scope.user.id}
         conversation={@streams.conversation}
         activity={@streams.activity}
@@ -305,7 +304,7 @@ defmodule RelayWeb.BoardLive do
   @impl true
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
         compose create_card move_card save_card_title save_card_description
-        set_card_status add_owner remove_owner take_over post_comment answer_input
+        add_owner remove_owner take_over post_comment answer_input
         review_approve review_reject review_mark_done review_pull send_back
         save_board_name archive_card restore_card toggle_sub_task
       ) do
@@ -555,18 +554,6 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("save_card_description", _params, socket), do: {:noreply, socket}
-
-  def handle_event("set_card_status", %{"card" => card_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
-    case Cards.set_status(card, card_params, current_actor(socket)) do
-      {:ok, card} ->
-        {:noreply, refresh_card(socket, card)}
-
-      {:error, changeset} ->
-        {:noreply, assign(socket, :status_form, to_form(changeset))}
-    end
-  end
-
-  def handle_event("set_card_status", _params, socket), do: {:noreply, socket}
 
   # SUB-TASKS panel toggle (RLY-18): flip the item's done flag and refresh the
   # drawer + board card so the done/total count and stage badge stay in sync.
@@ -987,7 +974,6 @@ defmodule RelayWeb.BoardLive do
 
     socket
     |> assign(:selected_card, card)
-    |> assign(:status_form, status_form(card))
     |> assign(:question, latest_question(card, activity))
     |> assign(:answer_form, empty_answer_form())
     |> assign_review(card)
@@ -998,7 +984,7 @@ defmodule RelayWeb.BoardLive do
 
   # Approve/reject moved the card: re-stream the source and target stage
   # columns (and counts) exactly like any move, then refresh the drawer to
-  # the updated card — status form, review panel, and timeline included.
+  # the updated card — review panel and timeline included.
   defp refresh_after_review(socket, %Card{} = before, %Card{} = updated) do
     socket
     |> apply_move(before.stage_id, updated)
@@ -1090,10 +1076,6 @@ defmodule RelayWeb.BoardLive do
     stage = Map.fetch!(by_id, stage_id)
     main = if is_nil(stage.parent_id), do: stage, else: Map.fetch!(by_id, stage.parent_id)
     main.position
-  end
-
-  defp status_form(%Card{} = card) do
-    to_form(%{"status" => Atom.to_string(card.status), "progress" => card.progress}, as: :card)
   end
 
   # The move already persisted; stream items can't be reordered in
@@ -1264,7 +1246,6 @@ defmodule RelayWeb.BoardLive do
         |> assign(:editing_title, false)
         |> assign(:editing_description, false)
         |> assign(:description_form, nil)
-        |> assign(:status_form, status_form(card))
         |> assign(:comment_form, empty_comment_form())
         |> assign(:question, latest_question(card, activity))
         |> assign(:answer_form, empty_answer_form())
@@ -1281,7 +1262,6 @@ defmodule RelayWeb.BoardLive do
           editing_title: false,
           editing_description: false,
           description_form: nil,
-          status_form: nil,
           comment_form: nil,
           question: nil,
           answer_form: nil,

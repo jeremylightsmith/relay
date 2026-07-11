@@ -1439,55 +1439,20 @@ defmodule RelayWeb.BoardLiveTest do
       refute has_element?(view, "#stage-col-1-cards .board-card[data-active-owner]")
     end
 
-    test "setting status from the drawer persists and updates the board card",
+    test "the rail shows a read-only status badge — no status select or progress input",
          %{conn: conn, card: card, user: user} do
+      {:ok, _card} = Cards.set_status(card, %{"status" => "working"})
+
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      view |> form("#card-drawer-status-form", card: %{status: "needs_input"}) |> render_change()
+      # read-only badge in the rail
+      assert has_element?(view, "#card-drawer-rail .rail-status .status-badge", "working")
 
-      assert Repo.get!(Card, card.id).status == :needs_input
-
-      assert has_element?(
-               view,
-               "#stage-col-1-cards .board-card .card-needs-input",
-               "NEEDS INPUT"
-             )
-    end
-
-    test "working reveals the progress input; progress shows on the board badge",
-         %{conn: conn, card: card, user: user} do
-      board = Boards.get_or_create_default_board(user)
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
-
-      refute has_element?(view, "#card-drawer-status-form input[name='card[progress]']")
-
-      view |> form("#card-drawer-status-form", card: %{status: "working"}) |> render_change()
-
-      assert has_element?(view, "#card-drawer-status-form input[name='card[progress]']")
-
-      view
-      |> form("#card-drawer-status-form", card: %{status: "working", progress: "61"})
-      |> render_change()
-
-      assert Repo.get!(Card, card.id).progress == 61
-
-      assert has_element?(
-               view,
-               "#stage-col-1-cards .board-card .card-status[data-status='working']",
-               "working · 61%"
-             )
-    end
-
-    test "an invalid status payload changes nothing", %{conn: conn, card: card, user: user} do
-      board = Boards.get_or_create_default_board(user)
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
-
-      view
-      |> element("#card-drawer-status-form")
-      |> render_change(%{"card" => %{"status" => "banana"}})
-
-      assert Repo.get!(Card, card.id).status == :queued
+      # no editable status surface anywhere in the drawer
+      refute has_element?(view, "#card-drawer-status-form")
+      refute has_element?(view, "#card-drawer select[name='card[status]']")
+      refute has_element?(view, "#card-drawer input[name='card[progress]']")
     end
 
     test "adding another user's id as owner is ignored", %{conn: conn, user: user} do
@@ -1620,25 +1585,22 @@ defmodule RelayWeb.BoardLiveTest do
       assert user_id == user.id
     end
 
-    test "drawer actions (status, owners, move) log user-attributed entries",
+    test "drawer actions (owners, move) log user-attributed entries",
          %{conn: conn, user: user, board: board, backlog: backlog} do
       {:ok, card} = Cards.create_card(backlog, %{title: "Card"})
-      # Review is a review-type stage, so :in_review stays valid on the move — no
-      # implicit ADR 0003 status snap sneaks an extra :status_changed entry in.
+      # Review is a review-type stage; the freshly-created card is :queued, which
+      # isn't valid there, so the move also triggers an implicit ADR 0003 status
+      # snap to :in_review — exercised here alongside owners/move attribution.
       review = Enum.find(board.stages, &(&1.name == "Review"))
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
-
-      view
-      |> form("#card-drawer-status-form", card: %{status: "in_review"})
-      |> render_change()
 
       view |> element("#card-drawer-add-me") |> render_click()
       view |> element("#card-drawer-move-to-#{review.id}") |> render_click()
 
       entries = Repo.all(from a in Schemas.Activity, where: a.card_id == ^card.id, order_by: a.id)
 
-      assert Enum.map(entries, & &1.type) == [:created, :status_changed, :owners_changed, :moved]
+      assert Enum.map(entries, & &1.type) == [:created, :owners_changed, :moved, :status_changed]
 
       [_created | user_entries] = entries
       assert Enum.all?(user_entries, &(&1.actor_type == :user and &1.user_id == user.id))
@@ -1731,21 +1693,6 @@ defmodule RelayWeb.BoardLiveTest do
                view,
                "#timeline-comment-#{comment.id} .timeline-comment-body",
                "Implemented — ready for review."
-             )
-    end
-
-    test "changing status in the open drawer appends the activity entry live", %{conn: conn, user: user} do
-      board = Boards.get_or_create_default_board(user)
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
-
-      view
-      |> form("#card-drawer-status-form", card: %{status: "in_review"})
-      |> render_change()
-
-      assert has_element?(
-               view,
-               "#card-drawer-activity .timeline-activity-phrase",
-               "set status to in_review"
              )
     end
 

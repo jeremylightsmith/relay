@@ -48,16 +48,20 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
     end
 
     test "a status change in session A's drawer re-renders the board card in session B",
-         %{conn: conn, backlog: backlog, user: user} do
-      {:ok, _card} = Cards.create_card(backlog, %{title: "Needs a human"})
+         %{conn: conn, board: board, backlog: backlog, user: user} do
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Ready for review"})
+      # Review is a review-type stage; the freshly-created card is :queued, which
+      # isn't valid there, so the move triggers an implicit ADR 0003 status snap
+      # to :in_review — this is the only drawer-driven status-change path left.
+      review = Enum.find(board.stages, &(&1.name == "Review"))
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view_a, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
       {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      view_a |> form("#card-drawer-status-form", card: %{status: "needs_input"}) |> render_change()
+      view_a |> element("#card-drawer-move-to-#{review.id}") |> render_click()
 
-      assert has_element?(view_b, "#stage-col-1-cards .board-card .card-needs-input", "NEEDS INPUT")
+      assert has_element?(view_b, ".board-card .card-status[data-status='in_review']")
     end
 
     test "a status change made elsewhere refreshes another session's open drawer",
