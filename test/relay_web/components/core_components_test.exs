@@ -131,6 +131,39 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ ~s(id="stage-col-1-new-card")
     end
 
+    test "compose + button has a ≥44px tap target with a visually small glyph" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-1",
+          name: "Backlog",
+          type: :queue,
+          stage_id: 7
+        )
+
+      assert html =~ ~s(id="stage-col-1-new-card")
+      # ≥44×44px hit area (mobile tap target); glyph stays 15px
+      assert html =~ "min-width:44px"
+      assert html =~ "min-height:44px"
+      assert html =~ "font-size:15px"
+    end
+
+    test "composer input is ≥16px (no iOS zoom) and its buttons are ≥44px tall" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-1",
+          name: "Backlog",
+          type: :queue,
+          stage_id: 7,
+          composing: true,
+          compose_form: to_form(%{"title" => ""}, as: :card)
+        )
+
+      # 16px input font prevents iOS auto-zoom on focus
+      assert html =~ ~s(class="commit-field-input text-base")
+      # Add card / Cancel are comfortable tap targets
+      assert html =~ "min-h-[44px]"
+    end
+
     test "collapsed renders the mockup's 44px dashed strip instead of the column" do
       html =
         render_component(&CoreComponents.stage_column/1,
@@ -570,6 +603,37 @@ defmodule RelayWeb.CoreComponentsTest do
       html = render_component(&CoreComponents.card_drawer/1, attrs)
 
       refute html =~ ~s(id="drawer-done-pill")
+    end
+
+    test "below 720px the drawer body is a single scroll container; ≥720px keeps two columns" do
+      attrs = drawer_attrs(%{status: :ready}, %{})
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      # Panel: full-screen below 720px (w-full h-dvh); desktop width only at drawer: (720px)
+      assert html =~
+               "drawer-panel flex h-dvh w-full flex-col bg-base-100 shadow-xl drawer:w-[min(760px,94vw)]"
+
+      # Body wrapper: single scroll container below 720px; hands scroll back to children at drawer:
+      assert html =~
+               "flex min-h-0 flex-1 flex-col overflow-y-auto drawer:flex-row drawer:overflow-hidden"
+
+      # Main column: content-sized + no own scroll below 720px; flex-1 + own scroll at drawer:
+      assert html =~
+               ~s(id="card-drawer-main")
+
+      assert html =~
+               "flex min-w-0 flex-none flex-col gap-6 p-5 drawer:flex-1 drawer:overflow-y-auto"
+
+      # Properties rail: full-width top-border below 720px; side panel + own scroll at drawer:
+      assert html =~ ~s(id="card-drawer-rail")
+
+      assert html =~
+               "flex w-full shrink-0 flex-col gap-5 border-t border-base-300 bg-base-200/30 p-5 text-sm drawer:w-[220px] drawer:overflow-y-auto drawer:border-l drawer:border-t-0"
+
+      # Regression: the old lg/1024 stack point is fully gone from the drawer.
+      refute html =~ "lg:flex-row"
+      refute html =~ "lg:w-[220px]"
+      refute html =~ "lg:w-[min(760px,94vw)]"
     end
   end
 

@@ -49,17 +49,17 @@ defmodule RelayWeb.BoardLive do
           </button>
         </div>
         <div class="flex items-center justify-between px-4 pb-3 pt-1 sm:px-5">
-          <div class="flex items-center gap-2">
+          <div id="board-title-cluster" class="flex min-w-0 items-center gap-2">
             <.link
               navigate={~p"/boards?from=#{@board.slug}"}
               id="all-boards-link"
               title="All boards"
-              class="btn btn-ghost btn-sm btn-circle"
+              class="btn btn-ghost btn-sm btn-circle min-h-[44px] min-w-[44px]"
               aria-label="All boards"
             >
               <.icon name="hero-squares-2x2" class="size-5" />
             </.link>
-            <h1 id="board-title" class="text-xl font-semibold">
+            <h1 id="board-title" class="min-w-0 truncate text-xl font-semibold">
               <.boxed_field
                 :if={!@read_only?}
                 id="board-name"
@@ -68,7 +68,7 @@ defmodule RelayWeb.BoardLive do
                 field={:name}
                 save_event="save_board_name"
                 cancel_event="cancel_board_name"
-                input_class="text-xl font-semibold"
+                input_class="truncate text-xl font-semibold"
               />
               <span :if={@read_only?}>{@board.name}</span>
             </h1>
@@ -89,7 +89,7 @@ defmodule RelayWeb.BoardLive do
               type="button"
               id="archived-cards-button"
               phx-click="open_archived"
-              class="btn btn-ghost btn-sm gap-1.5"
+              class="btn btn-ghost btn-sm gap-1.5 min-h-[44px] min-w-[44px]"
               aria-label="Archived cards"
             >
               <.icon name="hero-archive-box" class="size-5" />
@@ -98,14 +98,17 @@ defmodule RelayWeb.BoardLive do
             <.link
               navigate={~p"/board/#{@board.slug}/settings"}
               id="board-settings-link"
-              class="btn btn-ghost btn-sm btn-circle"
+              class="btn btn-ghost btn-sm btn-circle min-h-[44px] min-w-[44px]"
               aria-label="Board settings"
             >
               <.icon name="hero-cog-6-tooth" class="size-5" />
             </.link>
           </div>
         </div>
-        <div style="display:flex;gap:22px;padding:16px 18px 18px 18px;overflow-x:auto;overflow-y:hidden;align-items:stretch;background:oklch(0.952 0.008 255);min-height:calc(100vh - 120px);">
+        <div
+          id="board-bands"
+          style="display:flex;gap:22px;padding:16px 18px 18px 18px;overflow-x:auto;overflow-y:hidden;align-items:stretch;background:oklch(0.952 0.008 255);min-height:calc(100vh - 120px);-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;"
+        >
           <section
             :for={{category, stages} <- @stage_groups}
             id={"category-#{category}"}

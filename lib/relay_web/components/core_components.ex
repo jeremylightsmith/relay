@@ -1081,7 +1081,7 @@ defmodule RelayWeb.CoreComponents do
         <.link id={"#{@id}-scrim"} patch={@close_patch} class="drawer-overlay">
           <span class="sr-only">Close</span>
         </.link>
-        <aside class="drawer-panel flex h-dvh w-full flex-col bg-base-100 shadow-xl lg:w-[min(760px,94vw)]">
+        <aside class="drawer-panel flex h-dvh w-full flex-col bg-base-100 shadow-xl drawer:w-[min(760px,94vw)]">
           <header class="flex items-start gap-3 border-b border-base-300 p-5">
             <div class="flex min-w-0 flex-1 flex-col gap-1.5">
               <div class="flex items-center gap-2">
@@ -1131,8 +1131,11 @@ defmodule RelayWeb.CoreComponents do
             </.link>
           </header>
 
-          <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
-            <div id={"#{@id}-main"} class="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto p-5">
+          <div class="flex min-h-0 flex-1 flex-col overflow-y-auto drawer:flex-row drawer:overflow-hidden">
+            <div
+              id={"#{@id}-main"}
+              class="flex min-w-0 flex-none flex-col gap-6 p-5 drawer:flex-1 drawer:overflow-y-auto"
+            >
               <section
                 :if={@archived}
                 id="card-archived-banner"
@@ -1633,7 +1636,7 @@ defmodule RelayWeb.CoreComponents do
 
             <div
               id={"#{@id}-rail"}
-              class="flex w-full shrink-0 flex-col gap-5 overflow-y-auto border-t border-base-300 bg-base-200/30 p-5 text-sm lg:w-[220px] lg:border-l lg:border-t-0"
+              class="flex w-full shrink-0 flex-col gap-5 border-t border-base-300 bg-base-200/30 p-5 text-sm drawer:w-[220px] drawer:overflow-y-auto drawer:border-l drawer:border-t-0"
             >
               <%!-- STAGE: chip + Move to… + Archive --%>
               <div class="rail-section flex flex-col gap-2">
@@ -2062,7 +2065,7 @@ defmodule RelayWeb.CoreComponents do
             phx-value-stage-id={@stage_id}
             title="Add work"
             aria-label="New card"
-            style="width:22px;height:22px;border-radius:6px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:oklch(0.45 0.02 255);font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex:0 0 auto;"
+            style="min-width:44px;min-height:44px;border-radius:6px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:oklch(0.45 0.02 255);font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex:0 0 auto;"
           >
             +
           </button>
@@ -2120,12 +2123,19 @@ defmodule RelayWeb.CoreComponents do
                       placeholder="Card title"
                       autofocus
                       autocomplete="off"
+                      input_class="text-base"
                       phx-keydown="cancel_compose"
                       phx-key="escape"
                     />
                     <div class="mt-2 flex items-center gap-2">
-                      <.button variant="primary" class="btn btn-primary btn-xs">Add card</.button>
-                      <button type="button" class="btn btn-ghost btn-xs" phx-click="cancel_compose">
+                      <.button variant="primary" class="btn btn-primary btn-xs min-h-[44px]">
+                        Add card
+                      </.button>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-xs min-h-[44px]"
+                        phx-click="cancel_compose"
+                      >
                         Cancel
                       </button>
                     </div>
