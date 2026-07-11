@@ -3,6 +3,6 @@
   "private": true,
   "description": "Node dev deps for Relay's browser tests + acceptance smoke (Playwright).",
   "devDependencies": {
-    "playwright": "1.61.1"
+    "playwright": "^1.61.1"
   }
 }

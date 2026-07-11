@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.32 0.02 255);background:oklch(0.955 0.008 255);-webkit-font-smoothing:antialiased;}
+  a{color:oklch(0.50 0.14 250);} a:hover{color:oklch(0.42 0.14 250);}
+  ::-webkit-scrollbar{width:10px;height:10px;}
+  ::-webkit-scrollbar-thumb{background:oklch(0.88 0.01 255);border-radius:6px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  @keyframes relaypulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:oklch(0.955 0.008 255);">
+<div style="max-width:1000px;margin:0 auto;padding:56px 34px 110px;display:flex;flex-direction:column;">
+
+  <!-- ===== HEADER ===== -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:22px;">
+    <div style="width:24px;height:24px;border-radius:7px;background:oklch(0.60 0.14 250);display:flex;align-items:center;justify-content:center;position:relative;">
+      <div style="width:8px;height:8px;border-radius:50%;background:oklch(1 0 0);"></div>
+      <div style="position:absolute;right:3px;top:3px;width:4px;height:4px;border-radius:50%;background:oklch(0.60 0.14 250);box-shadow:0 0 0 1.5px oklch(1 0 0);"></div>
+    </div>
+    <span style="font-size:11px;font-weight:600;letter-spacing:0.14em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);">RELAY · DESIGN DRAFT</span>
+    <span style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;background:oklch(0.96 0.03 75);color:oklch(0.50 0.11 65);padding:3px 9px;border-radius:20px;">FOR DISCUSSION</span>
+  </div>
+  <h1 style="font-size:38px;font-weight:600;letter-spacing:-0.03em;line-height:1.08;margin:0 0 16px;color:oklch(0.22 0.02 255);">Stage &amp; card model</h1>
+  <p style="font-size:16.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0;max-width:672px;">A board is fully customizable — you name your stages, order them, and pick how many. To make card actions predictable across any layout, behavior comes from three fixed ideas: the <b style="color:oklch(0.28 0.02 255);">stage type</b>, whether a work stage is <b style="color:oklch(0.28 0.02 255);">AI-enabled</b>, and who <b style="color:oklch(0.28 0.02 255);">owns</b> the card. This doc defines those, the card's sub-states, and the very few buttons that actually exist.</p>
+
+  <!-- ===== 1. PRINCIPLE ===== -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:44px 0 34px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">01 — Principle</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 14px;color:oklch(0.24 0.02 255);">Work is pulled, not pushed</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 20px;max-width:672px;">Nobody presses a button to shove a card forward. A worker — an agent or a person — <i>pulls</i> the next card when they have room for it. So on the board, <b style="color:oklch(0.30 0.02 255);">movement is dragging</b> (or the agent moving its own card), <b style="color:oklch(0.30 0.02 255);">assignment is ownership</b>, and <b style="color:oklch(0.30 0.02 255);">buttons only appear when a human has an actual decision to make</b> — answer a question, or approve/reject at a gate. Everything else is quiet.</p>
+
+  <!-- ===== 2. STAGE TYPES ===== -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:44px 0 34px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">02 — Stage types</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px;color:oklch(0.24 0.02 255);">Five types</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 24px;max-width:672px;">Every column is exactly one of these. This is the smallest set that still tells us which columns are gates and where agents are allowed to work. <b style="color:oklch(0.30 0.02 255);">Planning</b> and <b style="color:oklch(0.30 0.02 255);">Work</b> are twins — both active, both owned — split apart only so the board can separate <i>shaping the approach</i> from <i>building it</i>.</p>
+
+  <div style="display:flex;flex-direction:column;gap:14px;">
+    <!-- Queue -->
+    <div style="display:flex;gap:18px;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:20px 22px;">
+      <div style="flex:0 0 auto;width:44px;height:44px;border-radius:11px;background:oklch(0.965 0.004 255);border:1px solid oklch(0.91 0.006 255);display:flex;align-items:center;justify-content:center;"><span style="width:14px;height:14px;border-radius:3px;border:2px solid oklch(0.58 0.02 255);box-sizing:border-box;display:block;"></span></div>
+      <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:5px;">
+          <span style="font-size:17px;font-weight:600;letter-spacing:-0.01em;color:oklch(0.26 0.02 255);">Queue</span>
+          <span style="font-size:12px;font-family:'JetBrains Mono',monospace;color:oklch(0.60 0.02 255);">passive · nothing runs here</span>
+        </div>
+        <p style="font-size:14px;line-height:1.55;color:oklch(0.44 0.02 255);margin:0 0 7px;">A holding area. Cards wait to be pulled. Order signals priority; the next stage's worker pulls from the top when it has room.</p>
+        <span style="font-size:12px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">e.g. Backlog · Next · Icebox</span>
+      </div>
+    </div>
+    <!-- Work -->
+    <div style="display:flex;gap:18px;background:oklch(1 0 0);border:1px solid oklch(0.90 0.02 275);border-radius:14px;padding:20px 22px;">
+      <div style="flex:0 0 auto;width:44px;height:44px;border-radius:11px;background:oklch(0.98 0.02 250);border:1px solid oklch(0.90 0.04 250);display:flex;align-items:center;justify-content:center;"><span style="width:14px;height:14px;border-radius:3px;background:oklch(0.60 0.14 250);display:block;"></span></div>
+      <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:5px;">
+          <span style="font-size:17px;font-weight:600;letter-spacing:-0.01em;color:oklch(0.26 0.02 255);">Work</span>
+          <span style="font-size:12px;font-family:'JetBrains Mono',monospace;color:oklch(0.60 0.02 255);">active · someone does the work</span>
+        </div>
+        <p style="font-size:14px;line-height:1.55;color:oklch(0.44 0.02 255);margin:0 0 10px;">Where work happens. A Work stage is either <b style="color:oklch(0.30 0.02 255);">AI-enabled</b> or not — that's a flag on the stage, not on the card:</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:8px;background:oklch(0.985 0.012 292);border:1px solid oklch(0.91 0.03 292);border-radius:9px;padding:7px 11px;">
+            <span style="width:16px;height:16px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;"><span style="width:6px;height:6px;border-radius:50%;border:1.5px solid oklch(1 0 0);"></span></span>
+            <span style="font-size:12.5px;color:oklch(0.40 0.02 255);"><b style="color:oklch(0.46 0.14 292);">AI-enabled</b> — an agent is listening; it can pull &amp; drive cards here</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;background:oklch(0.985 0.008 250);border:1px solid oklch(0.91 0.02 250);border-radius:9px;padding:7px 11px;">
+            <span style="width:16px;height:16px;border-radius:50%;background:oklch(0.60 0.14 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:600;">H</span>
+            <span style="font-size:12.5px;color:oklch(0.40 0.02 255);"><b style="color:oklch(0.42 0.13 250);">Human-only</b> — no agent listens; a person must do it</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Planning -->
+    <div style="display:flex;gap:18px;background:oklch(1 0 0);border:1px solid oklch(0.90 0.04 305);border-radius:14px;padding:20px 22px;">
+      <div style="flex:0 0 auto;width:44px;height:44px;border-radius:11px;background:oklch(0.97 0.02 305);border:1px solid oklch(0.90 0.05 305);display:flex;align-items:center;justify-content:center;"><span style="width:13px;height:13px;border-radius:2px;background:oklch(0.55 0.15 305);transform:rotate(45deg);display:block;"></span></div>
+      <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:5px;">
+          <span style="font-size:17px;font-weight:600;letter-spacing:-0.01em;color:oklch(0.26 0.02 255);">Planning</span>
+          <span style="font-size:12px;font-family:'JetBrains Mono',monospace;color:oklch(0.60 0.02 255);">active · work-like</span>
+        </div>
+        <p style="font-size:14px;line-height:1.55;color:oklch(0.44 0.02 255);margin:0 0 7px;">Where the approach gets shaped — the spec, the plan — before anything is built. It behaves <b style="color:oklch(0.30 0.02 255);">exactly like Work</b>: it has an owner, can be AI-enabled, and runs through the same sub-states and actions. It's its own category only so <i>figuring out what to do</i> reads separately from <i>doing it</i>.</p>
+        <span style="font-size:12px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">e.g. Spec · Plan · Scope</span>
+      </div>
+    </div>
+    <!-- Review -->
+    <div style="display:flex;gap:18px;background:oklch(1 0 0);border:1px solid oklch(0.90 0.04 70);border-radius:14px;padding:20px 22px;">
+      <div style="flex:0 0 auto;width:44px;height:44px;border-radius:11px;background:oklch(0.975 0.025 70);border:1px solid oklch(0.90 0.06 70);display:flex;align-items:center;justify-content:center;"><span style="width:16px;height:16px;border-radius:50%;border:2.5px solid oklch(0.66 0.13 65);box-sizing:border-box;display:block;"></span></div>
+      <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:5px;">
+          <span style="font-size:17px;font-weight:600;letter-spacing:-0.01em;color:oklch(0.26 0.02 255);">Review</span>
+          <span style="font-size:12px;font-family:'JetBrains Mono',monospace;color:oklch(0.60 0.02 255);">gate · a human decides</span>
+        </div>
+        <p style="font-size:14px;line-height:1.55;color:oklch(0.44 0.02 255);margin:0 0 7px;">A checkpoint. Work lands here and <i>stops</i> until a human approves it forward or rejects it back. The reviewer acts as a gate — <b style="color:oklch(0.30 0.02 255);">reviewing does not make you the owner.</b> This type is how we know which columns are gates.</p>
+        <span style="font-size:12px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">e.g. Review · QA · Sign-off · Legal</span>
+      </div>
+    </div>
+    <!-- Done -->
+    <div style="display:flex;gap:18px;background:oklch(1 0 0);border:1px solid oklch(0.90 0.03 155);border-radius:14px;padding:20px 22px;">
+      <div style="flex:0 0 auto;width:44px;height:44px;border-radius:11px;background:oklch(0.97 0.02 155);border:1px solid oklch(0.90 0.05 155);display:flex;align-items:center;justify-content:center;"><span style="width:16px;height:16px;border-radius:50%;background:oklch(0.60 0.13 155);display:block;"></span></div>
+      <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:5px;">
+          <span style="font-size:17px;font-weight:600;letter-spacing:-0.01em;color:oklch(0.26 0.02 255);">Done</span>
+          <span style="font-size:12px;font-family:'JetBrains Mono',monospace;color:oklch(0.60 0.02 255);">complete · a holding area</span>
+        </div>
+        <p style="font-size:14px;line-height:1.55;color:oklch(0.44 0.02 255);margin:0 0 7px;">A holding area like a Queue — no work happens — but it also says the work before it is complete. Cards park here, done with that phase.</p>
+        <span style="font-size:12px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">e.g. Shipped · Complete · Archived · Won't do</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:16px;background:oklch(0.99 0.008 155);border:1px solid oklch(0.90 0.03 155);border-radius:11px;padding:15px 17px;">
+    <div style="font-size:13.5px;line-height:1.6;color:oklch(0.40 0.02 255);"><b style="color:oklch(0.30 0.02 255);">Done can repeat.</b> A board can have several Done stages, not only at the very end — each one parks cards (like a Queue) while signalling that the phase before it is complete. Only the <b style="color:oklch(0.30 0.02 255);">final</b> Done stage is terminal: nothing pulls out of it.</div>
+  </div>
+
+  <!-- ===== 3. OWNERSHIP ===== -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:44px 0 34px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">03 — Ownership</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px;color:oklch(0.24 0.02 255);">Ownership is a claim on the card</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 22px;max-width:672px;">Owners live on the card, not the stage. Ownership acts like a lock: it says who's driving. An agent only touches cards it's allowed to claim — so ownership is also how a human tells the AI to keep its hands off.</p>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:14px;margin-bottom:20px;">
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:13px;padding:16px 18px;">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin-bottom:9px;">UNOWNED</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px;"><span style="width:24px;height:24px;border-radius:50%;border:1.5px dashed oklch(0.78 0.01 255);"></span><span style="font-size:12.5px;color:oklch(0.55 0.02 255);">nobody yet</span></div>
+      <p style="font-size:13px;line-height:1.5;color:oklch(0.46 0.02 255);margin:0;">Open to be claimed. If it enters an AI-enabled stage, an agent grabs it.</p>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.91 0.02 250);border-radius:13px;padding:16px 18px;">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.13 250);margin-bottom:9px;">OWNED BY PEOPLE</div>
+      <div style="display:flex;align-items:center;margin-bottom:9px;"><span style="width:24px;height:24px;border-radius:50%;background:oklch(0.62 0.13 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;box-shadow:0 0 0 2px oklch(1 0 0);">DK</span><span style="width:24px;height:24px;border-radius:50%;background:oklch(0.62 0.13 15);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;box-shadow:0 0 0 2px oklch(1 0 0);margin-left:-7px;">JR</span></div>
+      <p style="font-size:13px;line-height:1.5;color:oklch(0.46 0.02 255);margin:0;"><b style="color:oklch(0.34 0.02 255);">One or more people.</b> Agents ignore it — a human is driving.</p>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.91 0.03 292);border-radius:13px;padding:16px 18px;">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.14 292);margin-bottom:9px;">OWNED BY RELAY AI</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px;"><span style="width:24px;height:24px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px oklch(1 0 0);"><span style="width:8px;height:8px;border-radius:50%;border:1.5px solid oklch(1 0 0);"></span></span><span style="font-size:12.5px;color:oklch(0.48 0.02 255);">exclusive</span></div>
+      <p style="font-size:13px;line-height:1.5;color:oklch(0.46 0.02 255);margin:0;"><b style="color:oklch(0.34 0.02 255);">Special &amp; exclusive</b> — if AI owns a card, no one co-owns it.</p>
+    </div>
+  </div>
+
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:13px;padding:20px 22px;display:flex;flex-direction:column;gap:14px;">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.14 292);">THE CLAIM RULE</div>
+    <div style="display:flex;flex-direction:column;gap:11px;font-size:14px;line-height:1.55;color:oklch(0.42 0.02 255);">
+      <div style="display:flex;gap:11px;"><span style="flex:0 0 auto;width:20px;height:20px;border-radius:50%;background:oklch(0.97 0.02 292);color:oklch(0.48 0.14 292);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace;">1</span><span>An <b style="color:oklch(0.30 0.02 255);">unowned</b> card ready to move into an <b style="color:oklch(0.30 0.02 255);">AI-enabled</b> stage is auto-claimed by an agent. <b style="color:oklch(0.46 0.14 292);">Relay AI becomes the sole owner</b> and keeps pulling it through subsequent AI-enabled stages.</span></div>
+      <div style="display:flex;gap:11px;"><span style="flex:0 0 auto;width:20px;height:20px;border-radius:50%;background:oklch(0.98 0.008 250);color:oklch(0.46 0.13 250);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace;">2</span><span>The mirror: when a human <b style="color:oklch(0.30 0.02 255);">pulls an unowned card into a Work stage</b>, they automatically become the owner — which locks the agent out, so no AI touches it.</span></div>
+      <div style="display:flex;gap:11px;"><span style="flex:0 0 auto;width:20px;height:20px;border-radius:50%;background:oklch(0.98 0.008 250);color:oklch(0.46 0.13 250);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace;">3</span><span>If a card <b style="color:oklch(0.30 0.02 255);">already has a human owner</b>, agents leave it alone — someone's got it.</span></div>
+      <div style="display:flex;gap:11px;"><span style="flex:0 0 auto;width:20px;height:20px;border-radius:50%;background:oklch(0.98 0.008 250);color:oklch(0.46 0.13 250);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace;">4</span><span><b style="color:oklch(0.30 0.02 255);">Assigning Relay AI is the hand-off.</b> You add AI as an owner the same way you assign a person — and because AI is exclusive, that clears any human owners.</span></div>
+      <div style="display:flex;gap:11px;"><span style="flex:0 0 auto;width:20px;height:20px;border-radius:50%;background:oklch(0.98 0.008 250);color:oklch(0.46 0.13 250);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace;">5</span><span><b style="color:oklch(0.30 0.02 255);">Reviews don't transfer ownership.</b> A reviewer approves/rejects; the card keeps its owner — so a rejected card resumes with the same AI owner.</span></div>
+    </div>
+    <!-- take over mock -->
+    <div style="border-top:1px solid oklch(0.94 0.006 255);padding-top:14px;">
+      <div style="font-size:13px;line-height:1.55;color:oklch(0.42 0.02 255);margin-bottom:11px;"><b style="color:oklch(0.30 0.02 255);">Take over</b> lives in the owners list. When Relay AI owns a card, a button sits right next to it — press it and the agent drops the card and you become the owner.</div>
+      <div style="max-width:280px;background:oklch(0.992 0.002 255);border:1px solid oklch(0.93 0.006 255);border-radius:10px;padding:11px 13px;">
+        <div style="font-size:10px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(0.60 0.02 255);margin-bottom:9px;">OWNERS</div>
+        <div style="display:flex;align-items:center;gap:9px;">
+          <span style="width:24px;height:24px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;flex:0 0 auto;"><span style="width:8px;height:8px;border-radius:50%;border:1.5px solid oklch(1 0 0);"></span></span>
+          <span style="font-size:13px;font-weight:500;color:oklch(0.32 0.02 255);">Relay AI</span>
+          <span style="flex:1;"></span>
+          <span style="font-size:11.5px;font-weight:600;color:oklch(0.46 0.13 250);background:oklch(0.97 0.02 250);border:1px solid oklch(0.90 0.03 250);border-radius:6px;padding:4px 9px;">Take over</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 4. SUB-STATES ===== -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:44px 0 34px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">04 — Sub-states</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px;color:oklch(0.24 0.02 255);">Where the card is, and whether it's on you</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 22px;max-width:672px;">Four sub-states cover every situation. The board sorts them into two buckets so a person can tell, at a glance, what's <b style="color:oklch(0.52 0.12 65);">on them</b> versus what's just running.</p>
+
+  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:18px;">
+    <div style="flex:1;min-width:250px;display:flex;align-items:flex-start;gap:10px;background:oklch(0.99 0.004 255);border:1px solid oklch(0.93 0.006 255);border-radius:11px;padding:13px 15px;">
+      <span style="width:9px;height:9px;border-radius:50%;background:oklch(0.72 0.02 255);flex:0 0 auto;margin-top:4px;"></span>
+      <div><div style="font-size:13.5px;font-weight:600;color:oklch(0.30 0.02 255);margin-bottom:2px;">Ambient</div><div style="font-size:12.5px;line-height:1.45;color:oklch(0.50 0.02 255);">Nothing for a human right now — the AI is working, or someone's quietly on it.</div></div>
+    </div>
+    <div style="flex:1;min-width:250px;display:flex;align-items:flex-start;gap:10px;background:oklch(0.985 0.02 75);border:1px solid oklch(0.89 0.05 70);border-radius:11px;padding:13px 15px;">
+      <span style="width:9px;height:9px;border-radius:50%;background:oklch(0.70 0.13 65);flex:0 0 auto;margin-top:4px;"></span>
+      <div><div style="font-size:13.5px;font-weight:600;color:oklch(0.48 0.11 65);margin-bottom:2px;">Needs you</div><div style="font-size:12.5px;line-height:1.45;color:oklch(0.48 0.03 65);">Blocked on a human — a question, a review, or a card only a person can move.</div></div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;border:1px solid oklch(0.92 0.006 255);border-radius:13px;overflow:hidden;background:oklch(1 0 0);">
+    <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid oklch(0.95 0.006 255);">
+      <span style="width:9px;height:9px;border-radius:50%;background:oklch(0.56 0.16 292);flex:0 0 auto;"></span>
+      <span style="font-size:14.5px;font-weight:600;color:oklch(0.30 0.02 255);width:120px;flex:0 0 auto;">In progress</span>
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.60 0.02 255);width:82px;flex:0 0 auto;">ambient</span>
+      <span style="font-size:13px;color:oklch(0.48 0.02 255);flex:1;">Actively worked by its owner — AI or a person. In a <b style="color:oklch(0.34 0.02 255);">Work</b> stage.</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid oklch(0.95 0.006 255);">
+      <span style="width:9px;height:9px;border-radius:50%;background:oklch(0.60 0.13 155);flex:0 0 auto;"></span>
+      <span style="font-size:14.5px;font-weight:600;color:oklch(0.30 0.02 255);width:120px;flex:0 0 auto;">Ready</span>
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.60 0.02 255);width:82px;flex:0 0 auto;">ambient*</span>
+      <span style="font-size:13px;color:oklch(0.48 0.02 255);flex:1;">No work happening — parked and available for the next stage to pull. Same behavior whether it's sitting in a <b style="color:oklch(0.34 0.02 255);">Queue</b> or has just finished a Work stage. *Flags <b style="color:oklch(0.52 0.12 65);">needs you</b> if only a person can pull it onward.</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid oklch(0.95 0.006 255);background:oklch(0.985 0.02 75);">
+      <span style="width:9px;height:9px;border-radius:50%;background:oklch(0.70 0.13 65);flex:0 0 auto;"></span>
+      <span style="font-size:14.5px;font-weight:600;color:oklch(0.30 0.02 255);width:120px;flex:0 0 auto;">Needs input</span>
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 65);width:82px;flex:0 0 auto;">needs you</span>
+      <span style="font-size:13px;color:oklch(0.46 0.02 255);flex:1;">Relay AI hit a question and paused. Waiting on an answer.</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;background:oklch(0.985 0.02 75);">
+      <span style="width:9px;height:9px;border-radius:50%;background:oklch(0.70 0.13 65);flex:0 0 auto;"></span>
+      <span style="font-size:14.5px;font-weight:600;color:oklch(0.30 0.02 255);width:120px;flex:0 0 auto;">In review</span>
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 65);width:82px;flex:0 0 auto;">needs you</span>
+      <span style="font-size:13px;color:oklch(0.46 0.02 255);flex:1;">Sitting in a <b style="color:oklch(0.34 0.02 255);">Review</b> gate, awaiting approve / reject.</span>
+    </div>
+  </div>
+
+  <div style="margin-top:16px;background:oklch(0.99 0.01 155);border:1px solid oklch(0.90 0.03 155);border-radius:11px;padding:15px 17px;">
+    <div style="font-size:13.5px;line-height:1.6;color:oklch(0.40 0.02 255);"><b style="color:oklch(0.30 0.02 255);">A Queue is just a place to park Ready cards.</b> A dedicated queue column (Backlog, Next) and a card that's finished a Work stage and is waiting for the next one are doing the exact same thing — no work, just signalling <i>ready to be pulled</i>. They follow the same rules and have no buttons. The one special case is the <b style="color:oklch(0.30 0.02 255);">terminal</b> stage: a Ready card there has nowhere to go, so it reads as <b style="color:oklch(0.30 0.02 255);">Done</b>.</div>
+  </div>
+
+  <!-- ===== 5. ACTIONS ===== -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:44px 0 34px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">05 — Actions</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px;color:oklch(0.24 0.02 255);">Buttons are only for decisions</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 24px;max-width:672px;">Because movement is dragging and assignment is ownership, most states have <b style="color:oklch(0.30 0.02 255);">no primary button at all</b>. A big button appears only when a human genuinely has to decide something.</p>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+    <!-- has a button -->
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.90 0.05 70);border-radius:13px;padding:18px 20px;">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 65);margin-bottom:14px;">HAS A PRIMARY BUTTON</div>
+      <div style="display:flex;flex-direction:column;gap:13px;">
+        <div style="display:flex;align-items:center;gap:11px;">
+          <span style="width:110px;flex:0 0 auto;font-size:12.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);">Needs input</span>
+          <span style="display:inline-flex;align-items:center;background:oklch(0.70 0.13 65);color:oklch(1 0 0);border-radius:7px;padding:5px 12px;font-size:12.5px;font-weight:600;white-space:nowrap;">Answer →</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:11px;">
+          <span style="width:110px;flex:0 0 auto;font-size:12.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);">In review</span>
+          <span style="display:flex;gap:6px;"><span style="display:inline-flex;align-items:center;background:oklch(0.60 0.13 155);color:oklch(1 0 0);border-radius:7px;padding:5px 12px;font-size:12.5px;font-weight:600;white-space:nowrap;">Approve →</span><span style="display:inline-flex;align-items:center;background:oklch(1 0 0);border:1px solid oklch(0.82 0.08 65);color:oklch(0.52 0.12 65);border-radius:7px;padding:4px 11px;font-size:12.5px;font-weight:600;white-space:nowrap;">Reject ↩</span></span>
+        </div>
+      </div>
+    </div>
+    <!-- no button -->
+    <div style="background:oklch(0.992 0.002 255);border:1px solid oklch(0.92 0.006 255);border-radius:13px;padding:18px 20px;">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);margin-bottom:14px;">NO PRIMARY — JUST DRAG</div>
+      <div style="display:flex;flex-direction:column;gap:13px;">
+        <div style="display:flex;align-items:center;gap:11px;"><span style="width:110px;flex:0 0 auto;font-size:12.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);">In progress</span><span style="font-size:12.5px;color:oklch(0.55 0.02 255);">AI moves its own; you drag yours</span></div>
+        <div style="display:flex;align-items:center;gap:11px;"><span style="width:110px;flex:0 0 auto;font-size:12.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);">Ready · parked</span><span style="font-size:12.5px;color:oklch(0.55 0.02 255);">the next worker pulls it, or drag it</span></div>
+      </div>
+      <p style="font-size:12px;line-height:1.5;color:oklch(0.56 0.02 255);margin:16px 0 0;">A button here would just be noise — the card already moves by dragging (or the agent moves it itself).</p>
+    </div>
+  </div>
+
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:13px;padding:18px 20px;">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.13 250);margin-bottom:6px;">OWNERSHIP ACTIONS — in the owners area, not stage buttons</div>
+    <p style="font-size:13.5px;line-height:1.55;color:oklch(0.44 0.02 255);margin:0;"><b style="color:oklch(0.30 0.02 255);">Assign</b> a person or <b style="color:oklch(0.30 0.02 255);">Relay AI</b> (assigning AI hands off &amp; clears human owners) · <b style="color:oklch(0.30 0.02 255);">Take over</b> from AI · <b style="color:oklch(0.30 0.02 255);">Unassign</b>. These change who's driving, independent of what stage the card is in.</p>
+  </div>
+
+  <!-- ===== 6. ON THE BOARD ===== -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:44px 0 34px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">06 — On the board</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px;color:oklch(0.24 0.02 255);">Collapsed card, per sub-state</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 24px;max-width:672px;">The mini card carries just enough to read status at a glance: title, tag, owner, and a status cue. <b style="color:oklch(0.52 0.12 65);">Needs&nbsp;you</b> cards get an amber accent so they pop across an otherwise-quiet board.</p>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px;">
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">Ready · parked</span>
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:11px;padding:13px 14px;box-shadow:0 1px 2px oklch(0.5 0.03 255/0.05);">
+        <div style="font-size:13.5px;font-weight:600;color:oklch(0.28 0.02 255);margin-bottom:12px;line-height:1.3;">Add SSO for enterprise</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);">#auth</span>
+          <span style="width:22px;height:22px;border-radius:50%;background:oklch(0.62 0.13 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:600;">DK</span>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">In progress · AI</span>
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:11px;padding:13px 14px;box-shadow:0 1px 2px oklch(0.5 0.03 255/0.05);">
+        <div style="font-size:13.5px;font-weight:600;color:oklch(0.28 0.02 255);margin-bottom:10px;line-height:1.3;">Migrate 40 blog posts</div>
+        <div style="height:4px;border-radius:2px;background:oklch(0.93 0.02 292);overflow:hidden;margin-bottom:9px;"><div style="height:100%;width:62%;background:oklch(0.56 0.16 292);border-radius:2px;"></div></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.12 292);display:flex;align-items:center;gap:5px;"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.56 0.16 292);"></span>working</span>
+          <span style="width:22px;height:22px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;"><span style="width:7px;height:7px;border-radius:50%;border:1.5px solid oklch(1 0 0);"></span></span>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">Needs input · AI</span>
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.86 0.06 70);border-radius:11px;padding:13px 14px;box-shadow:0 1px 3px oklch(0.6 0.08 70/0.12);">
+        <div style="font-size:13.5px;font-weight:600;color:oklch(0.28 0.02 255);margin-bottom:11px;line-height:1.3;">Rewrite onboarding tooltips</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:10.5px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.12 65);background:oklch(0.97 0.03 75);border:1px solid oklch(0.88 0.07 75);border-radius:5px;padding:2px 7px;display:flex;align-items:center;gap:5px;"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.70 0.13 65);"></span>needs you</span>
+          <span style="width:22px;height:22px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;"><span style="width:7px;height:7px;border-radius:50%;border:1.5px solid oklch(1 0 0);"></span></span>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">In review</span>
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.86 0.06 70);border-radius:11px;padding:13px 14px;box-shadow:0 1px 3px oklch(0.6 0.08 70/0.12);">
+        <div style="font-size:13.5px;font-weight:600;color:oklch(0.28 0.02 255);margin-bottom:11px;line-height:1.3;">Refactor pricing page copy</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:10.5px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.12 65);background:oklch(0.97 0.03 75);border:1px solid oklch(0.88 0.07 75);border-radius:5px;padding:2px 7px;display:flex;align-items:center;gap:5px;"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.70 0.13 65);"></span>review</span>
+          <span style="width:22px;height:22px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;"><span style="width:7px;height:7px;border-radius:50%;border:1.5px solid oklch(1 0 0);"></span></span>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">Done</span>
+      <div style="background:oklch(0.992 0.003 255);border:1px solid oklch(0.93 0.006 255);border-radius:11px;padding:13px 14px;">
+        <div style="font-size:13.5px;font-weight:600;color:oklch(0.46 0.02 255);margin-bottom:11px;line-height:1.3;">Dark mode polish</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span></span>
+          <span style="width:22px;height:22px;border-radius:50%;background:oklch(0.72 0.06 15);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:600;">JR</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 7. CARD DETAIL ===== -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:44px 0 34px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">07 — In the card detail</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px;color:oklch(0.24 0.02 255);">The banner reflects the state</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 24px;max-width:672px;">Ambient states show a quiet, informational strip — no buttons. Only the two <b style="color:oklch(0.52 0.12 65);">needs&nbsp;you</b> states raise an action banner. Everything below it — description, spec, plan, sub-tasks, comments, activity — is the same regardless of state.</p>
+
+  <div style="display:flex;flex-direction:column;gap:16px;">
+    <div>
+      <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);margin-bottom:8px;">AMBIENT · AI WORKING — informational</div>
+      <div style="display:flex;flex-direction:column;gap:9px;background:oklch(0.975 0.02 292);border:1px solid oklch(0.90 0.04 292);border-radius:11px;padding:15px 16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:12.5px;font-weight:600;color:oklch(0.48 0.12 292);display:flex;align-items:center;gap:7px;"><span style="width:7px;height:7px;border-radius:50%;background:oklch(0.56 0.16 292);animation:relaypulse 1.4s ease-in-out infinite;"></span>Relay AI is working</span>
+          <span style="font-size:12.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.12 292);">62%</span>
+        </div>
+        <div style="height:6px;border-radius:3px;background:oklch(0.90 0.03 292);overflow:hidden;"><div style="height:100%;width:62%;background:oklch(0.56 0.16 292);border-radius:3px;"></div></div>
+      </div>
+    </div>
+    <div>
+      <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 65);margin-bottom:8px;">NEEDS YOU · NEEDS INPUT</div>
+      <div style="display:flex;flex-direction:column;gap:11px;background:oklch(0.975 0.025 75);border:1px solid oklch(0.87 0.07 75);border-radius:11px;padding:15px 16px;">
+        <span style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.52 0.11 65);font-family:'JetBrains Mono',monospace;">RELAY AI NEEDS YOUR INPUT</span>
+        <span style="font-size:13.5px;line-height:1.5;color:oklch(0.33 0.03 65);">Should I keep the playful CTA wording, or rewrite it to match the more formal new brand voice?</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <div style="flex:1;border:1px solid oklch(0.86 0.05 75);border-radius:7px;padding:8px 10px;background:oklch(1 0 0);font-size:12.5px;color:oklch(0.60 0.02 255);">Type your answer…</div>
+          <span style="background:oklch(0.70 0.13 65);color:oklch(1 0 0);border-radius:7px;padding:8px 15px;font-size:12.5px;font-weight:600;white-space:nowrap;">Answer →</span>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 65);margin-bottom:8px;">NEEDS YOU · IN REVIEW</div>
+      <div style="display:flex;flex-direction:column;gap:12px;background:oklch(0.975 0.02 155);border:1px solid oklch(0.88 0.05 155);border-radius:11px;padding:15px 16px;">
+        <span style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.46 0.10 155);font-family:'JetBrains Mono',monospace;">READY FOR YOUR REVIEW</span>
+        <span style="font-size:13px;line-height:1.5;color:oklch(0.36 0.03 155);">Relay AI finished this. Approve to advance it, or reject it back to an earlier stage with a note.</span>
+        <div style="display:flex;gap:8px;">
+          <span style="flex:1;text-align:center;background:oklch(0.60 0.13 155);color:oklch(1 0 0);border-radius:8px;padding:10px;font-size:13px;font-weight:600;">Approve →</span>
+          <span style="flex:1;text-align:center;background:oklch(1 0 0);border:1px solid oklch(0.84 0.06 65);color:oklch(0.52 0.12 65);border-radius:8px;padding:10px;font-size:13px;font-weight:600;">Reject ↩</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 8. NOTES ===== -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:44px 0 34px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">08 — Notes &amp; open questions</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 20px;color:oklch(0.24 0.02 255);">Decided, and still open</h2>
+
+  <div style="display:flex;flex-direction:column;gap:12px;">
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-left:3px solid oklch(0.60 0.13 155);border-radius:10px;padding:15px 17px;">
+      <div style="font-size:14px;font-weight:600;color:oklch(0.28 0.02 255);margin-bottom:5px;">Decided</div>
+      <p style="font-size:13.5px;line-height:1.55;color:oklch(0.44 0.02 255);margin:0;">Ownership is a per-card claim; AI is a special exclusive owner; assigning AI = hand-off; Take over lives in the owners list; reviews don't change ownership; and Queue / In progress / Ready have no primary button — you drag. Queue stages and the Ready sub-state are one “parked” concept; only the final stage's done is terminal.</p>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-left:3px solid oklch(0.62 0.13 65);border-radius:10px;padding:15px 17px;">
+      <div style="font-size:14px;font-weight:600;color:oklch(0.28 0.02 255);margin-bottom:5px;">Open — the AI→human hand-back</div>
+      <p style="font-size:13.5px;line-height:1.55;color:oklch(0.44 0.02 255);margin:0;">When an AI-owned card reaches a human-only stage, the agent can't continue. It should release the card so it reads <i>unowned &amp; needs you</i>, and whoever picks it up (assigns themselves) becomes owner. Confirm that's the behavior — and how loudly we surface “available for a human” vs. a plain unowned card.</p>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-left:3px solid oklch(0.56 0.16 292);border-radius:10px;padding:15px 17px;">
+      <div style="font-size:14px;font-weight:600;color:oklch(0.28 0.02 255);margin-bottom:5px;">Open — the queue's real throttle</div>
+      <p style="font-size:13.5px;line-height:1.55;color:oklch(0.44 0.02 255);margin:0;">If agents auto-pull, what stops everything from starting at once? Presumably each stage's WIP limit. Worth confirming WIP is the throttle, and whether a person can pin/prioritize a card to the front of the queue.</p>
+    </div>
+  </div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1000,&quot;height&quot;:900}}"></script>
+</body>
+</html>

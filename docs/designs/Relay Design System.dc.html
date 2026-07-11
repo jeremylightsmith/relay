@@ -151,18 +151,86 @@
         </div>
       </div>
     </div>
-    <div style="height:1px;background:oklch(0.94 0.005 255);"></div>
+  </div>
+
+  <!-- ===== EDITABLE FIELDS ===== -->
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin:36px 0 16px 0;">05 · EDITABLE FIELDS</div>
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:28px 32px;margin-bottom:16px;display:flex;flex-direction:column;gap:28px;">
+    <p style="font-size:13.5px;line-height:1.6;color:oklch(0.48 0.02 255);margin:0;max-width:600px;">Anything a person can type into uses one of <b style="color:oklch(0.30 0.02 255);">two</b> models — no more. Everything else (segmented, toggle, stepper, select) is a <b style="color:oklch(0.30 0.02 255);">control</b> from §04, not a field. Both field models share one focus treatment: a blue 1px border plus a 3px halo.</p>
+
+    <!-- Model 1: Inline -->
     <div>
-      <div style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:12px;">TEXT FIELD</div>
-      <div style="max-width:360px;display:flex;flex-direction:column;gap:8px;">
-        <div style="border:1px solid oklch(0.88 0.01 255);border-radius:8px;padding:9px 11px;font-size:13px;color:oklch(0.30 0.02 255);">Rewrite the onboarding tooltips</div>
-        <div style="border:1px solid oklch(0.60 0.14 250);border-radius:8px;padding:9px 11px;font-size:13px;color:oklch(0.62 0.02 255);box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.12);">Type your answer…</div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px;">
+        <span style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);">1 · Inline</span>
+        <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">edits in place</span>
+      </div>
+      <p style="font-size:12.5px;line-height:1.5;color:oklch(0.52 0.02 255);margin:0 0 16px 0;max-width:560px;">For primary content that <i>is</i> the thing — a card title or a stage name, edited right where it lives. Reads as plain text until you touch it, so the page stays calm. A quiet hover tint is the only cue that it's editable. Because there's no surrounding form, committing is <b style="color:oklch(0.34 0.02 255);">explicit</b> — Enter or ✓ saves, Esc or ✕ reverts. The ✓ / ✕ <b style="color:oklch(0.34 0.02 255);">float</b> just below the field so confirming never shifts the rest of the page.</p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+        <div style="display:flex;flex-direction:column;gap:7px;">
+          <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">REST</span>
+          <div style="width:240px;padding:7px 9px;border:1px solid transparent;border-radius:7px;font-size:15px;font-weight:600;color:oklch(0.26 0.02 255);">Rewrite the onboarding tooltips</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:7px;">
+          <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">HOVER</span>
+          <div style="width:240px;padding:7px 9px;border:1px solid oklch(0.92 0.006 255);border-radius:7px;background:oklch(0.968 0.004 255);font-size:15px;font-weight:600;color:oklch(0.26 0.02 255);">Rewrite the onboarding tooltips</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:7px;">
+          <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">EDITING</span>
+          <div style="position:relative;width:240px;">
+            <div style="padding:7px 9px;border:1px solid oklch(0.60 0.14 250);border-radius:7px;background:oklch(1 0 0);box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);font-size:15px;font-weight:600;color:oklch(0.24 0.02 255);">Rewrite the onboarding tooltips<span style="display:inline-block;width:1.5px;height:16px;background:oklch(0.60 0.14 250);margin-left:1px;vertical-align:-2px;"></span></div>
+            <div style="position:absolute;top:calc(100% + 6px);right:0;z-index:2;display:flex;align-items:center;gap:6px;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:8px;padding:4px 7px 4px 4px;box-shadow:0 6px 18px oklch(0.5 0.03 255/0.18);">
+              <button style="display:flex;align-items:center;justify-content:center;width:26px;height:24px;border-radius:6px;border:none;background:oklch(0.60 0.14 250);color:oklch(1 0 0);font-size:13px;">✓</button>
+              <button style="display:flex;align-items:center;justify-content:center;width:26px;height:24px;border-radius:6px;border:1px solid oklch(0.90 0.006 255);background:oklch(1 0 0);color:oklch(0.50 0.02 255);font-size:12px;">✕</button>
+              <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);white-space:nowrap;">Enter · Esc</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="height:1px;background:oklch(0.94 0.005 255);"></div>
+
+    <!-- Model 2: Boxed -->
+    <div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px;">
+        <span style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);">2 · Boxed</span>
+        <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">a form field</span>
+      </div>
+      <p style="font-size:12.5px;line-height:1.5;color:oklch(0.52 0.02 255);margin:0 0 16px 0;max-width:560px;">For discrete data you fill in — a description, URL, email, comment, or the reject note. Always boxed, so it clearly reads as "type here." Comes in single-line and multi-line; identical styling, the textarea is just taller.</p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+        <div style="display:flex;flex-direction:column;gap:7px;">
+          <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">REST</span>
+          <div style="width:240px;border:1px solid oklch(0.90 0.006 255);background:oklch(0.99 0.002 255);border-radius:8px;padding:9px 11px;font-size:13px;color:oklch(0.32 0.02 255);">acme/product</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:7px;">
+          <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">HOVER</span>
+          <div style="width:240px;border:1px solid oklch(0.80 0.01 255);background:oklch(0.99 0.002 255);border-radius:8px;padding:9px 11px;font-size:13px;color:oklch(0.32 0.02 255);">acme/product</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:7px;">
+          <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">FOCUS</span>
+          <div style="width:240px;border:1px solid oklch(0.60 0.14 250);background:oklch(1 0 0);border-radius:8px;padding:9px 11px;font-size:13px;color:oklch(0.30 0.02 255);box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);">acme/product<span style="display:inline-block;width:1.5px;height:14px;background:oklch(0.60 0.14 250);margin-left:1px;vertical-align:-2px;"></span></div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:7px;max-width:504px;">
+        <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">MULTI-LINE</span>
+        <div style="border:1px solid oklch(0.90 0.006 255);background:oklch(0.99 0.002 255);border-radius:8px;padding:10px 11px;font-size:13px;line-height:1.5;color:oklch(0.44 0.02 255);min-height:64px;">Move every post, preserve slugs, set up redirects, and re-upload images.</div>
+      </div>
+    </div>
+
+    <div style="height:1px;background:oklch(0.94 0.005 255);"></div>
+
+    <!-- Usage map -->
+    <div>
+      <div style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:12px;">WHICH MODEL WHERE</div>
+      <div style="display:flex;gap:32px;flex-wrap:wrap;font-size:13px;line-height:1.7;color:oklch(0.44 0.02 255);">
+        <div><b style="color:oklch(0.30 0.02 255);">Inline →</b> card title · stage name</div>
+        <div><b style="color:oklch(0.30 0.02 255);">Boxed →</b> board name · description · spec / plan · board URL · email · comment · reject note</div>
       </div>
     </div>
   </div>
 
   <!-- ===== COMPONENTS ===== -->
-  <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin:36px 0 16px 0;">05 · BOARD COMPONENTS</div>
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin:36px 0 16px 0;">06 · BOARD COMPONENTS</div>
   <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:28px 32px;margin-bottom:16px;">
 
     <div style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:14px;">BADGES · TAGS · WIP</div>
@@ -205,18 +273,19 @@
   </div>
 
   <!-- ===== STATUS CATEGORIES ===== -->
-  <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin:36px 0 16px 0;">06 · STATUS CATEGORIES</div>
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin:36px 0 16px 0;">07 · STATUS CATEGORIES</div>
   <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:28px 32px;margin-bottom:16px;">
-    <p style="font-size:13.5px;line-height:1.6;color:oklch(0.48 0.02 255);margin:0 0 20px 0;max-width:560px;">Every stage belongs to one of three categories — the same model as Linear and Shortcut — so a stage's <i>meaning</i> is never ambiguous. Squares mark the <b>owner</b>; circles mark the <b>category</b>.</p>
+    <p style="font-size:13.5px;line-height:1.6;color:oklch(0.48 0.02 255);margin:0 0 20px 0;max-width:560px;">Every stage belongs to one of four categories — so a stage's <i>meaning</i> is never ambiguous. Squares mark the <b>owner</b>; circles mark the <b>category</b>. <b style="color:oklch(0.40 0.02 255);">Planning</b> and <b style="color:oklch(0.40 0.02 255);">In&nbsp;progress</b> are both active, work-like categories — Planning is for shaping the approach, In&nbsp;progress for building it.</p>
     <div style="display:flex;gap:32px;flex-wrap:wrap;">
       <div style="display:flex;align-items:center;gap:10px;"><span style="width:12px;height:12px;border-radius:50%;border:2px solid oklch(0.68 0.02 255);box-sizing:border-box;"></span><div><div style="font-size:13px;font-weight:600;">Unstarted</div><div style="font-size:12px;color:oklch(0.55 0.02 255);">Not picked up yet</div></div></div>
-      <div style="display:flex;align-items:center;gap:10px;"><span style="width:12px;height:12px;border-radius:50%;background:conic-gradient(oklch(0.60 0.14 250) 0 50%, oklch(0.86 0.03 250) 50% 100%);"></span><div><div style="font-size:13px;font-weight:600;">In progress</div><div style="font-size:12px;color:oklch(0.55 0.02 255);">Actively being worked</div></div></div>
+      <div style="display:flex;align-items:center;gap:10px;"><span style="width:12px;height:12px;border-radius:50%;background:conic-gradient(oklch(0.55 0.15 305) 0 50%, oklch(0.88 0.05 305) 50% 100%);"></span><div><div style="font-size:13px;font-weight:600;">Planning</div><div style="font-size:12px;color:oklch(0.55 0.02 255);">Shaping the approach</div></div></div>
+      <div style="display:flex;align-items:center;gap:10px;"><span style="width:12px;height:12px;border-radius:50%;background:conic-gradient(oklch(0.60 0.14 250) 0 50%, oklch(0.86 0.03 250) 50% 100%);"></span><div><div style="font-size:13px;font-weight:600;">In progress</div><div style="font-size:12px;color:oklch(0.55 0.02 255);">Actively being built</div></div></div>
       <div style="display:flex;align-items:center;gap:10px;"><span style="width:12px;height:12px;border-radius:50%;background:oklch(0.60 0.13 155);"></span><div><div style="font-size:13px;font-weight:600;">Complete</div><div style="font-size:12px;color:oklch(0.55 0.02 255);">Done and verified</div></div></div>
     </div>
   </div>
 
   <!-- ===== IMPLEMENTATION MAP ===== -->
-  <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin:36px 0 16px 0;">07 · IMPLEMENTATION · TAILWIND 4 + daisyUI 5</div>
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin:36px 0 16px 0;">08 · IMPLEMENTATION · TAILWIND 4 + daisyUI 5</div>
   <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:28px 32px;margin-bottom:16px;">
     <p style="font-size:13.5px;line-height:1.6;color:oklch(0.48 0.02 255);margin:0 0 20px 0;max-width:600px;">Target stack: Phoenix LiveView with Tailwind 4 + daisyUI 5. Each element here maps to a daisyUI primitive — set the palette below as your daisyUI theme, then compose with utility classes. LiveView drives card moves and the live AI progress over the socket.</p>
     <div style="display:flex;flex-direction:column;gap:0;border:1px solid oklch(0.93 0.006 255);border-radius:10px;overflow:hidden;">

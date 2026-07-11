@@ -7,6 +7,7 @@ project changes.
 
 | File | What it is |
 | --- | --- |
+| `Relay Stage & Card Model.dc.html` | **The stage & card model — source of truth** (despite its "for discussion" badge). Five stage types (Queue · Work · Planning · Review · Done) alongside categories, AI-enabled stages, the ownership claim rule, the four card sub-states (ambient vs. needs-you), and the buttons-only-for-decisions doctrine. Read this before touching card/stage behavior. |
 | `Relay Board.dc.html` | The core kanban/baton board — columns owned by human vs. AI, cards (working / blocked / done), WIP limits, handoffs, detail drawer. **This is the primary screen.** |
 | `Relay Landing.dc.html` | Marketing landing page — hero, "how it works", the flow, configurable stages. |
 | `Relay Design System.dc.html` | The design system — typography, palette, actors/avatars, controls, board components, and an **implementation map to daisyUI/Tailwind primitives**. Read this first. |
