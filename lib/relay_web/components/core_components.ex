@@ -1405,15 +1405,28 @@ defmodule RelayWeb.CoreComponents do
                 </div>
               </section>
 
+              <%!--
+                Plain <details>/<summary> rather than daisyUI's `collapse` component:
+                Tailwind ships its own `.collapse` utility (`visibility: collapse`, for
+                table rows) under the same class name, and since these blocks are direct
+                children of the `flex flex-col` main column, that utility wins the layer
+                cascade over daisyUI's component and collapses the whole flex item to
+                ~0 height — regardless of the [open] state. Native <details> already gives
+                us a labeled, click-to-expand section for free.
+              --%>
               <details
                 :if={@card.spec}
                 id={"#{@id}-spec"}
-                class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-200/40"
+                class="group rounded-lg border border-base-300 bg-base-200/40"
               >
-                <summary class="collapse-title flex min-h-0 items-center py-3">
+                <summary class="collapse-title flex min-h-0 cursor-pointer list-none items-center gap-1.5 px-3.5 py-3 [&::-webkit-details-marker]:hidden">
+                  <.icon
+                    name="hero-chevron-right"
+                    class="size-3 shrink-0 text-base-content/50 transition-transform group-open:rotate-90"
+                  />
                   <.section_label>Spec</.section_label>
                 </summary>
-                <div class="collapse-content">
+                <div class="border-t border-base-300 px-3.5 pb-3.5 pt-3">
                   <div id={"#{@id}-spec-view"} class="md text-sm leading-relaxed">
                     {Relay.Markdown.to_html(@card.spec)}
                   </div>
@@ -1422,12 +1435,16 @@ defmodule RelayWeb.CoreComponents do
               <details
                 :if={@card.plan}
                 id="card-plan"
-                class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-200/40"
+                class="group rounded-lg border border-base-300 bg-base-200/40"
               >
-                <summary class="collapse-title flex min-h-0 items-center py-3">
+                <summary class="collapse-title flex min-h-0 cursor-pointer list-none items-center gap-1.5 px-3.5 py-3 [&::-webkit-details-marker]:hidden">
+                  <.icon
+                    name="hero-chevron-right"
+                    class="size-3 shrink-0 text-base-content/50 transition-transform group-open:rotate-90"
+                  />
                   <.section_label>Plan</.section_label>
                 </summary>
-                <div class="collapse-content">
+                <div class="border-t border-base-300 px-3.5 pb-3.5 pt-3">
                   <div
                     id="card-plan-body"
                     class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
