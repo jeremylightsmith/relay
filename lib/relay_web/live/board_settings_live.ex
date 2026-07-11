@@ -306,7 +306,7 @@ defmodule RelayWeb.BoardSettingsLive do
                         style="display:flex;align-items:center;gap:9px;"
                       >
                         <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
-                          RELAY AI
+                          AI-ENABLED
                         </span>
                         <input
                           id={"stage-#{stage.id}-ai-toggle"}
@@ -315,11 +315,21 @@ defmodule RelayWeb.BoardSettingsLive do
                           checked={stage.ai_enabled}
                           phx-click="toggle_ai"
                           phx-value-stage-id={stage.id}
-                          title="Relay AI listens here"
                         />
+                        <span
+                          :if={stage.ai_enabled}
+                          id={"stage-#{stage.id}-ai-hint"}
+                          style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;letter-spacing:0.03em;color:oklch(0.46 0.14 292);"
+                        >
+                          <span style="width:11px;height:11px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;">
+                            <span style="width:4px;height:4px;border-radius:50%;border:1px solid oklch(1 0 0);">
+                            </span>
+                          </span>
+                          Relay AI listens here
+                        </span>
                       </div>
                     </div>
-                    <%!-- Controls row — WIP (MMF 11) / DONE COLUMN (mockup lines ~241-262). --%>
+                    <%!-- Controls row — WIP (MMF 11). --%>
                     <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
                       <div style="display:flex;align-items:center;gap:9px;">
                         <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
@@ -369,20 +379,6 @@ defmodule RelayWeb.BoardSettingsLive do
                           </button>
                         </div>
                       </div>
-                      <div style="display:flex;align-items:center;gap:10px;">
-                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
-                          DONE COLUMN
-                        </span>
-                        <input
-                          id={toggle_id(@lane_nonce, stage.id, :done)}
-                          type="checkbox"
-                          class="toggle toggle-sm"
-                          checked={lane_on?(@lane_map, stage.id, :done)}
-                          phx-click="toggle_lane"
-                          phx-value-stage-id={stage.id}
-                          phx-value-lane="done"
-                        />
-                      </div>
                     </div>
                     <div
                       :if={stage.type == :review and is_nil(stage.parent_id)}
@@ -424,7 +420,10 @@ defmodule RelayWeb.BoardSettingsLive do
                         Rejected cards return here to be re-planned — the reviewer doesn't choose a destination.
                       </span>
                     </div>
-                    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px dashed oklch(0.94 0.006 255);padding-top:12px;">
+                    <div
+                      id={"stage-#{stage.id}-sublanes"}
+                      style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;border-top:1px dashed oklch(0.94 0.006 255);padding-top:12px;"
+                    >
                       <div style="display:flex;align-items:center;gap:10px;">
                         <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
                           REVIEW SUB-LANE
@@ -439,15 +438,34 @@ defmodule RelayWeb.BoardSettingsLive do
                           phx-value-lane="review"
                         />
                       </div>
-                      <span
-                        :if={lane_on?(@lane_map, stage.id, :review)}
-                        style="font-size:11px;line-height:1.4;color:oklch(0.55 0.02 255);"
-                      >
-                        Finished work waits in <b style="color:oklch(0.40 0.02 255);">Review</b>
-                        for a human to approve. A review sub-lane always rejects back into its own
-                        stage — nothing to configure.
+                      <div style="display:flex;align-items:center;gap:10px;">
+                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
+                          DONE SUB-LANE
+                        </span>
+                        <input
+                          id={toggle_id(@lane_nonce, stage.id, :done)}
+                          type="checkbox"
+                          class="toggle toggle-sm"
+                          checked={lane_on?(@lane_map, stage.id, :done)}
+                          phx-click="toggle_lane"
+                          phx-value-stage-id={stage.id}
+                          phx-value-lane="done"
+                        />
+                      </div>
+                      <span style="flex:1;min-width:180px;font-size:11px;line-height:1.4;color:oklch(0.55 0.02 255);">
+                        Both are optional lanes at the end of a stage —
+                        <b style="color:oklch(0.40 0.02 255);">Review</b>
+                        holds finished work for a human to approve or reject;
+                        <b style="color:oklch(0.40 0.02 255);">Done</b>
+                        parks it, ready for the next stage to pull.
                       </span>
                     </div>
+                    <span
+                      :if={lane_on?(@lane_map, stage.id, :review)}
+                      style="font-size:11px;line-height:1.4;color:oklch(0.55 0.02 255);"
+                    >
+                      A review sub-lane always rejects back into its own stage — nothing to configure.
+                    </span>
                   </div>
                 </div>
                 <button

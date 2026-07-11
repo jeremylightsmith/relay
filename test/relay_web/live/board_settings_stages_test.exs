@@ -272,13 +272,42 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       code = stage_named(board, "Code")
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
-      assert has_element?(view, "#stage-#{code.id}-row #stage-#{code.id}-done-toggle")
-      assert has_element?(view, "#stage-#{code.id}-row #stage-#{code.id}-review-toggle")
+      assert has_element?(view, "#stage-#{code.id}-sublanes #stage-#{code.id}-done-toggle")
+      assert has_element?(view, "#stage-#{code.id}-sublanes #stage-#{code.id}-review-toggle")
 
       view |> element("#stage-#{code.id}-review-toggle") |> render_click()
 
       assert [%{type: :review}] = Boards.sublanes(code)
-      assert has_element?(view, "#stage-#{code.id}-row", "Finished work waits in")
+      assert has_element?(view, "#stage-#{code.id}-row", "always rejects back into its own stage")
+    end
+
+    test "the AI toggle reads AI-ENABLED and shows the violet listens-here pill when on",
+         %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      {:ok, _stage} = Boards.update_stage(code, %{ai_enabled: true})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      assert has_element?(view, "#settings-group-in_progress", "AI-ENABLED")
+      refute has_element?(view, "#settings-group-in_progress", "RELAY AI")
+      assert has_element?(view, "#stage-#{code.id}-ai-hint", "Relay AI listens here")
+
+      view |> element("#stage-#{code.id}-ai-toggle") |> render_click()
+      refute has_element?(view, "#stage-#{code.id}-ai-hint")
+    end
+
+    test "review and done sub-lane toggles both live in one dashed row, labeled SUB-LANE",
+         %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      assert has_element?(view, "#stage-#{code.id}-sublanes", "REVIEW SUB-LANE")
+      assert has_element?(view, "#stage-#{code.id}-sublanes", "DONE SUB-LANE")
+      refute has_element?(view, "#settings-group-in_progress", "DONE COLUMN")
+
+      assert has_element?(view, "#stage-#{code.id}-sublanes [phx-value-lane='review']")
+      assert has_element?(view, "#stage-#{code.id}-sublanes [phx-value-lane='done']")
     end
   end
 
