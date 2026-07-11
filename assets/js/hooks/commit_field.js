@@ -45,6 +45,16 @@ const CommitField = {
       } else if (e.key === "Escape") {
         e.preventDefault()
         e.stopPropagation()
+        // The input still has focus at this point, and LiveView preserves a
+        // focused input's value across patches (so it won't clobber active
+        // typing) — so the server round-trip triggered by the cancel button
+        // below cannot revert the displayed value on its own. Revert it here
+        // for dirty-pill fields before handing off to the cancel button for
+        // the rest of the cancel behaviour (resetting server-side state).
+        if (el.dataset.dirtyPill) {
+          el.value = this.baseline
+          this.syncPill()
+        }
         const cancel = document.getElementById(el.dataset.cancelId)
         if (cancel) cancel.click()
       }

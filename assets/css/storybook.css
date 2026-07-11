@@ -204,6 +204,10 @@ textarea.commit-field-input { min-height: 64px; }
   border-radius: 8px;
   box-shadow: 0 6px 18px oklch(0.5 0.03 255 / 0.18);
 }
+/* Unlayered .commit-pill beats Tailwind's layered .hidden utility on
+   specificity alone, so the "hidden until dirty" pill never actually hides.
+   This higher-specificity, still-unlayered rule restores the override. */
+.commit-pill.hidden { display: none; }
 .commit-pill-save,
 .commit-pill-cancel {
   display: flex;
