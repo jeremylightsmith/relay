@@ -23,6 +23,20 @@ defmodule RelayWeb.BoardLiveAgentLogTest do
     assert has_element?(view, "#agent-log-empty")
   end
 
+  test "the open panel is in-flow inside the board viewport, not a fixed overlay",
+       %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+    view |> element("#agent-logs-button") |> render_click()
+
+    # the panel lives inside the fixed-height board viewport, as a flex sibling of the
+    # board, so opening it pushes the board up instead of floating over the bottom of it
+    assert has_element?(view, "#board-viewport #board")
+    assert has_element?(view, "#board-viewport #agent-log-sheet.flex-none")
+
+    # regression (the rejection): it must NOT be a fixed overlay anymore
+    refute has_element?(view, "#agent-log-sheet.fixed")
+  end
+
   test "an agent_log broadcast renders a line while the sheet is open", %{conn: conn, board: board} do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
     view |> element("#agent-logs-button") |> render_click()

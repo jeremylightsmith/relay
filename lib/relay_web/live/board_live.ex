@@ -84,79 +84,131 @@ defmodule RelayWeb.BoardLive do
           </button>
         </li>
       </:menu_items>
-      <div id="board" phx-hook="BoardDnD">
-        <div
-          :if={@read_only?}
-          id="read-only-banner"
-          class="mx-4 mb-2 mt-2 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm sm:mx-5"
-          style="background:oklch(0.97 0.04 85);border:1px solid oklch(0.85 0.09 85);color:oklch(0.42 0.09 85);"
-        >
-          <.icon name="hero-archive-box" class="size-4" />
-          <span class="flex-1">This board is archived and read-only.</span>
-          <button type="button" id="restore-board-button" phx-click="restore_board" class="btn btn-sm">
-            Restore
-          </button>
+      <div id="board-viewport" class="flex flex-col" style="height:calc(100vh - 61px);">
+        <div id="board" phx-hook="BoardDnD" class="flex min-h-0 flex-1 flex-col">
+          <div
+            :if={@read_only?}
+            id="read-only-banner"
+            class="mx-4 mb-2 mt-2 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm sm:mx-5"
+            style="background:oklch(0.97 0.04 85);border:1px solid oklch(0.85 0.09 85);color:oklch(0.42 0.09 85);"
+          >
+            <.icon name="hero-archive-box" class="size-4" />
+            <span class="flex-1">This board is archived and read-only.</span>
+            <button
+              type="button"
+              id="restore-board-button"
+              phx-click="restore_board"
+              class="btn btn-sm"
+            >
+              Restore
+            </button>
+          </div>
+          <div
+            id="board-bands"
+            style="display:flex;gap:22px;padding:16px 18px 18px 18px;overflow-x:auto;overflow-y:hidden;align-items:stretch;background:oklch(0.952 0.008 255);flex:1 1 auto;min-height:0;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;"
+          >
+            <section
+              :for={{category, stages} <- @stage_groups}
+              id={"category-#{category}"}
+              style="display:flex;flex-direction:column;gap:9px;flex:0 0 auto;"
+            >
+              <div style="display:flex;align-items:center;gap:8px;padding:0 4px;height:20px;flex:0 0 auto;">
+                <span class="category-dot" style={category_dot_style(category)}></span>
+                <h2
+                  class="category-band"
+                  style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;font-family:var(--font-mono);color:oklch(0.52 0.02 255);margin:0;"
+                >
+                  {category_label(category)}
+                </h2>
+                <span style="font-size:10.5px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);">
+                  {category_card_count(category, stages, @stage_counts, @sublanes_by_parent)}
+                </span>
+              </div>
+              <div style="display:flex;gap:9px;align-items:stretch;flex:1;min-height:0;">
+                <.stage_column
+                  :for={stage <- stages}
+                  id={"stage-col-#{stage.position}"}
+                  name={stage.name}
+                  type={stage.type}
+                  ai_enabled={stage.ai_enabled}
+                  category={category}
+                  stage_id={stage.id}
+                  collapsed={stage_collapsed?(stage, @stage_counts, @sublanes_by_parent, @force_open)}
+                  main_collapsed={
+                    lane_collapsed?(stage.id, :main, @stage_counts, @force_open, @force_closed)
+                  }
+                  count={Map.fetch!(@stage_counts, stage.id)}
+                  wip_limit={stage.wip_limit}
+                  board_key={@board.key}
+                  terminal={stage.id == @terminal_stage_id}
+                  questions={@needs_input_questions}
+                  cards={Map.fetch!(@streams, stream_name(stage.id))}
+                  composing={@composing_stage_id == stage.id}
+                  compose_form={@compose_form}
+                  read_only={@read_only?}
+                  sublanes={
+                    for sub <- Map.get(@sublanes_by_parent, stage.id, []) do
+                      %{
+                        id: sub.id,
+                        name: lane_label(sub.type),
+                        lane: sub.type,
+                        owner: :human,
+                        count: Map.fetch!(@stage_counts, sub.id),
+                        cards: Map.fetch!(@streams, stream_name(sub.id)),
+                        collapsed:
+                          lane_collapsed?(sub.id, sub.type, @stage_counts, @force_open, @force_closed)
+                      }
+                    end
+                  }
+                />
+              </div>
+            </section>
+          </div>
         </div>
         <div
-          id="board-bands"
-          style="display:flex;gap:22px;padding:16px 18px 18px 18px;overflow-x:auto;overflow-y:hidden;align-items:stretch;background:oklch(0.952 0.008 255);min-height:calc(100vh - 120px);-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;"
+          :if={@logs_open}
+          id="agent-log-sheet"
+          class="flex-none border-t border-base-300 bg-base-100"
+          role="log"
+          aria-label="Agent log"
         >
-          <section
-            :for={{category, stages} <- @stage_groups}
-            id={"category-#{category}"}
-            style="display:flex;flex-direction:column;gap:9px;flex:0 0 auto;"
+          <div class="flex items-center justify-between border-b border-base-200 px-4 py-1.5">
+            <div class="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-base-content/60">
+              <.icon name="hero-command-line" class="size-4" /> Agent log
+            </div>
+            <button
+              type="button"
+              id="agent-log-close"
+              phx-click="close_logs"
+              class="btn btn-ghost btn-xs btn-circle"
+              aria-label="Close agent log"
+            >
+              <.icon name="hero-x-mark" class="size-4" />
+            </button>
+          </div>
+          <div
+            id="agent-log-lines"
+            phx-update="stream"
+            class="h-48 overflow-y-auto px-4 py-2 font-mono text-xs leading-relaxed"
           >
-            <div style="display:flex;align-items:center;gap:8px;padding:0 4px;height:20px;flex:0 0 auto;">
-              <span class="category-dot" style={category_dot_style(category)}></span>
-              <h2
-                class="category-band"
-                style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;font-family:var(--font-mono);color:oklch(0.52 0.02 255);margin:0;"
-              >
-                {category_label(category)}
-              </h2>
-              <span style="font-size:10.5px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);">
-                {category_card_count(category, stages, @stage_counts, @sublanes_by_parent)}
+            <div
+              id="agent-log-empty"
+              class="hidden py-6 text-center text-base-content/50 only:block"
+            >
+              Waiting for agent activity…
+            </div>
+            <div
+              :for={{dom_id, entry} <- @streams.agent_logs}
+              id={dom_id}
+              class={["flex gap-2 py-0.5", agent_log_class(entry.kind)]}
+            >
+              <span class="shrink-0 text-base-content/40">
+                {Calendar.strftime(entry.ts, "%H:%M:%S")}
               </span>
+              <span :if={entry.ref} class="shrink-0 text-base-content/60">[{entry.ref}]</span>
+              <span class="whitespace-pre-wrap break-all">{entry.text}</span>
             </div>
-            <div style="display:flex;gap:9px;align-items:stretch;flex:1;min-height:0;">
-              <.stage_column
-                :for={stage <- stages}
-                id={"stage-col-#{stage.position}"}
-                name={stage.name}
-                type={stage.type}
-                ai_enabled={stage.ai_enabled}
-                category={category}
-                stage_id={stage.id}
-                collapsed={stage_collapsed?(stage, @stage_counts, @sublanes_by_parent, @force_open)}
-                main_collapsed={
-                  lane_collapsed?(stage.id, :main, @stage_counts, @force_open, @force_closed)
-                }
-                count={Map.fetch!(@stage_counts, stage.id)}
-                wip_limit={stage.wip_limit}
-                board_key={@board.key}
-                terminal={stage.id == @terminal_stage_id}
-                questions={@needs_input_questions}
-                cards={Map.fetch!(@streams, stream_name(stage.id))}
-                composing={@composing_stage_id == stage.id}
-                compose_form={@compose_form}
-                read_only={@read_only?}
-                sublanes={
-                  for sub <- Map.get(@sublanes_by_parent, stage.id, []) do
-                    %{
-                      id: sub.id,
-                      name: lane_label(sub.type),
-                      lane: sub.type,
-                      owner: :human,
-                      count: Map.fetch!(@stage_counts, sub.id),
-                      cards: Map.fetch!(@streams, stream_name(sub.id)),
-                      collapsed:
-                        lane_collapsed?(sub.id, sub.type, @stage_counts, @force_open, @force_closed)
-                    }
-                  end
-                }
-              />
-            </div>
-          </section>
+          </div>
         </div>
       </div>
       <.card_drawer
@@ -252,51 +304,6 @@ defmodule RelayWeb.BoardLive do
           </ul>
         </div>
         <label class="modal-backdrop" phx-click="close_archived">Close</label>
-      </div>
-      <div
-        :if={@logs_open}
-        id="agent-log-sheet"
-        class="fixed inset-x-0 bottom-0 z-40 border-t border-base-300 bg-base-100/95 shadow-2xl backdrop-blur"
-        role="log"
-        aria-label="Agent log"
-      >
-        <div class="flex items-center justify-between border-b border-base-200 px-4 py-1.5">
-          <div class="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-base-content/60">
-            <.icon name="hero-command-line" class="size-4" /> Agent log
-          </div>
-          <button
-            type="button"
-            id="agent-log-close"
-            phx-click="close_logs"
-            class="btn btn-ghost btn-xs btn-circle"
-            aria-label="Close agent log"
-          >
-            <.icon name="hero-x-mark" class="size-4" />
-          </button>
-        </div>
-        <div
-          id="agent-log-lines"
-          phx-update="stream"
-          class="h-48 overflow-y-auto px-4 py-2 font-mono text-xs leading-relaxed"
-        >
-          <div
-            id="agent-log-empty"
-            class="hidden py-6 text-center text-base-content/50 only:block"
-          >
-            Waiting for agent activity…
-          </div>
-          <div
-            :for={{dom_id, entry} <- @streams.agent_logs}
-            id={dom_id}
-            class={["flex gap-2 py-0.5", agent_log_class(entry.kind)]}
-          >
-            <span class="shrink-0 text-base-content/40">
-              {Calendar.strftime(entry.ts, "%H:%M:%S")}
-            </span>
-            <span :if={entry.ref} class="shrink-0 text-base-content/60">[{entry.ref}]</span>
-            <span class="whitespace-pre-wrap break-all">{entry.text}</span>
-          </div>
-        </div>
       </div>
     </Layouts.app>
     """
