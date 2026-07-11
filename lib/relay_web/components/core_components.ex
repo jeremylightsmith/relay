@@ -1059,9 +1059,9 @@ defmodule RelayWeb.CoreComponents do
         <.link id={"#{@id}-scrim"} patch={@close_patch} class="drawer-overlay">
           <span class="sr-only">Close</span>
         </.link>
-        <aside class="drawer-panel flex h-dvh w-full max-w-[1100px] flex-col bg-base-100 shadow-xl lg:w-2/3">
+        <aside class="drawer-panel flex h-dvh w-full flex-col bg-base-100 shadow-xl lg:w-[min(760px,94vw)]">
           <header class="flex items-start gap-3 border-b border-base-300 p-5">
-            <div class="flex min-w-0 flex-1 flex-col gap-2.5">
+            <div class="flex min-w-0 flex-1 flex-col gap-1.5">
               <div class="flex items-center gap-2">
                 <span class={[
                   "drawer-stage-chip badge badge-sm font-medium",
@@ -1378,58 +1378,67 @@ defmodule RelayWeb.CoreComponents do
                   </div>
                 </.form>
               </section>
-              <section :if={@card.sub_tasks != []} id="sub-tasks" class="space-y-2">
-                <div class="flex items-center justify-between">
-                  <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                    Sub-tasks
-                  </h4>
-                  <span id="sub-tasks-count" class="font-mono text-[10px] text-base-content/60">
-                    {@sub_task_progress.done}/{@sub_task_progress.total}
-                  </span>
-                </div>
-                <div class="h-1 w-full overflow-hidden rounded-full bg-base-300">
-                  <div
-                    class="h-full rounded-full bg-success transition-all"
-                    style={"width:#{sub_task_pct(@sub_task_progress)}%"}
-                  />
-                </div>
-                <ul class="space-y-1">
-                  <li
-                    :for={st <- @card.sub_tasks}
-                    id={"sub-task-#{st.id}"}
-                    class="flex items-start gap-2"
-                  >
-                    <button
-                      type="button"
-                      phx-click="toggle_sub_task"
-                      phx-value-id={st.id}
-                      class={[
-                        "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
-                        if(st.done,
-                          do: "border-success bg-success text-white",
-                          else: "border-base-300 hover:border-success"
-                        )
-                      ]}
-                      aria-label={if(st.done, do: "Mark incomplete", else: "Mark complete")}
-                    >
-                      <.icon :if={st.done} name="hero-check" class="size-3" />
-                    </button>
-                    <span class={[
-                      "text-sm leading-snug",
-                      st.done && "text-base-content/50 line-through"
-                    ]}>
-                      {st.title}
-                    </span>
-                  </li>
-                </ul>
-              </section>
-              <section :if={@card.ai_result} id="ai-result" class="space-y-2">
-                <h4
-                  class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em]"
-                  style="color:oklch(0.55 0.16 295);"
+              <section class="space-y-2">
+                <.section_label>Description</.section_label>
+                <.editable_text
+                  :if={!@archived}
+                  id={"#{@id}-description"}
+                  value={@card.description}
+                  editing={@editing_description}
+                  form={@description_form}
+                  field={:description}
+                  edit_event="edit_description"
+                  save_event="save_card_description"
+                  cancel_event="cancel_description"
+                  placeholder="Add a description…"
+                  markdown
+                  multiline
+                  rows="12"
+                  read_class="min-h-16 p-1 text-sm leading-relaxed"
+                />
+                <div
+                  :if={@archived}
+                  id={"#{@id}-description-archived"}
+                  class="md min-h-16 p-1 text-sm leading-relaxed"
                 >
-                  AI Result
-                </h4>
+                  {Relay.Markdown.to_html(@card.description || "_No description._")}
+                </div>
+              </section>
+
+              <details
+                :if={@card.spec}
+                id={"#{@id}-spec"}
+                class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-200/40"
+              >
+                <summary class="collapse-title flex min-h-0 items-center py-3">
+                  <.section_label>Spec</.section_label>
+                </summary>
+                <div class="collapse-content">
+                  <div id={"#{@id}-spec-view"} class="md text-sm leading-relaxed">
+                    {Relay.Markdown.to_html(@card.spec)}
+                  </div>
+                </div>
+              </details>
+              <details
+                :if={@card.plan}
+                id="card-plan"
+                class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-200/40"
+              >
+                <summary class="collapse-title flex min-h-0 items-center py-3">
+                  <.section_label>Plan</.section_label>
+                </summary>
+                <div class="collapse-content">
+                  <div
+                    id="card-plan-body"
+                    class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
+                  >
+                    {Relay.Markdown.to_html(@card.plan)}
+                  </div>
+                </div>
+              </details>
+
+              <section :if={@card.ai_result} id="ai-result" class="space-y-2">
+                <.section_label accent="text-secondary">AI Result</.section_label>
                 <div
                   class="space-y-3 rounded-[10px] border p-3.5"
                   style="border-color:oklch(0.88 0.05 295);background:oklch(0.985 0.01 295);"
@@ -1490,36 +1499,51 @@ defmodule RelayWeb.CoreComponents do
                   </a>
                 </div>
               </section>
-              <section class="space-y-2">
-                <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                  Description
-                </h4>
-                <.editable_text
-                  :if={!@archived}
-                  id={"#{@id}-description"}
-                  value={@card.description}
-                  editing={@editing_description}
-                  form={@description_form}
-                  field={:description}
-                  edit_event="edit_description"
-                  save_event="save_card_description"
-                  cancel_event="cancel_description"
-                  placeholder="Add a description…"
-                  markdown
-                  multiline
-                  rows="12"
-                  read_class="min-h-16 p-1 text-sm leading-relaxed"
-                />
-                <div
-                  :if={@archived}
-                  id={"#{@id}-description-archived"}
-                  class="md min-h-16 p-1 text-sm leading-relaxed"
-                >
-                  {Relay.Markdown.to_html(@card.description || "_No description._")}
+              <section :if={@card.sub_tasks != []} id="sub-tasks" class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <.section_label>Sub-tasks</.section_label>
+                  <span id="sub-tasks-count" class="font-mono text-[10px] text-base-content/60">
+                    {@sub_task_progress.done}/{@sub_task_progress.total}
+                  </span>
                 </div>
+                <div class="h-1 w-full overflow-hidden rounded-full bg-base-300">
+                  <div
+                    class="h-full rounded-full bg-success transition-all"
+                    style={"width:#{sub_task_pct(@sub_task_progress)}%"}
+                  />
+                </div>
+                <ul class="space-y-1">
+                  <li
+                    :for={st <- @card.sub_tasks}
+                    id={"sub-task-#{st.id}"}
+                    class="flex items-start gap-2"
+                  >
+                    <button
+                      type="button"
+                      phx-click="toggle_sub_task"
+                      phx-value-id={st.id}
+                      class={[
+                        "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
+                        if(st.done,
+                          do: "border-success bg-success text-white",
+                          else: "border-base-300 hover:border-success"
+                        )
+                      ]}
+                      aria-label={if(st.done, do: "Mark incomplete", else: "Mark complete")}
+                    >
+                      <.icon :if={st.done} name="hero-check" class="size-3" />
+                    </button>
+                    <span class={[
+                      "text-sm leading-snug",
+                      st.done && "text-base-content/50 line-through"
+                    ]}>
+                      {st.title}
+                    </span>
+                  </li>
+                </ul>
               </section>
               <section class="space-y-3 border-t border-base-300 pt-4">
-                <h4 class="text-sm font-semibold text-base-content/80">Conversation</h4>
+                <.section_label>Conversation</.section_label>
                 <ol id={"#{@id}-conversation"} phx-update="stream" class="space-y-4">
                   <li
                     id={"#{@id}-conversation-empty"}
@@ -1576,42 +1600,8 @@ defmodule RelayWeb.CoreComponents do
                 </.form>
               </section>
 
-              <details
-                :if={@card.spec}
-                id={"#{@id}-spec"}
-                class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-200/40"
-              >
-                <summary class="collapse-title min-h-0 py-3 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                  Spec
-                </summary>
-                <div class="collapse-content">
-                  <div id={"#{@id}-spec-view"} class="md text-sm leading-relaxed">
-                    {Relay.Markdown.to_html(@card.spec)}
-                  </div>
-                </div>
-              </details>
-              <details
-                :if={@card.plan}
-                id="card-plan"
-                class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-200/40"
-              >
-                <summary class="collapse-title min-h-0 py-3 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                  Plan
-                </summary>
-                <div class="collapse-content">
-                  <div
-                    id="card-plan-body"
-                    class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
-                  >
-                    {Relay.Markdown.to_html(@card.plan)}
-                  </div>
-                </div>
-              </details>
-
               <section class="space-y-2 border-t border-base-300 pt-4">
-                <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                  Activity
-                </h4>
+                <.section_label>Activity</.section_label>
                 <ol id={"#{@id}-activity"} phx-update="stream" class="space-y-1">
                   <li
                     id={"#{@id}-activity-empty"}
