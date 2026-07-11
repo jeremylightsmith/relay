@@ -282,7 +282,7 @@ class WorkOwnershipTest(unittest.TestCase):
         relay.set_status = lambda ref, status: self.calls.append(("set_status", ref, status))
         relay.comment = lambda ref, body: self.calls.append(("comment", ref))
         relay.flag = lambda ref, msg: self.calls.append(("flag", ref))
-        relay.run_step = lambda step, vars: True
+        relay.run_step = lambda step, vars, cwd=relay.ROOT, tag="": True
         relay.get_card = lambda ref: {"status": "in_review"}
         relay.log = lambda *a, **k: None
 
@@ -321,6 +321,39 @@ class BuildPoolsTest(unittest.TestCase):
     def test_worktree_path_is_under_dot_claude_worktrees(self):
         self.assertTrue(relay.worktree_path("work-1")
                         .endswith(os.path.join(".claude", "worktrees", "work-1")))
+
+
+class CwdRoutingTest(unittest.TestCase):
+    def setUp(self):
+        self._shell, self._claude, self._dry = (
+            relay._stream_shell, relay._stream_claude, relay.DRY)
+        relay.DRY = False
+        self.addCleanup(setattr, relay, "_stream_shell", self._shell)
+        self.addCleanup(setattr, relay, "_stream_claude", self._claude)
+        self.addCleanup(setattr, relay, "DRY", self._dry)
+
+    def test_shell_step_routes_rendered_cmd_cwd_and_tag(self):
+        seen = {}
+        relay._stream_shell = lambda cmd, cwd, tag="": (
+            seen.update(cmd=cmd, cwd=cwd, tag=tag) or True)
+        relay.run_step({"shell": "echo {ref}"}, {"ref": "RLY-7"},
+                       cwd="/tmp/wt", tag="[RLY-7] ")
+        self.assertEqual(seen, {"cmd": "echo RLY-7", "cwd": "/tmp/wt", "tag": "[RLY-7] "})
+
+    def test_claude_step_routes_prompt_cwd_and_tag(self):
+        seen = {}
+        relay._stream_claude = lambda prompt, cwd=relay.ROOT, tag="": (
+            seen.update(prompt=prompt, cwd=cwd, tag=tag) or True)
+        relay.run_step({"claude": "do {ref}"}, {"ref": "RLY-7"},
+                       cwd="/tmp/wt", tag="[RLY-7] ")
+        self.assertEqual(seen, {"prompt": "do RLY-7", "cwd": "/tmp/wt", "tag": "[RLY-7] "})
+
+    def test_claude_event_line_carries_the_tag(self):
+        ev = {"type": "assistant",
+              "message": {"content": [{"type": "text", "text": "hello there"}]}}
+        text = capture(relay._print_claude_event, ev, "[RLY-7] ")
+        self.assertIn("[RLY-7] ", text)
+        self.assertIn("hello there", text)
 
 
 if __name__ == "__main__":
