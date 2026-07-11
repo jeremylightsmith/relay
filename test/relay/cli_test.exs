@@ -177,6 +177,48 @@ defmodule Relay.CLITest do
     refute text =~ "RLY-1"
   end
 
+  test "pull/1 skips an unclaimed card that is derived done" do
+    stub(fn conn ->
+      Req.Test.json(conn, %{
+        "board" => %{"name" => "B", "key" => "RLY"},
+        "stages" => [
+          %{
+            "id" => 2,
+            "name" => "Code",
+            "type" => "work",
+            "ai_enabled" => true,
+            "category" => "in_progress",
+            "position" => 2
+          }
+        ],
+        "cards" => [
+          %{
+            "ref" => "RLY-1",
+            "title" => "Parked, derived done",
+            "status" => "ready",
+            "done" => true,
+            "stage_id" => 2,
+            "owners" => [],
+            "active_owner" => nil
+          },
+          %{
+            "ref" => "RLY-2",
+            "title" => "Unclaimed AI-stage",
+            "status" => "ready",
+            "done" => false,
+            "stage_id" => 2,
+            "owners" => [],
+            "active_owner" => nil
+          }
+        ]
+      })
+    end)
+
+    assert {:ok, text} = CLI.pull([])
+    assert text =~ "RLY-2"
+    refute text =~ "RLY-1"
+  end
+
   test "request/3 surfaces API errors and missing config" do
     stub(fn conn ->
       conn

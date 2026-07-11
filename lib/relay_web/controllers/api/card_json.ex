@@ -3,14 +3,19 @@ defmodule RelayWeb.Api.CardJSON do
 
   alias Relay.Cards
 
-  @doc "The shared card shape. `board` supplies the ref + key. Heavy plan/spec live on show/1."
-  def data(board, card) do
+  @doc """
+  The shared card shape. `board` supplies the ref + key; `stages` (the board's in-memory stage
+  list) drives the derived `done`/`needs_you` facts. Heavy plan/spec live on show/1.
+  """
+  def data(board, card, stages) do
     %{
       id: card.id,
       ref: Cards.ref(board, card),
       title: card.title,
       tag: card.tag,
       status: card.status,
+      done: Cards.done?(card, stages),
+      needs_you: Cards.needs_you?(card, stages),
       branch: card.branch,
       pr_url: card.pr_url,
       stage_id: card.stage_id,
@@ -36,15 +41,15 @@ defmodule RelayWeb.Api.CardJSON do
     }
   end
 
-  def index(%{board: board, cards: cards}) do
-    %{data: Enum.map(cards, &data(board, &1))}
+  def index(%{board: board, stages: stages, cards: cards}) do
+    %{data: Enum.map(cards, &data(board, &1, stages))}
   end
 
-  def show(%{board: board, card: card, timeline: timeline}) do
+  def show(%{board: board, card: card, stages: stages, timeline: timeline}) do
     %{
       data:
         board
-        |> data(card)
+        |> data(card, stages)
         |> Map.put(:description, card.description)
         |> Map.put(:plan, card.plan)
         |> Map.put(:spec, card.spec)

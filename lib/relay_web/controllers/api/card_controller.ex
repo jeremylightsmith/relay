@@ -9,7 +9,7 @@ defmodule RelayWeb.Api.CardController do
 
   def index(conn, _params) do
     board = conn.assigns.current_board
-    render(conn, :index, board: board, cards: Cards.list_cards(board))
+    render(conn, :index, board: board, stages: Boards.list_stages(board), cards: Cards.list_cards(board))
   end
 
   def create(conn, params) do
@@ -19,7 +19,12 @@ defmodule RelayWeb.Api.CardController do
          {:ok, card} <- Cards.create_card(stage, params, :agent) do
       conn
       |> put_status(:created)
-      |> render(:show, board: board, card: card, timeline: Activity.list_timeline(card))
+      |> render(:show,
+        board: board,
+        card: card,
+        stages: Boards.list_stages(board),
+        timeline: Activity.list_timeline(card)
+      )
     end
   end
 
@@ -27,8 +32,16 @@ defmodule RelayWeb.Api.CardController do
     board = conn.assigns.current_board
 
     case Cards.get_card_by_ref(board, ref) do
-      %Schemas.Card{} = card -> render(conn, :show, board: board, card: card, timeline: Activity.list_timeline(card))
-      nil -> {:error, :not_found}
+      %Schemas.Card{} = card ->
+        render(conn, :show,
+          board: board,
+          card: card,
+          stages: Boards.list_stages(board),
+          timeline: Activity.list_timeline(card)
+        )
+
+      nil ->
+        {:error, :not_found}
     end
   end
 
@@ -41,7 +54,12 @@ defmodule RelayWeb.Api.CardController do
          {:ok, card} <- update_owners(card, params),
          {:ok, card} <- update_ai_result(card, params),
          {:ok, card} <- update_sub_tasks(card, params) do
-      render(conn, :show, board: board, card: card, timeline: Activity.list_timeline(card))
+      render(conn, :show,
+        board: board,
+        card: card,
+        stages: Boards.list_stages(board),
+        timeline: Activity.list_timeline(card)
+      )
     else
       nil -> {:error, :not_found}
       {:error, changeset} -> {:error, changeset}
@@ -109,7 +127,12 @@ defmodule RelayWeb.Api.CardController do
          {:ok, index} <- move_index(params),
          %Schemas.Stage{} = stage <- get_stage(board, params["stage"]),
          {:ok, card} <- Cards.move_card(card, stage, index, :agent) do
-      render(conn, :show, board: board, card: card, timeline: Activity.list_timeline(card))
+      render(conn, :show,
+        board: board,
+        card: card,
+        stages: Boards.list_stages(board),
+        timeline: Activity.list_timeline(card)
+      )
     else
       nil -> {:error, :not_found}
       {:error, changeset} -> {:error, changeset}
@@ -123,7 +146,12 @@ defmodule RelayWeb.Api.CardController do
     with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
          {:ok, sub_task_id} <- parse_int_id(id),
          {:ok, card} <- Cards.set_sub_task_done(card, sub_task_id, done) do
-      render(conn, :show, board: board, card: card, timeline: Activity.list_timeline(card))
+      render(conn, :show,
+        board: board,
+        card: card,
+        stages: Boards.list_stages(board),
+        timeline: Activity.list_timeline(card)
+      )
     else
       nil -> {:error, :not_found}
       :error -> {:error, :not_found}
@@ -163,7 +191,12 @@ defmodule RelayWeb.Api.CardController do
 
     with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
          {:ok, card} <- Cards.request_input(card, question, :agent) do
-      render(conn, :show, board: board, card: card, timeline: Activity.list_timeline(card))
+      render(conn, :show,
+        board: board,
+        card: card,
+        stages: Boards.list_stages(board),
+        timeline: Activity.list_timeline(card)
+      )
     else
       nil -> {:error, :not_found}
       {:error, changeset} -> {:error, changeset}
@@ -177,7 +210,12 @@ defmodule RelayWeb.Api.CardController do
 
     with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
          {:ok, card} <- Cards.approve(card, :agent) do
-      render(conn, :show, board: board, card: card, timeline: Activity.list_timeline(card))
+      render(conn, :show,
+        board: board,
+        card: card,
+        stages: Boards.list_stages(board),
+        timeline: Activity.list_timeline(card)
+      )
     else
       nil -> {:error, :not_found}
       {:error, reason} -> {:error, reason}
@@ -190,7 +228,12 @@ defmodule RelayWeb.Api.CardController do
     with {:ok, note} <- reject_note(params),
          %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
          {:ok, card} <- do_reject(board, card, note, params["to"]) do
-      render(conn, :show, board: board, card: card, timeline: Activity.list_timeline(card))
+      render(conn, :show,
+        board: board,
+        card: card,
+        stages: Boards.list_stages(board),
+        timeline: Activity.list_timeline(card)
+      )
     else
       nil -> {:error, :not_found}
       {:error, reason} -> {:error, reason}

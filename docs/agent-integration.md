@@ -39,7 +39,7 @@ Human output by default; add `--json` for machine output. Non-zero exit on any e
 | `bin/relay pull` | (advisory) the next ready card per the config |
 | `bin/relay comment RLY-12 "…"` | Post a comment (as Relay AI) |
 | `bin/relay move RLY-12 Code` | Move to a stage (by name, e.g. `"Code:Review"`) |
-| `bin/relay status RLY-12 working` | Set status |
+| `bin/relay status RLY-12 working` | Set status (`ready`\|`working`\|`needs_input`\|`in_review`) |
 | `bin/relay describe RLY-12 @spec.md` | Set the card's **description** (the spec) |
 | `bin/relay plan RLY-12 @plan.md` | Set the card's **plan** (travels with the card) |
 | `bin/relay branch RLY-12 rly-12-…` | Record the **branch** this card's work lives on |
@@ -52,6 +52,15 @@ Human output by default; add `--json` for machine output. Non-zero exit on any e
 | `bin/relay approve RLY-12` / `bin/relay reject RLY-12 "note"` | Gate: advance / send back |
 
 Text args accept `-` (stdin) or `@path` (file) for long content (specs, plans).
+
+**Done is derived, not a status.** The stored status vocabulary is just
+`ready | working | needs_input | in_review` — there is no `done` status to set. A card
+payload instead carries `done: true` once a `ready` card is parked at the board's terminal
+(rightmost) stage, plus a `needs_you: true/false` fact (and the board payload carries a
+`needs_you` rollup). This means "ready" is used two ways below: **positionally**, a card is
+"ready to pull" when the column to its right is an AI column (invariant 5); as a **status**,
+`ready` means the card isn't actively `working`/blocked — it's just sitting wherever it is.
+Don't set a `done` status; move the card to its terminal stage instead and Done follows.
 
 ## The runner
 

@@ -188,7 +188,7 @@ defmodule RelayWeb.Api.CardControllerTest do
   end
 
   describe "POST /api/cards" do
-    test "creates a queued, unowned card in the board's first stage with title only",
+    test "creates a ready, unowned card in the board's first stage with title only",
          %{conn: conn, stage: stage} do
       body =
         conn
@@ -197,7 +197,7 @@ defmodule RelayWeb.Api.CardControllerTest do
         |> Map.fetch!("data")
 
       assert body["title"] == "New card"
-      assert body["status"] == "queued"
+      assert body["status"] == "ready"
       assert body["stage_id"] == stage.id
       assert body["owners"] == []
       assert body["active_owner"] == nil
@@ -267,5 +267,23 @@ defmodule RelayWeb.Api.CardControllerTest do
     test "unauthenticated POST /api/cards returns 401" do
       build_conn() |> post(~p"/api/cards", %{title: "x"}) |> json_response(401)
     end
+  end
+
+  test "card payload carries the new status vocab plus done and needs_you",
+       %{conn: conn, board: board, stage: stage} do
+    card = insert(:card, board: board, stage: stage, status: :ready)
+
+    resp = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200)
+    assert resp["data"]["status"] == "ready"
+    assert resp["data"]["done"] == true
+    assert resp["data"]["needs_you"] == false
+  end
+
+  test "board payload carries the needs_you rollup", %{conn: conn, board: board} do
+    review = insert(:stage, board: board, name: "Review", type: :review, position: 2)
+    insert(:card, board: board, stage: review, status: :in_review)
+
+    resp = conn |> get(~p"/api/board") |> json_response(200)
+    assert resp["needs_you"] == %{"needs_input" => 0, "in_review" => 1, "awaiting_human" => 0}
   end
 end
