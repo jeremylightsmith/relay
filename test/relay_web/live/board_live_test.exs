@@ -22,13 +22,13 @@ defmodule RelayWeb.BoardLiveTest do
   describe "when logged in" do
     setup :register_and_log_in_user
 
-    test "provisions the default board with 7 stages on first visit", %{conn: conn, user: user} do
+    test "provisions the default board with 8 stages on first visit", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, _view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert [%Board{} = board] = Repo.all(Board)
       assert board.owner_id == user.id
-      assert Repo.aggregate(Stage, :count) == 7
+      assert Repo.aggregate(Stage, :count) == 8
     end
 
     test "revisiting does not create a duplicate board", %{conn: conn, user: user} do
@@ -37,7 +37,7 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, _view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert Repo.aggregate(Board, :count) == 1
-      assert Repo.aggregate(Stage, :count) == 7
+      assert Repo.aggregate(Stage, :count) == 8
     end
 
     test "renders the stage columns in position order", %{conn: conn, user: user} do
@@ -51,12 +51,19 @@ defmodule RelayWeb.BoardLiveTest do
         |> LazyHTML.query("#board .stage-column h3")
         |> Enum.map(&String.trim(LazyHTML.text(&1)))
 
-      assert names == ["Backlog", "Spec", "Plan", "Code", "Review", "Deploy", "Done"]
+      assert names == ["Backlog", "Next up", "Spec", "Plan", "Code", "Review", "Deploy", "Done"]
     end
 
     test "groups the stages under their category bands in order", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
-      [backlog, spec, plan, code, review, deploy, done] = board.stages
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      next_up = Enum.find(board.stages, &(&1.name == "Next up"))
+      spec = Enum.find(board.stages, &(&1.name == "Spec"))
+      plan = Enum.find(board.stages, &(&1.name == "Plan"))
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      review = Enum.find(board.stages, &(&1.name == "Review"))
+      deploy = Enum.find(board.stages, &(&1.name == "Deploy"))
+      done = Enum.find(board.stages, &(&1.name == "Done"))
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
@@ -67,7 +74,8 @@ defmodule RelayWeb.BoardLiveTest do
 
       # a fresh board is empty, so every stage renders as its collapsed strip
       assert has_element?(view, "#category-unstarted #stage-strip-#{backlog.id}", "Backlog")
-      assert has_element?(view, "#category-unstarted #stage-strip-#{spec.id}", "Spec")
+      assert has_element?(view, "#category-unstarted #stage-strip-#{next_up.id}", "Next up")
+      assert has_element?(view, "#category-planning #stage-strip-#{spec.id}", "Spec")
       assert has_element?(view, "#category-planning #stage-strip-#{plan.id}", "Plan")
       assert has_element?(view, "#category-in_progress #stage-strip-#{code.id}", "Code")
       assert has_element?(view, "#category-in_progress #stage-strip-#{review.id}", "Review")
@@ -103,7 +111,7 @@ defmodule RelayWeb.BoardLiveTest do
       assert style =~ "--color-secondary"
     end
 
-    test "shows the right Human/AI owner swatch on each stage", %{conn: conn, user: user} do
+    test "shows the right stage-type icon on each stage", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
@@ -111,7 +119,7 @@ defmodule RelayWeb.BoardLiveTest do
       for stage <- board.stages do
         assert has_element?(
                  view,
-                 ~s(#stage-strip-#{stage.id} .stage-owner-swatch[data-owner="#{stage.owner}"])
+                 ~s(#stage-strip-#{stage.id} .stage-type-icon[data-type="#{stage.type}"])
                )
       end
     end
@@ -122,7 +130,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       document = view |> render() |> LazyHTML.from_fragment()
 
-      assert document |> LazyHTML.query("#board .stage-strip") |> Enum.count() == 7
+      assert document |> LazyHTML.query("#board .stage-strip") |> Enum.count() == 8
       assert document |> LazyHTML.query("#board .stage-empty") |> Enum.count() == 0
     end
   end
@@ -322,7 +330,8 @@ defmodule RelayWeb.BoardLiveTest do
 
     setup %{user: user} do
       board = Boards.get_or_create_default_board(user)
-      [backlog, spec, plan | _rest] = board.stages
+      [backlog, spec | _rest] = board.stages
+      plan = Enum.find(board.stages, &(&1.name == "Plan"))
       %{board: board, backlog: backlog, spec: spec, plan: plan}
     end
 
@@ -494,7 +503,7 @@ defmodule RelayWeb.BoardLiveTest do
         |> LazyHTML.query("#board .stage-cards[data-stage-id]")
         |> Enum.count()
 
-      assert zones == 7
+      assert zones == 8
     end
   end
 
@@ -1189,7 +1198,9 @@ defmodule RelayWeb.BoardLiveTest do
 
     setup %{user: user} do
       board = Boards.get_or_create_default_board(user)
-      [backlog, spec, plan | _rest] = board.stages
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      spec = Enum.find(board.stages, &(&1.name == "Spec"))
+      plan = Enum.find(board.stages, &(&1.name == "Plan"))
       {:ok, card} = Cards.create_card(backlog, %{title: "Pass the baton"})
       %{board: board, backlog: backlog, spec: spec, plan: plan, card: card}
     end
@@ -1243,10 +1254,10 @@ defmodule RelayWeb.BoardLiveTest do
       assert moved.position == 2
       assert Repo.get!(Card, existing.id).position == 1
 
-      assert has_element?(view, "#stage-col-2-cards .board-card", "Pass the baton")
+      assert has_element?(view, "#stage-col-#{spec.position}-cards .board-card", "Pass the baton")
       refute has_element?(view, "#stage-col-1-cards .board-card")
       assert has_element?(view, "#stage-strip-#{backlog.id} .stage-count", "0")
-      assert has_element?(view, "#stage-col-2 .stage-count", "2")
+      assert has_element?(view, "#stage-col-#{spec.position} .stage-count", "2")
     end
 
     test "the drawer stage chip and menu update after the move", %{conn: conn, plan: plan, user: user} do
@@ -1549,7 +1560,9 @@ defmodule RelayWeb.BoardLiveTest do
     test "drawer actions (status, owners, move) log user-attributed entries",
          %{conn: conn, user: user, board: board, backlog: backlog} do
       {:ok, card} = Cards.create_card(backlog, %{title: "Card"})
-      [_backlog, spec | _rest] = board.stages
+      # Review is a review-type stage, so :in_review stays valid on the move — no
+      # implicit ADR 0003 status snap sneaks an extra :status_changed entry in.
+      review = Enum.find(board.stages, &(&1.name == "Review"))
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
@@ -1558,7 +1571,7 @@ defmodule RelayWeb.BoardLiveTest do
       |> render_change()
 
       view |> element("#card-drawer-add-me") |> render_click()
-      view |> element("#card-drawer-move-to-#{spec.id}") |> render_click()
+      view |> element("#card-drawer-move-to-#{review.id}") |> render_click()
 
       entries = Repo.all(from a in Schemas.Activity, where: a.card_id == ^card.id, order_by: a.id)
 
@@ -1574,7 +1587,8 @@ defmodule RelayWeb.BoardLiveTest do
 
     setup %{user: user} do
       board = Boards.get_or_create_default_board(user)
-      [backlog, _spec, plan | _rest] = board.stages
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      plan = Enum.find(board.stages, &(&1.name == "Plan"))
       {:ok, card} = Cards.create_card(backlog, %{title: "Draft the spec"})
       %{board: board, backlog: backlog, plan: plan, card: card}
     end
@@ -1774,7 +1788,8 @@ defmodule RelayWeb.BoardLiveTest do
 
     setup %{user: user} do
       board = Boards.get_or_create_default_board(user)
-      [backlog, spec | _rest] = board.stages
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      spec = Enum.find(board.stages, &(&1.name == "Spec"))
       %{board: board, backlog: backlog, spec: spec}
     end
 
@@ -1793,7 +1808,7 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#stage-strip-#{spec.id}.stage-strip", "Spec")
       assert has_element?(view, "#stage-strip-#{spec.id} .stage-strip-name", "Spec")
       assert has_element?(view, "#stage-strip-#{spec.id} .stage-count", "0")
-      refute has_element?(view, "#stage-col-2-cards")
+      refute has_element?(view, "#stage-col-#{spec.position}-cards")
 
       strip_html = view |> element("#stage-strip-#{spec.id}") |> render()
       assert strip_html =~ "width:44px"
@@ -1850,8 +1865,8 @@ defmodule RelayWeb.BoardLiveTest do
       render_hook(view, "move_card", %{"ref" => "RLY-1", "stage_id" => "#{spec.id}", "index" => 0})
 
       refute has_element?(view, "#stage-strip-#{spec.id}")
-      assert has_element?(view, "#stage-col-2-cards .board-card", "Incoming")
-      assert has_element?(view, "#stage-col-2 .stage-count", "1")
+      assert has_element?(view, "#stage-col-#{spec.position}-cards .board-card", "Incoming")
+      assert has_element?(view, "#stage-col-#{spec.position} .stage-count", "1")
     end
 
     test "a stage whose only card sits in a sub-lane does not collapse",

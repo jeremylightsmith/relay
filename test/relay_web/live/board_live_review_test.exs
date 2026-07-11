@@ -10,15 +10,15 @@ defmodule RelayWeb.BoardLiveReviewTest do
 
   setup :register_and_log_in_user
 
-  # Default pipeline (positions 1-7): Backlog | Spec | Plan | Code(:ai) |
-  # Review(:human) | Deploy(:ai) | Done. Review becomes an approval gate
-  # whose reject target is Code; Code stays ungated.
+  # Default 8-stage pipeline: Backlog | Next up | Spec | Plan | Code(:work, ai) |
+  # Review(:review type) | Deploy(:work, ai) | Done. Review is a review-type stage by
+  # seed default, so it's already a gate — its reject target defaults to Code (the
+  # previous main stage); Code (type :work) is never itself a review-type stage.
   setup %{user: user} do
     board = Boards.get_or_create_default_board(user)
     code = Enum.find(board.stages, &(&1.name == "Code"))
     review = Enum.find(board.stages, &(&1.name == "Review"))
     deploy = Enum.find(board.stages, &(&1.name == "Deploy"))
-    {:ok, review} = Boards.update_stage(review, %{approval_gate: true, reject_to_stage_id: code.id})
     %{board: board, code: code, review: review, deploy: deploy}
   end
 
@@ -117,6 +117,30 @@ defmodule RelayWeb.BoardLiveReviewTest do
     assert note.actor_type == :user
     assert note.user_id == user.id
     assert Enum.any?(timeline, &match?(%Schemas.Activity{type: :rejected}, &1))
+  end
+
+  test "the reject target radio is preselected to the previous main stage",
+       %{conn: conn, board: board, code: code, review: review} do
+    in_review_card(review)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+    view |> element("#review-request-changes") |> render_click()
+
+    assert has_element?(view, ~s(#review-reject-target option[value="#{code.id}"][selected]))
+  end
+
+  test "a review stage that is the board's first column shows Approve but no Request changes",
+       %{conn: conn, user: user} do
+    {:ok, board} = Boards.create_board(user, %{name: "Gate first", key: "RLY"})
+    first = board.stages |> Enum.filter(&is_nil(&1.parent_id)) |> Enum.min_by(& &1.position)
+    {:ok, first} = Boards.update_stage(first, %{type: :review})
+    in_review_card(first)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+    assert has_element?(view, "#review-approve")
+    refute has_element?(view, "#review-request-changes")
   end
 
   test "Send back with an empty note is a no-op with an inline prompt",

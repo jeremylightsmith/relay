@@ -11,17 +11,20 @@ defmodule RelayWeb.BoardSettingsLive do
   `{:stages_changed, board_id}` (MMF 18) so every open board re-renders
   live.
 
-  RLY-46: the stage's `type`/`ai_enabled` dropdown + AI toggle (replacing the
-  owner segmented control) and the approve/reject config (now implicit in
-  `type: :review`, replacing the approval-gate toggle + reject-target picker)
-  are a follow-up task — this pane only shows a read-only owner swatch in the
-  meantime.
+  RLY-46: each stage row carries a TYPE dropdown (`queue | work | planning |
+  review | done`, `set_type` event, re-snaps resident cards to the new type's
+  valid status) and — for work/planning stages only — a violet AI-ENABLED
+  toggle (`toggle_ai` event, "Relay AI listens here"). The approve/reject
+  config that used to live here (the approval-gate toggle + reject-target
+  picker) is gone: gating is now implicit in `type: :review`, and the reject
+  target is chosen at reject time on the board (`Boards.previous_main_stage/1`).
   """
 
   use RelayWeb, :live_view
 
   alias Relay.ApiKeys
   alias Relay.Boards
+  alias Relay.Cards
   alias Schemas.Board
 
   @categories [:unstarted, :planning, :in_progress, :complete]
@@ -202,12 +205,7 @@ defmodule RelayWeb.BoardSettingsLive do
                     style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:13px;padding:16px 18px;display:flex;flex-direction:column;gap:14px;"
                   >
                     <div style="display:flex;align-items:center;gap:10px;">
-                      <span
-                        class="stage-owner-swatch"
-                        data-owner={stage_owner(stage)}
-                        style={"width:9px;height:9px;border-radius:3px;flex:0 0 auto;background:#{owner_color(stage_owner(stage))};"}
-                      >
-                      </span>
+                      <.stage_type_icon type={stage.type} />
                       <div style="flex:1;">
                         <.editable_text
                           id={"stage-#{stage.id}-name"}
@@ -283,9 +281,54 @@ defmodule RelayWeb.BoardSettingsLive do
                         <input type="hidden" name="stage_id" value={stage.id} />
                       </:hidden>
                     </.editable_text>
-                    <%!-- Controls row — WIP (MMF 11) / DONE COLUMN (mockup lines ~241-262). The
-                         type dropdown + AI toggle (RLY-46, replacing the owner segmented control)
-                         is a follow-up task. --%>
+                    <%!-- TYPE dropdown + AI-ENABLED toggle (RLY-46). --%>
+                    <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+                      <div style="display:flex;align-items:center;gap:9px;">
+                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
+                          TYPE
+                        </span>
+                        <details class="dropdown" id={"stage-#{stage.id}-type-dropdown"}>
+                          <summary class="btn btn-sm btn-outline gap-2">
+                            <.stage_type_icon type={stage.type} />
+                            {type_label(stage.type)}
+                          </summary>
+                          <ul class="menu dropdown-content z-10 w-44 rounded-box bg-base-100 p-1 shadow">
+                            <li :for={t <- [:queue, :work, :planning, :review, :done]}>
+                              <button
+                                type="button"
+                                id={"stage-#{stage.id}-type-#{t}"}
+                                phx-click="set_type"
+                                phx-value-stage-id={stage.id}
+                                phx-value-type={t}
+                                class="flex items-center gap-2"
+                              >
+                                <.stage_type_icon type={t} />
+                                <span class="flex-1 text-left">{type_label(t)}</span>
+                                <.icon :if={t == stage.type} name="hero-check" class="size-4" />
+                              </button>
+                            </li>
+                          </ul>
+                        </details>
+                      </div>
+                      <div
+                        :if={stage.type in [:work, :planning]}
+                        style="display:flex;align-items:center;gap:9px;"
+                      >
+                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
+                          RELAY AI
+                        </span>
+                        <input
+                          id={"stage-#{stage.id}-ai-toggle"}
+                          type="checkbox"
+                          class="toggle toggle-sm toggle-secondary"
+                          checked={stage.ai_enabled}
+                          phx-click="toggle_ai"
+                          phx-value-stage-id={stage.id}
+                          title="Relay AI listens here"
+                        />
+                      </div>
+                    </div>
+                    <%!-- Controls row — WIP (MMF 11) / DONE COLUMN (mockup lines ~241-262). --%>
                     <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
                       <div style="display:flex;align-items:center;gap:9px;">
                         <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
@@ -534,7 +577,7 @@ defmodule RelayWeb.BoardSettingsLive do
 
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
         save_general edit_stage save_stage add_stage delete_stage
-        toggle_wip bump_wip reorder_stage toggle_lane
+        toggle_wip bump_wip reorder_stage toggle_lane set_type toggle_ai
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -569,6 +612,20 @@ defmodule RelayWeb.BoardSettingsLive do
      socket
      |> put_flash(:info, "Board archived.")
      |> push_navigate(to: ~p"/boards")}
+  end
+
+  def handle_event("set_type", %{"stage-id" => stage_id, "type" => type}, socket)
+      when type in ~w(queue work planning review done) do
+    stage = find_stage(socket, stage_id)
+    {:ok, updated} = Boards.update_stage(stage, %{type: String.to_existing_atom(type)})
+    :ok = Cards.snap_cards_in(updated)
+    {:noreply, refresh_stages(socket)}
+  end
+
+  def handle_event("toggle_ai", %{"stage-id" => stage_id}, socket) do
+    stage = find_stage(socket, stage_id)
+    {:ok, _stage} = Boards.update_stage(stage, %{ai_enabled: not stage.ai_enabled})
+    {:noreply, refresh_stages(socket)}
   end
 
   def handle_event("toggle_lane", %{"stage-id" => stage_id, "lane" => lane}, socket) do
@@ -754,15 +811,11 @@ defmodule RelayWeb.BoardSettingsLive do
       "border:1px solid oklch(0.90 0.006 255);background:oklch(1 0 0);color:oklch(0.52 0.02 255);"
   end
 
-  # Human = blue, AI = violet (theme tokens in app.css).
-  defp owner_color(:human), do: "var(--color-primary)"
-  defp owner_color(:ai), do: "var(--color-secondary)"
-
-  # The owner swatch color: derived from ai_enabled (RLY-46 — the type/ai_enabled
-  # model replaces the owner column; a proper type dropdown + AI toggle is a
-  # follow-up task).
-  defp stage_owner(%Schemas.Stage{ai_enabled: true}), do: :ai
-  defp stage_owner(%Schemas.Stage{}), do: :human
+  defp type_label(:queue), do: "Queue"
+  defp type_label(:work), do: "Work"
+  defp type_label(:planning), do: "Planning"
+  defp type_label(:review), do: "Review"
+  defp type_label(:done), do: "Done"
 
   defp category_band_label(:unstarted), do: "UNSTARTED"
   defp category_band_label(:planning), do: "PLANNING"

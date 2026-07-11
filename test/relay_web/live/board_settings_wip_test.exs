@@ -73,7 +73,7 @@ defmodule RelayWeb.BoardSettingsWipTest do
       {:ok, _card} = Cards.create_card(code, %{title: "Busy"})
 
       {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
-      assert has_element?(board_view, "#stage-col-4 .stage-wip", "wip 1/3")
+      assert has_element?(board_view, "#stage-col-5 .stage-wip", "wip 1/3")
 
       {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
       settings_view |> element("#stage-#{code.id}-wip-toggle") |> render_click()

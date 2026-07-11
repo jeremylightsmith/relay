@@ -41,10 +41,10 @@ defmodule RelayWeb.BoardLiveWipTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#stage-col-4 .stage-wip", "wip 2/3")
-      refute has_element?(view, "#stage-col-4 .stage-wip[data-over]")
+      assert has_element?(view, "#stage-col-5 .stage-wip", "wip 2/3")
+      refute has_element?(view, "#stage-col-5 .stage-wip[data-over]")
 
-      style = chip_style(view, "#stage-col-4 .stage-wip")
+      style = chip_style(view, "#stage-col-5 .stage-wip")
       assert style =~ "background:oklch(0.96 0.006 255)"
       assert style =~ "color:oklch(0.48 0.02 255)"
       assert style =~ "font-family:var(--font-mono)"
@@ -57,9 +57,9 @@ defmodule RelayWeb.BoardLiveWipTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#stage-col-4 .stage-wip[data-over]", "wip 4/3")
+      assert has_element?(view, "#stage-col-5 .stage-wip[data-over]", "wip 4/3")
 
-      style = chip_style(view, "#stage-col-4 .stage-wip")
+      style = chip_style(view, "#stage-col-5 .stage-wip")
       assert style =~ "background:oklch(0.96 0.03 15)"
       assert style =~ "color:oklch(0.55 0.16 15)"
     end
@@ -70,7 +70,7 @@ defmodule RelayWeb.BoardLiveWipTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#stage-col-4 .stage-count", "2")
+      assert has_element?(view, "#stage-col-5 .stage-count", "2")
       refute has_element?(view, ".stage-wip")
     end
 
@@ -86,7 +86,7 @@ defmodule RelayWeb.BoardLiveWipTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       # 1 card left in Code's main lane + 2 in its Done sub-lane = 3, over the limit of 2.
-      assert has_element?(view, "#stage-col-4 .stage-wip[data-over]", "wip 3/2")
+      assert has_element?(view, "#stage-col-5 .stage-wip[data-over]", "wip 3/2")
       refute has_element?(view, "#sublane-#{done_lane.id} .stage-wip")
     end
 
@@ -108,7 +108,7 @@ defmodule RelayWeb.BoardLiveWipTest do
       create_cards(code, 2)
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
-      assert has_element?(view, "#stage-col-4 .stage-wip", "wip 2/3")
+      assert has_element?(view, "#stage-col-5 .stage-wip", "wip 2/3")
 
       {:ok, _stage} = Boards.update_stage(Boards.get_stage(board, code.id), %{wip_limit: nil})
 
@@ -125,8 +125,8 @@ defmodule RelayWeb.BoardLiveWipTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#stage-col-4[data-wip=under]")
-      assert chip_style(view, "#stage-col-4") =~ "border:1px solid var(--color-base-300)"
+      assert has_element?(view, "#stage-col-5[data-wip=under]")
+      assert chip_style(view, "#stage-col-5") =~ "border:1px solid var(--color-base-300)"
     end
 
     test "at the limit the border and chip text turn amber", %{conn: conn, code: code, user: user} do
@@ -136,9 +136,9 @@ defmodule RelayWeb.BoardLiveWipTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#stage-col-4[data-wip=at]")
-      assert chip_style(view, "#stage-col-4") =~ "border:1px solid var(--color-warning)"
-      assert chip_style(view, "#stage-col-4 .stage-wip") =~ "color:oklch(0.52 0.13 65)"
+      assert has_element?(view, "#stage-col-5[data-wip=at]")
+      assert chip_style(view, "#stage-col-5") =~ "border:1px solid var(--color-warning)"
+      assert chip_style(view, "#stage-col-5 .stage-wip") =~ "color:oklch(0.52 0.13 65)"
     end
 
     test "over the limit the border and chip text turn red", %{conn: conn, code: code, user: user} do
@@ -148,9 +148,9 @@ defmodule RelayWeb.BoardLiveWipTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#stage-col-4[data-wip=over]")
-      assert chip_style(view, "#stage-col-4") =~ "border:1px solid var(--color-error)"
-      assert chip_style(view, "#stage-col-4 .stage-wip") =~ "color:oklch(0.55 0.16 15)"
+      assert has_element?(view, "#stage-col-5[data-wip=over]")
+      assert chip_style(view, "#stage-col-5") =~ "border:1px solid var(--color-error)"
+      assert chip_style(view, "#stage-col-5 .stage-wip") =~ "color:oklch(0.55 0.16 15)"
     end
 
     test "with no limit the border stays neutral and no chip renders", %{conn: conn, code: code, user: user} do
@@ -159,8 +159,8 @@ defmodule RelayWeb.BoardLiveWipTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#stage-col-4[data-wip=none]")
-      assert chip_style(view, "#stage-col-4") =~ "border:1px solid var(--color-base-300)"
+      assert has_element?(view, "#stage-col-5[data-wip=none]")
+      assert chip_style(view, "#stage-col-5") =~ "border:1px solid var(--color-base-300)"
       refute has_element?(view, ".stage-wip")
     end
   end

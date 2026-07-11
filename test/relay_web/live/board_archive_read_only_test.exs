@@ -123,12 +123,11 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
         {"save_stage", %{"stage_id" => "#{stage.id}", "stage" => %{"name" => "sneaky"}}},
         {"add_stage", %{"category" => "unstarted"}},
         {"delete_stage", %{"stage-id" => "#{stage.id}"}},
-        {"toggle_gate", %{"stage-id" => "#{stage.id}"}},
-        {"set_owner", %{"stage-id" => "#{stage.id}", "owner" => "ai"}},
+        {"set_type", %{"stage-id" => "#{stage.id}", "type" => "work"}},
+        {"toggle_ai", %{"stage-id" => "#{stage.id}"}},
         {"toggle_wip", %{"stage-id" => "#{stage.id}"}},
         {"bump_wip", %{"stage-id" => "#{stage.id}", "delta" => "1"}},
         {"reorder_stage", %{"stage-id" => "#{stage.id}", "direction" => "down"}},
-        {"set_reject_target", %{"stage_id" => "#{stage.id}", "reject_to_stage_id" => ""}},
         {"toggle_lane", %{"stage-id" => "#{stage.id}", "lane" => "review"}}
       ]
 

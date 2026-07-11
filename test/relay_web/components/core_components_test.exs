@@ -51,19 +51,19 @@ defmodule RelayWeb.CoreComponentsTest do
   end
 
   describe "stage_column/1" do
-    test "renders the name, owner pill, empty state, and compose button when empty" do
+    test "renders the name, type icon, empty state, and compose button when empty" do
       html =
         render_component(&CoreComponents.stage_column/1,
           id: "stage-col-1",
           name: "Backlog",
-          owner: :human,
+          type: :queue,
           stage_id: 7
         )
 
       assert html =~ ~s(id="stage-col-1")
       assert html =~ "Backlog"
-      assert html =~ "stage-owner-swatch"
-      assert html =~ ~s(data-owner="human")
+      assert html =~ "stage-type-icon"
+      assert html =~ ~s(data-type="queue")
       assert html =~ "stage-empty"
       assert html =~ "No cards yet"
       assert html =~ ~s(id="stage-col-1-new-card")
@@ -76,7 +76,8 @@ defmodule RelayWeb.CoreComponentsTest do
         render_component(&CoreComponents.stage_column/1,
           id: "stage-col-4",
           name: "Code",
-          owner: :ai,
+          type: :work,
+          ai_enabled: true,
           stage_id: 4,
           board_key: "RLY",
           cards: [
@@ -109,7 +110,7 @@ defmodule RelayWeb.CoreComponentsTest do
         render_component(&CoreComponents.stage_column/1,
           id: "stage-col-1",
           name: "Backlog",
-          owner: :human,
+          type: :queue,
           stage_id: 7,
           composing: true,
           compose_form: to_form(%{"title" => ""}, as: :card)
@@ -127,7 +128,8 @@ defmodule RelayWeb.CoreComponentsTest do
         render_component(&CoreComponents.stage_column/1,
           id: "stage-col-6",
           name: "Deploy",
-          owner: :ai,
+          type: :work,
+          ai_enabled: true,
           stage_id: 6,
           count: 0,
           collapsed: true
@@ -140,10 +142,10 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "background:oklch(0.965 0.004 255)"
       assert html =~ "border-radius:11px"
       assert html =~ "cursor:pointer"
-      # 9px owner swatch in the AI colour
-      assert html =~ "stage-owner-swatch"
-      assert html =~ ~s(data-owner="ai")
-      assert html =~ "width:9px;height:9px;border-radius:3px"
+      # 9px work-type icon (blue square)
+      assert html =~ "stage-type-icon"
+      assert html =~ ~s(data-type="work")
+      assert html =~ "width:9px;height:9px;border-radius:2px"
       # rotated name + mono count
       assert html =~ "writing-mode:vertical-rl"
       assert html =~ "rotate(180deg)"
@@ -165,7 +167,8 @@ defmodule RelayWeb.CoreComponentsTest do
         render_component(&CoreComponents.stage_column/1,
           id: "stage-col-4",
           name: "Code",
-          owner: :ai,
+          type: :work,
+          ai_enabled: true,
           stage_id: 4,
           count: 0,
           collapsed: true,
@@ -192,7 +195,7 @@ defmodule RelayWeb.CoreComponentsTest do
         render_component(&CoreComponents.stage_column/1,
           id: "stage-col-1",
           name: "Backlog",
-          owner: :human,
+          type: :queue,
           stage_id: 7,
           collapsed: false
         )
@@ -207,7 +210,8 @@ defmodule RelayWeb.CoreComponentsTest do
         render_component(&CoreComponents.stage_column/1,
           id: "stage-col-4",
           name: "Code",
-          owner: :ai,
+          type: :work,
+          ai_enabled: true,
           stage_id: 4,
           count: 1,
           board_key: "RLY",

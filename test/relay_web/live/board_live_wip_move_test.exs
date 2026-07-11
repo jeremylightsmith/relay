@@ -29,10 +29,10 @@ defmodule RelayWeb.BoardLiveWipMoveTest do
 
       render_hook(view, "move_card", %{"ref" => "RLY-4", "stage_id" => code.id, "index" => 0})
 
-      assert has_element?(view, "#stage-col-4-cards .board-card", "One more")
+      assert has_element?(view, "#stage-col-5-cards .board-card", "One more")
       assert Repo.get!(Card, card.id).stage_id == code.id
       assert has_element?(view, "#flash-error", "Code is over its WIP limit — 4/3")
-      assert has_element?(view, "#stage-col-4 .stage-wip[data-over]", "wip 4/3")
+      assert has_element?(view, "#stage-col-5 .stage-wip[data-over]", "wip 4/3")
     end
 
     test "moving into a stage below its limit does not warn", %{conn: conn, spec: spec, code: code, user: user} do
@@ -45,9 +45,9 @@ defmodule RelayWeb.BoardLiveWipMoveTest do
 
       render_hook(view, "move_card", %{"ref" => "RLY-2", "stage_id" => code.id, "index" => 0})
 
-      assert has_element?(view, "#stage-col-4-cards .board-card", "Fits fine")
+      assert has_element?(view, "#stage-col-5-cards .board-card", "Fits fine")
       refute has_element?(view, "#flash-error")
-      assert has_element?(view, "#stage-col-4 .stage-wip", "wip 2/3")
+      assert has_element?(view, "#stage-col-5 .stage-wip", "wip 2/3")
     end
 
     test "reordering within an already over-limit stage does not warn", %{conn: conn, code: code, user: user} do
@@ -61,7 +61,7 @@ defmodule RelayWeb.BoardLiveWipMoveTest do
       render_hook(view, "move_card", %{"ref" => "RLY-2", "stage_id" => code.id, "index" => 0})
 
       refute has_element?(view, "#flash-error")
-      assert has_element?(view, "#stage-col-4 .stage-wip[data-over]", "wip 2/1")
+      assert has_element?(view, "#stage-col-5 .stage-wip[data-over]", "wip 2/1")
     end
 
     test "moving into an unlimited stage never warns", %{conn: conn, spec: spec, code: code, user: user} do
@@ -73,7 +73,7 @@ defmodule RelayWeb.BoardLiveWipMoveTest do
 
       render_hook(view, "move_card", %{"ref" => "RLY-4", "stage_id" => code.id, "index" => 0})
 
-      assert has_element?(view, "#stage-col-4-cards .board-card", "Free flow")
+      assert has_element?(view, "#stage-col-5-cards .board-card", "Free flow")
       refute has_element?(view, "#flash-error")
     end
 
@@ -92,7 +92,7 @@ defmodule RelayWeb.BoardLiveWipMoveTest do
 
       assert Repo.get!(Card, card.id).stage_id == review.id
       assert has_element?(view, "#flash-error", "Code is over its WIP limit — 3/2")
-      assert has_element?(view, "#stage-col-4 .stage-wip[data-over]", "wip 3/2")
+      assert has_element?(view, "#stage-col-5 .stage-wip[data-over]", "wip 3/2")
     end
   end
 end

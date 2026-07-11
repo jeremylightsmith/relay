@@ -5,7 +5,6 @@ defmodule RelayWeb.BoardSettingsStagesTest do
 
   alias Relay.Boards
   alias Relay.Repo
-  alias Schemas.CardOwner
 
   setup :register_and_log_in_user
 
@@ -37,7 +36,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       assert has_element?(view, "#add-stage-complete")
       assert has_element?(view, "#stage-#{code.id}-name-display", "Code")
       assert has_element?(view, "#stage-#{code.id}-description-display")
-      assert has_element?(view, "#stage-#{code.id}-row .stage-owner-swatch[data-owner='ai']")
+      assert has_element?(view, "#stage-#{code.id}-row .stage-type-icon[data-type='work']")
     end
 
     test "the API-key pane renders under the keys nav with its ids intact", %{conn: conn, user: user} do
@@ -147,40 +146,52 @@ defmodule RelayWeb.BoardSettingsStagesTest do
 
     test "the arrows reorder stages and crossing a band adopts the category",
          %{conn: conn, board: board} do
+      next_up = stage_named(board, "Next up")
       spec = stage_named(board, "Spec")
-      plan = stage_named(board, "Plan")
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
-      view |> element("#stage-#{spec.id}-down") |> render_click()
+      view |> element("#stage-#{next_up.id}-down") |> render_click()
 
-      assert has_element?(view, "#settings-group-planning #stage-#{spec.id}-row")
+      assert has_element?(view, "#settings-group-planning #stage-#{next_up.id}-row")
+      assert Boards.get_stage(board, next_up.id).category == :planning
+      # one-directional: the stage it crossed past keeps its own category
       assert Boards.get_stage(board, spec.id).category == :planning
-      # one-directional: the old first-Planning stage keeps its category
-      assert Boards.get_stage(board, plan.id).category == :planning
 
-      view |> element("#stage-#{spec.id}-up") |> render_click()
+      view |> element("#stage-#{next_up.id}-up") |> render_click()
 
-      assert has_element?(view, "#settings-group-unstarted #stage-#{spec.id}-row")
-      assert Boards.get_stage(board, spec.id).category == :unstarted
+      assert has_element?(view, "#settings-group-unstarted #stage-#{next_up.id}-row")
+      assert Boards.get_stage(board, next_up.id).category == :unstarted
     end
 
-    test "the owner segmented control changes meant-for and never touches card owners",
-         %{conn: conn, board: board, user: user} do
+    test "the TYPE dropdown changes a stage's type and re-snaps a resident card's status",
+         %{conn: conn, board: board} do
       code = stage_named(board, "Code")
-      card = insert(:card, stage: code)
-      owner_row = insert(:card_owner, card: card, user: user)
+      card = insert(:card, stage: code, status: :working)
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
-      view |> element("#stage-#{code.id}-owner-human") |> render_click()
+      assert has_element?(view, "#stage-#{code.id}-type-dropdown")
 
-      assert Boards.get_stage(board, code.id).owner == :human
-      assert has_element?(view, "#stage-#{code.id}-row .stage-owner-swatch[data-owner='human']")
+      view |> element("#stage-#{code.id}-type-review") |> render_click()
 
-      assert [%CardOwner{} = row] = Repo.all(CardOwner)
-      assert row.id == owner_row.id
-      assert row.actor_type == :user
-      assert row.user_id == user.id
+      assert Boards.get_stage(board, code.id).type == :review
+      assert has_element?(view, "#stage-#{code.id}-row .stage-type-icon[data-type='review']")
+
+      reloaded_card = Repo.get!(Schemas.Card, card.id)
+      assert reloaded_card.status == :in_review
+    end
+
+    test "the AI-enabled toggle only renders for work/planning stages", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      review = stage_named(board, "Review")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+      assert has_element?(view, "#stage-#{code.id}-ai-toggle")
+      refute has_element?(view, "#stage-#{review.id}-ai-toggle")
+
+      view |> element("#stage-#{code.id}-ai-toggle") |> render_click()
+
+      refute Boards.get_stage(board, code.id).ai_enabled
     end
   end
 
@@ -193,7 +204,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
 
       new_stage = board |> Boards.list_stages() |> Enum.find(&(&1.name == "New stage"))
       assert new_stage.category == :unstarted
-      assert new_stage.owner == :human
+      assert new_stage.type == Schemas.Stage.default_type(:unstarted)
       assert has_element?(view, "#settings-group-unstarted #stage-#{new_stage.id}-row")
       assert has_element?(view, "#stage-#{new_stage.id}-name-display")
     end
@@ -234,7 +245,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
     end
 
     test "deleting the only remaining stage flashes", %{conn: conn, board: board} do
-      [keep | rest] = Enum.filter(board.stages, &(&1.lane == :main))
+      [keep | rest] = Enum.filter(board.stages, &is_nil(&1.parent_id))
       Enum.each(rest, fn stage -> {:ok, _} = Boards.delete_stage(stage) end)
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
@@ -266,7 +277,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
 
       view |> element("#stage-#{code.id}-review-toggle") |> render_click()
 
-      assert [%{lane: :review}] = Boards.sublanes(code)
+      assert [%{type: :review}] = Boards.sublanes(code)
       assert has_element?(view, "#stage-#{code.id}-row", "Finished work waits in")
     end
   end

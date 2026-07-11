@@ -129,7 +129,8 @@ defmodule RelayWeb.BoardLive do
                 :for={stage <- stages}
                 id={"stage-col-#{stage.position}"}
                 name={stage.name}
-                owner={stage_owner(stage)}
+                type={stage.type}
+                ai_enabled={stage.ai_enabled}
                 category={category}
                 stage_id={stage.id}
                 collapsed={stage_collapsed?(stage, @stage_counts, @sublanes_by_parent, @force_open)}
@@ -149,7 +150,7 @@ defmodule RelayWeb.BoardLive do
                       id: sub.id,
                       name: lane_label(sub.type),
                       lane: sub.type,
-                      owner: stage_owner(sub),
+                      owner: :human,
                       count: Map.fetch!(@stage_counts, sub.id),
                       cards: Map.fetch!(@streams, stream_name(sub.id)),
                       collapsed:
@@ -1018,29 +1019,38 @@ defmodule RelayWeb.BoardLive do
     )
   end
 
-  # Gate info for the review panel, or nil when the card's current stage isn't
-  # review-type — mirroring Cards.approve/reject's :not_in_review guard (ADR 0003) so
-  # Approve/Request-changes only render where the transition can succeed.
+  # Gate info for the review panel, or nil unless the card sits in a review-type stage —
+  # mirroring Cards.approve/reject's :not_in_review guard so Approve/Request changes only
+  # render where the transition can succeed.
   defp review_gate_info(socket, %Card{} = card) do
     stage = find_stage_by_id(socket, card.stage_id)
 
     if stage.type == :review do
-      main = if is_nil(stage.parent_id), do: stage, else: find_stage_by_id(socket, stage.parent_id)
-      default_target = Boards.previous_main_stage(main) || main
+      main = governing_main_stage(socket, stage)
+      targets = send_back_targets(socket.assigns.board, card)
 
       %{
         approve_label: approve_label(main),
-        reject_to_name: default_target.name,
-        targets: gate_reject_targets(socket, card),
-        default_to: default_target.id
+        targets: targets,
+        default_to: default_reject_id(main),
+        can_reject: targets != []
       }
+    end
+  end
+
+  # The preselected reject target: the previous main stage's id, or nil when there is none
+  # (in which case can_reject is false and the panel is hidden).
+  defp default_reject_id(main) do
+    case Boards.previous_main_stage(main) do
+      %Stage{id: id} -> id
+      nil -> nil
     end
   end
 
   # Mirrors Cards.approve/2 routing: next main stage by position, or done
   # in place at the board's last main stage (mockup: "Approve → Deploy").
-  defp approve_label(gate) do
-    case Boards.next_main_stage(gate) do
+  defp approve_label(main) do
+    case Boards.next_main_stage(main) do
       nil -> "Approve → Done"
       %Stage{name: name} -> "Approve → #{name}"
     end
@@ -1058,18 +1068,6 @@ defmodule RelayWeb.BoardLive do
 
     board.stages
     |> Enum.filter(&(is_nil(&1.parent_id) and &1.position < pos))
-    |> Enum.sort_by(& &1.position)
-    |> Enum.map(&%{id: &1.id, name: &1.name})
-  end
-
-  # Gate reject picker: main stages at or before the current stage
-  # (the default reject lands in the previous main stage, so "at" is allowed).
-  defp gate_reject_targets(socket, %Card{} = card) do
-    board = socket.assigns.board
-    pos = current_main_position(board, card)
-
-    board.stages
-    |> Enum.filter(&(is_nil(&1.parent_id) and &1.position <= pos))
     |> Enum.sort_by(& &1.position)
     |> Enum.map(&%{id: &1.id, name: &1.name})
   end

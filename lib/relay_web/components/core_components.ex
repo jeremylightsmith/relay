@@ -456,6 +456,44 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
+  The stage-type glyph that replaces the owner dot: a 9px mark whose shape+color encodes the
+  five stage types (queue/work/planning/review/done). See ADR 0003 / the Stage & Card Model
+  mockup §02.
+  """
+  attr :type, :atom, values: [:queue, :work, :planning, :review, :done], required: true
+  attr :size, :integer, default: 9
+
+  def stage_type_icon(assigns) do
+    ~H"""
+    <span
+      class="stage-type-icon"
+      data-type={@type}
+      aria-label={"#{@type} stage"}
+      style={stage_type_icon_style(@type, @size)}
+    >
+    </span>
+    """
+  end
+
+  defp stage_type_icon_style(:queue, s),
+    do:
+      "width:#{s}px;height:#{s}px;border-radius:3px;border:1.5px solid oklch(0.68 0.02 255);box-sizing:border-box;flex:0 0 auto;display:block;background:transparent;"
+
+  defp stage_type_icon_style(:work, s),
+    do: "width:#{s}px;height:#{s}px;border-radius:2px;background:var(--color-primary);flex:0 0 auto;display:block;"
+
+  defp stage_type_icon_style(:planning, s),
+    do:
+      "width:#{s}px;height:#{s}px;background:var(--color-secondary);transform:rotate(45deg);flex:0 0 auto;display:block;"
+
+  defp stage_type_icon_style(:review, s),
+    do:
+      "width:#{s}px;height:#{s}px;border-radius:50%;border:1.5px solid var(--color-warning);box-sizing:border-box;flex:0 0 auto;display:block;background:transparent;"
+
+  defp stage_type_icon_style(:done, s),
+    do: "width:#{s}px;height:#{s}px;border-radius:50%;background:var(--color-success);flex:0 0 auto;display:block;"
+
+  @doc """
   Renders a card's status badge — the baton state at a glance.
 
   `working` appends the stored progress percentage when present
@@ -821,10 +859,6 @@ defmodule RelayWeb.CoreComponents do
   defp lane_divider(:done), do: "oklch(0.90 0.035 155)"
   defp lane_divider(_ongoing), do: "oklch(0.915 0.008 255)"
 
-  defp owner_hex(:ai), do: "var(--color-secondary)"
-  defp owner_hex(:human), do: "var(--color-primary)"
-  defp owner_hex(_owner), do: "oklch(0.55 0.02 255)"
-
   # RLY-1 item 9 — WIP threshold: over → red, at → amber, else neutral. Effective
   # count is the stage's main lane plus its sub-lanes (@total_count); no limit → :none.
   defp wip_state(_count, nil), do: :none
@@ -946,7 +980,7 @@ defmodule RelayWeb.CoreComponents do
   attr :review_gate, :any,
     default: nil,
     doc:
-      "MMF 15 gate info for an :in_review card on a gated stage — %{approve_label: label, reject_to_name: name}; nil when the governing stage is not an approval gate (hides Approve/Request changes)"
+      "MMF 15 gate info for an :in_review card on a review-type stage — %{approve_label, targets, default_to, can_reject}; nil when the card is not in a review-type stage"
 
   attr :reject_open, :boolean,
     default: false,
@@ -1152,6 +1186,7 @@ defmodule RelayWeb.CoreComponents do
                     {@review_gate.approve_label}
                   </button>
                   <button
+                    :if={@review_gate.can_reject}
                     id="review-request-changes"
                     type="button"
                     phx-click="review_open_reject"
@@ -1168,9 +1203,7 @@ defmodule RelayWeb.CoreComponents do
                   style="border:1px solid oklch(0.90 0.02 255);"
                 >
                   <p class="text-xs" style="color:oklch(0.42 0.02 255);">
-                    Sending back to
-                    <b style="color:oklch(0.30 0.02 255);">{@review_gate.reject_to_name}</b>
-                    for the AI to address.
+                    Send back to an earlier stage for the AI to address.
                   </p>
                   <.form
                     for={@reject_form}
@@ -1900,11 +1933,12 @@ defmodule RelayWeb.CoreComponents do
 
   ## Examples
 
-      <.stage_column id="stage-col-1" name="Backlog" owner={:human} stage_id={1} />
+      <.stage_column id="stage-col-1" name="Backlog" type={:queue} stage_id={1} />
   """
   attr :id, :string, required: true
   attr :name, :string, required: true
-  attr :owner, :atom, values: [:human, :ai], required: true
+  attr :type, :atom, values: [:queue, :work, :planning, :review, :done], required: true
+  attr :ai_enabled, :boolean, default: false
   attr :count, :integer, default: nil, doc: "the number of cards in the main lane; count hidden when nil"
 
   attr :wip_limit, :integer,
@@ -1949,6 +1983,7 @@ defmodule RelayWeb.CoreComponents do
       |> assign(:stage_width, 240 + Enum.sum(Enum.map(sublanes, &sublane_width/1)))
       |> assign(:total_count, total_count)
       |> assign(:wip_state, wip_state(total_count, assigns.wip_limit))
+      |> assign(:main_owner, if(assigns.ai_enabled, do: :ai, else: :human))
 
     ~H"""
     <%= if @collapsed do %>
@@ -1961,12 +1996,7 @@ defmodule RelayWeb.CoreComponents do
         aria-label={"Expand stage #{@name}"}
         style="flex:0 0 auto;width:44px;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;border-radius:11px;background:oklch(0.965 0.004 255);border:1px dashed oklch(0.90 0.006 255);cursor:pointer;box-sizing:border-box;"
       >
-        <span
-          class="stage-owner-swatch"
-          data-owner={@owner}
-          style={"width:9px;height:9px;border-radius:3px;flex:0 0 auto;background:#{owner_hex(@owner)};"}
-        >
-        </span>
+        <.stage_type_icon type={@type} />
         <h3
           class="stage-strip-name"
           style="writing-mode:vertical-rl;transform:rotate(180deg);font-size:12px;font-weight:600;letter-spacing:0.01em;color:oklch(0.52 0.02 255);white-space:nowrap;"
@@ -1988,12 +2018,7 @@ defmodule RelayWeb.CoreComponents do
         style={"flex:0 0 auto;width:#{@stage_width}px;display:flex;flex-direction:column;height:100%;background:var(--color-base-100);border:1px solid #{wip_border_color(@wip_state)};border-radius:14px;overflow:hidden;box-shadow:0 1px 3px oklch(0.5 0.02 255/0.06);"}
       >
         <header style="display:flex;align-items:center;gap:8px;padding:15px 15px 12px 15px;flex:0 0 auto;border-bottom:1px solid var(--color-base-300);">
-          <span
-            class="stage-owner-swatch"
-            data-owner={@owner}
-            style={"width:8px;height:8px;border-radius:3px;flex:0 0 auto;background:#{owner_hex(@owner)};"}
-          >
-          </span>
+          <.stage_type_icon type={@type} />
           <h3 style="font-size:13px;font-weight:600;letter-spacing:-0.01em;color:var(--color-base-content);">
             {@name}
           </h3>
@@ -2115,7 +2140,7 @@ defmodule RelayWeb.CoreComponents do
                     progress={card.progress}
                     owners={card.owners}
                     active_owner={Cards.active_owner_type(card)}
-                    stage_owner={@owner}
+                    stage_owner={@main_owner}
                     lane={:main}
                     category={@category}
                   />

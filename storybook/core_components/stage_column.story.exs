@@ -9,7 +9,7 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
     [
       %Variation{
         id: :empty_human,
-        attributes: %{id: "story-stage-backlog", name: "Backlog", owner: :human, stage_id: 1, count: 0}
+        attributes: %{id: "story-stage-backlog", name: "Backlog", type: :queue, stage_id: 1, count: 0}
       },
       %Variation{
         id: :collapsed_empty,
@@ -17,7 +17,8 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         attributes: %{
           id: "story-stage-collapsed",
           name: "Deploy",
-          owner: :ai,
+          type: :work,
+          ai_enabled: true,
           stage_id: 6,
           count: 0,
           collapsed: true
@@ -28,7 +29,8 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         attributes: %{
           id: "story-stage-code",
           name: "Code",
-          owner: :ai,
+          type: :work,
+          ai_enabled: true,
           stage_id: 4,
           count: 2,
           category: :in_progress,
@@ -60,7 +62,8 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         attributes: %{
           id: "story-stage-code-sublanes",
           name: "Code",
-          owner: :ai,
+          type: :work,
+          ai_enabled: true,
           stage_id: 4,
           count: 1,
           board_key: "RLY",
@@ -105,7 +108,8 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         attributes: %{
           id: "story-stage-collapsed-sublanes",
           name: "Code",
-          owner: :ai,
+          type: :work,
+          ai_enabled: true,
           stage_id: 5,
           count: 1,
           board_key: "RLY",
@@ -132,7 +136,8 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         attributes: %{
           id: "story-stage-plan",
           name: "Plan",
-          owner: :ai,
+          type: :planning,
+          ai_enabled: true,
           stage_id: 3,
           composing: true,
           compose_form: Phoenix.Component.to_form(%{"title" => ""}, as: :card)
@@ -144,7 +149,8 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         attributes: %{
           id: "story-stage-wip-ok",
           name: "Code",
-          owner: :ai,
+          type: :work,
+          ai_enabled: true,
           stage_id: 7,
           count: 2,
           wip_limit: 3,
@@ -178,7 +184,8 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         attributes: %{
           id: "story-stage-wip-over",
           name: "Code",
-          owner: :ai,
+          type: :work,
+          ai_enabled: true,
           stage_id: 8,
           count: 4,
           wip_limit: 3,
@@ -223,6 +230,31 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
              }}
           ]
         }
+      },
+      %Variation{
+        id: :type_queue,
+        description: "queue — hollow rounded square (neutral)",
+        attributes: %{id: "story-stage-type-queue", name: "Backlog", type: :queue, stage_id: 901, count: 3}
+      },
+      %Variation{
+        id: :type_work,
+        description: "work — solid blue square (--color-primary)",
+        attributes: %{id: "story-stage-type-work", name: "Code", type: :work, stage_id: 902, count: 2}
+      },
+      %Variation{
+        id: :type_planning,
+        description: "planning — solid violet diamond (--color-secondary)",
+        attributes: %{id: "story-stage-type-planning", name: "Plan", type: :planning, stage_id: 903, count: 1}
+      },
+      %Variation{
+        id: :type_review,
+        description: "review — hollow amber ring (--color-warning)",
+        attributes: %{id: "story-stage-type-review", name: "Review", type: :review, stage_id: 904, count: 1}
+      },
+      %Variation{
+        id: :type_done,
+        description: "done — solid green circle (--color-success)",
+        attributes: %{id: "story-stage-type-done", name: "Done", type: :done, stage_id: 905, count: 5}
       }
     ]
   end

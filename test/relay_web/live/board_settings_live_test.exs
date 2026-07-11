@@ -125,7 +125,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       view |> element("#stage-#{code.id}-review-toggle") |> render_click()
-      assert [%{lane: :review}] = Boards.sublanes(code)
+      assert [%{type: :review}] = Boards.sublanes(code)
 
       view |> element("#stage-#{code.id}-review-toggle") |> render_click()
       assert Boards.sublanes(code) == []
@@ -140,7 +140,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       html = view |> element("#stage-#{code.id}-review-toggle") |> render_click()
 
       assert html =~ "still has cards"
-      assert [%{lane: :review}] = Boards.sublanes(code)
+      assert [%{type: :review}] = Boards.sublanes(code)
     end
 
     test "a blocked disable snaps the checkbox back to checked instead of leaving it visually off",
