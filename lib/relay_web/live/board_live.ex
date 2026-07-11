@@ -60,16 +60,15 @@ defmodule RelayWeb.BoardLive do
               <.icon name="hero-squares-2x2" class="size-5" />
             </.link>
             <h1 id="board-title" class="text-xl font-semibold">
-              <.editable_text
+              <.boxed_field
                 :if={!@read_only?}
                 id="board-name"
                 value={@board.name}
-                editing={@editing_board_name}
                 form={@board_name_form}
                 field={:name}
-                edit_event="edit_board_name"
                 save_event="save_board_name"
                 cancel_event="cancel_board_name"
+                input_class="text-xl font-semibold"
               />
               <span :if={@read_only?}>{@board.name}</span>
             </h1>
@@ -283,7 +282,6 @@ defmodule RelayWeb.BoardLive do
       |> assign(:force_closed, MapSet.new())
       |> assign(:composing_stage_id, nil)
       |> assign(:compose_form, empty_compose_form())
-      |> assign(:editing_board_name, false)
       |> assign(:board_name_form, to_form(Boards.change_board(board)))
       |> stream_configure(:conversation, dom_id: &conversation_dom_id/1)
       |> stream_configure(:activity, dom_id: &activity_dom_id/1)
@@ -478,15 +476,8 @@ defmodule RelayWeb.BoardLive do
     {:noreply, assign(socket, :editing_title, false)}
   end
 
-  def handle_event("edit_board_name", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:editing_board_name, true)
-     |> assign(:board_name_form, to_form(Boards.change_board(socket.assigns.board)))}
-  end
-
   def handle_event("cancel_board_name", _params, socket) do
-    {:noreply, assign(socket, :editing_board_name, false)}
+    {:noreply, assign(socket, :board_name_form, to_form(Boards.change_board(socket.assigns.board)))}
   end
 
   def handle_event("save_board_name", %{"board" => board_params}, socket) do
@@ -496,7 +487,6 @@ defmodule RelayWeb.BoardLive do
          socket
          |> assign(:board, %{socket.assigns.board | name: board.name})
          |> assign(:page_title, board.name)
-         |> assign(:editing_board_name, false)
          |> assign(:board_name_form, to_form(Boards.change_board(board)))}
 
       {:error, changeset} ->
@@ -755,7 +745,8 @@ defmodule RelayWeb.BoardLive do
      socket
      |> assign(:board, updated)
      |> assign(:page_title, board.name)
-     |> assign(:read_only?, Board.archived?(updated))}
+     |> assign(:read_only?, Board.archived?(updated))
+     |> assign(:board_name_form, to_form(Boards.change_board(updated)))}
   end
 
   defp insert_timeline_entry(socket, %Schemas.Comment{} = comment) do

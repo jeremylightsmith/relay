@@ -159,7 +159,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
       {:ok, _board} = Boards.update_board(board, %{"name" => "Relayboard HQ"})
 
-      assert has_element?(view_b, "#board-title", "Relayboard HQ")
+      assert view_b |> element("#board-title #board-name-input") |> render() =~ "Relayboard HQ"
     end
 
     test "a rename from the settings General pane retitles an open board session",
@@ -168,9 +168,9 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       {:ok, view_settings, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
       {:ok, view_board, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      view_settings |> form("#general-form", board: %{name: "From settings"}) |> render_submit()
+      view_settings |> form("#board-name-form", board: %{name: "From settings"}) |> render_submit()
 
-      assert has_element?(view_board, "#board-title", "From settings")
+      assert view_board |> element("#board-title #board-name-input") |> render() =~ "From settings"
     end
 
     test "a card archived in session A disappears from session B and closes B's open drawer",
