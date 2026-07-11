@@ -766,7 +766,8 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      assert has_element?(view, "#card-drawer-title-display.whitespace-pre-wrap.break-words")
+      assert has_element?(view, "#card-drawer-title-display.break-words")
+      assert has_element?(view, "#card-drawer-title-display .whitespace-pre-wrap")
       refute has_element?(view, "#card-drawer-title-display.truncate")
     end
 
@@ -927,7 +928,8 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      assert has_element?(view, "#card-drawer-title-display.whitespace-pre-wrap.break-words")
+      assert has_element?(view, "#card-drawer-title-display.break-words")
+      assert has_element?(view, "#card-drawer-title-display .whitespace-pre-wrap")
     end
 
     test "pressing Escape closes the open drawer", %{conn: conn, user: user} do

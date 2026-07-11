@@ -1081,7 +1081,7 @@ defmodule RelayWeb.CoreComponents do
                 edit_event="edit_title"
                 save_event="save_card_title"
                 cancel_event="cancel_title"
-                read_class="whitespace-pre-wrap break-words px-1 text-lg font-semibold leading-[1.3]"
+                read_class="break-words px-1 text-lg font-semibold leading-[1.3]"
                 input_class="textarea textarea-bordered w-full text-lg font-semibold leading-[1.3]"
                 multiline
                 rows="2"
@@ -2362,7 +2362,7 @@ defmodule RelayWeb.CoreComponents do
         <div :if={@markdown && !editable_blank?(@value)} id={"#{@id}-view"} class="md">
           {Relay.Markdown.to_html(@value)}
         </div>
-        <span :if={!@markdown && !editable_blank?(@value)}>{@value}</span>
+        <span :if={!@markdown && !editable_blank?(@value)} class="whitespace-pre-wrap">{@value}</span>
         <span :if={editable_blank?(@value)} class="italic text-base-content/50">{@placeholder}</span>
         <.icon
           name="hero-pencil-square"
