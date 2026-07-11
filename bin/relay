@@ -22,20 +22,19 @@ Config (env): RELAY_URL, RELAY_API_KEY  (a board key from /board/settings)
 TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output.
 """
 import argparse
-import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
-import time
+import threading
 import urllib.error
 import urllib.request
 
 HERE = os.path.abspath(__file__)
 ROOT = os.path.dirname(os.path.dirname(HERE))
 CONFIG_PATH = os.path.join(ROOT, "relay_config.json")
-STATE_PATH = os.path.join(ROOT, ".relay-watch-state.json")
 DRY = False
 
 
@@ -103,13 +102,6 @@ def read_arg(text):
 
 def get_board():
     return api("GET", "/api/board")
-
-
-def get_board_version():
-    """Cheap board-changed poll: the version int, or None if the server lacks
-    the endpoint (older server) so the caller falls back to a full-board poll."""
-    resp = api("GET", "/api/board/version", soft_404=True)
-    return resp["version"] if resp else None
 
 
 def get_card(ref):
@@ -349,11 +341,6 @@ def refresh_worktree(name, base):
     subprocess.run(["git", "checkout", "--detach", base], cwd=path, check=False)
 
 
-def fingerprint(b):
-    rows = sorted(f'{c["ref"]}|{c["stage_id"]}|{c.get("status")}|{c.get("active_owner")}' for c in b["cards"])
-    return hashlib.sha256("\n".join(rows).encode()).hexdigest()
-
-
 def blocked(card):
     return card.get("status") == "needs_input"
 
@@ -405,6 +392,69 @@ def find_ready(b, cfg):
                 if not blocked(c) and not human_owned(c):
                     return c, entry, "fresh"
     return None
+
+
+def find_all_ready(b, cfg, in_flight, free_by_pool):
+    """All cards to dispatch this tick, right-to-left (resume before fresh),
+    honoring WIP limits AND per-pool free-slot budgets, excluding in-flight refs.
+    Pure: `in_flight` is a set of refs already being worked; `free_by_pool` maps
+    pool name -> free slot count. WIP and pool budgets are consumed as candidates
+    are chosen, so a single tick never over-dispatches."""
+    by_name = {s["name"]: s for s in b["stages"]}
+    by_id = {}
+    for c in b["cards"]:
+        by_id.setdefault(c["stage_id"], []).append(c)
+
+    children = {}
+    for s in b["stages"]:
+        parent = s.get("parent_id")
+        if parent is not None:
+            children.setdefault(parent, []).append(s["id"])
+
+    def cards_in(name):
+        s = by_name.get(name)
+        return by_id.get(s["id"], []) if s else []
+
+    def used(name):
+        s = by_name.get(name)
+        if not s:
+            return 0
+        total = len(by_id.get(s["id"], []))
+        for child_id in children.get(s["id"], []):
+            total += len(by_id.get(child_id, []))
+        return total
+
+    free = dict(free_by_pool)   # local, mutable
+    extra = {}                  # stage name -> newly-assigned fresh count
+    chosen = []
+
+    def take(card, entry, mode, count_wip):
+        pool = entry.get("pool")
+        if pool is not None and free.get(pool, 0) <= 0:
+            return
+        if pool is not None:
+            free[pool] -= 1
+        if count_wip:
+            extra[entry["stage"]] = extra.get(entry["stage"], 0) + 1
+        chosen.append((card, entry, mode))
+
+    def wip_room(name):
+        s = by_name.get(name)
+        limit = s.get("wip_limit") if s else None
+        return not limit or (used(name) + extra.get(name, 0)) < limit
+
+    for entry in reversed(cfg["pipeline"]):
+        for c in cards_in(entry["stage"]):          # resume in-progress first
+            if c["ref"] in in_flight:
+                continue
+            if c.get("status") == "working" and not blocked(c):
+                take(c, entry, "resume", count_wip=False)
+        for c in cards_in(entry["from"]):            # then pull fresh
+            if c["ref"] in in_flight or blocked(c):
+                continue
+            if wip_room(entry["stage"]):
+                take(c, entry, "fresh", count_wip=True)
+    return chosen
 
 
 def slug(text):
@@ -530,60 +580,77 @@ def work(card, entry, mode, cwd=ROOT, tag=""):
     log(f"  ✓ {ref} pushed to {entry['done']}")
 
 
-def state_load():
-    try:
-        return json.load(open(STATE_PATH))
-    except Exception:
-        return {}
-
-
-def state_save(fingerprint, version):
-    if not DRY:
-        json.dump({"fingerprint": fingerprint, "version": version}, open(STATE_PATH, "w"))
-
-
-def tick(cfg):
-    saved = state_load()
-    version = get_board_version()
-    # Cheap outer gate: when the server exposes a version and it hasn't moved
-    # since we last looked, skip the full-board fetch entirely.
-    if version is not None and version == saved.get("version"):
-        return False
-
-    b = get_board()
-    fp = fingerprint(b)
-    # Precise inner gate: a version bump that didn't change readiness (e.g. a
-    # comment) still short-circuits here before we scan for work.
-    if fp == saved.get("fingerprint"):
-        state_save(fp, version)
-        return False
-
-    log("board changed — scanning for ready work")
-    ready = find_ready(b, cfg)
-    if not ready:
-        log("  nothing ready to work")
-        state_save(fp, version)
-        return False
-
-    work(*ready)
-    state_save(None, None)  # after real work, force a full re-poll next tick
-    return True
-
-
 def cmd_watch(args):
     global DRY
     DRY = args.dry_run
     cfg = load_config()
     interval = args.interval or cfg.get("poll_interval", 45)
     env("RELAY_URL"), env("RELAY_API_KEY")
-    log(f"watching {os.environ['RELAY_URL']} every {interval}s"
+    pools = build_pools(cfg)
+    lock = threading.Lock()
+    wake = threading.Event()
+    stop = threading.Event()
+    in_flight = {}   # ref -> worker thread
+
+    if not DRY:
+        for p in pools.values():
+            for wt in dict.fromkeys(p["slots"]):   # unique worktree names
+                ensure_worktree(wt, p["spec"]["base"])
+
+    def run_job(card, entry, mode, pool_name, slot):
+        ref = card["ref"]
+        cwd = worktree_path(slot) if slot else ROOT
+        try:
+            work(card, entry, mode, cwd=cwd, tag=f"[{ref}] ")
+        except Exception as e:                     # never leak a slot on crash
+            flag(ref, f"worker crashed: {e}")
+        finally:
+            with lock:
+                if pool_name:
+                    pools[pool_name]["free"].append(slot)
+                in_flight.pop(ref, None)
+            wake.set()
+
+    def scan():
+        b = get_board()
+        with lock:
+            if not DRY:                            # ff idle shared worktrees to base
+                for p in pools.values():
+                    if (p["spec"].get("mode") == "shared"
+                            and len(p["free"]) == len(p["slots"])):
+                        refresh_worktree(p["spec"]["worktree"], p["spec"]["base"])
+            budgets = {name: len(p["free"]) for name, p in pools.items()}
+            for card, entry, mode in find_all_ready(b, cfg, set(in_flight), budgets):
+                pool_name = entry.get("pool")
+                slot = None
+                if pool_name:
+                    if not pools[pool_name]["free"]:
+                        continue
+                    slot = pools[pool_name]["free"].pop()
+                t = threading.Thread(target=run_job,
+                                     args=(card, entry, mode, pool_name, slot),
+                                     daemon=True)
+                in_flight[card["ref"]] = t
+                t.start()
+
+    def _shutdown(*_):
+        log("shutting down — no new dispatch; waiting for in-flight workers")
+        stop.set()
+        wake.set()
+    signal.signal(signal.SIGINT, _shutdown)
+
+    log(f"watching {os.environ['RELAY_URL']} every {interval}s (concurrent)"
         + (" (dry-run)" if DRY else "") + (" — one pass" if args.once else ""))
-    while True:
-        did = tick(cfg)
+
+    while not stop.is_set():
+        scan()
         if args.once:
             break
-        if not did:
-            time.sleep(interval)
+        wake.wait(interval)
+        wake.clear()
+
+    for t in list(in_flight.values()):             # join outstanding workers
+        t.join()
 
 
 # ============================ argparse ============================

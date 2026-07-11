@@ -12,7 +12,6 @@ import importlib.machinery
 import importlib.util
 import io
 import os
-import tempfile
 import unittest
 
 RELAY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "relay")
@@ -160,75 +159,6 @@ class FindReadyWipTest(unittest.TestCase):
         self.assertIsNone(relay.find_ready(board, cfg))
 
 
-class TickVersionGateTest(unittest.TestCase):
-    """The watch loop's version gate: cheap outer poll, fingerprint inner gate."""
-
-    PATCHED = ("DRY", "STATE_PATH", "get_board_version", "get_board",
-               "find_ready", "work", "log")
-
-    def setUp(self):
-        self._saved = {k: getattr(relay, k) for k in self.PATCHED}
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
-        tmp.close()
-        self._state_path = tmp.name
-        relay.STATE_PATH = self._state_path
-        relay.DRY = False
-        relay.log = lambda *a, **k: None
-        self.worked = []
-        relay.work = lambda *a, **k: self.worked.append(a)
-        relay.find_ready = lambda b, cfg: None  # default: nothing ready
-
-    def tearDown(self):
-        for k, v in self._saved.items():
-            setattr(relay, k, v)
-        os.remove(self._state_path)
-
-    def _seed_state(self, **kw):
-        import json
-        json.dump(kw, open(self._state_path, "w"))
-
-    def test_unchanged_version_skips_the_board_fetch(self):
-        self._seed_state(version=7, fingerprint="fp")
-        relay.get_board_version = lambda: 7
-        fetched = []
-        relay.get_board = lambda: fetched.append(True) or {"cards": [], "stages": []}
-
-        self.assertFalse(relay.tick({}))
-        self.assertEqual(fetched, [])  # cheap gate: no full-board fetch at all
-
-    def test_changed_version_fetches_scans_and_works(self):
-        self._seed_state(version=7, fingerprint="old")
-        relay.get_board_version = lambda: 8
-        relay.get_board = lambda: {"cards": [{"ref": "RLY-1", "stage_id": 1}], "stages": []}
-        relay.find_ready = lambda b, cfg: ({"ref": "RLY-1"}, {"stage": "Code"}, "fresh")
-
-        self.assertTrue(relay.tick({}))
-        self.assertEqual(len(self.worked), 1)
-
-    def test_version_bump_without_readiness_change_short_circuits(self):
-        board = {"cards": [{"ref": "RLY-1", "stage_id": 1, "status": None, "active_owner": None}]}
-        self._seed_state(version=1, fingerprint=relay.fingerprint(board))
-        relay.get_board_version = lambda: 2  # version moved (e.g. a comment)
-        relay.get_board = lambda: board
-        scanned = []
-        relay.find_ready = lambda b, cfg: scanned.append(True)
-
-        self.assertFalse(relay.tick({}))
-        self.assertEqual(scanned, [])  # inner fingerprint gate stops us before find_ready
-
-    def test_missing_endpoint_falls_back_to_fingerprint(self):
-        # Older server: the version endpoint 404s → get_board_version() is None.
-        # tick still fetches the board and uses the fingerprint gate.
-        board = {"cards": [{"ref": "RLY-1", "stage_id": 1, "status": None, "active_owner": None}]}
-        self._seed_state(version=None, fingerprint=relay.fingerprint(board))
-        relay.get_board_version = lambda: None
-        fetched = []
-        relay.get_board = lambda: fetched.append(True) or board
-
-        self.assertFalse(relay.tick({}))
-        self.assertEqual(fetched, [True])  # board WAS fetched despite the version gate
-
-
 class FindReadyOwnershipTest(unittest.TestCase):
     """Rule 4: the runner never pulls a human-owned card; AI-owned/unowned stay eligible."""
 
@@ -354,6 +284,108 @@ class CwdRoutingTest(unittest.TestCase):
         text = capture(relay._print_claude_event, ev, "[RLY-7] ")
         self.assertIn("[RLY-7] ", text)
         self.assertIn("hello there", text)
+
+
+class FindAllReadyTest(unittest.TestCase):
+    STAGES = [
+        {"id": 10, "name": "Next up",   "wip_limit": None, "parent_id": None},
+        {"id": 2,  "name": "Spec",      "wip_limit": None, "parent_id": None},
+        {"id": 11, "name": "Spec:Done", "wip_limit": None, "parent_id": None},
+        {"id": 3,  "name": "Plan",      "wip_limit": None, "parent_id": None},
+        {"id": 12, "name": "Plan:Done", "wip_limit": None, "parent_id": None},
+        {"id": 4,  "name": "Code",      "wip_limit": None, "parent_id": None},
+    ]
+    CFG = {"pipeline": [
+        {"stage": "Spec", "from": "Next up",   "done": "Spec:Review", "pool": "clean"},
+        {"stage": "Plan", "from": "Spec:Done",  "done": "Plan:Done",   "pool": "clean"},
+        {"stage": "Code", "from": "Plan:Done",  "done": "Code:Review", "pool": "work"},
+    ]}
+
+    def board(self, cards, stages=None):
+        return {"stages": stages or self.STAGES, "cards": cards}
+
+    def test_dispatches_up_to_pool_budget(self):
+        cards = [{"ref": f"RLY-{n}", "stage_id": 10, "status": "queued"} for n in range(1, 6)]
+        ready = relay.find_all_ready(self.board(cards), self.CFG, set(),
+                                     {"clean": 3, "work": 1})
+        self.assertEqual(len(ready), 3)  # clean budget caps at 3
+        self.assertTrue(all(e["stage"] == "Spec" for _, e, _ in ready))
+
+    def test_excludes_in_flight_refs(self):
+        cards = [{"ref": "RLY-1", "stage_id": 10, "status": "queued"},
+                 {"ref": "RLY-2", "stage_id": 10, "status": "queued"}]
+        ready = relay.find_all_ready(self.board(cards), self.CFG, {"RLY-1"},
+                                     {"clean": 3, "work": 1})
+        self.assertEqual([c["ref"] for c, _, _ in ready], ["RLY-2"])
+
+    def test_respects_zero_pool_budget(self):
+        cards = [{"ref": "RLY-1", "stage_id": 12, "status": "queued"}]  # ready for Code
+        ready = relay.find_all_ready(self.board(cards), self.CFG, set(),
+                                     {"clean": 3, "work": 0})
+        self.assertEqual(ready, [])
+
+    def test_resume_takes_the_slot_before_fresh(self):
+        cards = [{"ref": "RLY-1", "stage_id": 4,  "status": "working"},  # resuming in Code
+                 {"ref": "RLY-2", "stage_id": 12, "status": "queued"}]   # fresh for Code
+        ready = relay.find_all_ready(self.board(cards), self.CFG, set(),
+                                     {"clean": 3, "work": 1})
+        self.assertEqual(len(ready), 1)
+        self.assertEqual(ready[0][0]["ref"], "RLY-1")
+        self.assertEqual(ready[0][2], "resume")
+
+    def test_wip_limit_caps_fresh_even_with_pool_budget(self):
+        stages = [s for s in self.STAGES if s["name"] != "Code"] + \
+                 [{"id": 4, "name": "Code", "wip_limit": 2, "parent_id": None}]
+        cards = [{"ref": f"RLY-{n}", "stage_id": 12, "status": "queued"} for n in range(1, 6)]
+        ready = relay.find_all_ready(self.board(cards, stages), self.CFG, set(),
+                                     {"clean": 3, "work": 5})
+        self.assertEqual(len(ready), 2)  # WIP limit 2 wins over 5 free work slots
+
+
+class DispatchOnceTest(unittest.TestCase):
+    """`watch --once` dispatches every ready card into its pool's worktree, in
+    parallel worker threads, and frees all slots when the pass completes."""
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in
+                       ("get_board", "work", "ensure_worktree", "refresh_worktree",
+                        "load_config", "env", "log", "DRY")}
+        relay.DRY = False
+        relay.log = lambda *a, **k: None
+        relay.env = lambda name: "x"
+        relay.ensure_worktree = lambda *a, **k: None
+        relay.refresh_worktree = lambda *a, **k: None
+        os.environ.setdefault("RELAY_URL", "http://example.test")
+        os.environ.setdefault("RELAY_API_KEY", "k")
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            setattr(relay, k, v)
+
+    def test_once_dispatches_both_ready_cards_into_clean_worktree(self):
+        board = {"stages": FindAllReadyTest.STAGES,
+                 "cards": [{"ref": "RLY-1", "stage_id": 10, "status": "queued", "title": "a"},
+                           {"ref": "RLY-2", "stage_id": 10, "status": "queued", "title": "b"}]}
+        relay.get_board = lambda: board
+        relay.load_config = lambda: {
+            "poll_interval": 1,
+            "pools": {"clean": {"worktree": "clean", "mode": "shared",
+                                "base": "origin/main", "concurrency": 2}},
+            "pipeline": [{"stage": "Spec", "from": "Next up", "done": "Spec:Review",
+                          "pool": "clean", "action": [{"shell": "true"}]}]}
+        calls, lock = [], relay.threading.Lock()
+
+        def fake_work(card, entry, mode, cwd=relay.ROOT, tag=""):
+            with lock:
+                calls.append((card["ref"], cwd, tag))
+        relay.work = fake_work
+
+        relay.cmd_watch(relay.argparse.Namespace(once=True, dry_run=False, interval=1))
+
+        self.assertEqual(sorted(r for r, _, _ in calls), ["RLY-1", "RLY-2"])
+        self.assertTrue(all(cwd.endswith(os.path.join("worktrees", "clean"))
+                            for _, cwd, _ in calls))
+        self.assertTrue(all(tag.startswith("[RLY-") for _, _, tag in calls))
 
 
 if __name__ == "__main__":
