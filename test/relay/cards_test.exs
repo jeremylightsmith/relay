@@ -439,11 +439,20 @@ defmodule Relay.CardsTest do
       }
     end
 
-    test "an unowned card entering an AI-enabled stage claims Relay AI (rule 1), even on a human drag",
+    test "an unowned card a HUMAN moves into an AI-enabled stage is claimed by that human (rule 3, corrected)",
          %{stage: stage, ai_stage: ai_stage, user: user} do
       {:ok, card} = Cards.create_card(stage, %{title: "x"})
 
       assert {:ok, moved} = Cards.move_card(card, ai_stage, 0, {:user, user.id})
+      assert [%{actor_type: :user, user_id: uid}] = moved.owners
+      assert uid == user.id
+    end
+
+    test "an unowned card an AGENT moves into an AI-enabled stage is claimed by Relay AI (rule 1)",
+         %{stage: stage, ai_stage: ai_stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "x"})
+
+      assert {:ok, moved} = Cards.move_card(card, ai_stage, 0, :agent)
       assert [%{actor_type: :agent}] = moved.owners
     end
 

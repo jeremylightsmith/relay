@@ -581,12 +581,8 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, card} = Cards.add_owner(card, {:user, user.id})
       {:ok, card} = Cards.add_owner(card, :agent)
 
-      # Backlog (stage-col-1) is a human-owned stage, so an AI-active card
-      # left there is a genuine stage mismatch (covered separately by "an
-      # AI-active card in a human stage shows the red meant-for-humans
-      # warning") and the mismatch rule overrides the border to
-      # border-l-error. Move the card into Plan — an AI-owned stage — so
-      # this test can demonstrate the clean, no-mismatch quiet accent.
+      # Move the card into Plan — an AI-enabled stage — so this test
+      # demonstrates the clean, quiet accent for an AI-active card.
       {:ok, _moved} = Cards.move_card(card, plan, 0)
 
       board = Boards.get_or_create_default_board(user)
@@ -641,7 +637,7 @@ defmodule RelayWeb.BoardLiveTest do
       refute render(view) =~ "working · "
     end
 
-    test "a human-active card in an AI stage shows the red meant-for-agents warning",
+    test "a human-owned card in an AI stage shows no mismatch warning (the mover owns it)",
          %{conn: conn, user: user, card: card, plan: plan} do
       {:ok, card} = Cards.add_owner(card, {:user, user.id})
       {:ok, _moved} = Cards.move_card(card, plan, 0)
@@ -649,25 +645,20 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(
-               view,
-               "#stage-col-3-cards .board-card.border-l-error .card-mismatch",
-               "meant to be used by agents"
-             )
+      refute has_element?(view, "#stage-col-3-cards .board-card .card-mismatch")
+      refute has_element?(view, "#stage-col-3-cards .board-card.border-l-error")
     end
 
-    test "an AI-active card in a human stage shows the red meant-for-humans warning",
+    test "an AI-owned card in a human stage shows no mismatch warning (no hand-back)",
          %{conn: conn, card: card, user: user} do
       {:ok, _card} = Cards.add_owner(card, :agent)
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(
-               view,
-               "#stage-col-1-cards .board-card.border-l-error .card-mismatch",
-               "meant for humans"
-             )
+      refute has_element?(view, "#stage-col-1-cards .board-card .card-mismatch")
+      refute has_element?(view, "#stage-col-1-cards .board-card.border-l-error")
+      assert has_element?(view, "#stage-col-1-cards .board-card[data-active-owner='ai']")
     end
 
     test "moving a card changes neither its owners nor its status",
@@ -683,11 +674,7 @@ defmodule RelayWeb.BoardLiveTest do
       assert moved.status == :ready
       assert [%{actor_type: :user}] = moved.owners
 
-      assert has_element?(
-               view,
-               "#stage-col-3-cards .board-card.border-l-error .card-mismatch",
-               "meant to be used by agents"
-             )
+      refute has_element?(view, "#stage-col-3-cards .board-card .card-mismatch")
     end
   end
 

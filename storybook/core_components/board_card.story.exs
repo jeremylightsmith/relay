@@ -19,7 +19,6 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
           title: "Draft the onboarding spec",
           tag: "spec",
           active_owner: :human,
-          stage_owner: :human,
           status: :ready,
           owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}]
         }
@@ -31,33 +30,9 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
           ref: "RLY-3",
           title: "Migrate 40 blog posts",
           active_owner: :ai,
-          stage_owner: :ai,
           status: :working,
           progress: 61,
           owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}, %{actor_type: :agent}]
-        }
-      },
-      %Variation{
-        id: :mismatch_meant_for_agents,
-        attributes: %{
-          id: "story-card-5",
-          ref: "RLY-5",
-          title: "Human card parked in Code",
-          active_owner: :human,
-          stage_owner: :ai,
-          status: :ready
-        }
-      },
-      %Variation{
-        id: :mismatch_meant_for_humans,
-        attributes: %{
-          id: "story-card-6",
-          ref: "RLY-6",
-          title: "AI card parked in Review",
-          active_owner: :ai,
-          stage_owner: :human,
-          status: :working,
-          progress: 20
         }
       },
       %Variation{
@@ -106,7 +81,6 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
           status: :needs_input,
           question: "Should we ship en-US and de-DE first, or all five at once?",
           active_owner: :ai,
-          stage_owner: :ai,
           owners: [%{actor_type: :agent}]
         }
       }

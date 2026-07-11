@@ -356,7 +356,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       assert has_element?(board_view, "#stage-strip-#{code.id} h3", "Build")
     end
 
-    test "an AI-enabled toggle re-tints the column and flips the card mismatch flag",
+    test "an AI-enabled toggle re-tints the column live and never rewrites owners",
          %{conn: conn, board: board} do
       code = Enum.find(board.stages, &(&1.name == "Code"))
       {:ok, card} = Cards.create_card(code, %{title: "Agent task"})
@@ -365,9 +365,6 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
       {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
-      # ai_enabled stage + agent owner: no mismatch yet
-      refute has_element?(board_view, "#stage-col-#{code.position} .card-mismatch")
-
       settings_view |> element("#stage-#{code.id}-ai-toggle") |> render_click()
 
       assert has_element?(
@@ -375,8 +372,6 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
                "#stage-col-#{code.position} .stage-type-icon[data-type='work']"
              )
 
-      assert has_element?(board_view, "#stage-col-#{code.position} .card-mismatch")
-      # meant-for change only — the card's owner rows are untouched
       assert [%Schemas.CardOwner{actor_type: :agent}] = Repo.all(Schemas.CardOwner)
     end
 

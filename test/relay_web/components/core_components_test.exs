@@ -418,7 +418,6 @@ defmodule RelayWeb.CoreComponentsTest do
           ref: "RLY-2",
           title: "T",
           active_owner: :human,
-          stage_owner: :human,
           status: :ready,
           owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}]
         )
@@ -437,7 +436,6 @@ defmodule RelayWeb.CoreComponentsTest do
           ref: "RLY-3",
           title: "T",
           active_owner: :ai,
-          stage_owner: :ai,
           status: :working,
           progress: 61,
           owners: [%{actor_type: :agent}]
@@ -458,7 +456,6 @@ defmodule RelayWeb.CoreComponentsTest do
           ref: "RLY-9",
           title: "T",
           active_owner: :ai,
-          stage_owner: :ai,
           status: :working,
           owners: [%{actor_type: :agent}]
         )
@@ -469,35 +466,32 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ "height:5px;border-radius:3px;background:oklch(0.93 0.02 292)"
     end
 
-    test "a human-active card in an AI stage warns it is meant for agents" do
+    test "a human-active card in an AI stage shows no mismatch (the mover owns it)" do
       html =
         render_component(&CoreComponents.board_card/1,
           id: "c4",
           ref: "RLY-4",
           title: "T",
           active_owner: :human,
-          stage_owner: :ai,
           status: :ready
         )
 
-      assert html =~ "border-l-error"
-      assert html =~ "card-mismatch"
-      assert html =~ "This stage is meant to be used by agents"
+      refute html =~ "card-mismatch"
+      refute html =~ "border-l-error"
     end
 
-    test "an AI-active card in a human stage warns it is meant for humans" do
+    test "an AI-active card in a human stage shows no mismatch (no hand-back)" do
       html =
         render_component(&CoreComponents.board_card/1,
           id: "c5",
           ref: "RLY-5",
           title: "T",
           active_owner: :ai,
-          stage_owner: :human,
           status: :ready
         )
 
-      assert html =~ "border-l-error"
-      assert html =~ "This stage is meant for humans"
+      refute html =~ "card-mismatch"
+      refute html =~ "border-l-error"
     end
 
     test "no mismatch without an active owner, even in an AI stage" do
@@ -505,8 +499,7 @@ defmodule RelayWeb.CoreComponentsTest do
         render_component(&CoreComponents.board_card/1,
           id: "c6",
           ref: "RLY-6",
-          title: "T",
-          stage_owner: :ai
+          title: "T"
         )
 
       refute html =~ "card-mismatch"

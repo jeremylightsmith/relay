@@ -663,9 +663,9 @@ defmodule RelayWeb.CoreComponents do
   @doc """
   Renders a single kanban card matching the hi-fi mockup
   (`docs/designs/Relay Board.dc.html`): title, an accent left border keyed to
-  status (amber needs-you / violet working / red mismatch / quiet otherwise),
-  an optional violet progress bar while working, the amber needs-you box, a
-  mono status line + `#tag`, and the owner avatar cluster.
+  status (amber needs-you / violet working / quiet otherwise), an optional
+  violet progress bar while working, the amber needs-you box, a mono status
+  line + `#tag`, and the owner avatar cluster.
 
   Done is a pure derivation (RLY-48, `Relay.Cards.done?/2`), not a stored
   status: a `:ready` card at the board's terminal stage grays its title via
@@ -673,9 +673,8 @@ defmodule RelayWeb.CoreComponents do
   `card-ready-chip` instead (via `stage_type`); a plain parked `:ready` card
   elsewhere renders quiet, with no chip.
 
-  The red mismatch warning (MMF 06) still fires when the card's active-owner
-  type conflicts with the stage it sits in (`stage_owner`) — display-only,
-  it never mutates the card.
+  Ownership is provenance, not a stage "mismatch" (ADR 0004) — an owner may
+  legitimately sit in any stage, so this component never flags one.
 
   Clicking the card emits a `"select_card"` event (with `phx-value-ref`)
   for the parent LiveView — `RelayWeb.BoardLive` answers with a patch to
@@ -692,7 +691,6 @@ defmodule RelayWeb.CoreComponents do
         ref="RLY-4"
         title="Migrate the posts"
         active_owner={:ai}
-        stage_owner={:ai}
         status={:working}
         progress={61}
       />
@@ -706,11 +704,6 @@ defmodule RelayWeb.CoreComponents do
     values: [:human, :ai, nil],
     default: nil,
     doc: "who holds the baton, derived from the owner list; nil when unowned"
-
-  attr :stage_owner, :atom,
-    values: [:human, :ai, nil],
-    default: nil,
-    doc: "the stage's \"meant for\" designation, for the mismatch warning"
 
   attr :status, :atom,
     values: [:ready, :working, :needs_input, :in_review, nil],
@@ -743,12 +736,10 @@ defmodule RelayWeb.CoreComponents do
     doc: "the stage's category — cosmetic only (accent is keyed on status, not category)"
 
   def board_card(assigns) do
-    mismatch = mismatch(assigns.active_owner, assigns.stage_owner)
-    accent_class = card_accent_class(mismatch, assigns)
+    accent_class = card_accent_class(assigns)
 
     assigns =
       assigns
-      |> assign(:mismatch, mismatch)
       |> assign(:accent_class, accent_class)
       |> assign(:accent_color, card_accent_color(accent_class))
 
@@ -774,13 +765,6 @@ defmodule RelayWeb.CoreComponents do
         {@title}
       </span>
       <span class="card-ref sr-only">{@ref}</span>
-      <p
-        :if={@mismatch}
-        class="card-mismatch"
-        style="font-size:11px;font-weight:500;color:var(--color-error);"
-      >
-        {mismatch_message(@mismatch)}
-      </p>
       <div
         :if={@status == :working and @progress != nil}
         style="height:5px;border-radius:3px;background:oklch(0.93 0.02 292);overflow:hidden;"
@@ -843,32 +827,21 @@ defmodule RelayWeb.CoreComponents do
     """
   end
 
-  defp mismatch(nil, _stage_owner), do: nil
-  defp mismatch(_active_owner, nil), do: nil
-  defp mismatch(:human, :ai), do: :meant_for_agents
-  defp mismatch(:ai, :human), do: :meant_for_humans
-  defp mismatch(_active_owner, _stage_owner), do: nil
-
-  defp mismatch_message(:meant_for_agents), do: "This stage is meant to be used by agents"
-  defp mismatch_message(:meant_for_humans), do: "This stage is meant for humans"
-
-  # RLY-48: the left-border accent is keyed on status. Relay's own red mismatch case wins;
-  # then amber for the two needs-you states; violet for working; everything else (all :ready
-  # renderings, unowned) is quiet base-300. The green "done" affordance moved off the border
-  # (there is no :done status) — a terminal ready card grays instead (see the title style).
+  # RLY-48: the left-border accent is keyed on status. Amber for the two needs-you
+  # states; violet for working; everything else (all :ready renderings, unowned) is
+  # quiet base-300. The green "done" affordance moved off the border (there is no
+  # :done status) — a terminal ready card grays instead (see the title style).
   #
   # The returned `border-l-*` string is a *semantic/test hook only* — it is NOT
   # what paints the border. The actual 3px accent colour is set inline in
   # board_card/1 via card_accent_color/1 (an inline `style` beats the class, so
   # the class carries no colour). Do not delete these classes as "unused": the
-  # board/card tests select on them (e.g. `.border-l-warning`, `.border-l-error`).
-  defp card_accent_class(mismatch, _assigns) when not is_nil(mismatch), do: "border-l-error"
-  defp card_accent_class(_mismatch, %{status: :needs_input}), do: "border-l-warning"
-  defp card_accent_class(_mismatch, %{status: :in_review}), do: "border-l-warning"
-  defp card_accent_class(_mismatch, %{status: :working}), do: "border-l-secondary"
-  defp card_accent_class(_mismatch, _assigns), do: "border-l-base-300"
+  # board/card tests select on them (e.g. `.border-l-warning`).
+  defp card_accent_class(%{status: :needs_input}), do: "border-l-warning"
+  defp card_accent_class(%{status: :in_review}), do: "border-l-warning"
+  defp card_accent_class(%{status: :working}), do: "border-l-secondary"
+  defp card_accent_class(_assigns), do: "border-l-base-300"
 
-  defp card_accent_color("border-l-error"), do: "var(--color-error)"
   defp card_accent_color("border-l-warning"), do: "var(--color-warning)"
   defp card_accent_color("border-l-secondary"), do: "var(--color-secondary)"
   defp card_accent_color("border-l-base-300"), do: "var(--color-base-300)"
@@ -2019,7 +1992,6 @@ defmodule RelayWeb.CoreComponents do
       |> assign(:stage_width, 240 + Enum.sum(Enum.map(sublanes, &sublane_width/1)))
       |> assign(:total_count, total_count)
       |> assign(:wip_state, wip_state(total_count, assigns.wip_limit))
-      |> assign(:main_owner, if(assigns.ai_enabled, do: :ai, else: :human))
       |> assign(:compose_cta, if(assigns.ai_enabled, do: "Hand to AI", else: "Add"))
       |> assign(
         :compose_placeholder,
@@ -2217,7 +2189,6 @@ defmodule RelayWeb.CoreComponents do
                     progress={board_card_progress(card)}
                     owners={card.owners}
                     active_owner={Cards.active_owner_type(card)}
-                    stage_owner={@main_owner}
                     lane={:main}
                     category={@category}
                   />
@@ -2301,7 +2272,6 @@ defmodule RelayWeb.CoreComponents do
                   progress={board_card_progress(card)}
                   owners={card.owners}
                   active_owner={Cards.active_owner_type(card)}
-                  stage_owner={sub.owner}
                   lane={sub.lane}
                   category={@category}
                 />
