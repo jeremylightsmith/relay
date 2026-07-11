@@ -273,4 +273,16 @@ defmodule Relay.BoardsTest do
       assert_receive {:board_updated, %Board{archived_at: at}} when not is_nil(at)
     end
   end
+
+  describe "update_stage/2 reject_to_stage_id" do
+    test "persists reject_to_stage_id" do
+      board = insert(:board)
+      plan = insert(:stage, board: board, name: "Plan", type: :planning, category: :planning, position: 1)
+      review = insert(:stage, board: board, name: "Review", type: :review, category: :in_progress, position: 2)
+
+      assert {:ok, updated} = Boards.update_stage(review, %{reject_to_stage_id: plan.id})
+      assert updated.reject_to_stage_id == plan.id
+      assert Repo.get!(Stage, review.id).reject_to_stage_id == plan.id
+    end
+  end
 end

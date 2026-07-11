@@ -49,6 +49,22 @@ defmodule Schemas.StageTest do
     end
   end
 
+  test "changeset casts reject_to_stage_id" do
+    changeset =
+      main_changeset(%{name: "Review", position: 4, category: :in_progress, type: :review, reject_to_stage_id: 2})
+
+    assert changeset.valid?
+    assert Ecto.Changeset.get_change(changeset, :reject_to_stage_id) == 2
+  end
+
+  test "reject_to_stage_id defaults to nil and may be cleared" do
+    changeset =
+      main_changeset(%{name: "Review", position: 4, category: :in_progress, type: :review, reject_to_stage_id: nil})
+
+    assert changeset.valid?
+    assert Ecto.Changeset.get_field(changeset, :reject_to_stage_id) == nil
+  end
+
   test "a child stage must be review or done" do
     child = %Stage{board_id: 1, parent_id: 1}
     bad = Stage.changeset(child, %{name: "X", position: 2, category: :in_progress, type: :work})

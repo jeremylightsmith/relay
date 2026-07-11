@@ -806,13 +806,7 @@ defmodule RelayWeb.BoardLive do
          reject_error: "Add a note — the AI needs to know what to change."
        )}
     else
-      opts =
-        case resolve_stage(socket, params["to"]) do
-          %Stage{} = target -> [to: target]
-          nil -> []
-        end
-
-      case Cards.reject(card, note, current_actor(socket), opts) do
+      case Cards.reject(card, note, current_actor(socket)) do
         {:ok, updated} -> {:noreply, refresh_after_review(socket, card, updated)}
         {:error, _reason} -> {:noreply, socket}
       end
@@ -1133,23 +1127,13 @@ defmodule RelayWeb.BoardLive do
 
     if stage.type == :review do
       main = governing_main_stage(socket, stage)
-      targets = send_back_targets(socket.assigns.board, card)
+      target = Cards.reject_target(card)
 
       %{
         approve_label: approve_label(main),
-        targets: targets,
-        default_to: default_reject_id(main),
-        can_reject: targets != []
+        reject_target_name: target && Boards.stage_display_name(target),
+        can_reject: target != nil
       }
-    end
-  end
-
-  # The preselected reject target: the previous main stage's id, or nil when there is none
-  # (in which case can_reject is false and the panel is hidden).
-  defp default_reject_id(main) do
-    case Boards.previous_main_stage(main) do
-      %Stage{id: id} -> id
-      nil -> nil
     end
   end
 
@@ -1163,25 +1147,6 @@ defmodule RelayWeb.BoardLive do
   end
 
   defp empty_reject_form, do: to_form(%{"note" => ""}, as: :reject)
-
-  # Universal send-back targets: main stages strictly before the card's
-  # current main stage, in position order. Only called (from the template)
-  # while a card is selected, so no card is not a case to handle here.
-  defp send_back_targets(board, %Card{} = card) do
-    pos = current_main_position(board, card)
-
-    board.stages
-    |> Enum.filter(&(is_nil(&1.parent_id) and &1.position < pos))
-    |> Enum.sort_by(& &1.position)
-    |> Enum.map(&%{id: &1.id, name: &1.name})
-  end
-
-  defp current_main_position(board, %Card{stage_id: stage_id}) do
-    by_id = Map.new(board.stages, &{&1.id, &1})
-    stage = Map.fetch!(by_id, stage_id)
-    main = if is_nil(stage.parent_id), do: stage, else: Map.fetch!(by_id, stage.parent_id)
-    main.position
-  end
 
   # The move already persisted; stream items can't be reordered in
   # place, so refetch and reset the source and target stage streams,

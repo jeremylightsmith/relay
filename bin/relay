@@ -15,7 +15,7 @@ Config (env): RELAY_URL, RELAY_API_KEY  (a board key from /board/settings)
   relay board [--json]        relay card REF [--json]     relay pull [--json]
   relay comment REF TEXT      relay move REF STAGE        relay status REF STATUS
   relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF Q
-  relay own REF / release REF relay approve REF           relay reject REF NOTE [--to STAGE]
+  relay own REF / release REF relay approve REF           relay reject REF NOTE
   relay sub-tasks REF @file   relay check REF ID / uncheck REF ID   relay result REF @file
   relay layout   # config skeleton
 
@@ -337,10 +337,7 @@ def _simple(fn):
 
 
 def cmd_reject(args):
-    body = {"note": read_arg(args.note)}
-    if getattr(args, "to", None):
-        body["to"] = args.to
-    card = api("POST", f"/api/cards/{args.ref}/reject", body)["data"]
+    card = api("POST", f"/api/cards/{args.ref}/reject", {"note": read_arg(args.note)})["data"]
     emit(args, card, card_line(card))
 
 
@@ -769,8 +766,7 @@ def build_parser():
     add("own", _simple(lambda a: own(a.ref)), "ref", json_flag=True)
     add("release", _simple(lambda a: release(a.ref)), "ref", json_flag=True)
     add("approve", _simple(lambda a: api("POST", f"/api/cards/{a.ref}/approve", {})["data"]), "ref", json_flag=True)
-    rj = add("reject", cmd_reject, "ref", "note", json_flag=True)
-    rj.add_argument("--to")
+    add("reject", cmd_reject, "ref", "note", json_flag=True)
     add("comment", cmd_comment, "ref", "text")
     add("layout", cmd_layout)
     w = add("watch", cmd_watch)

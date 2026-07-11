@@ -113,19 +113,19 @@ defmodule Relay.CLITest do
     assert :binary.match(text, "CHANGES REQUESTED") < :binary.match(text, "the details")
   end
 
-  test "reject/4 posts the note and passes --to when given" do
+  test "reject/3 posts the note (routing is derived server-side)" do
     stub(fn conn ->
       assert conn.method == "POST"
       assert conn.request_path == "/api/cards/RLY-1/reject"
       {:ok, body, conn} = Plug.Conn.read_body(conn)
-      assert Jason.decode!(body) == %{"note" => "spec problem", "to" => "Spec"}
+      assert Jason.decode!(body) == %{"note" => "spec problem"}
 
       Req.Test.json(conn, %{
         "data" => %{"ref" => "RLY-1", "title" => "Do it", "status" => "ready", "active_owner" => nil}
       })
     end)
 
-    assert {:ok, text} = CLI.reject("RLY-1", "spec problem", [], "Spec")
+    assert {:ok, text} = CLI.reject("RLY-1", "spec problem", [])
     assert text =~ "RLY-1"
   end
 

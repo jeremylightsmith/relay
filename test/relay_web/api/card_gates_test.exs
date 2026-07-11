@@ -125,60 +125,6 @@ defmodule RelayWeb.Api.CardGatesTest do
     assert code.id == data["stage_id"]
   end
 
-  test "POST reject with an explicit :to sends the card there", %{
-    conn: conn,
-    board: board,
-    review: review,
-    code: code
-  } do
-    card = in_review_card(review)
-
-    data =
-      conn
-      |> post(~p"/api/cards/#{ref(board, card)}/reject", %{note: "spec problem", to: "Code"})
-      |> json_response(200)
-      |> Map.fetch!("data")
-
-    assert data["stage_id"] == code.id
-    assert data["rejection"]["to_stage"] == "Code"
-  end
-
-  test "POST reject with an explicit :to works on a NON-review card (universal send-back)", %{
-    conn: conn,
-    board: board,
-    code: code,
-    deploy: deploy
-  } do
-    # Deploy (position 3) is not review-type; a target still makes it a valid send-back.
-    card = insert(:card, stage: deploy)
-
-    data =
-      conn
-      |> post(~p"/api/cards/#{ref(board, card)}/reject", %{note: "back to code", to: code.id})
-      |> json_response(200)
-      |> Map.fetch!("data")
-
-    assert data["stage_id"] == code.id
-    assert data["rejection"]["to_stage"] == "Code"
-  end
-
-  test "POST reject with a forward/unknown :to 422s invalid_target", %{
-    conn: conn,
-    board: board,
-    review: review,
-    deploy: deploy
-  } do
-    card = in_review_card(review)
-
-    forward = conn |> post(~p"/api/cards/#{ref(board, card)}/reject", %{note: "x", to: deploy.id}) |> json_response(422)
-    assert forward["error"]["code"] == "invalid_target"
-
-    unknown =
-      conn |> post(~p"/api/cards/#{ref(board, card)}/reject", %{note: "x", to: "Nonexistent"}) |> json_response(422)
-
-    assert unknown["error"]["code"] == "invalid_target"
-  end
-
   test "GET /api/board stage payloads carry type/ai_enabled, not owner/lane/approval_gate/reject_to_stage_id", %{
     conn: conn,
     review: review

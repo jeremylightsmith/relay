@@ -29,6 +29,7 @@ defmodule Schemas.Stage do
 
     belongs_to :board, Schemas.Board
     belongs_to :parent, Schemas.Stage
+    belongs_to :reject_to_stage, Schemas.Stage
     has_many :sublanes, Schemas.Stage, foreign_key: :parent_id
 
     timestamps(type: :utc_datetime)
@@ -37,7 +38,16 @@ defmodule Schemas.Stage do
   @doc "Changeset for stage attributes. `board_id`/`parent_id` must already be set on the struct."
   def changeset(stage, attrs) do
     stage
-    |> cast(attrs, [:name, :description, :position, :category, :type, :ai_enabled, :wip_limit])
+    |> cast(attrs, [
+      :name,
+      :description,
+      :position,
+      :category,
+      :type,
+      :ai_enabled,
+      :wip_limit,
+      :reject_to_stage_id
+    ])
     |> validate_required([:name, :position, :category, :type])
     |> validate_number(:wip_limit, greater_than: 0)
     |> normalize_ai_enabled()

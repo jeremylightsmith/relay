@@ -102,6 +102,13 @@ defmodule RelayWeb.BoardLiveReviewTest do
     assert has_element?(view, "#review-request-note")
     refute has_element?(view, "#review-approve")
 
+    assert has_element?(view, "#review-reject-panel", "Returns to")
+    assert has_element?(view, "#review-reject-panel", "Code")
+    assert has_element?(view, "#review-send-back", "Reject → Code")
+    assert has_element?(view, ~s|#review-send-back[style*="oklch(0.62 0.14 65)"]|)
+    refute has_element?(view, "#review-reject-target")
+    refute has_element?(view, "#review-approve")
+
     view
     |> form("#review-reject-form", reject: %{note: "Tighten the error handling"})
     |> render_submit()
@@ -121,15 +128,16 @@ defmodule RelayWeb.BoardLiveReviewTest do
     assert Enum.any?(timeline, &match?(%Schemas.Activity{type: :rejected}, &1))
   end
 
-  test "the reject target radio is preselected to the previous main stage",
-       %{conn: conn, board: board, code: code, review: review} do
+  test "the reject panel shows the derived destination and offers no picker",
+       %{conn: conn, board: board, review: review} do
     in_review_card(review)
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
-
     view |> element("#review-request-changes") |> render_click()
 
-    assert has_element?(view, ~s(#review-reject-target option[value="#{code.id}"][selected]))
+    assert has_element?(view, "#review-reject-panel", "the reject target set on this stage")
+    assert has_element?(view, "#review-send-back", "Reject → Code")
+    refute has_element?(view, "#review-reject-target")
   end
 
   test "a review stage that is the board's first column shows Approve but no Request changes",
