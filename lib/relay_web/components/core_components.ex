@@ -935,10 +935,8 @@ defmodule RelayWeb.CoreComponents do
   from the timeline composer, and `"answer_input"` (form params
   `answer[body]`) from the needs-input panel's composer, and the MMF 15
   review-panel events: `"review_approve"`, `"review_open_reject"`,
-  `"review_cancel_reject"`, `"review_reject"` (form params `reject[note]` +
-  `reject[to]`), `"review_mark_done"`, and `"review_pull"`, and the RLY-30
-  universal send-back events: `"send_back_open"`, `"send_back_cancel"`, and
-  `"send_back"` (form params `send_back[to]` + `send_back[note]`).
+  `"review_cancel_reject"`, and `"review_reject"` (form params `reject[note]` +
+  `reject[to]`).
 
   ## Examples
 
@@ -1019,17 +1017,6 @@ defmodule RelayWeb.CoreComponents do
   attr :reject_error, :string,
     default: nil,
     doc: "inline prompt shown when Send back was submitted with an empty note"
-
-  attr :send_back_open, :boolean, default: false, doc: "whether the universal send-back panel is expanded"
-  attr :send_back_form, :any, default: nil, doc: "a Phoenix.HTML.Form for send_back[to] + send_back[note]"
-
-  attr :send_back_error, :string,
-    default: nil,
-    doc: "inline prompt shown when Send back was submitted with an empty note or bad target"
-
-  attr :send_back_targets, :list,
-    default: [],
-    doc: "main-lane stages before the card's current one (each %{id, name}); [] hides the universal control"
 
   attr :archived, :boolean,
     default: false,
@@ -1288,89 +1275,6 @@ defmodule RelayWeb.CoreComponents do
                     </div>
                   </.form>
                 </div>
-              </section>
-              <div
-                :if={@card.status == :in_review and !@archived}
-                id="review-actions"
-                class="flex flex-wrap gap-2"
-              >
-                <button
-                  id="review-mark-done"
-                  type="button"
-                  phx-click="review_mark_done"
-                  class="btn btn-sm rounded-[9px] border-none font-semibold text-white"
-                  style="background:oklch(0.60 0.13 155);"
-                >
-                  Mark done
-                </button>
-                <button
-                  :if={@current_user_id && !user_owner?(@card, @current_user_id)}
-                  id="review-pull"
-                  type="button"
-                  phx-click="review_pull"
-                  class="btn btn-sm rounded-[9px] border-none font-semibold text-white"
-                  style="background:oklch(0.60 0.14 250);"
-                >
-                  Pull — take this card
-                </button>
-              </div>
-              <div
-                :if={@send_back_targets != [] && !@send_back_open && !@archived}
-                id="send-back-actions"
-              >
-                <button
-                  id="send-back"
-                  type="button"
-                  phx-click="send_back_open"
-                  class="btn btn-sm btn-ghost text-warning"
-                >
-                  <.icon name="hero-arrow-uturn-left" class="size-4" /> Send back…
-                </button>
-              </div>
-              <section
-                :if={@send_back_targets != [] && @send_back_open && !@archived}
-                id="send-back-panel"
-                class="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3"
-              >
-                <.form
-                  for={@send_back_form}
-                  id="send-back-form"
-                  class="flex flex-col gap-2"
-                  phx-submit="send_back"
-                >
-                  <select
-                    id="send-back-target"
-                    name="send_back[to]"
-                    class="select select-sm select-bordered w-full"
-                  >
-                    <option :for={t <- @send_back_targets} value={t.id}>{t.name}</option>
-                  </select>
-                  <.input
-                    field={@send_back_form[:note]}
-                    type="textarea"
-                    id="send-back-note"
-                    rows="3"
-                    placeholder="What needs to change? This note goes to the AI…"
-                    class="textarea textarea-bordered w-full text-[13px]"
-                    phx-hook="SubmitOnCmdEnter"
-                  />
-                  <p :if={@send_back_error} id="send-back-error" class="text-xs text-error">
-                    {@send_back_error}
-                  </p>
-                  <div class="flex items-center gap-2">
-                    <button id="send-back-submit" type="submit" class="btn btn-sm btn-warning">
-                      Send back →
-                    </button>
-                    <button
-                      id="send-back-cancel"
-                      type="button"
-                      phx-click="send_back_cancel"
-                      class="btn btn-ghost btn-sm"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </.form>
               </section>
               <section class="space-y-2">
                 <.section_label>Description</.section_label>
@@ -1897,9 +1801,9 @@ defmodule RelayWeb.CoreComponents do
   defp activity_phrase(%Activity{type: :unarchived}), do: "restored this card"
 
   # The one-line hint under READY FOR YOUR REVIEW (MMF 15): a gated stage
-  # offers the approve/send-back pair; an ungated one only the standalone
-  # Mark done / Pull actions.
-  defp review_hint(nil), do: "Relay AI finished this. Mark it done, or pull the card to take it over."
+  # offers the approve/send-back pair; an ungated one has no drawer decision
+  # button (RLY-37) — move it forward by drag or Move to… when ready.
+  defp review_hint(nil), do: "Relay AI finished this. Drag it or use Move to… when you're ready."
 
   defp review_hint(_gate), do: "Relay AI finished this. Approve to move it forward, or send it back with a note."
 

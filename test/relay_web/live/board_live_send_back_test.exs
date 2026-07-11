@@ -42,52 +42,13 @@ defmodule RelayWeb.BoardLiveSendBackTest do
     refute has_element?(view, "#rejection-banner")
   end
 
-  test "the universal Send back control moves the card and opens the banner", %{
-    conn: conn,
-    board: board,
-    spec: spec,
-    code: code
-  } do
+  test "the standalone universal Send back control is gone from the drawer", %{conn: conn, board: board, code: code} do
     {:ok, _card} = Cards.create_card(code, %{title: "Bounce me"})
-
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
-
-    view |> element("#send-back") |> render_click()
-    assert has_element?(view, "#send-back-panel")
-
-    view
-    |> form("#send-back-form", send_back: %{to: spec.id, note: "This is really a spec problem"})
-    |> render_submit()
-
-    reloaded = Cards.get_card_by_ref(board, "RLY-1")
-    assert reloaded.stage_id == spec.id
-    assert reloaded.rejection.note == "This is really a spec problem"
-    assert has_element?(view, "#rejection-banner", "This is really a spec problem")
-  end
-
-  test "Send back with an empty note is a no-op with an inline prompt", %{
-    conn: conn,
-    board: board,
-    spec: spec,
-    code: code
-  } do
-    {:ok, _card} = Cards.create_card(code, %{title: "Bounce me"})
-
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
-    view |> element("#send-back") |> render_click()
-    view |> form("#send-back-form", send_back: %{to: spec.id, note: "   "}) |> render_submit()
-
-    assert has_element?(view, "#send-back-error")
-    assert Cards.get_card_by_ref(board, "RLY-1").stage_id == code.id
-  end
-
-  test "no Send back control on the first stage (nothing before it)", %{conn: conn, board: board} do
-    backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
-    {:ok, _card} = Cards.create_card(backlog, %{title: "First"})
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
     assert has_element?(view, "#card-drawer")
     refute has_element?(view, "#send-back")
+    refute has_element?(view, "#send-back-panel")
   end
 
   test "the gate reject panel exposes a target picker defaulting to the configured reject_to", %{
@@ -111,19 +72,5 @@ defmodule RelayWeb.BoardLiveSendBackTest do
     reloaded = Cards.get_card_by_ref(board, "RLY-1")
     assert reloaded.stage_id == code.id
     assert reloaded.rejection
-  end
-
-  test "Mark done clears an open rejection", %{conn: conn, board: board, code: code, review: review} do
-    {:ok, card} = Cards.create_card(review, %{title: "Done me"})
-    {:ok, sent} = Cards.send_back(card, code, "fix", :agent)
-    {:ok, _in_review} = Cards.set_status(sent, %{status: :in_review})
-
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
-    assert has_element?(view, "#rejection-banner")
-
-    view |> element("#review-mark-done") |> render_click()
-
-    assert Cards.get_card_by_ref(board, "RLY-1").rejection == nil
-    refute has_element?(view, "#rejection-banner")
   end
 end

@@ -48,12 +48,14 @@ defmodule RelayWeb.BoardLiveReviewTest do
     assert has_element?(view, "#review-panel", "READY FOR YOUR REVIEW")
     assert has_element?(view, "#review-approve", "Approve → Deploy")
     assert has_element?(view, "#review-request-changes", "Request changes")
-    assert has_element?(view, "#review-mark-done", "Mark done")
-    assert has_element?(view, "#review-pull", "Pull")
     refute has_element?(view, "#review-request-note")
   end
 
-  test "an in_review card on a non-gated stage shows only Mark done and Pull", %{conn: conn, code: code, user: user} do
+  test "an in_review card on a non-gated stage shows the banner but no decision buttons", %{
+    conn: conn,
+    code: code,
+    user: user
+  } do
     in_review_card(code)
 
     board = Boards.get_or_create_default_board(user)
@@ -62,8 +64,8 @@ defmodule RelayWeb.BoardLiveReviewTest do
     assert has_element?(view, "#review-panel", "READY FOR YOUR REVIEW")
     refute has_element?(view, "#review-approve")
     refute has_element?(view, "#review-request-changes")
-    assert has_element?(view, "#review-mark-done")
-    assert has_element?(view, "#review-pull")
+    refute has_element?(view, "#review-mark-done")
+    refute has_element?(view, "#review-pull")
   end
 
   test "Approve advances the card to the next main stage and logs :approved",
@@ -170,54 +172,6 @@ defmodule RelayWeb.BoardLiveReviewTest do
 
     refute has_element?(view, "#review-reject-panel")
     assert has_element?(view, "#review-approve")
-  end
-
-  test "Mark done sets :done, logs the status change, and removes the panel",
-       %{conn: conn, user: user, board: board, code: code} do
-    in_review_card(code)
-
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
-
-    view |> element("#review-mark-done") |> render_click()
-
-    reloaded = Cards.get_card_by_ref(board, "RLY-1")
-    assert reloaded.status == :done
-
-    refute has_element?(view, "#review-panel")
-    assert has_element?(view, "#card-drawer-activity .timeline-activity-phrase", "set status to done")
-
-    entry =
-      reloaded
-      |> Activity.list_timeline()
-      |> Enum.find(&match?(%Schemas.Activity{type: :status_changed, meta: %{"to_status" => "done"}}, &1))
-
-    assert entry.actor_type == :user
-    assert entry.user_id == user.id
-  end
-
-  test "Pull adds the signed-in user as an owner and hides the button",
-       %{conn: conn, user: user, board: board, review: review} do
-    in_review_card(review)
-
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
-    assert has_element?(view, "#review-pull")
-
-    view |> element("#review-pull") |> render_click()
-
-    refute has_element?(view, "#review-pull")
-    assert has_element?(view, "#review-panel")
-    assert has_element?(view, "#card-drawer-rail .rail-owner", "Test User")
-
-    assert has_element?(
-             view,
-             "#card-drawer-rail .rail-owner[data-actor-type='user'][data-active='true']",
-             "Test User"
-           )
-
-    assert has_element?(view, "#card-drawer-activity .timeline-activity-phrase", "added Test User as owner")
-
-    reloaded = Cards.get_card_by_ref(board, "RLY-1")
-    assert Enum.any?(reloaded.owners, &(&1.actor_type == :user and &1.user_id == user.id))
   end
 
   test "the review and needs-input panels are mutually exclusive by status",

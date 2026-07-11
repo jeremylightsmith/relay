@@ -76,9 +76,6 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
         {"answer_input", %{"answer" => %{"body" => "sneaky"}}},
         {"review_approve", %{}},
         {"review_reject", %{"reject" => %{"note" => "nope"}}},
-        {"review_mark_done", %{}},
-        {"review_pull", %{}},
-        {"send_back", %{"send_back" => %{"note" => "sneaky"}}},
         {"archive_card", %{"ref" => "RLY-1"}},
         {"restore_card", %{"ref" => "RLY-1"}},
         {"toggle_sub_task", %{"id" => "1"}}

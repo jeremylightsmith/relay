@@ -1119,6 +1119,54 @@ defmodule RelayWeb.BoardLiveTest do
       refute has_element?(view, "#card-archived-banner")
       assert Cards.get_card_by_ref(board, "RLY-1").archived_at == nil
     end
+
+    test "the drawer shows exactly the doctrine's buttons per state — nothing else",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      review = Enum.find(board.stages, &(&1.name == "Review"))
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+
+      # queued
+      {:ok, queued} = Cards.create_card(code, %{title: "Queued one"})
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, queued)}")
+
+      for id <- ~w(needs-input-send review-approve review-mark-done review-pull send-back card-drawer-status-form) do
+        refute has_element?(view, "##{id}")
+      end
+
+      assert has_element?(view, "#card-drawer-move")
+      assert has_element?(view, "#archive-card-button")
+
+      # working — still no primary button
+      {:ok, work} = Cards.create_card(code, %{title: "Working one"})
+      {:ok, work} = Cards.set_status(work, %{"status" => "working"})
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, work)}")
+
+      for id <- ~w(needs-input-send review-approve review-mark-done review-pull send-back card-drawer-status-form) do
+        refute has_element?(view, "##{id}")
+      end
+
+      # needs_input — only Answer →
+      {:ok, ask} = Cards.create_card(code, %{title: "Ask one"})
+      {:ok, ask} = Cards.request_input(ask, "Which palette?")
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, ask)}")
+      assert has_element?(view, "#needs-input-send")
+
+      for id <- ~w(review-approve review-mark-done review-pull send-back card-drawer-status-form) do
+        refute has_element?(view, "##{id}")
+      end
+
+      # in_review — only Approve / Request changes
+      {:ok, rev} = Cards.create_card(review, %{title: "Review one"})
+      {:ok, rev} = Cards.set_status(rev, %{"status" => "in_review"})
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, rev)}")
+      assert has_element?(view, "#review-approve")
+      assert has_element?(view, "#review-request-changes")
+
+      for id <- ~w(review-mark-done review-pull send-back card-drawer-status-form) do
+        refute has_element?(view, "##{id}")
+      end
+    end
   end
 
   describe "archived cards modal" do
