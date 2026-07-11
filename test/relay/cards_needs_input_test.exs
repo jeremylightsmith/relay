@@ -35,6 +35,14 @@ defmodule Relay.CardsNeedsInputTest do
                Enum.find(timeline, &match?(%Schemas.Activity{type: :needs_input}, &1))
     end
 
+    test "tags its question comment with kind :question", %{ai_stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Ship exports"})
+
+      {:ok, blocked} = Cards.request_input(card, "Which colour?")
+
+      assert [%Comment{kind: :question, body: "Which colour?"}] = Activity.list_conversation(blocked)
+    end
+
     test "attributes the question to a user actor", %{ai_stage: stage} do
       user = insert(:user)
       {:ok, card} = Cards.create_card(stage, %{title: "Human asks"})

@@ -1570,8 +1570,24 @@ defmodule RelayWeb.CoreComponents do
                         <time class="timeline-time font-mono text-[11px] text-base-content/50">
                           {Calendar.strftime(comment.inserted_at, "%b %d, %H:%M")}
                         </time>
+                        <span
+                          :if={comment.kind in [:question, :changes_requested]}
+                          class="font-mono"
+                          style={"font-size:9.5px;font-weight:600;letter-spacing:0.04em;color:#{comment_tag_color(comment.kind)};background:oklch(0.96 0.03 75);padding:1px 6px;border-radius:4px;"}
+                        >
+                          {comment_tag_label(comment.kind)}
+                        </span>
                       </div>
-                      <div class="timeline-comment-body md rounded-lg bg-base-200/60 px-3 py-2 text-sm leading-relaxed">
+                      <div
+                        class={[
+                          "timeline-comment-body md rounded-lg px-3 py-2 text-sm leading-relaxed",
+                          comment.kind not in [:question, :changes_requested] && "bg-base-200/60"
+                        ]}
+                        style={
+                          comment.kind in [:question, :changes_requested] &&
+                            "background:oklch(0.96 0.03 75);border:1px solid oklch(0.88 0.06 75);"
+                        }
+                      >
                         {Relay.Markdown.to_html(comment.body)}
                       </div>
                     </div>
@@ -1851,6 +1867,12 @@ defmodule RelayWeb.CoreComponents do
 
   defp timeline_author(%{actor_type: :agent}), do: "Relay AI"
   defp timeline_author(%{actor_type: :user, user: user}), do: user.name || user.email
+
+  defp comment_tag_label(:question), do: "QUESTION"
+  defp comment_tag_label(:changes_requested), do: "CHANGES REQUESTED"
+
+  defp comment_tag_color(:question), do: "oklch(0.52 0.11 65)"
+  defp comment_tag_color(:changes_requested), do: "oklch(0.55 0.13 65)"
 
   defp timeline_initials(%{actor_type: :agent}), do: "AI"
 

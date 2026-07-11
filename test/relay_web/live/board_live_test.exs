@@ -1897,6 +1897,25 @@ defmodule RelayWeb.BoardLiveTest do
       assert ids == ["timeline-comment-#{c1.id}", "timeline-comment-#{c2.id}"]
     end
 
+    test "the drawer conversation tags question and changes-requested comments",
+         %{conn: conn, user: user, card: card} do
+      insert(:comment, card: card, body: "Plain one")
+      q = insert(:comment, card: card, body: "Which colour?", kind: :question)
+      cr = insert(:comment, card: card, body: "Fix the copy", kind: :changes_requested)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      html = render(view)
+
+      assert has_element?(view, "#timeline-comment-#{q.id}", "QUESTION")
+      assert has_element?(view, "#timeline-comment-#{cr.id}", "CHANGES REQUESTED")
+      assert html =~ "oklch(0.52 0.11 65)"
+      assert html =~ "oklch(0.55 0.13 65)"
+      # tinted bubble for tagged comments
+      assert html =~ "oklch(0.88 0.06 75)"
+    end
+
     test "the activity log lists entries newest first", %{conn: conn, backlog: backlog, user: user} do
       card = insert(:card, stage: backlog, title: "Log", ref_number: 502, position: 7)
       a1 = insert(:activity, card: card, type: :created, inserted_at: ~U[2026-07-01 09:00:00Z])
