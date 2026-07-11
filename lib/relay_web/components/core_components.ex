@@ -875,6 +875,38 @@ defmodule RelayWeb.CoreComponents do
   defp wip_chip_colors(_state), do: "background:oklch(0.96 0.006 255);color:oklch(0.48 0.02 255);"
 
   @doc """
+  The drawer's mono-uppercase section label (main headings + rail labels).
+
+  Renders the shared label treatment
+  (`font-mono text-[10px] font-semibold uppercase tracking-[0.06em]`). Pass `accent`
+  (a full text-color class such as `text-secondary`) to tint it — e.g. the violet
+  AI Result heading — which replaces the default muted color.
+
+  ## Examples
+
+      <.section_label>Owners</.section_label>
+      <.section_label accent="text-secondary">AI Result</.section_label>
+  """
+  attr :accent, :string,
+    default: nil,
+    doc: "a full text-color class (e.g. \"text-secondary\") used instead of the muted default"
+
+  attr :class, :any, default: nil
+  slot :inner_block, required: true
+
+  def section_label(assigns) do
+    ~H"""
+    <span class={[
+      "font-mono text-[10px] font-semibold uppercase tracking-[0.06em]",
+      @accent || "text-base-content/60",
+      @class
+    ]}>
+      {render_slot(@inner_block)}
+    </span>
+    """
+  end
+
+  @doc """
   Renders the card detail drawer (daisyUI `drawer drawer-end`): a scrim
   plus a right-side panel with the card's stage chip (stage name in the
   Human/AI owner color), its ref, an editable title, the plain-text
@@ -1027,9 +1059,9 @@ defmodule RelayWeb.CoreComponents do
         <.link id={"#{@id}-scrim"} patch={@close_patch} class="drawer-overlay">
           <span class="sr-only">Close</span>
         </.link>
-        <aside class="drawer-panel flex h-dvh w-full max-w-[1100px] flex-col bg-base-100 shadow-xl lg:w-2/3">
+        <aside class="drawer-panel flex h-dvh w-full flex-col bg-base-100 shadow-xl lg:w-[min(760px,94vw)]">
           <header class="flex items-start gap-3 border-b border-base-300 p-5">
-            <div class="flex min-w-0 flex-1 flex-col gap-2.5">
+            <div class="flex min-w-0 flex-1 flex-col gap-1.5">
               <div class="flex items-center gap-2">
                 <span class={[
                   "drawer-stage-chip badge badge-sm font-medium",
@@ -1049,7 +1081,7 @@ defmodule RelayWeb.CoreComponents do
                 edit_event="edit_title"
                 save_event="save_card_title"
                 cancel_event="cancel_title"
-                read_class="whitespace-pre-wrap break-words px-1 text-lg font-semibold leading-[1.3]"
+                read_class="break-words px-1 text-lg font-semibold leading-[1.3]"
                 input_class="textarea textarea-bordered w-full text-lg font-semibold leading-[1.3]"
                 multiline
                 rows="2"
@@ -1346,58 +1378,84 @@ defmodule RelayWeb.CoreComponents do
                   </div>
                 </.form>
               </section>
-              <section :if={@card.sub_tasks != []} id="sub-tasks" class="space-y-2">
-                <div class="flex items-center justify-between">
-                  <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                    Sub-tasks
-                  </h4>
-                  <span id="sub-tasks-count" class="font-mono text-[10px] text-base-content/60">
-                    {@sub_task_progress.done}/{@sub_task_progress.total}
-                  </span>
-                </div>
-                <div class="h-1 w-full overflow-hidden rounded-full bg-base-300">
-                  <div
-                    class="h-full rounded-full bg-success transition-all"
-                    style={"width:#{sub_task_pct(@sub_task_progress)}%"}
-                  />
-                </div>
-                <ul class="space-y-1">
-                  <li
-                    :for={st <- @card.sub_tasks}
-                    id={"sub-task-#{st.id}"}
-                    class="flex items-start gap-2"
-                  >
-                    <button
-                      type="button"
-                      phx-click="toggle_sub_task"
-                      phx-value-id={st.id}
-                      class={[
-                        "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
-                        if(st.done,
-                          do: "border-success bg-success text-white",
-                          else: "border-base-300 hover:border-success"
-                        )
-                      ]}
-                      aria-label={if(st.done, do: "Mark incomplete", else: "Mark complete")}
-                    >
-                      <.icon :if={st.done} name="hero-check" class="size-3" />
-                    </button>
-                    <span class={[
-                      "text-sm leading-snug",
-                      st.done && "text-base-content/50 line-through"
-                    ]}>
-                      {st.title}
-                    </span>
-                  </li>
-                </ul>
-              </section>
-              <section :if={@card.ai_result} id="ai-result" class="space-y-2">
-                <h4
-                  class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em]"
-                  style="color:oklch(0.55 0.16 295);"
+              <section class="space-y-2">
+                <.section_label>Description</.section_label>
+                <.editable_text
+                  :if={!@archived}
+                  id={"#{@id}-description"}
+                  value={@card.description}
+                  editing={@editing_description}
+                  form={@description_form}
+                  field={:description}
+                  edit_event="edit_description"
+                  save_event="save_card_description"
+                  cancel_event="cancel_description"
+                  placeholder="Add a description…"
+                  markdown
+                  multiline
+                  rows="12"
+                  read_class="min-h-16 p-1 text-sm leading-relaxed"
+                />
+                <div
+                  :if={@archived}
+                  id={"#{@id}-description-archived"}
+                  class="md min-h-16 p-1 text-sm leading-relaxed"
                 >
-                  AI Result
-                </h4>
+                  {Relay.Markdown.to_html(@card.description || "_No description._")}
+                </div>
+              </section>
+
+              <%!--
+                Plain <details>/<summary> rather than daisyUI's `collapse` component:
+                Tailwind ships its own `.collapse` utility (`visibility: collapse`, for
+                table rows) under the same class name, and since these blocks are direct
+                children of the `flex flex-col` main column, that utility wins the layer
+                cascade over daisyUI's component and collapses the whole flex item to
+                ~0 height — regardless of the [open] state. Native <details> already gives
+                us a labeled, click-to-expand section for free.
+              --%>
+              <details
+                :if={@card.spec}
+                id={"#{@id}-spec"}
+                class="group rounded-lg border border-base-300 bg-base-200/40"
+              >
+                <summary class="collapse-title flex min-h-0 cursor-pointer list-none items-center gap-1.5 px-3.5 py-3 [&::-webkit-details-marker]:hidden">
+                  <.icon
+                    name="hero-chevron-right"
+                    class="size-3 shrink-0 text-base-content/50 transition-transform group-open:rotate-90"
+                  />
+                  <.section_label>Spec</.section_label>
+                </summary>
+                <div class="border-t border-base-300 px-3.5 pb-3.5 pt-3">
+                  <div id={"#{@id}-spec-view"} class="md text-sm leading-relaxed">
+                    {Relay.Markdown.to_html(@card.spec)}
+                  </div>
+                </div>
+              </details>
+              <details
+                :if={@card.plan}
+                id="card-plan"
+                class="group rounded-lg border border-base-300 bg-base-200/40"
+              >
+                <summary class="collapse-title flex min-h-0 cursor-pointer list-none items-center gap-1.5 px-3.5 py-3 [&::-webkit-details-marker]:hidden">
+                  <.icon
+                    name="hero-chevron-right"
+                    class="size-3 shrink-0 text-base-content/50 transition-transform group-open:rotate-90"
+                  />
+                  <.section_label>Plan</.section_label>
+                </summary>
+                <div class="border-t border-base-300 px-3.5 pb-3.5 pt-3">
+                  <div
+                    id="card-plan-body"
+                    class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
+                  >
+                    {Relay.Markdown.to_html(@card.plan)}
+                  </div>
+                </div>
+              </details>
+
+              <section :if={@card.ai_result} id="ai-result" class="space-y-2">
+                <.section_label accent="text-secondary">AI Result</.section_label>
                 <div
                   class="space-y-3 rounded-[10px] border p-3.5"
                   style="border-color:oklch(0.88 0.05 295);background:oklch(0.985 0.01 295);"
@@ -1458,36 +1516,51 @@ defmodule RelayWeb.CoreComponents do
                   </a>
                 </div>
               </section>
-              <section class="space-y-2">
-                <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                  Description
-                </h4>
-                <.editable_text
-                  :if={!@archived}
-                  id={"#{@id}-description"}
-                  value={@card.description}
-                  editing={@editing_description}
-                  form={@description_form}
-                  field={:description}
-                  edit_event="edit_description"
-                  save_event="save_card_description"
-                  cancel_event="cancel_description"
-                  placeholder="Add a description…"
-                  markdown
-                  multiline
-                  rows="12"
-                  read_class="min-h-16 p-1 text-sm leading-relaxed"
-                />
-                <div
-                  :if={@archived}
-                  id={"#{@id}-description-archived"}
-                  class="md min-h-16 p-1 text-sm leading-relaxed"
-                >
-                  {Relay.Markdown.to_html(@card.description || "_No description._")}
+              <section :if={@card.sub_tasks != []} id="sub-tasks" class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <.section_label>Sub-tasks</.section_label>
+                  <span id="sub-tasks-count" class="font-mono text-[10px] text-base-content/60">
+                    {@sub_task_progress.done}/{@sub_task_progress.total}
+                  </span>
                 </div>
+                <div class="h-1 w-full overflow-hidden rounded-full bg-base-300">
+                  <div
+                    class="h-full rounded-full bg-success transition-all"
+                    style={"width:#{sub_task_pct(@sub_task_progress)}%"}
+                  />
+                </div>
+                <ul class="space-y-1">
+                  <li
+                    :for={st <- @card.sub_tasks}
+                    id={"sub-task-#{st.id}"}
+                    class="flex items-start gap-2"
+                  >
+                    <button
+                      type="button"
+                      phx-click="toggle_sub_task"
+                      phx-value-id={st.id}
+                      class={[
+                        "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
+                        if(st.done,
+                          do: "border-success bg-success text-white",
+                          else: "border-base-300 hover:border-success"
+                        )
+                      ]}
+                      aria-label={if(st.done, do: "Mark incomplete", else: "Mark complete")}
+                    >
+                      <.icon :if={st.done} name="hero-check" class="size-3" />
+                    </button>
+                    <span class={[
+                      "text-sm leading-snug",
+                      st.done && "text-base-content/50 line-through"
+                    ]}>
+                      {st.title}
+                    </span>
+                  </li>
+                </ul>
               </section>
               <section class="space-y-3 border-t border-base-300 pt-4">
-                <h4 class="text-sm font-semibold text-base-content/80">Conversation</h4>
+                <.section_label>Conversation</.section_label>
                 <ol id={"#{@id}-conversation"} phx-update="stream" class="space-y-4">
                   <li
                     id={"#{@id}-conversation-empty"}
@@ -1544,42 +1617,8 @@ defmodule RelayWeb.CoreComponents do
                 </.form>
               </section>
 
-              <details
-                :if={@card.spec}
-                id={"#{@id}-spec"}
-                class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-200/40"
-              >
-                <summary class="collapse-title min-h-0 py-3 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                  Spec
-                </summary>
-                <div class="collapse-content">
-                  <div id={"#{@id}-spec-view"} class="md text-sm leading-relaxed">
-                    {Relay.Markdown.to_html(@card.spec)}
-                  </div>
-                </div>
-              </details>
-              <details
-                :if={@card.plan}
-                id="card-plan"
-                class="collapse collapse-arrow rounded-lg border border-base-300 bg-base-200/40"
-              >
-                <summary class="collapse-title min-h-0 py-3 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                  Plan
-                </summary>
-                <div class="collapse-content">
-                  <div
-                    id="card-plan-body"
-                    class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
-                  >
-                    {Relay.Markdown.to_html(@card.plan)}
-                  </div>
-                </div>
-              </details>
-
               <section class="space-y-2 border-t border-base-300 pt-4">
-                <h4 class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                  Activity
-                </h4>
+                <.section_label>Activity</.section_label>
                 <ol id={"#{@id}-activity"} phx-update="stream" class="space-y-1">
                   <li
                     id={"#{@id}-activity-empty"}
@@ -1611,197 +1650,204 @@ defmodule RelayWeb.CoreComponents do
               </section>
             </div>
 
-            <dl
+            <div
               id={"#{@id}-rail"}
-              class="grid w-full shrink-0 grid-cols-[auto_1fr] content-start gap-x-6 gap-y-3 overflow-y-auto border-t border-base-300 bg-base-200/30 p-5 text-sm lg:w-[220px] lg:border-l lg:border-t-0"
+              class="flex w-full shrink-0 flex-col gap-5 overflow-y-auto border-t border-base-300 bg-base-200/30 p-5 text-sm lg:w-[220px] lg:border-l lg:border-t-0"
             >
-              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                Active worker
-              </dt>
-              <dd class="rail-active-worker flex items-center gap-2">
-                <%= if @active_owner do %>
-                  <.owner_pill owner={@active_owner} />
-                  <span class="rail-active-worker-name text-sm">
-                    {active_worker_names(@card, @active_owner)}
+              <%!-- STAGE: chip + Move to… + Archive --%>
+              <div class="rail-section flex flex-col gap-2">
+                <.section_label>Stage</.section_label>
+                <div class="rail-stage flex flex-wrap items-center gap-2">
+                  <span class={[
+                    "badge badge-sm font-medium",
+                    if(@stage_owner == :human, do: "badge-primary", else: "badge-secondary")
+                  ]}>
+                    {@stage_name}
                   </span>
-                <% else %>
-                  <span class="text-base-content/50">None</span>
-                <% end %>
-              </dd>
-              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                Owners
-              </dt>
-              <dd class="rail-owners space-y-2">
-                <div
-                  :for={owner <- @card.owners}
-                  class="rail-owner flex items-center gap-2"
-                  data-actor-type={owner.actor_type}
-                >
-                  <span class="text-sm">{owner_name(owner)}</span>
-                  <button
-                    :if={!@archived and owner.actor_type == :agent}
-                    type="button"
-                    id={"#{@id}-take-over"}
-                    class="rail-take-over btn btn-primary btn-xs"
-                    phx-click="take_over"
-                  >
-                    Take over
-                  </button>
+                  <div :if={@stages != [] and !@archived} id={"#{@id}-move"} class="dropdown">
+                    <div
+                      tabindex="0"
+                      role="button"
+                      id={"#{@id}-move-button"}
+                      class="btn btn-ghost btn-xs"
+                    >
+                      Move to… <.icon name="hero-chevron-down" class="size-3" />
+                    </div>
+                    <ul
+                      tabindex="0"
+                      class="dropdown-content menu z-50 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg"
+                    >
+                      <li :for={stage <- @stages}>
+                        <button
+                          type="button"
+                          id={"#{@id}-move-to-#{stage.id}"}
+                          phx-click="move_card"
+                          phx-value-ref={@ref}
+                          phx-value-stage_id={stage.id}
+                        >
+                          {stage.name}
+                        </button>
+                      </li>
+                    </ul>
+                  </div>
                   <button
                     :if={!@archived}
                     type="button"
-                    id={"#{@id}-remove-owner-#{owner_dom_suffix(owner)}"}
-                    class="btn btn-ghost btn-xs btn-square"
-                    phx-click="remove_owner"
-                    phx-value-actor_type={owner.actor_type}
-                    phx-value-user_id={owner.user_id}
-                    aria-label={"Remove #{owner_name(owner)} as owner"}
+                    id="archive-card-button"
+                    phx-click="archive_card"
+                    phx-value-ref={@ref}
+                    data-confirm="Archive this card? You can restore it from Archived."
+                    class="btn btn-ghost btn-xs text-base-content/60"
                   >
-                    <.icon name="hero-x-mark" class="size-3" />
+                    <.icon name="hero-archive-box" class="size-3.5" /> Archive
                   </button>
                 </div>
-                <span :if={@card.owners == []} class="text-base-content/50">None</span>
-                <div :if={!@archived} class="flex flex-wrap gap-2">
-                  <button
-                    :if={!agent_owner?(@card)}
-                    type="button"
-                    id={"#{@id}-assign-ai"}
-                    class="btn btn-ghost btn-xs"
-                    phx-click="add_owner"
-                    phx-value-actor_type="agent"
-                  >
-                    Assign AI
-                  </button>
-                  <button
-                    :if={
-                      @current_user_id && !user_owner?(@card, @current_user_id) &&
-                        !agent_owner?(@card)
-                    }
-                    type="button"
-                    id={"#{@id}-add-me"}
-                    class="btn btn-ghost btn-xs"
-                    phx-click="add_owner"
-                    phx-value-actor_type="user"
-                    phx-value-user_id={@current_user_id}
-                  >
-                    Add me
-                  </button>
-                </div>
-              </dd>
-              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                Status
-              </dt>
-              <dd class="rail-status">
-                <.form
-                  :if={!@archived}
-                  for={@status_form}
-                  id={"#{@id}-status-form"}
-                  phx-change="set_card_status"
-                >
-                  <.input
-                    field={@status_form[:status]}
-                    type="select"
-                    options={status_options()}
-                    class="select select-sm w-full"
-                  />
-                  <.input
-                    :if={@card.status == :working}
-                    field={@status_form[:progress]}
-                    type="number"
-                    min="0"
-                    max="100"
-                    placeholder="Progress %"
-                    class="input input-sm w-full"
-                  />
-                </.form>
-                <.status_badge :if={@archived} status={@card.status} progress={@card.progress} />
-              </dd>
-              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                Stage
-              </dt>
-              <dd class="rail-stage flex flex-wrap items-center gap-2">
-                {@stage_name}
-                <div :if={@stages != [] and !@archived} id={"#{@id}-move"} class="dropdown">
+              </div>
+
+              <%!-- OWNERS: avatars + names, active owner ringed (ACTIVE WORKER merged here) --%>
+              <div class="rail-section flex flex-col gap-2">
+                <.section_label>Owners</.section_label>
+                <div class="rail-owners space-y-2">
                   <div
-                    tabindex="0"
-                    role="button"
-                    id={"#{@id}-move-button"}
-                    class="btn btn-ghost btn-xs"
+                    :for={owner <- @card.owners}
+                    class={[
+                      "rail-owner flex items-center gap-2 rounded-md px-1.5 py-1",
+                      active_owner?(owner, @active_owner) &&
+                        if(owner.actor_type == :agent,
+                          do: "rail-owner-active ring-2 ring-secondary/60",
+                          else: "rail-owner-active ring-2 ring-primary/60"
+                        )
+                    ]}
+                    data-actor-type={owner.actor_type}
+                    data-active={to_string(active_owner?(owner, @active_owner))}
                   >
-                    Move to… <.icon name="hero-chevron-down" class="size-3" />
+                    <span class="text-sm">{owner_name(owner)}</span>
+                    <button
+                      :if={!@archived and owner.actor_type == :agent}
+                      type="button"
+                      id={"#{@id}-take-over"}
+                      class="rail-take-over btn btn-primary btn-xs"
+                      phx-click="take_over"
+                    >
+                      Take over
+                    </button>
+                    <button
+                      :if={!@archived}
+                      type="button"
+                      id={"#{@id}-remove-owner-#{owner_dom_suffix(owner)}"}
+                      class="btn btn-ghost btn-xs btn-square"
+                      phx-click="remove_owner"
+                      phx-value-actor_type={owner.actor_type}
+                      phx-value-user_id={owner.user_id}
+                      aria-label={"Remove #{owner_name(owner)} as owner"}
+                    >
+                      <.icon name="hero-x-mark" class="size-3" />
+                    </button>
                   </div>
-                  <ul
-                    tabindex="0"
-                    class="dropdown-content menu z-50 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg"
-                  >
-                    <li :for={stage <- @stages}>
-                      <button
-                        type="button"
-                        id={"#{@id}-move-to-#{stage.id}"}
-                        phx-click="move_card"
-                        phx-value-ref={@ref}
-                        phx-value-stage_id={stage.id}
-                      >
-                        {stage.name}
-                      </button>
-                    </li>
-                  </ul>
+                  <span :if={@card.owners == []} class="text-base-content/50">None</span>
+                  <div :if={!@archived} class="flex flex-wrap gap-2">
+                    <button
+                      :if={!agent_owner?(@card)}
+                      type="button"
+                      id={"#{@id}-assign-ai"}
+                      class="btn btn-ghost btn-xs"
+                      phx-click="add_owner"
+                      phx-value-actor_type="agent"
+                    >
+                      Assign AI
+                    </button>
+                    <button
+                      :if={
+                        @current_user_id && !user_owner?(@card, @current_user_id) &&
+                          !agent_owner?(@card)
+                      }
+                      type="button"
+                      id={"#{@id}-add-me"}
+                      class="btn btn-ghost btn-xs"
+                      phx-click="add_owner"
+                      phx-value-actor_type="user"
+                      phx-value-user_id={@current_user_id}
+                    >
+                      Add me
+                    </button>
+                  </div>
                 </div>
-                <button
-                  :if={!@archived}
-                  type="button"
-                  id="archive-card-button"
-                  phx-click="archive_card"
-                  phx-value-ref={@ref}
-                  data-confirm="Archive this card? You can restore it from Archived."
-                  class="btn btn-ghost btn-xs text-base-content/60"
-                >
-                  <.icon name="hero-archive-box" class="size-3.5" /> Archive
-                </button>
-              </dd>
-              <dt
-                :if={@card.branch}
-                class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60"
-              >
-                Branch
-              </dt>
-              <dd :if={@card.branch} class="rail-branch">
-                <span id="card-branch" class="badge badge-ghost badge-sm gap-1 font-mono">
-                  <.icon name="hero-share" class="size-3" />
-                  {@card.branch}
-                </span>
-              </dd>
-              <dt
-                :if={@card.pr_url}
-                class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60"
-              >
-                PR
-              </dt>
-              <dd :if={@card.pr_url} class="rail-pr">
-                <.link
-                  id="card-pr"
-                  href={@card.pr_url}
-                  target="_blank"
-                  class="badge badge-ghost badge-sm gap-1 font-mono"
-                >
-                  <.icon name="hero-arrow-top-right-on-square" class="size-3" /> Review PR ↗
-                </.link>
-              </dd>
-              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                Tags
-              </dt>
-              <dd class="rail-tags">
-                <span :if={@card.tag} class="badge badge-ghost badge-sm">#{@card.tag}</span>
-                <span :if={!@card.tag} class="text-base-content/50">None</span>
-              </dd>
-              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                Dates
-              </dt>
-              <dd class="rail-dates space-y-0.5">
-                <div>Created {Calendar.strftime(@card.inserted_at, "%b %d, %Y")}</div>
-                <div>Updated {Calendar.strftime(@card.updated_at, "%b %d, %Y")}</div>
-              </dd>
-            </dl>
+              </div>
+
+              <%!-- STATUS: transitional — removed when buttons-only-for-decisions lands (RLY-*) --%>
+              <div class="rail-section flex flex-col gap-2">
+                <.section_label>Status</.section_label>
+                <div class="rail-status">
+                  <.form
+                    :if={!@archived}
+                    for={@status_form}
+                    id={"#{@id}-status-form"}
+                    phx-change="set_card_status"
+                  >
+                    <.input
+                      field={@status_form[:status]}
+                      type="select"
+                      options={status_options()}
+                      class="select select-sm w-full"
+                    />
+                    <.input
+                      :if={@card.status == :working}
+                      field={@status_form[:progress]}
+                      type="number"
+                      min="0"
+                      max="100"
+                      placeholder="Progress %"
+                      class="input input-sm w-full"
+                    />
+                  </.form>
+                  <.status_badge :if={@archived} status={@card.status} progress={@card.progress} />
+                </div>
+              </div>
+
+              <%!-- FLOW inserts here when flow-overrides lands — not built in this pass. --%>
+
+              <%!-- LINKS: Branch chip + PR link under one label; nothing when both absent --%>
+              <div :if={@card.branch || @card.pr_url} class="rail-section flex flex-col gap-2">
+                <.section_label>Links</.section_label>
+                <div class="rail-links flex flex-wrap items-center gap-2">
+                  <span
+                    :if={@card.branch}
+                    id="card-branch"
+                    class="badge badge-ghost badge-sm gap-1 font-mono"
+                  >
+                    <.icon name="hero-share" class="size-3" />
+                    {@card.branch}
+                  </span>
+                  <.link
+                    :if={@card.pr_url}
+                    id="card-pr"
+                    href={@card.pr_url}
+                    target="_blank"
+                    class="badge badge-ghost badge-sm gap-1 font-mono"
+                  >
+                    <.icon name="hero-arrow-top-right-on-square" class="size-3" /> Review PR ↗
+                  </.link>
+                </div>
+              </div>
+
+              <%!-- TAGS --%>
+              <div class="rail-section flex flex-col gap-2">
+                <.section_label>Tags</.section_label>
+                <div class="rail-tags">
+                  <span :if={@card.tag} class="badge badge-ghost badge-sm">#{@card.tag}</span>
+                  <span :if={!@card.tag} class="text-base-content/50">None</span>
+                </div>
+              </div>
+
+              <%!-- DATES --%>
+              <div class="rail-section flex flex-col gap-2">
+                <.section_label>Dates</.section_label>
+                <div class="rail-dates space-y-0.5 font-mono text-xs text-base-content/70">
+                  <div>Created {Calendar.strftime(@card.inserted_at, "%b %d, %Y")}</div>
+                  <div>Updated {Calendar.strftime(@card.updated_at, "%b %d, %Y")}</div>
+                </div>
+              </div>
+            </div>
           </div>
         </aside>
       </div>
@@ -1826,13 +1872,12 @@ defmodule RelayWeb.CoreComponents do
   defp owner_name(%{actor_type: :agent}), do: "Relay AI"
   defp owner_name(%{actor_type: :user, user: user}), do: user.name || user.email
 
-  defp active_worker_names(_card, :ai), do: "Relay AI"
-
-  defp active_worker_names(card, :human) do
-    card.owners
-    |> Enum.filter(&(&1.actor_type == :user))
-    |> Enum.map_join(", ", &owner_name/1)
-  end
+  # RLY-43: the active owner is the baton-holder — ringed inside OWNERS (the old
+  # standalone ACTIVE WORKER row is gone). Agent owner is active when the baton is AI's;
+  # a user owner when it's a human's.
+  defp active_owner?(%{actor_type: :agent}, :ai), do: true
+  defp active_owner?(%{actor_type: :user}, :human), do: true
+  defp active_owner?(_owner, _active_owner), do: false
 
   defp agent_owner?(card), do: Enum.any?(card.owners, &(&1.actor_type == :agent))
 
@@ -2334,7 +2379,7 @@ defmodule RelayWeb.CoreComponents do
         <div :if={@markdown && !editable_blank?(@value)} id={"#{@id}-view"} class="md">
           {Relay.Markdown.to_html(@value)}
         </div>
-        <span :if={!@markdown && !editable_blank?(@value)}>{@value}</span>
+        <span :if={!@markdown && !editable_blank?(@value)} class="whitespace-pre-wrap">{@value}</span>
         <span :if={editable_blank?(@value)} class="italic text-base-content/50">{@placeholder}</span>
         <.icon
           name="hero-pencil-square"

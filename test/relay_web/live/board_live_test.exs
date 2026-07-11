@@ -730,7 +730,7 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, ".timeline-comment-body strong", "commentbold")
     end
 
-    test "spec and plan sit collapsed between Conversation and Activity",
+    test "spec and plan sit collapsed between Description and Conversation",
          %{conn: conn, card: card, user: user} do
       {:ok, _updated} = Cards.update_card(card, %{spec: "The spec body", plan: "The plan body"})
 
@@ -745,15 +745,64 @@ defmodule RelayWeb.BoardLiveTest do
       refute has_element?(view, "details#card-drawer-spec[open]")
       refute has_element?(view, "details#card-plan[open]")
 
-      # DOM order: Conversation → Spec → Plan → Activity
-      conv = index_of(html, ~s(id="card-drawer-conversation"))
+      # DOM order (mockup order): Description → Spec → Plan → Conversation → Activity
+      description = index_of(html, ~s(id="card-drawer-description"))
       spec = index_of(html, ~s(id="card-drawer-spec"))
       plan = index_of(html, ~s(id="card-plan"))
+      conv = index_of(html, ~s(id="card-drawer-conversation"))
       activity = index_of(html, ~s(id="card-drawer-activity"))
 
-      assert conv < spec
+      assert description < spec
       assert spec < plan
-      assert plan < activity
+      assert plan < conv
+      assert conv < activity
+    end
+
+    test "a long title wraps in the read display (no truncation)",
+         %{conn: conn, card: card, user: user} do
+      long = String.duplicate("word ", 40)
+      {:ok, _} = Cards.update_card(card, %{title: long})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-title-display.break-words")
+      assert has_element?(view, "#card-drawer-title-display .whitespace-pre-wrap")
+      refute has_element?(view, "#card-drawer-title-display.truncate")
+    end
+
+    test "the main column renders sections in mockup order", %{conn: conn, card: card, user: user} do
+      {:ok, _} =
+        Cards.update_card(card, %{
+          description: "A description",
+          spec: "# Spec body",
+          plan: "# Plan body",
+          ai_result: %{"summary" => "AI summary"}
+        })
+
+      insert(:sub_task, card: card, title: "st-1")
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, _view, html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      order = ~w(
+        card-drawer-description
+        card-drawer-spec
+        card-plan
+        ai-result
+        sub-tasks
+        card-drawer-conversation
+        card-drawer-activity
+      )
+
+      positions =
+        Enum.map(order, fn id ->
+          {pos, _len} = :binary.match(html, ~s(id="#{id}"))
+          pos
+        end)
+
+      assert positions == Enum.sort(positions),
+             "main-column sections are out of mockup order: #{inspect(Enum.zip(order, positions))}"
     end
 
     test "with a spec but no plan, only the Spec block appears before Activity",
@@ -879,7 +928,8 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      assert has_element?(view, "#card-drawer-title-display.whitespace-pre-wrap.break-words")
+      assert has_element?(view, "#card-drawer-title-display.break-words")
+      assert has_element?(view, "#card-drawer-title-display .whitespace-pre-wrap")
     end
 
     test "pressing Escape closes the open drawer", %{conn: conn, user: user} do
@@ -972,7 +1022,7 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       assert has_element?(view, "#card-drawer aside.drawer-panel.w-full")
-      assert render(view) =~ "lg:w-2/3"
+      assert render(view) =~ "lg:w-[min(760px,94vw)]"
     end
 
     test "the drawer body has a main column beside a properties rail", %{conn: conn, user: user} do
@@ -1286,7 +1336,7 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      assert has_element?(view, "#card-drawer-rail .rail-active-worker", "None")
+      refute has_element?(view, "#card-drawer-rail .rail-owner[data-active='true']")
       assert has_element?(view, "#card-drawer-rail .rail-owners", "None")
       assert has_element?(view, "#card-drawer-assign-ai")
       assert has_element?(view, "#card-drawer-add-me")
@@ -1301,15 +1351,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#card-drawer-rail .rail-active-worker .owner-pill.badge-primary",
-               "Human"
-             )
-
-      assert has_element?(view, "#card-drawer-rail .rail-active-worker", "Test User")
-
-      assert has_element?(
-               view,
-               "#card-drawer-rail .rail-owner[data-actor-type='user']",
+               "#card-drawer-rail .rail-owner[data-actor-type='user'][data-active='true']",
                "Test User"
              )
 
@@ -1332,8 +1374,8 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#card-drawer-rail .rail-active-worker .owner-pill.badge-secondary",
-               "AI"
+               "#card-drawer-rail .rail-owner[data-actor-type='agent'][data-active='true']",
+               "Relay AI"
              )
 
       # exclusivity: the human owner is gone; no paused badge remains
@@ -1361,8 +1403,8 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#card-drawer-rail .rail-active-worker .owner-pill.badge-primary",
-               "Human"
+               "#card-drawer-rail .rail-owner[data-actor-type='user'][data-active='true']",
+               "Test User"
              )
 
       assert has_element?(view, "#card-drawer-rail .rail-owner[data-actor-type='user']", "Test User")
@@ -1391,7 +1433,8 @@ defmodule RelayWeb.BoardLiveTest do
       view |> element("#card-drawer-add-me") |> render_click()
       view |> element("#card-drawer-remove-owner-user-#{user.id}") |> render_click()
 
-      assert has_element?(view, "#card-drawer-rail .rail-active-worker", "None")
+      assert has_element?(view, "#card-drawer-rail .rail-owners", "None")
+      refute has_element?(view, "#card-drawer-rail .rail-owner[data-active='true']")
       assert Repo.all(CardOwner) == []
       refute has_element?(view, "#stage-col-1-cards .board-card[data-active-owner]")
     end
@@ -1456,7 +1499,7 @@ defmodule RelayWeb.BoardLiveTest do
       render_click(view, "add_owner", %{"actor_type" => "user", "user_id" => other.id})
 
       assert Repo.all(CardOwner) == []
-      assert has_element?(view, "#card-drawer-rail .rail-active-worker", "None")
+      assert has_element?(view, "#card-drawer-rail .rail-owners", "None")
     end
   end
 
