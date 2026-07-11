@@ -147,7 +147,7 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "font-size:15px"
     end
 
-    test "composer input is ≥16px (no iOS zoom) and its buttons are ≥44px tall" do
+    test "composer textarea matches the mockup's 13px font and its buttons are ≥44px tall" do
       html =
         render_component(&CoreComponents.stage_column/1,
           id: "stage-col-1",
@@ -158,9 +158,10 @@ defmodule RelayWeb.CoreComponentsTest do
           compose_form: to_form(%{"title" => ""}, as: :card)
         )
 
-      # 16px input font prevents iOS auto-zoom on focus
-      assert html =~ ~s(class="commit-field-input text-base")
-      # Add card / Cancel are comfortable tap targets
+      # 13px/1.4 borderless textarea per the mockup (Relay Board.dc.html ~L194-201)
+      assert html =~ ~s(id="stage-col-1-compose-title")
+      assert html =~ "text-[13px]"
+      # Add / Cancel are comfortable tap targets
       assert html =~ "min-h-[44px]"
     end
 
@@ -244,6 +245,89 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(id="stage-col-1")
       refute html =~ "stage-strip"
       assert html =~ "No cards yet"
+    end
+
+    test "shows the violet AI-listening pill on an ai-enabled non-complete stage" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-4",
+          name: "Code",
+          type: :work,
+          ai_enabled: true,
+          category: :in_progress,
+          stage_id: 4
+        )
+
+      assert html =~ ~s(id="stage-col-4-ai-listening")
+      assert html =~ "Relay AI is listening on this stage"
+      assert html =~ "oklch(0.46 0.14 292)"
+    end
+
+    test "hides the AI-listening pill on human and complete-category stages" do
+      human =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-1",
+          name: "Backlog",
+          type: :queue,
+          category: :unstarted,
+          stage_id: 1
+        )
+
+      complete =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-8",
+          name: "Done",
+          type: :done,
+          ai_enabled: true,
+          category: :complete,
+          stage_id: 8
+        )
+
+      refute human =~ "ai-listening"
+      refute complete =~ "ai-listening"
+    end
+
+    test "the composer is owner-aware: AI stage hands to AI, human stage adds; both submit blue" do
+      ai =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-4",
+          name: "Code",
+          type: :work,
+          ai_enabled: true,
+          category: :in_progress,
+          stage_id: 4,
+          composing: true,
+          compose_form: to_form(%{"title" => ""}, as: :card)
+        )
+
+      human =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-1",
+          name: "Backlog",
+          type: :queue,
+          category: :unstarted,
+          stage_id: 1,
+          composing: true,
+          compose_form: to_form(%{"title" => ""}, as: :card)
+        )
+
+      assert ai =~ "Hand to AI"
+      assert ai =~ "Describe work to hand to the AI"
+
+      human_submit_text =
+        human
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#stage-col-1-compose-submit")
+        |> LazyHTML.text()
+        |> String.trim()
+
+      assert human_submit_text == "Add"
+      assert human =~ "Add work to Backlog"
+      # Blue submit for both owners (decision 1).
+      assert ai =~ "oklch(0.60 0.14 250)"
+      assert human =~ "oklch(0.60 0.14 250)"
+      # Enter-submit hook wired on the textarea.
+      assert ai =~ ~s(phx-hook="SubmitOnEnter")
     end
 
     test "an empty collapsed sub-lane renders the 34px strip; a non-collapsed one renders expanded" do

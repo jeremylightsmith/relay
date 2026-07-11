@@ -181,7 +181,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       input_html =
         view
-        |> element("#stage-col-1-compose-form input[name='card[title]']")
+        |> element("#stage-col-1-compose-form textarea[name='card[title]']")
         |> render()
 
       refute input_html =~ "Ship MMF 03"
@@ -286,6 +286,28 @@ defmodule RelayWeb.BoardLiveTest do
       view |> form("#stage-col-1-compose-form", card: %{title: "Focus me"}) |> render_submit()
 
       assert_push_event(view, "focus_card", %{ref: "RLY-1"})
+    end
+
+    test "composing on an AI-enabled stage shows the handoff CTA and creates a card",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, _} = Boards.update_stage(code, %{ai_enabled: true})
+      col = "stage-col-#{code.position}"
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#stage-strip-#{code.id}") |> render_click()
+      view |> element("##{col}-new-card") |> render_click()
+      assert has_element?(view, "##{col}-compose-form")
+      assert render(view) =~ "Hand to AI"
+      assert render(view) =~ "Describe work to hand to the AI"
+
+      view
+      |> form("##{col}-compose-form", card: %{title: "Ship the thing"})
+      |> render_submit()
+
+      assert has_element?(view, "##{col}-cards", "Ship the thing")
     end
   end
 

@@ -1998,6 +1998,14 @@ defmodule RelayWeb.CoreComponents do
       |> assign(:total_count, total_count)
       |> assign(:wip_state, wip_state(total_count, assigns.wip_limit))
       |> assign(:main_owner, if(assigns.ai_enabled, do: :ai, else: :human))
+      |> assign(:compose_cta, if(assigns.ai_enabled, do: "Hand to AI", else: "Add"))
+      |> assign(
+        :compose_placeholder,
+        if(assigns.ai_enabled,
+          do: "Describe work to hand to the AI…",
+          else: "Add work to #{assigns.name}…"
+        )
+      )
 
     ~H"""
     <%= if @collapsed do %>
@@ -2036,6 +2044,16 @@ defmodule RelayWeb.CoreComponents do
           <h3 style="font-size:13px;font-weight:600;letter-spacing:-0.01em;color:var(--color-base-content);">
             {@name}
           </h3>
+          <span
+            :if={@ai_enabled and @category != :complete}
+            id={"#{@id}-ai-listening"}
+            title="Relay AI is listening on this stage"
+            style="display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:600;letter-spacing:0.06em;font-family:var(--font-mono);background:oklch(0.95 0.03 292);color:oklch(0.46 0.14 292);padding:2px 6px;border-radius:5px;flex:0 0 auto;"
+          >
+            <span style="width:10px;height:10px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;flex:0 0 auto;">
+              <span style="width:4px;height:4px;border-radius:50%;border:1px solid oklch(1 0 0);"></span>
+            </span>AI
+          </span>
           <span
             :if={@count}
             class="stage-count"
@@ -2104,33 +2122,45 @@ defmodule RelayWeb.CoreComponents do
                 </span>
               </div>
               <div style={"flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:#{if(@labeled, do: "0", else: "13px")} 13px 13px 15px;"}>
-                <div :if={@composing} id={"#{@id}-composer"} phx-click-away="cancel_compose">
+                <div
+                  :if={@composing}
+                  id={"#{@id}-composer"}
+                  phx-click-away="cancel_compose"
+                  style="background:oklch(1 0 0);border:1px solid oklch(0.60 0.14 250);border-radius:9px;padding:9px;box-shadow:0 2px 8px oklch(0.55 0.05 255/0.10);"
+                >
                   <.form
                     for={@compose_form}
                     id={"#{@id}-compose-form"}
                     phx-change="validate_card"
                     phx-submit="create_card"
+                    class="flex flex-col gap-2"
                   >
                     <input type="hidden" name="stage_id" value={@stage_id} />
-                    <.boxed_field
+                    <textarea
                       id={"#{@id}-compose-title"}
-                      commit={:form}
-                      form={@compose_form}
-                      field={:title}
-                      placeholder="Card title"
+                      name="card[title]"
+                      rows="2"
+                      placeholder={@compose_placeholder}
                       autofocus
                       autocomplete="off"
-                      input_class="text-base"
+                      phx-hook="SubmitOnEnter"
                       phx-keydown="cancel_compose"
                       phx-key="escape"
-                    />
-                    <div class="mt-2 flex items-center gap-2">
-                      <.button variant="primary" class="btn btn-primary btn-xs min-h-[44px]">
-                        Add card
-                      </.button>
+                      class="w-full resize-none border-none bg-transparent p-0 text-[13px] leading-[1.4] text-base-content outline-none focus:outline-none"
+                    >{Phoenix.HTML.Form.normalize_value("textarea", @compose_form[:title].value)}</textarea>
+                    <div class="flex items-center gap-1.5">
+                      <button
+                        type="submit"
+                        id={"#{@id}-compose-submit"}
+                        class="btn btn-xs min-h-[44px] border-none font-semibold text-white"
+                        style="background:oklch(0.60 0.14 250);"
+                      >
+                        {@compose_cta}
+                      </button>
                       <button
                         type="button"
                         class="btn btn-ghost btn-xs min-h-[44px]"
+                        style="color:oklch(0.55 0.02 255);"
                         phx-click="cancel_compose"
                       >
                         Cancel
