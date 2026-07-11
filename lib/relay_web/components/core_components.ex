@@ -1843,7 +1843,8 @@ defmodule RelayWeb.CoreComponents do
 
   `cards` accepts a LiveView stream (preferred) or a list of
   `{dom_id, card}` tuples; each card needs `title`, `tag`, `ref_number`,
-  `status`, `progress`, and a loaded `owners` list. Each lane body is its own
+  `status`, a loaded `owners` list, and (for the derived working-progress
+  bar/label) a loaded `sub_tasks` list. Each lane body is its own
   `phx-update="stream"` drop zone carrying `data-stage-id` (the main stage id
   for the ongoing lane, each child stage id for the sub-lanes) — the DnD
   contract is unchanged. The empty-state placeholder is CSS-hidden
