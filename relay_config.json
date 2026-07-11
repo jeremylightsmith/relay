@@ -24,19 +24,10 @@
       "done": "Code:Review",
       "action": [
         { "shell": "git fetch origin --prune && git checkout main && git reset --hard origin/main && git checkout -B {branch}" },
-        { "claude": "You are the AI working Relay card {ref} at the CODE stage. Run /exec-plan {ref} on the current branch to completion — it materializes the plan from the card into a transient plan.md, runs the workflow, and cleans up after itself. This is authorized — proceed without asking for confirmation. Do not merge; exec-plan stops before the human-gated finish." },
+        { "claude": "You are the AI working Relay card {ref} at the CODE stage. Run /exec-plan {ref} on the current branch to completion — it materializes the plan from the card into a transient plan.md, runs the workflow, and cleans up after itself. This is authorized — proceed without asking for confirmation. Do not push or merge yourself; the shell steps that follow push the branch, open the PR, and squash-merge it." },
         { "shell": "git push -u origin {branch}" },
-        { "shell": "url=$(gh pr create --fill --head {branch} --base main) && {relay} branch {ref} {branch} && {relay} pr {ref} \"$url\" && echo \"PR: $url\"" }
-      ]
-    },
-    {
-      "stage": "Deploy",
-      "from": "Code:Done",
-      "done": "Deploy:Done",
-      "action": [
-        { "shell": "gh pr update-branch {branch} 2>/dev/null || true" },
-        { "shell": "gh pr merge {branch} --squash --delete-branch" },
-        { "shell": "sleep 15 && gh run watch $(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId') --exit-status" }
+        { "shell": "url=$(gh pr create --fill --head {branch} --base main) && {relay} branch {ref} {branch} && {relay} pr {ref} \"$url\" && echo \"PR: $url\"" },
+        { "shell": "gh pr merge {branch} --squash --delete-branch" }
       ]
     }
   ]

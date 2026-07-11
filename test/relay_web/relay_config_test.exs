@@ -38,4 +38,12 @@ defmodule Relay.RelayConfigTest do
     assert Enum.any?(shells, &(&1 =~ "git push -u origin {branch}"))
     assert Enum.any?(shells, &(&1 =~ "gh pr create"))
   end
+
+  test "Code stage finishes by squash-merging the PR", %{stages: stages} do
+    assert List.last(shell_steps(stages["Code"])) =~ "gh pr merge {branch} --squash"
+  end
+
+  test "the pipeline has no Deploy stage", %{stages: stages} do
+    refute Map.has_key?(stages, "Deploy")
+  end
 end

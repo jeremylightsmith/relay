@@ -60,7 +60,7 @@ one hop, then re-polls. It is cheap when idle — it fingerprints the board and 
 tokens when there is actual work.
 
 Reasoning stages run headless Claude (`claude -p --dangerously-skip-permissions --output-format
-stream-json`, streamed as a live feed); mechanical stages (git, deploy) run shell. The pipeline —
+stream-json`, streamed as a live feed); mechanical steps (git, PR, merge) run shell. The pipeline —
 which columns are AI columns, what to run at each, and where finished work goes — is entirely in
 `relay_config.json`. Regenerate a skeleton from your board with `bin/relay layout`.
 
@@ -105,8 +105,8 @@ build your own runner or agents, honor these:
    will clobber. (This is why `Card` has `branch` + `plan` fields, API-read/writable.)
 
 5. **Readiness is positional and prioritized.** A card is *ready* when the column immediately to its
-   right is an AI column (`Next up → Spec`, `Spec:Done → Plan`, `Plan:Done → Code`, `Code:Done →
-   Deploy`). Work **right-to-left** (finish what's furthest along first). Two guards: **respect WIP
+   right is an AI column (`Next up → Spec`, `Spec:Done → Plan`, `Plan:Done → Code`). Work
+   **right-to-left** (finish what's furthest along first). Two guards: **respect WIP
    limits** (don't pull into a full AI column) and **skip blocked cards** (anything in
    `needs_input`).
 
@@ -122,7 +122,8 @@ build your own runner or agents, honor these:
 8. **Ask, don't guess.** If a reasoning stage needs clarification, it calls `bin/relay needs-input`
    and stops; the human answers in the drawer; the card unblocks and resumes on a later tick.
    Verification (`mix precommit` + the exec-plan review + the acceptance-smoke "eyes") is baked into
-   the Code stage, so nothing merges unreviewed; Deploy = merge + push, gated on CI going green.
+   the Code stage, which finishes by pushing, opening the PR, and squash-merging it — so nothing
+   merges unverified. There is no separate Deploy stage.
 
 ## Customizing (`relay_config.json`)
 
