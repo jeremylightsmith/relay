@@ -646,7 +646,7 @@ defmodule Relay.Cards do
 
   defp move_and_reject(card, from_stage, target, note, actor) do
     with {:ok, moved} <- move_card(card, target, @append_index, actor),
-         :ok <- attach_note(moved, note, actor) do
+         :ok <- attach_note(moved, note, actor, :changes_requested) do
       log_gate(moved, :rejected, actor, from_stage, target, note)
       {:ok, put_rejection(moved, from_stage, target, note, actor)}
     end
@@ -694,7 +694,8 @@ defmodule Relay.Cards do
   """
   def request_input(%Card{} = card, question, actor \\ :agent) when is_binary(question) do
     with {:ok, updated} <- set_status(card, %{status: :needs_input}, actor),
-         {:ok, _comment} <- Activity.add_comment(updated, %{actor: actor, body: question}),
+         {:ok, _comment} <-
+           Activity.add_comment(updated, %{actor: actor, body: question, kind: :question}),
          {:ok, _entry} <-
            Activity.log(updated, %{type: :needs_input, actor: actor, meta: %{"question" => question}}) do
       {:ok, updated}
@@ -842,10 +843,11 @@ defmodule Relay.Cards do
     end
   end
 
-  defp attach_note(_card, nil, _actor), do: :ok
+  defp attach_note(card, note, actor, kind \\ :comment)
+  defp attach_note(_card, nil, _actor, _kind), do: :ok
 
-  defp attach_note(%Card{} = card, note, actor) do
-    case Activity.add_comment(card, %{actor: actor, body: note}) do
+  defp attach_note(%Card{} = card, note, actor, kind) do
+    case Activity.add_comment(card, %{actor: actor, body: note, kind: kind}) do
       {:ok, _comment} -> :ok
       {:error, changeset} -> {:error, changeset}
     end

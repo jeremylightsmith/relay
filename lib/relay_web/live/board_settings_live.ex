@@ -37,22 +37,26 @@ defmodule RelayWeb.BoardSettingsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} wide>
+    <Layouts.app flash={@flash} current_scope={@current_scope} wide crumb>
+      <:title>
+        <span id="settings-title">Board settings</span>
+      </:title>
+      <:actions>
+        <.link
+          navigate={~p"/board/#{@board.slug}"}
+          id="settings-done"
+          class="btn btn-sm border-none font-semibold text-white"
+          style="background:oklch(0.60 0.14 250);"
+        >
+          Done
+        </.link>
+      </:actions>
       <div id="board-settings" style="display:flex;align-items:stretch;min-height:calc(100vh - 74px);">
         <%!-- Left rail — mockup "Relay Board.dc.html" lines ~176-183 --%>
         <nav
           id="settings-rail"
           style="width:210px;flex:0 0 auto;border-right:1px solid oklch(0.93 0.006 255);background:oklch(0.992 0.002 255);padding:22px 14px;display:flex;flex-direction:column;gap:3px;"
         >
-          <.link
-            navigate={~p"/board/#{@board.slug}"}
-            id="back-to-board"
-            class="btn btn-ghost btn-sm justify-start gap-1.5 px-2"
-            style="margin-bottom:10px;color:oklch(0.45 0.02 255);"
-          >
-            <.icon name="hero-arrow-left" class="size-4" />
-            <span class="font-mono" style="font-size:11px;">Back to board</span>
-          </.link>
           <div
             class="font-mono"
             style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);padding:4px 10px 8px 10px;"

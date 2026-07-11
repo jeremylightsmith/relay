@@ -56,6 +56,17 @@ defmodule RelayWeb.BoardsLiveTest do
       assert Repo.aggregate(Board, :count) == 2
     end
 
+    test "the top-bar + New board button creates a board and navigates to its settings",
+         %{conn: conn, user: user} do
+      _default = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      {:error, {:live_redirect, %{to: to}}} =
+        view |> element("#top-bar-new-board") |> render_click()
+
+      assert to =~ ~r"^/board/.+/settings$"
+    end
+
     test "a board tile shows its needs-you count", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       review = Enum.find(board.stages, &(&1.type == :review))

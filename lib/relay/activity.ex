@@ -20,14 +20,21 @@ defmodule Relay.Activity do
 
   @doc """
   Posts a comment on `card` from `attrs` — `:actor`
-  (`:agent | {:user, user_id}`, programmatic) and `:body` (the only
-  user-supplied field) — returning `{:ok, comment}` with the author
-  preloaded or `{:error, changeset}`.
+  (`:agent | {:user, user_id}`, programmatic), `:body` (the only
+  user-supplied field), and an optional `:kind`
+  (`:comment | :question | :changes_requested`, programmatic, defaults to
+  `:comment`) — returning `{:ok, comment}` with the author preloaded or
+  `{:error, changeset}`.
   """
   def add_comment(%Card{} = card, %{actor: actor} = attrs) do
     {actor_type, user_id} = split_actor(actor)
 
-    %Comment{card_id: card.id, actor_type: actor_type, user_id: user_id}
+    %Comment{
+      card_id: card.id,
+      actor_type: actor_type,
+      user_id: user_id,
+      kind: Map.get(attrs, :kind, :comment)
+    }
     |> Comment.changeset(Map.take(attrs, [:body]))
     |> Repo.insert()
     |> preload_user()

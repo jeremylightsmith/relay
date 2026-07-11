@@ -35,7 +35,55 @@ defmodule RelayWeb.BoardLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} wide>
+    <Layouts.app flash={@flash} current_scope={@current_scope} wide crumb>
+      <:title>
+        <.boxed_field
+          :if={!@read_only?}
+          id="board-name"
+          value={@board.name}
+          form={@board_name_form}
+          field={:name}
+          save_event="save_board_name"
+          cancel_event="cancel_board_name"
+          input_class="truncate text-[13px] font-medium max-w-[46vw] sm:max-w-[280px]"
+        />
+        <span :if={@read_only?} id="board-name-readonly" class="truncate">{@board.name}</span>
+      </:title>
+      <:actions>
+        <button
+          type="button"
+          id="agent-logs-button"
+          phx-click={if(@logs_open, do: "close_logs", else: "open_logs")}
+          class={["btn btn-ghost btn-sm min-h-[44px] min-w-[44px]", @logs_open && "btn-active"]}
+          aria-label="Agent log"
+          aria-pressed={to_string(@logs_open)}
+        >
+          <.icon name="hero-command-line" class="size-5" />
+        </button>
+        <.link
+          navigate={~p"/board/#{@board.slug}/settings"}
+          id="board-settings-link"
+          title="Board settings"
+          aria-label="Board settings"
+          class="flex min-h-[44px] min-w-[44px] items-center gap-[7px] rounded-lg px-3 text-[12px] font-semibold"
+          style="background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);color:oklch(0.40 0.02 255);"
+        >
+          <span style="width:13px;height:13px;border-radius:50%;border:2px solid oklch(0.55 0.02 255);position:relative;display:block;flex:0 0 auto;">
+            <span style="position:absolute;top:2.5px;left:2.5px;width:4px;height:4px;border-radius:50%;background:oklch(0.55 0.02 255);">
+            </span>
+          </span>
+          <span class="hidden sm:inline">Board settings</span>
+        </.link>
+      </:actions>
+      <:menu_items>
+        <li>
+          <button type="button" id="archived-cards-menu-item" phx-click="open_archived">
+            <.icon name="hero-archive-box" class="size-4" />
+            <span class="flex-1">Archived cards</span>
+            <span class="font-mono text-xs text-base-content/60">{@archived_count}</span>
+          </button>
+        </li>
+      </:menu_items>
       <div id="board" phx-hook="BoardDnD">
         <div
           :if={@read_only?}
@@ -48,73 +96,6 @@ defmodule RelayWeb.BoardLive do
           <button type="button" id="restore-board-button" phx-click="restore_board" class="btn btn-sm">
             Restore
           </button>
-        </div>
-        <div class="flex items-center justify-between px-4 pb-3 pt-1 sm:px-5">
-          <div id="board-title-cluster" class="flex min-w-0 items-center gap-2">
-            <.link
-              navigate={~p"/boards?from=#{@board.slug}"}
-              id="all-boards-link"
-              title="All boards"
-              class="btn btn-ghost btn-sm btn-circle min-h-[44px] min-w-[44px]"
-              aria-label="All boards"
-            >
-              <.icon name="hero-squares-2x2" class="size-5" />
-            </.link>
-            <h1 id="board-title" class="min-w-0 truncate text-xl font-semibold">
-              <.boxed_field
-                :if={!@read_only?}
-                id="board-name"
-                value={@board.name}
-                form={@board_name_form}
-                field={:name}
-                save_event="save_board_name"
-                cancel_event="cancel_board_name"
-                input_class="truncate text-xl font-semibold"
-              />
-              <span :if={@read_only?}>{@board.name}</span>
-            </h1>
-          </div>
-          <div class="flex items-center gap-4">
-            <div
-              class="hidden items-center gap-3 sm:flex"
-              style="font-size:11px;font-family:var(--font-mono);color:oklch(0.55 0.02 255);"
-            >
-              <span class="flex items-center gap-1.5">
-                <span style="width:8px;height:8px;border-radius:2px;background:var(--color-secondary);"></span>AI
-              </span>
-              <span class="flex items-center gap-1.5">
-                <span style="width:8px;height:8px;border-radius:2px;background:var(--color-primary);"></span>HUMAN
-              </span>
-            </div>
-            <button
-              type="button"
-              id="agent-logs-button"
-              phx-click={if(@logs_open, do: "close_logs", else: "open_logs")}
-              class={["btn btn-ghost btn-sm", @logs_open && "btn-active"]}
-              aria-label="Agent log"
-              aria-pressed={to_string(@logs_open)}
-            >
-              <.icon name="hero-command-line" class="size-5" />
-            </button>
-            <button
-              type="button"
-              id="archived-cards-button"
-              phx-click="open_archived"
-              class="btn btn-ghost btn-sm gap-1.5 min-h-[44px] min-w-[44px]"
-              aria-label="Archived cards"
-            >
-              <.icon name="hero-archive-box" class="size-5" />
-              <span class="font-mono text-xs">{@archived_count}</span>
-            </button>
-            <.link
-              navigate={~p"/board/#{@board.slug}/settings"}
-              id="board-settings-link"
-              class="btn btn-ghost btn-sm btn-circle min-h-[44px] min-w-[44px]"
-              aria-label="Board settings"
-            >
-              <.icon name="hero-cog-6-tooth" class="size-5" />
-            </.link>
-          </div>
         </div>
         <div
           id="board-bands"

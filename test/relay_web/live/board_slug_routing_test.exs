@@ -19,7 +19,7 @@ defmodule RelayWeb.BoardSlugRoutingTest do
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert view |> element("#board-title #board-name-input") |> render() =~ board.name
+      assert view |> element("#top-bar-title #board-name-input") |> render() =~ board.name
     end
 
     test "a slug the user does not own is a 404", %{conn: conn} do
@@ -41,14 +41,11 @@ defmodule RelayWeb.BoardSlugRoutingTest do
       assert has_element?(view, "#board-settings")
     end
 
-    test "the board header links to the boards home carrying ?from", %{conn: conn, user: user} do
+    test "the top-bar logo links to the boards home", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
-
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert view
-             |> element("#all-boards-link")
-             |> render() =~ "/boards?from=#{board.slug}"
+      assert has_element?(view, ~s(#top-bar-logo[href="/boards"]))
     end
   end
 end

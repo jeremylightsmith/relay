@@ -14,7 +14,7 @@ defmodule RelayWeb.Browser.BoardSmokeTest do
     conn
     # /dev/login logs in the fixed dev user and redirects to /board.
     |> visit("/dev/login")
-    |> assert_has("#board-title")
+    |> assert_has("#top-bar")
     # Wait for the LiveView socket to connect before asserting on live content.
     |> assert_has("body .phx-connected")
     |> assert_has("h3", text: "Backlog")

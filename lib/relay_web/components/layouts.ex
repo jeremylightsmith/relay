@@ -35,52 +35,94 @@ defmodule RelayWeb.Layouts do
     default: false,
     doc: "when true, use the full-width content container (board pages)"
 
+  attr :crumb, :boolean,
+    default: false,
+    doc: "render the 'Boards' breadcrumb button + separator before the title"
+
+  slot :title, doc: "the bar's title node (editable board name, or a plain span)"
+  slot :actions, doc: "the view's contextual right-side controls"
+  slot :menu_items, doc: "view-specific entries at the top of the avatar dropdown"
   slot :inner_block, required: true
 
   def app(assigns) do
     ~H"""
-    <header class="navbar px-4 sm:px-6 lg:px-8">
-      <div class="flex-1">
-        <a href={~p"/"} class="flex w-fit items-center gap-2">
-          <img src={~p"/images/logo.svg"} width="36" alt="Relay" />
-          <span class="text-sm font-semibold">Relay</span>
-        </a>
+    <header
+      id="top-bar"
+      class="flex items-center gap-3 border-b border-base-300 bg-base-100 px-4 sm:px-5"
+      style="height:53px;"
+    >
+      <.link
+        navigate={~p"/boards"}
+        id="top-bar-logo"
+        title="All boards"
+        class="flex items-center gap-2"
+      >
+        <img src={~p"/images/logo.svg"} width="23" alt="Relay" />
+        <span class="text-[15px] font-semibold tracking-[-0.02em]">Relay</span>
+      </.link>
+      <div
+        :if={@crumb or @title != []}
+        style="width:1px;height:18px;background:oklch(0.90 0.006 255);flex:0 0 auto;"
+      >
       </div>
-      <div class="flex-none">
-        <ul class="flex px-1 space-x-4 items-center">
+      <div :if={@crumb} id="top-bar-crumb" class="flex flex-none items-center gap-[7px]">
+        <.link
+          navigate={~p"/boards"}
+          id="top-bar-crumb-boards"
+          class="flex items-center gap-1.5 rounded-[7px] px-[7px] py-1 text-[13px] font-semibold"
+          style="color:oklch(0.50 0.02 255);"
+        >
+          <.icon name="hero-squares-2x2" class="size-3.5" /> Boards
+        </.link>
+        <span class="text-[13px]" style="color:oklch(0.78 0.02 255);">/</span>
+      </div>
+      <div id="top-bar-title" class="flex min-w-0 items-center text-[13px] font-medium">
+        {render_slot(@title)}
+      </div>
+      <span class="flex-1"></span>
+      {render_slot(@actions)}
+      <div :if={@current_scope} id="top-bar-account" class="dropdown dropdown-end flex-none">
+        <div
+          tabindex="0"
+          role="button"
+          id="user-avatar"
+          title={@current_scope.user.email}
+          class={[
+            "flex min-h-[44px] min-w-[44px] items-center justify-center",
+            if(@current_scope.user.avatar_url, do: "avatar", else: "avatar avatar-placeholder")
+          ]}
+        >
+          <div :if={@current_scope.user.avatar_url} class="w-7 rounded-full">
+            <img
+              src={@current_scope.user.avatar_url}
+              alt={@current_scope.user.name || @current_scope.user.email}
+              referrerpolicy="no-referrer"
+            />
+          </div>
+          <div
+            :if={!@current_scope.user.avatar_url}
+            class="bg-primary text-primary-content w-7 rounded-full"
+          >
+            <span class="text-xs">{initials(@current_scope.user)}</span>
+          </div>
+        </div>
+        <ul
+          tabindex="0"
+          id="account-menu"
+          class="menu dropdown-content z-50 mt-2 w-60 rounded-box bg-base-100 p-2 shadow"
+        >
+          {render_slot(@menu_items)}
+          <li class="menu-title px-2 text-[10px] uppercase tracking-wider">Theme</li>
           <li>
-            <.theme_toggle />
+            <div class="pointer-events-auto px-1 py-1 hover:bg-transparent">
+              <.theme_toggle />
+            </div>
           </li>
-          <%= if @current_scope do %>
-            <li>
-              <%= if @current_scope.user.avatar_url do %>
-                <div id="user-avatar" class="avatar" title={@current_scope.user.email}>
-                  <div class="w-8 rounded-full">
-                    <img
-                      src={@current_scope.user.avatar_url}
-                      alt={@current_scope.user.name || @current_scope.user.email}
-                      referrerpolicy="no-referrer"
-                    />
-                  </div>
-                </div>
-              <% else %>
-                <div
-                  id="user-avatar"
-                  class="avatar avatar-placeholder"
-                  title={@current_scope.user.email}
-                >
-                  <div class="bg-primary text-primary-content w-8 rounded-full">
-                    <span class="text-xs">{initials(@current_scope.user)}</span>
-                  </div>
-                </div>
-              <% end %>
-            </li>
-            <li>
-              <.link href={~p"/logout"} method="delete" id="sign-out" class="btn btn-ghost btn-sm">
-                Sign out
-              </.link>
-            </li>
-          <% end %>
+          <li>
+            <.link href={~p"/logout"} method="delete" id="sign-out">
+              <.icon name="hero-arrow-right-on-rectangle" class="size-4" /> Sign out
+            </.link>
+          </li>
         </ul>
       </div>
     </header>

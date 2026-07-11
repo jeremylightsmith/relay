@@ -77,6 +77,19 @@ defmodule Relay.CardsRejectTest do
       assert Repo.get!(Card, card.id).stage_id == review.id
     end
 
+    test "tags its note comment with kind :changes_requested", %{review: review, code: code} do
+      card = insert(:card, stage: review)
+      {:ok, card} = Cards.set_status(card, %{status: :in_review})
+
+      {:ok, rejected} = Cards.reject(card, "Please fix the copy", :agent)
+      assert rejected.stage_id == code.id
+
+      assert Enum.any?(
+               Activity.list_conversation(rejected),
+               &(&1.kind == :changes_requested and &1.body == "Please fix the copy")
+             )
+    end
+
     test "a blank note is rejected before anything moves", %{review: review} do
       card = insert(:card, stage: review)
       assert {:error, :missing_note} = Cards.reject(card, "   ", :agent)

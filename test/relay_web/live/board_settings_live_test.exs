@@ -160,17 +160,25 @@ defmodule RelayWeb.BoardSettingsLiveTest do
     end
   end
 
-  describe "back-to-board control" do
+  describe "top bar" do
     setup :register_and_log_in_user
 
-    test "renders top-left in the rail as an arrow + label and navigates to the board",
-         %{conn: conn, user: user} do
+    test "the Done button navigates back to the board", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
-      assert has_element?(view, "#settings-rail #back-to-board", "Back to board")
-      assert has_element?(view, "#back-to-board .hero-arrow-left")
-      assert has_element?(view, ~s(#back-to-board[href="/board/#{board.slug}"]))
+      refute has_element?(view, "#back-to-board")
+      assert has_element?(view, ~s(#settings-done[href="/board/#{board.slug}"]))
+      assert has_element?(view, "#top-bar-crumb-boards")
+    end
+
+    test "the avatar dropdown has Theme + Sign out but no Archived cards", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+      assert has_element?(view, "#account-menu #sign-out")
+      assert has_element?(view, "#account-menu [data-phx-theme='dark']")
+      refute has_element?(view, "#archived-cards-menu-item")
     end
   end
 

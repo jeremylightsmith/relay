@@ -39,6 +39,16 @@ defmodule Relay.ActivityTest do
       assert "can't be blank" in errors_on(changeset).body
       assert Repo.aggregate(Comment, :count) == 0
     end
+
+    test "defaults kind to :comment and accepts an explicit kind", %{card: card} do
+      assert {:ok, plain} = Activity.add_comment(card, %{actor: :agent, body: "hi"})
+      assert plain.kind == :comment
+
+      assert {:ok, tagged} =
+               Activity.add_comment(card, %{actor: :agent, body: "q?", kind: :question})
+
+      assert tagged.kind == :question
+    end
   end
 
   describe "log/2" do

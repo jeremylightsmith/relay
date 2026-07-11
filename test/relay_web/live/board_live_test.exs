@@ -181,7 +181,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       input_html =
         view
-        |> element("#stage-col-1-compose-form input[name='card[title]']")
+        |> element("#stage-col-1-compose-form textarea[name='card[title]']")
         |> render()
 
       refute input_html =~ "Ship MMF 03"
@@ -286,6 +286,28 @@ defmodule RelayWeb.BoardLiveTest do
       view |> form("#stage-col-1-compose-form", card: %{title: "Focus me"}) |> render_submit()
 
       assert_push_event(view, "focus_card", %{ref: "RLY-1"})
+    end
+
+    test "composing on an AI-enabled stage shows the handoff CTA and creates a card",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, _} = Boards.update_stage(code, %{ai_enabled: true})
+      col = "stage-col-#{code.position}"
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#stage-strip-#{code.id}") |> render_click()
+      view |> element("##{col}-new-card") |> render_click()
+      assert has_element?(view, "##{col}-compose-form")
+      assert render(view) =~ "Hand to AI"
+      assert render(view) =~ "Describe work to hand to the AI"
+
+      view
+      |> form("##{col}-compose-form", card: %{title: "Ship the thing"})
+      |> render_submit()
+
+      assert has_element?(view, "##{col}-cards", "Ship the thing")
     end
   end
 
@@ -1251,14 +1273,14 @@ defmodule RelayWeb.BoardLiveTest do
     test "the header button shows the archived count", %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#archived-cards-button", "1")
+      assert has_element?(view, "#archived-cards-menu-item", "1")
     end
 
     test "opening the modal lists the archived card with its stage and a Restore button",
          %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      view |> element("#archived-cards-button") |> render_click()
+      view |> element("#archived-cards-menu-item") |> render_click()
 
       assert has_element?(view, "#archived-modal")
       assert has_element?(view, "#archived-list", "Archived one")
@@ -1271,19 +1293,19 @@ defmodule RelayWeb.BoardLiveTest do
     test "Restore from the modal returns the card to the board and drops the count",
          %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
-      view |> element("#archived-cards-button") |> render_click()
+      view |> element("#archived-cards-menu-item") |> render_click()
 
       view |> element("#archived-restore-#{archived_id(board)}") |> render_click()
 
       assert has_element?(view, "#stage-col-1-cards .board-card", "Archived one")
-      assert has_element?(view, "#archived-cards-button", "0")
+      assert has_element?(view, "#archived-cards-menu-item", "0")
       assert Cards.count_archived_cards(board) == 0
     end
 
     test "clicking a row opens that card's drawer and closes the modal",
          %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
-      view |> element("#archived-cards-button") |> render_click()
+      view |> element("#archived-cards-menu-item") |> render_click()
 
       view |> element("#open-archived-card-#{archived_id(board)}") |> render_click()
 
@@ -1592,7 +1614,7 @@ defmodule RelayWeb.BoardLiveTest do
          %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#board-title #board-name-form #board-name-input")
+      assert has_element?(view, "#top-bar-title #board-name-form #board-name-input")
       refute has_element?(view, "#board-name-display")
     end
 
@@ -1649,6 +1671,36 @@ defmodule RelayWeb.BoardLiveTest do
 
       refute has_element?(view, "#user-avatar img")
       assert has_element?(view, "#user-avatar", "AL")
+    end
+
+    test "the logo and breadcrumb link to /boards; the settings button links to settings", %{conn: conn} do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = conn |> log_in_user(user) |> live(~p"/board/#{board.slug}")
+
+      assert has_element?(view, ~s(#top-bar-logo[href="/boards"]))
+      assert has_element?(view, ~s(#top-bar-crumb-boards[href="/boards"]))
+      assert has_element?(view, "#board-settings-link[href='/board/#{board.slug}/settings']")
+    end
+
+    test "the avatar dropdown holds Archived cards, Theme, and Sign out", %{conn: conn} do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = conn |> log_in_user(user) |> live(~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#account-menu #archived-cards-menu-item")
+      assert has_element?(view, "#account-menu #sign-out")
+      assert has_element?(view, "#account-menu [data-phx-theme='dark']")
+    end
+
+    test "clicking Archived cards in the dropdown opens the archived modal", %{conn: conn} do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = conn |> log_in_user(user) |> live(~p"/board/#{board.slug}")
+
+      refute has_element?(view, "#archived-modal")
+      view |> element("#archived-cards-menu-item") |> render_click()
+      assert has_element?(view, "#archived-modal")
     end
   end
 
@@ -1843,6 +1895,25 @@ defmodule RelayWeb.BoardLiveTest do
         |> LazyHTML.attribute("id")
 
       assert ids == ["timeline-comment-#{c1.id}", "timeline-comment-#{c2.id}"]
+    end
+
+    test "the drawer conversation tags question and changes-requested comments",
+         %{conn: conn, user: user, card: card} do
+      insert(:comment, card: card, body: "Plain one")
+      q = insert(:comment, card: card, body: "Which colour?", kind: :question)
+      cr = insert(:comment, card: card, body: "Fix the copy", kind: :changes_requested)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      html = render(view)
+
+      assert has_element?(view, "#timeline-comment-#{q.id}", "QUESTION")
+      assert has_element?(view, "#timeline-comment-#{cr.id}", "CHANGES REQUESTED")
+      assert html =~ "oklch(0.52 0.11 65)"
+      assert html =~ "oklch(0.55 0.13 65)"
+      # tinted bubble for tagged comments
+      assert html =~ "oklch(0.88 0.06 75)"
     end
 
     test "the activity log lists entries newest first", %{conn: conn, backlog: backlog, user: user} do

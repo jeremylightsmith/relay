@@ -3,8 +3,8 @@ defmodule Schemas.Comment do
   A comment on a card, authored by an actor: a user (`actor_type: :user`
   + `user_id`) or the single Relay AI agent (`actor_type: :agent`, no
   `user_id` — renders as "Relay AI"). Only `body` is user input;
-  `card_id`, `actor_type`, and `user_id` are set programmatically, never
-  cast from input.
+  `card_id`, `actor_type`, `user_id`, and `kind` are set programmatically,
+  never cast from input.
   """
 
   use Ecto.Schema
@@ -14,6 +14,7 @@ defmodule Schemas.Comment do
   schema "comments" do
     field :actor_type, Ecto.Enum, values: [:user, :agent]
     field :body, :string
+    field :kind, Ecto.Enum, values: [:comment, :question, :changes_requested], default: :comment
 
     belongs_to :card, Schemas.Card
     belongs_to :user, Schemas.User
