@@ -555,10 +555,14 @@ defmodule Relay.Cards do
 
   defp maybe_claim(%Card{} = card, %Stage{} = target, actor) do
     cond do
-      # rule 1: entering an AI-enabled work stage delegates to Relay AI, whoever moved it.
-      ai_stage?(target) -> put_owners(card, [:agent], actor)
-      # rule 3: a human pulling a card into a human-only work stage becomes its owner.
+      # rule 3 (corrected — the MOVER decides): whoever moves an unowned card into a
+      # work/planning stage takes it on. A human dragging a card into ANY work stage —
+      # AI-enabled or not — becomes its owner, which locks the agent out (the runner
+      # skips human-owned cards, rule 4).
       work_stage?(target) and match?({:user, _}, actor) -> put_owners(card, [actor], actor)
+      # rule 1: a non-human mover (the runner/API acting as :agent) dropping an unowned
+      # card into an AI-enabled stage delegates it to Relay AI.
+      ai_stage?(target) -> put_owners(card, [:agent], actor)
       # Queue, Done, Review, or an agent moving into a human-only stage: leave unowned.
       true -> card
     end
