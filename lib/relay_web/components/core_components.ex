@@ -1633,197 +1633,204 @@ defmodule RelayWeb.CoreComponents do
               </section>
             </div>
 
-            <dl
+            <div
               id={"#{@id}-rail"}
-              class="grid w-full shrink-0 grid-cols-[auto_1fr] content-start gap-x-6 gap-y-3 overflow-y-auto border-t border-base-300 bg-base-200/30 p-5 text-sm lg:w-[220px] lg:border-l lg:border-t-0"
+              class="flex w-full shrink-0 flex-col gap-5 overflow-y-auto border-t border-base-300 bg-base-200/30 p-5 text-sm lg:w-[220px] lg:border-l lg:border-t-0"
             >
-              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                Active worker
-              </dt>
-              <dd class="rail-active-worker flex items-center gap-2">
-                <%= if @active_owner do %>
-                  <.owner_pill owner={@active_owner} />
-                  <span class="rail-active-worker-name text-sm">
-                    {active_worker_names(@card, @active_owner)}
+              <%!-- STAGE: chip + Move to… + Archive --%>
+              <div class="rail-section flex flex-col gap-2">
+                <.section_label>Stage</.section_label>
+                <div class="rail-stage flex flex-wrap items-center gap-2">
+                  <span class={[
+                    "badge badge-sm font-medium",
+                    if(@stage_owner == :human, do: "badge-primary", else: "badge-secondary")
+                  ]}>
+                    {@stage_name}
                   </span>
-                <% else %>
-                  <span class="text-base-content/50">None</span>
-                <% end %>
-              </dd>
-              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                Owners
-              </dt>
-              <dd class="rail-owners space-y-2">
-                <div
-                  :for={owner <- @card.owners}
-                  class="rail-owner flex items-center gap-2"
-                  data-actor-type={owner.actor_type}
-                >
-                  <span class="text-sm">{owner_name(owner)}</span>
-                  <button
-                    :if={!@archived and owner.actor_type == :agent}
-                    type="button"
-                    id={"#{@id}-take-over"}
-                    class="rail-take-over btn btn-primary btn-xs"
-                    phx-click="take_over"
-                  >
-                    Take over
-                  </button>
+                  <div :if={@stages != [] and !@archived} id={"#{@id}-move"} class="dropdown">
+                    <div
+                      tabindex="0"
+                      role="button"
+                      id={"#{@id}-move-button"}
+                      class="btn btn-ghost btn-xs"
+                    >
+                      Move to… <.icon name="hero-chevron-down" class="size-3" />
+                    </div>
+                    <ul
+                      tabindex="0"
+                      class="dropdown-content menu z-50 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg"
+                    >
+                      <li :for={stage <- @stages}>
+                        <button
+                          type="button"
+                          id={"#{@id}-move-to-#{stage.id}"}
+                          phx-click="move_card"
+                          phx-value-ref={@ref}
+                          phx-value-stage_id={stage.id}
+                        >
+                          {stage.name}
+                        </button>
+                      </li>
+                    </ul>
+                  </div>
                   <button
                     :if={!@archived}
                     type="button"
-                    id={"#{@id}-remove-owner-#{owner_dom_suffix(owner)}"}
-                    class="btn btn-ghost btn-xs btn-square"
-                    phx-click="remove_owner"
-                    phx-value-actor_type={owner.actor_type}
-                    phx-value-user_id={owner.user_id}
-                    aria-label={"Remove #{owner_name(owner)} as owner"}
+                    id="archive-card-button"
+                    phx-click="archive_card"
+                    phx-value-ref={@ref}
+                    data-confirm="Archive this card? You can restore it from Archived."
+                    class="btn btn-ghost btn-xs text-base-content/60"
                   >
-                    <.icon name="hero-x-mark" class="size-3" />
+                    <.icon name="hero-archive-box" class="size-3.5" /> Archive
                   </button>
                 </div>
-                <span :if={@card.owners == []} class="text-base-content/50">None</span>
-                <div :if={!@archived} class="flex flex-wrap gap-2">
-                  <button
-                    :if={!agent_owner?(@card)}
-                    type="button"
-                    id={"#{@id}-assign-ai"}
-                    class="btn btn-ghost btn-xs"
-                    phx-click="add_owner"
-                    phx-value-actor_type="agent"
-                  >
-                    Assign AI
-                  </button>
-                  <button
-                    :if={
-                      @current_user_id && !user_owner?(@card, @current_user_id) &&
-                        !agent_owner?(@card)
-                    }
-                    type="button"
-                    id={"#{@id}-add-me"}
-                    class="btn btn-ghost btn-xs"
-                    phx-click="add_owner"
-                    phx-value-actor_type="user"
-                    phx-value-user_id={@current_user_id}
-                  >
-                    Add me
-                  </button>
-                </div>
-              </dd>
-              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                Status
-              </dt>
-              <dd class="rail-status">
-                <.form
-                  :if={!@archived}
-                  for={@status_form}
-                  id={"#{@id}-status-form"}
-                  phx-change="set_card_status"
-                >
-                  <.input
-                    field={@status_form[:status]}
-                    type="select"
-                    options={status_options()}
-                    class="select select-sm w-full"
-                  />
-                  <.input
-                    :if={@card.status == :working}
-                    field={@status_form[:progress]}
-                    type="number"
-                    min="0"
-                    max="100"
-                    placeholder="Progress %"
-                    class="input input-sm w-full"
-                  />
-                </.form>
-                <.status_badge :if={@archived} status={@card.status} progress={@card.progress} />
-              </dd>
-              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                Stage
-              </dt>
-              <dd class="rail-stage flex flex-wrap items-center gap-2">
-                {@stage_name}
-                <div :if={@stages != [] and !@archived} id={"#{@id}-move"} class="dropdown">
+              </div>
+
+              <%!-- OWNERS: avatars + names, active owner ringed (ACTIVE WORKER merged here) --%>
+              <div class="rail-section flex flex-col gap-2">
+                <.section_label>Owners</.section_label>
+                <div class="rail-owners space-y-2">
                   <div
-                    tabindex="0"
-                    role="button"
-                    id={"#{@id}-move-button"}
-                    class="btn btn-ghost btn-xs"
+                    :for={owner <- @card.owners}
+                    class={[
+                      "rail-owner flex items-center gap-2 rounded-md px-1.5 py-1",
+                      active_owner?(owner, @active_owner) &&
+                        if(owner.actor_type == :agent,
+                          do: "rail-owner-active ring-2 ring-secondary/60",
+                          else: "rail-owner-active ring-2 ring-primary/60"
+                        )
+                    ]}
+                    data-actor-type={owner.actor_type}
+                    data-active={to_string(active_owner?(owner, @active_owner))}
                   >
-                    Move to… <.icon name="hero-chevron-down" class="size-3" />
+                    <span class="text-sm">{owner_name(owner)}</span>
+                    <button
+                      :if={!@archived and owner.actor_type == :agent}
+                      type="button"
+                      id={"#{@id}-take-over"}
+                      class="rail-take-over btn btn-primary btn-xs"
+                      phx-click="take_over"
+                    >
+                      Take over
+                    </button>
+                    <button
+                      :if={!@archived}
+                      type="button"
+                      id={"#{@id}-remove-owner-#{owner_dom_suffix(owner)}"}
+                      class="btn btn-ghost btn-xs btn-square"
+                      phx-click="remove_owner"
+                      phx-value-actor_type={owner.actor_type}
+                      phx-value-user_id={owner.user_id}
+                      aria-label={"Remove #{owner_name(owner)} as owner"}
+                    >
+                      <.icon name="hero-x-mark" class="size-3" />
+                    </button>
                   </div>
-                  <ul
-                    tabindex="0"
-                    class="dropdown-content menu z-50 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg"
-                  >
-                    <li :for={stage <- @stages}>
-                      <button
-                        type="button"
-                        id={"#{@id}-move-to-#{stage.id}"}
-                        phx-click="move_card"
-                        phx-value-ref={@ref}
-                        phx-value-stage_id={stage.id}
-                      >
-                        {stage.name}
-                      </button>
-                    </li>
-                  </ul>
+                  <span :if={@card.owners == []} class="text-base-content/50">None</span>
+                  <div :if={!@archived} class="flex flex-wrap gap-2">
+                    <button
+                      :if={!agent_owner?(@card)}
+                      type="button"
+                      id={"#{@id}-assign-ai"}
+                      class="btn btn-ghost btn-xs"
+                      phx-click="add_owner"
+                      phx-value-actor_type="agent"
+                    >
+                      Assign AI
+                    </button>
+                    <button
+                      :if={
+                        @current_user_id && !user_owner?(@card, @current_user_id) &&
+                          !agent_owner?(@card)
+                      }
+                      type="button"
+                      id={"#{@id}-add-me"}
+                      class="btn btn-ghost btn-xs"
+                      phx-click="add_owner"
+                      phx-value-actor_type="user"
+                      phx-value-user_id={@current_user_id}
+                    >
+                      Add me
+                    </button>
+                  </div>
                 </div>
-                <button
-                  :if={!@archived}
-                  type="button"
-                  id="archive-card-button"
-                  phx-click="archive_card"
-                  phx-value-ref={@ref}
-                  data-confirm="Archive this card? You can restore it from Archived."
-                  class="btn btn-ghost btn-xs text-base-content/60"
-                >
-                  <.icon name="hero-archive-box" class="size-3.5" /> Archive
-                </button>
-              </dd>
-              <dt
-                :if={@card.branch}
-                class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60"
-              >
-                Branch
-              </dt>
-              <dd :if={@card.branch} class="rail-branch">
-                <span id="card-branch" class="badge badge-ghost badge-sm gap-1 font-mono">
-                  <.icon name="hero-share" class="size-3" />
-                  {@card.branch}
-                </span>
-              </dd>
-              <dt
-                :if={@card.pr_url}
-                class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60"
-              >
-                PR
-              </dt>
-              <dd :if={@card.pr_url} class="rail-pr">
-                <.link
-                  id="card-pr"
-                  href={@card.pr_url}
-                  target="_blank"
-                  class="badge badge-ghost badge-sm gap-1 font-mono"
-                >
-                  <.icon name="hero-arrow-top-right-on-square" class="size-3" /> Review PR ↗
-                </.link>
-              </dd>
-              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                Tags
-              </dt>
-              <dd class="rail-tags">
-                <span :if={@card.tag} class="badge badge-ghost badge-sm">#{@card.tag}</span>
-                <span :if={!@card.tag} class="text-base-content/50">None</span>
-              </dd>
-              <dt class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                Dates
-              </dt>
-              <dd class="rail-dates space-y-0.5">
-                <div>Created {Calendar.strftime(@card.inserted_at, "%b %d, %Y")}</div>
-                <div>Updated {Calendar.strftime(@card.updated_at, "%b %d, %Y")}</div>
-              </dd>
-            </dl>
+              </div>
+
+              <%!-- STATUS: transitional — removed when buttons-only-for-decisions lands (RLY-*) --%>
+              <div class="rail-section flex flex-col gap-2">
+                <.section_label>Status</.section_label>
+                <div class="rail-status">
+                  <.form
+                    :if={!@archived}
+                    for={@status_form}
+                    id={"#{@id}-status-form"}
+                    phx-change="set_card_status"
+                  >
+                    <.input
+                      field={@status_form[:status]}
+                      type="select"
+                      options={status_options()}
+                      class="select select-sm w-full"
+                    />
+                    <.input
+                      :if={@card.status == :working}
+                      field={@status_form[:progress]}
+                      type="number"
+                      min="0"
+                      max="100"
+                      placeholder="Progress %"
+                      class="input input-sm w-full"
+                    />
+                  </.form>
+                  <.status_badge :if={@archived} status={@card.status} progress={@card.progress} />
+                </div>
+              </div>
+
+              <%!-- FLOW inserts here when flow-overrides lands — not built in this pass. --%>
+
+              <%!-- LINKS: Branch chip + PR link under one label; nothing when both absent --%>
+              <div :if={@card.branch || @card.pr_url} class="rail-section flex flex-col gap-2">
+                <.section_label>Links</.section_label>
+                <div class="rail-links flex flex-wrap items-center gap-2">
+                  <span
+                    :if={@card.branch}
+                    id="card-branch"
+                    class="badge badge-ghost badge-sm gap-1 font-mono"
+                  >
+                    <.icon name="hero-share" class="size-3" />
+                    {@card.branch}
+                  </span>
+                  <.link
+                    :if={@card.pr_url}
+                    id="card-pr"
+                    href={@card.pr_url}
+                    target="_blank"
+                    class="badge badge-ghost badge-sm gap-1 font-mono"
+                  >
+                    <.icon name="hero-arrow-top-right-on-square" class="size-3" /> Review PR ↗
+                  </.link>
+                </div>
+              </div>
+
+              <%!-- TAGS --%>
+              <div class="rail-section flex flex-col gap-2">
+                <.section_label>Tags</.section_label>
+                <div class="rail-tags">
+                  <span :if={@card.tag} class="badge badge-ghost badge-sm">#{@card.tag}</span>
+                  <span :if={!@card.tag} class="text-base-content/50">None</span>
+                </div>
+              </div>
+
+              <%!-- DATES --%>
+              <div class="rail-section flex flex-col gap-2">
+                <.section_label>Dates</.section_label>
+                <div class="rail-dates space-y-0.5 font-mono text-xs text-base-content/70">
+                  <div>Created {Calendar.strftime(@card.inserted_at, "%b %d, %Y")}</div>
+                  <div>Updated {Calendar.strftime(@card.updated_at, "%b %d, %Y")}</div>
+                </div>
+              </div>
+            </div>
           </div>
         </aside>
       </div>
@@ -1848,13 +1855,12 @@ defmodule RelayWeb.CoreComponents do
   defp owner_name(%{actor_type: :agent}), do: "Relay AI"
   defp owner_name(%{actor_type: :user, user: user}), do: user.name || user.email
 
-  defp active_worker_names(_card, :ai), do: "Relay AI"
-
-  defp active_worker_names(card, :human) do
-    card.owners
-    |> Enum.filter(&(&1.actor_type == :user))
-    |> Enum.map_join(", ", &owner_name/1)
-  end
+  # RLY-43: the active owner is the baton-holder — ringed inside OWNERS (the old
+  # standalone ACTIVE WORKER row is gone). Agent owner is active when the baton is AI's;
+  # a user owner when it's a human's.
+  defp active_owner?(%{actor_type: :agent}, :ai), do: true
+  defp active_owner?(%{actor_type: :user}, :human), do: true
+  defp active_owner?(_owner, _active_owner), do: false
 
   defp agent_owner?(card), do: Enum.any?(card.owners, &(&1.actor_type == :agent))
 

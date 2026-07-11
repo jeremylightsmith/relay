@@ -207,7 +207,13 @@ defmodule RelayWeb.BoardLiveReviewTest do
     refute has_element?(view, "#review-pull")
     assert has_element?(view, "#review-panel")
     assert has_element?(view, "#card-drawer-rail .rail-owner", "Test User")
-    assert has_element?(view, "#card-drawer-rail .rail-active-worker", "Test User")
+
+    assert has_element?(
+             view,
+             "#card-drawer-rail .rail-owner[data-actor-type='user'][data-active='true']",
+             "Test User"
+           )
+
     assert has_element?(view, "#card-drawer-activity .timeline-activity-phrase", "added Test User as owner")
 
     reloaded = Cards.get_card_by_ref(board, "RLY-1")

@@ -1334,7 +1334,7 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      assert has_element?(view, "#card-drawer-rail .rail-active-worker", "None")
+      refute has_element?(view, "#card-drawer-rail .rail-owner[data-active='true']")
       assert has_element?(view, "#card-drawer-rail .rail-owners", "None")
       assert has_element?(view, "#card-drawer-assign-ai")
       assert has_element?(view, "#card-drawer-add-me")
@@ -1349,15 +1349,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#card-drawer-rail .rail-active-worker .owner-pill.badge-primary",
-               "Human"
-             )
-
-      assert has_element?(view, "#card-drawer-rail .rail-active-worker", "Test User")
-
-      assert has_element?(
-               view,
-               "#card-drawer-rail .rail-owner[data-actor-type='user']",
+               "#card-drawer-rail .rail-owner[data-actor-type='user'][data-active='true']",
                "Test User"
              )
 
@@ -1380,8 +1372,8 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#card-drawer-rail .rail-active-worker .owner-pill.badge-secondary",
-               "AI"
+               "#card-drawer-rail .rail-owner[data-actor-type='agent'][data-active='true']",
+               "Relay AI"
              )
 
       # exclusivity: the human owner is gone; no paused badge remains
@@ -1409,8 +1401,8 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#card-drawer-rail .rail-active-worker .owner-pill.badge-primary",
-               "Human"
+               "#card-drawer-rail .rail-owner[data-actor-type='user'][data-active='true']",
+               "Test User"
              )
 
       assert has_element?(view, "#card-drawer-rail .rail-owner[data-actor-type='user']", "Test User")
@@ -1439,7 +1431,8 @@ defmodule RelayWeb.BoardLiveTest do
       view |> element("#card-drawer-add-me") |> render_click()
       view |> element("#card-drawer-remove-owner-user-#{user.id}") |> render_click()
 
-      assert has_element?(view, "#card-drawer-rail .rail-active-worker", "None")
+      assert has_element?(view, "#card-drawer-rail .rail-owners", "None")
+      refute has_element?(view, "#card-drawer-rail .rail-owner[data-active='true']")
       assert Repo.all(CardOwner) == []
       refute has_element?(view, "#stage-col-1-cards .board-card[data-active-owner]")
     end
@@ -1504,7 +1497,7 @@ defmodule RelayWeb.BoardLiveTest do
       render_click(view, "add_owner", %{"actor_type" => "user", "user_id" => other.id})
 
       assert Repo.all(CardOwner) == []
-      assert has_element?(view, "#card-drawer-rail .rail-active-worker", "None")
+      assert has_element?(view, "#card-drawer-rail .rail-owners", "None")
     end
   end
 
