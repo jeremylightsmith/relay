@@ -28,11 +28,13 @@ get approval before moving on.
   block, treat resolving that feedback as this pass's primary goal. On approval, write the
   spec back to that card.
 - **No ref given** → first confirm with the user that the goal is to **create a new card**. On
-  confirmation, create it and capture its ref:
+  confirmation, create it in **Backlog** and capture its ref:
 
-      ./bin/relay create "<title>" --stage <stage> --json
+      ./bin/relay create "<title>" --stage Backlog --json
 
-  Brainstorm as usual, then write the approved spec to the new card and report its ref.
+  New cards are **intake**: they land in Backlog for a human to triage and prioritize later —
+  never drop a fresh card straight into a planning column (Spec/Plan/Code). Brainstorm as
+  usual, then write the approved spec to the new card and report its ref.
 
 ## Process
 1. Explore current project context (files, docs, recent commits). If a card ref was given,
@@ -77,9 +79,28 @@ get approval before moving on.
 - Point the user to `/write-plan <ref>`. Do NOT start implementation or launch execution.
 
 ## Headless / runner use (no human to dialogue with)
-When the board runner invokes this skill there is no human to approve interactively — the
-board's `Spec:Review` lane *is* the approval gate. Produce the design and either write the spec
-to the card (`./bin/relay spec <ref> @<tmpfile>`) and stop, or, if you genuinely need
-clarification, ask and stop instead of guessing:
+When the board runner invokes this skill there is no human to dialogue with in real time, but
+that does **not** mean skip the questions. Do the **same** clarifying-question discovery you'd
+do interactively (Process step 2) — surface every question you'd ask a human. Headless mode
+changes only *how* you deliver them, not *whether* you ask.
 
-    ./bin/relay needs-input <ref> "<your question>"
+- **If you have questions, ask them.** Collect *all* of them and send a **single**
+  `needs-input` call formatted as a numbered list, then STOP. Do not guess-and-write a spec
+  when real questions remain. Tell the human the reply shape:
+
+      ./bin/relay needs-input <ref> "Before I spec this I need a few decisions — reply like 1. … 2. … :
+      1. <question one>
+      2. <question two>
+      3. <question three>"
+
+  Calling `needs-input` blocks the card on a human and posts your questions to its timeline;
+  the runner stops working it until the human answers.
+
+- **On re-entry** (the card comes back after the human answers): the answers are in the card
+  timeline — `./bin/relay card <ref>` shows your question comment and the human's answer
+  comment (also honor any CHANGES REQUESTED block). Read them, incorporate, then write the
+  spec to the card (`./bin/relay spec <ref> @<tmpfile>`) and stop — or send one more batched
+  `needs-input` only if something is genuinely still ambiguous.
+
+- **Only write the spec directly, without asking, when there are genuinely no meaningful
+  questions.** The board's `Spec:Review` lane is the approval gate for the spec itself.
