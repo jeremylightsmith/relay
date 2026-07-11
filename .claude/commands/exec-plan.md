@@ -40,7 +40,16 @@ unchecked task) — nothing writes progress back to the card. So do NOT delete i
 here; whether it survives the run depends on how the run ends (see On completion below).
 
 ## On completion
-Read the workflow's returned object and report faithfully:
+**First, record the outcome so an autonomous runner can gate on it** — write the workflow's
+`status` verbatim to a sentinel file:
+
+    mkdir -p tmp && printf '%s' '<status>' > tmp/exec-plan-status
+
+Do this for **every** status below (`ready` and every failure alike). The Code-stage runner
+refuses to push the branch, open the PR, or merge unless this file reads exactly `ready`, so a
+`broken`/`blocked`/`stalled`/`smoke-failed` run stops at the branch instead of shipping.
+
+Then read the workflow's returned object and report faithfully:
 - `status: "ready"` — all tasks done, precommit passed, whole-branch review approved, AND the
   acceptance smoke drove the feature successfully. Surface `smoke.summary` and the
   `smoke.screenshots` paths so the user can eyeball them, then suggest `/finish` to merge /

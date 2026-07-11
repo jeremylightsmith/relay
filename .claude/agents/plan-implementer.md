@@ -21,6 +21,13 @@ missing, ask or escalate — don't guess.
 - Follow existing patterns and the project's `AGENTS.md`/`CLAUDE.md` rules (Phoenix v1.8, Ecto,
   LiveView, HEEx). Improve code you're touching; don't restructure beyond the task.
 
+## Design fidelity — only when the task says so
+If — and only if — your task explicitly names a `docs/designs/*.dc.html` artboard and the
+elements/states that must match it, open that artboard, match those specific things exactly,
+and assert their concrete values (classes, tokens, px, states) in your tests. Match only what
+the task names — do not go hunting the mockup for anything it didn't call out. If the task
+names no artboard, there is nothing to match here; build to the task's code as written.
+
 ## When you're in over your head
 It's always OK to stop — bad work is worse than no work, and escalating is never penalized.
 Escalate (status BLOCKED or NEEDS_CONTEXT) when the task needs an architectural decision with

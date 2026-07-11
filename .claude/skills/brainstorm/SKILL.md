@@ -50,6 +50,16 @@ get approval before moving on.
      MMFs edit the same modules (e.g. M06 + M07 both touched `profile.ex`, `index.ex`, and the
      client card), brainstorm and plan them together to avoid merge conflicts and contradictory
      edits, and note the shared files in the spec header.
+   - **UI features — settle artboard fidelity explicitly, and record the decision in the
+     spec.** Hi-fi mockups live in `docs/designs/*.dc.html`, but they **drift from the shipped
+     app over time**, so matching one is a deliberate per-feature choice, never a default. If
+     the work has a UI, ask the user whether it should match an artboard. If **yes**: open the
+     named artboard, confirm you understand exactly what's required — which screen/component,
+     which elements and states — and write that into the spec explicitly: **name the artboard
+     file and list the specific elements/states that must match it** (this is the signal
+     `/write-plan` keys off; without it the planner won't chase a mockup). If **no** (it
+     shouldn't track a mockup, the mockup is known-stale, or none fits): say so in the spec so
+     nothing downstream tries to match one. Non-UI work skips this.
 3. Propose 2–3 approaches with trade-offs and a recommendation.
 4. Present the design in sections scaled to complexity (architecture, components, data
    flow, error handling, testing); get approval section by section. YAGNI ruthlessly.
@@ -75,7 +85,11 @@ get approval before moving on.
 
   Do **NOT** write or commit a spec file under a shared `docs/…` specs directory — that home is
   retired; work travels with the card.
-- Self-review: placeholder scan, internal consistency, scope, ambiguity — fix inline.
+- Self-review: placeholder scan, internal consistency, scope, ambiguity — fix inline. **For any
+  UI feature, confirm the spec records an explicit artboard decision** — either "match
+  `docs/designs/<file>.dc.html`" naming the elements/states, or a deliberate "no mockup"
+  (with why: none fits / known-stale / not visual enough). A UI spec with *no* artboard
+  decision is a gap: resolve it (ask the user if it's still open) before writing the spec.
 - Point the user to `/write-plan <ref>`. Do NOT start implementation or launch execution.
 
 ## Headless / runner use (no human to dialogue with)

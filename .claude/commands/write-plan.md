@@ -41,7 +41,13 @@ every detail.
 
 ### Input
 The approved spec, read from the card's `spec` field (`./bin/relay card <ref> --json`). Read
-it fully.
+it fully. **Design fidelity is the spec's call, not yours** — artboards drift from the shipped
+app, so match a mockup only where the spec **explicitly** says a UI should match a named
+`docs/designs/*.dc.html` artboard (`/brainstorm` settles this with the human and records the
+decision in the spec). When the spec does name one, open that artboard and read the relevant
+section so its concrete values (classes, tokens, measurements, states) reach the plan. Where
+the spec does not tie a UI to an artboard, do **not** go hunting one — plan to the spec and the
+existing design system.
 
 ### Task right-sizing
 Prefer **~3 coarse, vertical-slice tasks** for a typical MMF (measured cheaper: fewer tasks =
@@ -67,6 +73,16 @@ refactor that benefits from isolation (e.g. keep a pure schema migration its own
     test code and implementation code in fenced blocks — no placeholders, no "similar to".
     The executor sees only this plan, so the code in it is the executor's source of truth
     and the reviewer's diff target; write it in full.
+  - **Design fidelity (only where the spec calls for it):** if the spec says this task's UI
+    must match a `docs/designs/*.dc.html` artboard, name that artboard file in the
+    task and list the **specific elements/states that must match it**, each with the mockup's
+    concrete value (exact daisyUI classes, design tokens, px measurements, and the states the
+    mockup shows). Fold those into the task's **test code as concrete assertions** (assert the
+    exact class / token / px the mockup uses — see `core_components_test.exs`, which pins
+    "44px dashed strip … Relay Board.dc.html lines ~75–81"), so "matches the mockup" is a
+    checked deliverable, not a hope. The implementer and reviewers act only on what you name
+    here — anything you leave out, they won't match. Non-visual tasks, and UI with no
+    governing artboard, skip this.
   - End each task with an independently testable deliverable + the commit message to use.
 - **Task checkbox convention:** every task's steps use `- [ ]`. The executor flips them to
   `- [x]` as it completes each task, so keep them clean GitHub task-list checkboxes.
@@ -78,7 +94,9 @@ step an engineer needs is on the page.
 ### Self-review then return
 After writing the plan, re-read it for: placeholder scan; internal consistency; scope
 (single coherent unit of work); ambiguity; **spec coverage** (point each spec
-requirement to a task — add a task for any gap); and **type/signature consistency** across
+requirement to a task — add a task for any gap); **design coverage** (every UI the spec ties
+to a `docs/designs/*.dc.html` artboard names that artboard and carries the mockup's concrete
+values in the task and its tests); and **type/signature consistency** across
 tasks (a function defined as `clear_layers/1` in Task 3 but called as `clear_full_layers/1`
 in Task 7 is a bug — the Consumes/Produces names must match exactly). Fix inline. Then write
 the plan to the card (`./bin/relay plan <ref> @<tmpfile>`), summarize the task breakdown, and

@@ -30,11 +30,12 @@
       "done": "Code:Review",
       "pool": "work",
       "action": [
-        { "shell": "git fetch origin --prune && git checkout -B {branch} origin/main" },
+        { "shell": "git fetch origin --prune && git checkout -B {branch} origin/main && rm -f tmp/exec-plan-status" },
         { "claude": "You are the AI working Relay card {ref} at the CODE stage. Run /exec-plan {ref} on the current branch to completion — it materializes the plan from the card into a transient plan.md, runs the workflow, and cleans up after itself. This is authorized — proceed without asking for confirmation. Do not push or merge yourself; the shell steps that follow push the branch, open the PR, and squash-merge it." },
+        { "shell": "test \"$(cat tmp/exec-plan-status 2>/dev/null)\" = ready || { echo \"exec-plan did not reach 'ready' (review/smoke not passed) — refusing to push or merge\"; exit 1; }" },
         { "shell": "git push -u origin {branch}" },
         { "shell": "url=$(gh pr create --fill --head {branch} --base main) && {relay} branch {ref} {branch} && {relay} pr {ref} \"$url\" && echo \"PR: $url\"" },
-        { "shell": "gh pr merge {branch} --squash --delete-branch" }
+        { "shell": "git checkout --detach && gh pr merge {branch} --squash --delete-branch" }
       ]
     }
   ]

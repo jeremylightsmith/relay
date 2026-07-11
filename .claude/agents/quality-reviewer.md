@@ -37,6 +37,14 @@ the code on its merits.
 - This change didn't bloat a file or smear one concern across many — judge what THIS change
   added, not pre-existing file size.
 
+**Design fidelity (only if the task's plan named an artboard)**
+- If — and only if — this task's plan entry named a `docs/designs/*.dc.html` artboard and the
+  elements/states that must match it, open that artboard and confirm the diff matches those
+  specific things (structure, daisyUI classes, tokens, px, the listed states), and that the
+  task's tests actually assert them. Flag concrete divergences from what the plan called out.
+- If the plan named no artboard for this task, skip this entirely — do not invent design
+  findings from your own reading of the mockups.
+
 Stay within the diff. Inspect surrounding code only to evaluate a concrete, named risk (e.g. a
 changed contract's call sites) — one focused check per risk, and name what you checked. Don't
 re-run the full suite; the implementer already reported it. Cite `file:line` for every finding,

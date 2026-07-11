@@ -21,6 +21,10 @@ or branch state. If you need a different revision, check it out into a temp work
 
 ## Assess against `plan.md` (the spec for this work)
 - **Spec coverage:** every plan task / acceptance item actually implemented? List gaps.
+- **Design fidelity & consistency:** for any plan task that named a `docs/designs/*.dc.html`
+  artboard, confirm the built UI matches the elements/states it called out, and that tasks
+  touching the same component styled it one consistent way (per the mockup), not two competing
+  ways. Only judge what the plan named an artboard for — don't invent design findings elsewhere.
 - **Consistency:** one coherent pattern across the branch — no contradictory choices between
   tasks (two ways of doing the same thing, mismatched naming or error handling).
 - **Hidden regressions:** refactors preserve behavior at every call site; a changed contract,
