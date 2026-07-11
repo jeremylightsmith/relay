@@ -904,7 +904,9 @@ defmodule RelayWeb.BoardLiveTest do
 
       view |> element("#card-drawer-title-display") |> render_click()
 
-      assert has_element?(view, "#card-drawer-title-form textarea#card-drawer-title-input")
+      assert has_element?(view, "#card-drawer-title-form input#card-drawer-title-input")
+      assert has_element?(view, "#card-drawer-title-save")
+      assert has_element?(view, "#card-drawer-title-cancel")
     end
 
     test "saving the title persists and reflects on drawer and board card",
@@ -1055,7 +1057,7 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#card-drawer-description-input[rows='12']")
     end
 
-    test "the title editor carries the InlineEdit hook wired to its cancel button", %{conn: conn, user: user} do
+    test "the title editor carries the CommitField hook wired to its cancel button", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
@@ -1063,11 +1065,20 @@ defmodule RelayWeb.BoardLiveTest do
 
       # The hook consumes Escape (cancel + stopPropagation) so it never reaches
       # the drawer's phx-window-keydown="close_drawer".
-      assert has_element?(view, ~s(#card-drawer-title-input[phx-hook="InlineEdit"]))
+      assert has_element?(view, ~s(#card-drawer-title-input[phx-hook="CommitField"]))
       assert has_element?(view, ~s(#card-drawer-title-input[data-cancel-id="card-drawer-title-cancel"]))
       assert has_element?(view, "#card-drawer-title-cancel")
       # The window-level close binding is still present for a not-editing Escape.
       assert has_element?(view, "[phx-window-keydown='close_drawer']")
+    end
+
+    test "the drawer has no pencil icons or legacy editable-text controls",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      refute has_element?(view, "#card-drawer .hero-pencil-square")
+      refute has_element?(view, "#card-drawer .editable-text")
     end
 
     test "the composer textareas submit on ⌘/Ctrl+Enter via the SubmitOnCmdEnter hook", %{conn: conn, user: user} do

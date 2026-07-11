@@ -1095,7 +1095,7 @@ defmodule RelayWeb.CoreComponents do
                   Done
                 </span>
               </div>
-              <.editable_text
+              <.inline_field
                 :if={!@archived}
                 id={"#{@id}-title"}
                 value={@card.title}
@@ -1106,9 +1106,7 @@ defmodule RelayWeb.CoreComponents do
                 save_event="save_card_title"
                 cancel_event="cancel_title"
                 read_class="break-words px-1 text-lg font-semibold leading-[1.3]"
-                input_class="textarea textarea-bordered w-full text-lg font-semibold leading-[1.3]"
-                multiline
-                rows="2"
+                input_class="text-lg font-semibold leading-[1.3]"
               />
               <h2
                 :if={@archived}
@@ -1230,14 +1228,14 @@ defmodule RelayWeb.CoreComponents do
                   class="flex flex-col items-start gap-[11px]"
                   phx-submit="answer_input"
                 >
-                  <.input
-                    field={@answer_form[:body]}
-                    type="textarea"
+                  <.boxed_field
                     id="needs-input-answer"
+                    commit={:form}
+                    multiline
                     rows="3"
+                    form={@answer_form}
+                    field={:body}
                     placeholder="Type your answer — the AI picks up where it left off…"
-                    class="w-full resize-none rounded-[7px] bg-white p-[9px] text-[13px] leading-snug"
-                    style="border:1px solid oklch(0.86 0.05 75);color:oklch(0.30 0.02 255);"
                     phx-hook="SubmitOnCmdEnter"
                   />
                   <button
@@ -1314,14 +1312,14 @@ defmodule RelayWeb.CoreComponents do
                         {t.name}
                       </option>
                     </select>
-                    <.input
-                      field={@reject_form[:note]}
-                      type="textarea"
+                    <.boxed_field
                       id="review-request-note"
+                      commit={:form}
+                      multiline
                       rows="3"
+                      form={@reject_form}
+                      field={:note}
                       placeholder="What needs to change? This note goes to the AI…"
-                      class="w-full resize-none rounded-[7px] p-[9px] text-[13px] leading-snug"
-                      style="border:1px solid oklch(0.90 0.006 255);color:oklch(0.30 0.02 255);background:oklch(0.99 0.002 255);"
                       phx-hook="SubmitOnCmdEnter"
                     />
                     <p
@@ -1353,9 +1351,9 @@ defmodule RelayWeb.CoreComponents do
                   </.form>
                 </div>
               </section>
-              <section class="space-y-2">
+              <section id={"#{@id}-description"} class="space-y-2">
                 <.section_label>Description</.section_label>
-                <.editable_text
+                <.boxed_field
                   :if={!@archived}
                   id={"#{@id}-description"}
                   value={@card.description}
@@ -1369,7 +1367,6 @@ defmodule RelayWeb.CoreComponents do
                   markdown
                   multiline
                   rows="12"
-                  read_class="min-h-16 p-1 text-sm leading-relaxed"
                 />
                 <div
                   :if={@archived}
@@ -1580,11 +1577,13 @@ defmodule RelayWeb.CoreComponents do
                   phx-change="validate_comment"
                   phx-submit="post_comment"
                 >
-                  <.input
-                    field={@comment_form[:body]}
-                    type="textarea"
+                  <.boxed_field
                     id={"#{@id}-comment-input"}
+                    commit={:form}
+                    multiline
                     rows="2"
+                    form={@comment_form}
+                    field={:body}
                     placeholder="Write a comment…"
                     phx-hook="SubmitOnCmdEnter"
                   />
@@ -2106,13 +2105,14 @@ defmodule RelayWeb.CoreComponents do
                     phx-submit="create_card"
                   >
                     <input type="hidden" name="stage_id" value={@stage_id} />
-                    <.input
-                      field={@compose_form[:title]}
-                      type="text"
+                    <.boxed_field
+                      id={"#{@id}-compose-title"}
+                      commit={:form}
+                      form={@compose_form}
+                      field={:title}
                       placeholder="Card title"
                       autofocus
                       autocomplete="off"
-                      class="input input-sm w-full"
                       phx-keydown="cancel_compose"
                       phx-key="escape"
                     />
@@ -2394,7 +2394,7 @@ defmodule RelayWeb.CoreComponents do
   attr :edit_attrs, :map, default: %{}
   attr :prefix, :string, default: nil
   attr :input_class, :any, default: nil
-  attr :rest, :global
+  attr :rest, :global, include: ~w(autocomplete)
   slot :hidden
 
   def boxed_field(%{commit: :form} = assigns) do
