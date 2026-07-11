@@ -196,7 +196,7 @@
         <span style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);">2 · Boxed</span>
         <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">a form field</span>
       </div>
-      <p style="font-size:12.5px;line-height:1.5;color:oklch(0.52 0.02 255);margin:0 0 16px 0;max-width:560px;">For discrete data you fill in — a description, URL, email, comment, or the reject note. Always boxed, so it clearly reads as "type here." Comes in single-line and multi-line; identical styling, the textarea is just taller.</p>
+      <p style="font-size:12.5px;line-height:1.5;color:oklch(0.52 0.02 255);margin:0 0 16px 0;max-width:560px;">For discrete data you fill in — a description, URL, email, comment, or the reject note. Always boxed, so it clearly reads as "type here." Comes in single-line and multi-line; identical styling, the textarea is just taller. <b style="color:oklch(0.34 0.02 255);">How it commits depends on what the box is for</b> — see Save model below.</p>
       <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
         <div style="display:flex;flex-direction:column;gap:7px;">
           <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">REST</span>
@@ -219,12 +219,92 @@
 
     <div style="height:1px;background:oklch(0.94 0.005 255);"></div>
 
+    <!-- Save model -->
+    <div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px;">
+        <span style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);">Save model</span>
+        <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">explicit Save / Cancel</span>
+      </div>
+      <p style="font-size:12.5px;line-height:1.5;color:oklch(0.52 0.02 255);margin:0 0 16px 0;max-width:560px;">Nothing on a card commits by ambient autosave. An inline title needs its <b style="color:oklch(0.34 0.02 255);">✓ / Enter</b>; a comment needs its <b style="color:oklch(0.34 0.02 255);">[Comment]</b>. Boxed long fields follow the same rule: editing is a deliberate session you <b style="color:oklch(0.34 0.02 255);">Save</b> or <b style="color:oklch(0.34 0.02 255);">Cancel</b>. Save persists and collapses back to preview; Cancel reverts to the last saved text. A boxed field has <b style="color:oklch(0.34 0.02 255);">three states</b>.</p>
+
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:stretch;">
+        <!-- State 1: preview -->
+        <div style="flex:1;min-width:250px;display:flex;flex-direction:column;gap:8px;">
+          <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">1 · PREVIEW — collapsed, click to edit</span>
+          <div style="border:1px solid oklch(0.93 0.006 255);background:oklch(0.994 0.002 255);border-radius:8px;padding:13px 14px 0 14px;position:relative;cursor:text;overflow:hidden;height:96px;">
+            <p style="font-size:12.5px;line-height:1.55;color:oklch(0.42 0.02 255);margin:0;">Ship the Safari checkout fix. Reproduces on iOS 17 when the card network is slow; the payment sheet double-fires and the order posts twice. Add a regression test and an idempotency key on submit so a retried request…</p>
+            <div style="position:absolute;left:0;right:0;bottom:0;height:52px;background:linear-gradient(to bottom, oklch(0.994 0.002 255/0), oklch(0.994 0.002 255));"></div>
+            <button style="position:absolute;left:14px;bottom:8px;background:transparent;border:none;font-size:12px;font-weight:600;color:oklch(0.50 0.13 250);padding:0;cursor:pointer;">Show more</button>
+          </div>
+          <span style="font-size:11px;color:oklch(0.60 0.02 255);">A few lines, faded at the base. Click anywhere → edit.</span>
+        </div>
+
+        <!-- State 2: edit -->
+        <div style="flex:1.2;min-width:280px;display:flex;flex-direction:column;gap:8px;">
+          <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">2 · EDIT — tall (~10 lines), Save / Cancel</span>
+          <div style="border:1px solid oklch(0.60 0.14 250);background:oklch(1 0 0);border-radius:8px;padding:11px 12px;box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);font-size:12px;line-height:1.6;color:oklch(0.40 0.02 255);font-family:ui-monospace,'JetBrains Mono',monospace;white-space:pre-wrap;height:150px;overflow:hidden;">## Goal
+Ship the Safari checkout fix.
+
+Reproduces on iOS 17 when the card
+network is slow — the payment sheet
+double-fires and the order posts twice.
+
+- Add a regression **test**
+- Idempotency key on submit<span style="display:inline-block;width:1.5px;height:14px;background:oklch(0.60 0.14 250);margin-left:1px;vertical-align:-2px;"></span></div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:7px;padding:7px 15px;font-size:12.5px;font-weight:600;cursor:pointer;">Save</button>
+            <button style="background:oklch(1 0 0);color:oklch(0.46 0.02 255);border:1px solid oklch(0.88 0.01 255);border-radius:7px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">Cancel</button>
+            <span style="font-size:11px;color:oklch(0.60 0.02 255);">Markdown supported · <span style="font-family:'JetBrains Mono',ui-monospace,monospace;">⌘↵</span> saves · Esc cancels</span>
+          </div>
+        </div>
+      </div>
+
+      <p style="font-size:11.5px;line-height:1.55;color:oklch(0.55 0.02 255);margin:14px 0 0 0;max-width:600px;"><b style="color:oklch(0.42 0.02 255);">The third state is read-in-full</b> — an expanded preview with no fade, shown after "Show more", still one click from edit. Comment, reject note and AI answer are the same boxed field but their button also <i>fires an action</i> (post / reject / answer) and clears the box, rather than persisting living content.</p>
+    </div>
+
+    <div style="height:1px;background:oklch(0.94 0.005 255);"></div>
+
+    <!-- Markdown -->
+    <div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px;">
+        <span style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);">Markdown</span>
+        <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">desc · spec · plan</span>
+      </div>
+      <p style="font-size:12.5px;line-height:1.5;color:oklch(0.52 0.02 255);margin:0 0 16px 0;max-width:560px;">The three long living fields accept Markdown. There is <b style="color:oklch(0.34 0.02 255);">no preview toggle</b> — read mode is the render, edit mode is the raw source. Click the rendered text to drop into a monospace textarea of the source; collapse to see it formatted again.</p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:stretch;">
+        <div style="display:flex;flex-direction:column;gap:7px;flex:1;min-width:240px;">
+          <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">EDIT — RAW SOURCE</span>
+          <div style="border:1px solid oklch(0.60 0.14 250);background:oklch(1 0 0);border-radius:8px;padding:11px 12px;font-size:12px;line-height:1.6;color:oklch(0.40 0.02 255);font-family:ui-monospace,'JetBrains Mono',monospace;box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);white-space:pre-wrap;">## Goal
+Ship Safari checkout fix.
+
+- Repro on iOS 17
+- Add regression **test**</div>
+          <span style="font-size:11px;color:oklch(0.60 0.02 255);">Markdown supported · <span style="color:oklch(0.50 0.13 250);font-weight:600;">Save</span> / Cancel below</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:7px;flex:1;min-width:240px;">
+          <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">READ — RENDERED (= PREVIEW)</span>
+          <div style="border:1px solid oklch(0.93 0.006 255);background:oklch(0.994 0.002 255);border-radius:8px;padding:13px 14px;">
+            <div style="font-size:13.5px;font-weight:700;color:oklch(0.26 0.02 255);margin:0 0 6px 0;">Goal</div>
+            <p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0 0 8px 0;">Ship Safari checkout fix.</p>
+            <div style="display:flex;flex-direction:column;gap:3px;font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);">
+              <div style="display:flex;gap:7px;"><span style="color:oklch(0.68 0.02 255);">•</span><span>Repro on iOS 17</span></div>
+              <div style="display:flex;gap:7px;"><span style="color:oklch(0.68 0.02 255);">•</span><span>Add regression <b style="color:oklch(0.28 0.02 255);">test</b></span></div>
+            </div>
+          </div>
+          <span style="font-size:11px;color:oklch(0.60 0.02 255);">Hover tints the border · click anywhere to edit</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="height:1px;background:oklch(0.94 0.005 255);"></div>
+
     <!-- Usage map -->
     <div>
       <div style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);margin-bottom:12px;">WHICH MODEL WHERE</div>
       <div style="display:flex;gap:32px;flex-wrap:wrap;font-size:13px;line-height:1.7;color:oklch(0.44 0.02 255);">
         <div><b style="color:oklch(0.30 0.02 255);">Inline →</b> card title · stage name</div>
-        <div><b style="color:oklch(0.30 0.02 255);">Boxed →</b> board name · description · spec / plan · board URL · email · comment · reject note</div>
+        <div><b style="color:oklch(0.30 0.02 255);">Boxed · autosave →</b> board name · description · spec / plan · board URL · email</div>
+        <div><b style="color:oklch(0.30 0.02 255);">Boxed · submit →</b> comment · reject note · AI answer</div>
       </div>
     </div>
   </div>

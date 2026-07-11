@@ -573,9 +573,32 @@
             </sc-if>
 
             <!-- description -->
-            <div style="display:flex;flex-direction:column;gap:8px;">
-              <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">DESCRIPTION</span>
-              <textarea value="{{ descText }}" onChange="{{ onDescInput }}" placeholder="Add a description…" rows="2" style="width:100%;border:1px solid oklch(0.93 0.006 255);border-radius:9px;padding:11px 12px;outline:none;resize:vertical;font-size:13.5px;line-height:1.55;color:oklch(0.36 0.02 255);background:oklch(0.992 0.002 255);"></textarea>
+            <div style="display:flex;flex-direction:column;gap:9px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">DESCRIPTION</span>
+              </div>
+
+              <!-- editing -->
+              <sc-if value="{{ descEditing }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                  <textarea value="{{ descText }}" onChange="{{ onDescInput }}" onKeyDown="{{ onDescKey }}" placeholder="Add a description…" rows="6" style="width:100%;border:1px solid oklch(0.86 0.02 250);border-radius:10px;padding:12px 13px;outline:none;resize:vertical;font-size:13px;line-height:1.6;color:oklch(0.30 0.02 255);background:oklch(1 0 0);font-family:ui-monospace,'JetBrains Mono',monospace;box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);"></textarea>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <button onClick="{{ onDescSave }}" style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:7px;padding:7px 15px;font-size:12.5px;font-weight:600;cursor:pointer;">Save</button>
+                    <button onClick="{{ onDescCancel }}" style="background:oklch(1 0 0);color:oklch(0.46 0.02 255);border:1px solid oklch(0.88 0.01 255);border-radius:7px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;" style-hover="border-color:oklch(0.72 0.02 255);">Cancel</button>
+                    <span style="font-size:11px;color:oklch(0.62 0.02 255);">Markdown supported · <span style="font-family:'JetBrains Mono',ui-monospace,monospace;">⌘↵</span> saves · Esc cancels</span>
+                  </div>
+                </div>
+              </sc-if>
+
+              <!-- reading -->
+              <sc-if value="{{ descReading }}" hint-placeholder-val="{{ true }}">
+                <sc-if value="{{ descEmpty }}" hint-placeholder-val="{{ false }}">
+                  <div onClick="{{ onDescEdit }}" style="border:1px dashed oklch(0.88 0.01 255);border-radius:10px;padding:11px 13px;font-size:13px;color:oklch(0.58 0.02 255);cursor:pointer;background:oklch(0.994 0.002 255);" style-hover="border-color:oklch(0.80 0.02 250);">Add a description…</div>
+                </sc-if>
+                <sc-if value="{{ descNode }}" hint-placeholder-val="{{ false }}">
+                  <div onClick="{{ onDescEdit }}" title="Click to edit" style="border:1px solid oklch(0.93 0.006 255);border-radius:10px;padding:12px 13px;background:oklch(0.994 0.002 255);cursor:text;" style-hover="border-color:oklch(0.86 0.02 250);">{{ descNode }}</div>
+                </sc-if>
+              </sc-if>
             </div>
 
             <!-- spec + plan long sections -->
@@ -611,10 +634,11 @@
                 <!-- editing -->
                 <sc-if value="{{ ls.editing }}" hint-placeholder-val="{{ false }}">
                   <div style="display:flex;flex-direction:column;gap:8px;">
-                    <textarea value="{{ ls.text }}" onChange="{{ ls.onInput }}" placeholder="{{ ls.placeholder }}" rows="12" style="width:100%;border:1px solid oklch(0.86 0.02 250);border-radius:10px;padding:12px 13px;outline:none;resize:vertical;font-size:13px;line-height:1.6;color:oklch(0.30 0.02 255);background:oklch(1 0 0);font-family:ui-monospace,'JetBrains Mono',monospace;"></textarea>
-                    <div style="display:flex;align-items:center;gap:10px;">
-                      <button onClick="{{ ls.onDoneEdit }}" style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:7px;padding:7px 15px;font-size:12.5px;font-weight:600;cursor:pointer;">Done</button>
-                      <span style="font-size:11px;color:oklch(0.62 0.02 255);">Supports Markdown — <b style="color:oklch(0.48 0.02 255);">##</b> headings, <b style="color:oklch(0.48 0.02 255);">-</b> lists, <b style="color:oklch(0.48 0.02 255);">**bold**</b></span>
+                    <textarea value="{{ ls.text }}" onChange="{{ ls.onInput }}" onKeyDown="{{ ls.onKey }}" placeholder="{{ ls.placeholder }}" rows="12" style="width:100%;border:1px solid oklch(0.86 0.02 250);border-radius:10px;padding:12px 13px;outline:none;resize:vertical;font-size:13px;line-height:1.6;color:oklch(0.30 0.02 255);background:oklch(1 0 0);font-family:ui-monospace,'JetBrains Mono',monospace;box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);"></textarea>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <button onClick="{{ ls.onSave }}" style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:7px;padding:7px 15px;font-size:12.5px;font-weight:600;cursor:pointer;">Save</button>
+                      <button onClick="{{ ls.onCancel }}" style="background:oklch(1 0 0);color:oklch(0.46 0.02 255);border:1px solid oklch(0.88 0.01 255);border-radius:7px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;" style-hover="border-color:oklch(0.72 0.02 255);">Cancel</button>
+                      <span style="font-size:11px;color:oklch(0.62 0.02 255);">Markdown supported · <span style="font-family:'JetBrains Mono',ui-monospace,monospace;">⌘↵</span> saves · Esc cancels</span>
                     </div>
                   </div>
                 </sc-if>
@@ -900,7 +924,7 @@ class Component extends DCLogic {
     ];
     return { people, stages, cards, view: 'board', settingsSection: 'general', selectedId: null, dragOverKey: null, composeStage: null, composeText: '', answerText: '', commentText: '', rejectText: '', rejectOpen: false, reassignOpen: false, dragging: false, forceOpen: {},
       vw: (typeof window !== 'undefined' ? window.innerWidth : 1200),
-      sendBackOpen: false, sendBackStage: null, sendBackText: '', longOpen: {}, longEdit: {}, typeMenuFor: null, titleEditing: false, titleDraft: '',
+      sendBackOpen: false, sendBackStage: null, sendBackText: '', longOpen: {}, longEdit: {}, editDesc: false, draft: {}, saveStatus: {}, typeMenuFor: null, titleEditing: false, titleDraft: '',
       boardName: 'Product workspace', slug: 'acme/product', inviteEmail: '', inviteRole: 'Member', copiedKeyId: null,
       members: [
         { id: 'dk', name: 'Dana Kim', email: 'dana@acme.com', role: 'Admin', hue: 250, you: true, status: 'active' },
@@ -1086,8 +1110,15 @@ class Component extends DCLogic {
     this.setState({ rejectText: '', rejectOpen: false });
   }
   toggleLong(field) { this.setState(s => ({ longOpen: { ...s.longOpen, [field]: !s.longOpen[field] }, longEdit: s.longOpen[field] ? { ...s.longEdit, [field]: false } : s.longEdit })); }
-  setLongEdit(field, on) { this.setState(s => ({ longOpen: { ...s.longOpen, [field]: true }, longEdit: { ...s.longEdit, [field]: on } })); }
-  onLongInput(field, v) { const id = this.state.selectedId; if (id) this.patchCard(id, { [field]: v }); }
+  // Boxed long fields commit explicitly: edit a draft, then Save (persist) or Cancel (revert to last saved).
+  startLongEdit(field) { const sel = this.findCard(this.state.selectedId); const cur = sel ? (sel[field] || '') : ''; this.setState(s => ({ longOpen: { ...s.longOpen, [field]: true }, longEdit: { ...s.longEdit, [field]: true }, draft: { ...s.draft, [field]: cur } })); }
+  onLongInput(field, v) { this.setState(s => ({ draft: { ...s.draft, [field]: v } })); }
+  saveLong(field) { const id = this.state.selectedId; if (id) this.patchCard(id, { [field]: this.state.draft[field] || '' }); this.setState(s => ({ longEdit: { ...s.longEdit, [field]: false } })); }
+  cancelLong(field) { this.setState(s => { const d = { ...s.draft }; delete d[field]; return { longEdit: { ...s.longEdit, [field]: false }, draft: d }; }); }
+  startDescEdit() { const sel = this.findCard(this.state.selectedId); const cur = sel ? (sel.desc || '') : ''; this.setState(s => ({ editDesc: true, draft: { ...s.draft, desc: cur } })); }
+  onDescInputV(v) { this.setState(s => ({ draft: { ...s.draft, desc: v } })); }
+  saveDesc() { const id = this.state.selectedId; if (id) this.patchCard(id, { desc: this.state.draft.desc || '' }); this.setState({ editDesc: false }); }
+  cancelDesc() { this.setState(s => { const d = { ...s.draft }; delete d.desc; return { editDesc: false, draft: d }; }); }
 
   openSendBack(id) {
     const card = this.findCard(id); if (!card) return;
@@ -1467,18 +1498,21 @@ class Component extends DCLogic {
         const editing = !!s.longEdit[m.field];
         const empty = !text.trim();
         return {
-          field: m.field, label: m.label, text, placeholder: m.placeholder,
+          field: m.field, label: m.label, placeholder: m.placeholder,
           accentStyle: { width: '3px', height: '13px', borderRadius: '2px', background: m.accent, flex: '0 0 auto' },
           open, collapsed: !open, editing, viewing: open && !editing,
+          text: (s.draft[m.field] != null ? s.draft[m.field] : text),
           previewNode: empty ? null : mdRender(text.split('\n').slice(0, 3).join('\n')),
           fullNode: empty ? null : mdRender(text),
           isEmpty: empty,
           toggleLabel: open ? 'Collapse' : (empty ? 'Add' : 'Expand'),
-          onToggle: () => empty ? this.setLongEdit(m.field, true) : this.toggleLong(m.field),
+          onToggle: () => empty ? this.startLongEdit(m.field) : this.toggleLong(m.field),
           onToggleStop: (e) => { if (e && e.stopPropagation) e.stopPropagation(); this.toggleLong(m.field); },
-          onEdit: () => this.setLongEdit(m.field, true),
-          onDoneEdit: () => this.setLongEdit(m.field, false),
+          onEdit: () => this.startLongEdit(m.field),
+          onSave: () => this.saveLong(m.field),
+          onCancel: () => this.cancelLong(m.field),
           onInput: (e) => this.onLongInput(m.field, e.target.value),
+          onKey: (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); this.saveLong(m.field); } else if (e.key === 'Escape') { e.preventDefault(); this.cancelLong(m.field); } },
           previewStyle: { position: 'relative', maxHeight: '62px', overflow: 'hidden', cursor: 'pointer', maskImage: 'linear-gradient(180deg, #000 62%, transparent)', WebkitMaskImage: 'linear-gradient(180deg, #000 62%, transparent)' },
         };
       });
@@ -1583,10 +1617,18 @@ class Component extends DCLogic {
       onInvite: () => this.invite(), onCreateKey: () => this.createKey(),
       groups, settingsGroups,
       composeText: s.composeText, answerText: s.answerText,
-      descText: sel ? (sel.desc || '') : '', commentText: s.commentText, rejectText: s.rejectText,
+      descText: (s.draft.desc != null ? s.draft.desc : (sel ? (sel.desc || '') : '')), commentText: s.commentText, rejectText: s.rejectText,
       onComposeInput: (e) => this.setState({ composeText: e.target.value }),
       onAnswerInput: (e) => this.setState({ answerText: e.target.value }),
-      onDescInput: (e) => { const v = e.target.value; const id = s.selectedId; if (id) this.setState(st => ({ cards: st.cards.map(c => c.id === id ? { ...c, desc: v } : c) })); },
+      onDescInput: (e) => this.onDescInputV(e.target.value),
+      descEditing: !!s.editDesc,
+      descReading: !s.editDesc,
+      descEmpty: !((sel && sel.desc || '').trim()),
+      descNode: (sel && (sel.desc || '').trim()) ? mdRender(sel.desc) : null,
+      onDescEdit: () => this.startDescEdit(),
+      onDescSave: () => this.saveDesc(),
+      onDescCancel: () => this.cancelDesc(),
+      onDescKey: (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); this.saveDesc(); } else if (e.key === 'Escape') { e.preventDefault(); this.cancelDesc(); } },
       titleValue: sel ? (s.titleEditing ? s.titleDraft : (sel.title || '')) : '',
       titleEditing: s.titleEditing,
       onTitleFocus: () => this.setState({ titleEditing: true, titleDraft: (sel ? (sel.title || '') : '') }),

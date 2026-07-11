@@ -1744,9 +1744,8 @@ defmodule RelayWeb.BoardLiveTest do
     test "drawer actions (owners, move) log user-attributed entries",
          %{conn: conn, user: user, board: board, backlog: backlog} do
       {:ok, card} = Cards.create_card(backlog, %{title: "Card"})
-      # Review is a review-type stage; the freshly-created card is :ready, which is
-      # valid there (RLY-48 matrix), so the move is a plain reparent — no implicit
-      # status snap — exercised here alongside owners/move attribution.
+      # Review is a review-type stage; moving the :ready card in snaps it to :in_review so it can
+      # be reviewed/rejected (RLY-57), logging a user-attributed :status_changed alongside :moved.
       review = Enum.find(board.stages, &(&1.name == "Review"))
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
@@ -1756,7 +1755,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       entries = Repo.all(from a in Schemas.Activity, where: a.card_id == ^card.id, order_by: a.id)
 
-      assert Enum.map(entries, & &1.type) == [:created, :owners_changed, :moved]
+      assert Enum.map(entries, & &1.type) == [:created, :owners_changed, :moved, :status_changed]
 
       [_created | user_entries] = entries
       assert Enum.all?(user_entries, &(&1.actor_type == :user and &1.user_id == user.id))

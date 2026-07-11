@@ -35,7 +35,7 @@
         { "shell": "test \"$(cat tmp/exec-plan-status 2>/dev/null)\" = ready || { echo \"exec-plan did not reach 'ready' (review/smoke not passed) — refusing to push or merge\"; exit 1; }" },
         { "shell": "git push -u origin {branch}" },
         { "shell": "url=$(gh pr create --fill --head {branch} --base main) && {relay} branch {ref} {branch} && {relay} pr {ref} \"$url\" && echo \"PR: $url\"" },
-        { "shell": "git checkout --detach && gh pr merge {branch} --squash --delete-branch" }
+        { "shell": "git checkout --detach && gh pr merge {branch} --squash && { git push origin --delete {branch} || true; git branch -D {branch} || true; }" }
       ]
     }
   ]

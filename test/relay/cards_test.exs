@@ -399,6 +399,16 @@ defmodule Relay.CardsTest do
       assert moved.status == :ready
     end
 
+    test "a :ready card entering a review stage becomes :in_review so it can be reviewed",
+         %{board: board, backlog_stage: backlog} do
+      review = insert(:stage, board: board, type: :review, position: 12)
+      {:ok, card} = Cards.create_card(backlog, %{title: "x"})
+      assert card.status == :ready
+
+      assert {:ok, moved} = Cards.move_card(card, review, 0)
+      assert moved.status == :in_review
+    end
+
     test "needs_input -> queue clears blocked_since", %{work_stage: work, backlog_stage: backlog} do
       {:ok, card} = Cards.create_card(work, %{title: "blocked"})
       {:ok, card} = Cards.set_status(card, %{status: :needs_input})
@@ -681,9 +691,12 @@ defmodule Relay.CardsTest do
 
       {:ok, moved} = Cards.move_card(card, review, 0)
 
-      # RLY-48 — :ready is valid in a :review-type stage (parked pending human review), so no
-      # snap/status_changed fires here; only the :moved entry is logged.
-      assert [_created, %Schemas.Activity{type: :moved, meta: meta}] = activities(moved)
+      # A :ready card entering a review lane now snaps to :in_review (RLY-57 precondition), so a
+      # :status_changed is logged alongside the :moved entry.
+      assert moved.status == :in_review
+
+      assert [%Schemas.Activity{type: :moved, meta: meta}] =
+               Enum.filter(activities(moved), &(&1.type == :moved))
 
       assert meta == %{"from_stage" => stage.name, "to_stage" => "Code · Review"}
     end

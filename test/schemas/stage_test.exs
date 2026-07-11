@@ -32,7 +32,9 @@ defmodule Schemas.StageTest do
     assert Stage.valid_status?(:needs_input, :work)
     refute Stage.valid_status?(:in_review, :work)
     assert Stage.valid_status?(:in_review, :review)
-    assert Stage.valid_status?(:ready, :review)
+    # RLY-57: a review stage only holds :in_review — a :ready card moved in snaps to :in_review
+    # so it is reviewable/rejectable, not parked as "already approved".
+    refute Stage.valid_status?(:ready, :review)
     refute Stage.valid_status?(:working, :done)
     assert Stage.valid_status?(:ready, :done)
   end
