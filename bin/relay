@@ -304,6 +304,51 @@ def load_config():
     return json.load(open(CONFIG_PATH))
 
 
+WORKTREES_DIR = os.path.join(ROOT, ".claude", "worktrees")
+
+
+def worktree_path(name):
+    return os.path.join(WORKTREES_DIR, name)
+
+
+def build_pools(cfg):
+    """Pools from cfg['pools']. A pool is a list of worktree 'slots': a `shared`
+    pool points all N slots at one worktree (safe for read-only Spec/Plan); an
+    `exclusive` pool gives each slot its own worktree-N. Concurrency == #slots."""
+    pools = {}
+    for name, spec in (cfg.get("pools") or {}).items():
+        n = spec.get("concurrency", 1)
+        wt = spec["worktree"]
+        if spec.get("mode") == "shared":
+            slots = [wt] * n
+        else:
+            slots = [f"{wt}-{i}" for i in range(1, n + 1)]
+        pools[name] = {"spec": spec, "slots": slots, "free": list(slots)}
+    return pools
+
+
+def ensure_worktree(name, base):
+    """Create <WORKTREES_DIR>/<name> as a DETACHED checkout at `base` if missing,
+    so it never holds a branch and cannot collide with ROOT's checked-out branch."""
+    path = worktree_path(name)
+    if os.path.isdir(path):
+        return path
+    subprocess.run(["git", "fetch", "origin", "--prune"], cwd=ROOT, check=True)
+    subprocess.run(["git", "worktree", "add", "--detach", path, base],
+                   cwd=ROOT, check=True)
+    return path
+
+
+def refresh_worktree(name, base):
+    """Fast-forward an existing detached worktree to `base`. Caller guarantees the
+    worktree is idle (no in-flight job using it)."""
+    path = worktree_path(name)
+    if not os.path.isdir(path):
+        return
+    subprocess.run(["git", "fetch", "origin", "--prune"], cwd=ROOT, check=False)
+    subprocess.run(["git", "checkout", "--detach", base], cwd=path, check=False)
+
+
 def fingerprint(b):
     rows = sorted(f'{c["ref"]}|{c["stage_id"]}|{c.get("status")}|{c.get("active_owner")}' for c in b["cards"])
     return hashlib.sha256("\n".join(rows).encode()).hexdigest()

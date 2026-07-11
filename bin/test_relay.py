@@ -299,5 +299,29 @@ class WorkOwnershipTest(unittest.TestCase):
         self.assertIn("move", names)
 
 
+class BuildPoolsTest(unittest.TestCase):
+    def test_shared_pool_has_n_slots_all_one_worktree(self):
+        cfg = {"pools": {"clean": {"worktree": "clean", "mode": "shared",
+                                   "base": "origin/main", "concurrency": 3}}}
+        pools = relay.build_pools(cfg)
+        self.assertEqual(pools["clean"]["slots"], ["clean", "clean", "clean"])
+        self.assertEqual(pools["clean"]["free"], ["clean", "clean", "clean"])
+        self.assertEqual(pools["clean"]["spec"]["base"], "origin/main")
+
+    def test_exclusive_pool_has_distinct_numbered_worktrees(self):
+        cfg = {"pools": {"work": {"worktree": "work", "mode": "exclusive",
+                                  "base": "origin/main", "concurrency": 2}}}
+        pools = relay.build_pools(cfg)
+        self.assertEqual(pools["work"]["slots"], ["work-1", "work-2"])
+        self.assertEqual(pools["work"]["free"], ["work-1", "work-2"])
+
+    def test_no_pools_key_is_empty(self):
+        self.assertEqual(relay.build_pools({}), {})
+
+    def test_worktree_path_is_under_dot_claude_worktrees(self):
+        self.assertTrue(relay.worktree_path("work-1")
+                        .endswith(os.path.join(".claude", "worktrees", "work-1")))
+
+
 if __name__ == "__main__":
     unittest.main()
