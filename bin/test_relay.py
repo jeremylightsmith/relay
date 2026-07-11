@@ -399,5 +399,74 @@ class DispatchOnceTest(unittest.TestCase):
         self.assertTrue(all(tag.startswith("[RLY-") for _, _, tag in calls))
 
 
+class LogForwarderTest(unittest.TestCase):
+    def setUp(self):
+        self._forwarder, self._api = relay.FORWARDER, relay.api
+        self.addCleanup(setattr, relay, "FORWARDER", self._forwarder)
+        self.addCleanup(setattr, relay, "api", self._api)
+
+    def test_drain_and_send_posts_the_batch_via_api(self):
+        sent = []
+        relay.api = lambda method, path, body=None, **k: sent.append((method, path, body))
+        fw = relay.LogForwarder(flush_interval=0.01)
+        fw.enqueue("claude", "hello", "RLY-1")
+        fw._send(fw._drain())
+        self.assertEqual(sent, [("POST", "/api/board/logs",
+                                 [{"kind": "claude", "ref": "RLY-1", "text": "hello"}])])
+
+    def test_send_swallows_api_die(self):
+        relay.api = lambda *a, **k: relay.die("API 500: nope")  # die() raises SystemExit
+        fw = relay.LogForwarder()
+        fw.enqueue("error", "x", None)
+        fw._send(fw._drain())  # must not raise
+
+    def test_enqueue_drops_when_full_instead_of_blocking(self):
+        fw = relay.LogForwarder(max_queue=2)
+        fw.enqueue("claude", "a", None)
+        fw.enqueue("claude", "b", None)
+        fw.enqueue("claude", "c", None)  # dropped, does not block
+        self.assertEqual(fw.q.qsize(), 2)
+
+    def test_forward_is_a_noop_without_a_forwarder(self):
+        relay.FORWARDER = None
+        relay.forward("claude", "x", "RLY-1")  # must not raise
+
+    def test_forward_enqueues_to_the_active_forwarder(self):
+        fw = relay.LogForwarder()
+        relay.FORWARDER = fw
+        relay.forward("lifecycle", "started", None)
+        self.assertEqual(fw.q.get_nowait(), {"kind": "lifecycle", "ref": None, "text": "started"})
+
+
+class ForwardEmitPointsTest(unittest.TestCase):
+    def setUp(self):
+        self.sent = []
+        self._forward, self._forwarder, self._dry = relay.forward, relay.FORWARDER, relay.DRY
+        relay.FORWARDER = None
+        relay.forward = lambda kind, text, ref=None: self.sent.append((kind, text, ref))
+        self.addCleanup(setattr, relay, "forward", self._forward)
+        self.addCleanup(setattr, relay, "FORWARDER", self._forwarder)
+        self.addCleanup(setattr, relay, "DRY", self._dry)
+
+    def test_ref_from_tag(self):
+        self.assertEqual(relay._ref_from_tag("[RLY-7] "), "RLY-7")
+        self.assertIsNone(relay._ref_from_tag(""))
+
+    def test_log_forwards_lifecycle(self):
+        capture(relay.log, "watching…")
+        self.assertIn(("lifecycle", "watching…", None), self.sent)
+
+    def test_claude_event_forwards_claude_with_ref_from_tag(self):
+        ev = {"type": "assistant",
+              "message": {"content": [{"type": "text", "text": "hi"}]}}
+        capture(relay._print_claude_event, ev, "[RLY-7] ")
+        self.assertEqual(self.sent, [("claude", "🤖 hi", "RLY-7")])
+
+    def test_flag_forwards_error_with_ref(self):
+        relay.DRY = True  # skip the needs_input API call inside flag()
+        capture(relay.flag, "RLY-9", "boom")
+        self.assertIn(("error", "  ⚑ RLY-9: boom", "RLY-9"), self.sent)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -24,6 +24,7 @@ TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output.
 import argparse
 import json
 import os
+import queue
 import re
 import signal
 import subprocess
@@ -36,6 +37,7 @@ HERE = os.path.abspath(__file__)
 ROOT = os.path.dirname(os.path.dirname(HERE))
 CONFIG_PATH = os.path.join(ROOT, "relay_config.json")
 DRY = False
+FORWARDER = None
 
 
 def die(msg):
@@ -43,8 +45,9 @@ def die(msg):
     sys.exit(1)
 
 
-def log(msg):
+def log(msg, *, ref=None, kind="lifecycle"):
     print(f"[relay] {msg}", flush=True)
+    forward(kind, msg, ref)
 
 
 def banner(lines):
@@ -89,6 +92,72 @@ def api(method, path, body=None, soft_404=False):
         die(f"API {e.code}: {msg}")
     except urllib.error.URLError as e:
         die(f"request failed: {e.reason}")
+
+
+def _ref_from_tag(tag):
+    """Extract 'RLY-7' from a per-card feed tag like '[RLY-7] '; None if untagged."""
+    m = re.match(r"\[([^\]]+)\]", tag or "")
+    return m.group(1) if m else None
+
+
+def forward(kind, text, ref=None):
+    """Best-effort: hand one feed line to the background mirror, if one is running."""
+    if FORWARDER is not None:
+        FORWARDER.enqueue(kind, text, ref)
+
+
+class LogForwarder:
+    """Background thread mirroring the runner feed to POST /api/board/logs.
+
+    Best-effort by construction: enqueue() never blocks (drops when the bounded
+    queue is full) and _send() swallows every error — including api()'s die()
+    (SystemExit) — so the log path can never raise into or stall work()."""
+
+    def __init__(self, flush_interval=0.25, batch_size=50, max_queue=1000):
+        self.q = queue.Queue(maxsize=max_queue)
+        self.flush_interval = flush_interval
+        self.batch_size = batch_size
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def enqueue(self, kind, text, ref=None):
+        try:
+            self.q.put_nowait({"kind": kind, "ref": ref, "text": text})
+        except queue.Full:
+            pass
+
+    def _drain(self):
+        batch = []
+        try:
+            batch.append(self.q.get(timeout=self.flush_interval))
+        except queue.Empty:
+            return batch
+        while len(batch) < self.batch_size:
+            try:
+                batch.append(self.q.get_nowait())
+            except queue.Empty:
+                break
+        return batch
+
+    def _send(self, batch):
+        try:
+            api("POST", "/api/board/logs", batch)
+        except SystemExit:  # api() die()s on HTTP/network error
+            pass
+        except Exception:
+            pass
+
+    def _run(self):
+        while not self._stop.is_set():
+            batch = self._drain()
+            if batch:
+                self._send(batch)
 
 
 def read_arg(text):
@@ -469,20 +538,27 @@ def render(template, vars):
 
 def _print_claude_event(ev, tag=""):
     """Render one stream-json event from a headless claude as a readable feed line."""
+    ref = _ref_from_tag(tag)
     t = ev.get("type")
     if t == "assistant":
         for b in ev.get("message", {}).get("content", []):
             if b.get("type") == "text" and b.get("text", "").strip():
-                print(f"    {tag}🤖 " + b["text"].strip()[:600], flush=True)
+                text = b["text"].strip()[:600]
+                print(f"    {tag}🤖 " + text, flush=True)
+                forward("claude", f"🤖 {text}", ref)
             elif b.get("type") == "tool_use":
                 inp = b.get("input", {}) or {}
                 brief = (inp.get("command") or inp.get("file_path") or inp.get("path")
                          or inp.get("pattern") or inp.get("description") or "")
-                print(f"    {tag}🔧 {b.get('name')}  {str(brief)[:140]}", flush=True)
+                line = f"🔧 {b.get('name')}  {str(brief)[:140]}"
+                print(f"    {tag}{line}", flush=True)
+                forward("claude", line, ref)
     elif t == "result":
         turns = ev.get("num_turns")
-        print(f"    {tag}{'✗' if ev.get('is_error') else '✓'} claude finished"
-              + (f" ({turns} turns)" if turns else ""), flush=True)
+        line = (f"{'✗' if ev.get('is_error') else '✓'} claude finished"
+                + (f" ({turns} turns)" if turns else ""))
+        print(f"    {tag}{line}", flush=True)
+        forward("claude", line, ref)
 
 
 def _stream_shell(cmd, cwd, tag=""):
@@ -540,7 +616,7 @@ def run_step(step, vars, cwd=ROOT, tag=""):
 
 
 def flag(ref, reason):
-    log(f"  ⚑ {ref}: {reason}")
+    log(f"  ⚑ {ref}: {reason}", ref=ref, kind="error")
     if not DRY:
         try:
             needs_input(ref, f"[auto] stage failed: {reason}. A human needs to look — the runner "
@@ -581,11 +657,14 @@ def work(card, entry, mode, cwd=ROOT, tag=""):
 
 
 def cmd_watch(args):
-    global DRY
+    global DRY, FORWARDER
     DRY = args.dry_run
     cfg = load_config()
     interval = args.interval or cfg.get("poll_interval", 45)
     env("RELAY_URL"), env("RELAY_API_KEY")
+    if not DRY:
+        FORWARDER = LogForwarder()
+        FORWARDER.start()
     pools = build_pools(cfg)
     lock = threading.Lock()
     wake = threading.Event()
