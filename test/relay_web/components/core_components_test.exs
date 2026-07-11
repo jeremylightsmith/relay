@@ -573,6 +573,147 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  describe "inline_field/1" do
+    test "rest state renders the value with no pencil icon and no form" do
+      html =
+        render_component(&CoreComponents.inline_field/1,
+          id: "if-title",
+          value: "Draft the onboarding spec",
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
+        )
+
+      assert html =~ ~s(id="if-title-display")
+      assert html =~ "Draft the onboarding spec"
+      refute html =~ "hero-pencil-square"
+      refute html =~ ~s(id="if-title-form")
+    end
+
+    test "blank value shows the placeholder" do
+      html =
+        render_component(&CoreComponents.inline_field/1,
+          id: "if-title",
+          value: "",
+          placeholder: "Untitled",
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
+        )
+
+      assert html =~ "Untitled"
+    end
+
+    test "editing state renders a single-line input, the pill, and Enter hint" do
+      html =
+        render_component(&CoreComponents.inline_field/1,
+          id: "if-title",
+          editing: true,
+          field: :title,
+          form: Phoenix.Component.to_form(%{"title" => "Draft"}, as: :card),
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
+        )
+
+      assert html =~ ~s(id="if-title-form")
+      assert html =~ ~s(<input)
+      assert html =~ ~s(data-commit="enter")
+      assert html =~ ~s(id="if-title-save")
+      assert html =~ ~s(id="if-title-cancel")
+      assert html =~ "Enter · Esc"
+    end
+  end
+
+  describe "boxed_field/1" do
+    test ":form mode renders only a styled bound input" do
+      html =
+        render_component(&CoreComponents.boxed_field/1,
+          id: "bf-comment-input",
+          commit: :form,
+          multiline: true,
+          field: :body,
+          form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment),
+          placeholder: "Write a comment…"
+        )
+
+      assert html =~ ~s(id="bf-comment-input")
+      assert html =~ "commit-field-input"
+      assert html =~ "Write a comment…"
+      refute html =~ "commit-pill"
+    end
+
+    test ":self markdown rest renders markdown, blank shows dashed placeholder" do
+      filled =
+        render_component(&CoreComponents.boxed_field/1,
+          id: "bf-desc",
+          markdown: true,
+          multiline: true,
+          value: "# Hi",
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
+        )
+
+      assert filled =~ ~s(id="bf-desc-view")
+      assert filled =~ ~s(class="md")
+
+      blank =
+        render_component(&CoreComponents.boxed_field/1,
+          id: "bf-desc",
+          markdown: true,
+          multiline: true,
+          value: "",
+          placeholder: "Add a description…",
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
+        )
+
+      assert blank =~ "commit-field-placeholder"
+      assert blank =~ "Add a description…"
+    end
+
+    test ":self markdown editing renders a mono textarea with a dirty-gated pill" do
+      html =
+        render_component(&CoreComponents.boxed_field/1,
+          id: "bf-desc",
+          markdown: true,
+          multiline: true,
+          editing: true,
+          field: :description,
+          form: Phoenix.Component.to_form(%{"description" => "raw"}, as: :card),
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
+        )
+
+      assert html =~ ~s(id="bf-desc-input")
+      assert html =~ ~s(<textarea)
+      assert html =~ "commit-field-mono"
+      assert html =~ ~s(data-commit="cmd-enter")
+      assert html =~ ~s(data-dirty-pill="true")
+      assert html =~ ~s(class="commit-pill hidden")
+      assert html =~ "⌘↵ · Esc"
+    end
+
+    test ":self always-editable with a prefix renders the prefixed box" do
+      html =
+        render_component(&CoreComponents.boxed_field/1,
+          id: "bf-slug",
+          field: :slug,
+          form: Phoenix.Component.to_form(%{"slug" => "my-board"}, as: :board),
+          prefix: "relay.app/",
+          save_event: "save_board_slug",
+          cancel_event: "cancel_board_slug"
+        )
+
+      assert html =~ "relay.app/"
+      assert html =~ "commit-field-prefixed"
+      assert html =~ ~s(id="bf-slug-input")
+    end
+  end
+
   describe "editable_text/1" do
     test "read state renders the value, the affordance, the pencil, and the edit hook" do
       html =

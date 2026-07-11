@@ -2275,6 +2275,254 @@ defmodule RelayWeb.CoreComponents do
     """
   end
 
+  defp field_blank?(nil), do: true
+  defp field_blank?(value) when is_binary(value), do: String.trim(value) == ""
+  defp field_blank?(_), do: false
+
+  attr :id, :string, required: true
+  attr :cancel_event, :string, required: true
+  attr :hint, :string, default: "Enter · Esc"
+  attr :hidden, :boolean, default: false
+
+  defp commit_pill(assigns) do
+    ~H"""
+    <div id={"#{@id}-pill"} class={["commit-pill", @hidden && "hidden"]}>
+      <button type="submit" id={"#{@id}-save"} class="commit-pill-save" aria-label="Save">
+        <.icon name="hero-check" class="size-3.5" />
+      </button>
+      <button
+        type="button"
+        id={"#{@id}-cancel"}
+        class="commit-pill-cancel"
+        phx-click={@cancel_event}
+        aria-label="Cancel"
+      >
+        <.icon name="hero-x-mark" class="size-3.5" />
+      </button>
+      <span class="commit-pill-hint">{@hint}</span>
+    </div>
+    """
+  end
+
+  @doc """
+  A plain-text field for primary content that *is* the thing (card title, stage
+  name). Reads as text with a quiet hover tint; editing swaps in a single-line
+  input with the blue focus ring and a floating ✓/✕ commit pill (Enter saves,
+  Esc reverts). The parent LiveView owns `editing` and `form`; the `CommitField`
+  JS hook owns focus/caret-at-end and the keyboard chord.
+  """
+  attr :id, :string, required: true
+  attr :editing, :boolean, default: false
+  attr :value, :string, default: nil
+  attr :placeholder, :string, default: "Untitled"
+  attr :form, :any, default: nil
+  attr :field, :atom, default: nil
+  attr :edit_event, :string, required: true
+  attr :save_event, :string, required: true
+  attr :cancel_event, :string, required: true
+  attr :edit_attrs, :map, default: %{}
+  attr :read_class, :any, default: nil
+  attr :input_class, :any, default: nil
+  slot :hidden
+
+  def inline_field(assigns) do
+    ~H"""
+    <div id={@id} class="inline-field">
+      <div
+        :if={!@editing}
+        id={"#{@id}-display"}
+        role="button"
+        tabindex="0"
+        phx-click={@edit_event}
+        phx-hook="CommitField"
+        data-field-role="display"
+        class={["inline-field-rest", @read_class]}
+        {@edit_attrs}
+      >
+        <span :if={!field_blank?(@value)} class="whitespace-pre-wrap">{@value}</span>
+        <span :if={field_blank?(@value)} class="font-normal italic text-base-content/50">
+          {@placeholder}
+        </span>
+      </div>
+      <.form
+        :if={@editing}
+        for={@form}
+        id={"#{@id}-form"}
+        phx-submit={@save_event}
+        phx-click-away={@cancel_event}
+        class="commit-field-form"
+      >
+        {render_slot(@hidden)}
+        <.input
+          field={@form[@field]}
+          type="text"
+          id={"#{@id}-input"}
+          class={["commit-field-input", @input_class]}
+          phx-hook="CommitField"
+          data-field-role="edit"
+          data-commit="enter"
+          data-autofocus="true"
+          data-cancel-id={"#{@id}-cancel"}
+        />
+        <.commit_pill id={@id} cancel_event={@cancel_event} hint="Enter · Esc" />
+      </.form>
+    </div>
+    """
+  end
+
+  @doc """
+  A form field you fill in. Always visibly a box; single-line and multi-line share
+  identical styling. `commit={:form}` renders only a styled input bound to
+  `@form[@field]` (the parent form's button submits). `commit={:self}` owns its own
+  commit via ⌘/Ctrl+Enter or ✓, reverting on Esc/✕: with `edit_event` set it is a
+  server-toggled rest↔edit field (markdown renders at rest); without `edit_event` it
+  is always editable and the pill appears once dirty (board name/slug).
+  """
+  attr :id, :string, required: true
+  attr :commit, :atom, values: [:self, :form], default: :self
+  attr :value, :string, default: nil
+  attr :placeholder, :string, default: nil
+  attr :multiline, :boolean, default: false
+  attr :markdown, :boolean, default: false
+  attr :rows, :string, default: "6"
+  attr :editing, :boolean, default: false
+  attr :form, :any, default: nil
+  attr :field, :atom, default: nil
+  attr :edit_event, :string, default: nil
+  attr :save_event, :string, default: nil
+  attr :cancel_event, :string, default: nil
+  attr :edit_attrs, :map, default: %{}
+  attr :prefix, :string, default: nil
+  attr :input_class, :any, default: nil
+  attr :rest, :global
+  slot :hidden
+
+  def boxed_field(%{commit: :form} = assigns) do
+    ~H"""
+    <.input
+      field={@form[@field]}
+      type={if(@multiline, do: "textarea", else: "text")}
+      id={@id}
+      rows={@multiline && @rows}
+      placeholder={@placeholder}
+      class={["commit-field-input", @input_class]}
+      {@rest}
+    />
+    """
+  end
+
+  def boxed_field(%{commit: :self, editing: true} = assigns) do
+    ~H"""
+    <.form
+      for={@form}
+      id={"#{@id}-form"}
+      phx-submit={@save_event}
+      phx-click-away={@cancel_event}
+      class="commit-field-form"
+    >
+      {render_slot(@hidden)}
+      <.input
+        field={@form[@field]}
+        type={if(@multiline, do: "textarea", else: "text")}
+        id={"#{@id}-input"}
+        rows={@multiline && @rows}
+        class={["commit-field-input", @markdown && "commit-field-mono", @input_class]}
+        phx-hook="CommitField"
+        data-field-role="edit"
+        data-commit={if(@multiline, do: "cmd-enter", else: "enter")}
+        data-autofocus="true"
+        data-dirty-pill="true"
+        data-cancel-id={"#{@id}-cancel"}
+      />
+      <.commit_pill
+        id={@id}
+        cancel_event={@cancel_event}
+        hint={if(@multiline, do: "⌘↵ · Esc", else: "Enter · Esc")}
+        hidden
+      />
+    </.form>
+    """
+  end
+
+  def boxed_field(%{commit: :self, edit_event: edit_event} = assigns) when is_binary(edit_event) do
+    ~H"""
+    <div
+      id={"#{@id}-display"}
+      role="button"
+      tabindex="0"
+      phx-click={@edit_event}
+      phx-hook="CommitField"
+      data-field-role="display"
+      class="commit-field-rest"
+      {@edit_attrs}
+    >
+      <div :if={@markdown && !field_blank?(@value)} id={"#{@id}-view"} class="md">
+        {Relay.Markdown.to_html(@value)}
+      </div>
+      <div
+        :if={!@markdown && !field_blank?(@value)}
+        id={"#{@id}-view"}
+        class="commit-field-input whitespace-pre-wrap"
+      >
+        {@value}
+      </div>
+      <div :if={field_blank?(@value)} class="commit-field-placeholder">
+        {@placeholder}
+      </div>
+    </div>
+    """
+  end
+
+  def boxed_field(%{commit: :self} = assigns) do
+    ~H"""
+    <.form for={@form} id={"#{@id}-form"} phx-submit={@save_event} class="commit-field-form">
+      <div :if={@prefix} class="commit-field-prefixed">
+        <span class="commit-field-prefix font-mono">{@prefix}</span>
+        <input
+          type="text"
+          id={"#{@id}-input"}
+          name={@form[@field].name}
+          value={Phoenix.HTML.Form.normalize_value("text", @form[@field].value)}
+          phx-hook="CommitField"
+          data-field-role="edit"
+          data-commit="enter"
+          data-dirty-pill="true"
+          data-cancel-id={"#{@id}-cancel"}
+          class={["commit-field-bare font-mono", @input_class]}
+        />
+      </div>
+      <.input
+        :if={!@prefix}
+        field={@form[@field]}
+        type={if(@multiline, do: "textarea", else: "text")}
+        id={"#{@id}-input"}
+        rows={@multiline && @rows}
+        placeholder={@placeholder}
+        class={["commit-field-input", @input_class]}
+        phx-hook="CommitField"
+        data-field-role="edit"
+        data-commit={if(@multiline, do: "cmd-enter", else: "enter")}
+        data-dirty-pill="true"
+        data-cancel-id={"#{@id}-cancel"}
+      />
+      <p
+        :for={msg <- Enum.map(@form[@field].errors, &translate_error/1)}
+        :if={@prefix}
+        id={"#{@id}-error"}
+        class="mt-1 text-sm text-error"
+      >
+        {msg}
+      </p>
+      <.commit_pill
+        id={@id}
+        cancel_event={@cancel_event}
+        hint={if(@multiline, do: "⌘↵ · Esc", else: "Enter · Esc")}
+        hidden
+      />
+    </.form>
+    """
+  end
+
   @doc """
   Renders a click-to-edit free-text field — the app-wide paradigm for editing
   names, titles, and descriptions (RLY-5).
