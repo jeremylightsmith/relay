@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.30 0.02 255);background:oklch(1 0 0);-webkit-font-smoothing:antialiased;}
+  a{color:oklch(0.55 0.13 250);text-decoration:none;} a:hover{text-decoration:underline;}
+  button{font-family:inherit;cursor:pointer;}
+  ::selection{background:oklch(0.60 0.14 250 / 0.16);}
+</style>
+</helmet>
+
+<div style="width:100%;overflow-x:hidden;">
+
+  <!-- ===== NAV (shared with site) ===== -->
+  <div style="position:sticky;top:0;z-index:20;background:oklch(1 0 0 / 0.85);backdrop-filter:blur(10px);border-bottom:1px solid oklch(0.93 0.006 255);">
+    <div style="max-width:1200px;margin:0 auto;padding:0 32px;height:62px;display:flex;align-items:center;gap:14px;">
+      <a href="Relay Landing.dc.html" style="display:flex;align-items:center;gap:9px;">
+        <div style="width:25px;height:25px;border-radius:8px;background:oklch(0.60 0.14 250);display:flex;align-items:center;justify-content:center;position:relative;">
+          <div style="width:9px;height:9px;border-radius:50%;background:oklch(1 0 0);"></div>
+          <div style="position:absolute;right:4px;top:4px;width:4px;height:4px;border-radius:50%;background:oklch(0.60 0.14 250);box-shadow:0 0 0 1.5px oklch(1 0 0);"></div>
+        </div>
+        <span style="font-weight:600;font-size:16px;letter-spacing:-0.02em;color:oklch(0.30 0.02 255);">Relay</span>
+      </a>
+      <span style="color:oklch(0.80 0.01 255);font-size:15px;">/</span>
+      <span style="font-size:14px;font-weight:600;color:oklch(0.44 0.02 255);">Docs</span>
+
+      <span style="flex:1;"></span>
+
+      <!-- search (boxed field, design-system style) -->
+      <label style="display:flex;align-items:center;gap:8px;width:210px;border:1px solid oklch(0.90 0.006 255);background:oklch(0.99 0.002 255);border-radius:8px;padding:7px 10px;">
+        <span style="width:13px;height:13px;border:1.5px solid oklch(0.62 0.02 255);border-radius:50%;position:relative;flex:0 0 auto;"><span style="position:absolute;right:-3px;bottom:-3px;width:6px;height:1.5px;background:oklch(0.62 0.02 255);transform:rotate(45deg);"></span></span>
+        <span style="font-size:13px;color:oklch(0.62 0.02 255);">Search the docs</span>
+        <span style="flex:1;"></span>
+        <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.66 0.02 255);border:1px solid oklch(0.90 0.006 255);border-radius:4px;padding:1px 5px;">⌘K</span>
+      </label>
+
+      <a href="Relay Board.dc.html" style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border-radius:8px;padding:8px 15px;font-size:13.5px;font-weight:600;">Open the board</a>
+    </div>
+  </div>
+
+  <!-- ===== DOCS SHELL ===== -->
+  <div style="max-width:1200px;margin:0 auto;padding:0 32px;display:flex;align-items:flex-start;gap:48px;">
+
+    <!-- ---- SIDEBAR ---- -->
+    <aside style="flex:0 0 214px;position:sticky;top:62px;align-self:flex-start;padding:40px 0 60px 0;max-height:calc(100vh - 62px);overflow-y:auto;">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin-bottom:12px;">GET STARTED</div>
+      <div style="display:flex;flex-direction:column;gap:2px;margin-bottom:26px;">
+        <a href="#" style="font-size:13.5px;padding:6px 10px;border-radius:7px;color:oklch(0.48 0.02 255);">Introduction</a>
+        <a href="#" style="font-size:13.5px;padding:6px 10px;border-radius:7px;color:oklch(0.48 0.02 255);">Boards &amp; stages</a>
+        <a href="#" style="font-size:13.5px;padding:6px 10px;border-radius:7px;color:oklch(0.48 0.02 255);">Cards &amp; handoffs</a>
+      </div>
+
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin-bottom:12px;">DEVELOPERS</div>
+      <div style="display:flex;flex-direction:column;gap:2px;">
+        <a href="#top" style="font-size:13.5px;font-weight:600;padding:6px 10px;border-radius:7px;color:oklch(0.36 0.09 250);background:oklch(0.96 0.02 250);border-left:2px solid oklch(0.60 0.14 250);">API &amp; Setup</a>
+        <a href="#" style="font-size:13.5px;padding:6px 10px;border-radius:7px;color:oklch(0.48 0.02 255);">REST API reference</a>
+        <a href="#" style="font-size:13.5px;padding:6px 10px;border-radius:7px;color:oklch(0.48 0.02 255);">CLI (<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;">bin/relay</span>)</a>
+        <a href="#" style="font-size:13.5px;padding:6px 10px;border-radius:7px;color:oklch(0.48 0.02 255);">Agent integration</a>
+        <a href="#" style="font-size:13.5px;padding:6px 10px;border-radius:7px;color:oklch(0.48 0.02 255);">Webhooks</a>
+      </div>
+    </aside>
+
+    <!-- ---- MAIN CONTENT ---- -->
+    <main id="top" style="flex:1;min-width:0;max-width:720px;padding:40px 0 96px 0;">
+
+      <!-- breadcrumb -->
+      <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);margin-bottom:20px;">
+        <a href="#" style="color:oklch(0.60 0.02 255);">Docs</a>
+        <span style="color:oklch(0.80 0.01 255);">/</span>
+        <a href="#" style="color:oklch(0.60 0.02 255);">Developers</a>
+        <span style="color:oklch(0.80 0.01 255);">/</span>
+        <span style="color:oklch(0.40 0.02 255);">API &amp; Setup</span>
+      </div>
+
+      <div style="font-size:12px;font-weight:600;letter-spacing:0.08em;color:oklch(0.55 0.13 292);font-family:'JetBrains Mono',ui-monospace,monospace;margin-bottom:14px;">DEVELOPERS</div>
+      <h1 style="font-size:42px;line-height:1.05;letter-spacing:-0.03em;font-weight:600;margin:0 0 18px 0;color:oklch(0.22 0.02 255);">API &amp; Setup</h1>
+      <p style="font-size:17px;line-height:1.6;color:oklch(0.46 0.02 255);margin:0 0 14px 0;">Relay is drivable over a small <b style="color:oklch(0.30 0.02 255);font-weight:600;">REST API</b> and the zero-dependency <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">bin/relay</code> CLI, so a Claude (or any) agent can pull a card, work it, and hand it back. Every write is attributed to the board's AI agent, <b style="color:oklch(0.30 0.02 255);font-weight:600;">"Relay AI"</b>.</p>
+
+      <!-- meta row -->
+      <div style="display:flex;align-items:center;gap:16px;margin:22px 0 34px 0;padding-bottom:22px;border-bottom:1px solid oklch(0.93 0.006 255);font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">
+        <span>Updated Jul 2026</span>
+        <span style="width:3px;height:3px;border-radius:50%;background:oklch(0.80 0.01 255);"></span>
+        <span>4 min read</span>
+        <span style="width:3px;height:3px;border-radius:50%;background:oklch(0.80 0.01 255);"></span>
+        <span style="display:flex;align-items:center;gap:6px;"><span style="width:16px;height:16px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;"><span style="width:6px;height:6px;border-radius:50%;border:1.5px solid oklch(1 0 0);"></span></span>Relay AI</span>
+      </div>
+
+      <!-- info callout -->
+      <div style="display:flex;gap:12px;background:oklch(0.97 0.02 250);border:1px solid oklch(0.90 0.04 250);border-radius:11px;padding:14px 16px;margin:0 0 36px 0;">
+        <span style="flex:0 0 auto;width:18px;height:18px;border-radius:50%;background:oklch(0.60 0.14 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;font-family:'JetBrains Mono',ui-monospace,monospace;margin-top:1px;">i</span>
+        <p style="margin:0;font-size:14px;line-height:1.55;color:oklch(0.40 0.03 250);">This page gets an agent set up. For the full endpoint-by-endpoint reference — request bodies, response shapes, and error codes — see the <a href="#">REST API reference</a>.</p>
+      </div>
+
+      <!-- SETUP -->
+      <h2 id="setup" style="scroll-margin-top:78px;font-size:26px;line-height:1.2;letter-spacing:-0.02em;font-weight:600;margin:0 0 8px 0;color:oklch(0.24 0.02 255);">Setup</h2>
+      <div style="height:1px;background:oklch(0.94 0.005 255);margin:0 0 22px 0;"></div>
+
+      <ol style="list-style:none;margin:0 0 36px 0;padding:0;display:flex;flex-direction:column;gap:22px;counter-reset:step;">
+        <li style="display:flex;gap:16px;">
+          <span style="flex:0 0 auto;width:26px;height:26px;border-radius:50%;background:oklch(0.96 0.02 250);border:1px solid oklch(0.88 0.04 250);color:oklch(0.42 0.11 250);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;">1</span>
+          <div style="flex:1;min-width:0;padding-top:1px;">
+            <p style="margin:0;font-size:15px;line-height:1.6;color:oklch(0.38 0.02 255);"><b style="color:oklch(0.26 0.02 255);font-weight:600;">Mint a board API key.</b> Open your board's <b style="color:oklch(0.32 0.02 255);font-weight:600;">Settings → API keys</b> (at <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">/board/:slug/settings</code>) and <b style="color:oklch(0.32 0.02 255);font-weight:600;">Generate</b> a key. It is shown once — copy it then. Regenerating replaces the previous key.</p>
+          </div>
+        </li>
+        <li style="display:flex;gap:16px;">
+          <span style="flex:0 0 auto;width:26px;height:26px;border-radius:50%;background:oklch(0.96 0.02 250);border:1px solid oklch(0.88 0.04 250);color:oklch(0.42 0.11 250);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;">2</span>
+          <div style="flex:1;min-width:0;padding-top:1px;">
+            <p style="margin:0 0 12px 0;font-size:15px;line-height:1.6;color:oklch(0.38 0.02 255);"><b style="color:oklch(0.26 0.02 255);font-weight:600;">Point your agent's shell at the board.</b> Set two environment variables (for example in a gitignored <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">.envrc.local</code>):</p>
+            <div style="border-radius:10px;overflow:hidden;border:1px solid {{ codeBorder }};">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:{{ codeBarBg }};border-bottom:1px solid {{ codeBorder }};">
+                <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:{{ codeBarText }};">bash</span>
+                <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:{{ codeBarText }};">Copy</span>
+              </div>
+              <pre style="margin:0;padding:14px 16px;background:{{ codeBg }};font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;line-height:1.7;color:{{ codeText }};overflow-x:auto;"><span style="color:{{ tkKey }};">export</span> RELAY_URL=<span style="color:{{ tkStr }};">"https://&lt;your-relay-host&gt;"</span>
+<span style="color:{{ tkKey }};">export</span> RELAY_API_KEY=<span style="color:{{ tkStr }};">"relay_xxxxxxxxxxxx_…"</span></pre>
+            </div>
+          </div>
+        </li>
+        <li style="display:flex;gap:16px;">
+          <span style="flex:0 0 auto;width:26px;height:26px;border-radius:50%;background:oklch(0.96 0.02 250);border:1px solid oklch(0.88 0.04 250);color:oklch(0.42 0.11 250);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;">3</span>
+          <div style="flex:1;min-width:0;padding-top:1px;">
+            <p style="margin:0;font-size:15px;line-height:1.6;color:oklch(0.38 0.02 255);"><b style="color:oklch(0.26 0.02 255);font-weight:600;">Confirm access.</b> Run <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">bin/relay board</code> — it should print your board's stages and cards. It's Python-3-stdlib only, so it runs anywhere your agent does.</p>
+          </div>
+        </li>
+      </ol>
+
+      <!-- AUTHENTICATION -->
+      <h2 id="auth" style="scroll-margin-top:78px;font-size:26px;line-height:1.2;letter-spacing:-0.02em;font-weight:600;margin:0 0 8px 0;color:oklch(0.24 0.02 255);">Authentication</h2>
+      <div style="height:1px;background:oklch(0.94 0.005 255);margin:0 0 22px 0;"></div>
+
+      <p style="font-size:15px;line-height:1.7;color:oklch(0.40 0.02 255);margin:0 0 16px 0;">Every <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">/api/*</code> request must carry the board key as a bearer token:</p>
+
+      <div style="border-radius:10px;overflow:hidden;border:1px solid {{ codeBorder }};margin:0 0 20px 0;">
+        <pre style="margin:0;padding:14px 16px;background:{{ codeBg }};font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;line-height:1.7;color:{{ codeText }};overflow-x:auto;"><span style="color:{{ tkFn }};">Authorization:</span> Bearer <span style="color:{{ tkComment }};">&lt;your board API key&gt;</span></pre>
+      </div>
+
+      <p style="font-size:15px;line-height:1.7;color:oklch(0.40 0.02 255);margin:0 0 20px 0;">A missing or invalid key returns <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;background:oklch(0.97 0.02 15);border:1px solid oklch(0.90 0.05 15);border-radius:5px;padding:1px 6px;color:oklch(0.52 0.16 15);">401</code> with the standard error envelope that every API error uses:</p>
+
+      <!-- warning callout -->
+      <div style="display:flex;gap:12px;background:oklch(0.975 0.025 75);border:1px solid oklch(0.88 0.07 75);border-radius:11px;padding:14px 16px;margin:0 0 20px 0;">
+        <span style="flex:0 0 auto;width:18px;height:18px;border-radius:5px;background:oklch(0.70 0.13 65);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;font-family:'JetBrains Mono',ui-monospace,monospace;margin-top:1px;">!</span>
+        <p style="margin:0;font-size:14px;line-height:1.55;color:oklch(0.40 0.05 65);">Keys are scoped to a single board and shown once. Store them in a secret manager — never commit them to source control.</p>
+      </div>
+
+      <div style="border-radius:10px;overflow:hidden;border:1px solid {{ codeBorder }};margin:0 0 36px 0;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:{{ codeBarBg }};border-bottom:1px solid {{ codeBorder }};">
+          <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:{{ codeBarText }};">json · 401 response</span>
+          <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:{{ codeBarText }};">Copy</span>
+        </div>
+        <pre style="margin:0;padding:14px 16px;background:{{ codeBg }};font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;line-height:1.7;color:{{ codeText }};overflow-x:auto;">{ <span style="color:{{ tkFn }};">"error"</span>: { <span style="color:{{ tkFn }};">"code"</span>: <span style="color:{{ tkStr }};">"unauthorized"</span>, <span style="color:{{ tkFn }};">"message"</span>: <span style="color:{{ tkStr }};">"..."</span> } }</pre>
+      </div>
+
+      <!-- ENDPOINTS -->
+      <h2 id="endpoints" style="scroll-margin-top:78px;font-size:26px;line-height:1.2;letter-spacing:-0.02em;font-weight:600;margin:0 0 8px 0;color:oklch(0.24 0.02 255);">Endpoints</h2>
+      <div style="height:1px;background:oklch(0.94 0.005 255);margin:0 0 22px 0;"></div>
+
+      <p style="font-size:15px;line-height:1.7;color:oklch(0.40 0.02 255);margin:0 0 16px 0;">The API is scoped to a single board and lives under <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">/api</code>. Each row is one endpoint; per-card actions hang off <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">/api/cards/:ref</code>.</p>
+
+      <!-- endpoint list with method pills -->
+      <div style="border:1px solid oklch(0.93 0.006 255);border-radius:11px;overflow:hidden;margin:0 0 36px 0;">
+        <sc-for list="{{ endpoints }}" as="ep" hint-placeholder-count="5">
+          <div style="display:flex;align-items:center;gap:12px;padding:11px 14px;border-top:1px solid oklch(0.95 0.005 255);">
+            <span style="flex:0 0 auto;width:52px;text-align:center;font-size:10.5px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;letter-spacing:0.03em;padding:3px 0;border-radius:5px;background:{{ ep.mbg }};color:{{ ep.mc }};">{{ ep.method }}</span>
+            <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:oklch(0.32 0.02 255);">{{ ep.path }}</code>
+            <span style="flex:1;"></span>
+            <span style="font-size:12.5px;color:oklch(0.55 0.02 255);">{{ ep.desc }}</span>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- CLI -->
+      <h2 id="cli" style="scroll-margin-top:78px;font-size:26px;line-height:1.2;letter-spacing:-0.02em;font-weight:600;margin:0 0 8px 0;color:oklch(0.24 0.02 255);">CLI quick reference</h2>
+      <div style="height:1px;background:oklch(0.94 0.005 255);margin:0 0 22px 0;"></div>
+
+      <p style="font-size:15px;line-height:1.7;color:oklch(0.40 0.02 255);margin:0 0 18px 0;">Most agents drive the API through the <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">bin/relay</code> CLI rather than raw HTTP. Common commands:</p>
+
+      <div style="border:1px solid oklch(0.93 0.006 255);border-radius:11px;overflow:hidden;margin:0 0 20px 0;">
+        <div style="display:flex;padding:10px 16px;background:oklch(0.975 0.004 255);font-size:11px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);letter-spacing:0.02em;">
+          <span style="flex:0 0 300px;">COMMAND</span><span style="flex:1;">WHAT IT DOES</span>
+        </div>
+        <sc-for list="{{ commands }}" as="cmd" hint-placeholder-count="6">
+          <div style="display:flex;align-items:center;padding:10px 16px;border-top:1px solid oklch(0.95 0.005 255);">
+            <code style="flex:0 0 300px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;color:oklch(0.40 0.06 292);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:12px;">{{ cmd.cmd }}</code>
+            <span style="flex:1;font-size:13px;line-height:1.45;color:oklch(0.46 0.02 255);">{{ cmd.desc }}</span>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- blockquote / note -->
+      <blockquote style="margin:0 0 44px 0;padding:4px 0 4px 18px;border-left:3px solid oklch(0.86 0.04 292);">
+        <p style="margin:0;font-size:14.5px;line-height:1.65;color:oklch(0.48 0.03 292);font-style:italic;">Text arguments accept <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;font-style:normal;background:oklch(0.96 0.02 292);border-radius:5px;padding:1px 6px;color:oklch(0.44 0.10 292);">-</code> (read from stdin) or <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;font-style:normal;background:oklch(0.96 0.02 292);border-radius:5px;padding:1px 6px;color:oklch(0.44 0.10 292);">@path</code> (read from a file) for long content like specs and plans.</p>
+      </blockquote>
+
+      <!-- prev / next -->
+      <div style="display:flex;gap:14px;">
+        <a href="#" style="flex:1;border:1px solid oklch(0.92 0.006 255);border-radius:11px;padding:14px 16px;display:flex;flex-direction:column;gap:4px;" style-hover="{ borderColor: 'oklch(0.80 0.03 250)' }">
+          <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">← PREVIOUS</span>
+          <span style="font-size:14px;font-weight:600;color:oklch(0.30 0.02 255);">Cards &amp; handoffs</span>
+        </a>
+        <a href="#" style="flex:1;border:1px solid oklch(0.92 0.006 255);border-radius:11px;padding:14px 16px;display:flex;flex-direction:column;gap:4px;text-align:right;" style-hover="{ borderColor: 'oklch(0.80 0.03 250)' }">
+          <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">NEXT →</span>
+          <span style="font-size:14px;font-weight:600;color:oklch(0.30 0.02 255);">REST API reference</span>
+        </a>
+      </div>
+
+    </main>
+
+    <!-- ---- ON THIS PAGE (TOC rail) ---- -->
+    <sc-if value="{{ showToc }}" hint-placeholder-val="{{ true }}">
+      <aside style="flex:0 0 172px;position:sticky;top:62px;align-self:flex-start;padding:44px 0 60px 0;">
+        <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin-bottom:14px;">ON THIS PAGE</div>
+        <div style="display:flex;flex-direction:column;gap:9px;border-left:1px solid oklch(0.92 0.006 255);padding-left:14px;">
+          <a href="#setup" style="font-size:13px;color:oklch(0.36 0.09 250);font-weight:600;">Setup</a>
+          <a href="#auth" style="font-size:13px;color:oklch(0.52 0.02 255);">Authentication</a>
+          <a href="#endpoints" style="font-size:13px;color:oklch(0.52 0.02 255);">Endpoints</a>
+          <a href="#cli" style="font-size:13px;color:oklch(0.52 0.02 255);">CLI quick reference</a>
+        </div>
+      </aside>
+    </sc-if>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1200,&quot;height&quot;:1500},&quot;codeTheme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Docs&quot;},&quot;showToc&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Docs&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const dark = (this.props.codeTheme ?? 'dark') === 'dark';
+    const code = dark ? {
+      codeBg: 'oklch(0.20 0.02 255)',
+      codeBarBg: 'oklch(0.24 0.02 255)',
+      codeBorder: 'oklch(0.30 0.02 255)',
+      codeText: 'oklch(0.88 0.008 255)',
+      codeBarText: 'oklch(0.66 0.02 255)',
+      tkKey: 'oklch(0.74 0.11 292)',
+      tkStr: 'oklch(0.76 0.10 195)',
+      tkFn: 'oklch(0.74 0.11 250)',
+      tkComment: 'oklch(0.60 0.02 255)',
+    } : {
+      codeBg: 'oklch(0.985 0.003 255)',
+      codeBarBg: 'oklch(0.965 0.004 255)',
+      codeBorder: 'oklch(0.91 0.006 255)',
+      codeText: 'oklch(0.34 0.02 255)',
+      codeBarText: 'oklch(0.56 0.02 255)',
+      tkKey: 'oklch(0.48 0.14 292)',
+      tkStr: 'oklch(0.44 0.11 195)',
+      tkFn: 'oklch(0.46 0.13 250)',
+      tkComment: 'oklch(0.62 0.02 255)',
+    };
+
+    const HBG = 'oklch(0.95 0.02 155)', HC = 'oklch(0.42 0.11 155)';
+    const BBG = 'oklch(0.95 0.03 250)', BC = 'oklch(0.42 0.12 250)';
+    const endpoints = [
+      { method: 'GET',  path: '/api/board',                mbg: HBG, mc: HC, desc: 'Full board: stages + cards' },
+      { method: 'GET',  path: '/api/cards',                mbg: HBG, mc: HC, desc: 'List cards' },
+      { method: 'POST', path: '/api/cards',                mbg: BBG, mc: BC, desc: 'Create a card' },
+      { method: 'POST', path: '/api/cards/:ref/move',      mbg: BBG, mc: BC, desc: 'Move to a stage' },
+      { method: 'POST', path: '/api/cards/:ref/needs-input', mbg: BBG, mc: BC, desc: 'Ask the human — blocks the card' },
+      { method: 'POST', path: '/api/cards/:ref/approve',   mbg: BBG, mc: BC, desc: 'Gate: advance the card' },
+      { method: 'POST', path: '/api/cards/:ref/reject',    mbg: BBG, mc: BC, desc: 'Gate: send it back' },
+    ];
+    const commands = [
+      { cmd: 'bin/relay board',                    desc: 'Show the board: stages with their cards' },
+      { cmd: 'bin/relay card RLY-12',              desc: 'One card: description, plan, branch, timeline' },
+      { cmd: 'bin/relay create "Fix login"',       desc: 'Create a card (--stage / --description / --tag)' },
+      { cmd: 'bin/relay comment RLY-12 "…"',       desc: 'Post a comment (as Relay AI)' },
+      { cmd: 'bin/relay move RLY-12 Code',         desc: 'Move the card to a stage (by name)' },
+      { cmd: 'bin/relay needs-input RLY-12 "…"',   desc: 'Ask the human a question — blocks the card' },
+      { cmd: 'bin/relay approve RLY-12',           desc: 'Gate: advance the card' },
+    ];
+
+    return {
+      ...code,
+      endpoints,
+      commands,
+      showToc: this.props.showToc ?? true,
+    };
+  }
+}
+</script>
+</body>
+</html>

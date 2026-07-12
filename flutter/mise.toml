@@ -1,0 +1,4 @@
+[tools]
+flutter = "3.44.1"
+# ruby carries CocoaPods (pod 1.16.2), needed for the iOS webview plugin build.
+ruby = "4.0.5"

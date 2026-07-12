@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.32 0.02 255);background:oklch(0.955 0.008 255);-webkit-font-smoothing:antialiased;}
+  a{color:oklch(0.60 0.14 250);text-decoration:none;} a:hover{text-decoration:underline;}
+  p{margin:0;}
+</style>
+</helmet>
+
+<div style="max-width:800px;margin:0 auto;padding:64px 40px 120px 40px;">
+
+  <!-- MASTHEAD -->
+  <div style="display:flex;align-items:center;gap:11px;margin-bottom:26px;">
+    <div style="width:30px;height:30px;border-radius:9px;background:oklch(0.60 0.14 250);display:flex;align-items:center;justify-content:center;position:relative;flex:0 0 auto;">
+      <div style="width:11px;height:11px;border-radius:50%;background:oklch(1 0 0);"></div>
+      <div style="position:absolute;right:4px;top:4px;width:5px;height:5px;border-radius:50%;background:oklch(0.60 0.14 250);box-shadow:0 0 0 1.8px oklch(1 0 0);"></div>
+    </div>
+    <span style="font-size:15px;font-weight:600;letter-spacing:-0.01em;">Relay</span>
+    <span style="font-size:15px;color:oklch(0.62 0.02 255);letter-spacing:-0.01em;">Mobile</span>
+    <span style="flex:1;"></span>
+    <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);">PLATFORM BRIEF · v0.1 · Jul 2026</span>
+  </div>
+
+  <h1 style="font-size:42px;line-height:1.05;letter-spacing:-0.035em;font-weight:600;margin:0 0 20px 0;color:oklch(0.20 0.02 255);max-width:640px;">What Relay is — and isn't — on a phone</h1>
+  <p style="font-size:17px;line-height:1.6;color:oklch(0.42 0.02 255);max-width:600px;">Relay's home is the desktop board, where you do deep work with the AI. Mobile is not a second copy of that. It's a <strong style="color:oklch(0.26 0.02 255);">companion for keeping work moving when you're away from your desk</strong> — its whole job is to unblock the AI and clear the decisions only you can make.</p>
+
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:40px 0;"></div>
+
+  <!-- 01 · THESIS / IS-ISNT -->
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:oklch(0.55 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin-bottom:18px;">01 · THE LINE WE'RE DRAWING</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-top:3px solid oklch(0.60 0.14 250);border-radius:14px;padding:22px;">
+      <div style="font-size:13px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.46 0.12 250);margin-bottom:16px;">MOBILE IS…</div>
+      <div style="display:flex;flex-direction:column;gap:13px;">
+        <div style="display:flex;gap:10px;"><span style="color:oklch(0.5 0.12 155);font-size:15px;line-height:1.4;flex:0 0 auto;">✓</span><span style="font-size:14px;line-height:1.5;color:oklch(0.34 0.02 255);">Where you <strong>respond to the AI's requests for input</strong></span></div>
+        <div style="display:flex;gap:10px;"><span style="color:oklch(0.5 0.12 155);font-size:15px;line-height:1.4;flex:0 0 auto;">✓</span><span style="font-size:14px;line-height:1.5;color:oklch(0.34 0.02 255);">Where you <strong>review a finished card and approve or reject it</strong></span></div>
+        <div style="display:flex;gap:10px;"><span style="color:oklch(0.5 0.12 155);font-size:15px;line-height:1.4;flex:0 0 auto;">✓</span><span style="font-size:14px;line-height:1.5;color:oklch(0.34 0.02 255);">A glance at status — what's working, what's blocked, what's waiting on you</span></div>
+        <div style="display:flex;gap:10px;"><span style="color:oklch(0.5 0.12 155);font-size:15px;line-height:1.4;flex:0 0 auto;">✓</span><span style="font-size:14px;line-height:1.5;color:oklch(0.34 0.02 255);">The thing that <strong>pushes you</strong> the moment the AI is blocked on you</span></div>
+      </div>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-top:3px solid oklch(0.62 0.02 255);border-radius:14px;padding:22px;">
+      <div style="font-size:13px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.5 0.02 255);margin-bottom:16px;">MOBILE ISN'T…</div>
+      <div style="display:flex;flex-direction:column;gap:13px;">
+        <div style="display:flex;gap:10px;"><span style="color:oklch(0.65 0.02 255);font-size:15px;line-height:1.3;flex:0 0 auto;">✕</span><span style="font-size:14px;line-height:1.5;color:oklch(0.5 0.02 255);">Authoring specs or plans from scratch</span></div>
+        <div style="display:flex;gap:10px;"><span style="color:oklch(0.65 0.02 255);font-size:15px;line-height:1.3;flex:0 0 auto;">✕</span><span style="font-size:14px;line-height:1.5;color:oklch(0.5 0.02 255);">Building or restructuring a board — stages, columns, rules</span></div>
+        <div style="display:flex;gap:10px;"><span style="color:oklch(0.65 0.02 255);font-size:15px;line-height:1.3;flex:0 0 auto;">✕</span><span style="font-size:14px;line-height:1.5;color:oklch(0.5 0.02 255);">Long-form writing or heavy multi-card reorganization</span></div>
+        <div style="display:flex;gap:10px;"><span style="color:oklch(0.65 0.02 255);font-size:15px;line-height:1.3;flex:0 0 auto;">✕</span><span style="font-size:14px;line-height:1.5;color:oklch(0.5 0.02 255);">Admin, billing, integrations setup — desktop work</span></div>
+      </div>
+    </div>
+  </div>
+  <p style="font-size:13px;line-height:1.55;color:oklch(0.52 0.02 255);font-style:italic;margin-bottom:40px;">Rule of thumb: if it takes more than a minute of typing or more than one screen of layout, it belongs on the web board. Mobile is for the <em>decision</em>, not the <em>production</em>.</p>
+
+  <!-- 02 · SURFACES -->
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:oklch(0.55 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin-bottom:18px;">02 · THE SURFACES WE'RE KEEPING</div>
+  <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px;">
+    <div style="display:flex;gap:16px;align-items:flex-start;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:20px;">
+      <span style="font-size:11px;font-weight:700;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(1 0 0);background:oklch(0.60 0.14 250);border-radius:6px;padding:4px 9px;flex:0 0 auto;margin-top:2px;">1A</span>
+      <div>
+        <div style="font-size:16px;font-weight:600;letter-spacing:-0.015em;color:oklch(0.24 0.02 255);margin-bottom:5px;">Inbox — the front door <span style="font-size:12px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.5 0.12 155);background:oklch(0.96 0.03 155);border-radius:5px;padding:2px 7px;margin-left:6px;">KEEP</span></div>
+        <p style="font-size:14px;line-height:1.55;color:oklch(0.44 0.02 255);">A single "Needs you" queue fed by push. This is where 80% of mobile sessions start and end — clear the decision, close the loop, put the phone away.</p>
+      </div>
+    </div>
+    <div style="display:flex;gap:16px;align-items:flex-start;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:20px;">
+      <span style="font-size:11px;font-weight:700;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(1 0 0);background:oklch(0.56 0.16 292);border-radius:6px;padding:4px 9px;flex:0 0 auto;margin-top:2px;">1B</span>
+      <div>
+        <div style="font-size:16px;font-weight:600;letter-spacing:-0.015em;color:oklch(0.24 0.02 255);margin-bottom:5px;">Board — the map <span style="font-size:12px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.5 0.12 155);background:oklch(0.96 0.03 155);border-radius:5px;padding:2px 7px;margin-left:6px;">KEEP</span></div>
+        <p style="font-size:14px;line-height:1.55;color:oklch(0.44 0.02 255);">For when you want the fuller picture — one stage at a time, swipe between them, tap into any card. Read-mostly, with the same review actions available inline.</p>
+      </div>
+    </div>
+    <div style="display:flex;gap:16px;align-items:flex-start;background:oklch(0.975 0.004 255);border:1px dashed oklch(0.85 0.01 255);border-radius:14px;padding:20px;opacity:0.9;">
+      <span style="font-size:11px;font-weight:700;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);background:oklch(0.92 0.008 255);border-radius:6px;padding:4px 9px;flex:0 0 auto;margin-top:2px;">1C</span>
+      <div>
+        <div style="font-size:16px;font-weight:600;letter-spacing:-0.015em;color:oklch(0.45 0.02 255);margin-bottom:5px;">Stream — conversational feed <span style="font-size:12px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.03 30);background:oklch(0.95 0.03 30);border-radius:5px;padding:2px 7px;margin-left:6px;">DROP</span></div>
+        <p style="font-size:14px;line-height:1.55;color:oklch(0.5 0.02 255);">Cut. It reframes structured work as chat and buries the board's status model. The Inbox already delivers the "AI needs you" moment without pretending work is a conversation.</p>
+      </div>
+    </div>
+  </div>
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:40px 0;"></div>
+
+  <!-- 03 · ACTIONS -->
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:oklch(0.55 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin-bottom:8px;">03 · WHAT YOU CAN ACTUALLY DO</div>
+  <p style="font-size:15px;line-height:1.6;color:oklch(0.42 0.02 255);max-width:600px;margin-bottom:22px;">Two primary actions carry the app. Everything else is in service of doing those two with confidence.</p>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:22px;">
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:20px;">
+      <div style="display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.52 0.11 65);background:oklch(0.97 0.03 75);border:1px solid oklch(0.87 0.07 75);border-radius:5px;padding:3px 8px;margin-bottom:12px;"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.70 0.13 65);"></span>PRIMARY</div>
+      <div style="font-size:16px;font-weight:600;letter-spacing:-0.015em;color:oklch(0.24 0.02 255);margin-bottom:6px;">Respond to a request for input</div>
+      <p style="font-size:13.5px;line-height:1.5;color:oklch(0.46 0.02 255);">The AI paused and asked a question. You answer — pick an option, type a short reply, or send it back with direction. Work resumes immediately.</p>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:20px;">
+      <div style="display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.52 0.11 65);background:oklch(0.97 0.03 75);border:1px solid oklch(0.87 0.07 75);border-radius:5px;padding:3px 8px;margin-bottom:12px;"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.70 0.13 65);"></span>PRIMARY</div>
+      <div style="font-size:16px;font-weight:600;letter-spacing:-0.015em;color:oklch(0.24 0.02 255);margin-bottom:6px;">Review a card → approve or reject</div>
+      <p style="font-size:13.5px;line-height:1.5;color:oklch(0.46 0.02 255);">The AI finished something. You approve it to move on, or reject with a reason. <strong>Neither is a blind tap</strong> — both need supporting context first (see §04).</p>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:13px;align-items:center;background:oklch(0.96 0.03 292);border:1px solid oklch(0.88 0.05 292);border-radius:14px;padding:16px 20px;margin-bottom:14px;">
+    <span style="width:34px;height:34px;border-radius:10px;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;flex:0 0 auto;"><span style="width:9px;height:14px;border-radius:5px;background:oklch(1 0 0);"></span></span>
+    <div><div style="font-size:14.5px;font-weight:600;color:oklch(0.26 0.02 255);">Text entry is voice-first</div><div style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);">Typing on a phone is the enemy of a quick decision. Tap the mic and speak your answer — transcribed on-device with Whisper. Type only if you'd rather.</div></div>
+  </div>
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:20px;">
+    <div style="font-size:10px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.5 0.02 255);margin-bottom:14px;letter-spacing:0.04em;">SECONDARY · SUPPORTED, NOT THE POINT</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;">
+      <span style="font-size:13px;color:oklch(0.38 0.02 255);background:oklch(0.965 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:8px;padding:7px 12px;">Hand a card off to the AI</span>
+      <span style="font-size:13px;color:oklch(0.38 0.02 255);background:oklch(0.965 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:8px;padding:7px 12px;">Move a card between stages</span>
+      <span style="font-size:13px;color:oklch(0.38 0.02 255);background:oklch(0.965 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:8px;padding:7px 12px;">Comment / reply</span>
+      <span style="font-size:13px;color:oklch(0.38 0.02 255);background:oklch(0.965 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:8px;padding:7px 12px;">Reply by voice</span>
+      <span style="font-size:13px;color:oklch(0.38 0.02 255);background:oklch(0.965 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:8px;padding:7px 12px;">Search a board or card</span>
+      <span style="font-size:13px;color:oklch(0.38 0.02 255);background:oklch(0.965 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:8px;padding:7px 12px;">Reassign a card</span>
+    </div>
+  </div>
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:40px 0;"></div>
+
+  <!-- 04 · SUPPLEMENTAL CONTEXT -->
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:oklch(0.55 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin-bottom:8px;">04 · "BEFORE I CAN APPROVE, I NEED TO SEE…"</div>
+  <p style="font-size:15px;line-height:1.6;color:oklch(0.42 0.02 255);max-width:620px;margin-bottom:22px;">A reject/approve is only as good as the context behind it. The hard design problem for mobile is surfacing that context <em>without</em> turning the phone into a full IDE. Each of these opens as a focused sheet you can dismiss straight back to the decision.</p>
+
+  <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;">
+    <div style="display:flex;gap:14px;align-items:center;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:15px 18px;">
+      <span style="width:34px;height:34px;border-radius:9px;background:oklch(0.96 0.03 250);display:flex;align-items:center;justify-content:center;flex:0 0 auto;"><span style="width:13px;height:16px;border:2px solid oklch(0.55 0.12 250);border-radius:2px;"></span></span>
+      <div style="flex:1;"><div style="font-size:14.5px;font-weight:600;color:oklch(0.28 0.02 255);">The spec or plan</div><div style="font-size:12.5px;color:oklch(0.5 0.02 255);">What was this card supposed to do? Read the doc the AI worked from.</div></div>
+      <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.46 0.12 250);background:oklch(0.96 0.02 250);border-radius:5px;padding:3px 8px;flex:0 0 auto;">WEB SHEET</span>
+    </div>
+    <div style="display:flex;gap:14px;align-items:center;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:15px 18px;">
+      <span style="width:34px;height:34px;border-radius:9px;background:oklch(0.95 0.006 255);display:flex;align-items:center;justify-content:center;flex:0 0 auto;"><span style="display:flex;gap:2px;align-items:center;"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.4 0.02 255);"></span><span style="width:10px;height:2px;background:oklch(0.4 0.02 255);"></span><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.4 0.02 255);"></span></span></span>
+      <div style="flex:1;"><div style="font-size:14.5px;font-weight:600;color:oklch(0.28 0.02 255);">The PR on GitHub</div><div style="font-size:12.5px;color:oklch(0.5 0.02 255);">The actual diff — deep-links straight into the GitHub app. It's already great; no reason to rebuild it inside Relay.</div></div>
+      <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.5 0.02 255);background:oklch(0.95 0.006 255);border-radius:5px;padding:3px 8px;flex:0 0 auto;">OPENS GITHUB APP</span>
+    </div>
+    <div style="display:flex;gap:14px;align-items:center;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:15px 18px;">
+      <span style="width:34px;height:34px;border-radius:9px;background:oklch(0.96 0.03 250);display:flex;align-items:center;justify-content:center;flex:0 0 auto;"><span style="width:16px;height:12px;border:2px solid oklch(0.55 0.12 250);border-radius:3px 3px 3px 0;"></span></span>
+      <div style="flex:1;"><div style="font-size:14.5px;font-weight:600;color:oklch(0.28 0.02 255);">Comments — soon with screenshots</div><div style="font-size:12.5px;color:oklch(0.5 0.02 255);">The discussion thread on the card. Image attachments need a real mobile viewer (pinch-zoom, full-screen).</div></div>
+      <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.46 0.12 250);background:oklch(0.96 0.02 250);border-radius:5px;padding:3px 8px;flex:0 0 auto;">WEB + NATIVE VIEWER</span>
+    </div>
+  </div>
+  <p style="font-size:13px;line-height:1.55;color:oklch(0.52 0.02 255);font-style:italic;margin-bottom:40px;">Design principle: context opens <em>over</em> the decision and dismisses back to it. You should never lose the "approve / reject" bar by going to look at something.</p>
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:40px 0;"></div>
+
+  <!-- 05 · ARCHITECTURE -->
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:oklch(0.55 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin-bottom:8px;">05 · FULLY NATIVE, OR REUSE THE WEB? — RECOMMENDATION</div>
+  <p style="font-size:15px;line-height:1.6;color:oklch(0.42 0.02 255);max-width:640px;margin-bottom:10px;">You asked the right question. The honest answer: <strong style="color:oklch(0.26 0.02 255);">neither extreme.</strong> A pure webview wrapper feels cheap and can't push you or handle screenshots well; a fully native rebuild duplicates the entire product and doubles every future change.</p>
+  <div style="background:oklch(0.96 0.03 250);border:1px solid oklch(0.88 0.05 250);border-radius:12px;padding:16px 20px;margin-bottom:26px;">
+    <div style="font-size:11px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.46 0.12 250);margin-bottom:5px;">THE CALL</div>
+    <p style="font-size:15px;line-height:1.55;color:oklch(0.28 0.02 255);">A <strong>hybrid — a thin native shell around reused web views.</strong> Native owns everything that must feel instant and system-integrated. The existing live-view rendering delivers everything that's content-dense and changes fast. One product, two rendering layers.</p>
+  </div>
+
+  <!-- layer diagram -->
+  <div style="display:flex;flex-direction:column;gap:0;border-radius:16px;overflow:hidden;border:1px solid oklch(0.90 0.006 255);margin-bottom:14px;">
+    <div style="background:oklch(0.60 0.14 250);padding:20px 22px;color:oklch(1 0 0);">
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px;"><span style="font-size:11px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;letter-spacing:0.05em;opacity:0.85;">LAYER 1</span><span style="font-size:16px;font-weight:600;letter-spacing:-0.01em;">Native shell — Swift / Kotlin</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:7px;">
+        <span style="font-size:12px;background:oklch(1 0 0 / 0.18);border-radius:7px;padding:5px 10px;">Push notifications</span>
+        <span style="font-size:12px;background:oklch(1 0 0 / 0.18);border-radius:7px;padding:5px 10px;">Tab bar &amp; navigation</span>
+        <span style="font-size:12px;background:oklch(1 0 0 / 0.18);border-radius:7px;padding:5px 10px;">Inbox list</span>
+        <span style="font-size:12px;background:oklch(1 0 0 / 0.18);border-radius:7px;padding:5px 10px;">Approve / reject bar</span>
+        <span style="font-size:12px;background:oklch(1 0 0 / 0.18);border-radius:7px;padding:5px 10px;">Sheets &amp; in-app browser</span>
+        <span style="font-size:12px;background:oklch(1 0 0 / 0.18);border-radius:7px;padding:5px 10px;">Screenshot viewer</span>
+        <span style="font-size:12px;background:oklch(1 0 0 / 0.18);border-radius:7px;padding:5px 10px;">Biometrics / share</span>
+        <span style="font-size:12px;background:oklch(1 0 0 / 0.18);border-radius:7px;padding:5px 10px;">Voice input · Whisper</span>
+      </div>
+    </div>
+    <div style="background:oklch(0.56 0.16 292);padding:20px 22px;color:oklch(1 0 0);">
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px;"><span style="font-size:11px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;letter-spacing:0.05em;opacity:0.85;">LAYER 2</span><span style="font-size:16px;font-weight:600;letter-spacing:-0.01em;">Web content — reused live view</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:7px;">
+        <span style="font-size:12px;background:oklch(1 0 0 / 0.18);border-radius:7px;padding:5px 10px;">Card body</span>
+        <span style="font-size:12px;background:oklch(1 0 0 / 0.18);border-radius:7px;padding:5px 10px;">Spec &amp; plan docs</span>
+        <span style="font-size:12px;background:oklch(1 0 0 / 0.18);border-radius:7px;padding:5px 10px;">Board columns (responsive)</span>
+        <span style="font-size:12px;background:oklch(1 0 0 / 0.18);border-radius:7px;padding:5px 10px;">Comment threads</span>
+        <span style="font-size:12px;background:oklch(1 0 0 / 0.18);border-radius:7px;padding:5px 10px;">Live app preview</span>
+      </div>
+    </div>
+    <div style="background:oklch(0.28 0.02 255);padding:20px 22px;color:oklch(0.9 0.01 255);">
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px;"><span style="font-size:11px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;letter-spacing:0.05em;opacity:0.7;">LAYER 0</span><span style="font-size:16px;font-weight:600;letter-spacing:-0.01em;color:oklch(1 0 0);">Shared core</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:7px;">
+        <span style="font-size:12px;background:oklch(1 0 0 / 0.12);border-radius:7px;padding:5px 10px;">One API &amp; data model</span>
+        <span style="font-size:12px;background:oklch(1 0 0 / 0.12);border-radius:7px;padding:5px 10px;">Same auth session</span>
+        <span style="font-size:12px;background:oklch(1 0 0 / 0.12);border-radius:7px;padding:5px 10px;">Realtime sync (web ⇄ mobile)</span>
+      </div>
+    </div>
+  </div>
+  <p style="font-size:13px;line-height:1.55;color:oklch(0.52 0.02 255);margin-bottom:26px;">Why it works for Relay specifically: the <strong>decision surfaces are small and stable</strong> (a queue, an action bar, an answer field) — cheap to build native and worth the polish. The <strong>content surfaces are large and change constantly</strong> (cards, specs, PRs, comments) — exactly what you don't want to maintain twice. The web views already exist; we're wrapping them, not rebuilding them.</p>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:40px;">
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px;">
+      <div style="font-size:12px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.5 0.02 255);margin-bottom:8px;">FASTEST TO SHIP</div>
+      <div style="font-size:13.5px;line-height:1.5;color:oklch(0.4 0.02 255);">Native inbox + push first, wrapping today's card view. Ships the core loop in weeks, not quarters.</div>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px;">
+      <div style="font-size:12px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.5 0.02 255);margin-bottom:8px;">WHERE TO INVEST NATIVE</div>
+      <div style="font-size:13.5px;line-height:1.5;color:oklch(0.4 0.02 255);">The action bar, transitions, and the screenshot viewer. These are what make it feel like an app, not a site.</div>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px;">
+      <div style="font-size:12px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.5 0.02 255);margin-bottom:8px;">THE ONE RISK</div>
+      <div style="font-size:13.5px;line-height:1.5;color:oklch(0.4 0.02 255);">Web views must be genuinely mobile-responsive, or the seams show. Budget design time for the card/spec views specifically.</div>
+    </div>
+  </div>
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:40px 0;"></div>
+
+  <!-- 06 · NOTIFICATION MODEL -->
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:oklch(0.55 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin-bottom:8px;">06 · THE NOTIFICATION MODEL</div>
+  <p style="font-size:15px;line-height:1.6;color:oklch(0.42 0.02 255);max-width:640px;margin-bottom:22px;">Push is the product. It's the only reason the app is on the phone at all, so the rules for it are load-bearing — not a settings afterthought.</p>
+  <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:26px;">
+    <div style="display:flex;gap:14px;align-items:flex-start;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:15px 18px;"><span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.46 0.12 250);flex:0 0 auto;margin-top:2px;">FIRES ON</span><div style="font-size:13.5px;line-height:1.5;color:oklch(0.36 0.02 255);">A card is <strong>ready for your review</strong>, the AI <strong>asks a question</strong>, or someone <strong>@mentions</strong> you. Nothing else pushes — progress and status never do.</div></div>
+    <div style="display:flex;gap:14px;align-items:flex-start;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:15px 18px;"><span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.46 0.12 250);flex:0 0 auto;margin-top:2px;">BATCHING</span><div style="font-size:13.5px;line-height:1.5;color:oklch(0.36 0.02 255);">One card = one push. A burst of AI activity collapses into a single "3 cards need you" rather than buzzing three times.</div></div>
+    <div style="display:flex;gap:14px;align-items:flex-start;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:15px 18px;"><span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.46 0.12 250);flex:0 0 auto;margin-top:2px;">QUIET&nbsp;HRS</span><div style="font-size:13.5px;line-height:1.5;color:oklch(0.36 0.02 255);">Respected by default. Work keeps moving overnight; you wake to a batched digest, not a night of buzzes.</div></div>
+    <div style="display:flex;gap:14px;align-items:flex-start;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:15px 18px;"><span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.46 0.12 250);flex:0 0 auto;margin-top:2px;">BADGE</span><div style="font-size:13.5px;line-height:1.5;color:oklch(0.36 0.02 255);">The app icon badge = the count of items in <strong>Needs you</strong>. It hits zero when you're caught up — that's the whole feedback loop.</div></div>
+    <div style="display:flex;gap:14px;align-items:flex-start;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:15px 18px;"><span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.46 0.12 250);flex:0 0 auto;margin-top:2px;">TAP</span><div style="font-size:13.5px;line-height:1.5;color:oklch(0.36 0.02 255);">A push deep-links <strong>straight to the card it's about</strong> — never to a generic inbox. One tap from lock screen to decision.</div></div>
+  </div>
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:40px 0;"></div>
+
+  <!-- 07 · SHIP PLAN -->
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:oklch(0.55 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin-bottom:8px;">07 · SHIP PLAN</div>
+  <p style="font-size:15px;line-height:1.6;color:oklch(0.42 0.02 255);max-width:640px;margin-bottom:10px;">Ship the decision loop first; everything else earns its way in. North-star metric: <strong style="color:oklch(0.26 0.02 255);">median time-to-unblock</strong> — how fast the AI gets its answer once it's stuck.</p>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:26px;">
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-top:3px solid oklch(0.60 0.14 250);border-radius:12px;padding:16px;"><div style="font-size:12px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.46 0.12 250);margin-bottom:10px;">V1 · THE LOOP</div><div style="font-size:12.5px;line-height:1.7;color:oklch(0.38 0.02 255);">Login &amp; push opt-in<br>Push → card review<br>Approve / reject + note<br>Needs-input answer<br>Needs you + empty state<br>Basic notification settings</div></div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-top:3px solid oklch(0.56 0.16 292);border-radius:12px;padding:16px;"><div style="font-size:12px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.46 0.14 292);margin-bottom:10px;">V1.1 · CONTEXT</div><div style="font-size:12.5px;line-height:1.7;color:oklch(0.38 0.02 255);">Board (read + move)<br>Boards list<br>Comments + screenshots<br>Spec sheet<br>Open in GitHub</div></div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-top:3px solid oklch(0.62 0.02 255);border-radius:12px;padding:16px;"><div style="font-size:12px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.5 0.02 255);margin-bottom:10px;">LATER · DEPTH</div><div style="font-size:12.5px;line-height:1.7;color:oklch(0.38 0.02 255);">Voice everywhere<br>Biometric gate on approve<br>Widgets / Live Activity<br>Offline action queue<br>Multi-board switching</div></div>
+  </div>
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:40px 0;"></div>
+
+  <!-- 08 · OPEN -->
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.09em;color:oklch(0.55 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin-bottom:16px;">08 · OPEN QUESTIONS</div>
+  <div style="display:flex;flex-direction:column;gap:11px;">
+    <div style="display:flex;gap:12px;"><span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.14 292);flex:0 0 auto;margin-top:2px;">Q1</span><span style="font-size:14.5px;line-height:1.5;color:oklch(0.36 0.02 255);">Can you reject <em>from the inbox</em> without opening the card, or does reject always force a look at context first?</span></div>
+    <div style="display:flex;gap:12px;"><span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.14 292);flex:0 0 auto;margin-top:2px;">Q2</span><span style="font-size:14.5px;line-height:1.5;color:oklch(0.36 0.02 255);">What's the minimum viable "click around the app" preview on a phone — a live build, a recorded walkthrough, or screenshots only?</span></div>
+    <div style="display:flex;gap:12px;"><span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.14 292);flex:0 0 auto;margin-top:2px;">Q3</span><span style="font-size:14.5px;line-height:1.5;color:oklch(0.36 0.02 255);">Does the Board tab ship in v1, or is Inbox-only the right initial release?</span></div>
+    <div style="display:flex;gap:12px;"><span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.14 292);flex:0 0 auto;margin-top:2px;">Q4</span><span style="font-size:14.5px;line-height:1.5;color:oklch(0.36 0.02 255);">How much can you reply with — a line of text, or full rich comments with your own screenshots back to the AI?</span></div>
+  </div>
+
+  <div style="margin-top:48px;padding-top:20px;border-top:1px solid oklch(0.90 0.006 255);display:flex;align-items:center;gap:10px;">
+    <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);">Companion prototype →</span>
+    <a href="Relay Mobile.dc.html" style="font-size:13px;font-weight:600;">Relay Mobile — Inbox &amp; Board (tappable)</a>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

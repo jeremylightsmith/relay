@@ -11,6 +11,10 @@ project changes.
 | `Relay Board.dc.html` | The core kanban/baton board — columns owned by human vs. AI, cards (working / blocked / done), WIP limits, handoffs, detail drawer. **This is the primary screen.** |
 | `Relay Landing.dc.html` | Marketing landing page — hero, "how it works", the flow, configurable stages. |
 | `Relay Design System.dc.html` | The design system — typography, palette, actors/avatars, controls, board components, and an **implementation map to daisyUI/Tailwind primitives**. Read this first. |
+| `Relay Mobile Brief.dc.html` | **Mobile platform brief** — what Relay is/isn't on a phone, the surfaces (Inbox/Board keep, Stream drop), the two primary actions, the hybrid native-shell architecture, and the ship plan. Read alongside [ADR 0005](../adr/0005-mobile-app-scope-and-architecture.md). |
+| `Relay Mobile.dc.html` | **Mobile screen flow (for build)** — the tappable Inbox & Board prototype: login, core review loop, needs-input, board, settings, comments/screenshot viewer. Source for the mobile cards. |
+| `Relay Docs.dc.html` | Docs-site **API & Setup** page (developer onboarding). |
+| `Relay API Reference.dc.html` | Docs-site **REST API reference** page. (Static content faithful; the canvas render `<script>` was omitted on pull — re-pull for a pristine copy.) |
 | `support.js` | The Claude design-canvas runtime the `.dc.html` files load. |
 
 ## Design language (from the Design System file)
