@@ -223,6 +223,33 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         }
       },
       %Variation{
+        id: :sub_tasks,
+        attributes: %{
+          id: "story-drawer-sub-tasks",
+          ref: "RLY-60",
+          card: %{
+            story_card()
+            | status: :working,
+              progress: nil,
+              sub_tasks: [
+                %{id: 1, title: "Inline the SUB-TASKS header row", done: true, position: 0},
+                %{id: 2, title: "Box each sub-task row", done: true, position: 1},
+                %{id: 3, title: "Make the whole row the toggle target", done: false, position: 2}
+              ]
+          },
+          stage_name: "Code",
+          stage_owner: :ai,
+          active_owner: :ai,
+          current_user_id: 1,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Sub-tasks drawer"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => nil}, as: :card),
+          conversation: story_conversation(),
+          activity: story_activity(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
         id: :working_strip,
         attributes: %{
           id: "story-drawer-working",
