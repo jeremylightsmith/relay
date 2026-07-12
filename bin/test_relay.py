@@ -14,6 +14,7 @@ import importlib.util
 import io
 import os
 import unittest
+import urllib.error
 
 RELAY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "relay")
 _loader = importlib.machinery.SourceFileLoader("relay_runner", RELAY_PATH)
@@ -29,6 +30,26 @@ def capture(fn, *args, **kwargs):
     with contextlib.redirect_stdout(out):
         fn(*args, **kwargs)
     return out.getvalue()
+
+
+class _FakeResp:
+    """Minimal stand-in for a urlopen() result: a context manager with .read()."""
+
+    def __init__(self, body=b"{}"):
+        self._body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self):
+        return self._body
+
+
+def _http_error(code, body=b""):
+    return urllib.error.HTTPError("http://x", code, "err", {}, io.BytesIO(body))
 
 
 class BannerTest(unittest.TestCase):
@@ -490,6 +511,76 @@ class BoardIncludeDoneTest(unittest.TestCase):
     def test_parser_accepts_include_done(self):
         args = relay.build_parser().parse_args(["board", "--include-done"])
         self.assertTrue(args.include_done)
+
+
+class ApiRetryTest(unittest.TestCase):
+    """api() rides out transient failures with bounded retries + backoff, but never
+    retries a non-idempotent POST 5xx or a 4xx, and still die()s when exhausted."""
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in ("env", "_api_backoff", "log")}
+        relay.env = lambda name: "http://example.test"
+        relay._api_backoff = lambda attempt: None   # never actually sleep
+        relay.log = lambda *a, **k: None
+        self._urlopen = relay.urllib.request.urlopen
+        self.calls = []
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            setattr(relay, k, v)
+        relay.urllib.request.urlopen = self._urlopen
+
+    def _script(self, outcomes):
+        """Make urlopen return/raise each outcome in order, counting calls."""
+        seq = list(outcomes)
+
+        def fake(req, *a, **k):
+            self.calls.append(req)
+            outcome = seq.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        relay.urllib.request.urlopen = fake
+
+    def test_get_retries_5xx_then_succeeds(self):
+        self._script([_http_error(500), _FakeResp(b'{"ok": 1}')])
+        self.assertEqual(relay.api("GET", "/api/board"), {"ok": 1})
+        self.assertEqual(len(self.calls), 2)
+
+    def test_get_exhausts_retries_then_dies(self):
+        self._script([_http_error(500), _http_error(500), _http_error(500)])
+        with self.assertRaises(SystemExit):
+            relay.api("GET", "/api/board")
+        self.assertEqual(len(self.calls), relay.API_MAX_ATTEMPTS)
+
+    def test_urlerror_retries_any_method(self):
+        self._script([urllib.error.URLError("refused"), _FakeResp(b"{}")])
+        self.assertEqual(relay.api("POST", "/api/cards", {"t": "x"}), {})
+        self.assertEqual(len(self.calls), 2)
+
+    def test_post_5xx_is_not_retried(self):
+        self._script([_http_error(500)])
+        with self.assertRaises(SystemExit):
+            relay.api("POST", "/api/comments", {"body": "hi"})
+        self.assertEqual(len(self.calls), 1)
+
+    def test_patch_retries_5xx_then_succeeds(self):
+        self._script([_http_error(500), _FakeResp(b'{"ok": 1}')])
+        self.assertEqual(
+            relay.api("PATCH", "/api/cards/RLY-1", {"status": "ready"}), {"ok": 1})
+        self.assertEqual(len(self.calls), 2)
+
+    def test_4xx_is_not_retried(self):
+        self._script([_http_error(422, b'{"error": {"message": "bad"}}')])
+        with self.assertRaises(SystemExit):
+            relay.api("GET", "/api/board")
+        self.assertEqual(len(self.calls), 1)
+
+    def test_soft_404_returns_none_without_retry(self):
+        self._script([_http_error(404)])
+        self.assertIsNone(relay.api("GET", "/api/cards/NOPE", soft_404=True))
+        self.assertEqual(len(self.calls), 1)
 
 
 if __name__ == "__main__":
