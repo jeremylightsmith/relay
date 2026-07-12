@@ -26,6 +26,7 @@ defmodule RelayWeb.BoardLive do
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Events
+  alias Relay.Members
   alias Schemas.Board
   alias Schemas.Card
   alias Schemas.Stage
@@ -236,6 +237,8 @@ defmodule RelayWeb.BoardLive do
         spec_form={@spec_form}
         plan_form={@plan_form}
         current_user_id={@current_scope.user.id}
+        members={@members}
+        reassign_open={@reassign_open}
         conversation={@streams.conversation}
         activity={@streams.activity}
         comment_form={@comment_form}
@@ -342,6 +345,8 @@ defmodule RelayWeb.BoardLive do
       |> assign(:composing_stage_id, nil)
       |> assign(:compose_form, empty_compose_form())
       |> assign(:board_name_form, to_form(Boards.change_board(board)))
+      |> assign(:members, Members.list_members(board))
+      |> assign(:reassign_open, false)
       |> stream_configure(:conversation, dom_id: &conversation_dom_id/1)
       |> stream_configure(:activity, dom_id: &activity_dom_id/1)
 
@@ -706,18 +711,23 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("toggle_sub_task", _params, socket), do: {:noreply, socket}
 
-  # Owner changes are explicit drawer actions. Adding a :user owner is
-  # restricted to the signed-in user (MVP boards are single-human; members
-  # arrive in MMF 17); anything unresolvable is a silent no-op.
-  def handle_event("add_owner", params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
-    current_user_id = socket.assigns.current_scope.user.id
+  def handle_event("toggle_reassign", _params, socket) do
+    {:noreply, update(socket, :reassign_open, &(not &1))}
+  end
 
+  # RLY-32: any board member (or the agent) can be assigned — the old
+  # "only yourself" restriction is lifted. A non-member {:user, id} is a no-op.
+  def handle_event("add_owner", params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
     case resolve_actor(params) do
       :agent ->
         apply_owner_change(socket, Cards.add_owner(card, :agent, current_actor(socket)))
 
-      {:user, ^current_user_id} = actor ->
-        apply_owner_change(socket, Cards.add_owner(card, actor, current_actor(socket)))
+      {:user, id} = actor ->
+        if member_user_id?(socket, id) do
+          apply_owner_change(socket, Cards.add_owner(card, actor, current_actor(socket)))
+        else
+          {:noreply, socket}
+        end
 
       _other ->
         {:noreply, socket}
@@ -889,6 +899,20 @@ defmodule RelayWeb.BoardLive do
      |> assign(:page_title, board.name)
      |> assign(:read_only?, Board.archived?(updated))
      |> assign(:board_name_form, to_form(Boards.change_board(updated)))}
+  end
+
+  # RLY-32: a member was removed elsewhere — eject the affected session's open
+  # board (access is revoked); every other open session just refreshes its
+  # reassign-picker member list.
+  def handle_info({:member_removed, user_id}, socket) do
+    if socket.assigns.current_scope.user.id == user_id do
+      {:noreply,
+       socket
+       |> put_flash(:info, "You were removed from this board.")
+       |> push_navigate(to: ~p"/boards")}
+    else
+      {:noreply, assign(socket, :members, Members.list_members(socket.assigns.board))}
+    end
   end
 
   @impl true
@@ -1070,6 +1094,10 @@ defmodule RelayWeb.BoardLive do
   end
 
   defp resolve_actor(_params), do: nil
+
+  defp member_user_id?(socket, id) do
+    Enum.any?(socket.assigns.members, &(&1.user_id == id))
+  end
 
   defp apply_owner_change(socket, {:ok, %Card{} = card}), do: {:noreply, refresh_card(socket, card)}
   defp apply_owner_change(socket, {:error, _changeset}), do: {:noreply, socket}

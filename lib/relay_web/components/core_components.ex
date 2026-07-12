@@ -1072,6 +1072,14 @@ defmodule RelayWeb.CoreComponents do
     default: nil,
     doc: "the signed-in user's id, for the Add me owner control"
 
+  attr :members, :list,
+    default: [],
+    doc: "resolved board memberships (:user preloaded) — reassign-picker assignables"
+
+  attr :reassign_open, :boolean,
+    default: false,
+    doc: "whether the OWNERS reassign picker popover is open"
+
   attr :stages, :list,
     default: [],
     doc: "move targets: the board's other stages (each exposing id and name); [] hides the menu"
@@ -1808,30 +1816,63 @@ defmodule RelayWeb.CoreComponents do
                     </button>
                   </div>
                   <span :if={@card.owners == []} class="text-base-content/50">None</span>
-                  <div :if={!@archived} class="flex flex-wrap gap-2">
+                  <button
+                    :if={!@archived}
+                    type="button"
+                    id={"#{@id}-reassign-toggle"}
+                    class="self-start"
+                    phx-click="toggle_reassign"
+                    style="background:transparent;border:none;color:oklch(0.50 0.13 250);font-size:12px;font-weight:600;padding:2px 0;cursor:pointer;"
+                  >
+                    {if @reassign_open, do: "Close", else: "Reassign ▾"}
+                  </button>
+                  <div
+                    :if={!@archived and @reassign_open}
+                    id={"#{@id}-reassign-picker"}
+                    style="display:flex;flex-direction:column;gap:4px;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:7px;"
+                  >
                     <button
-                      :if={!agent_owner?(@card)}
+                      :for={m <- reassignable_members(@members)}
                       type="button"
-                      id={"#{@id}-assign-ai"}
-                      class="btn btn-ghost btn-xs"
-                      phx-click="add_owner"
-                      phx-value-actor_type="agent"
-                    >
-                      Assign AI
-                    </button>
-                    <button
-                      :if={
-                        @current_user_id && !user_owner?(@card, @current_user_id) &&
-                          !agent_owner?(@card)
-                      }
-                      type="button"
-                      id={"#{@id}-add-me"}
-                      class="btn btn-ghost btn-xs"
+                      id={"#{@id}-assign-user-#{m.user_id}"}
                       phx-click="add_owner"
                       phx-value-actor_type="user"
-                      phx-value-user_id={@current_user_id}
+                      phx-value-user_id={m.user_id}
+                      style="display:flex;align-items:center;gap:8px;background:transparent;border:none;border-radius:7px;padding:5px 6px;cursor:pointer;text-align:left;"
                     >
-                      Add me
+                      <span style={reassign_avatar_style(:human, m.user_id)}>
+                        {initials_of(m.user)}
+                      </span>
+                      <span style="font-size:12.5px;color:oklch(0.34 0.02 255);flex:1;">
+                        {user_name(m.user)}
+                      </span>
+                      <span
+                        :if={user_owner?(@card, m.user_id)}
+                        style="font-size:11px;color:oklch(0.50 0.13 250);"
+                      >
+                        ✓
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      id={"#{@id}-assign-ai"}
+                      phx-click="add_owner"
+                      phx-value-actor_type="agent"
+                      style="display:flex;align-items:center;gap:8px;background:transparent;border:none;border-radius:7px;padding:5px 6px;cursor:pointer;text-align:left;"
+                    >
+                      <span style={reassign_avatar_style(:ai, nil)}>
+                        <span style="width:9px;height:9px;border-radius:50%;border:1.5px solid oklch(1 0 0);display:block;">
+                        </span>
+                      </span>
+                      <span style="font-size:12.5px;color:oklch(0.34 0.02 255);flex:1;">
+                        Relay AI
+                      </span>
+                      <span
+                        :if={agent_owner?(@card)}
+                        style="font-size:11px;color:oklch(0.50 0.13 250);"
+                      >
+                        ✓
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -1926,6 +1967,23 @@ defmodule RelayWeb.CoreComponents do
 
   defp user_owner?(card, user_id) do
     Enum.any?(card.owners, &(&1.actor_type == :user and &1.user_id == user_id))
+  end
+
+  # RLY-32: only resolved members (with a user) can own a card; invited
+  # (user-less) rows are skipped in the reassign picker.
+  defp reassignable_members(members), do: Enum.filter(members, & &1.user_id)
+
+  defp reassign_avatar_style(:ai, _id) do
+    "width:22px;height:22px;border-radius:50%;background:var(--color-secondary);" <>
+      "display:flex;align-items:center;justify-content:center;flex:0 0 auto;box-sizing:border-box;"
+  end
+
+  defp reassign_avatar_style(:human, user_id) do
+    hue = rem(:erlang.phash2(user_id), 360)
+
+    "width:22px;height:22px;border-radius:50%;background:oklch(0.62 0.15 #{hue});" <>
+      "color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;" <>
+      "font-size:10px;font-weight:600;flex:0 0 auto;box-sizing:border-box;"
   end
 
   defp owner_dom_suffix(%{actor_type: :agent}), do: "agent"
