@@ -79,7 +79,7 @@ defmodule RelayWeb.BoardLive do
       </:menu_items>
       <div
         id="board-viewport"
-        class="flex flex-col min-h-[calc(100dvh_-_61px)] drawer:h-[calc(100dvh_-_61px)] drawer:min-h-0"
+        class="flex flex-col min-h-[calc(100dvh_-_53px)] drawer:h-[calc(100dvh_-_53px)] drawer:min-h-0"
       >
         <div id="board" phx-hook="BoardDnD" class="flex min-h-0 flex-1 flex-col">
           <div

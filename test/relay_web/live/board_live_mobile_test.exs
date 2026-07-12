@@ -74,7 +74,8 @@ defmodule RelayWeb.BoardLiveMobileTest do
 
       # Below 720px the board is a normal scrolling document: a dvh-based min-height,
       # never a fixed height that would let iOS treat it as a non-scrolling canvas.
-      assert viewport =~ "min-h-[calc(100dvh_-_61px)]"
+      # 53px == the top bar's exact height (no gap between the bar border and the board panel).
+      assert viewport =~ "min-h-[calc(100dvh_-_53px)]"
       # The old fixed viewport-height lock (and the static-viewport `vh` unit) is gone.
       refute viewport =~ "100vh"
       refute viewport =~ "height:calc"
@@ -89,7 +90,7 @@ defmodule RelayWeb.BoardLiveMobileTest do
 
       # The desktop app-shell is preserved: the fixed height is restored at the
       # 720px `drawer:` breakpoint (with min-height reset so it can't linger).
-      assert viewport =~ "drawer:h-[calc(100dvh_-_61px)]"
+      assert viewport =~ "drawer:h-[calc(100dvh_-_53px)]"
       assert viewport =~ "drawer:min-h-0"
     end
   end
