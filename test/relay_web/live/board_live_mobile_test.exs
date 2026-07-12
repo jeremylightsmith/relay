@@ -8,14 +8,36 @@ defmodule RelayWeb.BoardLiveMobileTest do
   describe "board at mobile widths" do
     setup :register_and_log_in_user
 
-    test "the horizontal band container allows momentum touch scrolling",
+    test "below 720px the band strip flows in the document; the inner scroller returns at >=720px",
          %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      style = view |> element("#board-bands") |> render()
-      assert style =~ "-webkit-overflow-scrolling:touch"
-      assert style =~ "overscroll-behavior-x:contain"
+      bands = view |> element("#board-bands") |> render()
+
+      # Below 720px there is NO inner horizontal scroll container: the band strip is
+      # document-flow — content-width (w-max) but at least full width (min-w-full) so the
+      # gray board canvas covers the whole scrollable width — with visible overflow, so
+      # <body> owns the horizontal scroll and iOS pinch-zoom magnifies the real document
+      # instead of a composited inner scroller going white.
+      assert bands =~ "min-w-full"
+      assert bands =~ "w-max"
+      assert bands =~ "overflow-x-visible"
+      assert bands =~ "overflow-y-visible"
+
+      # The inline inner-scroller declarations that created the composited momentum layer
+      # are gone (Tailwind class forms use hyphens, e.g. `overflow-x-auto`, so these
+      # colon-form substrings match only the old inline style).
+      refute bands =~ "overflow-x:auto"
+      refute bands =~ "overflow-y:hidden"
+
+      # At >=720px the desktop app-shell's internal horizontal scroller is restored exactly.
+      assert bands =~ "drawer:w-auto"
+      assert bands =~ "drawer:min-w-0"
+      assert bands =~ "drawer:overflow-x-auto"
+      assert bands =~ "drawer:overflow-y-hidden"
+      assert bands =~ "drawer:[-webkit-overflow-scrolling:touch]"
+      assert bands =~ "drawer:[overscroll-behavior-x:contain]"
     end
   end
 
