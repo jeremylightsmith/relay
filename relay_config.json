@@ -27,7 +27,7 @@
     {
       "stage": "Code",
       "from": "Plan:Done",
-      "done": "Code:Review",
+      "done": "Review",
       "pool": "work",
       "action": [
         { "shell": "git fetch origin --prune && git checkout -B {branch} origin/main && rm -f tmp/exec-plan-status" },
