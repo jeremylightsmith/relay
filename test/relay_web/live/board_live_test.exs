@@ -31,6 +31,14 @@ defmodule RelayWeb.BoardLiveTest do
       assert Repo.aggregate(Stage, :count) == 8
     end
 
+    test "titles the board tab with the board name and the · Relay suffix", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, _view, html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert html =~ "#{board.name} · Relay"
+      refute html =~ "Phoenix Framework"
+    end
+
     test "revisiting does not create a duplicate board", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, _view, _html} = live(conn, ~p"/board/#{board.slug}")
