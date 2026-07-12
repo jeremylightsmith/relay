@@ -143,33 +143,85 @@
 
       <p style="font-size:15px;line-height:1.7;color:oklch(0.40 0.02 255);margin:0 0 14px 0;">Cards are serialized by <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">CardJSON</code>. The <b style="color:oklch(0.32 0.02 255);font-weight:600;">base shape</b> is returned in lists and as the <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">data</code> of every card response:</p>
 
-      <!--
-        NOTE (local copy): the trailing <script type="text/x-dc"> from the Claude Design
-        canvas — which renders the code-sample blocks (curl + JSON) and the error/endpoint
-        tables above — was omitted from this pulled copy. Its nested quote/backslash escaping
-        could not be reproduced faithfully by hand, so rather than commit a subtly-corrupted
-        script, the dynamic sections render as their {{ template }} placeholders here.
-        For a pristine canvas copy, re-pull from the Claude Design project per
-        docs/designs/README.md ("Re-pulling"). The static structure above is faithful.
-      -->
+      <div style="border-radius:10px;overflow:hidden;border:1px solid {{ codeBorder }};margin:0 0 16px 0;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:{{ codeBarBg }};border-bottom:1px solid {{ codeBorder }};">
+          <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:{{ codeBarText }};">json · Card (base)</span>
+          <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:{{ codeBarText }};">Copy</span>
+        </div>
+        <pre style="margin:0;padding:14px 16px;background:{{ codeBg }};font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;line-height:1.7;color:{{ codeText }};overflow-x:auto;">{
+  <span style="color:{{ tkFn }};">"id"</span>: <span style="color:{{ tkNum }};">42</span>,
+  <span style="color:{{ tkFn }};">"ref"</span>: <span style="color:{{ tkStr }};">"RLY-12"</span>,
+  <span style="color:{{ tkFn }};">"title"</span>: <span style="color:{{ tkStr }};">"Wire up the API docs"</span>,
+  <span style="color:{{ tkFn }};">"tag"</span>: <span style="color:{{ tkStr }};">"feature"</span>,
+  <span style="color:{{ tkFn }};">"status"</span>: <span style="color:{{ tkStr }};">"working"</span>,
+  <span style="color:{{ tkFn }};">"progress"</span>: <span style="color:{{ tkNum }};">40</span>,
+  <span style="color:{{ tkFn }};">"branch"</span>: <span style="color:{{ tkStr }};">"rly-12-api-docs"</span>,
+  <span style="color:{{ tkFn }};">"pr_url"</span>: <span style="color:{{ tkStr }};">"https://github.com/acme/relay/pull/7"</span>,
+  <span style="color:{{ tkFn }};">"stage_id"</span>: <span style="color:{{ tkNum }};">5</span>,
+  <span style="color:{{ tkFn }};">"owners"</span>: [{ <span style="color:{{ tkFn }};">"type"</span>: <span style="color:{{ tkStr }};">"agent"</span>, <span style="color:{{ tkFn }};">"name"</span>: <span style="color:{{ tkStr }};">"Relay AI"</span> }],
+  <span style="color:{{ tkFn }};">"active_owner"</span>: <span style="color:{{ tkStr }};">"agent"</span>,
+  <span style="color:{{ tkFn }};">"rejection"</span>: <span style="color:{{ tkKey }};">null</span>
+}</pre>
+      </div>
+
+      <p style="font-size:14px;line-height:1.65;color:oklch(0.46 0.02 255);margin:0 0 22px 0;"><code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">owners</code> entries are either <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.82em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">{ "type": "agent", "name": "Relay AI" }</code> or <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.82em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">{ "type": "user", "id": 3, "name": "Ada" }</code>. <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">rejection</code>, when present, is <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.82em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">{ note, from_stage, to_stage, rejected_by, rejected_at }</code>.</p>
+
+      <p style="font-size:15px;line-height:1.7;color:oklch(0.40 0.02 255);margin:0 0 16px 0;">The <b style="color:oklch(0.32 0.02 255);font-weight:600;">single-card</b> responses (<code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">show</code>, and every write that returns a card) add the heavy fields:</p>
+
+      <div style="border-radius:10px;overflow:hidden;border:1px solid {{ codeBorder }};margin:0 0 22px 0;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:{{ codeBarBg }};border-bottom:1px solid {{ codeBorder }};">
+          <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:{{ codeBarText }};">json · Card (single, added fields)</span>
+        </div>
+        <pre style="margin:0;padding:14px 16px;background:{{ codeBg }};font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;line-height:1.7;color:{{ codeText }};overflow-x:auto;">{
+  <span style="color:{{ tkFn }};">"description"</span>: <span style="color:{{ tkStr }};">"…markdown…"</span>,
+  <span style="color:{{ tkFn }};">"plan"</span>: <span style="color:{{ tkStr }};">"…markdown…"</span>,
+  <span style="color:{{ tkFn }};">"spec"</span>: <span style="color:{{ tkStr }};">"…markdown…"</span>,
+  <span style="color:{{ tkFn }};">"timeline"</span>: [
+    { <span style="color:{{ tkFn }};">"kind"</span>: <span style="color:{{ tkStr }};">"comment"</span>, <span style="color:{{ tkFn }};">"body"</span>: <span style="color:{{ tkStr }};">"on it"</span>, <span style="color:{{ tkFn }};">"author"</span>: { <span style="color:{{ tkFn }};">"type"</span>: <span style="color:{{ tkStr }};">"agent"</span>, <span style="color:{{ tkFn }};">"name"</span>: <span style="color:{{ tkStr }};">"Relay AI"</span> }, <span style="color:{{ tkFn }};">"inserted_at"</span>: <span style="color:{{ tkStr }};">"…"</span> },
+    { <span style="color:{{ tkFn }};">"kind"</span>: <span style="color:{{ tkStr }};">"activity"</span>, <span style="color:{{ tkFn }};">"type"</span>: <span style="color:{{ tkStr }};">"moved"</span>, <span style="color:{{ tkFn }};">"meta"</span>: { <span style="color:{{ tkFn }};">"from_stage"</span>: <span style="color:{{ tkStr }};">"Spec"</span>, <span style="color:{{ tkFn }};">"to_stage"</span>: <span style="color:{{ tkStr }};">"Code"</span> }, <span style="color:{{ tkFn }};">"author"</span>: { … }, <span style="color:{{ tkFn }};">"inserted_at"</span>: <span style="color:{{ tkStr }};">"…"</span> }
+  ]
+}</pre>
+      </div>
+
+      <p style="font-size:15px;line-height:1.7;color:oklch(0.40 0.02 255);margin:0 0 16px 0;">A <b style="color:oklch(0.32 0.02 255);font-weight:600;">stage</b> (returned inside <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">GET /api/board</code>):</p>
+
+      <div style="border-radius:10px;overflow:hidden;border:1px solid {{ codeBorder }};margin:0 0 40px 0;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:{{ codeBarBg }};border-bottom:1px solid {{ codeBorder }};">
+          <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:{{ codeBarText }};">json · Stage</span>
+        </div>
+        <pre style="margin:0;padding:14px 16px;background:{{ codeBg }};font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;line-height:1.7;color:{{ codeText }};overflow-x:auto;">{
+  <span style="color:{{ tkFn }};">"id"</span>: <span style="color:{{ tkNum }};">5</span>, <span style="color:{{ tkFn }};">"name"</span>: <span style="color:{{ tkStr }};">"Plan"</span>, <span style="color:{{ tkFn }};">"category"</span>: <span style="color:{{ tkStr }};">"started"</span>, <span style="color:{{ tkFn }};">"owner"</span>: <span style="color:{{ tkStr }};">"ai"</span>,
+  <span style="color:{{ tkFn }};">"position"</span>: <span style="color:{{ tkNum }};">3</span>, <span style="color:{{ tkFn }};">"approval_gate"</span>: <span style="color:{{ tkKey }};">false</span>, <span style="color:{{ tkFn }};">"reject_to_stage_id"</span>: <span style="color:{{ tkKey }};">null</span>,
+  <span style="color:{{ tkFn }};">"wip_limit"</span>: <span style="color:{{ tkKey }};">null</span>, <span style="color:{{ tkFn }};">"lane"</span>: <span style="color:{{ tkStr }};">"main"</span>, <span style="color:{{ tkFn }};">"parent_id"</span>: <span style="color:{{ tkKey }};">null</span>
+}</pre>
+      </div>
 
       <!-- ===== ENDPOINTS ===== -->
-      <h2 id="endpoints" style="scroll-margin-top:78px;font-size:26px;line-height:1.2;letter-spacing:-0.02em;font-weight:600;margin:36px 0 8px 0;color:oklch(0.24 0.02 255);">Endpoints</h2>
+      <h2 id="endpoints" style="scroll-margin-top:78px;font-size:26px;line-height:1.2;letter-spacing:-0.02em;font-weight:600;margin:0 0 8px 0;color:oklch(0.24 0.02 255);">Endpoints</h2>
       <div style="height:1px;background:oklch(0.94 0.005 255);margin:0 0 26px 0;"></div>
 
-      <p style="font-size:15px;line-height:1.7;color:oklch(0.40 0.02 255);margin:0 0 8px 0;">The board-scoped endpoints (see the CLI/agent docs and <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.86em;background:oklch(0.96 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:1px 6px;color:oklch(0.40 0.06 292);">priv/docs/api.md</code> for full request/response bodies):</p>
-      <ul style="font-size:14px;line-height:1.9;color:oklch(0.40 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">
-        <li>GET <code>/api/board</code> — the whole board: identity, stages, cards (base shape)</li>
-        <li>GET <code>/api/cards</code> — all cards (base shape)</li>
-        <li>POST <code>/api/cards</code> — create a card → 201, single-card shape</li>
-        <li>GET <code>/api/cards/:ref</code> — one card, single-card shape (description, plan, spec, timeline)</li>
-        <li>PATCH <code>/api/cards/:ref</code> — update title/description/spec/tag/branch/plan/pr_url, status(+progress), owners</li>
-        <li>POST <code>/api/cards/:ref/move</code> — move (stage id or name; 1-based position)</li>
-        <li>POST <code>/api/cards/:ref/comments</code> — add an agent comment → 201</li>
-        <li>POST <code>/api/cards/:ref/needs-input</code> — flag needs human input (requires question)</li>
-        <li>POST <code>/api/cards/:ref/approve</code> — approve on a gate stage (422 not_gated otherwise)</li>
-        <li>POST <code>/api/cards/:ref/reject</code> — send back (requires note; optional to stage; 422 missing_note/invalid_target)</li>
-      </ul>
+      <sc-for list="{{ endpoints }}" as="ep" hint-placeholder-count="11">
+        <div style="margin:0 0 30px 0;">
+          <!-- signature -->
+          <div style="display:flex;align-items:center;gap:11px;margin-bottom:8px;flex-wrap:wrap;">
+            <span style="flex:0 0 auto;width:54px;text-align:center;font-size:10.5px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;letter-spacing:0.03em;padding:4px 0;border-radius:5px;background:{{ ep.mbg }};color:{{ ep.mc }};">{{ ep.method }}</span>
+            <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:14.5px;font-weight:600;color:oklch(0.26 0.02 255);">{{ ep.path }}</code>
+            <sc-if value="{{ ep.badge }}" hint-placeholder-val="{{ true }}">
+              <span style="font-size:10px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:{{ ep.badgeColor }};background:{{ ep.badgeBg }};border-radius:5px;padding:2px 7px;">{{ ep.badge }}</span>
+            </sc-if>
+          </div>
+          <p style="font-size:14.5px;line-height:1.6;color:oklch(0.42 0.02 255);margin:0 0 12px 0;">{{ ep.desc }}</p>
+          <sc-if value="{{ ep.hasCode }}" hint-placeholder-val="{{ true }}">
+            <div style="border-radius:10px;overflow:hidden;border:1px solid {{ codeBorder }};">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:{{ codeBarBg }};border-bottom:1px solid {{ codeBorder }};">
+                <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:{{ codeBarText }};">{{ ep.codeLabel }}</span>
+                <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:{{ codeBarText }};">Copy</span>
+              </div>
+              <pre style="margin:0;padding:14px 16px;background:{{ codeBg }};font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;line-height:1.7;color:{{ codeText }};overflow-x:auto;">{{ ep.code }}</pre>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
 
       <!-- ===== CLI ===== -->
       <h2 id="cli" style="scroll-margin-top:78px;font-size:26px;line-height:1.2;letter-spacing:-0.02em;font-weight:600;margin:36px 0 8px 0;color:oklch(0.24 0.02 255);">CLI</h2>
@@ -210,5 +262,119 @@
   </div>
 </div>
 </x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1200,&quot;height&quot;:1800},&quot;codeTheme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Docs&quot;},&quot;showToc&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Docs&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const dark = (this.props.codeTheme ?? 'dark') === 'dark';
+    const code = dark ? {
+      codeBg: 'oklch(0.20 0.02 255)', codeBarBg: 'oklch(0.24 0.02 255)', codeBorder: 'oklch(0.30 0.02 255)',
+      codeText: 'oklch(0.88 0.008 255)', codeBarText: 'oklch(0.66 0.02 255)',
+      tkKey: 'oklch(0.74 0.11 292)', tkStr: 'oklch(0.76 0.10 195)', tkFn: 'oklch(0.74 0.11 250)',
+      tkComment: 'oklch(0.60 0.02 255)', tkNum: 'oklch(0.80 0.11 75)',
+    } : {
+      codeBg: 'oklch(0.985 0.003 255)', codeBarBg: 'oklch(0.965 0.004 255)', codeBorder: 'oklch(0.91 0.006 255)',
+      codeText: 'oklch(0.34 0.02 255)', codeBarText: 'oklch(0.56 0.02 255)',
+      tkKey: 'oklch(0.48 0.14 292)', tkStr: 'oklch(0.44 0.11 195)', tkFn: 'oklch(0.46 0.13 250)',
+      tkComment: 'oklch(0.62 0.02 255)', tkNum: 'oklch(0.50 0.12 65)',
+    };
+
+    const errors = [
+      { http: '401', code: 'unauthorized',   when: 'missing / invalid Authorization bearer key', httpColor: 'oklch(0.55 0.16 25)' },
+      { http: '404', code: 'not_found',      when: 'no card / stage matches the ref or id', httpColor: 'oklch(0.55 0.16 25)' },
+      { http: '400', code: 'invalid',        when: 'malformed body or unusable field values', httpColor: 'oklch(0.55 0.13 55)' },
+      { http: '422', code: 'not_gated',      when: 'approve / reject on a card whose stage is not an approval gate', httpColor: 'oklch(0.55 0.13 55)' },
+      { http: '422', code: 'missing_note',   when: 'reject without a non-empty note', httpColor: 'oklch(0.55 0.13 55)' },
+      { http: '422', code: 'invalid_target', when: "reject to a stage that isn't a valid main-lane target", httpColor: 'oklch(0.55 0.13 55)' },
+    ];
+
+    const GET = { mbg: 'oklch(0.95 0.02 155)', mc: 'oklch(0.42 0.11 155)' };
+    const POST = { mbg: 'oklch(0.95 0.03 250)', mc: 'oklch(0.42 0.12 250)' };
+    const PATCH = { mbg: 'oklch(0.95 0.03 65)', mc: 'oklch(0.48 0.12 55)' };
+    const C = code.tkComment, S = code.tkStr, K = code.tkFn, N = code.tkNum, KW = code.tkKey;
+    const sp = (color, txt) => '<span style="color:' + color + ';">' + txt + '</span>';
+    const html = (s) => React.createElement('span', { dangerouslySetInnerHTML: { __html: s } });
+
+    const endpoints = [
+      {
+        ...GET, method: 'GET', path: '/api/board',
+        desc: 'The whole board: its identity, stages, and cards (base shape).',
+        hasCode: true, codeLabel: 'curl + response',
+        code: html(sp(KW, 'curl') + ' -H ' + sp(S, '"Authorization: Bearer $RELAY_KEY"') + ' https://relay.example/api/board\n{\n'
+          + '  ' + sp(K, '"board"') + ': { ' + sp(K, '"id"') + ': ' + sp(N, '1') + ', ' + sp(K, '"name"') + ': ' + sp(S, '"My board"') + ', ' + sp(K, '"key"') + ': ' + sp(S, '"RLY"') + ' },\n'
+          + '  ' + sp(K, '"stages"') + ': [ { ' + sp(K, '"id"') + ': ' + sp(N, '1') + ', ' + sp(K, '"name"') + ': ' + sp(S, '"Backlog"') + ', ' + sp(S, '"…"') + ': ' + sp(S, '"…"') + ' } ],\n'
+          + '  ' + sp(K, '"cards"') + ':  [ { ' + sp(K, '"id"') + ': ' + sp(N, '42') + ', ' + sp(K, '"ref"') + ': ' + sp(S, '"RLY-12"') + ', ' + sp(S, '"…"') + ': ' + sp(S, '"…"') + ' } ]\n}'),
+      },
+      {
+        ...GET, method: 'GET', path: '/api/cards',
+        desc: 'All cards on the board (base shape).',
+        hasCode: true, codeLabel: 'json · response',
+        code: html('{ ' + sp(K, '"data"') + ': [ { ' + sp(K, '"id"') + ': ' + sp(N, '42') + ', ' + sp(K, '"ref"') + ': ' + sp(S, '"RLY-12"') + ', ' + sp(S, '"…"') + ': ' + sp(S, '"…"') + ' } ] }'),
+      },
+      {
+        ...POST, method: 'POST', path: '/api/cards',
+        badge: '201', badgeColor: 'oklch(0.42 0.11 155)', badgeBg: 'oklch(0.95 0.02 155)',
+        desc: 'Create a card. Optional stage (a stage id; defaults to the board’s first stage). Accepts title, description, spec, tag, branch, plan, pr_url. Returns 201 with the single-card shape.',
+        hasCode: true, codeLabel: 'curl + response',
+        code: html(sp(KW, 'curl') + ' -X POST -H ' + sp(S, '"Authorization: Bearer $RELAY_KEY"') + ' -H ' + sp(S, '"Content-Type: application/json"') + ' \\\n'
+          + '  -d ' + sp(S, '\'{"title":"New card","stage":5}\'') + ' https://relay.example/api/cards\n'
+          + '{ ' + sp(K, '"data"') + ': { ' + sp(K, '"id"') + ': ' + sp(N, '43') + ', ' + sp(K, '"ref"') + ': ' + sp(S, '"RLY-13"') + ', ' + sp(K, '"title"') + ': ' + sp(S, '"New card"') + ', ' + sp(S, '"…"') + ': ' + sp(S, '"…"') + ' } }'),
+      },
+      {
+        ...GET, method: 'GET', path: '/api/cards/:ref',
+        desc: 'One card, single-card shape (with description, plan, spec, timeline).',
+        hasCode: true, codeLabel: 'curl',
+        code: html(sp(KW, 'curl') + ' -H ' + sp(S, '"Authorization: Bearer $RELAY_KEY"') + ' https://relay.example/api/cards/RLY-12'),
+      },
+      {
+        ...PATCH, method: 'PATCH', path: '/api/cards/:ref',
+        desc: 'Update a card. Any of title, description, spec, tag, branch, plan, pr_url; plus status (with optional progress); plus owners (a list of "agent" or "user:<id>"). Returns the single-card shape.',
+        hasCode: true, codeLabel: 'curl',
+        code: html(sp(KW, 'curl') + ' -X PATCH -H ' + sp(S, '"Authorization: Bearer $RELAY_KEY"') + ' -H ' + sp(S, '"Content-Type: application/json"') + ' \\\n'
+          + '  -d ' + sp(S, '\'{"status":"working","progress":40}\'') + ' https://relay.example/api/cards/RLY-12'),
+      },
+      {
+        ...POST, method: 'POST', path: '/api/cards/:ref/move',
+        desc: 'Move a card. stage is a stage id or name; position is 1-based (omit to append). Returns the single-card shape.',
+        hasCode: true, codeLabel: 'curl',
+        code: html(sp(KW, 'curl') + ' -X POST -H ' + sp(S, '"Authorization: Bearer $RELAY_KEY"') + ' -H ' + sp(S, '"Content-Type: application/json"') + ' \\\n'
+          + '  -d ' + sp(S, '\'{"stage":"Plan","position":1}\'') + ' https://relay.example/api/cards/RLY-12/move'),
+      },
+      {
+        ...POST, method: 'POST', path: '/api/cards/:ref/comments',
+        badge: '201', badgeColor: 'oklch(0.42 0.11 155)', badgeBg: 'oklch(0.95 0.02 155)',
+        desc: 'Add an agent comment. Requires body. Returns 201 with the new timeline entry.',
+        hasCode: true, codeLabel: 'json · response',
+        code: html('{ ' + sp(K, '"data"') + ': { ' + sp(K, '"kind"') + ': ' + sp(S, '"comment"') + ', ' + sp(K, '"body"') + ': ' + sp(S, '"on it"') + ', ' + sp(K, '"author"') + ': { ' + sp(K, '"type"') + ': ' + sp(S, '"agent"') + ', ' + sp(K, '"name"') + ': ' + sp(S, '"Relay AI"') + ' }, ' + sp(K, '"inserted_at"') + ': ' + sp(S, '"…"') + ' } }'),
+      },
+      {
+        ...POST, method: 'POST', path: '/api/cards/:ref/needs-input',
+        desc: 'Flag the card as needing human input. Requires question. Returns the single-card shape.',
+        hasCode: true, codeLabel: 'curl',
+        code: html(sp(KW, 'curl') + ' -X POST -H ' + sp(S, '"Authorization: Bearer $RELAY_KEY"') + ' -H ' + sp(S, '"Content-Type: application/json"') + ' \\\n'
+          + '  -d ' + sp(S, '\'{"question":"Which auth provider?"}\'') + ' https://relay.example/api/cards/RLY-12/needs-input'),
+      },
+      {
+        ...POST, method: 'POST', path: '/api/cards/:ref/approve',
+        desc: 'Approve a card sitting on an approval-gate stage (advances it). 422 not_gated if the card’s stage is not a gate. Returns the single-card shape.',
+        hasCode: false,
+      },
+      {
+        ...POST, method: 'POST', path: '/api/cards/:ref/reject',
+        desc: 'Send a card back. Requires a non-empty note (else 422 missing_note). Optional to (a stage id or name) routes to a specific earlier main-lane stage; an unresolvable target is 422 invalid_target. Without to, uses the gate’s reject flow. Returns the single-card shape.',
+        hasCode: true, codeLabel: 'curl',
+        code: html(sp(KW, 'curl') + ' -X POST -H ' + sp(S, '"Authorization: Bearer $RELAY_KEY"') + ' -H ' + sp(S, '"Content-Type: application/json"') + ' \\\n'
+          + '  -d ' + sp(S, '\'{"note":"needs a test","to":"Plan"}\'') + ' https://relay.example/api/cards/RLY-12/reject'),
+      },
+    ];
+
+    return {
+      ...code,
+      errors,
+      endpoints,
+      showToc: this.props.showToc ?? true,
+    };
+  }
+}
+</script>
 </body>
 </html>
