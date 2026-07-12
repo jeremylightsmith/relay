@@ -62,6 +62,28 @@ defmodule RelayWeb.Api.CardJSON do
     %{data: entry(comment)}
   end
 
+  def attachment(%{attachment: attachment}) do
+    %{
+      data: %{
+        id: attachment.id,
+        url: "/attachments/#{attachment.id}",
+        markdown: "![#{escape_markdown_text(attachment.filename)}](/attachments/#{attachment.id})"
+      }
+    }
+  end
+
+  # `filename` is accepted verbatim from the ingest body, so it can contain
+  # markdown-special characters. Escape `[` and `]` (would prematurely open/close
+  # the image alt text) and `)` (harmless here but defensive) so the generated
+  # markdown always round-trips to the literal filename as alt text.
+  defp escape_markdown_text(text) do
+    text
+    |> String.replace("\\", "\\\\")
+    |> String.replace("[", "\\[")
+    |> String.replace("]", "\\]")
+    |> String.replace(")", "\\)")
+  end
+
   defp entry(%Schemas.Comment{} = c) do
     %{kind: "comment", body: c.body, author: author(c), inserted_at: c.inserted_at}
   end

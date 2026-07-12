@@ -421,6 +421,51 @@ class DispatchOnceTest(unittest.TestCase):
         self.assertTrue(all(tag.startswith("[RLY-") for _, _, tag in calls))
 
 
+class AttachTest(unittest.TestCase):
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+
+    def _tmpfile(self, suffix, data):
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=suffix)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        self.addCleanup(os.remove, path)
+        return path
+
+    def test_attach_reads_binary_base64_encodes_and_prints_markdown(self):
+        import base64
+        sent = []
+        relay.api = lambda method, path, body=None, **k: (
+            sent.append((method, path, body)) or
+            {"data": {"id": "abc", "url": "/attachments/abc",
+                      "markdown": "![shot.png](/attachments/abc)"}}
+        )
+        raw = b"\x89PNG\r\n\x1a\n binary\x00bytes"
+        path = self._tmpfile(".png", raw)
+        args = argparse.Namespace(ref="RLY-1", file=path, caption=None, json=False)
+
+        out = capture(relay.cmd_attach, args)
+
+        method, apath, body = sent[0]
+        self.assertEqual(method, "POST")
+        self.assertEqual(apath, "/api/cards/RLY-1/attachments")
+        self.assertEqual(body["content_type"], "image/png")
+        self.assertEqual(base64.b64decode(body["data_base64"]), raw)
+        self.assertIn("![shot.png](/attachments/abc)", out)
+
+    def test_attach_json_prints_json(self):
+        relay.api = lambda *a, **k: {"data": {"id": "abc", "url": "/attachments/abc",
+                                               "markdown": "![x](/attachments/abc)"}}
+        path = self._tmpfile(".png", b"x")
+        args = argparse.Namespace(ref="RLY-1", file=path, caption=None, json=True)
+
+        out = capture(relay.cmd_attach, args)
+
+        self.assertIn('"id": "abc"', out)
+
+
 class LogForwarderTest(unittest.TestCase):
     def setUp(self):
         self._forwarder, self._api = relay.FORWARDER, relay.api

@@ -36,6 +36,7 @@ export const meta = {
     { title: 'Final check', detail: 'mix precommit (haiku)', model: 'haiku' },
     { title: 'Final review', detail: 'whole-branch review + bounded fix loop (opus)', model: 'opus' },
     { title: 'Smoke', detail: 'drive the feature through the running app + visual review, bounded fix loop (opus)', model: 'opus' },
+    { title: 'Post', detail: 'attach smoke screenshots + one "Smoke results" comment (sonnet)', model: 'sonnet' },
   ],
 }
 
@@ -277,6 +278,29 @@ const smokeStatus =
   smoke && smoke.verdict === 'pass' ? 'ready' :
   smoke && smoke.verdict === 'blocked' ? 'smoke-blocked' :
   'smoke-failed'
+
+// ---- post smoke screenshots to the card (RLY-13) --------------------------
+// When a smoke run produced screenshots and the card ref was threaded in via
+// args, attach each screenshot and post ONE "Smoke results" comment embedding
+// them inline, so a human reviewing the card on the board sees what smoke
+// rendered. Fires whenever screenshots exist (pass or broken), per the spec —
+// no verdict gating. `relay attach` is the tested primitive; this glue is not
+// unit-tested (consistent with the rest of the workflow orchestration).
+if (smoke && Array.isArray(smoke.screenshots) && smoke.screenshots.length && args && args.ref) {
+  phase('Post')
+  const shots = smoke.screenshots.map((s) => `   - ${s}`).join('\n')
+  await agent(
+    `Post the smoke screenshots to Relay card ${args.ref}. This repo has a CLI at ./bin/relay ` +
+      `and RELAY_URL + RELAY_API_KEY are already set in the environment. Do EXACTLY this and nothing else:\n` +
+      `1. For EACH screenshot path below, run \`./bin/relay attach ${args.ref} <path> --json\` and keep the ` +
+      `"markdown" field it prints:\n${shots}\n` +
+      `2. Post ONE comment with \`./bin/relay comment ${args.ref} @<tmpfile>\` whose body is the summary ` +
+      `below, then a blank line, then the collected markdown snippets one per line (one image per ` +
+      `new/changed state — do not add extras):\n\n${smoke.summary || 'Smoke results'}\n\n` +
+      `Post at most ONE comment. Do not touch git or any other card. Report what you posted.`,
+    { agentType: 'general-purpose', model: 'sonnet', phase: 'Post', effort: 'low', label: 'post-smoke' },
+  )
+}
 
 return {
   status: smokeStatus,

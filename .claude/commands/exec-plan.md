@@ -27,9 +27,13 @@ into that **transient** file just before launching:
 
     ./bin/relay card <ref> --json | jq -r '.plan // ""' > plan.md
 
-Then invoke the Workflow tool with the committed script:
+Then invoke the Workflow tool with the committed script, passing the card ref through `args` so
+the workflow can attach smoke screenshots and post the "Smoke results" comment on this card after
+the smoke loop:
 
-    Workflow({ scriptPath: ".claude/workflows/execute-plan.js" })
+    Workflow({ scriptPath: ".claude/workflows/execute-plan.js", args: { ref: "<ref>" } })
+
+(Replace `<ref>` with the actual card ref from `$ARGUMENTS`.)
 
 The workflow runs in the background; a task-notification arrives when it completes.
 While it runs, the user can watch live progress with `/workflows`.

@@ -20,6 +20,7 @@ defmodule Relay do
       Activity,
       AgentLog,
       ApiKeys,
+      Attachments,
       BoardWatch,
       Boards,
       Cards,

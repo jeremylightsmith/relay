@@ -69,6 +69,7 @@ defmodule RelayWeb.Router do
     pipe_through [:browser, :require_authenticated_user]
 
     get "/board", BoardRedirectController, :index
+    get "/attachments/:id", AttachmentController, :show
   end
 
   scope "/admin", RelayWeb.Admin do
@@ -104,6 +105,7 @@ defmodule RelayWeb.Router do
     patch "/cards/:ref/sub-tasks/:id", CardController, :toggle_sub_task
     post "/cards/:ref/move", CardController, :move
     post "/cards/:ref/comments", CardController, :comments
+    post "/cards/:ref/attachments", CardController, :attachments
     post "/cards/:ref/needs-input", CardController, :needs_input
     post "/cards/:ref/approve", CardController, :approve
     post "/cards/:ref/reject", CardController, :reject

@@ -17,12 +17,15 @@ Config (env): RELAY_URL, RELAY_API_KEY  (a board key from /board/settings)
   relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF Q
   relay own REF / release REF relay approve REF           relay reject REF NOTE
   relay sub-tasks REF @file   relay check REF ID / uncheck REF ID   relay result REF @file
+  relay attach REF FILE [--caption TEXT] [--json]
   relay layout   # config skeleton
 
 TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output.
 """
 import argparse
+import base64
 import json
+import mimetypes
 import os
 import queue
 import re
@@ -289,6 +292,18 @@ def comment(ref, text):
     return api("POST", f"/api/cards/{ref}/comments", {"body": text})
 
 
+def attach(ref, path):
+    with open(path, "rb") as f:
+        data = f.read()
+    content_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+    body = {
+        "filename": os.path.basename(path),
+        "content_type": content_type,
+        "data_base64": base64.b64encode(data).decode(),
+    }
+    return api("POST", f"/api/cards/{ref}/attachments", body)["data"]
+
+
 def needs_input(ref, question):
     return api("POST", f"/api/cards/{ref}/needs-input", {"question": question})["data"]
 
@@ -377,6 +392,13 @@ def cmd_reject(args):
 def cmd_comment(args):
     comment(args.ref, read_arg(args.text))
     print(f"{args.ref}: comment posted")
+
+
+def cmd_attach(args):
+    data = attach(args.ref, args.file)
+    # --caption rewrites the alt text client-side; otherwise use the server's snippet.
+    md = f"![{args.caption}]({data['url']})" if args.caption else data["markdown"]
+    emit(args, {**data, "markdown": md}, md)
 
 
 def cmd_layout(args):
@@ -805,6 +827,8 @@ def build_parser():
     add("approve", _simple(lambda a: api("POST", f"/api/cards/{a.ref}/approve", {})["data"]), "ref", json_flag=True)
     add("reject", cmd_reject, "ref", "note", json_flag=True)
     add("comment", cmd_comment, "ref", "text")
+    at = add("attach", cmd_attach, "ref", "file", json_flag=True)
+    at.add_argument("--caption")
     add("layout", cmd_layout)
     w = add("watch", cmd_watch)
     w.add_argument("--once", action="store_true")

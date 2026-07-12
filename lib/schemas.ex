@@ -8,5 +8,19 @@ defmodule Schemas do
 
   use Boundary,
     deps: [],
-    exports: [Activity, ApiKey, Board, Card, CardOwner, CardRejection, Comment, Membership, Scope, Stage, SubTask, User]
+    exports: [
+      Activity,
+      ApiKey,
+      Attachment,
+      Board,
+      Card,
+      CardOwner,
+      CardRejection,
+      Comment,
+      Membership,
+      Scope,
+      Stage,
+      SubTask,
+      User
+    ]
 end

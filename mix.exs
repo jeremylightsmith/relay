@@ -65,6 +65,15 @@ defmodule Relay.MixProject do
       # --- Markdown rendering for card long-form fields (RLY-3) ---
       {:mdex, "~> 0.13"},
 
+      # --- Object storage for card attachments (RLY-13). ex_aws does S3 SigV4
+      # request signing (what Req doesn't do); it's configured (see
+      # config/config.exs) to make the actual HTTP calls through Req rather
+      # than pulling in hackney, keeping one HTTP client in the app.
+      # Prod-only — the test suite uses the Local filesystem adapter.
+      {:ex_aws, "~> 2.5"},
+      {:ex_aws_s3, "~> 2.5"},
+      {:sweet_xml, "~> 0.7"},
+
       # --- Auth: Google OAuth via Ueberauth (MMF 01) ---
       {:ueberauth, "~> 0.10"},
       {:ueberauth_google, "~> 0.12"},
