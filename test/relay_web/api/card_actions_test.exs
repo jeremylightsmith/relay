@@ -115,6 +115,26 @@ defmodule RelayWeb.Api.CardActionsTest do
     assert Cards.get_card_by_ref(board, ref(board, card)).status == :needs_input
   end
 
+  test "needs-input with an explicit null options value blocks the card instead of crashing",
+       %{conn: conn, board: board, spec: spec} do
+    card = insert(:card, stage: spec)
+
+    questions = [%{"prompt" => "Nullable?", "options" => nil}]
+
+    body =
+      conn
+      |> post(~p"/api/cards/#{ref(board, card)}/needs-input", %{questions: questions})
+      |> json_response(200)
+      |> Map.fetch!("data")
+
+    assert body["status"] == "needs_input"
+
+    entry =
+      Enum.find(body["timeline"], &(&1["kind"] == "activity" and &1["type"] == "needs_input"))
+
+    assert entry["meta"]["questions"] == [%{"prompt" => "Nullable?", "options" => [], "allow_text" => true}]
+  end
+
   test "needs-input still accepts a plain string question", %{conn: conn, board: board, spec: spec} do
     card = insert(:card, stage: spec)
 

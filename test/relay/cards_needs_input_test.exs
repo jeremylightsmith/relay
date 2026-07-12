@@ -133,6 +133,19 @@ defmodule Relay.CardsNeedsInputTest do
       assert entry.meta["questions"] == [%{"prompt" => "Bare?", "options" => [], "allow_text" => true}]
     end
 
+    test "list normalization coerces an explicit nil options value to []", %{ai_stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Explicit nil"})
+
+      {:ok, blocked} = Cards.request_input(card, [%{"prompt" => "Nullable?", "options" => nil}], :agent)
+
+      entry =
+        blocked
+        |> Activity.list_timeline()
+        |> Enum.find(&match?(%Schemas.Activity{type: :needs_input}, &1))
+
+      assert entry.meta["questions"] == [%{"prompt" => "Nullable?", "options" => [], "allow_text" => true}]
+    end
+
     test "the plain-string path still writes meta['question'] and no 'questions' key",
          %{ai_stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "String path"})

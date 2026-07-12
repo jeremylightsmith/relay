@@ -831,7 +831,7 @@ defmodule Relay.Cards do
   defp normalize_question(question) when is_map(question) do
     %{
       "prompt" => Map.get(question, "prompt"),
-      "options" => Map.get(question, "options", []),
+      "options" => Map.get(question, "options") || [],
       "allow_text" => Map.get(question, "allow_text", true)
     }
   end
