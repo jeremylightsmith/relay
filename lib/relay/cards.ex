@@ -94,15 +94,25 @@ defmodule Relay.Cards do
   those heavy text bodies must fetch the full card via `get_card_by_ref/2`
   (the drawer already does). Every other column, the `owners: :user` and
   ordered `sub_tasks` preloads, and the `rejection` embed are populated.
+
+  `opts`:
+    * `:exclude_stage_ids` — a list of stage ids to drop from the result
+      (the API index passes the board's top-level Done stage ids by default).
   """
-  def list_cards(%Board{id: board_id}) do
+  def list_cards(%Board{id: board_id}, opts \\ []) do
+    exclude_stage_ids = Keyword.get(opts, :exclude_stage_ids, [])
+
     Card
     |> where([c], c.board_id == ^board_id and is_nil(c.archived_at))
+    |> exclude_stages(exclude_stage_ids)
     |> order_by([c], asc: c.stage_id, asc: c.position, asc: c.id)
     |> select([c], struct(c, @list_card_fields))
     |> Repo.all()
     |> Repo.preload(card_preloads())
   end
+
+  defp exclude_stages(query, []), do: query
+  defp exclude_stages(query, ids), do: where(query, [c], c.stage_id not in ^ids)
 
   @doc """
   Archives `card` (RLY-4): a reversible soft-hide. Stamps `archived_at`

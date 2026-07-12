@@ -19,7 +19,6 @@ defmodule RelayWeb.Api.CardJSON do
       branch: card.branch,
       pr_url: card.pr_url,
       stage_id: card.stage_id,
-      ai_result: card.ai_result,
       sub_task_progress: Cards.sub_task_progress(card),
       owners: Enum.map(card.owners, &owner/1),
       active_owner: Cards.active_owner_type(card),
@@ -53,6 +52,7 @@ defmodule RelayWeb.Api.CardJSON do
         |> Map.put(:description, card.description)
         |> Map.put(:plan, card.plan)
         |> Map.put(:spec, card.spec)
+        |> Map.put(:ai_result, card.ai_result)
         |> Map.put(:sub_tasks, Enum.map(card.sub_tasks, &sub_task/1))
         |> Map.put(:timeline, Enum.map(timeline, &entry/1))
     }

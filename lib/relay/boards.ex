@@ -175,6 +175,17 @@ defmodule Relay.Boards do
   end
 
   @doc """
+  The ids of the board's **top-level** Done stages (`parent_id == nil`,
+  `category == :complete`) from an in-memory `stages` list. Used by the API
+  index to drop the Done column by default (RLY-67). A `:done` **sub-lane**
+  (a child stage) is intentionally excluded — only the board's terminal Done
+  column is dropped, not a done lane nested under an in-progress parent.
+  """
+  def top_level_done_stage_ids(stages) when is_list(stages) do
+    for %Stage{parent_id: nil, category: :complete, id: id} <- stages, do: id
+  end
+
+  @doc """
   Enables a `:review` or `:done` sub-lane on `parent` (a main stage),
   creating the child stage with `type:` review/done and `ai_enabled: false`.
   Idempotent.

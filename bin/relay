@@ -297,7 +297,8 @@ def emit(args, data, human):
 # ============================ CLI commands ============================
 
 def cmd_board(args):
-    b = get_board()
+    path = "/api/board?include_done=1" if getattr(args, "include_done", False) else "/api/board"
+    b = api("GET", path)
     if args.json:
         return print(json.dumps(b, indent=2))
     by_stage = {}
@@ -744,7 +745,8 @@ def build_parser():
         sp.set_defaults(func=fn)
         return sp
 
-    add("board", cmd_board, json_flag=True)
+    bd = add("board", cmd_board, json_flag=True)
+    bd.add_argument("--include-done", action="store_true")
     add("card", cmd_card, "ref", json_flag=True)
     c = add("create", cmd_create, "title", json_flag=True)
     c.add_argument("--stage")

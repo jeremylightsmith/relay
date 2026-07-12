@@ -191,6 +191,22 @@ defmodule Relay.CardsTest do
     end
   end
 
+  describe "list_cards/2 with :exclude_stage_ids" do
+    test "omits cards in the excluded stages and keeps the rest", %{board: board, stage: stage} do
+      other = insert(:stage, board: board, position: 2)
+      keep = insert(:card, stage: stage)
+      _drop = insert(:card, stage: other)
+
+      ids = Enum.map(Cards.list_cards(board, exclude_stage_ids: [other.id]), & &1.id)
+      assert ids == [keep.id]
+    end
+
+    test "an empty exclude list keeps every card", %{board: board, stage: stage} do
+      insert(:card, stage: stage)
+      assert length(Cards.list_cards(board, exclude_stage_ids: [])) == 1
+    end
+  end
+
   describe "update_card/2" do
     test "updates title, description, and tag", %{stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "Before"})

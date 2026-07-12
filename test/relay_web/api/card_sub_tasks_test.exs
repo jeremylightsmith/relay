@@ -81,7 +81,7 @@ defmodule RelayWeb.Api.CardSubTasksTest do
     assert body["ai_result"] == %{"summary" => "Shipped", "changes" => ["x"]}
   end
 
-  test "GET /api/cards index includes sub_task_progress and ai_result",
+  test "GET /api/cards index includes sub_task_progress but omits ai_result (RLY-67)",
        %{conn: conn, stage: stage} do
     card = insert(:card, stage: stage)
     {:ok, card} = Cards.set_sub_tasks(card, [%{"title" => "A"}])
@@ -89,6 +89,6 @@ defmodule RelayWeb.Api.CardSubTasksTest do
 
     [json] = conn |> get(~p"/api/cards") |> json_response(200) |> Map.fetch!("data")
     assert json["sub_task_progress"] == %{"done" => 0, "total" => 1}
-    assert json["ai_result"] == %{"summary" => "hi"}
+    refute Map.has_key?(json, "ai_result")
   end
 end

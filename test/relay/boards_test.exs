@@ -319,4 +319,17 @@ defmodule Relay.BoardsTest do
       assert Repo.get!(Stage, review.id).reject_to_stage_id == plan.id
     end
   end
+
+  describe "top_level_done_stage_ids/1" do
+    test "returns top-level complete-stage ids, excluding done sub-lanes" do
+      board = insert(:board)
+      _backlog = insert(:stage, board: board, position: 1, category: :unstarted)
+      code = insert(:stage, board: board, position: 2, category: :in_progress)
+      done = insert(:stage, board: board, position: 3, category: :complete)
+      _done_sub = insert(:stage, board: board, position: 4, category: :complete, type: :done, parent: code)
+
+      stages = Boards.list_stages(board)
+      assert Boards.top_level_done_stage_ids(stages) == [done.id]
+    end
+  end
 end
