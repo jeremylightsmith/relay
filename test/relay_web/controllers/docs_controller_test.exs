@@ -1,64 +1,93 @@
 defmodule RelayWeb.DocsControllerTest do
   use RelayWeb.ConnCase, async: true
 
-  test "GET /docs/api renders the API reference and is reachable logged out", %{conn: conn} do
-    html = conn |> get(~p"/docs/api") |> html_response(200)
-    assert html =~ "API Reference"
-    assert html =~ "Authorization: Bearer"
+  test "GET /docs renders the Introduction, logged out", %{conn: conn} do
+    html = conn |> get(~p"/docs") |> html_response(200)
+    assert html =~ "Introduction"
+    assert html =~ "baton"
+    assert html =~ ~s(id="docs")
   end
 
-  test "documents every API endpoint path", %{conn: conn} do
-    html = conn |> get(~p"/docs/api") |> html_response(200)
+  test "every registry page returns 200 and shows its title", %{conn: conn} do
+    pages = [
+      {"/docs", "Introduction"},
+      {"/docs/boards-and-stages", "Boards &amp; stages"},
+      {"/docs/cards-and-handoffs", "Cards &amp; handoffs"},
+      {"/docs/setup", "Setup"},
+      {"/docs/cli", "bin/relay"},
+      {"/docs/agent-integration", "Agent integration"},
+      {"/docs/api", "API Reference"}
+    ]
 
-    for fragment <- [
-          "GET /api/board",
-          "GET /api/cards",
-          "POST /api/cards",
-          "/api/cards/:ref",
-          "/api/cards/:ref/move",
-          "/api/cards/:ref/comments",
-          "/api/cards/:ref/needs-input",
-          "/api/cards/:ref/approve",
-          "/api/cards/:ref/reject"
-        ] do
-      assert html =~ fragment, "expected the API docs to mention #{fragment}"
+    for {path, needle} <- pages do
+      html = conn |> get(path) |> html_response(200)
+      assert html =~ needle, "expected #{path} to render #{inspect(needle)}"
     end
   end
 
-  test "documents the error envelope and status/code table", %{conn: conn} do
+  test "the REST API reference still lives at /docs/api", %{conn: conn} do
     html = conn |> get(~p"/docs/api") |> html_response(200)
-    assert html =~ "unauthorized"
-    assert html =~ "not_gated"
-    assert html =~ "missing_note"
-    assert html =~ "invalid_target"
-  end
-
-  test "renders the status/error-code table as HTML, not literal markdown pipes", %{conn: conn} do
-    html = conn |> get(~p"/docs/api") |> html_response(200)
-    assert html =~ "<table>"
-    refute html =~ "| --- | --- | --- |"
-  end
-
-  test "GET /docs renders the setup guide and is reachable logged out", %{conn: conn} do
-    html = conn |> get(~p"/docs") |> html_response(200)
-
-    assert html =~ "id=\"docs\""
-    assert html =~ "Setup"
     assert html =~ "Authorization: Bearer"
-    assert html =~ "RELAY_API_KEY"
+    assert html =~ "GET /api/board"
   end
 
-  test "GET /docs points to the full REST API reference", %{conn: conn} do
-    html = conn |> get(~p"/docs") |> html_response(200)
-
-    assert html =~ ~p"/docs/api"
-    assert html =~ "/api/board"
+  test "an unknown slug is a 404", %{conn: conn} do
+    assert_error_sent 404, fn -> get(conn, "/docs/does-not-exist") end
   end
 
-  test "GET /docs renders the CLI table as HTML, not literal markdown pipes", %{conn: conn} do
+  test "the sidebar lists all seven pages grouped into the two sections", %{conn: conn} do
     html = conn |> get(~p"/docs") |> html_response(200)
 
-    assert html =~ "<table>"
-    refute html =~ "| --- |"
+    for section <- ["Get started", "Build with Relay"] do
+      assert html =~ section
+    end
+
+    for title <- [
+          "Introduction",
+          "Boards &amp; stages",
+          "Cards &amp; handoffs",
+          "Setup",
+          "CLI (bin/relay)",
+          "Agent integration",
+          "REST API reference"
+        ] do
+      assert html =~ title, "sidebar missing #{title}"
+    end
+  end
+
+  test "the current page is highlighted in the sidebar", %{conn: conn} do
+    html = conn |> get(~p"/docs/setup") |> html_response(200)
+
+    active =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query("a.docs-sidebar-link.is-active")
+      |> LazyHTML.text()
+
+    assert active =~ "Setup"
+    refute active =~ "Introduction"
+  end
+
+  test "the public nav links to the board and home, with no search field", %{conn: conn} do
+    html = conn |> get(~p"/docs") |> html_response(200)
+
+    assert html =~ ~s(href="/board")
+    assert html =~ "Open the board"
+    assert html =~ ~s(class="docs-nav-brand")
+    refute html =~ ~s(type="search")
+    refute html =~ "Search the docs"
+  end
+
+  test "the on-this-page TOC anchors match the rendered heading ids", %{conn: conn} do
+    html = conn |> get(~p"/docs/setup") |> html_response(200)
+
+    # setup.md has `## Authentication`
+    assert html =~ ~s(href="#authentication")
+    assert html =~ ~s(id="authentication")
+  end
+
+  test "the sign-in page points builders at the setup guide", %{conn: conn} do
+    html = conn |> get(~p"/") |> html_response(200)
+    assert html =~ ~s(href="/docs/setup")
   end
 end

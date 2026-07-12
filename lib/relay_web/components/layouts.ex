@@ -151,6 +151,73 @@ defmodule RelayWeb.Layouts do
   end
 
   @doc """
+  Public documentation layout: top nav (wordmark → `/`, "/ Docs" eyebrow, "Open the board"
+  → `/board`), a left sidebar grouped by section with the active page highlighted, the article
+  slot, and an "on this page" TOC rail. Public — never reads `current_scope`. Docs are static
+  controller pages, so links use plain `href`.
+  """
+  attr :sidebar, :list, required: true, doc: "[%{slug, title, section}] in sidebar order"
+  attr :sections, :list, required: true, doc: "ordered, de-duplicated section names"
+  attr :active_slug, :string, required: true
+  attr :toc, :list, default: [], doc: "[%{level, text, anchor}] for the current page"
+  slot :inner_block, required: true
+
+  def docs(assigns) do
+    ~H"""
+    <div class="docs-shell">
+      <header class="docs-nav">
+        <a href={~p"/"} class="docs-nav-brand">
+          <img src={~p"/images/logo_light_128.png"} width="22" alt="Relay" />
+          <span>Relay</span>
+        </a>
+        <span class="docs-nav-eyebrow">/ Docs</span>
+        <a href={~p"/board"} class="docs-nav-cta">Open the board</a>
+      </header>
+
+      <div class="docs-body">
+        <details class="docs-menu" open>
+          <summary class="docs-menu-summary">
+            <.icon name="hero-bars-3" class="size-4" /> Menu
+          </summary>
+          <nav class="docs-sidebar" aria-label="Documentation">
+            <div :for={section <- @sections} class="docs-sidebar-section">
+              <p class="docs-sidebar-heading">{section}</p>
+              <ul>
+                <li :for={page <- Enum.filter(@sidebar, &(&1.section == section))}>
+                  <a
+                    href={docs_link(page)}
+                    class={["docs-sidebar-link", page.slug == @active_slug && "is-active"]}
+                    aria-current={page.slug == @active_slug && "page"}
+                  >
+                    {page.title}
+                  </a>
+                </li>
+              </ul>
+            </div>
+          </nav>
+        </details>
+
+        <main class="docs-main">
+          {render_slot(@inner_block)}
+        </main>
+
+        <nav :if={@toc != []} class="docs-toc" aria-label="On this page">
+          <p class="docs-toc-heading">On this page</p>
+          <ul>
+            <li :for={item <- @toc} class={["docs-toc-item", "docs-toc-#{item.level}"]}>
+              <a href={"##{item.anchor}"}>{item.text}</a>
+            </li>
+          </ul>
+        </nav>
+      </div>
+    </div>
+    """
+  end
+
+  defp docs_link(%{slug: "introduction"}), do: ~p"/docs"
+  defp docs_link(%{slug: slug}), do: ~p"/docs/#{slug}"
+
+  @doc """
   Shows the flash group with standard titles and content.
 
   ## Examples
