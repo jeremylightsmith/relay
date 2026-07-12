@@ -54,6 +54,13 @@ defmodule Relay.AccountsTest do
 
       assert %{email: ["has already been taken"]} = errors_on(changeset)
     end
+
+    test "normalizes the provider's email casing/whitespace so it matches invite lookups" do
+      assert {:ok, %User{} = user} =
+               Accounts.upsert_user_from_google(google_auth(%{email: "  Ada@Example.com "}))
+
+      assert user.email == "ada@example.com"
+    end
   end
 
   describe "get_user/1" do

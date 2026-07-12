@@ -4,6 +4,7 @@ defmodule Relay.MembersTest do
   alias Relay.Members
   alias Relay.Repo
   alias Schemas.Membership
+  alias Ueberauth.Auth.Info
 
   describe "invite/2" do
     test "creates an invited (user-less) row for an unregistered email" do
@@ -35,6 +36,22 @@ defmodule Relay.MembersTest do
       board = insert(:board)
       assert {:error, %Ecto.Changeset{}} = Members.invite(board, "   ")
     end
+
+    test "resolves immediately for a user whose stored email came from the provider with mixed case" do
+      board = insert(:board)
+
+      auth = %Ueberauth.Auth{
+        provider: :google,
+        uid: "google-uid-ada",
+        info: %Info{email: "  Ada@Example.com ", name: "Ada Lovelace", image: nil}
+      }
+
+      {:ok, user} = Relay.Accounts.upsert_user_from_google(auth)
+
+      assert {:ok, membership} = Members.invite(board, "ada@example.com")
+      assert membership.user_id == user.id
+      refute Membership.invited?(membership)
+    end
   end
 
   describe "resolve_invites_for_user/1" do
@@ -48,6 +65,22 @@ defmodule Relay.MembersTest do
       assert Repo.get!(Membership, invited.id).user_id == user.id
 
       # idempotent — running again changes nothing
+      assert :ok = Members.resolve_invites_for_user(user)
+      assert Repo.get!(Membership, invited.id).user_id == user.id
+    end
+
+    test "matches when the user's stored email was normalized from a mixed-case provider address" do
+      board = insert(:board)
+      {:ok, invited} = Members.invite(board, "later@example.com")
+
+      auth = %Ueberauth.Auth{
+        provider: :google,
+        uid: "google-uid-later",
+        info: %Info{email: "  Later@Example.com ", name: "Later Person", image: nil}
+      }
+
+      {:ok, user} = Relay.Accounts.upsert_user_from_google(auth)
+
       assert :ok = Members.resolve_invites_for_user(user)
       assert Repo.get!(Membership, invited.id).user_id == user.id
     end

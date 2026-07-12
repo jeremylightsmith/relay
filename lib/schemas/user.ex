@@ -19,12 +19,21 @@ defmodule Schemas.User do
     timestamps(type: :utc_datetime)
   end
 
-  @doc "Changeset for profile fields coming from the OAuth provider."
+  @doc """
+  Changeset for profile fields coming from the OAuth provider. `:email` is
+  normalized (trimmed/downcased) so every email in the system is canonical —
+  `Relay.Members` matches invite rows against `user.email` verbatim and
+  relies on this.
+  """
   def changeset(user, attrs) do
     user
     |> cast(attrs, [:email, :name, :avatar_url])
+    |> update_change(:email, &normalize/1)
     |> validate_required([:email])
     |> unique_constraint(:email)
     |> unique_constraint(:provider_uid)
   end
+
+  defp normalize(nil), do: nil
+  defp normalize(email), do: email |> String.trim() |> String.downcase()
 end
