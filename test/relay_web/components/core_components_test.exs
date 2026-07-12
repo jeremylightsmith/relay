@@ -42,6 +42,9 @@ defmodule RelayWeb.CoreComponentsTest do
       # 24px circle with a 2px white ring per the mockup (lines ~114-124)
       assert html =~ "width:24px;height:24px"
       assert html =~ "box-shadow:0 0 0 2px oklch(1 0 0)"
+      # avatar fill chroma matches the mockup's avatars builder
+      # (`docs/designs/Relay Board.dc.html` line ~1590: `oklch(0.62 0.13 <hue>)`)
+      assert html =~ "background:oklch(0.62 0.13 "
       refute html =~ ~s(data-role="member-overflow")
     end
 
@@ -52,6 +55,10 @@ defmodule RelayWeb.CoreComponentsTest do
 
       assert html =~ ~s(data-role="member-overflow")
       assert html =~ ">+2<"
+      # overflow chip colors match the mockup's `moreStyle`
+      # (`docs/designs/Relay Board.dc.html` line ~1596)
+      assert html =~ "background:oklch(0.94 0.006 255)"
+      assert html =~ "color:oklch(0.50 0.02 255)"
     end
 
     test "renders nothing for an empty list" do

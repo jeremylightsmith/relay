@@ -727,7 +727,7 @@ defmodule RelayWeb.CoreComponents do
     hue = rem(:erlang.phash2(member_email(m)), 360)
 
     base =
-      "width:24px;height:24px;border-radius:50%;background:oklch(0.62 0.15 #{hue});" <>
+      "width:24px;height:24px;border-radius:50%;background:oklch(0.62 0.13 #{hue});" <>
         "color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;" <>
         "font-size:10px;font-weight:600;flex:0 0 auto;box-sizing:border-box;" <>
         "box-shadow:0 0 0 2px oklch(1 0 0);"
@@ -736,8 +736,8 @@ defmodule RelayWeb.CoreComponents do
   end
 
   defp member_overflow_style do
-    "width:24px;height:24px;border-radius:50%;background:oklch(0.90 0.006 255);" <>
-      "color:oklch(0.45 0.02 255);display:flex;align-items:center;justify-content:center;" <>
+    "width:24px;height:24px;border-radius:50%;background:oklch(0.94 0.006 255);" <>
+      "color:oklch(0.50 0.02 255);display:flex;align-items:center;justify-content:center;" <>
       "font-size:10px;font-weight:600;flex:0 0 auto;box-sizing:border-box;" <>
       "box-shadow:0 0 0 2px oklch(1 0 0);margin-left:-7px;"
   end
