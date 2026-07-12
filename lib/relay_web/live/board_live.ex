@@ -819,13 +819,17 @@ defmodule RelayWeb.BoardLive do
   def handle_event("answer_input", _params, socket), do: {:noreply, socket}
 
   # RLY-71 — stepper: record a picked option for the current step (single-select).
+  #
+  # phx-value-option, not phx-value-value: "value" collides with the button's intrinsic DOM
+  # .value property (empty for a value-less <button>), which wins over the phx-value-*
+  # attribute when a real browser serializes the click.
   def handle_event(
         "answer_select",
-        %{"index" => index, "value" => value},
+        %{"index" => index, "option" => option},
         %{assigns: %{selected_card: %Card{status: :needs_input}}} = socket
       ) do
     step = String.to_integer(index)
-    {:noreply, assign(socket, :answer_values, Map.put(socket.assigns.answer_values, step, value))}
+    {:noreply, assign(socket, :answer_values, Map.put(socket.assigns.answer_values, step, option))}
   end
 
   def handle_event("answer_select", _params, socket), do: {:noreply, socket}
@@ -1042,6 +1046,12 @@ defmodule RelayWeb.BoardLive do
 
     {:noreply, assign(socket, :agent_log_ids, kept)}
   end
+
+  # `Phoenix.Ecto.SQL.Sandbox` traps exits on the request process by default (recommended for
+  # browser-driven tests, so DB connections shut down cleanly instead of corrupting the sandbox
+  # when a browser navigates away mid-request) — that requires a catch-all clause here so a
+  # linked process exiting normally doesn't crash the LiveView.
+  def handle_info({:EXIT, _pid, _reason}, socket), do: {:noreply, socket}
 
   defp insert_timeline_entry(socket, %Schemas.Comment{} = comment) do
     stream_insert(socket, :conversation, comment)

@@ -1328,13 +1328,17 @@ defmodule RelayWeb.CoreComponents do
                     {Relay.Markdown.to_html(@stepper_question["prompt"])}
                   </div>
                   <div :if={@stepper_question["options"] != []} class="flex flex-col gap-1.5">
+                    <%!-- phx-value-option, not phx-value-value: "value" collides with the
+                    button's intrinsic DOM .value property (empty for a value-less <button>),
+                    which wins over the phx-value-* attribute when a real browser serializes
+                    the click — silently sending "" instead of the picked option. --%>
                     <button
                       :for={{option, index} <- Enum.with_index(@stepper_question["options"])}
                       type="button"
                       id={"needs-input-option-#{index}"}
                       phx-click="answer_select"
                       phx-value-index={@answer_step}
-                      phx-value-value={option}
+                      phx-value-option={option}
                       class={[
                         "btn btn-sm justify-start rounded-[7px] font-normal",
                         Map.get(@answer_values, @answer_step) == option &&
