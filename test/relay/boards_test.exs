@@ -248,11 +248,13 @@ defmodule Relay.BoardsTest do
       end
     end
 
-    test "get_board!/2 raises for a non-member even of an existing board" do
+    test "get_board!/2 raises for an invited-but-unresolved member (no user_id yet)" do
       {:ok, board} = Boards.create_board(insert(:user), %{name: "Ops"})
+      invitee = insert(:user)
+      insert(:membership, board: board, user: nil, email: invitee.email)
 
       assert_raise Ecto.NoResultsError, fn ->
-        Boards.get_board!(insert(:user), board.slug)
+        Boards.get_board!(invitee, board.slug)
       end
     end
 
