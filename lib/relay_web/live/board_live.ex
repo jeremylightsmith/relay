@@ -38,17 +38,9 @@ defmodule RelayWeb.BoardLive do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} wide crumb>
       <:title>
-        <.boxed_field
-          :if={!@read_only?}
-          id="board-name"
-          value={@board.name}
-          form={@board_name_form}
-          field={:name}
-          save_event="save_board_name"
-          cancel_event="cancel_board_name"
-          input_class="truncate text-[13px] font-medium max-w-[46vw] sm:max-w-[280px]"
-        />
-        <span :if={@read_only?} id="board-name-readonly" class="truncate">{@board.name}</span>
+        <span id="board-name" class="truncate max-w-[46vw] sm:max-w-[280px]">
+          {@board.name}
+        </span>
       </:title>
       <:actions>
         <button
@@ -87,7 +79,7 @@ defmodule RelayWeb.BoardLive do
       </:menu_items>
       <div
         id="board-viewport"
-        class="flex flex-col min-h-[calc(100dvh_-_61px)] drawer:h-[calc(100dvh_-_61px)] drawer:min-h-0"
+        class="flex flex-col min-h-[calc(100dvh_-_53px)] drawer:h-[calc(100dvh_-_53px)] drawer:min-h-0"
       >
         <div id="board" phx-hook="BoardDnD" class="flex min-h-0 flex-1 flex-col">
           <div
@@ -345,7 +337,6 @@ defmodule RelayWeb.BoardLive do
       |> assign(:force_closed, MapSet.new())
       |> assign(:composing_stage_id, nil)
       |> assign(:compose_form, empty_compose_form())
-      |> assign(:board_name_form, to_form(Boards.change_board(board)))
       |> assign(:members, Members.list_members(board))
       |> assign(:reassign_open, false)
       |> stream_configure(:conversation, dom_id: &conversation_dom_id/1)
@@ -370,7 +361,7 @@ defmodule RelayWeb.BoardLive do
         save_card_spec save_card_plan
         add_owner remove_owner take_over post_comment answer_input
         review_approve review_reject
-        save_board_name archive_card restore_card toggle_sub_task
+        archive_card restore_card toggle_sub_task
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -560,24 +551,6 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("cancel_title", _params, socket) do
     {:noreply, assign(socket, :editing_title, false)}
-  end
-
-  def handle_event("cancel_board_name", _params, socket) do
-    {:noreply, assign(socket, :board_name_form, to_form(Boards.change_board(socket.assigns.board)))}
-  end
-
-  def handle_event("save_board_name", %{"board" => board_params}, socket) do
-    case Boards.update_board(socket.assigns.board, Map.take(board_params, ["name"])) do
-      {:ok, board} ->
-        {:noreply,
-         socket
-         |> assign(:board, %{socket.assigns.board | name: board.name})
-         |> assign(:page_title, board.name)
-         |> assign(:board_name_form, to_form(Boards.change_board(board)))}
-
-      {:error, changeset} ->
-        {:noreply, assign(socket, :board_name_form, to_form(changeset))}
-    end
   end
 
   def handle_event("save_card_title", %{"card" => card_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
@@ -898,8 +871,7 @@ defmodule RelayWeb.BoardLive do
      socket
      |> assign(:board, updated)
      |> assign(:page_title, board.name)
-     |> assign(:read_only?, Board.archived?(updated))
-     |> assign(:board_name_form, to_form(Boards.change_board(updated)))}
+     |> assign(:read_only?, Board.archived?(updated))}
   end
 
   # RLY-32: a member was removed elsewhere — eject the affected session's open

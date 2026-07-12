@@ -51,8 +51,8 @@ defmodule RelayWeb.BoardLiveMobileTest do
 
       # The bar title truncates instead of pushing actions off-screen on narrow screens.
       assert view |> element("#top-bar-title") |> render() =~ "min-w-0"
-      # The editable board-name <input> itself ellipsis-truncates (truncate must sit on the input).
-      assert view |> element("#board-name-input") |> render() =~ "truncate"
+      # The plain board-name <span> itself ellipsis-truncates (truncate sits on the span).
+      assert view |> element("#board-name") |> render() =~ "truncate"
 
       # The interactive bar controls are ≥44px tap targets.
       assert view |> element("#board-settings-link") |> render() =~ "min-h-[44px]"
@@ -74,7 +74,8 @@ defmodule RelayWeb.BoardLiveMobileTest do
 
       # Below 720px the board is a normal scrolling document: a dvh-based min-height,
       # never a fixed height that would let iOS treat it as a non-scrolling canvas.
-      assert viewport =~ "min-h-[calc(100dvh_-_61px)]"
+      # 53px == the top bar's exact height (no gap between the bar border and the board panel).
+      assert viewport =~ "min-h-[calc(100dvh_-_53px)]"
       # The old fixed viewport-height lock (and the static-viewport `vh` unit) is gone.
       refute viewport =~ "100vh"
       refute viewport =~ "height:calc"
@@ -89,7 +90,7 @@ defmodule RelayWeb.BoardLiveMobileTest do
 
       # The desktop app-shell is preserved: the fixed height is restored at the
       # 720px `drawer:` breakpoint (with min-height reset so it can't linger).
-      assert viewport =~ "drawer:h-[calc(100dvh_-_61px)]"
+      assert viewport =~ "drawer:h-[calc(100dvh_-_53px)]"
       assert viewport =~ "drawer:min-h-0"
     end
   end

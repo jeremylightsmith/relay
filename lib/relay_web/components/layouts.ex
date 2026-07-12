@@ -128,7 +128,7 @@ defmodule RelayWeb.Layouts do
     </header>
 
     <main class={[
-      if(@wide, do: "px-0 pt-2 pb-0", else: "px-4 py-20 sm:px-6 lg:px-8")
+      if(@wide, do: "px-0 py-0", else: "px-4 py-20 sm:px-6 lg:px-8")
     ]}>
       <div class={[if(@wide, do: "max-w-none", else: "mx-auto max-w-2xl space-y-4")]}>
         {render_slot(@inner_block)}
