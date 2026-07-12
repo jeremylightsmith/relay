@@ -20,6 +20,14 @@ defmodule RelayWeb.PageControllerTest do
       assert html =~ "See how it works"
     end
 
+    test "titles the landing tab with the · Relay suffix and drops the Phoenix suffix", %{conn: conn} do
+      html = conn |> get(~p"/") |> html_response(200)
+
+      assert html =~ "AI-first kanban board · Relay"
+      refute html =~ "Phoenix Framework"
+      refute html =~ "Relay · Relay"
+    end
+
     test "renders the marketing body sections and anchors", %{conn: conn} do
       html = conn |> get(~p"/") |> html_response(200)
 

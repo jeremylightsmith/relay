@@ -27,6 +27,32 @@ defmodule RelayWeb.LayoutsTest do
     assert html =~ ~s(href="/boards")
   end
 
+  test "hides the wordmark text below md while keeping the logo icon" do
+    html = render_app(%{inner_block: inner_block_slot()})
+
+    # wordmark span is hidden until md; logo img is always present
+    assert html =~ ~s(class="hidden md:inline text-[15px] font-semibold tracking-[-0.02em]")
+    assert html =~ ~s(alt="Relay")
+  end
+
+  test "reconnect banners read 'Relay is updating' as calm info alerts" do
+    html = render_app(%{inner_block: inner_block_slot()})
+
+    assert html =~ ~s(id="client-error")
+    assert html =~ ~s(id="server-error")
+    assert html =~ "Relay is updating"
+    assert html =~ "Standby"
+    assert html =~ "alert-info"
+
+    # the old red-error copy is gone
+    refute html =~ "We can't find the internet"
+    refute html =~ "Something went wrong"
+
+    # the disconnect/connect visibility hooks are preserved
+    assert html =~ "phx-disconnected"
+    assert html =~ "phx-connected"
+  end
+
   test "renders the avatar dropdown with theme toggle and sign out" do
     html = render_app(%{inner_block: inner_block_slot()})
 

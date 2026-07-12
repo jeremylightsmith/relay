@@ -27,6 +27,17 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     refute has_element?(view, "#needs-input-panel")
   end
 
+  test "the reply textarea sits in a full-width wrapper spanning the form",
+       %{conn: conn, code: code, user: user} do
+    {:ok, card} = Cards.create_card(code, %{title: "Wide reply"})
+    {:ok, _blocked} = Cards.request_input(card, "Which bucket?")
+
+    board = Boards.get_or_create_default_board(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+    assert has_element?(view, "#needs-input-form > div.w-full #needs-input-answer")
+  end
+
   test "a blocked card's drawer shows the amber panel with the latest question and composer",
        %{conn: conn, code: code, user: user} do
     {:ok, card} = Cards.create_card(code, %{title: "Ship exports"})

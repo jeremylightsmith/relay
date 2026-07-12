@@ -9,7 +9,7 @@ defmodule RelayWeb.PageController do
     if conn.assigns.current_scope do
       redirect(conn, to: ~p"/board")
     else
-      render(conn, :home)
+      render(conn, :home, page_title: "AI-first kanban board")
     end
   end
 
