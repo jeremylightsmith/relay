@@ -273,6 +273,35 @@ textarea.commit-field-input { min-height: 64px; }
   padding: 9px 11px 9px 2px;
   color: var(--color-base-content);
 }
+.commit-field-section { display: flex; flex-direction: column; gap: 9px; }
+.commit-field-header { display: flex; align-items: center; gap: 8px; }
+.commit-field-accent { width: 3px; height: 13px; border-radius: 2px; flex: 0 0 auto; }
+.commit-field-toggle,
+.commit-field-showmore {
+  background: transparent;
+  border: none;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.commit-field-preview-box {
+  border: 1px solid var(--color-field-border);
+  background: var(--color-field-bg);
+  border-radius: 8px;
+  padding: 13px 14px 6px;
+  cursor: text;
+}
+.commit-field-preview-box:hover { border-color: var(--color-field-border-hover); }
+.commit-field-preview {
+  position: relative;
+  max-height: 62px;
+  overflow: hidden;
+  cursor: text;
+  -webkit-mask-image: linear-gradient(180deg, #000 62%, transparent);
+  mask-image: linear-gradient(180deg, #000 62%, transparent);
+}
 .commit-pill {
   position: absolute;
   top: calc(100% + 6px);

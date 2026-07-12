@@ -231,6 +231,8 @@ defmodule RelayWeb.BoardLive do
         description_form={@description_form}
         editing_spec={@editing_spec}
         editing_plan={@editing_plan}
+        expanded_spec={@expanded_spec?}
+        expanded_plan={@expanded_plan?}
         spec_form={@spec_form}
         plan_form={@plan_form}
         current_user_id={@current_scope.user.id}
@@ -682,6 +684,14 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("save_card_plan", _params, socket), do: {:noreply, socket}
+
+  def handle_event("toggle_spec", _params, socket) do
+    {:noreply, update(socket, :expanded_spec?, &(!&1))}
+  end
+
+  def handle_event("toggle_plan", _params, socket) do
+    {:noreply, update(socket, :expanded_plan?, &(!&1))}
+  end
 
   # SUB-TASKS panel toggle (RLY-18): flip the item's done flag and refresh the
   # drawer + board card so the done/total count and stage badge stay in sync.
@@ -1310,6 +1320,8 @@ defmodule RelayWeb.BoardLive do
         |> assign(:description_form, nil)
         |> assign(:editing_spec, false)
         |> assign(:editing_plan, false)
+        |> assign(:expanded_spec?, false)
+        |> assign(:expanded_plan?, false)
         |> assign(:spec_form, nil)
         |> assign(:plan_form, nil)
         |> assign(:comment_form, empty_comment_form())
@@ -1330,6 +1342,8 @@ defmodule RelayWeb.BoardLive do
           description_form: nil,
           editing_spec: false,
           editing_plan: false,
+          expanded_spec?: false,
+          expanded_plan?: false,
           spec_form: nil,
           plan_form: nil,
           comment_form: nil,
