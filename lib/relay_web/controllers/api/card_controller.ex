@@ -2,6 +2,7 @@ defmodule RelayWeb.Api.CardController do
   use RelayWeb, :controller
 
   alias Relay.Activity
+  alias Relay.Attachments
   alias Relay.Boards
   alias Relay.Cards
 
@@ -186,6 +187,37 @@ defmodule RelayWeb.Api.CardController do
   end
 
   def comments(_conn, %{"ref" => _ref}), do: {:error, :invalid_request}
+
+  def attachments(conn, %{"ref" => ref, "content_type" => content_type, "data_base64" => data_base64} = params) do
+    board = conn.assigns.current_board
+    filename = Map.get(params, "filename", "attachment")
+
+    with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
+         {:ok, bytes} <- decode_base64(data_base64),
+         {:ok, attachment} <-
+           Attachments.create_attachment(card, %{
+             filename: filename,
+             content_type: content_type,
+             bytes: bytes
+           }) do
+      conn |> put_status(:created) |> render(:attachment, attachment: attachment)
+    else
+      nil -> {:error, :not_found}
+      :error -> {:error, :invalid_request}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  def attachments(_conn, %{"ref" => _ref}), do: {:error, :invalid_request}
+
+  defp decode_base64(data) when is_binary(data) do
+    case Base.decode64(data) do
+      {:ok, bytes} -> {:ok, bytes}
+      :error -> :error
+    end
+  end
+
+  defp decode_base64(_data), do: :error
 
   def needs_input(conn, %{"ref" => ref, "question" => question}) when is_binary(question) do
     board = conn.assigns.current_board

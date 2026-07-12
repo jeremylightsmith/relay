@@ -62,6 +62,16 @@ defmodule RelayWeb.Api.CardJSON do
     %{data: entry(comment)}
   end
 
+  def attachment(%{attachment: attachment}) do
+    %{
+      data: %{
+        id: attachment.id,
+        url: "/attachments/#{attachment.id}",
+        markdown: "![#{attachment.filename}](/attachments/#{attachment.id})"
+      }
+    }
+  end
+
   defp entry(%Schemas.Comment{} = c) do
     %{kind: "comment", body: c.body, author: author(c), inserted_at: c.inserted_at}
   end
