@@ -98,10 +98,12 @@ defmodule RelayWeb.BoardsLive do
                   {b.needs_you_count} need you
                 </span>
               </span>
-              <span class="font-mono text-[10.5px]" style="color:oklch(0.62 0.02 255);">
-                Updated {updated_label(b.updated_at)}
-              </span>
-              <.member_stack id={"board-members-#{b.slug}"} members={b.members} />
+              <div class="mt-[3px] flex items-center justify-between">
+                <.member_stack id={"board-members-#{b.slug}"} members={b.members} />
+                <span class="font-mono text-[10.5px]" style="color:oklch(0.62 0.02 255);">
+                  Updated {updated_label(b.updated_at)}
+                </span>
+              </div>
             </div>
           </.link>
 
