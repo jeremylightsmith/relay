@@ -24,6 +24,7 @@ defmodule Relay do
       Boards,
       Cards,
       Events,
-      Markdown
+      Markdown,
+      Members
     ]
 end

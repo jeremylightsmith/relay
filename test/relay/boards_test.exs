@@ -136,6 +136,13 @@ defmodule Relay.BoardsTest do
   end
 
   describe "create_board/2" do
+    test "creates the creator's membership" do
+      user = insert(:user)
+      {:ok, board} = Boards.create_board(user, %{name: "Ops"})
+
+      assert Relay.Members.member?(board, user)
+    end
+
     test "creates a named board, derives slug + key, seeds 8 stages" do
       user = insert(:user)
 
@@ -199,6 +206,15 @@ defmodule Relay.BoardsTest do
 
       refute theirs.id in Enum.map(Boards.list_boards(insert(:user)), & &1.id)
     end
+
+    test "returns boards the user is a member of but does not own" do
+      creator = insert(:user)
+      {:ok, board} = Boards.create_board(creator, %{name: "Shared"})
+      guest = insert(:user)
+      insert(:membership, board: board, user: guest, email: guest.email)
+
+      assert board.id in Enum.map(Boards.list_boards(guest), & &1.id)
+    end
   end
 
   describe "get_board/2 and get_board!/2" do
@@ -230,6 +246,22 @@ defmodule Relay.BoardsTest do
       assert_raise Ecto.NoResultsError, fn ->
         Boards.get_board!(insert(:user), board.slug)
       end
+    end
+
+    test "get_board!/2 raises for a non-member even of an existing board" do
+      {:ok, board} = Boards.create_board(insert(:user), %{name: "Ops"})
+
+      assert_raise Ecto.NoResultsError, fn ->
+        Boards.get_board!(insert(:user), board.slug)
+      end
+    end
+
+    test "a member (non-owner) can load the board by slug" do
+      {:ok, board} = Boards.create_board(insert(:user), %{name: "Ops"})
+      guest = insert(:user)
+      insert(:membership, board: board, user: guest, email: guest.email)
+
+      assert Boards.get_board!(guest, board.slug).id == board.id
     end
   end
 

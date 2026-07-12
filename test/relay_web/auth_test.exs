@@ -65,6 +65,17 @@ defmodule RelayWeb.AuthTest do
       refute get_session(conn, :stale)
       assert redirected_to(conn) == ~p"/board"
     end
+
+    test "resolves pending invites for the logging-in user", %{conn: conn} do
+      board = Relay.Factory.insert(:board)
+      {:ok, invited} = Relay.Members.invite(board, "join@example.com")
+      assert invited.user_id == nil
+
+      user = Relay.Factory.insert(:user, email: "join@example.com")
+      Auth.log_in_user(conn, user)
+
+      assert Relay.Members.member?(board, user)
+    end
   end
 
   describe "log_out_user/1" do
