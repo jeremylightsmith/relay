@@ -886,4 +886,28 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ "text-base-content/60"
     end
   end
+
+  describe ".md markdown stylesheet (RLY-58)" do
+    @app_css File.read!(Path.expand("../../../assets/css/app.css", __DIR__))
+    @storybook_css File.read!(Path.expand("../../../assets/css/storybook.css", __DIR__))
+
+    test "app.css restyles .md to the design-system look" do
+      # body ~13px / 1.55, slightly muted
+      assert @app_css =~ ~r/\.md\s*\{[^}]*font-size:\s*13px/
+      assert @app_css =~ ~r/\.md\s*\{[^}]*line-height:\s*1\.55/
+      # disc bullets with a muted marker
+      assert @app_css =~ ".md ul { list-style: disc; }"
+      assert @app_css =~ ".md li::marker"
+      # links use the primary token, underlined
+      assert @app_css =~ ".md a { color: var(--color-primary); text-decoration: underline; }"
+      # headings are a strong label, not oversized
+      assert @app_css =~ ~r/\.md h1[^\n]*\{[^}]*font-weight:\s*700/
+    end
+
+    test "storybook.css mirrors the .md block (RLY-58 gap closed)" do
+      assert @storybook_css =~ ".md ul { list-style: disc; }"
+      assert @storybook_css =~ ".md a { color: var(--color-primary); text-decoration: underline; }"
+      assert @storybook_css =~ ".md li::marker"
+    end
+  end
 end
