@@ -1220,6 +1220,7 @@ defmodule RelayWeb.CoreComponents do
                     rows="3"
                     form={@answer_form}
                     field={:body}
+                    input_class="w-full"
                     placeholder="Type your answer — the AI picks up where it left off…"
                     phx-hook="SubmitOnCmdEnter"
                   />
