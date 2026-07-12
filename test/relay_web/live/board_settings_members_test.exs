@@ -75,6 +75,19 @@ defmodule RelayWeb.BoardSettingsMembersTest do
     assert has_element?(view, "#settings-nav-members")
   end
 
+  test "a member row's avatar matches the mockup's chroma and font size", %{conn: conn, user: user} do
+    board = board_for(user)
+    [me] = Members.list_members(board)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=members")
+
+    row = view |> element("#member-row-#{me.id} div[style*='border-radius:50%']") |> render()
+
+    # matches `docs/designs/Relay Board.dc.html` member row avatarStyle (line ~1406):
+    # oklch(0.62 0.13 <hue>) at font-size:12px
+    assert row =~ "background:oklch(0.62 0.13 "
+    assert row =~ "font-size:12px"
+  end
+
   test "the AGENT card links to the API keys pane", %{conn: conn, user: user} do
     board = board_for(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=members")
