@@ -100,6 +100,32 @@ class PrintCardTest(unittest.TestCase):
         self.assertNotIn("CHANGES REQUESTED", text)
 
 
+class NeedsInputBodyTest(unittest.TestCase):
+    """needs_input_body builds the POST body: plain question vs. structured --questions JSON."""
+
+    def test_plain_question_builds_question_body(self):
+        self.assertEqual(relay.needs_input_body("plain q", None), {"question": "plain q"})
+
+    def test_structured_questions_build_questions_body(self):
+        raw = '[{"prompt": "p", "options": ["a", "b"]}]'
+        self.assertEqual(
+            relay.needs_input_body(None, raw),
+            {"questions": [{"prompt": "p", "options": ["a", "b"]}]},
+        )
+
+    def test_malformed_json_dies(self):
+        with self.assertRaises(SystemExit):
+            relay.needs_input_body(None, "{not json")
+
+    def test_non_list_payload_dies(self):
+        with self.assertRaises(SystemExit):
+            relay.needs_input_body(None, '{"prompt": "p"}')
+
+    def test_empty_array_dies(self):
+        with self.assertRaises(SystemExit):
+            relay.needs_input_body(None, "[]")
+
+
 class WorkBannerTest(unittest.TestCase):
     CARD = {"ref": "RLY-25", "title": "better relay logging"}
     ENTRY = {"stage": "Spec", "from": "Spec · Ready", "done": "Spec:Review",

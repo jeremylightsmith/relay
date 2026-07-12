@@ -14,7 +14,7 @@ Config (env): RELAY_URL, RELAY_API_KEY  (a board key from /board/settings)
   relay watch [--once] [--dry-run] [--interval N]
   relay board [--json]        relay card REF [--json]     relay pull [--json]
   relay comment REF TEXT      relay move REF STAGE        relay status REF STATUS
-  relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF Q
+  relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF [Q] [--questions @file]
   relay own REF / release REF relay approve REF           relay reject REF NOTE
   relay sub-tasks REF @file   relay check REF ID / uncheck REF ID   relay result REF @file
   relay attach REF FILE [--caption TEXT] [--json]
@@ -304,8 +304,23 @@ def attach(ref, path):
     return api("POST", f"/api/cards/{ref}/attachments", body)["data"]
 
 
-def needs_input(ref, question):
-    return api("POST", f"/api/cards/{ref}/needs-input", {"question": question})["data"]
+def needs_input_body(question, questions_raw):
+    """POST body for needs-input: {"question": ...} for a plain ask, or a validated
+    {"questions": [...]} from the JSON in questions_raw (already resolved from @file/stdin)."""
+    if questions_raw is None:
+        return {"question": question}
+    try:
+        parsed = json.loads(questions_raw)
+    except json.JSONDecodeError as e:
+        die(f"--questions is not valid JSON: {e}")
+    if not isinstance(parsed, list) or not parsed:
+        die("--questions must be a non-empty JSON array of question objects")
+    return {"questions": parsed}
+
+
+def needs_input(ref, question=None, questions_raw=None):
+    body = needs_input_body(question, questions_raw)
+    return api("POST", f"/api/cards/{ref}/needs-input", body)["data"]
 
 
 # ============================ rendering ============================
@@ -386,6 +401,15 @@ def _simple(fn):
 
 def cmd_reject(args):
     card = api("POST", f"/api/cards/{args.ref}/reject", {"note": read_arg(args.note)})["data"]
+    emit(args, card, card_line(card))
+
+
+def cmd_needs_input(args):
+    question = read_arg(args.question) if args.question is not None else None
+    questions_raw = read_arg(args.questions) if args.questions is not None else None
+    if question is None and questions_raw is None:
+        die("needs-input needs a QUESTION argument or --questions")
+    card = needs_input(args.ref, question, questions_raw)
     emit(args, card, card_line(card))
 
 
@@ -821,7 +845,9 @@ def build_parser():
     add("check", _simple(lambda a: set_sub_task_done(a.ref, a.id, True)), "ref", "id", json_flag=True)
     add("uncheck", _simple(lambda a: set_sub_task_done(a.ref, a.id, False)), "ref", "id", json_flag=True)
     add("result", _simple(lambda a: set_result(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
-    add("needs-input", _simple(lambda a: needs_input(a.ref, read_arg(a.question))), "ref", "question", json_flag=True)
+    ni = add("needs-input", cmd_needs_input, "ref", json_flag=True)
+    ni.add_argument("question", nargs="?")
+    ni.add_argument("--questions")
     add("own", _simple(lambda a: own(a.ref)), "ref", json_flag=True)
     add("release", _simple(lambda a: release(a.ref)), "ref", json_flag=True)
     add("approve", _simple(lambda a: api("POST", f"/api/cards/{a.ref}/approve", {})["data"]), "ref", json_flag=True)
