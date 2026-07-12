@@ -115,6 +115,23 @@ defmodule Relay.Cards do
   defp exclude_stages(query, ids), do: where(query, [c], c.stage_id not in ^ids)
 
   @doc """
+  Returns the newest `limit` non-archived cards in `stage`, ordered
+  `updated_at DESC, id DESC` — the terminal Done column's render window
+  (RLY-53). `updated_at` is the recency proxy for "recently completed": a
+  card's row is touched when it moves into a stage. Owners (`:user`) and
+  position-ordered sub_tasks are preloaded exactly like `list_cards/1`, so the
+  board columns can render the result directly.
+  """
+  def list_stage_cards(%Stage{id: stage_id}, limit) when is_integer(limit) and limit >= 0 do
+    Card
+    |> where([c], c.stage_id == ^stage_id and is_nil(c.archived_at))
+    |> order_by([c], desc: c.updated_at, desc: c.id)
+    |> limit(^limit)
+    |> Repo.all()
+    |> Repo.preload(card_preloads())
+  end
+
+  @doc """
   Archives `card` (RLY-4): a reversible soft-hide. Stamps `archived_at`
   (truncated UTC, like boards), attributes an `:archived` activity to
   `actor` (`:agent | {:user, user_id}`, defaults to `:agent`), and

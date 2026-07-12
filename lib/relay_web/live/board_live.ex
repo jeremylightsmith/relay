@@ -35,6 +35,11 @@ defmodule RelayWeb.BoardLive do
 
   @category_order [:unstarted, :planning, :in_progress, :complete]
 
+  # RLY-53 — the terminal Done column renders at most this many cards, with a
+  # "Show N more" button revealing the next batch. Keep in sync with the
+  # stage_column/1 :page_size default.
+  @done_page_size 8
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -140,6 +145,7 @@ defmodule RelayWeb.BoardLive do
                   wip_limit={stage.wip_limit}
                   board_key={@board.key}
                   terminal={stage.id == @terminal_stage_id}
+                  revealed={if(stage.id == @terminal_stage_id, do: @done_revealed)}
                   questions={@needs_input_questions}
                   cards={Map.fetch!(@streams, stream_name(stage.id))}
                   composing={@composing_stage_id == stage.id}
@@ -336,6 +342,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
       |> assign_board_derivations(board)
+      |> assign(:done_revealed, @done_page_size)
       |> assign(:force_open, MapSet.new())
       |> assign(:force_closed, MapSet.new())
       |> assign(:composing_stage_id, nil)
@@ -348,7 +355,7 @@ defmodule RelayWeb.BoardLive do
 
     socket =
       Enum.reduce(board.stages, socket, fn stage, acc ->
-        stream(acc, stream_name(stage.id), Map.get(cards_by_stage, stage.id, []))
+        stream_stage(acc, stage.id, cards_by_stage)
       end)
 
     {:ok, socket}
@@ -414,6 +421,20 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("cancel_compose", _params, socket) do
     {:noreply, assign(socket, :composing_stage_id, nil)}
+  end
+
+  # RLY-53 — reveal the next batch of the terminal Done column: grow
+  # done_revealed by a page and re-derive the terminal stream to the newest
+  # done_revealed cards (reset keeps only the bounded window in the DOM).
+  def handle_event("show_more_done", %{"stage-id" => stage_id}, socket) do
+    stage_id = String.to_integer(stage_id)
+
+    if stage_id == socket.assigns.terminal_stage_id do
+      socket = update(socket, :done_revealed, &(&1 + @done_page_size))
+      {:noreply, stream_stage(socket, stage_id, %{}, reset: true)}
+    else
+      {:noreply, socket}
+    end
   end
 
   # Tracks the composer's live value server-side (LiveView only patches the
@@ -854,7 +875,7 @@ defmodule RelayWeb.BoardLive do
       {:noreply,
        socket
        |> assign(:needs_input_questions, Cards.needs_input_questions(socket.assigns.board))
-       |> stream_insert(stream_name(card.stage_id), card)
+       |> upsert_card_stream(card, cards_by_stage)
        |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, cards_by_stage))
        |> assign_archived_count()
        |> maybe_refresh_drawer(card)}
@@ -1193,14 +1214,68 @@ defmodule RelayWeb.BoardLive do
     cards_by_stage = socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
 
     socket
+    |> adjust_done_revealed(source_stage_id, moved.stage_id, cards_by_stage)
     |> restream_stage(source_stage_id, cards_by_stage)
     |> restream_stage(moved.stage_id, cards_by_stage)
     |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, cards_by_stage))
     |> refresh_selected_after_move(moved)
   end
 
+  # RLY-53 — keep the Done reveal count consistent as cards cross the terminal
+  # boundary. A card entering Done is revealed on top without hiding a shown one
+  # (bump by 1, capped at the new count); a card leaving clamps the window to
+  # what remains. Reorders within Done, and moves that never touch Done, leave
+  # done_revealed untouched. Runs before the restream, which reads done_revealed.
+  defp adjust_done_revealed(socket, source_stage_id, target_stage_id, cards_by_stage) do
+    terminal_id = socket.assigns.terminal_stage_id
+    done_count = length(Map.get(cards_by_stage, terminal_id, []))
+
+    cond do
+      is_nil(terminal_id) ->
+        socket
+
+      target_stage_id == terminal_id and source_stage_id != terminal_id ->
+        update(socket, :done_revealed, &min(&1 + 1, done_count))
+
+      source_stage_id == terminal_id and target_stage_id != terminal_id ->
+        update(socket, :done_revealed, &min(&1, done_count))
+
+      true ->
+        socket
+    end
+  end
+
+  # RLY-53 — the single windowing gate: the terminal Done column streams only
+  # its newest @done_revealed cards (via Cards.list_stage_cards/2); every other
+  # stage streams its full list from cards_by_stage. Route every (re)stream of a
+  # stage through here so the Done cap holds identically on mount, reveal,
+  # reload, move, and realtime restream.
+  defp stream_stage(socket, stage_id, cards_by_stage, opts \\ []) do
+    stream(socket, stream_name(stage_id), stage_window(socket, stage_id, cards_by_stage), opts)
+  end
+
+  defp stage_window(socket, stage_id, cards_by_stage) do
+    if stage_id == socket.assigns.terminal_stage_id do
+      terminal_stage = find_stage_by_id(socket, stage_id)
+      Cards.list_stage_cards(terminal_stage, socket.assigns.done_revealed)
+    else
+      Map.get(cards_by_stage, stage_id, [])
+    end
+  end
+
+  # RLY-53 — the terminal Done column is a bounded window, so an upsert there
+  # re-derives the window (a blind stream_insert could surface a card meant to
+  # stay behind "Show more"). Every other stage upserts in place by DOM id.
+  defp upsert_card_stream(socket, %Card{stage_id: stage_id} = card, cards_by_stage) do
+    if stage_id == socket.assigns.terminal_stage_id do
+      stream_stage(socket, stage_id, cards_by_stage, reset: true)
+    else
+      stream_insert(socket, stream_name(stage_id), card)
+    end
+  end
+
   defp restream_stage(socket, stage_id, cards_by_stage) do
-    stream(socket, stream_name(stage_id), Map.get(cards_by_stage, stage_id, []), reset: true)
+    stream_stage(socket, stage_id, cards_by_stage, reset: true)
   end
 
   # RLY-4 — a card was archived (locally or via broadcast): drop it from its
@@ -1322,7 +1397,7 @@ defmodule RelayWeb.BoardLive do
 
     board.stages
     |> Enum.reduce(socket, fn stage, acc ->
-      stream(acc, stream_name(stage.id), Map.get(cards_by_stage, stage.id, []), reset: true)
+      stream_stage(acc, stage.id, cards_by_stage, reset: true)
     end)
     |> refresh_selected_stage()
   end

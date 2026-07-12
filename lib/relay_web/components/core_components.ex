@@ -2186,6 +2186,19 @@ defmodule RelayWeb.CoreComponents do
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
 
   attr :terminal, :boolean, default: false, doc: "true when this is the board's terminal (Done) stage"
+
+  attr :revealed, :integer,
+    default: nil,
+    doc:
+      "RLY-53 — how many terminal Done cards are shown; the 'Show N more' button appears " <>
+        "when @count exceeds it. nil (non-terminal) hides the button."
+
+  attr :page_size, :integer,
+    default: 8,
+    doc:
+      "RLY-53 — the reveal batch size, capping the button's count " <>
+        "(keep in sync with BoardLive @done_page_size)"
+
   attr :questions, :map, default: %{}, doc: "card_id => latest needs_input question, for previews"
 
   def stage_column(assigns) do
@@ -2400,6 +2413,21 @@ defmodule RelayWeb.CoreComponents do
                     category={@category}
                   />
                 </div>
+                <button
+                  :if={(@terminal and @revealed) && @count > @revealed}
+                  type="button"
+                  id={"#{@id}-show-more-done"}
+                  phx-click="show_more_done"
+                  phx-value-stage-id={@stage_id}
+                  class="stage-show-more"
+                  style="flex:0 0 auto;width:100%;margin-top:2px;padding:8px 10px;border:1px solid var(--color-base-300);border-radius:8px;background:var(--color-base-100);color:oklch(0.52 0.02 255);font-size:11px;font-weight:600;letter-spacing:0.01em;text-align:center;cursor:pointer;"
+                >
+                  Show
+                  <span style="font-family:var(--font-mono);">
+                    {min(@page_size, @count - @revealed)}
+                  </span>
+                  more
+                </button>
               </div>
             </div>
           <% end %>
