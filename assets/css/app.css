@@ -375,7 +375,7 @@
   .docs-menu-summary { display: none !important; }
 }
 @media (max-width: 1023px) {
-  .docs-body { grid-template-columns: 1fr; gap: 20px; }
+  .docs-body { grid-template-columns: minmax(0, 1fr); gap: 20px; }
   .docs-toc { display: none; }
   .docs-menu-summary { display: flex; }
   .docs-sidebar { position: static; top: auto; margin-bottom: 8px; }
