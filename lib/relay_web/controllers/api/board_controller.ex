@@ -8,9 +8,10 @@ defmodule RelayWeb.Api.BoardController do
 
   action_fallback RelayWeb.Api.FallbackController
 
-  def show(conn, _params) do
+  def show(conn, params) do
     board = conn.assigns.current_board
-    render(conn, :show, board: board, stages: Boards.list_stages(board), cards: Cards.list_cards(board))
+    stages = Boards.list_stages(board)
+    render(conn, :show, board: board, stages: stages, cards: index_cards(board, stages, params))
   end
 
   def version(conn, _params) do
@@ -26,4 +27,15 @@ defmodule RelayWeb.Api.BoardController do
     :ok = AgentLog.record(conn.assigns.current_board.id, entries)
     send_resp(conn, 200, "")
   end
+
+  # RLY-67: the board index drops the top-level Done column unless ?include_done is set.
+  defp index_cards(board, stages, params) do
+    if include_done?(params) do
+      Cards.list_cards(board)
+    else
+      Cards.list_cards(board, exclude_stage_ids: Boards.top_level_done_stage_ids(stages))
+    end
+  end
+
+  defp include_done?(params), do: params["include_done"] in ["1", "true", true]
 end

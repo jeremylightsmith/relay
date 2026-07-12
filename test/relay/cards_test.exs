@@ -136,6 +136,75 @@ defmodule Relay.CardsTest do
 
       assert Enum.map(Cards.list_cards(board), & &1.id) == [keep.id]
     end
+
+    test "omits description/spec/plan but keeps every other field and the preloads",
+         %{board: board, stage: stage} do
+      card = insert(:card, stage: stage, description: "d", spec: "s", plan: "p", status: :working)
+      insert(:card_owner, card: card)
+      insert(:sub_task, card: card, title: "todo")
+
+      assert [loaded] = Cards.list_cards(board)
+
+      assert loaded.description == nil
+      assert loaded.spec == nil
+      assert loaded.plan == nil
+      assert loaded.title == card.title
+      assert loaded.status == :working
+      assert [%Schemas.CardOwner{}] = loaded.owners
+      assert [%Schemas.SubTask{title: "todo"}] = loaded.sub_tasks
+    end
+
+    test "preserves the rejection embed through the trim", %{board: board, stage: stage} do
+      card = insert(:card, stage: stage)
+
+      {:ok, _} =
+        card
+        |> Ecto.Changeset.change()
+        |> Ecto.Changeset.put_embed(:rejection, %Schemas.CardRejection{
+          note: "fix it",
+          from_stage_id: stage.id,
+          from_stage_name: "Code",
+          to_stage_id: stage.id,
+          to_stage_name: "Plan",
+          rejected_by: "Relay AI",
+          rejected_at: DateTime.truncate(DateTime.utc_now(), :second)
+        })
+        |> Repo.update()
+
+      assert [loaded] = Cards.list_cards(board)
+      assert %Schemas.CardRejection{note: "fix it"} = loaded.rejection
+    end
+  end
+
+  describe "count_cards/1" do
+    test "counts the board's non-archived cards, excluding archived and other boards",
+         %{board: board, stage: stage} do
+      insert(:card, stage: stage)
+      insert(:card, stage: stage)
+      archived = insert(:card, stage: stage)
+      {:ok, _} = Cards.archive_card(archived)
+
+      other = insert(:board)
+      insert(:card, stage: insert(:stage, board: other))
+
+      assert Cards.count_cards(board) == 2
+    end
+  end
+
+  describe "list_cards/2 with :exclude_stage_ids" do
+    test "omits cards in the excluded stages and keeps the rest", %{board: board, stage: stage} do
+      other = insert(:stage, board: board, position: 2)
+      keep = insert(:card, stage: stage)
+      _drop = insert(:card, stage: other)
+
+      ids = Enum.map(Cards.list_cards(board, exclude_stage_ids: [other.id]), & &1.id)
+      assert ids == [keep.id]
+    end
+
+    test "an empty exclude list keeps every card", %{board: board, stage: stage} do
+      insert(:card, stage: stage)
+      assert length(Cards.list_cards(board, exclude_stage_ids: [])) == 1
+    end
   end
 
   describe "update_card/2" do

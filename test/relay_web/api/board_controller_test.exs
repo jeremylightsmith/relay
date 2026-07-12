@@ -82,4 +82,46 @@ defmodule RelayWeb.Api.BoardControllerTest do
       assert json_response(conn, 401)
     end
   end
+
+  describe "GET /api/board Done-column exclusion (RLY-67)" do
+    setup %{board: board} do
+      code = insert(:stage, board: board, name: "Code", type: :work, category: :in_progress, position: 1)
+      done = insert(:stage, board: board, name: "Done", type: :done, category: :complete, position: 2)
+
+      done_sub =
+        insert(:stage, board: board, name: "Code:Done", type: :done, category: :complete, position: 3, parent: code)
+
+      %{code: code, done: done, done_sub: done_sub}
+    end
+
+    test "excludes top-level Done cards by default, keeps in-progress and done sub-lane cards",
+         %{conn: conn, code: code, done: done, done_sub: done_sub} do
+      insert(:card, stage: code, title: "Working")
+      insert(:card, stage: done, title: "Shipped")
+      insert(:card, stage: done_sub, title: "Sub-done")
+
+      titles = conn |> get(~p"/api/board") |> json_response(200) |> Map.fetch!("cards") |> Enum.map(& &1["title"])
+
+      assert "Working" in titles
+      assert "Sub-done" in titles
+      refute "Shipped" in titles
+    end
+
+    test "includes top-level Done cards with ?include_done=1", %{conn: conn, done: done} do
+      insert(:card, stage: done, title: "Shipped")
+
+      titles =
+        conn |> get(~p"/api/board?include_done=1") |> json_response(200) |> Map.fetch!("cards") |> Enum.map(& &1["title"])
+
+      assert "Shipped" in titles
+    end
+  end
+
+  test "board card JSON omits ai_result", %{conn: conn, board: board} do
+    stage = insert(:stage, board: board, position: 1)
+    insert(:card, stage: stage, ai_result: %{"summary" => "did it"})
+
+    [card_json] = conn |> get(~p"/api/board") |> json_response(200) |> Map.fetch!("cards")
+    refute Map.has_key?(card_json, "ai_result")
+  end
 end

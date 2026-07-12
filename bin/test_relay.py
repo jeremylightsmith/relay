@@ -7,6 +7,7 @@ work() path, which prints the card-switch banner then returns before any API cal
 
 Run: python3 bin/test_relay.py
 """
+import argparse
 import contextlib
 import importlib.machinery
 import importlib.util
@@ -466,6 +467,29 @@ class ForwardEmitPointsTest(unittest.TestCase):
         relay.DRY = True  # skip the needs_input API call inside flag()
         capture(relay.flag, "RLY-9", "boom")
         self.assertIn(("error", "  ⚑ RLY-9: boom", "RLY-9"), self.sent)
+
+
+class BoardIncludeDoneTest(unittest.TestCase):
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+        self.calls = []
+        relay.api = lambda method, path, body=None, **k: (
+            self.calls.append((method, path))
+            or {"board": {"name": "B", "key": "RLY"}, "stages": [], "cards": []}
+        )
+
+    def test_board_defaults_to_the_plain_path(self):
+        capture(relay.cmd_board, argparse.Namespace(json=True, include_done=False))
+        self.assertEqual(self.calls, [("GET", "/api/board")])
+
+    def test_include_done_flag_forwards_the_query_param(self):
+        capture(relay.cmd_board, argparse.Namespace(json=True, include_done=True))
+        self.assertEqual(self.calls, [("GET", "/api/board?include_done=1")])
+
+    def test_parser_accepts_include_done(self):
+        args = relay.build_parser().parse_args(["board", "--include-done"])
+        self.assertTrue(args.include_done)
 
 
 if __name__ == "__main__":

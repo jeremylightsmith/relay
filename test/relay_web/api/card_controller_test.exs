@@ -286,4 +286,32 @@ defmodule RelayWeb.Api.CardControllerTest do
     resp = conn |> get(~p"/api/board") |> json_response(200)
     assert resp["needs_you"] == %{"needs_input" => 0, "in_review" => 1, "awaiting_human" => 0}
   end
+
+  describe "GET /api/cards Done-column exclusion (RLY-67)" do
+    test "excludes top-level Done cards by default, present with ?include_done=1",
+         %{conn: conn, board: board} do
+      done = insert(:stage, board: board, name: "Done", type: :done, category: :complete, position: 9)
+      insert(:card, stage: done, title: "Shipped")
+
+      default_titles = conn |> get(~p"/api/cards") |> json_response(200) |> Map.fetch!("data") |> Enum.map(& &1["title"])
+      refute "Shipped" in default_titles
+
+      included_titles =
+        conn |> get(~p"/api/cards?include_done=1") |> json_response(200) |> Map.fetch!("data") |> Enum.map(& &1["title"])
+
+      assert "Shipped" in included_titles
+    end
+  end
+
+  test "GET /api/cards list omits ai_result", %{conn: conn, stage: stage} do
+    insert(:card, stage: stage, ai_result: %{"summary" => "x"})
+    [card_json] = conn |> get(~p"/api/cards") |> json_response(200) |> Map.fetch!("data")
+    refute Map.has_key?(card_json, "ai_result")
+  end
+
+  test "GET /api/cards/:ref detail includes ai_result", %{conn: conn, board: board, stage: stage} do
+    card = insert(:card, stage: stage, ai_result: %{"summary" => "done"})
+    body = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200) |> Map.fetch!("data")
+    assert body["ai_result"] == %{"summary" => "done"}
+  end
 end

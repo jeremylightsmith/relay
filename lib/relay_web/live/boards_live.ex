@@ -157,7 +157,7 @@ defmodule RelayWeb.BoardsLive do
         slug: board.slug,
         name: board.name,
         updated_at: board.updated_at,
-        card_count: length(Cards.list_cards(board)),
+        card_count: Cards.count_cards(board),
         needs_you_count: rollup.needs_input + rollup.in_review + rollup.awaiting_human,
         members: Members.list_members(board)
       }
