@@ -13,8 +13,8 @@ project changes.
 | `Relay Design System.dc.html` | The design system — typography, palette, actors/avatars, controls, board components, and an **implementation map to daisyUI/Tailwind primitives**. Read this first. |
 | `Relay Mobile Brief.dc.html` | **Mobile platform brief** — what Relay is/isn't on a phone, the surfaces (Inbox/Board keep, Stream drop), the two primary actions, the hybrid native-shell architecture, and the ship plan. Read alongside [ADR 0005](../adr/0005-mobile-app-scope-and-architecture.md). |
 | `Relay Mobile.dc.html` | **Mobile screen flow (for build)** — the tappable Inbox & Board prototype: login, core review loop, needs-input, board, settings, comments/screenshot viewer. Source for the mobile cards. |
-| `Relay Docs.dc.html` | Docs-site **API & Setup** page (developer onboarding). |
-| `Relay API Reference.dc.html` | Docs-site **REST API reference** page. (Static content faithful; the canvas render `<script>` was omitted on pull — re-pull for a pristine copy.) |
+| `Relay Docs.dc.html` | The public documentation site — top nav, sectioned left sidebar, "on this page" TOC, and the content styles (callouts, numbered steps, code blocks, tables). **Fidelity source for the `/docs` pages.** |
+| `Relay API Reference.dc.html` | The REST API reference page styling — endpoint/method treatment and code samples. **Fidelity source for `/docs/api`.** (Static content faithful; the canvas render `<script>` was omitted on pull — re-pull for a pristine copy.) |
 | `support.js` | The Claude design-canvas runtime the `.dc.html` files load. |
 
 ## Design language (from the Design System file)
