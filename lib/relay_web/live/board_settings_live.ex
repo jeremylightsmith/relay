@@ -1076,9 +1076,9 @@ defmodule RelayWeb.BoardSettingsLive do
     seed = m.email || ""
     hue = rem(:erlang.phash2(seed), 360)
 
-    "width:34px;height:34px;border-radius:50%;background:oklch(0.62 0.15 #{hue});" <>
+    "width:34px;height:34px;border-radius:50%;background:oklch(0.62 0.13 #{hue});" <>
       "color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;" <>
-      "font-size:13px;font-weight:600;flex:0 0 auto;"
+      "font-size:12px;font-weight:600;flex:0 0 auto;"
   end
 
   # The effective reject target id: the explicit reject_to, else the previous main stage.
