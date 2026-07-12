@@ -39,4 +39,36 @@ defmodule RelayWeb.BoardLiveMobileTest do
       assert view |> element("#user-avatar") |> render() =~ "min-w-[44px]"
     end
   end
+
+  describe "board scroll behavior below the mobile breakpoint" do
+    setup :register_and_log_in_user
+
+    test "#board-viewport uses a dvh-based min-height and drops the fixed 100vh lock",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      viewport = view |> element("#board-viewport") |> render()
+
+      # Below 720px the board is a normal scrolling document: a dvh-based min-height,
+      # never a fixed height that would let iOS treat it as a non-scrolling canvas.
+      assert viewport =~ "min-h-[calc(100dvh_-_61px)]"
+      # The old fixed viewport-height lock (and the static-viewport `vh` unit) is gone.
+      refute viewport =~ "100vh"
+      refute viewport =~ "height:calc"
+    end
+
+    test "at >=720px the board keeps its fixed viewport-height app shell",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      viewport = view |> element("#board-viewport") |> render()
+
+      # The desktop app-shell is preserved: the fixed height is restored at the
+      # 720px `drawer:` breakpoint (with min-height reset so it can't linger).
+      assert viewport =~ "drawer:h-[calc(100dvh_-_61px)]"
+      assert viewport =~ "drawer:min-h-0"
+    end
+  end
 end
