@@ -1102,6 +1102,17 @@ defmodule RelayWeb.CoreComponents do
     default: nil,
     doc: "a Phoenix.HTML.Form for answer[body]; required when the card's status is :needs_input"
 
+  attr :answer_questions, :any,
+    default: nil,
+    doc:
+      "RLY-71 structured needs-input questions (list of %{prompt, options, allow_text}); nil renders the single-textarea fallback"
+
+  attr :answer_step, :integer, default: 0, doc: "RLY-71 stepper: 0-based current question index"
+
+  attr :answer_values, :map,
+    default: %{},
+    doc: "RLY-71 stepper: %{integer => string} answer picked/typed per question index"
+
   attr :review_gate, :any,
     default: nil,
     doc:
@@ -1138,6 +1149,12 @@ defmodule RelayWeb.CoreComponents do
       assigns
       |> assign(:sub_task_progress, Cards.sub_task_progress(assigns.card))
       |> assign(:working_progress, board_card_progress(assigns.card))
+      |> assign(
+        :stepper_question,
+        if(is_list(assigns[:answer_questions]),
+          do: Enum.at(assigns.answer_questions, assigns[:answer_step] || 0)
+        )
+      )
 
     ~H"""
     <div id={@id} class="drawer drawer-end" phx-window-keydown="close_drawer" phx-key="escape">
@@ -1294,48 +1311,148 @@ defmodule RelayWeb.CoreComponents do
                     {waiting_label(@card.blocked_since)}
                   </span>
                 </div>
-                <div
-                  :if={@body_loading}
-                  id="needs-input-question-skeleton"
-                  class="skeleton h-5 w-3/4 rounded"
-                >
-                </div>
-                <div
-                  :if={!@body_loading and @question}
-                  id="needs-input-question"
-                  class="md text-[13.5px] leading-normal"
-                  style="color:oklch(0.33 0.03 65);"
-                >
-                  {Relay.Markdown.to_html(@question)}
-                </div>
-                <.form
-                  for={@answer_form}
-                  id="needs-input-form"
-                  class="flex flex-col items-start gap-[11px]"
-                  phx-submit="answer_input"
-                >
-                  <div class="w-full">
-                    <.boxed_field
-                      id="needs-input-answer"
-                      commit={:form}
-                      multiline
-                      rows="3"
-                      form={@answer_form}
-                      field={:body}
-                      input_class="w-full"
-                      placeholder="Type your answer — the AI picks up where it left off…"
-                      phx-hook="SubmitOnCmdEnter"
-                    />
-                  </div>
-                  <button
-                    id="needs-input-send"
-                    type="submit"
-                    class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
-                    style="background:oklch(0.70 0.13 65);"
+                <%!-- RLY-71 stepper: one structured question at a time --%>
+                <div :if={@answer_questions} id="needs-input-stepper" class="flex flex-col gap-[11px]">
+                  <div
+                    id="needs-input-progress"
+                    class="font-mono text-[10px]"
+                    style="color:oklch(0.52 0.11 65);"
                   >
-                    Send to AI →
-                  </button>
-                </.form>
+                    Question {@answer_step + 1} of {length(@answer_questions)}
+                  </div>
+                  <div
+                    id="needs-input-question"
+                    class="md text-[13.5px] leading-normal"
+                    style="color:oklch(0.33 0.03 65);"
+                  >
+                    {Relay.Markdown.to_html(@stepper_question["prompt"])}
+                  </div>
+                  <div :if={@stepper_question["options"] != []} class="flex flex-col gap-1.5">
+                    <button
+                      :for={{option, index} <- Enum.with_index(@stepper_question["options"])}
+                      type="button"
+                      id={"needs-input-option-#{index}"}
+                      phx-click="answer_select"
+                      phx-value-index={@answer_step}
+                      phx-value-value={option}
+                      class={[
+                        "btn btn-sm justify-start rounded-[7px] font-normal",
+                        Map.get(@answer_values, @answer_step) == option &&
+                          "needs-input-option-selected text-white"
+                      ]}
+                      style={
+                        if(Map.get(@answer_values, @answer_step) == option,
+                          do: "background:oklch(0.70 0.13 65);border-color:oklch(0.70 0.13 65);",
+                          else:
+                            "background:transparent;border:1px solid oklch(0.87 0.07 75);color:oklch(0.33 0.03 65);"
+                        )
+                      }
+                    >
+                      {option}
+                    </button>
+                  </div>
+                  <form
+                    :if={@stepper_question["allow_text"]}
+                    id="needs-input-text-form"
+                    phx-change="answer_custom"
+                  >
+                    <input type="hidden" name="answer[index]" value={@answer_step} />
+                    <input
+                      id="needs-input-text"
+                      type="text"
+                      name="answer[text]"
+                      value={
+                        stepper_custom_text(
+                          @answer_values,
+                          @answer_step,
+                          @stepper_question["options"]
+                        )
+                      }
+                      autocomplete="off"
+                      placeholder="Or type your own…"
+                      class="input input-sm w-full rounded-[7px]"
+                    />
+                  </form>
+                  <div class="flex items-center justify-between">
+                    <button
+                      :if={@answer_step > 0}
+                      id="needs-input-back"
+                      type="button"
+                      phx-click="answer_back"
+                      class="btn btn-sm btn-ghost rounded-[7px]"
+                    >
+                      ← Back
+                    </button>
+                    <span :if={@answer_step == 0}></span>
+                    <button
+                      :if={@answer_step < length(@answer_questions) - 1}
+                      id="needs-input-next"
+                      type="button"
+                      phx-click="answer_next"
+                      disabled={not Map.has_key?(@answer_values, @answer_step)}
+                      class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
+                      style="background:oklch(0.70 0.13 65);"
+                    >
+                      Next →
+                    </button>
+                    <button
+                      :if={@answer_step == length(@answer_questions) - 1}
+                      id="needs-input-send"
+                      type="button"
+                      phx-click="answer_submit"
+                      disabled={not Map.has_key?(@answer_values, @answer_step)}
+                      class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
+                      style="background:oklch(0.70 0.13 65);"
+                    >
+                      Send to AI →
+                    </button>
+                  </div>
+                </div>
+                <%!-- fallback: today's single-textarea composer for plain-string / human blocks --%>
+                <div :if={is_nil(@answer_questions)}>
+                  <div
+                    :if={@body_loading}
+                    id="needs-input-question-skeleton"
+                    class="skeleton h-5 w-3/4 rounded"
+                  >
+                  </div>
+                  <div
+                    :if={!@body_loading and @question}
+                    id="needs-input-question"
+                    class="md text-[13.5px] leading-normal"
+                    style="color:oklch(0.33 0.03 65);"
+                  >
+                    {Relay.Markdown.to_html(@question)}
+                  </div>
+                  <.form
+                    for={@answer_form}
+                    id="needs-input-form"
+                    class="flex flex-col items-start gap-[11px]"
+                    phx-submit="answer_input"
+                  >
+                    <div class="w-full">
+                      <.boxed_field
+                        id="needs-input-answer"
+                        commit={:form}
+                        multiline
+                        rows="3"
+                        form={@answer_form}
+                        field={:body}
+                        input_class="w-full"
+                        placeholder="Type your answer — the AI picks up where it left off…"
+                        phx-hook="SubmitOnCmdEnter"
+                      />
+                    </div>
+                    <button
+                      id="needs-input-send"
+                      type="submit"
+                      class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
+                      style="background:oklch(0.70 0.13 65);"
+                    >
+                      Send to AI →
+                    </button>
+                  </.form>
+                </div>
               </section>
               <section
                 :if={@card.status == :in_review and !@archived}
@@ -2116,6 +2233,15 @@ defmodule RelayWeb.CoreComponents do
       minutes < 60 -> "waiting #{minutes}m"
       minutes < 1440 -> "waiting #{div(minutes, 60)}h"
       true -> "waiting #{div(minutes, 1440)}d"
+    end
+  end
+
+  # RLY-71 — the text-box value for the current step: the stored answer when it's a free-typed
+  # custom string, blank when it's one of the presented options (or unanswered).
+  defp stepper_custom_text(values, step, options) do
+    case Map.get(values, step) do
+      nil -> ""
+      value -> if value in options, do: "", else: value
     end
   end
 
