@@ -18,7 +18,7 @@ defmodule RelayWeb.BoardSettingsWipTest do
     test "renders Off with no stepper when the stage has no limit", %{conn: conn, board: board} do
       code = stage_named(board, "Code")
 
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
 
       assert has_element?(view, "#stage-#{code.id}-wip-toggle", "Off")
       refute has_element?(view, "#stage-#{code.id}-wip-value")
@@ -27,7 +27,7 @@ defmodule RelayWeb.BoardSettingsWipTest do
     test "toggling on defaults the limit to 3", %{conn: conn, board: board} do
       code = stage_named(board, "Code")
 
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
       view |> element("#stage-#{code.id}-wip-toggle") |> render_click()
 
       assert has_element?(view, "#stage-#{code.id}-wip-toggle", "On")
@@ -39,7 +39,7 @@ defmodule RelayWeb.BoardSettingsWipTest do
       code = stage_named(board, "Code")
       {:ok, _stage} = Boards.update_stage(code, %{wip_limit: 3})
 
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
       view |> element("#stage-#{code.id}-wip-toggle") |> render_click()
 
       assert has_element?(view, "#stage-#{code.id}-wip-toggle", "Off")
@@ -51,7 +51,7 @@ defmodule RelayWeb.BoardSettingsWipTest do
       code = stage_named(board, "Code")
       {:ok, _stage} = Boards.update_stage(code, %{wip_limit: 2})
 
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
 
       view |> element("#stage-#{code.id}-wip-up") |> render_click()
       assert has_element?(view, "#stage-#{code.id}-wip-value", "3")
@@ -75,7 +75,7 @@ defmodule RelayWeb.BoardSettingsWipTest do
       {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
       assert has_element?(board_view, "#stage-col-5 .stage-wip", "wip 1/3")
 
-      {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
       settings_view |> element("#stage-#{code.id}-wip-toggle") |> render_click()
 
       render(board_view)

@@ -55,11 +55,55 @@ defmodule RelayWeb.BoardSettingsLive do
           Done
         </.link>
       </:actions>
-      <div id="board-settings" style="display:flex;align-items:stretch;min-height:calc(100vh - 74px);">
+      <div
+        id="board-settings"
+        class="flex flex-col drawer:flex-row"
+        style="align-items:stretch;min-height:calc(100vh - 74px);"
+      >
+        <%!-- RLY-72: mobile-only (<720px) horizontal tab strip. Rendered first so on
+             phones it sits under the page title with content full-width below; at
+             >=720px `drawer:hidden` collapses it and the rail+content two-pane returns.
+             No artboard — deliberate responsive design reusing the settings chrome. --%>
+        <nav
+          id="settings-tabs"
+          class="flex drawer:hidden overflow-x-auto"
+          style="border-bottom:1px solid oklch(0.93 0.006 255);background:oklch(0.992 0.002 255);padding:0 14px;gap:2px;"
+        >
+          <.link
+            patch={~p"/board/#{@board.slug}/settings"}
+            id="settings-tab-general"
+            style={tab_style(@section == :general)}
+          >
+            General
+          </.link>
+          <.link
+            patch={~p"/board/#{@board.slug}/settings?section=stages"}
+            id="settings-tab-stages"
+            style={tab_style(@section == :stages)}
+          >
+            Stages
+          </.link>
+          <.link
+            patch={~p"/board/#{@board.slug}/settings?section=members"}
+            id="settings-tab-members"
+            style={tab_style(@section == :members)}
+          >
+            Members
+          </.link>
+          <.link
+            patch={~p"/board/#{@board.slug}/settings?section=keys"}
+            id="settings-tab-keys"
+            style={tab_style(@section == :keys)}
+          >
+            API keys
+          </.link>
+        </nav>
+
         <%!-- Left rail — mockup "Relay Board.dc.html" lines ~176-183 --%>
         <nav
           id="settings-rail"
-          style="width:210px;flex:0 0 auto;border-right:1px solid oklch(0.93 0.006 255);background:oklch(0.992 0.002 255);padding:22px 14px;display:flex;flex-direction:column;gap:3px;"
+          class="hidden drawer:flex"
+          style="width:210px;flex:0 0 auto;border-right:1px solid oklch(0.93 0.006 255);background:oklch(0.992 0.002 255);padding:22px 14px;flex-direction:column;gap:3px;"
         >
           <div
             class="font-mono"
@@ -68,14 +112,14 @@ defmodule RelayWeb.BoardSettingsLive do
             BOARD
           </div>
           <.link
-            patch={~p"/board/#{@board.slug}/settings?section=general"}
+            patch={~p"/board/#{@board.slug}/settings"}
             id="settings-nav-general"
             style={nav_style(@section == :general)}
           >
             General
           </.link>
           <.link
-            patch={~p"/board/#{@board.slug}/settings"}
+            patch={~p"/board/#{@board.slug}/settings?section=stages"}
             id="settings-nav-stages"
             style={nav_style(@section == :stages)}
           >
@@ -1019,10 +1063,10 @@ defmodule RelayWeb.BoardSettingsLive do
 
   def handle_info(_message, socket), do: {:noreply, socket}
 
-  defp section(%{"section" => "general"}), do: :general
+  defp section(%{"section" => "stages"}), do: :stages
   defp section(%{"section" => "keys"}), do: :keys
   defp section(%{"section" => "members"}), do: :members
-  defp section(_params), do: :stages
+  defp section(_params), do: :general
 
   # Reloads the main stages and lane map from the DB after any mutation, and
   # groups them for the pane. All four categories always render so an
@@ -1167,6 +1211,22 @@ defmodule RelayWeb.BoardSettingsLive do
   defp nav_style(false) do
     "display:block;text-align:left;border:none;border-radius:8px;padding:8px 10px;" <>
       "font-size:13.5px;text-decoration:none;font-weight:500;" <>
+      "background:transparent;color:oklch(0.44 0.02 255);"
+  end
+
+  # RLY-72: horizontal tab in the mobile settings strip. Reuses nav_style/1's
+  # active/inactive blue-tint values (active = oklch(0.42 0.13 250) text on
+  # oklch(0.95 0.03 250)), laid out as a non-wrapping pill for a horizontal row.
+  # No artboard — deliberate responsive design matching the settings chrome.
+  defp tab_style(true) do
+    "flex:0 0 auto;text-decoration:none;padding:10px 14px;border-radius:8px;" <>
+      "font-size:13.5px;font-weight:600;white-space:nowrap;" <>
+      "background:oklch(0.95 0.03 250);color:oklch(0.42 0.13 250);"
+  end
+
+  defp tab_style(false) do
+    "flex:0 0 auto;text-decoration:none;padding:10px 14px;border-radius:8px;" <>
+      "font-size:13.5px;font-weight:500;white-space:nowrap;" <>
       "background:transparent;color:oklch(0.44 0.02 255);"
   end
 

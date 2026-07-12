@@ -122,7 +122,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
 
     test "toggling Review on creates the child lane; off removes it", %{conn: conn, board: board} do
       code = Enum.find(board.stages, &(&1.name == "Code"))
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
 
       view |> element("#stage-#{code.id}-review-toggle") |> render_click()
       assert [%{type: :review}] = Boards.sublanes(code)
@@ -136,7 +136,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       {:ok, review} = Boards.enable_lane(code, :review)
       Relay.Factory.insert(:card, stage: review)
 
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
       html = view |> element("#stage-#{code.id}-review-toggle") |> render_click()
 
       assert html =~ "still has cards"
@@ -149,7 +149,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       {:ok, review} = Boards.enable_lane(code, :review)
       Relay.Factory.insert(:card, stage: review)
 
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
       view |> element("#stage-#{code.id}-review-toggle") |> render_click()
 
       # The blocked toggle bumps a render nonce into the checkbox's id so
@@ -179,6 +179,65 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       assert has_element?(view, "#account-menu #sign-out")
       assert has_element?(view, "#account-menu [data-phx-theme='dark']")
       refute has_element?(view, "#archived-cards-menu-item")
+    end
+  end
+
+  describe "default section" do
+    setup :register_and_log_in_user
+
+    test "bare /settings opens the General pane, not Stages", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+      assert has_element?(view, "#general-pane")
+      refute has_element?(view, "#stages-pane")
+      # the General rail link carries nav_style/1's active blue-tint
+      assert has_element?(view, "#settings-nav-general[style*='oklch(0.42 0.13 250)']")
+      refute has_element?(view, "#settings-nav-stages[style*='oklch(0.42 0.13 250)']")
+    end
+  end
+
+  describe "mobile tab strip" do
+    setup :register_and_log_in_user
+
+    test "renders a horizontal tab strip linking every settings section", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+      assert has_element?(view, "#settings-tabs")
+      assert has_element?(view, "#settings-tab-general[href='/board/#{board.slug}/settings']")
+      assert has_element?(view, "#settings-tab-stages[href='/board/#{board.slug}/settings?section=stages']")
+      assert has_element?(view, "#settings-tab-members[href='/board/#{board.slug}/settings?section=members']")
+      assert has_element?(view, "#settings-tab-keys[href='/board/#{board.slug}/settings?section=keys']")
+    end
+
+    test "the tab matching the current section carries the active style", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+
+      {:ok, general, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      assert has_element?(general, "#settings-tab-general[style*='oklch(0.42 0.13 250)']")
+      refute has_element?(general, "#settings-tab-stages[style*='oklch(0.42 0.13 250)']")
+
+      {:ok, stages, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+      assert has_element?(stages, "#settings-tab-stages[style*='oklch(0.42 0.13 250)']")
+      refute has_element?(stages, "#settings-tab-general[style*='oklch(0.42 0.13 250)']")
+    end
+
+    test "rail and strip carry the responsive show/hide classes", %{conn: conn, user: user} do
+      # The real show/hide is a CSS media query (drawer: = 720px) that render
+      # tests can't exercise — both chrome variants are always in the DOM. We
+      # assert the responsive utility classes instead.
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+      rail = view |> element("#settings-rail") |> render()
+      assert rail =~ ~s(class="hidden drawer:flex")
+
+      tabs = view |> element("#settings-tabs") |> render()
+      assert tabs =~ "drawer:hidden"
+
+      container = view |> element("#board-settings") |> render()
+      assert container =~ "flex flex-col drawer:flex-row"
     end
   end
 

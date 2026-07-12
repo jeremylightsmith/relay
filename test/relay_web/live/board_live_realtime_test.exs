@@ -351,7 +351,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       code = Enum.find(board.stages, &(&1.name == "Code"))
 
       {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
-      {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
 
       settings_view |> element("#stage-#{code.id}-name-display") |> render_click()
 
@@ -369,7 +369,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       {:ok, _card} = Cards.add_owner(card, :agent)
 
       {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
-      {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
 
       settings_view |> element("#stage-#{code.id}-ai-toggle") |> render_click()
 
@@ -388,7 +388,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       {:ok, _card} = Cards.create_card(backlog, %{title: "Ride along"})
 
       {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
-      {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
 
       settings_view |> element("#stage-#{next_up.id}-up") |> render_click()
 
@@ -403,7 +403,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
 
       {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
-      {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
 
       settings_view |> element("#stage-#{spec.id}-down") |> render_click()
 
@@ -416,7 +416,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       deploy = Enum.find(board.stages, &(&1.name == "Deploy"))
 
       {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
-      {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
 
       settings_view |> element("#add-stage-unstarted") |> render_click()
       assert has_element?(board_view, "#category-unstarted h3", "New stage")
