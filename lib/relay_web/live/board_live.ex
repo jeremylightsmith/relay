@@ -31,6 +31,8 @@ defmodule RelayWeb.BoardLive do
   alias Schemas.Card
   alias Schemas.Stage
 
+  require Logger
+
   @category_order [:unstarted, :planning, :in_progress, :complete]
 
   @impl true
@@ -242,6 +244,7 @@ defmodule RelayWeb.BoardLive do
         reject_form={@reject_form}
         reject_error={@reject_error}
         archived={Card.archived?(@selected_card)}
+        body_loading={@body_loading?}
       />
       <div
         :if={@archived_open}
@@ -339,6 +342,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:compose_form, empty_compose_form())
       |> assign(:members, Members.list_members(board))
       |> assign(:reassign_open, false)
+      |> assign(:body_loading?, false)
       |> stream_configure(:conversation, dom_id: &conversation_dom_id/1)
       |> stream_configure(:activity, dom_id: &activity_dom_id/1)
 
@@ -353,6 +357,36 @@ defmodule RelayWeb.BoardLive do
   @impl true
   def handle_params(params, _uri, socket) do
     {:noreply, assign_selected_card(socket, params["card"])}
+  end
+
+  # RLY-68 — the async heavy-body fetch kicked off by
+  # maybe_start_body_load/4. Compares the result's card id against the
+  # live selected_card so a fill that resolves after the user has since
+  # switched cards (or closed the drawer) is dropped instead of
+  # overwriting the wrong content.
+  @impl true
+  def handle_async(:load_card_body, {:ok, result}, socket) do
+    %{card_id: card_id, card: card, activity: activity, conversation: conversation} = result
+
+    case socket.assigns.selected_card do
+      %Card{id: ^card_id} ->
+        {:noreply,
+         socket
+         |> assign(:selected_card, card)
+         |> assign(:body_loading?, false)
+         |> assign(:question, latest_question(card, activity))
+         |> assign_review(card)
+         |> stream(:conversation, conversation, reset: true)
+         |> stream(:activity, activity, reset: true)}
+
+      _stale ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_async(:load_card_body, {:exit, reason}, socket) do
+    Logger.warning("optimistic drawer body load failed: #{inspect(reason)}")
+    {:noreply, assign(socket, :body_loading?, false)}
   end
 
   @impl true
@@ -1083,6 +1117,7 @@ defmodule RelayWeb.BoardLive do
 
     socket
     |> assign(:selected_card, card)
+    |> assign(:body_loading?, false)
     |> assign(:question, latest_question(card, activity))
     |> assign(:answer_form, empty_answer_form())
     |> assign_review(card)
@@ -1246,6 +1281,7 @@ defmodule RelayWeb.BoardLive do
       %Card{id: ^moved_id} ->
         socket
         |> assign(:selected_card, moved)
+        |> assign(:body_loading?, false)
         |> assign(:selected_stage, find_stage_by_id(socket, moved.stage_id))
         |> assign_review(moved)
         |> stream(:conversation, Activity.list_conversation(moved), reset: true)
@@ -1296,41 +1332,54 @@ defmodule RelayWeb.BoardLive do
   # selected card's stage always still exists).
   defp refresh_selected_stage(socket) do
     case socket.assigns.selected_card do
-      %Card{} = card -> assign(socket, :selected_stage, find_stage_by_id(socket, card.stage_id))
-      _other -> socket
+      %Card{} = card ->
+        socket
+        |> assign(:selected_stage, find_stage_by_id(socket, card.stage_id))
+        |> assign(:body_loading?, false)
+
+      _other ->
+        socket
     end
   end
 
   # The drawer is URL-driven: ?card=<ref> selects a card; no param — or a
   # ref that doesn't resolve on this user's board (unknown, malformed, or
   # another board's card) — means no drawer. Authorization is the board
-  # scoping inside Cards.get_card_by_ref/2.
+  # scoping inside Cards.get_card_light_by_ref/2.
+  #
+  # RLY-68 optimistic open: paint from the light card immediately, then
+  # (when connected) fetch the heavy body/timeline/conversation async.
   defp assign_selected_card(socket, ref) do
-    card = if ref, do: Cards.get_card_by_ref(socket.assigns.board, ref)
+    card = if ref, do: Cards.get_card_light_by_ref(socket.assigns.board, ref)
 
     case card do
       %Card{} = card ->
-        activity = Activity.list_activity(card)
+        socket =
+          socket
+          |> assign(:selected_card, card)
+          |> assign(:selected_stage, find_stage_by_id(socket, card.stage_id))
+          |> assign(:title_form, to_form(%{"title" => card.title}, as: :card))
+          |> assign(:editing_title, false)
+          |> assign(:editing_description, false)
+          |> assign(:description_form, nil)
+          |> assign(:editing_spec, false)
+          |> assign(:editing_plan, false)
+          |> assign(:expanded_spec?, false)
+          |> assign(:expanded_plan?, false)
+          |> assign(:spec_form, nil)
+          |> assign(:plan_form, nil)
+          |> assign(:comment_form, empty_comment_form())
+          |> assign(:answer_form, empty_answer_form())
+          |> assign(:body_loading?, true)
+          |> assign(:question, nil)
+          |> assign(:review_gate, nil)
+          |> assign(:reject_open, false)
+          |> assign(:reject_form, empty_reject_form())
+          |> assign(:reject_error, nil)
+          |> stream(:conversation, [], reset: true)
+          |> stream(:activity, [], reset: true)
 
-        socket
-        |> assign(:selected_card, card)
-        |> assign(:selected_stage, find_stage_by_id(socket, card.stage_id))
-        |> assign(:title_form, to_form(%{"title" => card.title}, as: :card))
-        |> assign(:editing_title, false)
-        |> assign(:editing_description, false)
-        |> assign(:description_form, nil)
-        |> assign(:editing_spec, false)
-        |> assign(:editing_plan, false)
-        |> assign(:expanded_spec?, false)
-        |> assign(:expanded_plan?, false)
-        |> assign(:spec_form, nil)
-        |> assign(:plan_form, nil)
-        |> assign(:comment_form, empty_comment_form())
-        |> assign(:question, latest_question(card, activity))
-        |> assign(:answer_form, empty_answer_form())
-        |> assign_review(card)
-        |> stream(:conversation, Activity.list_conversation(card), reset: true)
-        |> stream(:activity, activity, reset: true)
+        maybe_start_body_load(socket, card, ref, connected?(socket))
 
       nil ->
         socket
@@ -1353,11 +1402,33 @@ defmodule RelayWeb.BoardLive do
           review_gate: nil,
           reject_open: false,
           reject_form: nil,
-          reject_error: nil
+          reject_error: nil,
+          body_loading?: false
         )
         |> stream(:conversation, [], reset: true)
         |> stream(:activity, [], reset: true)
     end
+  end
+
+  # Kick off the async heavy-body fetch when the socket is connected. On a
+  # dead render (cold deep-link / refresh) there is no async — the skeleton
+  # renders and the reconnect's handle_params performs the fill. The result
+  # carries card_id so handle_async can drop a stale fill.
+  defp maybe_start_body_load(socket, _card, _ref, false), do: socket
+
+  defp maybe_start_body_load(socket, %Card{id: card_id}, ref, true) do
+    board = socket.assigns.board
+
+    start_async(socket, :load_card_body, fn ->
+      full = Cards.get_card_by_ref(board, ref)
+
+      %{
+        card_id: card_id,
+        card: full,
+        activity: Activity.list_activity(full),
+        conversation: Activity.list_conversation(full)
+      }
+    end)
   end
 
   # Streams are keyed per stage so each column gets its own

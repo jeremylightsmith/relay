@@ -47,6 +47,7 @@ defmodule RelayWeb.BoardLiveSubTasksTest do
     {:ok, _card} = Cards.update_ai_result(card, %{"summary" => "All **done**", "changes" => ["Wired it"]})
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     assert has_element?(view, "#ai-result")
     assert has_element?(view, "#ai-result-summary.md strong", "done")

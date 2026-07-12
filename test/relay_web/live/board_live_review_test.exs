@@ -44,6 +44,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     assert has_element?(view, "#review-panel", "READY FOR YOUR REVIEW")
     assert has_element?(view, "#review-approve", "Approve → Deploy")
@@ -73,6 +74,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     in_review_card(review)
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     view |> element("#review-approve") |> render_click()
 
@@ -95,6 +97,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     in_review_card(review)
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     view |> element("#review-request-changes") |> render_click()
 
@@ -133,6 +136,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     in_review_card(review)
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
     view |> element("#review-request-changes") |> render_click()
 
     assert has_element?(view, "#review-reject-panel", "the reject target set on this stage")
@@ -148,6 +152,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     in_review_card(first)
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     assert has_element?(view, "#review-approve")
     refute has_element?(view, "#review-request-changes")
@@ -158,6 +163,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     in_review_card(review)
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     view |> element("#review-request-changes") |> render_click()
     view |> form("#review-reject-form", reject: %{note: "   "}) |> render_submit()
@@ -172,6 +178,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     view |> element("#review-request-changes") |> render_click()
     assert has_element?(view, "#review-reject-panel")
