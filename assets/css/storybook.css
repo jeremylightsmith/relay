@@ -142,6 +142,73 @@
 /* RLY-48: the drawer's "Relay AI is working" strip pulse. */
 @keyframes relaypulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
+/* --- Rendered markdown — one global house style (card description / spec / plan /
+   comments / AI result / rejection note / needs-input question, RLY-3 · RLY-58).
+   Restyled to docs/designs/Relay Design System.dc.html §05 Markdown. --- */
+.md {
+  font-size: 13px;
+  line-height: 1.55;
+  color: color-mix(in oklch, var(--color-base-content) 85%, transparent);
+}
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--color-base-content);
+  margin: 0.9em 0 0.35em;
+}
+.md h1 { font-size: 1.15em; }
+.md h2 { font-size: 1.05em; }
+.md h3 { font-size: 1em; }
+.md h4, .md h5, .md h6 {
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: color-mix(in oklch, var(--color-base-content) 60%, transparent);
+}
+.md p { margin: 0.5em 0; }
+.md ul, .md ol { margin: 0.5em 0; padding-left: 1.35em; }
+.md ul { list-style: disc; }
+.md ol { list-style: decimal; }
+.md li { margin: 0.2em 0; }
+.md li::marker { color: color-mix(in oklch, var(--color-base-content) 45%, transparent); }
+.md li > ul, .md li > ol { margin: 0.2em 0; }
+.md a { color: var(--color-primary); text-decoration: underline; }
+.md strong { font-weight: 700; color: var(--color-base-content); }
+.md em { font-style: italic; }
+.md code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.85em;
+  background: color-mix(in oklch, currentColor 8%, transparent);
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+}
+.md pre {
+  background: color-mix(in oklch, currentColor 6%, transparent);
+  padding: 0.7em 0.9em;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+.md pre code { background: none; padding: 0; }
+.md blockquote {
+  border-left: 3px solid color-mix(in oklch, currentColor 20%, transparent);
+  padding-left: 0.8em;
+  margin: 0.6em 0;
+  color: color-mix(in oklch, var(--color-base-content) 70%, transparent);
+}
+.md hr {
+  border: 0;
+  border-top: 1px solid color-mix(in oklch, currentColor 15%, transparent);
+  margin: 1em 0;
+}
+.md table { border-collapse: collapse; margin: 0.6em 0; }
+.md th, .md td {
+  border: 1px solid color-mix(in oklch, currentColor 15%, transparent);
+  padding: 0.3em 0.6em;
+}
+
 /* --- Editable fields: InlineField / BoxedField (RLY-49) --- */
 .inline-field-rest {
   cursor: text;
@@ -186,6 +253,11 @@ textarea.commit-field-input { min-height: 64px; }
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-primary) 14%, transparent);
 }
 .commit-field-mono { font-family: var(--font-mono); }
+.commit-field-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.commit-field-hint {
+  font-size: 11px;
+  color: color-mix(in oklch, var(--color-base-content) 55%, transparent);
+}
 .commit-field-form { position: relative; }
 .commit-field-prefixed {
   display: flex;
@@ -207,6 +279,35 @@ textarea.commit-field-input { min-height: 64px; }
   outline: none;
   padding: 9px 11px 9px 2px;
   color: var(--color-base-content);
+}
+.commit-field-section { display: flex; flex-direction: column; gap: 9px; }
+.commit-field-header { display: flex; align-items: center; gap: 8px; }
+.commit-field-accent { width: 3px; height: 13px; border-radius: 2px; flex: 0 0 auto; }
+.commit-field-toggle,
+.commit-field-showmore {
+  background: transparent;
+  border: none;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.commit-field-preview-box {
+  border: 1px solid var(--color-field-border);
+  background: var(--color-field-bg);
+  border-radius: 8px;
+  padding: 13px 14px 6px;
+  cursor: text;
+}
+.commit-field-preview-box:hover { border-color: var(--color-field-border-hover); }
+.commit-field-preview {
+  position: relative;
+  max-height: 62px;
+  overflow: hidden;
+  cursor: text;
+  -webkit-mask-image: linear-gradient(180deg, #000 62%, transparent);
+  mask-image: linear-gradient(180deg, #000 62%, transparent);
 }
 .commit-pill {
   position: absolute;

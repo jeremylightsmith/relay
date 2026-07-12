@@ -850,6 +850,84 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#card-plan-display", "Add a plan")
     end
 
+    test "spec and plan default to a collapsed preview with Show more, and expand on toggle",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _} =
+        Cards.update_card(card, %{
+          spec: "## Spec head\n\nline1\nline2\nline3\nline4\nline5",
+          plan: "## Plan head\n\nstep1\nstep2\nstep3\nstep4\nstep5"
+        })
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      # collapsed by default: preview box + Show more, header toggle reads "Expand"
+      assert has_element?(view, "#card-drawer-spec .commit-field-preview #card-drawer-spec-view.md")
+      assert has_element?(view, "#card-drawer-spec-show-more", "Show more")
+      assert has_element?(view, "#card-drawer-spec-toggle", "Expand")
+      assert has_element?(view, "#card-plan .commit-field-preview")
+
+      # expand via the header toggle → full read, no preview clamp, toggle reads "Collapse"
+      view |> element("#card-drawer-spec-toggle") |> render_click()
+
+      refute has_element?(view, "#card-drawer-spec .commit-field-preview")
+      assert has_element?(view, "#card-drawer-spec-view.md", "line5")
+      assert has_element?(view, "#card-drawer-spec-toggle", "Collapse")
+      refute has_element?(view, "#card-drawer-spec-show-more")
+
+      # Show more also expands (plan), independently of spec
+      view |> element("#card-plan-show-more") |> render_click()
+      refute has_element?(view, "#card-plan .commit-field-preview")
+      assert has_element?(view, "#card-plan-toggle", "Collapse")
+    end
+
+    test "spec = primary accent, plan = secondary accent; both always shown",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _} = Cards.update_card(card, %{spec: "S", plan: "P"})
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-spec .commit-field-accent.bg-primary")
+      assert has_element?(view, "#card-plan .commit-field-accent.bg-secondary")
+    end
+
+    test "an empty spec/plan renders a dashed Add box with an Add toggle, no Show more",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-spec-display", "Add a spec")
+      assert has_element?(view, "#card-drawer-spec-toggle", "Add")
+      refute has_element?(view, "#card-drawer-spec-show-more")
+      refute has_element?(view, "#card-drawer-spec .commit-field-preview")
+    end
+
+    test "expanded state resets when switching to another card",
+         %{conn: conn, card: card, user: user, backlog: backlog} do
+      {:ok, _} = Cards.update_card(card, %{spec: "line1\nline2\nline3\nline4\nline5"})
+      {:ok, _other} = Cards.create_card(backlog, %{title: "Other", spec: "a\nb\nc\nd\ne"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      view |> element("#card-drawer-spec-toggle") |> render_click()
+      assert has_element?(view, "#card-drawer-spec-toggle", "Collapse")
+
+      # patch to the other card in the SAME mount → assign_selected_card resets expanded
+      render_patch(view, ~p"/board/#{board.slug}?card=RLY-2")
+      assert has_element?(view, "#card-drawer-spec-toggle", "Expand")
+    end
+
+    test "description has no collapse chrome (reading/editing only)",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _} = Cards.update_card(card, %{description: "d1\nd2\nd3\nd4\nd5"})
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      refute has_element?(view, "#card-drawer-description-toggle")
+      refute has_element?(view, "#card-drawer-description-show-more")
+      refute has_element?(view, "#card-drawer-description .commit-field-preview")
+    end
+
     test "visiting the deep link opens the drawer directly", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
@@ -1018,6 +1096,19 @@ defmodule RelayWeb.BoardLiveTest do
       refute has_element?(view, "#card-drawer-description-form")
       assert has_element?(view, "#card-drawer-description-display", "Add a description")
       assert Repo.get!(Card, card.id).description == nil
+    end
+
+    test "editing a boxed long field shows Save/Cancel + hint, not the pill",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      view |> element("#card-drawer-description-display") |> render_click()
+
+      assert has_element?(view, "button#card-drawer-description-save[type='submit']", "Save")
+      assert has_element?(view, "button#card-drawer-description-cancel", "Cancel")
+      assert has_element?(view, "#card-drawer-description-form .commit-field-hint")
+      refute has_element?(view, "#card-drawer-description-pill")
     end
 
     test "a saved description survives a fresh deep-link visit", %{conn: conn, card: card, user: user} do

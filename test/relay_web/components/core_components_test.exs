@@ -818,7 +818,7 @@ defmodule RelayWeb.CoreComponentsTest do
       assert blank =~ "Add a description…"
     end
 
-    test ":self markdown editing renders a mono textarea with a dirty-gated pill" do
+    test ":self markdown editing renders a mono textarea with Save/Cancel + hint" do
       html =
         render_component(&CoreComponents.boxed_field/1,
           id: "bf-desc",
@@ -836,9 +836,11 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(<textarea)
       assert html =~ "commit-field-mono"
       assert html =~ ~s(data-commit="cmd-enter")
-      assert html =~ ~s(data-dirty-pill="true")
-      assert html =~ ~s(class="commit-pill hidden")
-      assert html =~ "⌘↵ · Esc"
+      refute html =~ "data-dirty-pill"
+      refute html =~ "commit-pill"
+      assert html =~ ~s(id="bf-desc-save")
+      assert html =~ ~s(id="bf-desc-cancel")
+      assert html =~ "Markdown supported"
     end
 
     test ":self always-editable with a prefix renders the prefixed box" do
@@ -855,6 +857,45 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "relay.app/"
       assert html =~ "commit-field-prefixed"
       assert html =~ ~s(id="bf-slug-input")
+    end
+  end
+
+  describe "boxed_field/1 editing commit affordance (RLY-58)" do
+    defp edit_attrs do
+      [
+        id: "bf",
+        commit: :self,
+        markdown: true,
+        multiline: true,
+        editing: true,
+        field: :description,
+        form: Phoenix.Component.to_form(%{"description" => "raw source"}, as: :card),
+        edit_event: "edit",
+        save_event: "save",
+        cancel_event: "cancel"
+      ]
+    end
+
+    test "renders Save/Cancel buttons + markdown hint, not the floating pill" do
+      html = render_component(&CoreComponents.boxed_field/1, edit_attrs())
+
+      assert html =~ ~s(id="bf-save")
+      assert html =~ ~s(type="submit")
+      assert html =~ ~s(id="bf-cancel")
+      assert html =~ ~s(phx-click="cancel")
+      assert html =~ "btn btn-sm btn-primary"
+      assert html =~ "Markdown supported"
+      assert html =~ "commit-field-hint"
+      refute html =~ "commit-pill"
+    end
+
+    test "the textarea keeps the hook wiring but drops the dirty-pill flag" do
+      html = render_component(&CoreComponents.boxed_field/1, edit_attrs())
+
+      assert html =~ ~s(id="bf-input")
+      assert html =~ ~s(data-cancel-id="bf-cancel")
+      assert html =~ ~s(data-commit="cmd-enter")
+      refute html =~ "data-dirty-pill"
     end
   end
 
@@ -884,6 +925,30 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "AI Result"
       assert html =~ "text-secondary"
       refute html =~ "text-base-content/60"
+    end
+  end
+
+  describe ".md markdown stylesheet (RLY-58)" do
+    @app_css File.read!(Path.expand("../../../assets/css/app.css", __DIR__))
+    @storybook_css File.read!(Path.expand("../../../assets/css/storybook.css", __DIR__))
+
+    test "app.css restyles .md to the design-system look" do
+      # body ~13px / 1.55, slightly muted
+      assert @app_css =~ ~r/\.md\s*\{[^}]*font-size:\s*13px/
+      assert @app_css =~ ~r/\.md\s*\{[^}]*line-height:\s*1\.55/
+      # disc bullets with a muted marker
+      assert @app_css =~ ".md ul { list-style: disc; }"
+      assert @app_css =~ ".md li::marker"
+      # links use the primary token, underlined
+      assert @app_css =~ ".md a { color: var(--color-primary); text-decoration: underline; }"
+      # headings are a strong label, not oversized
+      assert @app_css =~ ~r/\.md h1[^\n]*\{[^}]*font-weight:\s*700/
+    end
+
+    test "storybook.css mirrors the .md block (RLY-58 gap closed)" do
+      assert @storybook_css =~ ".md ul { list-style: disc; }"
+      assert @storybook_css =~ ".md a { color: var(--color-primary); text-decoration: underline; }"
+      assert @storybook_css =~ ".md li::marker"
     end
   end
 end

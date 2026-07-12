@@ -919,16 +919,18 @@ defmodule RelayWeb.CoreComponents do
   are `patch` links to `close_patch`, so closing is a URL change the
   parent LiveView handles in `handle_params/3`.
 
-  When the card carries a runner `plan` it renders in a collapsed-by-default
-  "Plan" collapse section below the description; a `branch` renders as a mono
-  chip in the properties rail; a `pr_url` renders as a "Review PR ↗" link chip
-  in the properties rail. All three are read-only here — the runner sets them
-  via the API.
+  Description renders reading/editing only. Spec and Plan render as collapsible
+  boxed fields (accent bar + eyebrow label + Collapse/Expand/Add toggle): a faded
+  collapsed preview with Show more by default, expanding to a full read; empty →
+  a dashed "Add…" box. `branch` renders as a mono chip and `pr_url` as a
+  "Review PR ↗" link chip in the properties rail; both are read-only (the runner
+  sets them via the API).
 
   Events emitted (handled by the parent LiveView): `"save_card_title"`
   (form params `card[title]`) on title submit, `"edit_description"` when
   the description view is clicked, `"cancel_description"` on Cancel,
   `"save_card_description"` (form params `card[description]`) on save,
+  `"toggle_spec"` / `"toggle_plan"` (flip the Spec/Plan expanded state),
   `"move_card"` (phx-value ref + stage_id, no index — the server appends
   to the target stage's bottom) when a "Move to…" target is picked,
   `"add_owner"` / `"remove_owner"` (phx-value
@@ -979,6 +981,8 @@ defmodule RelayWeb.CoreComponents do
 
   attr :editing_spec, :boolean, default: false
   attr :editing_plan, :boolean, default: false
+  attr :expanded_spec, :boolean, default: false
+  attr :expanded_plan, :boolean, default: false
   attr :spec_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[spec]"
   attr :plan_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[plan]"
 
@@ -1356,7 +1360,6 @@ defmodule RelayWeb.CoreComponents do
               </section>
 
               <section :if={!@archived} id={"#{@id}-spec"} class="space-y-2">
-                <.section_label>Spec</.section_label>
                 <.boxed_field
                   id={"#{@id}-spec"}
                   value={@card.spec}
@@ -1367,6 +1370,11 @@ defmodule RelayWeb.CoreComponents do
                   save_event="save_card_spec"
                   cancel_event="cancel_spec"
                   placeholder="Add a spec…"
+                  label="Spec"
+                  accent={:primary}
+                  collapsible
+                  expanded={@expanded_spec}
+                  toggle_event="toggle_spec"
                   markdown
                   multiline
                   rows="14"
@@ -1380,7 +1388,6 @@ defmodule RelayWeb.CoreComponents do
               </section>
 
               <section :if={!@archived} id="card-plan" class="space-y-2">
-                <.section_label>Plan</.section_label>
                 <.boxed_field
                   id="card-plan"
                   value={@card.plan}
@@ -1391,6 +1398,11 @@ defmodule RelayWeb.CoreComponents do
                   save_event="save_card_plan"
                   cancel_event="cancel_plan"
                   placeholder="Add a plan…"
+                  label="Plan"
+                  accent={:secondary}
+                  collapsible
+                  expanded={@expanded_plan}
+                  toggle_event="toggle_plan"
                   markdown
                   multiline
                   rows="16"
@@ -2406,6 +2418,40 @@ defmodule RelayWeb.CoreComponents do
     """
   end
 
+  attr :id, :string, required: true
+  attr :label, :string, required: true
+  attr :accent, :atom, default: nil
+  attr :toggle?, :boolean, default: false
+  attr :expanded, :boolean, default: false
+  attr :value, :string, default: nil
+  attr :toggle_event, :string, default: nil
+  attr :edit_event, :string, default: nil
+
+  defp field_header(assigns) do
+    ~H"""
+    <div class="commit-field-header">
+      <span :if={@accent} class={["commit-field-accent", accent_bar_class(@accent)]}></span>
+      <.section_label>{@label}</.section_label>
+      <span class="flex-1"></span>
+      <button
+        :if={@toggle?}
+        type="button"
+        id={"#{@id}-toggle"}
+        phx-click={if(field_blank?(@value), do: @edit_event, else: @toggle_event)}
+        class="commit-field-toggle"
+      >
+        {toggle_label(@expanded, @value)}
+      </button>
+    </div>
+    """
+  end
+
+  defp accent_bar_class(:primary), do: "bg-primary"
+  defp accent_bar_class(:secondary), do: "bg-secondary"
+
+  defp toggle_label(true, _value), do: "Collapse"
+  defp toggle_label(false, value), do: if(field_blank?(value), do: "Add", else: "Expand")
+
   @doc """
   A form field you fill in. Always visibly a box; single-line and multi-line share
   identical styling. `commit={:form}` renders only a styled input bound to
@@ -2430,6 +2476,25 @@ defmodule RelayWeb.CoreComponents do
   attr :edit_attrs, :map, default: %{}
   attr :prefix, :string, default: nil
   attr :input_class, :any, default: nil
+  attr :label, :string, default: nil, doc: "eyebrow header text; when set the field renders its own header row"
+
+  attr :accent, :atom,
+    values: [:primary, :secondary, nil],
+    default: nil,
+    doc: "left accent bar color"
+
+  attr :collapsible, :boolean,
+    default: false,
+    doc: "collapse content into a faded preview by default"
+
+  attr :expanded, :boolean,
+    default: false,
+    doc: "server-owned: show the full read instead of the preview"
+
+  attr :toggle_event, :string,
+    default: nil,
+    doc: "event the header toggle / Show more fires to flip expanded"
+
   attr :rest, :global, include: ~w(autocomplete)
   slot :hidden
 
@@ -2449,61 +2514,110 @@ defmodule RelayWeb.CoreComponents do
 
   def boxed_field(%{commit: :self, editing: true} = assigns) do
     ~H"""
-    <.form
-      for={@form}
-      id={"#{@id}-form"}
-      phx-submit={@save_event}
-      phx-click-away={@cancel_event}
-      class="commit-field-form"
-    >
-      {render_slot(@hidden)}
-      <.input
-        field={@form[@field]}
-        type={if(@multiline, do: "textarea", else: "text")}
-        id={"#{@id}-input"}
-        rows={@multiline && @rows}
-        class={["commit-field-input", @markdown && "commit-field-mono", @input_class]}
-        phx-hook="CommitField"
-        data-field-role="edit"
-        data-commit={if(@multiline, do: "cmd-enter", else: "enter")}
-        data-autofocus="true"
-        data-dirty-pill="true"
-        data-cancel-id={"#{@id}-cancel"}
-      />
-      <.commit_pill
-        id={@id}
-        cancel_event={@cancel_event}
-        hint={if(@multiline, do: "⌘↵ · Esc", else: "Enter · Esc")}
-        hidden
-      />
-    </.form>
+    <div class="commit-field-section">
+      <.field_header :if={@label} id={@id} label={@label} accent={@accent} toggle?={false} />
+      <.form
+        for={@form}
+        id={"#{@id}-form"}
+        phx-submit={@save_event}
+        phx-click-away={@cancel_event}
+        class="commit-field-form"
+      >
+        {render_slot(@hidden)}
+        <.input
+          field={@form[@field]}
+          type={if(@multiline, do: "textarea", else: "text")}
+          id={"#{@id}-input"}
+          rows={@multiline && @rows}
+          class={["commit-field-input", @markdown && "commit-field-mono", @input_class]}
+          phx-hook="CommitField"
+          data-field-role="edit"
+          data-commit={if(@multiline, do: "cmd-enter", else: "enter")}
+          data-autofocus="true"
+          data-cancel-id={"#{@id}-cancel"}
+        />
+        <div class="commit-field-actions">
+          <button type="submit" id={"#{@id}-save"} class="btn btn-sm btn-primary">Save</button>
+          <button type="button" id={"#{@id}-cancel"} phx-click={@cancel_event} class="btn btn-sm">
+            Cancel
+          </button>
+          <span class="commit-field-hint">
+            Markdown supported · <span class="font-mono">⌘↵</span> saves · Esc cancels
+          </span>
+        </div>
+      </.form>
+    </div>
     """
   end
 
   def boxed_field(%{commit: :self, edit_event: edit_event} = assigns) when is_binary(edit_event) do
     ~H"""
-    <div
-      id={"#{@id}-display"}
-      role="button"
-      tabindex="0"
-      phx-click={@edit_event}
-      phx-hook="CommitField"
-      data-field-role="display"
-      class="commit-field-rest"
-      {@edit_attrs}
-    >
-      <div :if={@markdown && !field_blank?(@value)} id={"#{@id}-view"} class="md">
-        {Relay.Markdown.to_html(@value)}
-      </div>
+    <div class="commit-field-section">
+      <.field_header
+        :if={@label}
+        id={@id}
+        label={@label}
+        accent={@accent}
+        toggle?={@collapsible}
+        expanded={@expanded}
+        value={@value}
+        toggle_event={@toggle_event}
+        edit_event={@edit_event}
+      />
+      <%!-- empty: dashed Add box --%>
       <div
-        :if={!@markdown && !field_blank?(@value)}
-        id={"#{@id}-view"}
-        class="commit-field-input whitespace-pre-wrap"
+        :if={field_blank?(@value)}
+        id={"#{@id}-display"}
+        role="button"
+        tabindex="0"
+        phx-click={@edit_event}
+        phx-hook="CommitField"
+        data-field-role="display"
+        class="commit-field-rest"
+        {@edit_attrs}
       >
-        {@value}
+        <div class="commit-field-placeholder">{@placeholder}</div>
       </div>
-      <div :if={field_blank?(@value)} class="commit-field-placeholder">
-        {@placeholder}
+      <%!-- collapsed preview: collapsible + has content + not expanded --%>
+      <div :if={!field_blank?(@value) && @collapsible && !@expanded} class="commit-field-preview-box">
+        <div
+          id={"#{@id}-display"}
+          role="button"
+          tabindex="0"
+          phx-click={@edit_event}
+          phx-hook="CommitField"
+          data-field-role="display"
+          class="commit-field-preview"
+          {@edit_attrs}
+        >
+          <div :if={@markdown} id={"#{@id}-view"} class="md">{Relay.Markdown.to_html(@value)}</div>
+          <div :if={!@markdown} id={"#{@id}-view"} class="whitespace-pre-wrap">{@value}</div>
+        </div>
+        <button
+          type="button"
+          id={"#{@id}-show-more"}
+          phx-click={@toggle_event}
+          class="commit-field-showmore"
+        >
+          Show more
+        </button>
+      </div>
+      <%!-- full read: non-collapsible OR expanded, has content --%>
+      <div
+        :if={!field_blank?(@value) && (!@collapsible || @expanded)}
+        id={"#{@id}-display"}
+        role="button"
+        tabindex="0"
+        phx-click={@edit_event}
+        phx-hook="CommitField"
+        data-field-role="display"
+        class="commit-field-rest"
+        {@edit_attrs}
+      >
+        <div :if={@markdown} id={"#{@id}-view"} class="md">{Relay.Markdown.to_html(@value)}</div>
+        <div :if={!@markdown} id={"#{@id}-view"} class="commit-field-input whitespace-pre-wrap">
+          {@value}
+        </div>
       </div>
     </div>
     """
