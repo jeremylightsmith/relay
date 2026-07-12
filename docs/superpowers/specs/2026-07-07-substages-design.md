@@ -2,6 +2,11 @@
 
 **Date:** 2026-07-07  **MMF:** [`docs/mmfs/10b-substages.md`](../../mmfs/10b-substages.md)
 **Status:** Draft for review → `/write-plan`  ·  **Milestone:** Post-MVP
+
+> **Superseded (RLY-76):** Approve from a review substage advances to the parent's **Done
+> substage** when it exists (the "next stage or substage" rule), not straight to the next main
+> stage. See [`docs/glossary.md`](../../glossary.md) (the routing authority).
+
 **Depends on:** MMF 05 (move), 06 (owners/`Schemas`), 08 (`/board/settings`)
 **Development:** trunk-based on `main`
 
