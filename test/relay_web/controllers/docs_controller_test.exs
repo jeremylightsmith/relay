@@ -90,4 +90,25 @@ defmodule RelayWeb.DocsControllerTest do
     html = conn |> get(~p"/") |> html_response(200)
     assert html =~ ~s(href="/docs/setup")
   end
+
+  test "a middle page gets both a previous and a next pager link", %{conn: conn} do
+    html = conn |> get(~p"/docs/setup") |> html_response(200)
+
+    assert html =~ ~s(class="docs-pager")
+    assert html =~ ~s(docs-pager-prev)
+    assert html =~ ~s(docs-pager-next)
+    # setup's neighbours in registry order are cards-and-handoffs and cli
+    assert html =~ "Cards &amp; handoffs"
+    assert html =~ "CLI (bin/relay)"
+  end
+
+  test "the first page has no previous link, the last page has no next link", %{conn: conn} do
+    first = conn |> get(~p"/docs") |> html_response(200)
+    refute first =~ "docs-pager-prev"
+    assert first =~ "docs-pager-next"
+
+    last = conn |> get(~p"/docs/api") |> html_response(200)
+    assert last =~ "docs-pager-prev"
+    refute last =~ "docs-pager-next"
+  end
 end
