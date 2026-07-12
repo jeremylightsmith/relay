@@ -19,6 +19,28 @@ defmodule RelayWeb.PageControllerTest do
       assert html =~ "Open the board"
       assert html =~ "See how it works"
     end
+
+    test "renders the marketing body sections and anchors", %{conn: conn} do
+      html = conn |> get(~p"/") |> html_response(200)
+
+      # section anchors the nav links target
+      assert html =~ "id=\"how\""
+      assert html =~ "id=\"flow\""
+      assert html =~ "id=\"stages\""
+
+      # representative headings from each section
+      assert html =~ "Every stage has an owner"
+      assert html =~ "A question, not a wrong guess"
+      assert html =~ "Watch a card relay across the board"
+      assert html =~ "Shape the stages around how you actually work"
+      assert html =~ "Give the AI a lane"
+
+      # responsive + fidelity signals
+      assert html =~ "md:grid-cols-3"
+      assert html =~ "overflow-x-auto"
+      # the CTA band is a deliberately fixed-dark panel in both themes
+      assert html =~ "background:oklch(0.22 0.02 255)"
+    end
   end
 
   describe "GET / when logged in" do

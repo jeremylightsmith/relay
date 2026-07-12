@@ -188,6 +188,194 @@
     </div>
   </section>
 
+  <%!-- HOW IT WORKS --%>
+  <section id="how" class="mx-auto max-w-[1120px] px-4 pb-6 pt-16 sm:px-8">
+    <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-secondary">
+      HOW IT WORKS
+    </div>
+    <h2 class="mb-3.5 max-w-[640px] text-[34px] font-semibold leading-tight tracking-[-0.025em] text-base-content">
+      Every stage has an owner. The work moves between them.
+    </h2>
+    <p class="mb-11 max-w-[560px] text-base leading-relaxed text-base-content/70">
+      You decide which stages people run and which the AI runs. Finished work lands in a Done
+      column, ready for the next owner to pull it forward.
+    </p>
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div class="rounded-[14px] border border-base-300 bg-base-200 p-6">
+        <div class="mb-4 flex size-[34px] items-center justify-center rounded-[10px] bg-primary/10">
+          <span class="size-3 rounded-[4px] bg-primary"></span>
+        </div>
+        <h3 class="mb-2 text-base font-semibold tracking-[-0.01em]">You stay in control</h3>
+        <p class="text-[13.5px] leading-relaxed text-base-content/70">
+          Human stages are yours. Queue work, review AI output, approve or send it back —
+          nothing ships without a person.
+        </p>
+      </div>
+      <div class="rounded-[14px] border border-base-300 bg-base-200 p-6">
+        <div class="mb-4 flex size-[34px] items-center justify-center rounded-[10px] bg-secondary/10">
+          <span class="flex size-3.5 items-center justify-center rounded-full bg-secondary">
+            <span class="size-[5px] rounded-full border-[1.5px] border-base-100"></span>
+          </span>
+        </div>
+        <h3 class="mb-2 text-base font-semibold tracking-[-0.01em]">The AI does the work</h3>
+        <p class="text-[13.5px] leading-relaxed text-base-content/70">
+          AI stages pull ready work automatically, show live progress, and hand finished cards
+          forward — you watch it happen.
+        </p>
+      </div>
+      <div class="rounded-[14px] border border-base-300 bg-base-200 p-6">
+        <div class="mb-4 flex size-[34px] items-center justify-center rounded-[10px] bg-warning/10">
+          <span class="size-3 rounded-full bg-warning"></span>
+        </div>
+        <h3 class="mb-2 text-base font-semibold tracking-[-0.01em]">It asks before it guesses</h3>
+        <p class="text-[13.5px] leading-relaxed text-base-content/70">
+          When the AI hits a decision it can't make, the card blocks and waits. You answer
+          inline; it picks up where it left off.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <%!-- WHEN IT'S UNSURE (blocked feature) --%>
+  <section class="mx-auto grid max-w-[1120px] grid-cols-1 items-center gap-8 px-4 py-14 sm:px-8 md:grid-cols-2 md:gap-14">
+    <div>
+      <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-warning">
+        WHEN IT'S UNSURE
+      </div>
+      <h2 class="mb-3.5 text-[30px] font-semibold leading-tight tracking-[-0.02em] text-base-content">
+        A question, not a wrong guess.
+      </h2>
+      <p class="text-base leading-relaxed text-base-content/70">
+        The AI would rather ask than assume. Blocked cards surface right on the board with a
+        clear prompt — the whole team can see what's waiting on a human, and for how long.
+      </p>
+    </div>
+    <div class="rounded-[14px] border border-base-300 bg-base-200 p-[22px] shadow-xl">
+      <div class="flex flex-col gap-[11px] rounded-[10px] border border-base-300 border-l-[3px] border-l-warning bg-base-100 p-3.5">
+        <span class="text-sm font-semibold text-base-content">
+          Rewrite the onboarding tooltips
+        </span>
+        <div class="flex flex-col gap-2.5 rounded-[9px] border border-warning/40 bg-warning/10 p-3">
+          <span class="font-mono text-[10px] font-semibold tracking-[0.05em] text-warning">
+            AI ASKED A QUESTION
+          </span>
+          <span class="text-[13px] leading-normal text-base-content/80">
+            Should I keep the original playful CTA wording, or match the more formal new brand
+            voice?
+          </span>
+          <div class="mt-0.5 flex gap-2">
+            <span class="rounded-[7px] bg-warning px-3.5 py-1.5 text-[12.5px] font-semibold text-warning-content">
+              Answer →
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <%!-- THE FLOW --%>
+  <section id="flow" class="border-y border-base-300 bg-base-200">
+    <div class="mx-auto max-w-[1120px] px-4 py-16 sm:px-8">
+      <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-secondary">
+        THE FLOW
+      </div>
+      <h2 class="mb-2 text-[32px] font-semibold leading-tight tracking-[-0.025em] text-base-content">
+        Watch a card relay across the board.
+      </h2>
+      <p class="mb-10 max-w-[560px] text-base leading-relaxed text-base-content/70">
+        Handoffs alternate between people and AI. WIP limits keep any one stage from piling up.
+      </p>
+      <div class="flex items-stretch gap-2.5 overflow-x-auto pb-1.5">
+        <%= for {name, owner, border_cls, label_cls} <- [
+          {"Backlog", "HUMAN", "border-t-primary", "text-base-content/70"},
+          {"Spec", "HUMAN", "border-t-primary", "text-base-content/70"},
+          {"Plan", "AI", "border-t-secondary", "text-secondary"},
+          {"Code", "AI", "border-t-secondary", "text-secondary"},
+          {"Review", "HUMAN", "border-t-primary", "text-base-content/70"},
+          {"Deploy", "AI", "border-t-secondary", "text-secondary"},
+          {"Complete", "DONE", "border-t-success", "text-success"}
+        ] do %>
+          <div class={[
+            "min-w-[120px] flex-1 rounded-[11px] border border-base-300 border-t-[3px] bg-base-100 p-3.5",
+            border_cls
+          ]}>
+            <div class={["mb-1.5 font-mono text-[10px]", label_cls]}>{owner}</div>
+            <div class="text-sm font-semibold">{name}</div>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  </section>
+
+  <%!-- YOUR WORKFLOW / CONFIGURABLE STAGES --%>
+  <section
+    id="stages"
+    class="mx-auto grid max-w-[1120px] grid-cols-1 items-center gap-8 px-4 py-14 sm:px-8 md:grid-cols-2 md:gap-14"
+  >
+    <div class="rounded-[14px] border border-base-300 bg-base-200 p-5 shadow-xl">
+      <div class="flex flex-col gap-2.5">
+        <div class="flex items-center gap-3 rounded-[11px] border border-base-300 bg-base-100 p-3.5">
+          <span class="size-[9px] rounded-[3px] bg-secondary"></span>
+          <span class="flex-1 text-sm font-semibold">Code</span>
+          <div class="inline-flex gap-0.5 rounded-lg border border-base-300 bg-base-200 p-[3px]">
+            <span class="rounded-md px-2.5 py-1 text-[11px] font-semibold text-base-content/60">
+              Human
+            </span>
+            <span class="rounded-md bg-base-100 px-2.5 py-1 text-[11px] font-semibold text-base-content shadow-sm">
+              AI
+            </span>
+          </div>
+        </div>
+        <div class="flex items-center gap-4 rounded-[11px] border border-base-300 bg-base-100 p-3.5">
+          <div class="flex items-center gap-2">
+            <span class="font-mono text-[11px] text-base-content/60">WIP</span>
+            <div class="inline-flex items-center overflow-hidden rounded-lg border border-base-300">
+              <span class="flex h-7 w-6 items-center justify-center text-base-content/60">−</span>
+              <span class="w-[30px] text-center font-mono text-[13px]">3</span>
+              <span class="flex h-7 w-6 items-center justify-center text-base-content/60">+</span>
+            </div>
+          </div>
+          <span class="flex-1"></span>
+          <div class="flex items-center gap-2.5">
+            <span class="font-mono text-[11px] text-base-content/60">DONE COLUMN</span>
+            <span class="relative block h-[22px] w-[38px] rounded-full bg-primary">
+              <span class="absolute right-0.5 top-0.5 size-[18px] rounded-full bg-base-100">
+              </span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-primary">
+        YOUR WORKFLOW
+      </div>
+      <h2 class="mb-3.5 text-[30px] font-semibold leading-tight tracking-[-0.02em] text-base-content">
+        Shape the stages around how you actually work.
+      </h2>
+      <p class="text-base leading-relaxed text-base-content/70">
+        Rename stages, reorder them, set who owns each, cap the WIP, and add a Done sub-column
+        wherever finished work needs to wait for a handoff. No two teams relay the same way.
+      </p>
+    </div>
+  </section>
+
+  <%!-- CTA BAND (deliberately fixed-dark in both themes) --%>
+  <section class="mx-auto max-w-[1120px] px-4 pb-20 pt-8 sm:px-8">
+    <div
+      class="relative overflow-hidden rounded-[20px] px-6 py-14 text-center sm:px-10"
+      style="background:oklch(0.22 0.02 255);"
+    >
+      <h2 class="mx-auto mb-3.5 max-w-[560px] text-[34px] font-semibold leading-tight tracking-[-0.025em] text-white">
+        Give the AI a lane. Keep your hand on the board.
+      </h2>
+      <p class="mx-auto mb-7 max-w-[480px] text-base leading-relaxed text-white/70">
+        Start with the default workflow, then bend it to fit. It takes about a minute.
+      </p>
+      <a href={~p"/auth/google"} class="btn btn-primary">Open the board →</a>
+    </div>
+  </section>
+
   <%!-- FOOTER --%>
   <footer class="border-t border-base-300">
     <div class="mx-auto flex max-w-[1120px] flex-wrap items-center gap-3 px-4 py-7 sm:px-8">
