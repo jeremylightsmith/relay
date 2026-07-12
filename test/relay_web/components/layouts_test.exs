@@ -27,6 +27,14 @@ defmodule RelayWeb.LayoutsTest do
     assert html =~ ~s(href="/boards")
   end
 
+  test "hides the wordmark text below md while keeping the logo icon" do
+    html = render_app(%{inner_block: inner_block_slot()})
+
+    # wordmark span is hidden until md; logo img is always present
+    assert html =~ ~s(class="hidden md:inline text-[15px] font-semibold tracking-[-0.02em]")
+    assert html =~ ~s(alt="Relay")
+  end
+
   test "renders the avatar dropdown with theme toggle and sign out" do
     html = render_app(%{inner_block: inner_block_slot()})
 

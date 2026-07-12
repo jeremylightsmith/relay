@@ -45,7 +45,7 @@ defmodule RelayWeb.BoardLive do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} wide crumb>
       <:title>
-        <span id="board-name" class="truncate max-w-[46vw] sm:max-w-[280px]">
+        <span id="board-name" class="truncate max-w-[58vw] sm:max-w-[280px]">
           {@board.name}
         </span>
       </:title>

@@ -58,7 +58,7 @@ defmodule RelayWeb.Layouts do
         class="flex items-center gap-2"
       >
         <img src={~p"/images/logo_light_128.png"} width="23" alt="Relay" />
-        <span class="text-[15px] font-semibold tracking-[-0.02em]">Relay</span>
+        <span class="hidden md:inline text-[15px] font-semibold tracking-[-0.02em]">Relay</span>
       </.link>
       <div
         :if={@crumb or @title != []}
