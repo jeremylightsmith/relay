@@ -253,6 +253,11 @@ textarea.commit-field-input { min-height: 64px; }
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-primary) 14%, transparent);
 }
 .commit-field-mono { font-family: var(--font-mono); }
+.commit-field-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.commit-field-hint {
+  font-size: 11px;
+  color: color-mix(in oklch, var(--color-base-content) 55%, transparent);
+}
 .commit-field-form { position: relative; }
 .commit-field-prefixed {
   display: flex;

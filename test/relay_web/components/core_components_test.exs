@@ -818,7 +818,7 @@ defmodule RelayWeb.CoreComponentsTest do
       assert blank =~ "Add a description…"
     end
 
-    test ":self markdown editing renders a mono textarea with a dirty-gated pill" do
+    test ":self markdown editing renders a mono textarea with Save/Cancel + hint" do
       html =
         render_component(&CoreComponents.boxed_field/1,
           id: "bf-desc",
@@ -836,9 +836,11 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(<textarea)
       assert html =~ "commit-field-mono"
       assert html =~ ~s(data-commit="cmd-enter")
-      assert html =~ ~s(data-dirty-pill="true")
-      assert html =~ ~s(class="commit-pill hidden")
-      assert html =~ "⌘↵ · Esc"
+      refute html =~ "data-dirty-pill"
+      refute html =~ "commit-pill"
+      assert html =~ ~s(id="bf-desc-save")
+      assert html =~ ~s(id="bf-desc-cancel")
+      assert html =~ "Markdown supported"
     end
 
     test ":self always-editable with a prefix renders the prefixed box" do
@@ -855,6 +857,45 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "relay.app/"
       assert html =~ "commit-field-prefixed"
       assert html =~ ~s(id="bf-slug-input")
+    end
+  end
+
+  describe "boxed_field/1 editing commit affordance (RLY-58)" do
+    defp edit_attrs do
+      [
+        id: "bf",
+        commit: :self,
+        markdown: true,
+        multiline: true,
+        editing: true,
+        field: :description,
+        form: Phoenix.Component.to_form(%{"description" => "raw source"}, as: :card),
+        edit_event: "edit",
+        save_event: "save",
+        cancel_event: "cancel"
+      ]
+    end
+
+    test "renders Save/Cancel buttons + markdown hint, not the floating pill" do
+      html = render_component(&CoreComponents.boxed_field/1, edit_attrs())
+
+      assert html =~ ~s(id="bf-save")
+      assert html =~ ~s(type="submit")
+      assert html =~ ~s(id="bf-cancel")
+      assert html =~ ~s(phx-click="cancel")
+      assert html =~ "btn btn-sm btn-primary"
+      assert html =~ "Markdown supported"
+      assert html =~ "commit-field-hint"
+      refute html =~ "commit-pill"
+    end
+
+    test "the textarea keeps the hook wiring but drops the dirty-pill flag" do
+      html = render_component(&CoreComponents.boxed_field/1, edit_attrs())
+
+      assert html =~ ~s(id="bf-input")
+      assert html =~ ~s(data-cancel-id="bf-cancel")
+      assert html =~ ~s(data-commit="cmd-enter")
+      refute html =~ "data-dirty-pill"
     end
   end
 

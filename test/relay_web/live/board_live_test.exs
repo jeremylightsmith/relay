@@ -1020,6 +1020,19 @@ defmodule RelayWeb.BoardLiveTest do
       assert Repo.get!(Card, card.id).description == nil
     end
 
+    test "editing a boxed long field shows Save/Cancel + hint, not the pill",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      view |> element("#card-drawer-description-display") |> render_click()
+
+      assert has_element?(view, "button#card-drawer-description-save[type='submit']", "Save")
+      assert has_element?(view, "button#card-drawer-description-cancel", "Cancel")
+      assert has_element?(view, "#card-drawer-description-form .commit-field-hint")
+      refute has_element?(view, "#card-drawer-description-pill")
+    end
+
     test "a saved description survives a fresh deep-link visit", %{conn: conn, card: card, user: user} do
       {:ok, _card} = Cards.update_card(card, %{description: "Persisted\ntext"})
 

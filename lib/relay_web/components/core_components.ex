@@ -2467,15 +2467,17 @@ defmodule RelayWeb.CoreComponents do
         data-field-role="edit"
         data-commit={if(@multiline, do: "cmd-enter", else: "enter")}
         data-autofocus="true"
-        data-dirty-pill="true"
         data-cancel-id={"#{@id}-cancel"}
       />
-      <.commit_pill
-        id={@id}
-        cancel_event={@cancel_event}
-        hint={if(@multiline, do: "⌘↵ · Esc", else: "Enter · Esc")}
-        hidden
-      />
+      <div class="commit-field-actions">
+        <button type="submit" id={"#{@id}-save"} class="btn btn-sm btn-primary">Save</button>
+        <button type="button" id={"#{@id}-cancel"} phx-click={@cancel_event} class="btn btn-sm">
+          Cancel
+        </button>
+        <span class="commit-field-hint">
+          Markdown supported · <span class="font-mono">⌘↵</span> saves · Esc cancels
+        </span>
+      </div>
     </.form>
     """
   end
