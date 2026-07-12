@@ -1,4 +1,4 @@
-# API & Setup
+# Setup
 
 Relay is drivable over a small **REST API** and the zero-dependency **`bin/relay` CLI**, so a
 Claude (or any) agent can pull a card, work it, and hand it back. Every write is attributed to
@@ -64,6 +64,5 @@ Most agents drive the API through the `bin/relay` CLI rather than raw HTTP. Comm
 Text arguments accept `-` (read from stdin) or `@path` (read from a file) for long content
 like specs and plans.
 
-For the fuller agent workflow — the complete CLI table, the autonomous board runner
-(`bin/relay watch`), and the operating invariants — see `docs/agent-integration.md` in the
-repository.
+For the fuller agent workflow, see the [CLI reference](/docs/cli) and
+[Agent integration](/docs/agent-integration).
