@@ -597,7 +597,7 @@ defmodule RelayWeb.BoardSettingsLive do
                     Relay AI
                   </div>
                   <div style="font-size:12.5px;color:oklch(0.50 0.03 292);">
-                    Runs the AI-enabled stages · authenticated with an API key
+                    Runs the AI-owned stages · authenticated with an API key
                   </div>
                 </div>
                 <.link
@@ -616,7 +616,7 @@ defmodule RelayWeb.BoardSettingsLive do
               </h1>
               <p style="font-size:14px;line-height:1.55;color:oklch(0.52 0.02 255);margin:0 0 24px 0;max-width:520px;">
                 Give a key to your agent so it can read the board, move cards, post progress, and
-                ask questions on the AI-enabled stages. Treat it like a password. One key per board.
+                ask questions on the AI-owned stages. Treat it like a password.
               </p>
 
               <div style="display:flex;align-items:center;gap:11px;background:oklch(0.99 0.008 292);border:1px solid oklch(0.91 0.03 292);border-radius:10px;padding:12px 14px;margin-bottom:22px;">

@@ -99,4 +99,22 @@ defmodule RelayWeb.BoardSettingsMembersTest do
              ~s{#agent-card a[href="/board/#{board.slug}/settings?section=keys"]}
            )
   end
+
+  test "the AGENT card subtitle matches the mockup's AI-owned wording", %{conn: conn, user: user} do
+    board = board_for(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=members")
+
+    # matches `docs/designs/Relay Board.dc.html:455`: "Runs the AI-owned stages · authenticated with an API key"
+    assert has_element?(view, "#agent-card", "Runs the AI-owned stages")
+    refute render(view) =~ "AI-enabled stages"
+  end
+
+  test "the API keys pane intro matches the mockup's AI-owned wording", %{conn: conn, user: user} do
+    board = board_for(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
+
+    # matches `docs/designs/Relay Board.dc.html:464`
+    assert has_element?(view, "#api-key-pane", "ask questions on the AI-owned stages")
+    refute render(view) =~ "AI-enabled stages"
+  end
 end
