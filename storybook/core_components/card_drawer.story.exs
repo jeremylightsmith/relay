@@ -294,6 +294,35 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           activity: [],
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
+      },
+      %Variation{
+        id: :body_loading,
+        attributes: %{
+          id: "story-drawer-loading",
+          ref: "RLY-68",
+          card: %{
+            story_card()
+            | description: nil,
+              spec: nil,
+              plan: nil,
+              ai_result: nil,
+              status: :needs_input,
+              blocked_since: ~U[2026-07-12 09:00:00Z]
+          },
+          stage_name: "Code",
+          stage_owner: :ai,
+          active_owner: :ai,
+          current_user_id: 1,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Optimistic drawer"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "needs_input", "progress" => nil}, as: :card),
+          body_loading: true,
+          question: nil,
+          answer_form: Phoenix.Component.to_form(%{"body" => ""}, as: :answer),
+          conversation: [],
+          activity: [],
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
       }
     ]
   end

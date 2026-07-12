@@ -1128,6 +1128,11 @@ defmodule RelayWeb.CoreComponents do
     default: false,
     doc: "derived Done (Relay.Cards.done?/2): shows a Done pill in the header; no banner below"
 
+  attr :body_loading, :boolean,
+    default: false,
+    doc:
+      "RLY-68 optimistic drawer: when true, the heavy sections (description/spec/plan/ai_result/needs-input question/timeline) render daisyUI skeletons instead of their content; the async fill flips this false"
+
   def card_drawer(assigns) do
     assigns =
       assigns
@@ -1290,7 +1295,13 @@ defmodule RelayWeb.CoreComponents do
                   </span>
                 </div>
                 <div
-                  :if={@question}
+                  :if={@body_loading}
+                  id="needs-input-question-skeleton"
+                  class="skeleton h-5 w-3/4 rounded"
+                >
+                </div>
+                <div
+                  :if={!@body_loading and @question}
                   id="needs-input-question"
                   class="md text-[13.5px] leading-normal"
                   style="color:oklch(0.33 0.03 65);"
@@ -1426,8 +1437,14 @@ defmodule RelayWeb.CoreComponents do
               </section>
               <section id={"#{@id}-description"} class="space-y-2">
                 <.section_label>Description</.section_label>
+                <div
+                  :if={@body_loading}
+                  id={"#{@id}-description-skeleton"}
+                  class="skeleton h-28 w-full rounded-lg"
+                >
+                </div>
                 <.boxed_field
-                  :if={!@archived}
+                  :if={!@body_loading and !@archived}
                   id={"#{@id}-description"}
                   value={@card.description}
                   editing={@editing_description}
@@ -1442,7 +1459,7 @@ defmodule RelayWeb.CoreComponents do
                   rows="12"
                 />
                 <div
-                  :if={@archived}
+                  :if={!@body_loading and @archived}
                   id={"#{@id}-description-archived"}
                   class="md min-h-16 p-1 text-sm leading-relaxed"
                 >
@@ -1450,7 +1467,11 @@ defmodule RelayWeb.CoreComponents do
                 </div>
               </section>
 
-              <section :if={!@archived} id={"#{@id}-spec"} class="space-y-2">
+              <section :if={@body_loading} id={"#{@id}-spec-skeleton-section"} class="space-y-2">
+                <.section_label>Spec</.section_label>
+                <div id={"#{@id}-spec-skeleton"} class="skeleton h-32 w-full rounded-lg"></div>
+              </section>
+              <section :if={!@body_loading and !@archived} id={"#{@id}-spec"} class="space-y-2">
                 <.boxed_field
                   id={"#{@id}-spec"}
                   value={@card.spec}
@@ -1471,14 +1492,22 @@ defmodule RelayWeb.CoreComponents do
                   rows="14"
                 />
               </section>
-              <section :if={@archived && @card.spec} id={"#{@id}-spec-archived"} class="space-y-2">
+              <section
+                :if={(!@body_loading and @archived) && @card.spec}
+                id={"#{@id}-spec-archived"}
+                class="space-y-2"
+              >
                 <.section_label>Spec</.section_label>
                 <div id={"#{@id}-spec-view"} class="md text-sm leading-relaxed">
                   {Relay.Markdown.to_html(@card.spec)}
                 </div>
               </section>
 
-              <section :if={!@archived} id="card-plan" class="space-y-2">
+              <section :if={@body_loading} id="card-plan-skeleton-section" class="space-y-2">
+                <.section_label>Plan</.section_label>
+                <div id="card-plan-skeleton" class="skeleton h-40 w-full rounded-lg"></div>
+              </section>
+              <section :if={!@body_loading and !@archived} id="card-plan" class="space-y-2">
                 <.boxed_field
                   id="card-plan"
                   value={@card.plan}
@@ -1499,7 +1528,11 @@ defmodule RelayWeb.CoreComponents do
                   rows="16"
                 />
               </section>
-              <section :if={@archived && @card.plan} id="card-plan-archived" class="space-y-2">
+              <section
+                :if={(!@body_loading and @archived) && @card.plan}
+                id="card-plan-archived"
+                class="space-y-2"
+              >
                 <.section_label>Plan</.section_label>
                 <div
                   id="card-plan-body"
@@ -1509,7 +1542,11 @@ defmodule RelayWeb.CoreComponents do
                 </div>
               </section>
 
-              <section :if={@card.ai_result} id="ai-result" class="space-y-2">
+              <section :if={@body_loading} id="ai-result-skeleton-section" class="space-y-2">
+                <.section_label accent="text-secondary">AI Result</.section_label>
+                <div id="ai-result-skeleton" class="skeleton h-24 w-full rounded-lg"></div>
+              </section>
+              <section :if={!@body_loading and @card.ai_result} id="ai-result" class="space-y-2">
                 <.section_label accent="text-secondary">AI Result</.section_label>
                 <div
                   class="space-y-3 rounded-[10px] border p-3.5"
@@ -1614,7 +1651,19 @@ defmodule RelayWeb.CoreComponents do
               </section>
               <section class="space-y-3 border-t border-base-300 pt-4">
                 <.section_label>Conversation</.section_label>
-                <ol id={"#{@id}-conversation"} phx-update="stream" class="space-y-4">
+                <div
+                  :if={@body_loading}
+                  id={"#{@id}-conversation-loading"}
+                  class="flex justify-center py-4"
+                >
+                  <span class="loading loading-spinner loading-sm text-base-content/40"></span>
+                </div>
+                <ol
+                  :if={!@body_loading}
+                  id={"#{@id}-conversation"}
+                  phx-update="stream"
+                  class="space-y-4"
+                >
                   <li
                     id={"#{@id}-conversation-empty"}
                     class="hidden text-sm text-base-content/50 only:block"
@@ -1690,7 +1739,14 @@ defmodule RelayWeb.CoreComponents do
 
               <section class="space-y-2 border-t border-base-300 pt-4">
                 <.section_label>Activity</.section_label>
-                <ol id={"#{@id}-activity"} phx-update="stream" class="space-y-1">
+                <div
+                  :if={@body_loading}
+                  id={"#{@id}-activity-loading"}
+                  class="flex justify-center py-3"
+                >
+                  <span class="loading loading-spinner loading-sm text-base-content/40"></span>
+                </div>
+                <ol :if={!@body_loading} id={"#{@id}-activity"} phx-update="stream" class="space-y-1">
                   <li
                     id={"#{@id}-activity-empty"}
                     class="hidden text-sm text-base-content/50 only:block"
