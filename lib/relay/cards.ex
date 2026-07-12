@@ -829,10 +829,16 @@ defmodule Relay.Cards do
   # Coerce an incoming question map to the canonical string-keyed shape, filling defaults and
   # dropping any keys the stepper doesn't understand.
   defp normalize_question(question) when is_map(question) do
+    allow_text =
+      case Map.get(question, "allow_text", true) do
+        nil -> true
+        value -> value
+      end
+
     %{
       "prompt" => Map.get(question, "prompt"),
       "options" => Map.get(question, "options") || [],
-      "allow_text" => Map.get(question, "allow_text", true)
+      "allow_text" => allow_text
     }
   end
 
