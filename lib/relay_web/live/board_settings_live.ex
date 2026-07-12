@@ -68,14 +68,14 @@ defmodule RelayWeb.BoardSettingsLive do
             BOARD
           </div>
           <.link
-            patch={~p"/board/#{@board.slug}/settings?section=general"}
+            patch={~p"/board/#{@board.slug}/settings"}
             id="settings-nav-general"
             style={nav_style(@section == :general)}
           >
             General
           </.link>
           <.link
-            patch={~p"/board/#{@board.slug}/settings"}
+            patch={~p"/board/#{@board.slug}/settings?section=stages"}
             id="settings-nav-stages"
             style={nav_style(@section == :stages)}
           >
@@ -1019,10 +1019,10 @@ defmodule RelayWeb.BoardSettingsLive do
 
   def handle_info(_message, socket), do: {:noreply, socket}
 
-  defp section(%{"section" => "general"}), do: :general
+  defp section(%{"section" => "stages"}), do: :stages
   defp section(%{"section" => "keys"}), do: :keys
   defp section(%{"section" => "members"}), do: :members
-  defp section(_params), do: :stages
+  defp section(_params), do: :general
 
   # Reloads the main stages and lane map from the DB after any mutation, and
   # groups them for the pane. All four categories always render so an

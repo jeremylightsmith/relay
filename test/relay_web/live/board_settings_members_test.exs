@@ -70,7 +70,7 @@ defmodule RelayWeb.BoardSettingsMembersTest do
     board = Boards.get_or_create_default_board(owner)
     insert(:membership, board: board, user: user, email: user.email)
 
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
     assert has_element?(view, "#stages-pane")
     assert has_element?(view, "#settings-nav-members")
   end

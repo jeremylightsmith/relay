@@ -122,7 +122,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
 
     test "toggling Review on creates the child lane; off removes it", %{conn: conn, board: board} do
       code = Enum.find(board.stages, &(&1.name == "Code"))
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
 
       view |> element("#stage-#{code.id}-review-toggle") |> render_click()
       assert [%{type: :review}] = Boards.sublanes(code)
@@ -136,7 +136,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       {:ok, review} = Boards.enable_lane(code, :review)
       Relay.Factory.insert(:card, stage: review)
 
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
       html = view |> element("#stage-#{code.id}-review-toggle") |> render_click()
 
       assert html =~ "still has cards"
@@ -149,7 +149,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       {:ok, review} = Boards.enable_lane(code, :review)
       Relay.Factory.insert(:card, stage: review)
 
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
       view |> element("#stage-#{code.id}-review-toggle") |> render_click()
 
       # The blocked toggle bumps a render nonce into the checkbox's id so
@@ -179,6 +179,21 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       assert has_element?(view, "#account-menu #sign-out")
       assert has_element?(view, "#account-menu [data-phx-theme='dark']")
       refute has_element?(view, "#archived-cards-menu-item")
+    end
+  end
+
+  describe "default section" do
+    setup :register_and_log_in_user
+
+    test "bare /settings opens the General pane, not Stages", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+      assert has_element?(view, "#general-pane")
+      refute has_element?(view, "#stages-pane")
+      # the General rail link carries nav_style/1's active blue-tint
+      assert has_element?(view, "#settings-nav-general[style*='oklch(0.42 0.13 250)']")
+      refute has_element?(view, "#settings-nav-stages[style*='oklch(0.42 0.13 250)']")
     end
   end
 
