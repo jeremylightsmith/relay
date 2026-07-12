@@ -24,6 +24,20 @@ defmodule RelayWeb.BoardLiveMembersTest do
     assert has_element?(view, "#card-drawer-assign-ai")
   end
 
+  test "the reassign picker's person avatars match the mockup's chroma", %{conn: conn, user: user} do
+    board = Boards.get_or_create_default_board(user)
+    [stage | _] = board.stages
+    card = insert(:card, stage: stage)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
+
+    view |> element("#card-drawer-reassign-toggle") |> render_click()
+    row = view |> element("#card-drawer-assign-user-#{user.id} span[style*='border-radius:50%']") |> render()
+
+    # matches `docs/designs/Relay Board.dc.html` avatarFor/mkAvatar (lines ~1166, ~1194):
+    # oklch(0.62 0.13 <hue>), never 0.15
+    assert row =~ "background:oklch(0.62 0.13 "
+  end
+
   test "picking a member assigns them as the active owner", %{conn: conn, user: user} do
     board = Boards.get_or_create_default_board(user)
     teammate = insert(:user, name: "Morgan Lee")

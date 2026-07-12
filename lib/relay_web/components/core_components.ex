@@ -1981,7 +1981,7 @@ defmodule RelayWeb.CoreComponents do
   defp reassign_avatar_style(:human, user_id) do
     hue = rem(:erlang.phash2(user_id), 360)
 
-    "width:22px;height:22px;border-radius:50%;background:oklch(0.62 0.15 #{hue});" <>
+    "width:22px;height:22px;border-radius:50%;background:oklch(0.62 0.13 #{hue});" <>
       "color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;" <>
       "font-size:10px;font-weight:600;flex:0 0 auto;box-sizing:border-box;"
   end
