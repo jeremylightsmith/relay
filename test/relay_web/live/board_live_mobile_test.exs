@@ -51,8 +51,8 @@ defmodule RelayWeb.BoardLiveMobileTest do
 
       # The bar title truncates instead of pushing actions off-screen on narrow screens.
       assert view |> element("#top-bar-title") |> render() =~ "min-w-0"
-      # The editable board-name <input> itself ellipsis-truncates (truncate must sit on the input).
-      assert view |> element("#board-name-input") |> render() =~ "truncate"
+      # The plain board-name <span> itself ellipsis-truncates (truncate sits on the span).
+      assert view |> element("#board-name") |> render() =~ "truncate"
 
       # The interactive bar controls are ≥44px tap targets.
       assert view |> element("#board-settings-link") |> render() =~ "min-h-[44px]"

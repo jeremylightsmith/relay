@@ -1683,54 +1683,19 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
-  describe "board header rename" do
+  describe "board title" do
     setup :register_and_log_in_user
 
     setup %{user: user} do
       %{board: Boards.get_or_create_default_board(user)}
     end
 
-    test "the header name is an always-editable box with no click-to-edit affordance",
-         %{conn: conn, board: board} do
+    test "the header title is plain, non-editable text", %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#top-bar-title #board-name-form #board-name-input")
-      refute has_element?(view, "#board-name-display")
-    end
-
-    test "saving a new name persists it and stays editable", %{conn: conn, board: board, user: user} do
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
-
-      view |> form("#board-name-form", board: %{name: "Launch board"}) |> render_submit()
-
-      assert view |> element("#board-name-input") |> render() =~ "Launch board"
-      assert Boards.get_or_create_default_board(user).name == "Launch board"
-    end
-
-    test "a blank name is rejected inline and nothing changes", %{conn: conn, board: board, user: user} do
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
-
-      html = view |> form("#board-name-form", board: %{name: ""}) |> render_submit()
-
-      assert html =~ "should be at least 1 character"
-      assert Boards.get_or_create_default_board(user).name == board.name
-    end
-
-    test "cancel reverts the input to the saved name without saving", %{conn: conn, board: board, user: user} do
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
-
-      view |> element("#board-name-cancel") |> render_click()
-
-      assert view |> element("#board-name-input") |> render() =~ board.name
-      assert Boards.get_or_create_default_board(user).name == board.name
-    end
-
-    test "renaming from the header never changes the slug", %{conn: conn, board: board, user: user} do
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
-
-      view |> form("#board-name-form", board: %{name: "Renamed"}) |> render_submit()
-
-      assert Boards.get_or_create_default_board(user).slug == board.slug
+      assert view |> element("#top-bar-title #board-name") |> render() =~ board.name
+      refute has_element?(view, "#board-name-form")
+      refute has_element?(view, "#board-name-input")
     end
   end
 
