@@ -82,7 +82,7 @@ defmodule Relay.CardsGatesTest do
       assert approved.stage_id == deploy.id
     end
 
-    test "from the gate's review sub-lane, next = the first main stage after the parent",
+    test "from a review substage whose parent has no Done substage, next = first main stage after parent",
          %{review: review, deploy: deploy} do
       {:ok, sublane} = Boards.enable_lane(review, :review)
       card = insert(:card, stage: sublane)
@@ -137,6 +137,48 @@ defmodule Relay.CardsGatesTest do
     test "returns {:error, :not_in_review} on a non-review stage", %{code: code} do
       card = insert(:card, stage: code)
       assert {:error, :not_in_review} = Cards.approve(card)
+    end
+  end
+
+  describe "approve/2 into a Done substage (RLY-76)" do
+    test "a card in a review substage lands in the parent's Done substage, parked :ready",
+         %{board: board, code: code} do
+      {:ok, review_sub} = Boards.enable_lane(code, :review)
+      {:ok, done_sub} = Boards.enable_lane(code, :done)
+      card = insert(:card, stage: review_sub)
+      {:ok, card} = Cards.set_status(card, %{status: :in_review})
+
+      assert {:ok, approved} = Cards.approve(card)
+      assert approved.stage_id == done_sub.id
+      assert approved.status == :ready
+      refute Cards.done?(approved, Boards.list_stages(board))
+    end
+
+    test "approve_target/1 returns the parent's Done substage for a review substage card",
+         %{code: code} do
+      {:ok, review_sub} = Boards.enable_lane(code, :review)
+      {:ok, done_sub} = Boards.enable_lane(code, :done)
+      card = insert(:card, stage: review_sub)
+
+      assert %Schemas.Stage{id: id} = Cards.approve_target(card)
+      assert id == done_sub.id
+    end
+
+    test "approve_target/1 returns the next main stage for a top-level review card",
+         %{review: review, deploy: deploy} do
+      card = insert(:card, stage: review)
+      assert %Schemas.Stage{id: id} = Cards.approve_target(card)
+      assert id == deploy.id
+    end
+
+    test "approve_target/1 is nil at the terminal review stage", %{done: done} do
+      card = insert(:card, stage: done)
+      assert Cards.approve_target(card) == nil
+    end
+
+    test "approve_target/1 is nil for a non-review stage", %{code: code} do
+      card = insert(:card, stage: code)
+      assert Cards.approve_target(card) == nil
     end
   end
 

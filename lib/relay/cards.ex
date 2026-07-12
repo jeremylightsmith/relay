@@ -701,18 +701,42 @@ defmodule Relay.Cards do
   and reuses `move_card`/`set_status`, so the usual
   `{:card_moved}`/`{:card_upserted}`/`{:timeline_appended}` events fire. Reused verbatim
   by the API (MMF 09) and the drawer (MMF 15).
+
+  From a review substage the card advances to the parent's Done substage when one exists
+  (arriving :ready and parked — Done is derived only at the board's terminal stage), else
+  the next main stage.
   """
   def approve(%Card{} = card, actor \\ :agent) do
     stage = current_stage(card)
 
     if stage.type == :review do
-      case Boards.next_main_stage(current_main_stage(card)) do
+      case next_approve_stage(stage) do
         nil -> approve_in_place(card, stage, actor)
         %Stage{} = target -> route(card, stage, target, :approved, nil, actor)
       end
     else
       {:error, :not_in_review}
     end
+  end
+
+  @doc """
+  The stage/substage an Approve would advance this card into, or `nil` when the card is not in a
+  review-type stage or sits at the terminal stage (approve completes it in place). Mirrors
+  `reject_target/1`; the drawer uses it to *show* the destination and `approve/2` to *move* there.
+  """
+  def approve_target(%Card{} = card) do
+    stage = current_stage(card)
+    if stage.type == :review, do: next_approve_stage(stage)
+  end
+
+  # The "next stage or substage" rule. A review SUBSTAGE hands to its parent's Done substage when
+  # one exists, else the next main stage after the parent; a top-level review stage advances to the
+  # next main stage. nil = no next (terminal) → approve completes in place.
+  defp next_approve_stage(%Stage{parent_id: nil} = stage), do: Boards.next_main_stage(stage)
+
+  defp next_approve_stage(%Stage{parent_id: parent_id}) do
+    parent = Repo.get!(Stage, parent_id)
+    Boards.done_sublane(parent) || Boards.next_main_stage(parent)
   end
 
   @doc """

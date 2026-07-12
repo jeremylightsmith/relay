@@ -272,6 +272,9 @@ defmodule Relay.Boards do
     |> List.last()
   end
 
+  @doc "The parent main stage's `:done` substage, or nil when it has none."
+  def done_sublane(%Stage{parent_id: nil} = parent), do: get_sublane(parent, :done)
+
   @doc """
   Moves `stage` one step up or down among the board's main stages (`:up` =
   toward position 1), inside a transaction. With a same-category neighbour
