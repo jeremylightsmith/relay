@@ -28,6 +28,30 @@ defmodule Relay.Cards do
   # move_card/4 clamps this into range.
   @append_index 1_000_000
 
+  # Every Card column EXCEPT the heavy text bodies (:description, :spec, :plan).
+  # list_cards/1,2 loads only these so a whole-board render (LiveView columns + the
+  # API index) never drags multi-KB spec/plan/description text it doesn't show
+  # (RLY-67). :rejection is an inline embeds_one column and rides along in the struct;
+  # anything needing the omitted text must go through get_card_by_ref/2.
+  @list_card_fields [
+    :id,
+    :title,
+    :position,
+    :tag,
+    :ref_number,
+    :status,
+    :blocked_since,
+    :archived_at,
+    :branch,
+    :pr_url,
+    :ai_result,
+    :board_id,
+    :stage_id,
+    :rejection,
+    :inserted_at,
+    :updated_at
+  ]
+
   @doc """
   Creates a card in `stage` from user-supplied `attrs` (`:title`, optional
   `:tag`), attributed to `actor` (`:agent | {:user, user_id}`, defaults to
@@ -64,11 +88,18 @@ defmodule Relay.Cards do
   `position` — the render order within each stage column. Archived cards
   (RLY-4) are excluded, so they drop out of every stage/category/WIP count
   for free.
+
+  **Loads a trimmed projection (RLY-67):** `description`, `spec`, and `plan`
+  come back `nil` — a whole-board view never renders them. Anything needing
+  those heavy text bodies must fetch the full card via `get_card_by_ref/2`
+  (the drawer already does). Every other column, the `owners: :user` and
+  ordered `sub_tasks` preloads, and the `rejection` embed are populated.
   """
   def list_cards(%Board{id: board_id}) do
     Card
     |> where([c], c.board_id == ^board_id and is_nil(c.archived_at))
     |> order_by([c], asc: c.stage_id, asc: c.position, asc: c.id)
+    |> select([c], struct(c, @list_card_fields))
     |> Repo.all()
     |> Repo.preload(card_preloads())
   end
@@ -143,6 +174,11 @@ defmodule Relay.Cards do
   @doc "How many of the board's cards are archived (the header button's badge)."
   def count_archived_cards(%Board{id: board_id}) do
     Repo.aggregate(from(c in Card, where: c.board_id == ^board_id and not is_nil(c.archived_at)), :count)
+  end
+
+  @doc "How many non-archived cards the board has (the boards-home tile count)."
+  def count_cards(%Board{id: board_id}) do
+    Repo.aggregate(from(c in Card, where: c.board_id == ^board_id and is_nil(c.archived_at)), :count)
   end
 
   @doc """
