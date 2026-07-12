@@ -23,6 +23,11 @@ config :esbuild,
     env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
   ]
 
+# ex_aws (S3 SigV4 signing for the prod attachment adapter) makes its HTTP
+# calls through Req instead of pulling in hackney, so the app keeps a
+# single HTTP client.
+config :ex_aws, http_client: ExAws.Request.Req
+
 # Configure Elixir's Logger
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
@@ -30,6 +35,10 @@ config :logger, :default_formatter,
 
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
+
+# RLY-13: attachment byte storage. Dev/test use the hermetic filesystem
+# adapter; prod overrides to S3 (Tigris) in config/runtime.exs.
+config :relay, Relay.Attachments, storage: Relay.Attachments.Storage.Local
 
 # Configure the mailer
 #

@@ -60,6 +60,23 @@ if config_env() == :prod do
 
   host = System.get_env("PHX_HOST") || "example.com"
 
+  tigris_endpoint =
+    URI.parse(System.get_env("AWS_ENDPOINT_URL_S3") || "https://fly.storage.tigris.dev")
+
+  config :ex_aws, :s3,
+    scheme: "#{tigris_endpoint.scheme}://",
+    host: tigris_endpoint.host,
+    region: "auto"
+
+  config :ex_aws,
+    access_key_id: System.get_env("AWS_ACCESS_KEY_ID"),
+    secret_access_key: System.get_env("AWS_SECRET_ACCESS_KEY"),
+    region: "auto"
+
+  # RLY-13: attachments go to Tigris (S3-compatible) in prod. `fly storage create`
+  # provisions the bucket and sets AWS_* / BUCKET_NAME / AWS_ENDPOINT_URL_S3.
+  config :relay, Relay.Attachments, storage: Relay.Attachments.Storage.S3
+
   config :relay, Relay.Repo,
     # ssl: true,
     url: database_url,

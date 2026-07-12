@@ -141,4 +141,20 @@ defmodule Relay.Factory do
 
     activity |> merge_attributes(attrs) |> evaluate_lazy_attributes()
   end
+
+  # Full-control factory: `card` (when overridden) must be a persisted card.
+  # Metadata only — no bytes are written to storage by the factory.
+  def attachment_factory(attrs) do
+    {card, attrs} = Map.pop_lazy(attrs, :card, fn -> insert(:card) end)
+
+    attachment = %Schemas.Attachment{
+      card_id: card.id,
+      filename: sequence(:attachment_filename, &"shot-#{&1}.png"),
+      content_type: "image/png",
+      byte_size: 1024,
+      storage_key: Ecto.UUID.generate()
+    }
+
+    attachment |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
 end
