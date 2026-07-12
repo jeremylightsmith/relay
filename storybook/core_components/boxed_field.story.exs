@@ -56,21 +56,72 @@ defmodule Storybook.Components.CoreComponents.BoxedField do
         }
       },
       %Variation{
-        id: :self_editing_dirty,
+        id: :self_editing_savecancel,
         attributes: %{
           id: "bf-md-edit",
           markdown: true,
           multiline: true,
           editing: true,
-          field: :description,
-          form: Phoenix.Component.to_form(%{"description" => "raw markdown source"}, as: :card),
+          label: "Spec",
+          accent: :primary,
+          field: :spec,
+          form: Phoenix.Component.to_form(%{"spec" => "## Goal\n\nraw markdown source"}, as: :card),
           edit_event: "edit",
           save_event: "save",
           cancel_event: "cancel"
-        },
-        template: """
-        <div style="padding-bottom:72px"><.psb-variation/></div>
-        """
+        }
+      },
+      %Variation{
+        id: :self_collapsed_preview,
+        attributes: %{
+          id: "bf-spec-collapsed",
+          markdown: true,
+          multiline: true,
+          collapsible: true,
+          expanded: false,
+          label: "Spec",
+          accent: :primary,
+          toggle_event: "toggle_spec",
+          value:
+            "## Goal\n\nShip the Safari checkout fix. Reproduces on iOS 17 when the network is slow; the payment sheet double-fires.\n\n- Add a regression test\n- Idempotency key on submit",
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
+        }
+      },
+      %Variation{
+        id: :self_expanded_read,
+        attributes: %{
+          id: "bf-plan-expanded",
+          markdown: true,
+          multiline: true,
+          collapsible: true,
+          expanded: true,
+          label: "Plan",
+          accent: :secondary,
+          toggle_event: "toggle_plan",
+          value: "## Task 1\n\n- [x] migration\n- [ ] wire the API\n\n## Task 2\n\n- [ ] drawer",
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
+        }
+      },
+      %Variation{
+        id: :self_empty_add,
+        attributes: %{
+          id: "bf-spec-empty",
+          markdown: true,
+          multiline: true,
+          collapsible: true,
+          label: "Spec",
+          accent: :primary,
+          toggle_event: "toggle_spec",
+          value: "",
+          placeholder: "Add a spec…",
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
+        }
       },
       %Variation{
         id: :self_prefixed_slug,

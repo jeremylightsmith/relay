@@ -147,6 +147,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 61}, as: :card),
+          expanded_spec: false,
+          expanded_plan: false,
           conversation: story_conversation(),
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
