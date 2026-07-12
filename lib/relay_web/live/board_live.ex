@@ -1285,23 +1285,23 @@ defmodule RelayWeb.BoardLive do
     stage = find_stage_by_id(socket, card.stage_id)
 
     if stage.type == :review do
-      main = governing_main_stage(socket, stage)
       target = Cards.reject_target(card)
 
       %{
-        approve_label: approve_label(main),
+        approve_label: approve_label(card),
         reject_target_name: target && Boards.stage_display_name(target),
         can_reject: target != nil
       }
     end
   end
 
-  # Mirrors Cards.approve/2 routing: next main stage by position, or done
-  # in place at the board's last main stage (mockup: "Approve → Deploy").
-  defp approve_label(main) do
-    case Boards.next_main_stage(main) do
+  # Derived from the domain target (Cards.approve_target/1) so the label can never drift from the
+  # actual move. stage_display_name/1 renders a Done substage as "<Parent> · Done" (not the
+  # internal composite "<Parent>:Done"). nil target = complete in place at the terminal stage.
+  defp approve_label(card) do
+    case Cards.approve_target(card) do
       nil -> "Approve → Done"
-      %Stage{name: name} -> "Approve → #{name}"
+      %Stage{} = target -> "Approve → #{Boards.stage_display_name(target)}"
     end
   end
 

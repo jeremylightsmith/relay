@@ -2,6 +2,11 @@
 
 **Date:** 2026-07-08  **MMF:** [`docs/mmfs/15-review-gate-actions.md`](../../mmfs/15-review-gate-actions.md)
 **Status:** Draft for review → `/write-plan`  ·  **Milestone:** Post-MVP
+
+> **Superseded (RLY-76):** Approve advances to the **next stage or substage** — for a review
+> substage that is the parent's **Done substage** when it exists, not the next main stage. See
+> [`docs/glossary.md`](../../glossary.md) (the routing authority).
+
 **Depends on:** MMF 04 (drawer), 06 (owners), **13 (gate routing — must land first)**, 18 (broadcasts)
 **Development:** trunk-based on `main`
 

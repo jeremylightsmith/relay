@@ -8,6 +8,10 @@ whose turn it is, what's blocked on a human, and what an agent is actively worki
 "who holds the baton" (human vs. agent) as a first-class property of a card, not an
 afterthought. See [`docs/vision.md`](docs/vision.md) for the product north star.
 
+**Terminology:** the board vocabulary — **stage / substage**, card, status, baton, the review
+gate, and the "next stage or substage" Approve rule — is defined in
+[`docs/glossary.md`](docs/glossary.md). Use those terms; it's the terminology source of truth.
+
 **Design source of truth:** hi-fi mockups live in [`docs/designs/`](docs/designs/README.md)
 (pulled from the Claude Design project). Build the LiveView UI to match them. The palette
 encodes the core idea — **Human = blue** (`--color-primary`), **AI = violet**
