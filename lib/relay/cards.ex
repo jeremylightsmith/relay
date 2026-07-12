@@ -508,6 +508,36 @@ defmodule Relay.Cards do
     end)
   end
 
+  # Light card columns for the optimistic drawer's first paint (RLY-68):
+  # every Card field except the multi-KB heavy text
+  # (description/spec/plan/ai_result). One list so this light fetch and any
+  # future light projection (RLY-67) share a single source of truth.
+  @light_card_fields ~w(id title tag position ref_number status blocked_since archived_at branch pr_url board_id stage_id inserted_at updated_at rejection)a
+
+  @doc """
+  Like `get_card_by_ref/2`, but selects only the card's light columns
+  (everything except the heavy `description`/`spec`/`plan`/`ai_result`
+  text), still preloading `owners: :user` and position-ordered
+  `sub_tasks`. The heavy string fields come back `nil`. Powers the
+  optimistic card drawer's instant first paint (RLY-68); the drawer's
+  async fill re-fetches the full card via `get_card_by_ref/2`.
+  Board-scoped exactly like `get_card_by_ref/2`, so a ref can never
+  resolve to another board's card.
+  """
+  def get_card_light_by_ref(%Board{} = board, ref) when is_binary(ref) do
+    case parse_ref_number(board, ref) do
+      {:ok, ref_number} ->
+        Card
+        |> where([c], c.board_id == ^board.id and c.ref_number == ^ref_number)
+        |> select([c], struct(c, @light_card_fields))
+        |> Repo.one()
+        |> preload_owners()
+
+      :error ->
+        nil
+    end
+  end
+
   @doc """
   Fetches the card a human-facing ref (e.g. `"RLY-12"`) points at on
   `board`, or `nil` when the ref does not parse against the board's key

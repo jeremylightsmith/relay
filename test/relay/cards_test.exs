@@ -369,6 +369,59 @@ defmodule Relay.CardsTest do
     end
   end
 
+  describe "get_card_light_by_ref/2" do
+    test "loads light columns with heavy fields nil, owners and sub_tasks preloaded",
+         %{board: board, stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Light me", tag: "perf"})
+
+      {:ok, _} =
+        Cards.update_card(card, %{
+          description: "d",
+          spec: "s",
+          plan: "p",
+          ai_result: %{"summary" => "x"}
+        })
+
+      {:ok, _} = Cards.set_sub_tasks(card, [%{"title" => "One"}, %{"title" => "Two"}])
+
+      light = Cards.get_card_light_by_ref(board, "RLY-1")
+
+      assert light.id == card.id
+      assert light.title == "Light me"
+      assert light.tag == "perf"
+      assert light.status == :ready
+      # heavy fields are not selected
+      assert light.description == nil
+      assert light.spec == nil
+      assert light.plan == nil
+      assert light.ai_result == nil
+      # associations still preloaded
+      assert is_list(light.owners)
+      assert Enum.map(light.sub_tasks, & &1.title) == ["One", "Two"]
+    end
+
+    test "returns nil for an unknown ref number", %{board: board} do
+      assert Cards.get_card_light_by_ref(board, "RLY-99") == nil
+    end
+
+    test "returns nil for malformed or foreign-key refs", %{board: board, stage: stage} do
+      {:ok, _card} = Cards.create_card(stage, %{title: "Present"})
+
+      for ref <- ["", "RLY-", "nope", "OPS-1"] do
+        assert Cards.get_card_light_by_ref(board, ref) == nil, "expected nil for #{inspect(ref)}"
+      end
+    end
+
+    test "never returns another board's card", %{board: board} do
+      other_board = insert(:board, key: "OPS")
+      other_stage = insert(:stage, board: other_board, position: 1)
+      {:ok, _card} = Cards.create_card(other_stage, %{title: "Foreign"})
+
+      # the RLY board has no card #1 yet
+      assert Cards.get_card_light_by_ref(board, "RLY-1") == nil
+    end
+  end
+
   describe "move_card/4" do
     setup %{board: board} do
       %{target: insert(:stage, board: board, position: 2)}
