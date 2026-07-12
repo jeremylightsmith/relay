@@ -421,7 +421,7 @@
 .docs-pager-link:hover { border-color: color-mix(in oklch, var(--color-primary) 35%, var(--color-base-300)); }
 .docs-pager-next { text-align: right; margin-left: auto; }
 .docs-pager-label {
-  font-family: var(--font-mono); font-size: 11px;
+  font-family: var(--font-mono); font-size: 11px; text-transform: uppercase;
   color: color-mix(in oklch, var(--color-base-content) 55%, transparent);
 }
 .docs-pager-title { font-size: 14px; font-weight: 600; color: var(--color-base-content); }

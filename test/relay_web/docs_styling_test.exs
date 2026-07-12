@@ -57,4 +57,10 @@ defmodule RelayWeb.DocsStylingTest do
     assert app =~ ~r/\.docs\s+\.markdown-alert-tip[^}]*\{[^}]*var\(--color-secondary\)/s
     assert app =~ ~r/\.docs\s+\.markdown-alert-warning[^}]*\{[^}]*var\(--color-warning\)/s
   end
+
+  test "the pager label reads all-caps like every other mono label in the mockup" do
+    for css <- [File.read!(@app_css), File.read!(@storybook_css)] do
+      assert css =~ ~r/\.docs-pager-label\s*\{[^}]*text-transform:\s*uppercase/s
+    end
+  end
 end
