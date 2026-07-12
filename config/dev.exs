@@ -44,7 +44,9 @@ config :relay, RelayWeb.Endpoint,
   secret_key_base: "AFIPqzFJsRUrOe1Q+1u4zAcL6Ete47JHD7ai+q47847KaB8dt/VBYQs6WYBjbam0",
   watchers: [
     esbuild: {Esbuild, :install_and_run, [:relay, ~w(--sourcemap=inline --watch)]},
-    tailwind: {Tailwind, :install_and_run, [:relay, ~w(--watch)]}
+    esbuild: {Esbuild, :install_and_run, [:storybook, ~w(--sourcemap=inline --watch)]},
+    tailwind: {Tailwind, :install_and_run, [:relay, ~w(--watch)]},
+    tailwind: {Tailwind, :install_and_run, [:storybook, ~w(--watch)]}
   ]
 
 # ## SSL Support

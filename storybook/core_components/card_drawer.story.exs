@@ -90,8 +90,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
           review_gate: %{
             approve_label: "Approve → Deploy",
-            targets: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 5, name: "Review"}],
-            default_to: 4,
+            reject_target_name: "Code",
             can_reject: true
           },
           reject_form: Phoenix.Component.to_form(%{"note" => ""}, as: :reject),
@@ -115,8 +114,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
           review_gate: %{
             approve_label: "Approve → Deploy",
-            targets: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 5, name: "Review"}],
-            default_to: 4,
+            reject_target_name: "Code",
             can_reject: true
           },
           reject_open: true,
