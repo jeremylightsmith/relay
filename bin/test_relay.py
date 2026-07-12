@@ -583,5 +583,37 @@ class ApiRetryTest(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
 
 
+class WatchLoopResilienceTest(unittest.TestCase):
+    """A scan() that die()s (exhausted api() retries) is caught and logged; the watch
+    loop does not propagate the SystemExit and the runner keeps going."""
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in
+                       ("get_board", "load_config", "env", "log", "DRY")}
+        relay.DRY = True   # skip forwarder + worktree setup
+        relay.env = lambda name: "x"
+        relay.load_config = lambda: {"poll_interval": 1, "pipeline": []}
+        self.logs = []
+        relay.log = lambda msg="", **k: self.logs.append((msg, k.get("kind")))
+        os.environ.setdefault("RELAY_URL", "http://example.test")
+        os.environ.setdefault("RELAY_API_KEY", "k")
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            setattr(relay, k, v)
+
+    def test_watch_survives_a_scan_that_dies(self):
+        def boom():
+            relay.die("API 500: down")   # what get_board() does when api() exhausts
+        relay.get_board = boom
+
+        # Must return normally — no SystemExit escapes the loop.
+        relay.cmd_watch(
+            relay.argparse.Namespace(once=True, dry_run=True, interval=1))
+
+        self.assertTrue(any("board scan failed" in msg for msg, _ in self.logs))
+        self.assertTrue(any(kind == "error" for _, kind in self.logs))
+
+
 if __name__ == "__main__":
     unittest.main()

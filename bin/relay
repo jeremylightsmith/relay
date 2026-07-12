@@ -752,7 +752,10 @@ def cmd_watch(args):
         + (" (dry-run)" if DRY else "") + (" — one pass" if args.once else ""))
 
     while not stop.is_set():
-        scan()
+        try:
+            scan()
+        except SystemExit as e:            # exhausted api() retries → die() in scan()
+            log(f"board scan failed, will retry next tick: {e}", kind="error")
         if args.once:
             break
         wake.wait(interval)
