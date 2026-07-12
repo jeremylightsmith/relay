@@ -57,7 +57,7 @@ defmodule RelayWeb.Layouts do
         title="All boards"
         class="flex items-center gap-2"
       >
-        <img src={~p"/images/logo.svg"} width="23" alt="Relay" />
+        <img src={~p"/images/logo_light_128.png"} width="23" alt="Relay" />
         <span class="text-[15px] font-semibold tracking-[-0.02em]">Relay</span>
       </.link>
       <div
