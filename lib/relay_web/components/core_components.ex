@@ -1482,45 +1482,43 @@ defmodule RelayWeb.CoreComponents do
                 </div>
               </section>
               <section :if={@card.sub_tasks != []} id="sub-tasks" class="space-y-2">
-                <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
                   <.section_label>Sub-tasks</.section_label>
                   <span id="sub-tasks-count" class="font-mono text-[10px] text-base-content/60">
                     {@sub_task_progress.done}/{@sub_task_progress.total}
                   </span>
+                  <div class="h-1 max-w-[120px] flex-1 overflow-hidden rounded-full bg-base-300">
+                    <div
+                      class="h-full rounded-full bg-success transition-all"
+                      style={"width:#{sub_task_pct(@sub_task_progress)}%"}
+                    />
+                  </div>
                 </div>
-                <div class="h-1 w-full overflow-hidden rounded-full bg-base-300">
-                  <div
-                    class="h-full rounded-full bg-success transition-all"
-                    style={"width:#{sub_task_pct(@sub_task_progress)}%"}
-                  />
-                </div>
-                <ul class="space-y-1">
-                  <li
-                    :for={st <- @card.sub_tasks}
-                    id={"sub-task-#{st.id}"}
-                    class="flex items-start gap-2"
-                  >
+                <ul class="space-y-1.5">
+                  <li :for={st <- @card.sub_tasks} id={"sub-task-#{st.id}"}>
                     <button
                       type="button"
                       phx-click="toggle_sub_task"
                       phx-value-id={st.id}
-                      class={[
-                        "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
+                      aria-label={if(st.done, do: "Mark incomplete", else: "Mark complete")}
+                      class="flex w-full items-center gap-2 rounded-lg border border-base-300 bg-base-200 px-2 py-1.5 text-left transition-colors hover:border-base-content/20"
+                    >
+                      <span class={[
+                        "flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
                         if(st.done,
                           do: "border-success bg-success text-white",
-                          else: "border-base-300 hover:border-success"
+                          else: "border-base-300"
                         )
-                      ]}
-                      aria-label={if(st.done, do: "Mark incomplete", else: "Mark complete")}
-                    >
-                      <.icon :if={st.done} name="hero-check" class="size-3" />
+                      ]}>
+                        <.icon :if={st.done} name="hero-check" class="size-3" />
+                      </span>
+                      <span class={[
+                        "text-sm leading-snug",
+                        st.done && "text-base-content/50 line-through"
+                      ]}>
+                        {st.title}
+                      </span>
                     </button>
-                    <span class={[
-                      "text-sm leading-snug",
-                      st.done && "text-base-content/50 line-through"
-                    ]}>
-                      {st.title}
-                    </span>
                   </li>
                 </ul>
               </section>

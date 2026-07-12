@@ -715,6 +715,67 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ "lg:w-[220px]"
       refute html =~ "lg:w-[min(760px,94vw)]"
     end
+
+    test "sub-tasks header puts label, count and a capped inline bar on one row" do
+      attrs =
+        drawer_attrs(
+          %{sub_tasks: [%{id: 1, title: "a", done: true}, %{id: 2, title: "b", done: false}]},
+          %{}
+        )
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      # Header is a single inline row: label · count · bar (no justify-between).
+      assert html =~ ~s(<div class="flex items-center gap-2">)
+      assert html =~ ~s(id="sub-tasks-count")
+      # The progress bar is inline in that row: flex-1 but capped at 120px, 4px, green fill.
+      assert html =~ "h-1 max-w-[120px] flex-1 overflow-hidden rounded-full bg-base-300"
+      assert html =~ "h-full rounded-full bg-success"
+      assert html =~ "width:50%"
+    end
+
+    test "each sub-task renders as a boxed, bordered, whole-row toggle button" do
+      attrs = drawer_attrs(%{sub_tasks: [%{id: 1, title: "a", done: false}]}, %{})
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      # The row <li> keeps its stable id...
+      assert html =~ ~s(id="sub-task-1")
+      # ...and the whole boxed row is a full-width button carrying the toggle plumbing.
+      assert html =~ ~s(phx-click="toggle_sub_task")
+      assert html =~ ~s(phx-value-id="1")
+
+      assert html =~
+               "flex w-full items-center gap-2 rounded-lg border border-base-300 bg-base-200 px-2 py-1.5 text-left"
+    end
+
+    test "a done sub-task shows a filled green check and struck-through muted label" do
+      attrs =
+        drawer_attrs(
+          %{
+            sub_tasks: [
+              %{id: 1, title: "done one", done: true},
+              %{id: 2, title: "open one", done: false}
+            ]
+          },
+          %{}
+        )
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      # Done check box is filled green; done label is muted + struck through.
+      assert html =~ "border-success bg-success text-white"
+      assert html =~ "text-base-content/50 line-through"
+      assert html =~ "hero-check"
+    end
+
+    test "no sub-tasks section when the card has none" do
+      attrs = drawer_attrs(%{sub_tasks: []}, %{})
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      refute html =~ ~s(id="sub-tasks")
+    end
   end
 
   describe "inline_field/1" do
