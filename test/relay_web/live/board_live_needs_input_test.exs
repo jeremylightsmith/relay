@@ -34,6 +34,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     assert has_element?(view, "#needs-input-panel", "RELAY AI NEEDS YOUR INPUT")
     assert has_element?(view, "#needs-input-question", "Billing timezone or the viewer's?")
@@ -43,6 +44,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, mdcard} = Cards.create_card(code, %{title: "Markdown ask"})
     {:ok, _} = Cards.request_input(mdcard, "Use **UTC** or the `viewer` tz?")
     {:ok, mdview, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-#{mdcard.ref_number}")
+    render_async(mdview)
     assert has_element?(mdview, "#needs-input-question.md strong", "UTC")
     assert has_element?(mdview, "#needs-input-question.md code", "viewer")
     assert has_element?(view, "#needs-input-answer")
@@ -57,6 +59,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     assert has_element?(view, "#needs-input-question", "Second question?")
     refute has_element?(view, "#needs-input-question", "First question?")

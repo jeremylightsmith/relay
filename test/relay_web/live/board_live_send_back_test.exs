@@ -60,6 +60,7 @@ defmodule RelayWeb.BoardLiveSendBackTest do
     {:ok, _} = Cards.set_status(card, %{status: :in_review})
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
     view |> element("#review-request-changes") |> render_click()
 
     refute has_element?(view, "#review-reject-target")

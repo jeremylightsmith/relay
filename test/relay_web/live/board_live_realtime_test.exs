@@ -59,6 +59,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view_a, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
       {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}")
+      render_async(view_a)
 
       view_a |> element("#review-approve") |> render_click()
 
@@ -101,6 +102,8 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view_a, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
       {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      render_async(view_a)
+      render_async(view_b)
 
       view_a |> form("#card-drawer-comment-form", comment: %{body: "Live comment"}) |> render_submit()
 
@@ -257,6 +260,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      render_async(view)
 
       send(view.pid, {:timeline_appended, card.id, comment})
       send(view.pid, {:timeline_appended, card.id, comment})
@@ -304,6 +308,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      render_async(view)
 
       assert token
              |> api_conn()
@@ -321,6 +326,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      render_async(view)
       refute has_element?(view, "#card-plan-view")
 
       assert token

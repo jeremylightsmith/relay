@@ -1053,4 +1053,78 @@ defmodule RelayWeb.CoreComponentsTest do
       assert @storybook_css =~ ".md li::marker"
     end
   end
+
+  describe "card_drawer/1 body_loading" do
+    defp loading_drawer_assigns(overrides \\ %{}) do
+      base = %{
+        id: "d",
+        ref: "RLY-68",
+        card: %{
+          title: "Optimistic drawer",
+          description: nil,
+          spec: nil,
+          plan: nil,
+          tag: "perf",
+          status: :needs_input,
+          blocked_since: ~U[2026-07-12 09:00:00Z],
+          branch: nil,
+          pr_url: nil,
+          rejection: nil,
+          sub_tasks: [],
+          ai_result: nil,
+          owners: [],
+          inserted_at: ~U[2026-07-12 09:00:00Z],
+          updated_at: ~U[2026-07-12 09:00:00Z]
+        },
+        stage_name: "Code",
+        stage_owner: :ai,
+        close_patch: "/board/x",
+        title_form: Phoenix.Component.to_form(%{"title" => "Optimistic drawer"}, as: :card),
+        answer_form: Phoenix.Component.to_form(%{"body" => ""}, as: :answer),
+        conversation: [],
+        activity: [],
+        comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment),
+        body_loading: true
+      }
+
+      Map.merge(base, overrides)
+    end
+
+    test "renders skeletons for the heavy sections while loading" do
+      html = render_component(&CoreComponents.card_drawer/1, loading_drawer_assigns())
+
+      assert html =~ ~s(id="d-description-skeleton")
+      assert html =~ ~s(id="d-spec-skeleton")
+      assert html =~ ~s(id="card-plan-skeleton")
+      assert html =~ ~s(id="ai-result-skeleton")
+      assert html =~ ~s(id="needs-input-question-skeleton")
+      assert html =~ ~s(id="d-conversation-loading")
+      assert html =~ ~s(id="d-activity-loading")
+      assert html =~ "skeleton"
+      # heavy content is suppressed while loading
+      refute html =~ ~s(id="d-description-view")
+      # the streamed <ol> is gated off during loading
+      refute html =~ ~s(id="d-conversation")
+    end
+
+    test "renders the real sections and no skeletons when not loading" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          loading_drawer_assigns(%{
+            body_loading: false,
+            card: %{
+              loading_drawer_assigns().card
+              | description: "hello",
+                status: :ready,
+                blocked_since: nil
+            }
+          })
+        )
+
+      refute html =~ "skeleton"
+      refute html =~ ~s(id="d-description-skeleton")
+      assert html =~ ~s(id="d-description")
+    end
+  end
 end
