@@ -1824,7 +1824,7 @@ defmodule RelayWeb.CoreComponents do
                     phx-click="toggle_reassign"
                     style="background:transparent;border:none;color:oklch(0.50 0.13 250);font-size:12px;font-weight:600;padding:2px 0;cursor:pointer;"
                   >
-                    {if @reassign_open, do: "Close", else: "Reassign ▾"}
+                    {if @reassign_open, do: "Done", else: "Reassign"}
                   </button>
                   <div
                     :if={!@archived and @reassign_open}
