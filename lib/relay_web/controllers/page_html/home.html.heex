@@ -1,12 +1,56 @@
 <Layouts.flash_group flash={@flash} />
-<main class="min-h-screen flex items-center justify-center px-4">
-  <div class="card bg-base-200 w-full max-w-sm shadow-md">
-    <div class="card-body items-center text-center gap-6">
-      <div>
-        <h1 class="text-2xl font-semibold">Relay</h1>
-        <p class="mt-2 text-base-content/70">Sign in to continue</p>
+
+<div class="w-full overflow-x-clip">
+  <%!-- NAV --%>
+  <header class="sticky top-0 z-20 border-b border-base-300 bg-base-100/85 backdrop-blur-md">
+    <nav class="mx-auto flex h-[62px] max-w-[1120px] items-center gap-7 px-4 sm:px-8">
+      <a href="#top" class="flex items-center gap-2.5">
+        <span class="relative flex size-[25px] items-center justify-center rounded-lg bg-primary">
+          <span class="size-[9px] rounded-full bg-base-100"></span>
+          <span class="absolute right-1 top-1 size-1 rounded-full bg-primary ring-[1.5px] ring-base-100">
+          </span>
+        </span>
+        <span class="text-base font-semibold tracking-[-0.02em]">Relay</span>
+      </a>
+      <div class="hidden items-center gap-[22px] text-[13.5px] text-base-content/70 md:flex">
+        <a href="#how" class="hover:text-primary">How it works</a>
+        <a href="#flow" class="hover:text-primary">The flow</a>
+        <a href="#stages" class="hover:text-primary">Stages</a>
       </div>
-      <a href={~p"/auth/google"} id="google-signin" class="btn btn-primary w-full">
+      <span class="flex-1"></span>
+      <Layouts.theme_toggle />
+      <a
+        href={~p"/auth/google"}
+        class="hidden text-[13.5px] text-base-content/70 hover:text-primary sm:inline"
+      >
+        Sign in
+      </a>
+      <a href={~p"/auth/google"} class="btn btn-primary btn-sm rounded-lg">Open the board</a>
+    </nav>
+  </header>
+
+  <%!-- HERO --%>
+  <section
+    id="top"
+    class="mx-auto max-w-[1120px] px-4 pb-10 pt-16 text-center sm:px-8 sm:pt-[76px]"
+  >
+    <div class="mb-6 inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-secondary/25 bg-secondary/10 px-3 py-1.5 font-mono text-xs font-semibold text-secondary">
+      <span
+        class="size-[7px] rounded-full bg-secondary"
+        style="animation:relaypulse 1.4s ease-in-out infinite;"
+      >
+      </span>
+      HUMAN + AI, ONE BOARD
+    </div>
+    <h1 class="mx-auto mb-5 max-w-[820px] text-4xl font-semibold leading-[1.02] tracking-[-0.035em] text-base-content md:text-6xl">
+      Pass work between people and AI — without losing the thread.
+    </h1>
+    <p class="mx-auto mb-8 max-w-[560px] text-lg leading-relaxed text-base-content/70">
+      Relay is a kanban board built for handoffs. Some stages are yours, some belong to the AI.
+      It works in the open, asks when it's unsure, and waits for your call.
+    </p>
+    <div class="mb-4 flex flex-wrap items-center justify-center gap-3">
+      <a href={~p"/auth/google"} id="google-signin" class="btn btn-primary">
         <svg viewBox="0 0 48 48" class="size-5" aria-hidden="true">
           <path
             fill="#EA4335"
@@ -27,13 +71,325 @@
         </svg>
         Sign in with Google
       </a>
-      <p class="text-xs text-base-content/50">
-        By continuing you agree to our <.link navigate={~p"/terms"} class="link">Terms</.link>
-        and <.link navigate={~p"/privacy"} class="link">Privacy Policy</.link>.
-      </p>
-      <p class="text-xs text-base-content/50">
-        Building an agent? Read the <.link navigate={~p"/docs"} class="link">API docs</.link>.
+      <a href="#how" class="btn btn-outline">See how it works</a>
+    </div>
+    <p class="mb-14 text-xs text-base-content/50">
+      By continuing you agree to our <.link navigate={~p"/terms"} class="link">Terms</.link>
+      and <.link navigate={~p"/privacy"} class="link">Privacy Policy</.link>.
+    </p>
+
+    <%!-- Hero board visual --%>
+    <div class="relative overflow-hidden rounded-[18px] border border-base-300 bg-base-200 p-5 text-left shadow-2xl">
+      <div class="flex min-w-0 items-start gap-3.5">
+        <%!-- Spec / HUMAN column --%>
+        <div class="min-w-0 flex-1">
+          <div class="mb-3 flex items-center gap-[7px] px-0.5">
+            <span class="size-2 rounded-[3px] bg-primary"></span>
+            <span class="text-[13px] font-semibold">Spec</span>
+            <span class="rounded-[5px] bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary">
+              HUMAN
+            </span>
+          </div>
+          <div class="flex flex-col gap-2.5 rounded-[9px] border border-base-300 border-l-[3px] border-l-primary bg-base-100 p-[11px]">
+            <span class="text-[12.5px] font-medium text-base-content">
+              Define CSV export criteria
+            </span>
+            <div class="flex items-center justify-between">
+              <span class="font-mono text-[11px] text-base-content/60">#product</span>
+              <span class="flex size-[22px] items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-content">
+                DK
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Handoff divider --%>
+        <div class="flex flex-none flex-col items-center gap-1.5 self-center pt-5">
+          <span class="font-mono text-[10px] tracking-wider text-base-content/60">HANDOFF</span>
+          <span class="text-xl text-secondary">→</span>
+        </div>
+
+        <%!-- Code / AI column --%>
+        <div class="min-w-0 flex-[1.4]">
+          <div class="mb-3 flex items-center gap-[7px] px-0.5">
+            <span class="size-2 rounded-[3px] bg-secondary"></span>
+            <span class="text-[13px] font-semibold">Code</span>
+            <span class="rounded-[5px] bg-secondary/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-secondary">
+              AI
+            </span>
+            <span class="rounded-[5px] bg-base-200 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-base-content/70">
+              wip 2/3
+            </span>
+          </div>
+          <div class="flex flex-col gap-2.5">
+            <div class="flex flex-col gap-2.5 rounded-[9px] border border-base-300 border-l-[3px] border-l-secondary bg-base-100 p-[11px]">
+              <span class="text-[12.5px] font-medium text-base-content">
+                Migrate 40 blog posts to the new CMS
+              </span>
+              <progress class="progress progress-secondary h-[5px]" value="62" max="100">
+              </progress>
+              <div class="flex items-center justify-between">
+                <span class="flex items-center gap-1.5 font-mono text-[11px] text-secondary">
+                  <span
+                    class="size-1.5 rounded-full bg-secondary"
+                    style="animation:relaypulse 1.4s ease-in-out infinite;"
+                  >
+                  </span>
+                  working · 62%
+                </span>
+                <span class="flex size-[22px] items-center justify-center rounded-full bg-secondary">
+                  <span class="size-2 rounded-full border-[1.5px] border-base-100"></span>
+                </span>
+              </div>
+            </div>
+            <div class="flex flex-col gap-2 rounded-[9px] border border-base-300 border-l-[3px] border-l-warning bg-base-100 p-[11px]">
+              <span class="text-[12.5px] font-medium text-base-content">
+                Rewrite the onboarding tooltips
+              </span>
+              <div class="flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2 py-1.5">
+                <span class="size-1.5 rounded-full bg-warning"></span>
+                <span class="font-mono text-[10px] font-semibold tracking-wider text-warning">
+                  NEEDS YOUR INPUT
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Review / HUMAN column --%>
+        <div class="min-w-0 flex-1">
+          <div class="mb-3 flex items-center gap-[7px] px-0.5">
+            <span class="size-2 rounded-[3px] bg-primary"></span>
+            <span class="text-[13px] font-semibold">Review</span>
+            <span class="rounded-[5px] bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary">
+              HUMAN
+            </span>
+          </div>
+          <div class="rounded-[10px] bg-success/10 p-1.5">
+            <div class="px-1 pb-2 pt-0.5 font-mono text-[10px] font-semibold tracking-wider text-success">
+              DONE
+            </div>
+            <div class="flex flex-col gap-2.5 rounded-[9px] border border-base-300 border-l-[3px] border-l-success bg-base-100 p-[11px]">
+              <span class="text-[12.5px] font-medium text-base-content">
+                Add keyboard shortcuts
+              </span>
+              <div class="flex items-center justify-between">
+                <span class="flex items-center gap-1.5 font-mono text-[11px] text-success">
+                  <span class="size-1.5 rounded-full bg-success"></span>ready
+                </span>
+                <span class="flex size-[22px] items-center justify-center rounded-full bg-secondary">
+                  <span class="size-2 rounded-full border-[1.5px] border-base-100"></span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <%!-- HOW IT WORKS --%>
+  <section id="how" class="mx-auto max-w-[1120px] px-4 pb-6 pt-16 sm:px-8">
+    <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-secondary">
+      HOW IT WORKS
+    </div>
+    <h2 class="mb-3.5 max-w-[640px] text-[34px] font-semibold leading-tight tracking-[-0.025em] text-base-content">
+      Every stage has an owner. The work moves between them.
+    </h2>
+    <p class="mb-11 max-w-[560px] text-base leading-relaxed text-base-content/70">
+      You decide which stages people run and which the AI runs. Finished work lands in a Done
+      column, ready for the next owner to pull it forward.
+    </p>
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div class="rounded-[14px] border border-base-300 bg-base-200 p-6">
+        <div class="mb-4 flex size-[34px] items-center justify-center rounded-[10px] bg-primary/10">
+          <span class="size-3 rounded-[4px] bg-primary"></span>
+        </div>
+        <h3 class="mb-2 text-base font-semibold tracking-[-0.01em]">You stay in control</h3>
+        <p class="text-[13.5px] leading-relaxed text-base-content/70">
+          Human stages are yours. Queue work, review AI output, approve or send it back —
+          nothing ships without a person.
+        </p>
+      </div>
+      <div class="rounded-[14px] border border-base-300 bg-base-200 p-6">
+        <div class="mb-4 flex size-[34px] items-center justify-center rounded-[10px] bg-secondary/10">
+          <span class="flex size-3.5 items-center justify-center rounded-full bg-secondary">
+            <span class="size-[5px] rounded-full border-[1.5px] border-base-100"></span>
+          </span>
+        </div>
+        <h3 class="mb-2 text-base font-semibold tracking-[-0.01em]">The AI does the work</h3>
+        <p class="text-[13.5px] leading-relaxed text-base-content/70">
+          AI stages pull ready work automatically, show live progress, and hand finished cards
+          forward — you watch it happen.
+        </p>
+      </div>
+      <div class="rounded-[14px] border border-base-300 bg-base-200 p-6">
+        <div class="mb-4 flex size-[34px] items-center justify-center rounded-[10px] bg-warning/10">
+          <span class="size-3 rounded-full bg-warning"></span>
+        </div>
+        <h3 class="mb-2 text-base font-semibold tracking-[-0.01em]">It asks before it guesses</h3>
+        <p class="text-[13.5px] leading-relaxed text-base-content/70">
+          When the AI hits a decision it can't make, the card blocks and waits. You answer
+          inline; it picks up where it left off.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <%!-- WHEN IT'S UNSURE (blocked feature) --%>
+  <section class="mx-auto grid max-w-[1120px] grid-cols-1 items-center gap-8 px-4 py-14 sm:px-8 md:grid-cols-2 md:gap-14">
+    <div>
+      <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-warning">
+        WHEN IT'S UNSURE
+      </div>
+      <h2 class="mb-3.5 text-[30px] font-semibold leading-tight tracking-[-0.02em] text-base-content">
+        A question, not a wrong guess.
+      </h2>
+      <p class="text-base leading-relaxed text-base-content/70">
+        The AI would rather ask than assume. Blocked cards surface right on the board with a
+        clear prompt — the whole team can see what's waiting on a human, and for how long.
       </p>
     </div>
-  </div>
-</main>
+    <div class="rounded-[14px] border border-base-300 bg-base-200 p-[22px] shadow-xl">
+      <div class="flex flex-col gap-[11px] rounded-[10px] border border-base-300 border-l-[3px] border-l-warning bg-base-100 p-3.5">
+        <span class="text-sm font-semibold text-base-content">
+          Rewrite the onboarding tooltips
+        </span>
+        <div class="flex flex-col gap-2.5 rounded-[9px] border border-warning/40 bg-warning/10 p-3">
+          <span class="font-mono text-[10px] font-semibold tracking-[0.05em] text-warning">
+            AI ASKED A QUESTION
+          </span>
+          <span class="text-[13px] leading-normal text-base-content/80">
+            Should I keep the original playful CTA wording, or match the more formal new brand
+            voice?
+          </span>
+          <div class="mt-0.5 flex gap-2">
+            <span class="rounded-[7px] bg-warning px-3.5 py-1.5 text-[12.5px] font-semibold text-warning-content">
+              Answer →
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <%!-- THE FLOW --%>
+  <section id="flow" class="border-y border-base-300 bg-base-200">
+    <div class="mx-auto max-w-[1120px] px-4 py-16 sm:px-8">
+      <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-secondary">
+        THE FLOW
+      </div>
+      <h2 class="mb-2 text-[32px] font-semibold leading-tight tracking-[-0.025em] text-base-content">
+        Watch a card relay across the board.
+      </h2>
+      <p class="mb-10 max-w-[560px] text-base leading-relaxed text-base-content/70">
+        Handoffs alternate between people and AI. WIP limits keep any one stage from piling up.
+      </p>
+      <div class="flex items-stretch gap-2.5 overflow-x-auto pb-1.5">
+        <%= for {name, owner, border_cls, label_cls} <- [
+          {"Backlog", "HUMAN", "border-t-primary", "text-base-content/70"},
+          {"Spec", "HUMAN", "border-t-primary", "text-base-content/70"},
+          {"Plan", "AI", "border-t-secondary", "text-secondary"},
+          {"Code", "AI", "border-t-secondary", "text-secondary"},
+          {"Review", "HUMAN", "border-t-primary", "text-base-content/70"},
+          {"Deploy", "AI", "border-t-secondary", "text-secondary"},
+          {"Complete", "DONE", "border-t-success", "text-success"}
+        ] do %>
+          <div class={[
+            "min-w-[120px] flex-1 rounded-[11px] border border-base-300 border-t-[3px] bg-base-100 p-3.5",
+            border_cls
+          ]}>
+            <div class={["mb-1.5 font-mono text-[10px]", label_cls]}>{owner}</div>
+            <div class="text-sm font-semibold">{name}</div>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  </section>
+
+  <%!-- YOUR WORKFLOW / CONFIGURABLE STAGES --%>
+  <section
+    id="stages"
+    class="mx-auto grid max-w-[1120px] grid-cols-1 items-center gap-8 px-4 py-14 sm:px-8 md:grid-cols-2 md:gap-14"
+  >
+    <div class="rounded-[14px] border border-base-300 bg-base-200 p-5 shadow-xl">
+      <div class="flex flex-col gap-2.5">
+        <div class="flex items-center gap-3 rounded-[11px] border border-base-300 bg-base-100 p-3.5">
+          <span class="size-[9px] rounded-[3px] bg-secondary"></span>
+          <span class="flex-1 text-sm font-semibold">Code</span>
+          <div class="inline-flex gap-0.5 rounded-lg border border-base-300 bg-base-200 p-[3px]">
+            <span class="rounded-md px-2.5 py-1 text-[11px] font-semibold text-base-content/60">
+              Human
+            </span>
+            <span class="rounded-md bg-base-100 px-2.5 py-1 text-[11px] font-semibold text-base-content shadow-sm">
+              AI
+            </span>
+          </div>
+        </div>
+        <div class="flex items-center gap-4 rounded-[11px] border border-base-300 bg-base-100 p-3.5">
+          <div class="flex items-center gap-2">
+            <span class="font-mono text-[11px] text-base-content/60">WIP</span>
+            <div class="inline-flex items-center overflow-hidden rounded-lg border border-base-300">
+              <span class="flex h-7 w-6 items-center justify-center text-base-content/60">−</span>
+              <span class="w-[30px] text-center font-mono text-[13px]">3</span>
+              <span class="flex h-7 w-6 items-center justify-center text-base-content/60">+</span>
+            </div>
+          </div>
+          <span class="flex-1"></span>
+          <div class="flex items-center gap-2.5">
+            <span class="font-mono text-[11px] text-base-content/60">DONE COLUMN</span>
+            <span class="relative block h-[22px] w-[38px] rounded-full bg-primary">
+              <span class="absolute right-0.5 top-0.5 size-[18px] rounded-full bg-base-100">
+              </span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-primary">
+        YOUR WORKFLOW
+      </div>
+      <h2 class="mb-3.5 text-[30px] font-semibold leading-tight tracking-[-0.02em] text-base-content">
+        Shape the stages around how you actually work.
+      </h2>
+      <p class="text-base leading-relaxed text-base-content/70">
+        Rename stages, reorder them, set who owns each, cap the WIP, and add a Done sub-column
+        wherever finished work needs to wait for a handoff. No two teams relay the same way.
+      </p>
+    </div>
+  </section>
+
+  <%!-- CTA BAND (deliberately fixed-dark in both themes) --%>
+  <section class="mx-auto max-w-[1120px] px-4 pb-20 pt-8 sm:px-8">
+    <div
+      class="relative overflow-hidden rounded-[20px] px-6 py-14 text-center sm:px-10"
+      style="background:oklch(0.22 0.02 255);"
+    >
+      <h2 class="mx-auto mb-3.5 max-w-[560px] text-[34px] font-semibold leading-tight tracking-[-0.025em] text-white">
+        Give the AI a lane. Keep your hand on the board.
+      </h2>
+      <p class="mx-auto mb-7 max-w-[480px] text-base leading-relaxed text-white/70">
+        Start with the default workflow, then bend it to fit. It takes about a minute.
+      </p>
+      <a href={~p"/auth/google"} class="btn btn-primary">Open the board →</a>
+    </div>
+  </section>
+
+  <%!-- FOOTER --%>
+  <footer class="border-t border-base-300">
+    <div class="mx-auto flex max-w-[1120px] flex-wrap items-center gap-3 px-4 py-7 sm:px-8">
+      <span class="flex size-[21px] items-center justify-center rounded-md bg-primary">
+        <span class="size-2 rounded-full bg-base-100"></span>
+      </span>
+      <span class="text-sm font-semibold tracking-[-0.01em]">Relay</span>
+      <span class="flex-1"></span>
+      <span class="font-mono text-xs text-base-content/60">humans + AI, one board · © 2026</span>
+      <nav class="flex items-center gap-4 text-xs text-base-content/60">
+        <.link navigate={~p"/terms"} class="link link-hover">Terms</.link>
+        <.link navigate={~p"/privacy"} class="link link-hover">Privacy</.link>
+        <.link navigate={~p"/docs"} class="link link-hover">API docs</.link>
+      </nav>
+    </div>
+  </footer>
+</div>

@@ -1,6 +1,6 @@
 defmodule RelayWeb.PageController do
   @moduledoc """
-  Public sign-in page. Signed-in users are sent straight to the board.
+  Public landing page. Signed-in users are sent straight to the board.
   """
 
   use RelayWeb, :controller
