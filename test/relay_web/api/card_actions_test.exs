@@ -87,6 +87,65 @@ defmodule RelayWeb.Api.CardActionsTest do
     assert %DateTime{} = reloaded.blocked_since
   end
 
+  test "needs-input with a structured questions array blocks the card and stores the payload",
+       %{conn: conn, board: board, spec: spec} do
+    card = insert(:card, stage: spec)
+
+    questions = [
+      %{"prompt" => "Which timezone?", "options" => ["Billing", "Viewer"], "allow_text" => true},
+      %{"prompt" => "Any size limit?"}
+    ]
+
+    body =
+      conn
+      |> post(~p"/api/cards/#{ref(board, card)}/needs-input", %{questions: questions})
+      |> json_response(200)
+      |> Map.fetch!("data")
+
+    assert body["status"] == "needs_input"
+
+    entry =
+      Enum.find(body["timeline"], &(&1["kind"] == "activity" and &1["type"] == "needs_input"))
+
+    assert entry["meta"]["questions"] == [
+             %{"prompt" => "Which timezone?", "options" => ["Billing", "Viewer"], "allow_text" => true},
+             %{"prompt" => "Any size limit?", "options" => [], "allow_text" => true}
+           ]
+
+    assert Cards.get_card_by_ref(board, ref(board, card)).status == :needs_input
+  end
+
+  test "needs-input still accepts a plain string question", %{conn: conn, board: board, spec: spec} do
+    card = insert(:card, stage: spec)
+
+    body =
+      conn
+      |> post(~p"/api/cards/#{ref(board, card)}/needs-input", %{question: "Which region?"})
+      |> json_response(200)
+      |> Map.fetch!("data")
+
+    assert body["status"] == "needs_input"
+  end
+
+  test "needs-input with a malformed questions payload is invalid and does not block the card",
+       %{conn: conn, board: board, spec: spec} do
+    for bad <- [
+          %{questions: "nope"},
+          %{questions: []},
+          %{questions: [%{"options" => ["a"]}]},
+          %{questions: [%{"prompt" => "  "}]},
+          %{questions: [%{"prompt" => "no way to answer", "options" => [], "allow_text" => false}]}
+        ] do
+      card = insert(:card, stage: spec)
+
+      assert conn
+             |> post(~p"/api/cards/#{ref(board, card)}/needs-input", bad)
+             |> json_response(400)
+
+      assert Cards.get_card_by_ref(board, ref(board, card)).status != :needs_input
+    end
+  end
+
   test "the human's answer reaches the agent via the card timeline", %{
     conn: conn,
     board: board,

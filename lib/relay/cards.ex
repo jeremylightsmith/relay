@@ -784,13 +784,22 @@ defmodule Relay.Cards do
   @doc """
   Blocks the card on a human (MMF 14): sets status `:needs_input` — which
   stamps `blocked_since` (see `Schemas.Card.status_changeset/2`) — posts
-  `question` as a comment from `actor`, and logs a `:needs_input` activity
+  the question(s) as a comment from `actor`, and logs a `:needs_input` activity
   entry with the question in `meta` (the durable record the drawer's
   question panel reads). The MMF 09 `POST /api/cards/:ref/needs-input`
   endpoint routes here. Reuses `set_status`/`Relay.Activity`, so the usual
   `{:card_upserted}` / `{:timeline_appended}` events fire (MMF 18).
+
+  Accepts either a plain string `question` (unchanged, single-question form) or (RLY-71) a
+  **list** of question maps (each `%{"prompt" => ..., "options" => [...], "allow_text" => bool}`).
+  For the list form, each item is normalized (defaults `options => []`, `allow_text => true`;
+  unknown keys dropped), stored under `meta["questions"]` for the drawer stepper, and mirrored as
+  a flattened, human-readable rendering into `meta["question"]` and the `:question` comment body
+  so the board preview, the panel fallback, and the timeline all keep working unchanged.
   """
-  def request_input(%Card{} = card, question, actor \\ :agent) when is_binary(question) do
+  def request_input(card, question_or_questions, actor \\ :agent)
+
+  def request_input(%Card{} = card, question, actor) when is_binary(question) do
     with {:ok, updated} <- set_status(card, %{status: :needs_input}, actor),
          {:ok, _comment} <-
            Activity.add_comment(updated, %{actor: actor, body: question, kind: :question}),
@@ -799,6 +808,50 @@ defmodule Relay.Cards do
       {:ok, updated}
     end
   end
+
+  def request_input(%Card{} = card, questions, actor) when is_list(questions) do
+    normalized = Enum.map(questions, &normalize_question/1)
+    flattened = flatten_questions(normalized)
+
+    with {:ok, updated} <- set_status(card, %{status: :needs_input}, actor),
+         {:ok, _comment} <-
+           Activity.add_comment(updated, %{actor: actor, body: flattened, kind: :question}),
+         {:ok, _entry} <-
+           Activity.log(updated, %{
+             type: :needs_input,
+             actor: actor,
+             meta: %{"question" => flattened, "questions" => normalized}
+           }) do
+      {:ok, updated}
+    end
+  end
+
+  # Coerce an incoming question map to the canonical string-keyed shape, filling defaults and
+  # dropping any keys the stepper doesn't understand.
+  defp normalize_question(question) when is_map(question) do
+    %{
+      "prompt" => Map.get(question, "prompt"),
+      "options" => Map.get(question, "options", []),
+      "allow_text" => Map.get(question, "allow_text", true)
+    }
+  end
+
+  # Numbered, human-readable rendering of the normalized questions — the comment body and the
+  # back-compat meta["question"] value. Options are lettered a) b) c)…
+  defp flatten_questions(normalized) do
+    normalized
+    |> Enum.with_index(1)
+    |> Enum.map_join("\n", fn {question, number} -> flatten_question(question, number) end)
+  end
+
+  defp flatten_question(%{"prompt" => prompt, "options" => []}, number), do: "#{number}. #{prompt}"
+
+  defp flatten_question(%{"prompt" => prompt, "options" => options}, number) do
+    lines = options |> Enum.with_index() |> Enum.map_join("\n", &flatten_option/1)
+    "#{number}. #{prompt}\n" <> lines
+  end
+
+  defp flatten_option({option, index}), do: "   #{<<?a + index>>}) #{option}"
 
   @doc """
   Answers a blocked card's question (MMF 14): posts `answer` as a comment

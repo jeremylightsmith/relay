@@ -88,6 +88,65 @@ defmodule Relay.CardsNeedsInputTest do
       assert blocked_ids == [blocked.id]
       assert DateTime.diff(DateTime.utc_now(), blocked.blocked_since, :second) >= 0
     end
+
+    test "with a list of questions: blocks the card and records structured + flattened meta",
+         %{ai_stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Ship exports"})
+
+      questions = [
+        %{"prompt" => "Which timezone?", "options" => ["Billing", "Viewer"], "allow_text" => true},
+        %{"prompt" => "Any size limit?"}
+      ]
+
+      assert {:ok, %Card{status: :needs_input} = blocked} = Cards.request_input(card, questions, :agent)
+
+      entry =
+        blocked
+        |> Activity.list_timeline()
+        |> Enum.find(&match?(%Schemas.Activity{type: :needs_input}, &1))
+
+      # structured payload, normalized (defaults filled, unknown keys dropped)
+      assert entry.meta["questions"] == [
+               %{"prompt" => "Which timezone?", "options" => ["Billing", "Viewer"], "allow_text" => true},
+               %{"prompt" => "Any size limit?", "options" => [], "allow_text" => true}
+             ]
+
+      # flattened rendering, mirrored into meta["question"] for back-compat (board preview + panel)
+      flat = "1. Which timezone?\n   a) Billing\n   b) Viewer\n2. Any size limit?"
+      assert entry.meta["question"] == flat
+
+      # one :question-kind comment whose body is the flattened text
+      assert [%Comment{kind: :question, body: ^flat}] = Activity.list_conversation(blocked)
+    end
+
+    test "list normalization fills defaults: missing options -> [], missing allow_text -> true",
+         %{ai_stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Defaults"})
+
+      {:ok, blocked} = Cards.request_input(card, [%{"prompt" => "Bare?"}], :agent)
+
+      entry =
+        blocked
+        |> Activity.list_timeline()
+        |> Enum.find(&match?(%Schemas.Activity{type: :needs_input}, &1))
+
+      assert entry.meta["questions"] == [%{"prompt" => "Bare?", "options" => [], "allow_text" => true}]
+    end
+
+    test "the plain-string path still writes meta['question'] and no 'questions' key",
+         %{ai_stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "String path"})
+
+      {:ok, blocked} = Cards.request_input(card, "Just a string?", :agent)
+
+      entry =
+        blocked
+        |> Activity.list_timeline()
+        |> Enum.find(&match?(%Schemas.Activity{type: :needs_input}, &1))
+
+      assert entry.meta["question"] == "Just a string?"
+      refute Map.has_key?(entry.meta, "questions")
+    end
   end
 
   describe "answer_input/3" do
