@@ -5,8 +5,10 @@ defmodule RelayWeb.AttachmentController do
   image stays under the board's origin and the CSP `img-src 'self'` — no CSP
   widening, and the storage bucket stays hidden. Ids are stable and content
   never changes, so responses are cached long + immutable. Sits on the
-  browser pipeline behind `:require_authenticated_user`: same visibility as
-  the board it belongs to.
+  browser pipeline behind `:require_authenticated_user`, and — like every
+  other board-scoped lookup — 404s unless `current_scope.user` is a member
+  of the board that owns the attachment's card: same visibility as the
+  board it belongs to.
   """
   use RelayWeb, :controller
 
@@ -20,7 +22,9 @@ defmodule RelayWeb.AttachmentController do
   # image bytes.
   # sobelow_skip ["XSS.SendResp", "XSS.ContentType"]
   def show(conn, %{"id" => id}) do
-    with %Schemas.Attachment{} = attachment <- Attachments.get_attachment(id),
+    user = conn.assigns.current_scope.user
+
+    with %Schemas.Attachment{} = attachment <- Attachments.get_attachment(user, id),
          {:ok, bytes} <- Attachments.fetch_bytes(attachment) do
       conn
       |> put_resp_content_type(attachment.content_type, nil)

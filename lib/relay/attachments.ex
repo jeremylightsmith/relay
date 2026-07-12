@@ -8,11 +8,13 @@ defmodule Relay.Attachments do
   hermetic (`Local`) and prod uses object storage (`S3`).
   """
 
-  use Boundary, deps: [Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Boards, Relay.Repo, Schemas]
 
+  alias Relay.Boards
   alias Relay.Repo
   alias Schemas.Attachment
   alias Schemas.Card
+  alias Schemas.User
 
   @doc """
   Validates `attrs` (`:filename`, `:content_type`, `:bytes`), stores the
@@ -47,6 +49,23 @@ defmodule Relay.Attachments do
     case Ecto.UUID.cast(id) do
       {:ok, uuid} -> Repo.get(Attachment, uuid)
       :error -> nil
+    end
+  end
+
+  @doc """
+  Membership-scoped: the metadata row for `id`, but only when `user` is a
+  member of the board that owns the attachment's card. `nil` for an unknown
+  id, a non-UUID id, or an id whose card belongs to a board `user` isn't a
+  member of — same visibility boundary as every other board-scoped lookup
+  (`Relay.Boards.get_board/2`).
+  """
+  def get_attachment(%User{} = user, id) when is_binary(id) do
+    with %Attachment{} = attachment <- get_attachment(id),
+         %Attachment{card: %Card{board: board}} <- Repo.preload(attachment, card: :board),
+         %Schemas.Board{} <- Boards.get_board(user, board.slug) do
+      attachment
+    else
+      _ -> nil
     end
   end
 
