@@ -59,6 +59,32 @@ defmodule RelayWeb.Api.AttachmentIngestTest do
     assert doc |> LazyHTML.query("img[alt=\"weird]name).png\"]") |> Enum.count() == 1
   end
 
+  test "a filename containing an opening bracket produces valid markdown", %{
+    conn: conn,
+    board: board,
+    stage: stage
+  } do
+    card = insert(:card, stage: stage)
+
+    data =
+      conn
+      |> post(~p"/api/cards/#{ref(board, card)}/attachments", %{
+        filename: "a[b.png",
+        content_type: "image/png",
+        data_base64: @png_b64
+      })
+      |> json_response(201)
+      |> Map.fetch!("data")
+
+    assert data["markdown"] == "![a\\[b.png](/attachments/#{data["id"]})"
+
+    {:safe, html} = Relay.Markdown.to_html(data["markdown"])
+    doc = LazyHTML.from_fragment(html)
+
+    assert doc |> LazyHTML.query("img[src=\"#{data["url"]}\"]") |> Enum.count() == 1
+    assert doc |> LazyHTML.query("img[alt=\"a[b.png\"]") |> Enum.count() == 1
+  end
+
   test "rejects a non-image content type with 400", %{conn: conn, board: board, stage: stage} do
     card = insert(:card, stage: stage)
 

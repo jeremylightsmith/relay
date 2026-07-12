@@ -73,12 +73,13 @@ defmodule RelayWeb.Api.CardJSON do
   end
 
   # `filename` is accepted verbatim from the ingest body, so it can contain
-  # markdown-special characters. Escape `]` (would prematurely close the
-  # image alt text) and `)` (harmless here but defensive) so the generated
+  # markdown-special characters. Escape `[` and `]` (would prematurely open/close
+  # the image alt text) and `)` (harmless here but defensive) so the generated
   # markdown always round-trips to the literal filename as alt text.
   defp escape_markdown_text(text) do
     text
     |> String.replace("\\", "\\\\")
+    |> String.replace("[", "\\[")
     |> String.replace("]", "\\]")
     |> String.replace(")", "\\)")
   end
