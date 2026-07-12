@@ -13,8 +13,8 @@ the MMF design specs).
   **This is the canonical name for what the code currently calls a "sub-lane" / "lane"** — those
   identifiers (`Boards.sublanes/1`, `enable_lane/2`, `has_many :sublanes`) are legacy names for
   *substage* and have not yet been renamed.
-- **Category** — the coarse board grouping a main stage belongs to (`:planning | :in_progress |
-  :complete`), used for ordering and the Done derivation.
+- **Category** — the coarse board grouping a main stage belongs to (`:unstarted | :planning |
+  :in_progress | :complete`), used for ordering and the Done derivation.
 - **Stage type** — a stage's behavior type: `queue | work | planning | review | done`. Types drive
   the claim rule and the arrival status (`Schemas.Stage.default_status/1`).
 - **Card** — a unit of work (`Schemas.Card`) that lives in exactly one stage/substage at a time.
