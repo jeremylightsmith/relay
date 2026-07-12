@@ -11,6 +11,7 @@ defmodule RelayWeb.Auth do
   import Plug.Conn
 
   alias Relay.Accounts
+  alias Relay.Members
   alias Schemas.Scope
 
   @doc "Plug: assigns `:current_scope` from the session (nil when logged out)."
@@ -44,8 +45,10 @@ defmodule RelayWeb.Auth do
     end
   end
 
-  @doc "Renews the session, stores the user id, and redirects to the board."
+  @doc "Renews the session, resolves any pending invites, and redirects to the board."
   def log_in_user(conn, user) do
+    Members.resolve_invites_for_user(user)
+
     conn
     |> renew_session()
     |> put_session(:user_id, user.id)

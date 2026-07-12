@@ -13,6 +13,7 @@ defmodule Relay.Boards do
   alias Relay.Repo
   alias Schemas.Board
   alias Schemas.Card
+  alias Schemas.Membership
   alias Schemas.Stage
   alias Schemas.User
 
@@ -68,24 +69,28 @@ defmodule Relay.Boards do
     Repo.preload(board, stages: from(s in Stage, order_by: s.position))
   end
 
-  @doc "The user's non-archived boards, oldest first (stable inserted_at/id order)."
+  @doc "The user's non-archived boards (member of), oldest first (stable inserted_at/id order)."
   def list_boards(%User{id: user_id}) do
     Repo.all(
       from b in Board,
-        where: b.owner_id == ^user_id and is_nil(b.archived_at),
+        join: m in Membership,
+        on: m.board_id == b.id,
+        where: m.user_id == ^user_id and is_nil(b.archived_at),
         order_by: [asc: b.inserted_at, asc: b.id]
     )
   end
 
   @doc """
-  Owner-scoped board lookup by slug, with stages preloaded in position order.
-  Returns an archived board too (still loadable, read-only). nil when the user
-  owns no board with that slug.
+  Membership-scoped board lookup by slug, with stages preloaded in position
+  order. Returns an archived board too (still loadable, read-only). nil when
+  the user is not a member of a board with that slug.
   """
   def get_board(%User{id: user_id}, slug) when is_binary(slug) do
     Repo.one(
       from b in Board,
-        where: b.owner_id == ^user_id and b.slug == ^slug,
+        join: m in Membership,
+        on: m.board_id == b.id,
+        where: m.user_id == ^user_id and b.slug == ^slug,
         preload: [stages: ^from(s in Stage, order_by: s.position)]
     )
   end
@@ -94,7 +99,9 @@ defmodule Relay.Boards do
   def get_board!(%User{id: user_id}, slug) when is_binary(slug) do
     Repo.one!(
       from b in Board,
-        where: b.owner_id == ^user_id and b.slug == ^slug,
+        join: m in Membership,
+        on: m.board_id == b.id,
+        where: m.user_id == ^user_id and b.slug == ^slug,
         preload: [stages: ^from(s in Stage, order_by: s.position)]
     )
   end
@@ -120,6 +127,7 @@ defmodule Relay.Boards do
       case Repo.insert(changeset) do
         {:ok, board} ->
           seed_stages!(board)
+          insert_owner_membership!(board, user)
           Repo.preload(board, stages: from(s in Stage, order_by: s.position))
 
         {:error, changeset} ->
@@ -470,6 +478,14 @@ defmodule Relay.Boards do
       })
 
     board
+  end
+
+  # RLY-32: the board creator is its first member. Owner-scoping is gone —
+  # this membership is what grants the creator access via list_boards/get_board.
+  defp insert_owner_membership!(board, user) do
+    %Membership{board_id: board.id, user_id: user.id}
+    |> Membership.changeset(%{email: user.email})
+    |> Repo.insert!()
   end
 
   defp seed_stages!(board) do

@@ -1,0 +1,89 @@
+defmodule RelayWeb.BoardSettingsMembersTest do
+  use RelayWeb.ConnCase, async: true
+
+  import Phoenix.LiveViewTest
+
+  alias Relay.Boards
+  alias Relay.Members
+
+  setup :register_and_log_in_user
+
+  defp board_for(user), do: Boards.get_or_create_default_board(user)
+
+  test "the Members nav link renders and opens the members pane", %{conn: conn, user: user} do
+    board = board_for(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=members")
+
+    assert has_element?(view, "#settings-nav-members")
+    assert has_element?(view, "#members-pane")
+    assert has_element?(view, "#invite-member-form")
+  end
+
+  test "the current user's own row shows a YOU badge and no remove button", %{conn: conn, user: user} do
+    board = board_for(user)
+    [me] = Members.list_members(board)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=members")
+
+    assert has_element?(view, "#member-row-#{me.id}", "YOU")
+    refute has_element?(view, "#remove-member-#{me.id}")
+  end
+
+  test "inviting an email adds an INVITED row", %{conn: conn, user: user} do
+    board = board_for(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=members")
+
+    view
+    |> form("#invite-member-form", invite: %{email: "teammate@example.com"})
+    |> render_submit()
+
+    [invited] = Enum.filter(Members.list_members(board), &(&1.user_id == nil))
+    assert has_element?(view, "#member-row-#{invited.id}", "INVITED")
+    assert has_element?(view, "#member-row-#{invited.id}", "teammate@example.com")
+  end
+
+  test "a duplicate invite surfaces a flash", %{conn: conn, user: user} do
+    board = board_for(user)
+    {:ok, _} = Members.invite(board, "dup@example.com")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=members")
+
+    html =
+      view
+      |> form("#invite-member-form", invite: %{email: "dup@example.com"})
+      |> render_submit()
+
+    assert html =~ "already"
+  end
+
+  test "removing another member drops the row", %{conn: conn, user: user} do
+    board = board_for(user)
+    other = insert(:user, name: "Other")
+    membership = insert(:membership, board: board, user: other, email: other.email)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=members")
+
+    assert has_element?(view, "#member-row-#{membership.id}")
+    view |> element("#remove-member-#{membership.id}") |> render_click()
+    refute has_element?(view, "#member-row-#{membership.id}")
+  end
+
+  test "a non-owner member can open settings and edit stages (no role gate)", %{conn: conn, user: user} do
+    owner = insert(:user)
+    board = Boards.get_or_create_default_board(owner)
+    insert(:membership, board: board, user: user, email: user.email)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+    assert has_element?(view, "#stages-pane")
+    assert has_element?(view, "#settings-nav-members")
+  end
+
+  test "the AGENT card links to the API keys pane", %{conn: conn, user: user} do
+    board = board_for(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=members")
+
+    assert has_element?(view, "#agent-card")
+
+    assert has_element?(
+             view,
+             ~s{#agent-card a[href="/board/#{board.slug}/settings?section=keys"]}
+           )
+  end
+end

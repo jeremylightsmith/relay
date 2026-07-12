@@ -26,6 +26,14 @@ defmodule Relay.Factory do
     }
   end
 
+  def membership_factory do
+    %Schemas.Membership{
+      email: sequence(:membership_email, &"member#{&1}@example.com"),
+      board: build(:board),
+      user: build(:user)
+    }
+  end
+
   # A persisted key whose raw token is intentionally unknown — use
   # Relay.ApiKeys.create_key/2 in tests that need the raw secret.
   def api_key_factory do

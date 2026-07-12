@@ -1544,31 +1544,33 @@ defmodule RelayWeb.BoardLiveTest do
       %{board: board, backlog: backlog, card: card}
     end
 
-    test "an unowned card shows None for active worker and owners, with both add controls",
+    test "an unowned card shows None for active worker and owners, with the reassign toggle",
          %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
       refute has_element?(view, "#card-drawer-rail .rail-owner[data-active='true']")
       assert has_element?(view, "#card-drawer-rail .rail-owners", "None")
+      assert has_element?(view, "#card-drawer-reassign-toggle")
+
+      view |> element("#card-drawer-reassign-toggle") |> render_click()
       assert has_element?(view, "#card-drawer-assign-ai")
-      assert has_element?(view, "#card-drawer-add-me")
+      assert has_element?(view, "#card-drawer-assign-user-#{user.id}")
     end
 
-    test "Add me makes the current user the active worker and reflects on the board card",
+    test "assigning yourself via the reassign picker makes you the active worker and reflects on the board card",
          %{conn: conn, user: user, card: card} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      view |> element("#card-drawer-add-me") |> render_click()
+      view |> element("#card-drawer-reassign-toggle") |> render_click()
+      view |> element("#card-drawer-assign-user-#{user.id}") |> render_click()
 
       assert has_element?(
                view,
                "#card-drawer-rail .rail-owner[data-actor-type='user'][data-active='true']",
                "Test User"
              )
-
-      refute has_element?(view, "#card-drawer-add-me")
 
       assert [owner] = Repo.all(CardOwner)
       assert owner.card_id == card.id
@@ -1577,12 +1579,13 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#stage-col-1-cards .board-card[data-active-owner='human']")
     end
 
-    test "Assign AI makes Relay AI the sole owner: Take over shows, add controls hide",
+    test "Assign AI via the reassign picker makes Relay AI the sole owner: Take over shows",
          %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      view |> element("#card-drawer-add-me") |> render_click()
+      view |> element("#card-drawer-reassign-toggle") |> render_click()
+      view |> element("#card-drawer-assign-user-#{user.id}") |> render_click()
       view |> element("#card-drawer-assign-ai") |> render_click()
 
       assert has_element?(
@@ -1595,10 +1598,8 @@ defmodule RelayWeb.BoardLiveTest do
       refute has_element?(view, "#card-drawer-rail .rail-owner[data-actor-type='user']")
       refute has_element?(view, "#card-drawer-rail .rail-owner-paused")
 
-      # Take over is the affordance next to Relay AI; Add me / Assign AI are hidden
+      # Take over is the affordance next to Relay AI
       assert has_element?(view, "#card-drawer-take-over")
-      refute has_element?(view, "#card-drawer-add-me")
-      refute has_element?(view, "#card-drawer-assign-ai")
 
       assert has_element?(view, "#stage-col-1-cards .board-card[data-active-owner='ai']")
     end
@@ -1643,7 +1644,8 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      view |> element("#card-drawer-add-me") |> render_click()
+      view |> element("#card-drawer-reassign-toggle") |> render_click()
+      view |> element("#card-drawer-assign-user-#{user.id}") |> render_click()
       view |> element("#card-drawer-remove-owner-user-#{user.id}") |> render_click()
 
       assert has_element?(view, "#card-drawer-rail .rail-owners", "None")
@@ -1828,7 +1830,8 @@ defmodule RelayWeb.BoardLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      view |> element("#card-drawer-add-me") |> render_click()
+      view |> element("#card-drawer-reassign-toggle") |> render_click()
+      view |> element("#card-drawer-assign-user-#{user.id}") |> render_click()
       view |> element("#card-drawer-move-to-#{review.id}") |> render_click()
 
       entries = Repo.all(from a in Schemas.Activity, where: a.card_id == ^card.id, order_by: a.id)
@@ -1934,7 +1937,8 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
 
-      view |> element("#card-drawer-add-me") |> render_click()
+      view |> element("#card-drawer-reassign-toggle") |> render_click()
+      view |> element("#card-drawer-assign-user-#{user.id}") |> render_click()
 
       assert has_element?(
                view,

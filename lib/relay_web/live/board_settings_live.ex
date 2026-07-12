@@ -29,8 +29,12 @@ defmodule RelayWeb.BoardSettingsLive do
   alias Relay.ApiKeys
   alias Relay.Boards
   alias Relay.Cards
+  alias Relay.Events
+  alias Relay.Members
   alias Schemas.Board
+  alias Schemas.Membership
   alias Schemas.Stage
+  alias Schemas.User
 
   @categories [:unstarted, :planning, :in_progress, :complete]
 
@@ -76,6 +80,13 @@ defmodule RelayWeb.BoardSettingsLive do
             style={nav_style(@section == :stages)}
           >
             Stages
+          </.link>
+          <.link
+            patch={~p"/board/#{@board.slug}/settings?section=members"}
+            id="settings-nav-members"
+            style={nav_style(@section == :members)}
+          >
+            Members
           </.link>
           <.link
             patch={~p"/board/#{@board.slug}/settings?section=keys"}
@@ -480,89 +491,257 @@ defmodule RelayWeb.BoardSettingsLive do
               </div>
             </section>
 
-            <section
-              :if={@section == :keys}
-              id="api-key-pane"
-              class="card border border-base-300 bg-base-100"
-            >
-              <div class="card-body space-y-4">
-                <div>
-                  <h2 class="card-title text-base">API key</h2>
-                  <p class="text-sm text-base-content/60">
-                    Lets external tools (like Claude Code) act on this board. One key per board.
-                  </p>
-                </div>
+            <section :if={@section == :members} id="members-pane">
+              <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 4px 0;color:oklch(0.24 0.02 255);">
+                Members
+              </h1>
+              <p style="font-size:14px;color:oklch(0.52 0.02 255);margin:0 0 26px 0;">
+                People with access to this board — and the AI agent that works alongside them.
+              </p>
 
-                <div :if={@revealed_token} id="api-key-reveal" class="space-y-2">
-                  <div id="api-key-reveal-note" class="alert alert-warning text-sm">
-                    <.icon name="hero-exclamation-triangle" class="size-5 shrink-0" />
-                    <span>Copy this key now — you won't be able to see it again.</span>
+              <.form
+                :let={f}
+                for={@invite_form}
+                id="invite-member-form"
+                as={:invite}
+                phx-submit="invite_member"
+                style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px;display:flex;align-items:center;gap:10px;margin-bottom:26px;flex-wrap:wrap;"
+              >
+                <input
+                  type="email"
+                  id="invite-email"
+                  name={f[:email].name}
+                  value={Phoenix.HTML.Form.normalize_value("email", f[:email].value)}
+                  placeholder="name@company.com"
+                  autocomplete="off"
+                  style="flex:1;min-width:180px;border:1px solid oklch(0.90 0.006 255);border-radius:8px;padding:9px 11px;font-size:13.5px;color:oklch(0.28 0.02 255);background:oklch(0.99 0.002 255);outline:none;"
+                />
+                <button
+                  type="submit"
+                  id="send-invite"
+                  style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 16px;font-size:13.5px;font-weight:600;"
+                >
+                  Send invite
+                </button>
+              </.form>
+
+              <div
+                class="font-mono"
+                style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:oklch(0.58 0.02 255);margin-bottom:10px;"
+              >
+                PEOPLE · {@member_count}
+              </div>
+              <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;overflow:hidden;margin-bottom:28px;">
+                <div
+                  :for={m <- @members}
+                  id={"member-row-#{m.id}"}
+                  style="display:flex;align-items:center;gap:12px;padding:13px 16px;border-top:1px solid oklch(0.95 0.006 255);"
+                >
+                  <div style={member_avatar_style(m)}>{member_initials(m)}</div>
+                  <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <span style="font-size:14px;font-weight:600;color:oklch(0.28 0.02 255);">
+                        {member_name(m)}
+                      </span>
+                      <span
+                        :if={mine?(m, @current_scope)}
+                        class="font-mono"
+                        style="font-size:10px;font-weight:600;letter-spacing:0.04em;background:oklch(0.95 0.03 250);color:oklch(0.45 0.13 250);padding:2px 6px;border-radius:5px;"
+                      >
+                        YOU
+                      </span>
+                      <span
+                        :if={is_nil(m.user_id)}
+                        class="font-mono"
+                        style="font-size:10px;font-weight:600;letter-spacing:0.04em;background:oklch(0.96 0.03 75);color:oklch(0.52 0.11 65);padding:2px 6px;border-radius:5px;"
+                      >
+                        INVITED
+                      </span>
+                    </div>
+                    <span class="font-mono" style="font-size:12.5px;color:oklch(0.56 0.02 255);">
+                      {m.email}
+                    </span>
                   </div>
-                  <div class="join w-full">
-                    <code
-                      id="api-key-secret"
-                      class="join-item flex flex-1 items-center overflow-x-auto border border-base-300 bg-base-200 px-3 py-2 font-mono text-sm"
-                    >
-                      {@revealed_token}
-                    </code>
-                    <button
-                      id="copy-key"
-                      type="button"
-                      class="join-item btn btn-primary"
-                      phx-hook=".CopyKey"
-                      data-target="api-key-secret"
-                    >
-                      <.icon name="hero-clipboard" class="size-4" /> Copy
-                    </button>
+                  <button
+                    :if={!mine?(m, @current_scope)}
+                    type="button"
+                    id={"remove-member-#{m.id}"}
+                    phx-click="remove_member"
+                    phx-value-id={m.id}
+                    data-confirm="Remove this member from the board?"
+                    title="Remove"
+                    style="width:28px;height:28px;border-radius:7px;border:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);color:oklch(0.55 0.02 255);font-size:15px;line-height:1;padding:0;flex:0 0 auto;"
+                  >
+                    ×
+                  </button>
+                  <span :if={mine?(m, @current_scope)} style="width:28px;flex:0 0 auto;"></span>
+                </div>
+              </div>
+
+              <div
+                class="font-mono"
+                style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:oklch(0.58 0.02 255);margin-bottom:10px;"
+              >
+                AGENT
+              </div>
+              <div
+                id="agent-card"
+                style="background:oklch(0.99 0.008 292);border:1px solid oklch(0.91 0.03 292);border-radius:12px;padding:16px;display:flex;align-items:center;gap:13px;"
+              >
+                <div style="width:38px;height:38px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;flex:0 0 auto;">
+                  <span style="width:14px;height:14px;border-radius:50%;border:2px solid oklch(1 0 0);">
+                  </span>
+                </div>
+                <div style="flex:1;min-width:0;">
+                  <div style="font-size:14px;font-weight:600;color:oklch(0.28 0.02 255);">
+                    Relay AI
                   </div>
+                  <div style="font-size:12.5px;color:oklch(0.50 0.03 292);">
+                    Runs the AI-enabled stages · authenticated with an API key
+                  </div>
+                </div>
+                <.link
+                  patch={~p"/board/#{@board.slug}/settings?section=keys"}
+                  id="agent-manage-key"
+                  style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.03 292);color:oklch(0.46 0.13 292);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;flex:0 0 auto;text-decoration:none;"
+                >
+                  Manage key →
+                </.link>
+              </div>
+            </section>
+
+            <section :if={@section == :keys} id="api-key-pane">
+              <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 4px 0;color:oklch(0.24 0.02 255);">
+                API keys
+              </h1>
+              <p style="font-size:14px;line-height:1.55;color:oklch(0.52 0.02 255);margin:0 0 24px 0;max-width:520px;">
+                Give a key to your agent so it can read the board, move cards, post progress, and
+                ask questions on the AI-enabled stages. Treat it like a password. One key per board.
+              </p>
+
+              <div style="display:flex;align-items:center;gap:11px;background:oklch(0.99 0.008 292);border:1px solid oklch(0.91 0.03 292);border-radius:10px;padding:12px 14px;margin-bottom:22px;">
+                <div style="width:26px;height:26px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;flex:0 0 auto;">
+                  <span style="width:10px;height:10px;border-radius:50%;border:1.5px solid oklch(1 0 0);">
+                  </span>
+                </div>
+                <span style="font-size:13px;color:oklch(0.44 0.06 292);">
+                  These keys authenticate <b>Relay AI</b> on this board.
+                </span>
+              </div>
+
+              <div :if={@revealed_token} id="api-key-reveal" style="margin-bottom:14px;">
+                <div
+                  id="api-key-reveal-note"
+                  class="font-mono"
+                  style="font-size:11.5px;color:oklch(0.52 0.11 65);margin-bottom:6px;"
+                >
+                  Copy this key now — you won't be able to see it again.
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;background:oklch(0.985 0.004 255);border:1px solid oklch(0.93 0.006 255);border-radius:9px;padding:10px 12px;">
+                  <code
+                    id="api-key-secret"
+                    class="font-mono"
+                    style="flex:1;min-width:0;font-size:13px;color:oklch(0.34 0.02 255);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                  >
+                    {@revealed_token}
+                  </code>
+                  <button
+                    id="copy-key"
+                    type="button"
+                    phx-hook=".CopyKey"
+                    data-target="api-key-secret"
+                    style="background:oklch(0.97 0.004 255);border:1px solid oklch(0.91 0.006 255);color:oklch(0.42 0.02 255);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;flex:0 0 auto;"
+                  >
+                    Copy
+                  </button>
                   <script :type={Phoenix.LiveView.ColocatedHook} name=".CopyKey">
                     export default {
                       mounted() {
                         this.el.addEventListener("click", () => {
                           const target = document.getElementById(this.el.dataset.target)
-                          if (target) navigator.clipboard.writeText(target.textContent.trim())
+                          if (!target) return
+                          navigator.clipboard.writeText(target.textContent.trim())
+                          const label = this.el.dataset.label || this.el.textContent.trim()
+                          this.el.dataset.label = label
+                          this.el.textContent = "Copied ✓"
+                          this.el.style.background = "oklch(0.95 0.06 150)"
+                          this.el.style.borderColor = "oklch(0.80 0.10 150)"
+                          this.el.style.color = "oklch(0.42 0.14 150)"
+                          clearTimeout(this._t)
+                          this._t = setTimeout(() => {
+                            this.el.textContent = label
+                            this.el.style.background = "oklch(0.97 0.004 255)"
+                            this.el.style.borderColor = "oklch(0.91 0.006 255)"
+                            this.el.style.color = "oklch(0.42 0.02 255)"
+                          }, 1600)
                         })
                       }
                     }
                   </script>
                 </div>
+              </div>
 
-                <%= if @api_key do %>
-                  <dl id="api-key-details" class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
-                    <dt class="text-base-content/60">Name</dt>
-                    <dd id="api-key-name">{@api_key.name}</dd>
-                    <dt class="text-base-content/60">Key</dt>
-                    <dd id="api-key-masked" class="font-mono">{masked(@api_key)}</dd>
-                    <dt class="text-base-content/60">Created</dt>
-                    <dd id="api-key-created">{format_time(@api_key.inserted_at)}</dd>
-                    <dt class="text-base-content/60">Last used</dt>
-                    <dd id="api-key-last-used">{last_used(@api_key)}</dd>
-                  </dl>
-                  <div class="card-actions">
+              <div style="display:flex;flex-direction:column;gap:12px;">
+                <div
+                  :if={@api_key}
+                  id="api-key-details"
+                  style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;"
+                >
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <span
+                      id="api-key-name"
+                      style="font-size:14px;font-weight:600;color:oklch(0.28 0.02 255);flex:1;"
+                    >
+                      {@api_key.name}
+                    </span>
                     <button
                       id="regenerate-key"
-                      class="btn btn-outline btn-sm"
+                      type="button"
                       phx-click="regenerate_key"
                       data-confirm="Regenerate the key? The current key stops working immediately."
+                      style="background:transparent;border:1px solid oklch(0.91 0.006 255);color:oklch(0.48 0.02 255);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;"
                     >
-                      <.icon name="hero-arrow-path" class="size-4" /> Regenerate
+                      Regenerate
                     </button>
                     <button
                       id="revoke-key"
-                      class="btn btn-outline btn-error btn-sm"
+                      type="button"
                       phx-click="revoke_key"
                       data-confirm="Revoke the key? Tools using it will lose access."
+                      style="background:oklch(0.98 0.015 15);border:1px solid oklch(0.90 0.04 15);color:oklch(0.52 0.16 15);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;"
                     >
-                      <.icon name="hero-trash" class="size-4" /> Revoke
+                      Revoke
                     </button>
                   </div>
-                <% else %>
-                  <div class="card-actions">
-                    <button id="generate-key" class="btn btn-primary btn-sm" phx-click="generate_key">
-                      <.icon name="hero-key" class="size-4" /> Generate key
-                    </button>
+                  <div style="display:flex;align-items:center;gap:8px;background:oklch(0.985 0.004 255);border:1px solid oklch(0.93 0.006 255);border-radius:9px;padding:10px 12px;">
+                    <span
+                      id="api-key-masked"
+                      class="font-mono"
+                      style="flex:1;min-width:0;font-size:13px;color:oklch(0.34 0.02 255);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                    >
+                      {masked(@api_key)}
+                    </span>
                   </div>
-                <% end %>
+                  <div class="font-mono" style="font-size:11.5px;color:oklch(0.60 0.02 255);">
+                    <span id="api-key-created">Created {format_time(@api_key.inserted_at)}</span>
+                    · <span id="api-key-last-used">last used {last_used(@api_key)}</span>
+                  </div>
+                </div>
+
+                <button
+                  :if={!@api_key}
+                  id="generate-key"
+                  type="button"
+                  phx-click="generate_key"
+                  style="border:1px dashed oklch(0.86 0.01 255);background:oklch(1 0 0);color:oklch(0.46 0.02 255);border-radius:11px;padding:11px 16px;font-size:13px;font-weight:600;"
+                >
+                  + Create new key
+                </button>
+              </div>
+
+              <div style="margin-top:26px;font-size:12.5px;line-height:1.55;color:oklch(0.58 0.02 255);">
+                Keys are shown in full only right after they're created or regenerated. Store them
+                somewhere safe — anyone with a key can act as your agent.
               </div>
             </section>
           </div>
@@ -576,6 +755,8 @@ defmodule RelayWeb.BoardSettingsLive do
   def mount(%{"slug" => slug}, _session, socket) do
     board = Boards.get_board!(socket.assigns.current_scope.user, slug)
 
+    if connected?(socket), do: Events.subscribe(board.id)
+
     {:ok,
      socket
      |> assign(:page_title, "Board settings")
@@ -587,6 +768,8 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:read_only?, Board.archived?(board))
      |> assign(:editing_stage, nil)
      |> assign(:stage_form, nil)
+     |> assign(:invite_form, to_form(%{"email" => ""}, as: :invite))
+     |> assign_members()
      |> refresh_stages()}
   end
 
@@ -627,6 +810,7 @@ defmodule RelayWeb.BoardSettingsLive do
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
         save_board_name save_board_slug edit_stage save_stage add_stage delete_stage
         toggle_wip bump_wip reorder_stage toggle_lane set_type toggle_ai set_reject_to
+        invite_member remove_member
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -681,6 +865,38 @@ defmodule RelayWeb.BoardSettingsLive do
      socket
      |> put_flash(:info, "Board archived.")
      |> push_navigate(to: ~p"/boards")}
+  end
+
+  def handle_event("invite_member", %{"invite" => %{"email" => email}}, socket) do
+    case Members.invite(socket.assigns.board, email) do
+      {:ok, _membership} ->
+        {:noreply,
+         socket
+         |> assign(:invite_form, to_form(%{"email" => ""}, as: :invite))
+         |> assign_members()}
+
+      {:error, :already_member} ->
+        {:noreply, put_flash(socket, :error, "That person is already a member of this board.")}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Enter a valid email address.")}
+    end
+  end
+
+  def handle_event("remove_member", %{"id" => id}, socket) do
+    membership = Enum.find(socket.assigns.members, &(to_string(&1.id) == id))
+
+    cond do
+      is_nil(membership) ->
+        {:noreply, socket}
+
+      membership.user_id == socket.assigns.current_scope.user.id ->
+        {:noreply, socket}
+
+      true ->
+        {:ok, _} = Members.remove(membership)
+        {:noreply, assign_members(socket)}
+    end
   end
 
   def handle_event("set_type", %{"stage-id" => stage_id, "type" => type}, socket)
@@ -789,8 +1005,23 @@ defmodule RelayWeb.BoardSettingsLive do
     end
   end
 
+  @impl true
+  def handle_info({:member_removed, user_id}, socket) do
+    if socket.assigns.current_scope.user.id == user_id do
+      {:noreply,
+       socket
+       |> put_flash(:info, "You were removed from this board.")
+       |> push_navigate(to: ~p"/boards")}
+    else
+      {:noreply, assign_members(socket)}
+    end
+  end
+
+  def handle_info(_message, socket), do: {:noreply, socket}
+
   defp section(%{"section" => "general"}), do: :general
   defp section(%{"section" => "keys"}), do: :keys
+  defp section(%{"section" => "members"}), do: :members
   defp section(_params), do: :stages
 
   # Reloads the main stages and lane map from the DB after any mutation, and
@@ -815,6 +1046,39 @@ defmodule RelayWeb.BoardSettingsLive do
   defp find_stage(socket, stage_id) do
     id = String.to_integer(stage_id)
     Enum.find(socket.assigns.stages, &(&1.id == id))
+  end
+
+  defp assign_members(socket) do
+    members = Members.list_members(socket.assigns.board)
+
+    socket
+    |> assign(:members, members)
+    |> assign(:member_count, length(members))
+  end
+
+  defp mine?(%Membership{user_id: user_id}, scope), do: user_id == scope.user.id
+
+  defp member_name(%Membership{user: %User{name: name}}) when is_binary(name) and name != "", do: name
+
+  defp member_name(%Membership{email: email}), do: email |> String.split("@") |> hd()
+
+  defp member_initials(membership) do
+    membership
+    |> member_name()
+    |> String.split(~r/[\s@.]+/, trim: true)
+    |> Enum.map(&String.first/1)
+    |> Enum.take(2)
+    |> Enum.join()
+    |> String.upcase()
+  end
+
+  defp member_avatar_style(%Membership{} = m) do
+    seed = m.email || ""
+    hue = rem(:erlang.phash2(seed), 360)
+
+    "width:34px;height:34px;border-radius:50%;background:oklch(0.62 0.15 #{hue});" <>
+      "color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;" <>
+      "font-size:13px;font-weight:600;flex:0 0 auto;"
   end
 
   # The effective reject target id: the explicit reject_to, else the previous main stage.

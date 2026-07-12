@@ -661,6 +661,88 @@ defmodule RelayWeb.CoreComponents do
   defp user_name(user), do: Map.get(user, :name) || Map.get(user, :email)
 
   @doc """
+  The boards-home overlapping member avatar stack (RLY-32) — mockup
+  "Relay Board.dc.html" lines ~114-124. Up to `limit` 24×24 colored-initials
+  circles (2px white ring, -7px overlap), then a neutral +N overflow chip.
+  Invited (user-less) members show email-derived initials. Renders nothing for
+  an empty list.
+
+  `members` items expose `:email` and an optional preloaded `:user`.
+  """
+  attr :members, :list, default: []
+  attr :limit, :integer, default: 4
+  attr :id, :string, default: nil
+
+  def member_stack(assigns) do
+    shown =
+      assigns.members
+      |> Enum.take(assigns.limit)
+      |> Enum.with_index()
+      |> Enum.map(fn {m, i} -> member_avatar_data(m, i) end)
+
+    ov = length(assigns.members) - length(shown)
+    assigns = assign(assigns, avatars: shown, ov: ov, ov_style: member_overflow_style())
+
+    ~H"""
+    <div :if={@members != []} id={@id} data-role="member-stack" class="flex items-center">
+      <span :for={av <- @avatars} style={av.style} title={av.name}>{av.initials}</span>
+      <span :if={@ov > 0} data-role="member-overflow" style={@ov_style}>+{@ov}</span>
+    </div>
+    """
+  end
+
+  defp member_avatar_data(m, index) do
+    %{
+      style: member_circle_style(m, index),
+      name: user_name(Map.get(m, :user)) || member_email(m),
+      initials: member_stack_initials(m)
+    }
+  end
+
+  defp member_stack_initials(m) do
+    case user_name(Map.get(m, :user)) do
+      nil -> m |> member_email() |> email_initials()
+      _name -> initials_of(Map.get(m, :user))
+    end
+  end
+
+  defp member_email(m), do: Map.get(m, :email) || ""
+
+  defp email_initials(email) do
+    email
+    |> String.split("@")
+    |> List.first("")
+    |> String.split(~r/[._\s-]+/, trim: true)
+    |> Enum.map(&String.first/1)
+    |> Enum.take(2)
+    |> Enum.join()
+    |> String.upcase()
+    |> case do
+      "" -> "?"
+      initials -> initials
+    end
+  end
+
+  defp member_circle_style(m, index) do
+    hue = rem(:erlang.phash2(member_email(m)), 360)
+
+    base =
+      "width:24px;height:24px;border-radius:50%;background:oklch(0.62 0.15 #{hue});" <>
+        "color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;" <>
+        "font-size:10px;font-weight:600;flex:0 0 auto;box-sizing:border-box;" <>
+        "box-shadow:0 0 0 2px oklch(1 0 0);"
+
+    if index == 0, do: base, else: base <> "margin-left:-7px;"
+  end
+
+  defp member_overflow_style do
+    "width:24px;height:24px;border-radius:50%;background:oklch(0.90 0.006 255);" <>
+      "color:oklch(0.45 0.02 255);display:flex;align-items:center;justify-content:center;" <>
+      "font-size:10px;font-weight:600;flex:0 0 auto;box-sizing:border-box;" <>
+      "box-shadow:0 0 0 2px oklch(1 0 0);margin-left:-7px;"
+  end
+
+  @doc """
   Renders a single kanban card matching the hi-fi mockup
   (`docs/designs/Relay Board.dc.html`): title, an accent left border keyed to
   status (amber needs-you / violet working / quiet otherwise), an optional
@@ -989,6 +1071,14 @@ defmodule RelayWeb.CoreComponents do
   attr :current_user_id, :integer,
     default: nil,
     doc: "the signed-in user's id, for the Add me owner control"
+
+  attr :members, :list,
+    default: [],
+    doc: "resolved board memberships (:user preloaded) — reassign-picker assignables"
+
+  attr :reassign_open, :boolean,
+    default: false,
+    doc: "whether the OWNERS reassign picker popover is open"
 
   attr :stages, :list,
     default: [],
@@ -1726,30 +1816,63 @@ defmodule RelayWeb.CoreComponents do
                     </button>
                   </div>
                   <span :if={@card.owners == []} class="text-base-content/50">None</span>
-                  <div :if={!@archived} class="flex flex-wrap gap-2">
+                  <button
+                    :if={!@archived}
+                    type="button"
+                    id={"#{@id}-reassign-toggle"}
+                    class="self-start"
+                    phx-click="toggle_reassign"
+                    style="background:transparent;border:none;color:oklch(0.50 0.13 250);font-size:12px;font-weight:600;padding:2px 0;cursor:pointer;"
+                  >
+                    {if @reassign_open, do: "Close", else: "Reassign ▾"}
+                  </button>
+                  <div
+                    :if={!@archived and @reassign_open}
+                    id={"#{@id}-reassign-picker"}
+                    style="display:flex;flex-direction:column;gap:4px;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:7px;"
+                  >
                     <button
-                      :if={!agent_owner?(@card)}
+                      :for={m <- reassignable_members(@members)}
                       type="button"
-                      id={"#{@id}-assign-ai"}
-                      class="btn btn-ghost btn-xs"
-                      phx-click="add_owner"
-                      phx-value-actor_type="agent"
-                    >
-                      Assign AI
-                    </button>
-                    <button
-                      :if={
-                        @current_user_id && !user_owner?(@card, @current_user_id) &&
-                          !agent_owner?(@card)
-                      }
-                      type="button"
-                      id={"#{@id}-add-me"}
-                      class="btn btn-ghost btn-xs"
+                      id={"#{@id}-assign-user-#{m.user_id}"}
                       phx-click="add_owner"
                       phx-value-actor_type="user"
-                      phx-value-user_id={@current_user_id}
+                      phx-value-user_id={m.user_id}
+                      style="display:flex;align-items:center;gap:8px;background:transparent;border:none;border-radius:7px;padding:5px 6px;cursor:pointer;text-align:left;"
                     >
-                      Add me
+                      <span style={reassign_avatar_style(:human, m.user_id)}>
+                        {initials_of(m.user)}
+                      </span>
+                      <span style="font-size:12.5px;color:oklch(0.34 0.02 255);flex:1;">
+                        {user_name(m.user)}
+                      </span>
+                      <span
+                        :if={user_owner?(@card, m.user_id)}
+                        style="font-size:11px;color:oklch(0.50 0.13 250);"
+                      >
+                        ✓
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      id={"#{@id}-assign-ai"}
+                      phx-click="add_owner"
+                      phx-value-actor_type="agent"
+                      style="display:flex;align-items:center;gap:8px;background:transparent;border:none;border-radius:7px;padding:5px 6px;cursor:pointer;text-align:left;"
+                    >
+                      <span style={reassign_avatar_style(:ai, nil)}>
+                        <span style="width:9px;height:9px;border-radius:50%;border:1.5px solid oklch(1 0 0);display:block;">
+                        </span>
+                      </span>
+                      <span style="font-size:12.5px;color:oklch(0.34 0.02 255);flex:1;">
+                        Relay AI
+                      </span>
+                      <span
+                        :if={agent_owner?(@card)}
+                        style="font-size:11px;color:oklch(0.50 0.13 250);"
+                      >
+                        ✓
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -1844,6 +1967,23 @@ defmodule RelayWeb.CoreComponents do
 
   defp user_owner?(card, user_id) do
     Enum.any?(card.owners, &(&1.actor_type == :user and &1.user_id == user_id))
+  end
+
+  # RLY-32: only resolved members (with a user) can own a card; invited
+  # (user-less) rows are skipped in the reassign picker.
+  defp reassignable_members(members), do: Enum.filter(members, & &1.user_id)
+
+  defp reassign_avatar_style(:ai, _id) do
+    "width:22px;height:22px;border-radius:50%;background:var(--color-secondary);" <>
+      "display:flex;align-items:center;justify-content:center;flex:0 0 auto;box-sizing:border-box;"
+  end
+
+  defp reassign_avatar_style(:human, user_id) do
+    hue = rem(:erlang.phash2(user_id), 360)
+
+    "width:22px;height:22px;border-radius:50%;background:oklch(0.62 0.15 #{hue});" <>
+      "color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;" <>
+      "font-size:10px;font-weight:600;flex:0 0 auto;box-sizing:border-box;"
   end
 
   defp owner_dom_suffix(%{actor_type: :agent}), do: "agent"
