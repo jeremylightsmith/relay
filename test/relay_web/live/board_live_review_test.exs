@@ -52,6 +52,19 @@ defmodule RelayWeb.BoardLiveReviewTest do
     refute has_element?(view, "#review-request-note")
   end
 
+  test "Approve names the parent's Done substage when the card is in a review substage",
+       %{conn: conn, code: code, user: user} do
+    {:ok, review_sub} = Boards.enable_lane(code, :review)
+    {:ok, _done_sub} = Boards.enable_lane(code, :done)
+    in_review_card(review_sub)
+
+    board = Boards.get_or_create_default_board(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
+
+    assert has_element?(view, "#review-approve", "Approve → Code · Done")
+  end
+
   test "an in_review card on a non-gated stage shows the banner but no decision buttons", %{
     conn: conn,
     code: code,
