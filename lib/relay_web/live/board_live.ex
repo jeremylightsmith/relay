@@ -109,7 +109,8 @@ defmodule RelayWeb.BoardLive do
           </div>
           <div
             id="board-bands"
-            style="display:flex;gap:22px;padding:16px 18px 18px 18px;overflow-x:auto;overflow-y:hidden;align-items:stretch;background:oklch(0.952 0.008 255);flex:1 1 auto;min-height:0;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;"
+            class="min-w-full w-max overflow-x-visible overflow-y-visible drawer:min-w-0 drawer:w-auto drawer:overflow-x-auto drawer:overflow-y-hidden drawer:[-webkit-overflow-scrolling:touch] drawer:[overscroll-behavior-x:contain]"
+            style="display:flex;gap:22px;padding:16px 18px 18px 18px;align-items:stretch;background:oklch(0.952 0.008 255);flex:1 1 auto;min-height:0;"
           >
             <section
               :for={{category, stages} <- @stage_groups}
