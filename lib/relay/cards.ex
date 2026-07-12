@@ -510,9 +510,10 @@ defmodule Relay.Cards do
 
   # Light card columns for the optimistic drawer's first paint (RLY-68):
   # every Card field except the multi-KB heavy text
-  # (description/spec/plan/ai_result). One list so this light fetch and any
-  # future light projection (RLY-67) share a single source of truth.
-  @light_card_fields ~w(id title tag position ref_number status blocked_since archived_at branch pr_url board_id stage_id inserted_at updated_at rejection)a
+  # (description/spec/plan/ai_result). Derived from @list_card_fields (RLY-67)
+  # minus :ai_result, so there is one source of truth for the board's light
+  # projection and this even-lighter drawer projection never drifts from it.
+  @light_card_fields @list_card_fields -- [:ai_result]
 
   @doc """
   Like `get_card_by_ref/2`, but selects only the card's light columns
