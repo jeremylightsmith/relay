@@ -661,6 +661,88 @@ defmodule RelayWeb.CoreComponents do
   defp user_name(user), do: Map.get(user, :name) || Map.get(user, :email)
 
   @doc """
+  The boards-home overlapping member avatar stack (RLY-32) — mockup
+  "Relay Board.dc.html" lines ~114-124. Up to `limit` 24×24 colored-initials
+  circles (2px white ring, -7px overlap), then a neutral +N overflow chip.
+  Invited (user-less) members show email-derived initials. Renders nothing for
+  an empty list.
+
+  `members` items expose `:email` and an optional preloaded `:user`.
+  """
+  attr :members, :list, default: []
+  attr :limit, :integer, default: 4
+  attr :id, :string, default: nil
+
+  def member_stack(assigns) do
+    shown =
+      assigns.members
+      |> Enum.take(assigns.limit)
+      |> Enum.with_index()
+      |> Enum.map(fn {m, i} -> member_avatar_data(m, i) end)
+
+    ov = length(assigns.members) - length(shown)
+    assigns = assign(assigns, avatars: shown, ov: ov, ov_style: member_overflow_style())
+
+    ~H"""
+    <div :if={@members != []} id={@id} data-role="member-stack" class="flex items-center">
+      <span :for={av <- @avatars} style={av.style} title={av.name}>{av.initials}</span>
+      <span :if={@ov > 0} data-role="member-overflow" style={@ov_style}>+{@ov}</span>
+    </div>
+    """
+  end
+
+  defp member_avatar_data(m, index) do
+    %{
+      style: member_circle_style(m, index),
+      name: user_name(Map.get(m, :user)) || member_email(m),
+      initials: member_stack_initials(m)
+    }
+  end
+
+  defp member_stack_initials(m) do
+    case user_name(Map.get(m, :user)) do
+      nil -> m |> member_email() |> email_initials()
+      _name -> initials_of(Map.get(m, :user))
+    end
+  end
+
+  defp member_email(m), do: Map.get(m, :email) || ""
+
+  defp email_initials(email) do
+    email
+    |> String.split("@")
+    |> List.first("")
+    |> String.split(~r/[._\s-]+/, trim: true)
+    |> Enum.map(&String.first/1)
+    |> Enum.take(2)
+    |> Enum.join()
+    |> String.upcase()
+    |> case do
+      "" -> "?"
+      initials -> initials
+    end
+  end
+
+  defp member_circle_style(m, index) do
+    hue = rem(:erlang.phash2(member_email(m)), 360)
+
+    base =
+      "width:24px;height:24px;border-radius:50%;background:oklch(0.62 0.15 #{hue});" <>
+        "color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;" <>
+        "font-size:10px;font-weight:600;flex:0 0 auto;box-sizing:border-box;" <>
+        "box-shadow:0 0 0 2px oklch(1 0 0);"
+
+    if index == 0, do: base, else: base <> "margin-left:-7px;"
+  end
+
+  defp member_overflow_style do
+    "width:24px;height:24px;border-radius:50%;background:oklch(0.90 0.006 255);" <>
+      "color:oklch(0.45 0.02 255);display:flex;align-items:center;justify-content:center;" <>
+      "font-size:10px;font-weight:600;flex:0 0 auto;box-sizing:border-box;" <>
+      "box-shadow:0 0 0 2px oklch(1 0 0);margin-left:-7px;"
+  end
+
+  @doc """
   Renders a single kanban card matching the hi-fi mockup
   (`docs/designs/Relay Board.dc.html`): title, an accent left border keyed to
   status (amber needs-you / violet working / quiet otherwise), an optional

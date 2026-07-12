@@ -11,6 +11,7 @@ defmodule RelayWeb.BoardsLive do
 
   alias Relay.Boards
   alias Relay.Cards
+  alias Relay.Members
 
   @impl true
   def render(assigns) do
@@ -100,6 +101,7 @@ defmodule RelayWeb.BoardsLive do
               <span class="font-mono text-[10.5px]" style="color:oklch(0.62 0.02 255);">
                 Updated {updated_label(b.updated_at)}
               </span>
+              <.member_stack id={"board-members-#{b.slug}"} members={b.members} />
             </div>
           </.link>
 
@@ -154,7 +156,8 @@ defmodule RelayWeb.BoardsLive do
         name: board.name,
         updated_at: board.updated_at,
         card_count: length(Cards.list_cards(board)),
-        needs_you_count: rollup.needs_input + rollup.in_review + rollup.awaiting_human
+        needs_you_count: rollup.needs_input + rollup.in_review + rollup.awaiting_human,
+        members: Members.list_members(board)
       }
     end
   end

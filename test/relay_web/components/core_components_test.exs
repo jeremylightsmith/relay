@@ -26,6 +26,40 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  describe "member_stack/1" do
+    test "renders one 24px ringed circle per member up to the limit" do
+      members = [
+        %{email: "ada@example.com", user: %{name: "Ada Lovelace"}},
+        %{email: "guest@example.com", user: nil}
+      ]
+
+      html = render_component(&CoreComponents.member_stack/1, members: members)
+
+      assert html =~ ~s(data-role="member-stack")
+      # initials: "AL" for Ada Lovelace, "G" for the email-only invited member
+      assert html =~ ">AL<"
+      assert html =~ ">G<"
+      # 24px circle with a 2px white ring per the mockup (lines ~114-124)
+      assert html =~ "width:24px;height:24px"
+      assert html =~ "box-shadow:0 0 0 2px oklch(1 0 0)"
+      refute html =~ ~s(data-role="member-overflow")
+    end
+
+    test "shows a +N overflow chip beyond the limit" do
+      members = for i <- 1..6, do: %{email: "m#{i}@example.com", user: nil}
+
+      html = render_component(&CoreComponents.member_stack/1, members: members, limit: 4)
+
+      assert html =~ ~s(data-role="member-overflow")
+      assert html =~ ">+2<"
+    end
+
+    test "renders nothing for an empty list" do
+      html = render_component(&CoreComponents.member_stack/1, members: [])
+      refute html =~ ~s(data-role="member-stack")
+    end
+  end
+
   describe "board_card/1" do
     test "renders the title and ref" do
       html = render_component(&CoreComponents.board_card/1, id: "card-1", ref: "RLY-3", title: "Ship MMF 03")
