@@ -1,12 +1,56 @@
 <Layouts.flash_group flash={@flash} />
-<main class="min-h-screen flex items-center justify-center px-4">
-  <div class="card bg-base-200 w-full max-w-sm shadow-md">
-    <div class="card-body items-center text-center gap-6">
-      <div>
-        <h1 class="text-2xl font-semibold">Relay</h1>
-        <p class="mt-2 text-base-content/70">Sign in to continue</p>
+
+<div class="w-full overflow-x-hidden">
+  <%!-- NAV --%>
+  <header class="sticky top-0 z-20 border-b border-base-300 bg-base-100/85 backdrop-blur-md">
+    <nav class="mx-auto flex h-[62px] max-w-[1120px] items-center gap-7 px-4 sm:px-8">
+      <a href="#top" class="flex items-center gap-2.5">
+        <span class="relative flex size-[25px] items-center justify-center rounded-lg bg-primary">
+          <span class="size-[9px] rounded-full bg-base-100"></span>
+          <span class="absolute right-1 top-1 size-1 rounded-full bg-primary ring-[1.5px] ring-base-100">
+          </span>
+        </span>
+        <span class="text-base font-semibold tracking-[-0.02em]">Relay</span>
+      </a>
+      <div class="hidden items-center gap-[22px] text-[13.5px] text-base-content/70 md:flex">
+        <a href="#how" class="hover:text-primary">How it works</a>
+        <a href="#flow" class="hover:text-primary">The flow</a>
+        <a href="#stages" class="hover:text-primary">Stages</a>
       </div>
-      <a href={~p"/auth/google"} id="google-signin" class="btn btn-primary w-full">
+      <span class="flex-1"></span>
+      <Layouts.theme_toggle />
+      <a
+        href={~p"/auth/google"}
+        class="hidden text-[13.5px] text-base-content/70 hover:text-primary sm:inline"
+      >
+        Sign in
+      </a>
+      <a href={~p"/auth/google"} class="btn btn-primary btn-sm rounded-lg">Open the board</a>
+    </nav>
+  </header>
+
+  <%!-- HERO --%>
+  <section
+    id="top"
+    class="mx-auto max-w-[1120px] px-4 pb-10 pt-16 text-center sm:px-8 sm:pt-[76px]"
+  >
+    <div class="mb-6 inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-secondary/25 bg-secondary/10 px-3 py-1.5 font-mono text-xs font-semibold text-secondary">
+      <span
+        class="size-[7px] rounded-full bg-secondary"
+        style="animation:relaypulse 1.4s ease-in-out infinite;"
+      >
+      </span>
+      HUMAN + AI, ONE BOARD
+    </div>
+    <h1 class="mx-auto mb-5 max-w-[820px] text-4xl font-semibold leading-[1.02] tracking-[-0.035em] text-base-content md:text-6xl">
+      Pass work between people and AI — without losing the thread.
+    </h1>
+    <p class="mx-auto mb-8 max-w-[560px] text-lg leading-relaxed text-base-content/70">
+      Relay is a kanban board built for handoffs. Some stages are yours, some belong to the AI.
+      It works in the open, asks when it's unsure, and waits for your call.
+    </p>
+    <div class="mb-4 flex flex-wrap items-center justify-center gap-3">
+      <a href={~p"/auth/google"} id="google-signin" class="btn btn-primary">
         <svg viewBox="0 0 48 48" class="size-5" aria-hidden="true">
           <path
             fill="#EA4335"
@@ -27,13 +71,137 @@
         </svg>
         Sign in with Google
       </a>
-      <p class="text-xs text-base-content/50">
-        By continuing you agree to our <.link navigate={~p"/terms"} class="link">Terms</.link>
-        and <.link navigate={~p"/privacy"} class="link">Privacy Policy</.link>.
-      </p>
-      <p class="text-xs text-base-content/50">
-        Building an agent? Read the <.link navigate={~p"/docs"} class="link">API docs</.link>.
-      </p>
+      <a href="#how" class="btn btn-outline">See how it works</a>
     </div>
-  </div>
-</main>
+    <p class="mb-14 text-xs text-base-content/50">
+      By continuing you agree to our <.link navigate={~p"/terms"} class="link">Terms</.link>
+      and <.link navigate={~p"/privacy"} class="link">Privacy Policy</.link>.
+    </p>
+
+    <%!-- Hero board visual --%>
+    <div class="relative overflow-hidden rounded-[18px] border border-base-300 bg-base-200 p-5 text-left shadow-2xl">
+      <div class="flex min-w-0 items-start gap-3.5">
+        <%!-- Spec / HUMAN column --%>
+        <div class="min-w-0 flex-1">
+          <div class="mb-3 flex items-center gap-[7px] px-0.5">
+            <span class="size-2 rounded-[3px] bg-primary"></span>
+            <span class="text-[13px] font-semibold">Spec</span>
+            <span class="rounded-[5px] bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary">
+              HUMAN
+            </span>
+          </div>
+          <div class="flex flex-col gap-2.5 rounded-[9px] border border-base-300 border-l-[3px] border-l-primary bg-base-100 p-[11px]">
+            <span class="text-[12.5px] font-medium text-base-content">
+              Define CSV export criteria
+            </span>
+            <div class="flex items-center justify-between">
+              <span class="font-mono text-[11px] text-base-content/60">#product</span>
+              <span class="flex size-[22px] items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-content">
+                DK
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Handoff divider --%>
+        <div class="flex flex-none flex-col items-center gap-1.5 self-center pt-5">
+          <span class="font-mono text-[10px] tracking-wider text-base-content/60">HANDOFF</span>
+          <span class="text-xl text-secondary">→</span>
+        </div>
+
+        <%!-- Code / AI column --%>
+        <div class="min-w-0 flex-[1.4]">
+          <div class="mb-3 flex items-center gap-[7px] px-0.5">
+            <span class="size-2 rounded-[3px] bg-secondary"></span>
+            <span class="text-[13px] font-semibold">Code</span>
+            <span class="rounded-[5px] bg-secondary/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-secondary">
+              AI
+            </span>
+            <span class="rounded-[5px] bg-base-200 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-base-content/70">
+              wip 2/3
+            </span>
+          </div>
+          <div class="flex flex-col gap-2.5">
+            <div class="flex flex-col gap-2.5 rounded-[9px] border border-base-300 border-l-[3px] border-l-secondary bg-base-100 p-[11px]">
+              <span class="text-[12.5px] font-medium text-base-content">
+                Migrate 40 blog posts to the new CMS
+              </span>
+              <progress class="progress progress-secondary h-[5px]" value="62" max="100">
+              </progress>
+              <div class="flex items-center justify-between">
+                <span class="flex items-center gap-1.5 font-mono text-[11px] text-secondary">
+                  <span
+                    class="size-1.5 rounded-full bg-secondary"
+                    style="animation:relaypulse 1.4s ease-in-out infinite;"
+                  >
+                  </span>
+                  working · 62%
+                </span>
+                <span class="flex size-[22px] items-center justify-center rounded-full bg-secondary">
+                  <span class="size-2 rounded-full border-[1.5px] border-base-100"></span>
+                </span>
+              </div>
+            </div>
+            <div class="flex flex-col gap-2 rounded-[9px] border border-base-300 border-l-[3px] border-l-warning bg-base-100 p-[11px]">
+              <span class="text-[12.5px] font-medium text-base-content">
+                Rewrite the onboarding tooltips
+              </span>
+              <div class="flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2 py-1.5">
+                <span class="size-1.5 rounded-full bg-warning"></span>
+                <span class="font-mono text-[10px] font-semibold tracking-wider text-warning">
+                  NEEDS YOUR INPUT
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Review / HUMAN column --%>
+        <div class="min-w-0 flex-1">
+          <div class="mb-3 flex items-center gap-[7px] px-0.5">
+            <span class="size-2 rounded-[3px] bg-primary"></span>
+            <span class="text-[13px] font-semibold">Review</span>
+            <span class="rounded-[5px] bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary">
+              HUMAN
+            </span>
+          </div>
+          <div class="rounded-[10px] bg-success/10 p-1.5">
+            <div class="px-1 pb-2 pt-0.5 font-mono text-[10px] font-semibold tracking-wider text-success">
+              DONE
+            </div>
+            <div class="flex flex-col gap-2.5 rounded-[9px] border border-base-300 border-l-[3px] border-l-success bg-base-100 p-[11px]">
+              <span class="text-[12.5px] font-medium text-base-content">
+                Add keyboard shortcuts
+              </span>
+              <div class="flex items-center justify-between">
+                <span class="flex items-center gap-1.5 font-mono text-[11px] text-success">
+                  <span class="size-1.5 rounded-full bg-success"></span>ready
+                </span>
+                <span class="flex size-[22px] items-center justify-center rounded-full bg-secondary">
+                  <span class="size-2 rounded-full border-[1.5px] border-base-100"></span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <%!-- FOOTER --%>
+  <footer class="border-t border-base-300">
+    <div class="mx-auto flex max-w-[1120px] flex-wrap items-center gap-3 px-4 py-7 sm:px-8">
+      <span class="flex size-[21px] items-center justify-center rounded-md bg-primary">
+        <span class="size-2 rounded-full bg-base-100"></span>
+      </span>
+      <span class="text-sm font-semibold tracking-[-0.01em]">Relay</span>
+      <span class="flex-1"></span>
+      <span class="font-mono text-xs text-base-content/60">humans + AI, one board · © 2026</span>
+      <nav class="flex items-center gap-4 text-xs text-base-content/60">
+        <.link navigate={~p"/terms"} class="link link-hover">Terms</.link>
+        <.link navigate={~p"/privacy"} class="link link-hover">Privacy</.link>
+        <.link navigate={~p"/docs"} class="link link-hover">API docs</.link>
+      </nav>
+    </div>
+  </footer>
+</div>

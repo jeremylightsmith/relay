@@ -2,13 +2,22 @@ defmodule RelayWeb.PageControllerTest do
   use RelayWeb.ConnCase, async: true
 
   describe "GET / when logged out" do
-    test "renders the sign-in page with a Google button", %{conn: conn} do
+    test "renders the landing page hero with the branded Google button", %{conn: conn} do
       conn = get(conn, ~p"/")
       html = html_response(conn, 200)
 
+      # branded Google sign-in CTA (kept from the old sign-in card)
       assert html =~ "Sign in with Google"
       assert html =~ "id=\"google-signin\""
       assert html =~ ~p"/auth/google"
+
+      # hero copy from the artboard
+      assert html =~ "Pass work between people and AI"
+      assert html =~ "HUMAN + AI, ONE BOARD"
+
+      # nav "Open the board" CTA and the secondary "See how it works" ghost button
+      assert html =~ "Open the board"
+      assert html =~ "See how it works"
     end
   end
 
