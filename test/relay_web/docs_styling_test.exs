@@ -13,6 +13,8 @@ defmodule RelayWeb.DocsStylingTest do
     ".docs-sidebar-heading",
     ".docs-sidebar-link.is-active",
     ".docs-toc",
+    ".docs-breadcrumb",
+    ".docs-eyebrow",
     ".docs h1",
     ".docs h2",
     ".docs pre",
@@ -42,10 +44,13 @@ defmodule RelayWeb.DocsStylingTest do
     assert app =~ ~r/\.docs-sidebar-link\.is-active\s*\{[^}]*var\(--color-primary\)/s
 
     # Eyebrow, section headings and the TOC heading are set in the mono (JetBrains) token.
-    for sel <- [".docs-nav-eyebrow", ".docs-sidebar-heading", ".docs-toc-heading"] do
+    for sel <- [".docs-nav-eyebrow", ".docs-sidebar-heading", ".docs-toc-heading", ".docs-eyebrow"] do
       assert app =~ ~r/#{Regex.escape(sel)}\s*\{[^}]*var\(--font-mono\)/s,
              "#{sel} should use var(--font-mono)"
     end
+
+    # The page-header eyebrow above the h1 reads as AI/violet, per the mockup.
+    assert app =~ ~r/\.docs-eyebrow\s*\{[^}]*var\(--color-secondary\)/s
 
     # Callouts carry the actor palette: note→primary(blue), tip→secondary(violet), warning→amber.
     assert app =~ ~r/\.docs\s+\.markdown-alert-note[^}]*\{[^}]*var\(--color-primary\)/s

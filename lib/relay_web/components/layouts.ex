@@ -198,6 +198,16 @@ defmodule RelayWeb.Layouts do
         </details>
 
         <main class="docs-main">
+          <% current = docs_current(@sidebar, @active_slug) %>
+          <nav class="docs-breadcrumb" aria-label="Breadcrumb">
+            <a href={~p"/docs"}>Docs</a>
+            <span class="docs-breadcrumb-sep">/</span>
+            <span>{current.section}</span>
+            <span class="docs-breadcrumb-sep">/</span>
+            <span class="docs-breadcrumb-current">{current.title}</span>
+          </nav>
+          <p class="docs-eyebrow">{String.upcase(current.section)}</p>
+
           {render_slot(@inner_block)}
 
           <% prev = docs_adjacent(@sidebar, @active_slug, -1) %>
@@ -229,6 +239,10 @@ defmodule RelayWeb.Layouts do
 
   defp docs_link(%{slug: "introduction"}), do: ~p"/docs"
   defp docs_link(%{slug: slug}), do: ~p"/docs/#{slug}"
+
+  # The active page's own sidebar entry (title + section), for the breadcrumb and eyebrow
+  # above the article.
+  defp docs_current(sidebar, active_slug), do: Enum.find(sidebar, &(&1.slug == active_slug))
 
   # The page immediately before/after the active one in sidebar (reading) order, or nil
   # at either end. Powers the "prev / next" pager at the article foot.
