@@ -1314,17 +1314,19 @@ defmodule RelayWeb.CoreComponents do
                   class="flex flex-col items-start gap-[11px]"
                   phx-submit="answer_input"
                 >
-                  <.boxed_field
-                    id="needs-input-answer"
-                    commit={:form}
-                    multiline
-                    rows="3"
-                    form={@answer_form}
-                    field={:body}
-                    input_class="w-full"
-                    placeholder="Type your answer — the AI picks up where it left off…"
-                    phx-hook="SubmitOnCmdEnter"
-                  />
+                  <div class="w-full">
+                    <.boxed_field
+                      id="needs-input-answer"
+                      commit={:form}
+                      multiline
+                      rows="3"
+                      form={@answer_form}
+                      field={:body}
+                      input_class="w-full"
+                      placeholder="Type your answer — the AI picks up where it left off…"
+                      phx-hook="SubmitOnCmdEnter"
+                    />
+                  </div>
                   <button
                     id="needs-input-send"
                     type="submit"
