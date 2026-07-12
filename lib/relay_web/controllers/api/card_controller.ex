@@ -219,6 +219,25 @@ defmodule RelayWeb.Api.CardController do
 
   defp decode_base64(_data), do: :error
 
+  def needs_input(conn, %{"ref" => ref, "questions" => questions}) when is_list(questions) do
+    board = conn.assigns.current_board
+
+    with true <- valid_questions?(questions),
+         %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
+         {:ok, card} <- Cards.request_input(card, questions, :agent) do
+      render(conn, :show,
+        board: board,
+        card: card,
+        stages: Boards.list_stages(board),
+        timeline: Activity.list_timeline(card)
+      )
+    else
+      false -> {:error, :invalid_request}
+      nil -> {:error, :not_found}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
   def needs_input(conn, %{"ref" => ref, "question" => question}) when is_binary(question) do
     board = conn.assigns.current_board
 
@@ -330,4 +349,32 @@ defmodule RelayWeb.Api.CardController do
   end
 
   defp include_done?(params), do: params["include_done"] in ["1", "true", true]
+
+  # RLY-71 — light shape check on a structured needs-input payload. A valid payload is a non-empty
+  # list of maps, each with a non-blank string prompt, string options (if given), a boolean
+  # allow_text (if given), and at least one way to answer (options, or free text).
+  defp valid_questions?(questions) do
+    questions != [] and Enum.all?(questions, &valid_question?/1)
+  end
+
+  defp valid_question?(%{"prompt" => prompt} = question) when is_binary(prompt) do
+    options = Map.get(question, "options")
+    allow_text = Map.get(question, "allow_text")
+
+    String.trim(prompt) != "" and valid_options?(options) and valid_allow_text?(allow_text) and
+      answerable?(options, allow_text)
+  end
+
+  defp valid_question?(_question), do: false
+
+  defp valid_options?(nil), do: true
+  defp valid_options?(options) when is_list(options), do: Enum.all?(options, &is_binary/1)
+  defp valid_options?(_options), do: false
+
+  defp valid_allow_text?(nil), do: true
+  defp valid_allow_text?(allow_text), do: is_boolean(allow_text)
+
+  # A question with text disabled must have at least one option to pick.
+  defp answerable?(options, false), do: is_list(options) and options != []
+  defp answerable?(_options, _allow_text), do: true
 end

@@ -245,6 +245,9 @@ defmodule RelayWeb.BoardLive do
         comment_form={@comment_form}
         question={@question}
         answer_form={@answer_form}
+        answer_questions={@answer_questions}
+        answer_step={@answer_step}
+        answer_values={@answer_values}
         review_gate={@review_gate}
         reject_open={@reject_open}
         reject_form={@reject_form}
@@ -382,6 +385,9 @@ defmodule RelayWeb.BoardLive do
          |> assign(:selected_card, card)
          |> assign(:body_loading?, false)
          |> assign(:question, latest_question(card, activity))
+         |> assign(:answer_questions, latest_questions(card, activity))
+         |> assign(:answer_step, 0)
+         |> assign(:answer_values, %{})
          |> assign_review(card)
          |> stream(:conversation, conversation, reset: true)
          |> stream(:activity, activity, reset: true)}
@@ -401,6 +407,7 @@ defmodule RelayWeb.BoardLive do
         compose create_card move_card save_card_title save_card_description
         save_card_spec save_card_plan
         add_owner remove_owner take_over post_comment answer_input
+        answer_select answer_custom answer_next answer_back answer_goto answer_submit
         review_approve review_reject
         archive_card restore_card toggle_sub_task
       ) do
@@ -811,6 +818,91 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("answer_input", _params, socket), do: {:noreply, socket}
 
+  # RLY-71 — stepper: record a picked option for the current step (single-select).
+  #
+  # phx-value-option, not phx-value-value: "value" collides with the button's intrinsic DOM
+  # .value property (empty for a value-less <button>), which wins over the phx-value-*
+  # attribute when a real browser serializes the click.
+  def handle_event(
+        "answer_select",
+        %{"index" => index, "option" => option},
+        %{assigns: %{selected_card: %Card{status: :needs_input}}} = socket
+      ) do
+    step = String.to_integer(index)
+    {:noreply, assign(socket, :answer_values, Map.put(socket.assigns.answer_values, step, option))}
+  end
+
+  def handle_event("answer_select", _params, socket), do: {:noreply, socket}
+
+  # RLY-71 — stepper: a typed custom answer for the current step. Blank clears the step so Next
+  # stays disabled until the human picks or types something.
+  def handle_event(
+        "answer_custom",
+        %{"answer" => %{"index" => index, "text" => text}},
+        %{assigns: %{selected_card: %Card{status: :needs_input}}} = socket
+      ) do
+    step = String.to_integer(index)
+
+    values =
+      if String.trim(text) == "",
+        do: Map.delete(socket.assigns.answer_values, step),
+        else: Map.put(socket.assigns.answer_values, step, text)
+
+    {:noreply, assign(socket, :answer_values, values)}
+  end
+
+  def handle_event("answer_custom", _params, socket), do: {:noreply, socket}
+
+  # RLY-71 — stepper navigation, clamped to the question range.
+  def handle_event("answer_next", _params, %{assigns: %{selected_card: %Card{status: :needs_input}}} = socket) do
+    %{answer_questions: questions, answer_step: step} = socket.assigns
+    {:noreply, assign(socket, :answer_step, min(step + 1, length(questions) - 1))}
+  end
+
+  def handle_event("answer_next", _params, socket), do: {:noreply, socket}
+
+  def handle_event(
+        "answer_back",
+        _params,
+        %{assigns: %{selected_card: %Card{status: :needs_input}, answer_step: step}} = socket
+      ) do
+    {:noreply, assign(socket, :answer_step, max(step - 1, 0))}
+  end
+
+  def handle_event("answer_back", _params, socket), do: {:noreply, socket}
+
+  def handle_event(
+        "answer_goto",
+        %{"index" => index},
+        %{assigns: %{selected_card: %Card{status: :needs_input}, answer_questions: questions}} = socket
+      ) do
+    step = index |> String.to_integer() |> max(0) |> min(length(questions) - 1)
+    {:noreply, assign(socket, :answer_step, step)}
+  end
+
+  def handle_event("answer_goto", _params, socket), do: {:noreply, socket}
+
+  # RLY-71 — submit the batch: compose one numbered Q->A comment and reuse Cards.answer_input/3,
+  # which records the comment, resumes the card, and logs one :input_answered (unchanged contract).
+  def handle_event(
+        "answer_submit",
+        _params,
+        %{
+          assigns: %{
+            selected_card: %Card{status: :needs_input} = card,
+            answer_questions: questions,
+            answer_values: values
+          }
+        } = socket
+      ) do
+    case Cards.answer_input(card, compose_answers(questions, values), current_actor(socket)) do
+      {:ok, updated} -> {:noreply, refresh_card(socket, updated)}
+      {:error, _changeset} -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("answer_submit", _params, socket), do: {:noreply, socket}
+
   # MMF 15 — the drawer's green review panel: the four human review actions,
   # each a thin wrapper over an existing context transition (Cards.approve/
   # reject from MMF 13, set_status/add_owner from MMF 06), attributed to the
@@ -954,6 +1046,12 @@ defmodule RelayWeb.BoardLive do
 
     {:noreply, assign(socket, :agent_log_ids, kept)}
   end
+
+  # `Phoenix.Ecto.SQL.Sandbox` traps exits on the request process by default (recommended for
+  # browser-driven tests, so DB connections shut down cleanly instead of corrupting the sandbox
+  # when a browser navigates away mid-request) — that requires a catch-all clause here so a
+  # linked process exiting normally doesn't crash the LiveView.
+  def handle_info({:EXIT, _pid, _reason}, socket), do: {:noreply, socket}
 
   defp insert_timeline_entry(socket, %Schemas.Comment{} = comment) do
     stream_insert(socket, :conversation, comment)
@@ -1140,6 +1238,9 @@ defmodule RelayWeb.BoardLive do
     |> assign(:selected_card, card)
     |> assign(:body_loading?, false)
     |> assign(:question, latest_question(card, activity))
+    |> assign(:answer_questions, latest_questions(card, activity))
+    |> assign(:answer_step, 0)
+    |> assign(:answer_values, %{})
     |> assign(:answer_form, empty_answer_form())
     |> assign_review(card)
     |> stream(:conversation, Activity.list_conversation(card), reset: true)
@@ -1447,6 +1548,9 @@ defmodule RelayWeb.BoardLive do
           |> assign(:answer_form, empty_answer_form())
           |> assign(:body_loading?, true)
           |> assign(:question, nil)
+          |> assign(:answer_questions, nil)
+          |> assign(:answer_step, 0)
+          |> assign(:answer_values, %{})
           |> assign(:review_gate, nil)
           |> assign(:reject_open, false)
           |> assign(:reject_form, empty_reject_form())
@@ -1473,6 +1577,9 @@ defmodule RelayWeb.BoardLive do
           plan_form: nil,
           comment_form: nil,
           question: nil,
+          answer_questions: nil,
+          answer_step: 0,
+          answer_values: %{},
           answer_form: nil,
           review_gate: nil,
           reject_open: false,
@@ -1530,6 +1637,32 @@ defmodule RelayWeb.BoardLive do
   end
 
   defp latest_question(_card, _activity), do: nil
+
+  # RLY-71 — the structured payload behind the newest :needs_input block, or nil when that block
+  # carries only a plain string (the drawer then renders the single-textarea fallback). Mirrors
+  # latest_question/2: it looks at the newest :needs_input activity only.
+  defp latest_questions(%Card{status: :needs_input}, activity) do
+    case Enum.find(activity, &match?(%Schemas.Activity{type: :needs_input}, &1)) do
+      %Schemas.Activity{meta: %{"questions" => questions}}
+      when is_list(questions) and questions != [] ->
+        questions
+
+      _entry ->
+        nil
+    end
+  end
+
+  defp latest_questions(_card, _activity), do: nil
+
+  # RLY-71 — compose the single numbered Q->A comment the timeline records on submit, so the
+  # answers still show as one block (and the AI reads them from it), exactly like today.
+  defp compose_answers(questions, values) do
+    questions
+    |> Enum.with_index()
+    |> Enum.map_join("\n", fn {%{"prompt" => prompt}, index} ->
+      "#{index + 1}. #{prompt} → #{Map.get(values, index, "")}"
+    end)
+  end
 
   defp conversation_dom_id(%Schemas.Comment{id: id}), do: "timeline-comment-#{id}"
   defp activity_dom_id(%Schemas.Activity{id: id}), do: "timeline-activity-#{id}"

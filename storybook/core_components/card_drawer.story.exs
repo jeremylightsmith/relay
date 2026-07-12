@@ -76,6 +76,40 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         }
       },
       %Variation{
+        id: :needs_input_stepper,
+        attributes: %{
+          id: "story-drawer-stepper",
+          ref: "RLY-73",
+          card: %{
+            story_card()
+            | status: :needs_input,
+              progress: nil,
+              blocked_since: DateTime.add(DateTime.utc_now(), -2, :hour)
+          },
+          stage_name: "Spec",
+          stage_owner: :ai,
+          active_owner: :ai,
+          current_user_id: 1,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "needs_input", "progress" => nil}, as: :card),
+          answer_form: Phoenix.Component.to_form(%{"body" => ""}, as: :answer),
+          answer_questions: [
+            %{
+              "prompt" => "Which timezone should exports use?",
+              "options" => ["Billing timezone", "Viewer's local timezone"],
+              "allow_text" => true
+            },
+            %{"prompt" => "Any constraint on export file size?", "options" => [], "allow_text" => true}
+          ],
+          answer_step: 0,
+          answer_values: %{},
+          conversation: story_conversation(),
+          activity: story_activity(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
         id: :in_review_gated,
         attributes: %{
           id: "story-drawer-4",

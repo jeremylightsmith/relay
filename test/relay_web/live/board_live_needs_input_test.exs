@@ -155,4 +155,125 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
 
     assert has_element?(view, "#needs-input-panel", "Which region?")
   end
+
+  defp structured_questions do
+    [
+      %{"prompt" => "Which timezone?", "options" => ["Billing", "Viewer"], "allow_text" => true},
+      %{"prompt" => "Any size limit?", "options" => [], "allow_text" => true}
+    ]
+  end
+
+  test "a structured block renders the stepper: progress, first prompt, option buttons",
+       %{conn: conn, code: code, user: user} do
+    {:ok, card} = Cards.create_card(code, %{title: "Structured"})
+    {:ok, _blocked} = Cards.request_input(card, structured_questions(), :agent)
+
+    board = Boards.get_or_create_default_board(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
+
+    assert has_element?(view, "#needs-input-panel", "RELAY AI NEEDS YOUR INPUT")
+    assert has_element?(view, "#needs-input-progress", "Question 1 of 2")
+    assert has_element?(view, "#needs-input-question", "Which timezone?")
+    assert has_element?(view, "#needs-input-option-0", "Billing")
+    assert has_element?(view, "#needs-input-option-1", "Viewer")
+    # first step has no Back and shows Next (not Send)
+    refute has_element?(view, "#needs-input-back")
+    assert has_element?(view, "#needs-input-next")
+    refute has_element?(view, "#needs-input-send")
+  end
+
+  test "selecting an option then Next advances to Q2, and Back returns preserving the selection",
+       %{conn: conn, code: code, user: user} do
+    {:ok, card} = Cards.create_card(code, %{title: "Advance"})
+    {:ok, _blocked} = Cards.request_input(card, structured_questions(), :agent)
+
+    board = Boards.get_or_create_default_board(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
+
+    view |> element("#needs-input-option-1") |> render_click()
+    view |> element("#needs-input-next") |> render_click()
+
+    assert has_element?(view, "#needs-input-progress", "Question 2 of 2")
+    assert has_element?(view, "#needs-input-question", "Any size limit?")
+    assert has_element?(view, "#needs-input-back")
+
+    view |> element("#needs-input-back") |> render_click()
+    assert has_element?(view, "#needs-input-progress", "Question 1 of 2")
+    # the previously selected option keeps its selected marker
+    assert has_element?(view, "#needs-input-option-1.needs-input-option-selected")
+  end
+
+  test "typing a custom answer records it for the step and enables advancing",
+       %{conn: conn, code: code, user: user} do
+    {:ok, card} = Cards.create_card(code, %{title: "Custom"})
+    {:ok, _blocked} = Cards.request_input(card, structured_questions(), :agent)
+
+    board = Boards.get_or_create_default_board(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
+
+    view
+    |> form("#needs-input-text-form", answer: %{index: "0", text: "Pacific"})
+    |> render_change()
+
+    refute has_element?(view, "#needs-input-next[disabled]")
+  end
+
+  test "Send on the last step composes one numbered Q->A comment, resumes :working, hides the panel",
+       %{conn: conn, board: board, code: code} do
+    {:ok, card} = Cards.create_card(code, %{title: "Send batch"})
+    {:ok, _blocked} = Cards.request_input(card, structured_questions(), :agent)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
+
+    # Q1: pick an option, advance
+    view |> element("#needs-input-option-0") |> render_click()
+    view |> element("#needs-input-next") |> render_click()
+    # Q2 (free-text only): type an answer, send
+    view
+    |> form("#needs-input-text-form", answer: %{index: "1", text: "Under 10 MB"})
+    |> render_change()
+
+    view |> element("#needs-input-send") |> render_click()
+
+    refute has_element?(view, "#needs-input-panel")
+
+    reloaded = Cards.get_card_by_ref(board, "RLY-1")
+    assert reloaded.status == :working
+    assert reloaded.blocked_since == nil
+
+    composed = "1. Which timezone? → Billing\n2. Any size limit? → Under 10 MB"
+    assert has_element?(view, "#card-drawer-conversation .timeline-comment-body", "Which timezone?")
+
+    comment =
+      reloaded
+      |> Activity.list_timeline()
+      |> Enum.find(&match?(%Comment{body: ^composed}, &1))
+
+    assert comment.actor_type == :user
+
+    # exactly one :input_answered activity
+    answered =
+      reloaded
+      |> Activity.list_timeline()
+      |> Enum.filter(&match?(%Schemas.Activity{type: :input_answered}, &1))
+
+    assert length(answered) == 1
+  end
+
+  test "the amber Send button keeps the shipped panel's amber fill token",
+       %{conn: conn, code: code, user: user} do
+    {:ok, card} = Cards.create_card(code, %{title: "Amber"})
+    {:ok, _blocked} = Cards.request_input(card, [%{"prompt" => "Only one?"}], :agent)
+
+    board = Boards.get_or_create_default_board(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
+
+    # single-question block: Send is on the first (only) step
+    assert has_element?(view, "#needs-input-send[style*='oklch(0.70 0.13 65)']")
+  end
 end
