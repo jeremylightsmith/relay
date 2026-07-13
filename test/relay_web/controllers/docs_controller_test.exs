@@ -90,4 +90,71 @@ defmodule RelayWeb.DocsControllerTest do
     html = conn |> get(~p"/") |> html_response(200)
     assert html =~ ~s(href="/docs/setup")
   end
+
+  test "a middle page gets both a previous and a next pager link", %{conn: conn} do
+    html = conn |> get(~p"/docs/setup") |> html_response(200)
+
+    assert html =~ ~s(class="docs-pager")
+    assert html =~ ~s(docs-pager-prev)
+    assert html =~ ~s(docs-pager-next)
+    # setup's neighbours in registry order are cards-and-handoffs and cli
+    assert html =~ "Cards &amp; handoffs"
+    assert html =~ "CLI (bin/relay)"
+  end
+
+  test "the first page has no previous link, the last page has no next link", %{conn: conn} do
+    first = conn |> get(~p"/docs") |> html_response(200)
+    refute first =~ "docs-pager-prev"
+    assert first =~ "docs-pager-next"
+
+    last = conn |> get(~p"/docs/api") |> html_response(200)
+    assert last =~ "docs-pager-prev"
+    refute last =~ "docs-pager-next"
+  end
+
+  test "each page carries a breadcrumb and a section eyebrow above the article", %{conn: conn} do
+    html = conn |> get(~p"/docs/setup") |> html_response(200)
+
+    assert html =~ ~s(class="docs-breadcrumb")
+    assert html =~ ~s(class="docs-eyebrow")
+
+    breadcrumb =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query(".docs-breadcrumb")
+      |> LazyHTML.text()
+
+    assert breadcrumb =~ "Docs"
+    assert breadcrumb =~ "Build with Relay"
+    assert breadcrumb =~ "Setup"
+
+    eyebrow =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query(".docs-eyebrow")
+      |> LazyHTML.text()
+
+    assert eyebrow =~ "BUILD WITH RELAY"
+  end
+
+  test "the breadcrumb and eyebrow track the page's own section", %{conn: conn} do
+    html = conn |> get(~p"/docs") |> html_response(200)
+
+    breadcrumb =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query(".docs-breadcrumb")
+      |> LazyHTML.text()
+
+    assert breadcrumb =~ "Get started"
+    assert breadcrumb =~ "Introduction"
+
+    eyebrow =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query(".docs-eyebrow")
+      |> LazyHTML.text()
+
+    assert eyebrow =~ "GET STARTED"
+  end
 end
