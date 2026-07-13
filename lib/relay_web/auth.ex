@@ -45,13 +45,24 @@ defmodule RelayWeb.Auth do
     end
   end
 
-  @doc "Renews the session, resolves any pending invites, and redirects to the board."
-  def log_in_user(conn, user) do
+  @doc """
+  Establishes a signed-in session for `user`: resolves any pending invites,
+  renews the session, and stores `:user_id`. Does **not** redirect — the web
+  flow (`log_in_user/2`) adds the redirect; the native JSON flow renders the
+  response carrying the `Set-Cookie: _relay_key=…` header instead.
+  """
+  def put_user_session(conn, user) do
     Members.resolve_invites_for_user(user)
 
     conn
     |> renew_session()
     |> put_session(:user_id, user.id)
+  end
+
+  @doc "Establishes the session (see `put_user_session/2`) and redirects to the board."
+  def log_in_user(conn, user) do
+    conn
+    |> put_user_session(user)
     |> redirect(to: ~p"/board")
   end
 

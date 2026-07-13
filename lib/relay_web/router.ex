@@ -4,6 +4,8 @@ defmodule RelayWeb.Router do
   import PhoenixStorybook.Router
   import RelayWeb.Auth
 
+  alias RelayWeb.Plugs.ApiLogger
+
   @content_security_policy "default-src 'self'; " <>
                              "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; " <>
                              "style-src 'self' 'unsafe-inline'; " <>
@@ -26,11 +28,17 @@ defmodule RelayWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
-    plug RelayWeb.Plugs.ApiLogger
+    plug ApiLogger
   end
 
   pipeline :api_auth do
     plug RelayWeb.ApiAuth
+  end
+
+  pipeline :native_auth do
+    plug :accepts, ["json"]
+    plug :fetch_session
+    plug ApiLogger
   end
 
   pipeline :require_authenticated_user do
@@ -90,6 +98,12 @@ defmodule RelayWeb.Router do
 
     get "/:provider", AuthController, :request
     get "/:provider/callback", AuthController, :callback
+  end
+
+  scope "/api/auth/native", RelayWeb do
+    pipe_through :native_auth
+
+    post "/google", NativeAuthController, :google
   end
 
   scope "/api", RelayWeb.Api do
