@@ -63,6 +63,50 @@ defmodule Relay.AccountsTest do
     end
   end
 
+  describe "upsert_user_from_provider/1" do
+    @claims %{
+      provider: "google",
+      provider_uid: "prov-uid-1",
+      email: "grace@example.com",
+      name: "Grace Hopper",
+      avatar_url: "https://example.com/grace.png"
+    }
+
+    test "inserts a new user on first sign-in, keyed on provider_uid" do
+      assert {:ok, %User{} = user} = Accounts.upsert_user_from_provider(@claims)
+      assert user.provider == "google"
+      assert user.provider_uid == "prov-uid-1"
+      assert user.email == "grace@example.com"
+      assert user.name == "Grace Hopper"
+      assert user.avatar_url == "https://example.com/grace.png"
+    end
+
+    test "refreshes profile but keeps identity on a return sign-in" do
+      {:ok, first} = Accounts.upsert_user_from_provider(@claims)
+
+      assert {:ok, second} =
+               Accounts.upsert_user_from_provider(%{
+                 @claims
+                 | name: "Grace M. Hopper",
+                   email: "grace@navy.example",
+                   avatar_url: "https://example.com/new.png"
+               })
+
+      assert second.id == first.id
+      assert second.name == "Grace M. Hopper"
+      assert second.email == "grace@navy.example"
+      assert second.avatar_url == "https://example.com/new.png"
+      assert Repo.aggregate(User, :count) == 1
+    end
+
+    test "normalizes the provider email casing/whitespace" do
+      assert {:ok, user} =
+               Accounts.upsert_user_from_provider(%{@claims | email: "  Grace@Example.com "})
+
+      assert user.email == "grace@example.com"
+    end
+  end
+
   describe "get_user/1" do
     test "returns the user for an id" do
       user = insert(:user)
