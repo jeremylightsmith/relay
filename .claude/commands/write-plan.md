@@ -71,8 +71,21 @@ a task crosses an independent module boundary, would be a very large diff, or is
 refactor that benefits from isolation (e.g. keep a pure schema migration its own task).
 
 ### Output: the plan you author (this is the executor's contract) — written to the card's `plan` field
-- A short header: **Goal**, **Architecture**, **Tech**, and a **Global Constraints**
-  section (project-wide rules copied verbatim from the spec).
+- A short header: **Goal**, **Architecture**, **Tech**, a **Global Constraints**
+  section (project-wide rules copied verbatim from the spec), and a **`## Verification`**
+  section (below).
+- **`## Verification`** — declares the gate the executor runs, because not every card is a
+  Phoenix card. Two lines:
+  - **`Gate:`** the command(s) that must pass. **Default `mix precommit`** (the Elixir/LiveView
+    app). A card that only touches **`flutter/`** declares `flutter analyze` + `flutter test`
+    (run in `flutter/`) instead — `mix precommit` does not exercise Dart. A card touching both
+    declares both.
+  - **`Smoke:`** how the acceptance smoke drives it. Default: the running web app on
+    `:4003` via Playwright. A **Flutter** card declares the iOS-simulator smoke (boot the app,
+    screenshot each state, compare to `docs/designs/Relay Mobile.dc.html`). Say "none" only for
+    a card with no runtime surface.
+  The `plan-implementer`, the whole-suite gate, and the `smoke-tester` all read these lines, so
+  they must be exact.
 - Then a series of **bite-sized tasks**. Each task:
   - `### Task N: <name>` with **Files** (exact create/modify/test paths) and
     **Interfaces** — split as **Consumes** (exact signatures this task uses from earlier
