@@ -33,7 +33,7 @@ export const meta = {
     { title: 'Implement', detail: 'TDD implement (sonnet, high effort)', model: 'sonnet' },
     { title: 'Spec review', detail: 'nothing missing / nothing extra (sonnet)', model: 'sonnet' },
     { title: 'Quality review', detail: 'well-built? (opus)', model: 'opus' },
-    { title: 'Final check', detail: 'mix precommit (haiku)', model: 'haiku' },
+    { title: 'Final check', detail: 'plan-declared gate, default mix precommit (haiku)', model: 'haiku' },
     { title: 'Final review', detail: 'whole-branch review + bounded fix loop (opus)', model: 'opus' },
     { title: 'Smoke', detail: 'drive the feature through the running app + visual review, bounded fix loop (opus)', model: 'opus' },
     { title: 'Post', detail: 'attach smoke screenshots + one "Smoke results" comment (sonnet)', model: 'sonnet' },
@@ -226,8 +226,11 @@ if (stalled) return { status: 'stalled', stalledTask: stalled }
 // ---- whole-suite gate -----------------------------------------------------
 phase('Final check')
 const precommit = await agent(
-  'Run `mix precommit` and report the full result verbatim (pass/fail + any failures). Do not fix anything here — just report.',
-  { phase: 'Final check', model: 'haiku', label: 'mix precommit' },
+  'Run the plan\'s declared verification gate and report the full result verbatim (pass/fail + any failures). ' +
+  'The gate is whatever plan.md\'s "## Verification" section specifies under **Gate:** — default `mix precommit` ' +
+  'when that section is absent. (A Flutter-only card typically declares `flutter analyze` + `flutter test` run in ' +
+  '`flutter/`, not `mix precommit`.) Do not fix anything here — just run the declared gate and report.',
+  { phase: 'Final check', model: 'haiku', label: 'gate' },
 )
 
 // ---- cross-cutting whole-branch review with bounded fix loop --------------
@@ -260,9 +263,10 @@ let smoke = null
 for (let visit = 1; visit <= MAX_SMOKE_VISITS; visit++) {
   smoke = await agent(
     role('smoke-tester',
-      'Run the acceptance smoke for this whole branch (visit ' + visit + '). Drive the new ' +
-      'functionality end-to-end through the running app; for any UI, screenshot each new/changed ' +
-      'state and compare it against the matching docs/designs artboard.'),
+      'Run the acceptance smoke for this whole branch (visit ' + visit + '). Follow plan.md\'s "## Verification" ' +
+      '**Smoke:** directive if present (e.g. a Flutter card boots the app in the iOS simulator and screenshots each ' +
+      'state); otherwise drive the new functionality end-to-end through the running web app. For any UI, screenshot ' +
+      'each new/changed state and compare it against the matching docs/designs artboard.'),
     { agentType: 'general-purpose', model: 'opus', schema: SMOKE, phase: 'Smoke', effort: 'high', label: `smoke #${visit}` },
   )
   if (!smoke || smoke.verdict === 'pass') break
