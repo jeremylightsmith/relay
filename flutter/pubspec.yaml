@@ -51,6 +51,26 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
+  # Build-time generators for the iOS app icon + launch screen (F1).
+  flutter_launcher_icons: ^0.14.1
+  flutter_native_splash: ^2.4.1
+
+# App icon: the light Relay logo composited on white (iOS icons can't have alpha).
+flutter_launcher_icons:
+  ios: true
+  android: false
+  image_path: "assets/branding/logo_light_512.png"
+  background_color_ios: "#ffffff"
+  remove_alpha_ios: true
+
+# Launch screen: centered light logo on white.
+flutter_native_splash:
+  color: "#ffffff"
+  image: "assets/branding/logo_light_512.png"
+  ios: true
+  android: false
+  web: false
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
