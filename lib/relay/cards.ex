@@ -546,6 +546,63 @@ defmodule Relay.Cards do
     end)
   end
 
+  @feed_statuses [:needs_input, :in_review]
+
+  @doc """
+  The signed-in user's cross-board "needs-you" feed (RLY-80): every non-archived card with
+  `status in [:needs_input, :in_review]` on any board they are a member of, most-recently-blocked
+  first (`blocked_since` is stamped only for `:needs_input`; `:in_review` falls back to
+  `updated_at`, which is when it entered review). Cards come with `:board` and `:stage` preloaded.
+
+  This is **deliberately narrower than `needs_you_rollup/1`**: it excludes the
+  ready-awaiting-human flavor, so the mobile count diverges from the board's by design (ADR
+  0005). The F4 feed, the F5 badge (RLY-81), and the inbox (RLY-85) all read this one query, so
+  the three can never drift.
+
+  Returns `[%{card: card, question: latest_question_string | nil, questions: structured | nil}]`
+  — `question`/`questions` come from the card's newest `:needs_input` activity meta (one extra
+  indexed query for the whole feed, the pattern `needs_input_questions/1` uses) and are `nil` for
+  `:in_review` rows and for legacy string-only questions.
+  """
+  def needs_you_feed(%User{} = user) do
+    board_ids = user |> Boards.list_boards() |> Enum.map(& &1.id)
+
+    cards =
+      Repo.all(
+        from c in Card,
+          where: c.board_id in ^board_ids and is_nil(c.archived_at) and c.status in ^@feed_statuses,
+          order_by: [desc: coalesce(c.blocked_since, c.updated_at), desc: c.id],
+          preload: [:board, :stage]
+      )
+
+    metas = feed_question_metas(cards)
+
+    Enum.map(cards, fn card ->
+      meta = Map.get(metas, card.id, %{})
+      %{card: card, question: meta["question"], questions: structured_questions(meta)}
+    end)
+  end
+
+  # The newest :needs_input meta per blocked card, in one indexed query.
+  defp feed_question_metas(cards) do
+    case for(c <- cards, c.status == :needs_input, do: c.id) do
+      [] ->
+        %{}
+
+      card_ids ->
+        from(a in Schemas.Activity,
+          where: a.card_id in ^card_ids and a.type == :needs_input,
+          order_by: [asc: a.card_id, desc: a.inserted_at, desc: a.id],
+          select: {a.card_id, a.meta}
+        )
+        |> Repo.all()
+        |> Enum.reduce(%{}, fn {card_id, meta}, acc -> Map.put_new(acc, card_id, meta) end)
+    end
+  end
+
+  defp structured_questions(%{"questions" => questions}) when is_list(questions), do: questions
+  defp structured_questions(_meta), do: nil
+
   @doc """
   A `card_id => latest :needs_input question` map for the board's `:needs_input` cards, for the
   board's collapsed-card question previews (RLY-48 §3). One indexed query; empty when no card is

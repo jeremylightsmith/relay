@@ -37,6 +37,10 @@ defmodule RelayWeb.Router do
     plug RelayWeb.ApiAuth
   end
 
+  pipeline :api_user_auth do
+    plug RelayWeb.ApiUserAuth
+  end
+
   pipeline :native_auth do
     plug :accepts, ["json"]
     plug :fetch_session
@@ -106,6 +110,15 @@ defmodule RelayWeb.Router do
     pipe_through :native_auth
 
     post "/google", NativeAuthController, :google
+  end
+
+  # RLY-80 — the native app's human-authed decision surface. Deliberately separate from the
+  # agent-only board-key /api scope below: different credential, different actor, and it must
+  # not collide with the board API's payloads (RLY-67).
+  scope "/api/all", RelayWeb.Api do
+    pipe_through [:api, :api_user_auth]
+
+    get "/feed", AllController, :feed
   end
 
   scope "/api", RelayWeb.Api do
