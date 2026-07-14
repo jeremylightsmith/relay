@@ -31,7 +31,8 @@ class MainScaffold extends StatelessWidget {
           NavigationDestination(
             key: const Key('nav_needs_you'),
             icon: const Badge(
-              backgroundColor: RelayTheme.relayBlocked, // amber dot · mockup oklch(0.70 0.13 65)
+              backgroundColor: RelayTheme
+                  .relayBlocked, // amber dot · mockup oklch(0.70 0.13 65)
               smallSize: 7,
               child: Icon(Icons.check_box_outline_blank),
             ),

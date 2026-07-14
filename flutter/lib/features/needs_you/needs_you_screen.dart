@@ -6,6 +6,9 @@ class NeedsYouScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const PlaceholderScreen(title: 'Needs you', icon: Icons.check_box_outline_blank);
+    return const PlaceholderScreen(
+      title: 'Needs you',
+      icon: Icons.check_box_outline_blank,
+    );
   }
 }

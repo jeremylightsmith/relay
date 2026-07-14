@@ -17,18 +17,24 @@ GoRouter buildRouter() {
         routes: [
           GoRoute(
             path: '/needs-you',
-            pageBuilder: (context, state) =>
-                NoTransitionPage(key: state.pageKey, child: const NeedsYouScreen()),
+            pageBuilder: (context, state) => NoTransitionPage(
+              key: state.pageKey,
+              child: const NeedsYouScreen(),
+            ),
           ),
           GoRoute(
             path: '/board',
-            pageBuilder: (context, state) =>
-                NoTransitionPage(key: state.pageKey, child: const BoardScreen()),
+            pageBuilder: (context, state) => NoTransitionPage(
+              key: state.pageKey,
+              child: const BoardScreen(),
+            ),
           ),
           GoRoute(
             path: '/settings',
-            pageBuilder: (context, state) =>
-                NoTransitionPage(key: state.pageKey, child: const SettingsScreen()),
+            pageBuilder: (context, state) => NoTransitionPage(
+              key: state.pageKey,
+              child: const SettingsScreen(),
+            ),
           ),
         ],
       ),

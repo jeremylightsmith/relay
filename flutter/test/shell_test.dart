@@ -16,8 +16,9 @@ void main() {
     expect(find.text('Arriving soon'), findsOneWidget);
   });
 
-  testWidgets('shows exactly three destinations with stable keys, in order',
-      (tester) async {
+  testWidgets('shows exactly three destinations with stable keys, in order', (
+    tester,
+  ) async {
     await pumpApp(tester);
     final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
     expect(bar.destinations.length, 3);
@@ -26,8 +27,9 @@ void main() {
     expect(find.byKey(const Key('nav_settings')), findsOneWidget);
   });
 
-  testWidgets('Needs you destination carries the amber notification dot',
-      (tester) async {
+  testWidgets('Needs you destination carries the amber notification dot', (
+    tester,
+  ) async {
     await pumpApp(tester);
     final badge = tester.widget<Badge>(
       find
@@ -40,8 +42,9 @@ void main() {
     expect(badge.backgroundColor, RelayTheme.relayBlocked);
   });
 
-  testWidgets('tapping Board then Settings navigates to those screens',
-      (tester) async {
+  testWidgets('tapping Board then Settings navigates to those screens', (
+    tester,
+  ) async {
     await pumpApp(tester);
 
     await tester.tap(find.byKey(const Key('nav_board')));

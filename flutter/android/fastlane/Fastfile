@@ -1,0 +1,96 @@
+default_platform(:android)
+
+platform :android do
+  desc "Build and upload to Play Store Internal Testing"
+  lane :deploy do
+    setup_ci if is_ci
+
+    sh("cd ../.. && flutter pub get")
+
+    build_number = ENV["BUILD_NUMBER"]
+    if build_number.nil? || build_number.empty?
+      UI.user_error!("❌ BUILD_NUMBER environment variable is required. Set it like: BUILD_NUMBER=123 fastlane deploy")
+    end
+
+    UI.important("🔨 Building Flutter App Bundle (build #{build_number})...")
+    sh("cd ../.. && flutter build appbundle --release --build-number=#{build_number}")
+
+    UI.success("✅ App Bundle built.")
+    upload_internal
+  end
+
+  desc "Build App Bundle only"
+  lane :build_bundle do
+    sh("cd ../.. && flutter pub get")
+    build_number = ENV["BUILD_NUMBER"] || "1"
+    sh("cd ../.. && flutter build appbundle --release --build-number=#{build_number}")
+    UI.success("✅ App Bundle built at: ../../build/app/outputs/bundle/release/app-release.aab")
+  end
+
+  desc "Upload to Play Store Internal Testing track"
+  lane :upload_internal do
+    json_key_file = ENV["PLAY_STORE_CONFIG_JSON_PATH"]
+    unless json_key_file && File.exist?(json_key_file)
+      UI.user_error!("❌ PLAY_STORE_CONFIG_JSON_PATH not set or file doesn't exist")
+    end
+
+    flutter_root = File.expand_path("../..", __dir__)
+    aab_path = File.join(flutter_root, "build/app/outputs/bundle/release/app-release.aab")
+    unless File.exist?(aab_path)
+      UI.user_error!("❌ AAB not found at #{aab_path}. Run 'fastlane build_bundle' first.")
+    end
+
+    UI.important("📤 Uploading to Play Store Internal Testing...")
+    upload_to_play_store(
+      track: "internal",
+      aab: aab_path,
+      json_key: json_key_file,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      skip_upload_changelogs: true,
+      release_status: "draft"
+    )
+    UI.success("✅ Uploaded to Play Store Internal Testing! Add testers in the Play Console.")
+  end
+
+  desc "Promote latest Internal build to Beta"
+  lane :promote_to_beta do
+    json_key_file = ENV["PLAY_STORE_CONFIG_JSON_PATH"]
+    unless json_key_file && File.exist?(json_key_file)
+      UI.user_error!("❌ PLAY_STORE_CONFIG_JSON_PATH not set or file doesn't exist")
+    end
+
+    upload_to_play_store(
+      track: "internal",
+      track_promote_to: "beta",
+      json_key: json_key_file,
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+    UI.success("✅ Promoted to Beta!")
+  end
+
+  desc "Promote latest Beta build to Production"
+  lane :promote_to_production do
+    json_key_file = ENV["PLAY_STORE_CONFIG_JSON_PATH"]
+    unless json_key_file && File.exist?(json_key_file)
+      UI.user_error!("❌ PLAY_STORE_CONFIG_JSON_PATH not set or file doesn't exist")
+    end
+
+    upload_to_play_store(
+      track: "beta",
+      track_promote_to: "production",
+      json_key: json_key_file,
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+    UI.success("✅ Promoted to Production!")
+  end
+end

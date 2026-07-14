@@ -1,0 +1,2 @@
+json_key_file("") # Path is set via environment variable PLAY_STORE_CONFIG_JSON_PATH
+package_name("com.jeremylightsmith.relay")
