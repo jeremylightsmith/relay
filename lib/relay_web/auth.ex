@@ -79,6 +79,8 @@ defmodule RelayWeb.Auth do
     * `:mount_current_scope` — assigns `current_scope` (or nil) and continues.
     * `:require_authenticated` — additionally halts with a redirect to the
       sign-in page when there is no signed-in user.
+    * `:mount_embed` — assigns `embed` (bool) from the session so authenticated
+      LiveViews can suppress web chrome when hosted in the native shell.
   """
   def on_mount(:mount_current_scope, _params, session, socket) do
     {:cont, mount_current_scope(socket, session)}
@@ -112,6 +114,10 @@ defmodule RelayWeb.Auth do
 
       {:halt, socket}
     end
+  end
+
+  def on_mount(:mount_embed, _params, session, socket) do
+    {:cont, Phoenix.Component.assign_new(socket, :embed, fn -> session["embed"] == true end)}
   end
 
   defp mount_current_scope(socket, session) do
