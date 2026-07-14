@@ -67,7 +67,7 @@ jobs:
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.2'
+          ruby-version: '4.0.5'
           bundler-cache: true
           working-directory: flutter/ios
 
@@ -144,7 +144,7 @@ jobs:
 #       - name: Setup Ruby
 #         uses: ruby/setup-ruby@v1
 #         with:
-#           ruby-version: '3.2'
+#           ruby-version: '4.0.5'
 #           bundler-cache: true
 #           working-directory: flutter/android
 # 
