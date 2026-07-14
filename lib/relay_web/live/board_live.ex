@@ -43,7 +43,7 @@ defmodule RelayWeb.BoardLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} wide crumb>
+    <Layouts.app flash={@flash} current_scope={@current_scope} wide crumb embed={@embed}>
       <:title>
         <span id="board-name" class="truncate max-w-[58vw] sm:max-w-[280px]">
           {@board.name}
@@ -86,7 +86,14 @@ defmodule RelayWeb.BoardLive do
       </:menu_items>
       <div
         id="board-viewport"
-        class="flex flex-col min-h-[calc(100dvh_-_53px)] drawer:h-[calc(100dvh_-_53px)] drawer:min-h-0"
+        class={[
+          "flex flex-col",
+          if(@embed,
+            do: "min-h-dvh drawer:h-dvh",
+            else: "min-h-[calc(100dvh_-_53px)] drawer:h-[calc(100dvh_-_53px)]"
+          ),
+          "drawer:min-h-0"
+        ]}
       >
         <div id="board" phx-hook="BoardDnD" class="flex min-h-0 flex-1 flex-col">
           <div

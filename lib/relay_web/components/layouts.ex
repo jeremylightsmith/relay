@@ -39,6 +39,10 @@ defmodule RelayWeb.Layouts do
     default: false,
     doc: "render the 'Boards' breadcrumb button + separator before the title"
 
+  attr :embed, :boolean,
+    default: false,
+    doc: "when true, suppress the web top-bar chrome (surface hosted in the native shell)"
+
   slot :title, doc: "the bar's title node (editable board name, or a plain span)"
   slot :actions, doc: "the view's contextual right-side controls"
   slot :menu_items, doc: "view-specific entries at the top of the avatar dropdown"
@@ -47,6 +51,7 @@ defmodule RelayWeb.Layouts do
   def app(assigns) do
     ~H"""
     <header
+      :if={!@embed}
       id="top-bar"
       class="flex items-center gap-3 border-b border-base-300 bg-base-100 px-4 sm:px-5"
       style="height:53px;"

@@ -16,7 +16,7 @@ defmodule RelayWeb.BoardsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} wide>
+    <Layouts.app flash={@flash} current_scope={@current_scope} wide embed={@embed}>
       <:title>
         <span id="boards-title">Your boards</span>
       </:title>
