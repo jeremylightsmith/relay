@@ -31,6 +31,10 @@ end
 # prod from `fly secrets set`. Test uses static dummies from
 # config/test.exs, which this must not override with nils.
 if config_env() != :test do
+  config :relay,
+    google_client_id: System.get_env("GOOGLE_CLIENT_ID"),
+    google_ios_client_id: System.get_env("GOOGLE_IOS_CLIENT_ID")
+
   config :ueberauth, Ueberauth.Strategy.Google.OAuth,
     client_id: System.get_env("GOOGLE_CLIENT_ID"),
     client_secret: System.get_env("GOOGLE_CLIENT_SECRET")

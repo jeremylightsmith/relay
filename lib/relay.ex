@@ -17,6 +17,7 @@ defmodule Relay do
       Repo,
       Mailer,
       Accounts,
+      Accounts.GoogleTokenValidator,
       Activity,
       AgentLog,
       ApiKeys,

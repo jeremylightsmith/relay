@@ -7,7 +7,7 @@ defmodule Relay.Accounts do
   login bypass. Web/session concerns live in `RelayWeb.Auth`, not here.
   """
 
-  use Boundary, deps: [Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Repo, Schemas], exports: [GoogleTokenValidator]
 
   alias Relay.Repo
   alias Schemas.User
@@ -19,25 +19,40 @@ defmodule Relay.Accounts do
   def get_user(id), do: Repo.get(User, id)
 
   @doc """
-  Upserts a user from a Google `%Ueberauth.Auth{}`: looks up by
-  `provider_uid` (Google's `sub`), creating on first sign-in and
-  refreshing `email`/`name`/`avatar_url` on return visits.
+  Upserts a user from normalized provider claims (the provider-agnostic seam).
+  Looks up by `provider_uid`, inserting a `%User{provider:, provider_uid:}` on
+  first sign-in and refreshing `email`/`name`/`avatar_url` on return visits.
+  Every sign-in path (Google web + native, future Apple/GitHub) flows through here.
   """
-  def upsert_user_from_google(%Ueberauth.Auth{} = auth) do
-    provider_uid = to_string(auth.uid)
-    attrs = %{email: auth.info.email, name: auth.info.name, avatar_url: auth.info.image}
+  def upsert_user_from_provider(%{provider: provider, provider_uid: provider_uid} = claims) do
+    profile = Map.take(claims, [:email, :name, :avatar_url])
 
     case Repo.get_by(User, provider_uid: provider_uid) do
       nil ->
-        %User{provider: "google", provider_uid: provider_uid}
-        |> User.changeset(attrs)
+        %User{provider: provider, provider_uid: provider_uid}
+        |> User.changeset(profile)
         |> Repo.insert()
 
       %User{} = user ->
         user
-        |> User.changeset(attrs)
+        |> User.changeset(profile)
         |> Repo.update()
     end
+  end
+
+  @doc """
+  Upserts a user from a Google `%Ueberauth.Auth{}` (the web redirect flow).
+  Maps the auth struct onto provider claims and delegates to
+  `upsert_user_from_provider/1`.
+  """
+  def upsert_user_from_google(%Ueberauth.Auth{} = auth) do
+    upsert_user_from_provider(%{
+      provider: "google",
+      provider_uid: to_string(auth.uid),
+      email: auth.info.email,
+      name: auth.info.name,
+      avatar_url: auth.info.image
+    })
   end
 
   @doc """

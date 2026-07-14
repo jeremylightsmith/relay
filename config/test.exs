@@ -49,6 +49,11 @@ config :relay, RelayWeb.Endpoint,
   secret_key_base: "d7ZQNZUWtP3mPcEZbpa3EzYQ70t1YmaHBlp+2uxkBeAXR5d6FfGSGzr/toxbUS5k",
   server: true
 
+# Native-auth Google token validator: static dummy client id + a Req.Test plug
+# so GoogleTokenValidator hits an in-process stub instead of real Google.
+config :relay, :google_client_id, "test-google-client-id"
+config :relay, :google_tokeninfo_req_options, plug: {Req.Test, Relay.Accounts.GoogleTokenValidator}
+
 # Compile dev-only routes (GET /dev/login, LiveDashboard, storybook) into
 # the test router so tests and the acceptance smoke can authenticate
 # without real Google. Never enabled in prod.

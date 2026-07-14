@@ -1,7 +1,9 @@
 defmodule RelayWeb.AuthTest do
   use RelayWeb.ConnCase, async: true
 
+  alias Relay.Repo
   alias RelayWeb.Auth
+  alias Schemas.Membership
   alias Schemas.Scope
 
   setup %{conn: conn} do
@@ -53,6 +55,27 @@ defmodule RelayWeb.AuthTest do
         |> Auth.require_authenticated([])
 
       refute conn.halted
+    end
+  end
+
+  describe "put_user_session/2" do
+    test "renews the session and stores the user id without redirecting", %{conn: conn} do
+      user = insert(:user)
+
+      conn = Auth.put_user_session(conn, user)
+
+      assert get_session(conn, :user_id) == user.id
+      refute conn.halted
+      assert conn.status == nil
+    end
+
+    test "resolves pending invites for the user's email", %{conn: conn} do
+      user = insert(:user, email: "invitee@example.com")
+      membership = insert(:membership, email: "invitee@example.com", user: nil)
+
+      Auth.put_user_session(conn, user)
+
+      assert Repo.get!(Membership, membership.id).user_id == user.id
     end
   end
 

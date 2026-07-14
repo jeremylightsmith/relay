@@ -1,0 +1,137 @@
+default_platform(:ios)
+
+APP_IDENTIFIER = "com.jeremylightsmith.Relay"
+TEAM_ID = "CR8KT24FBH"
+
+platform :ios do
+  desc "Sync certificates and provisioning profiles using Match"
+  lane :sync_certificates do
+    UI.important("🔐 Syncing certificates and provisioning profiles...")
+
+    match(
+      type: "appstore",
+      readonly: is_ci,
+      app_identifier: APP_IDENTIFIER,
+      team_id: TEAM_ID,
+      force_for_new_devices: !is_ci,
+      verbose: true,
+      force: !is_ci
+    )
+    UI.success("✅ Certificates and profiles synced from Match!")
+  end
+
+  desc "Build IPA for App Store"
+  lane :build_ipa do
+    setup_ci if is_ci
+
+    # BUILD_NUMBER is required.
+    #   CI:    GitHub run number
+    #   Local: set explicitly, e.g. BUILD_NUMBER=999 fastlane deploy
+    build_num = ENV["BUILD_NUMBER"]
+    if build_num.nil? || build_num.empty?
+      UI.user_error!("❌ BUILD_NUMBER environment variable is required. Set it like: BUILD_NUMBER=123 fastlane deploy")
+    end
+
+    UI.important("🔢 Setting build number to: #{build_num}")
+    increment_build_number(
+      xcodeproj: "Runner.xcodeproj",
+      build_number: build_num
+    )
+
+    # Get Flutter dependencies and build (unsigned; fastlane signs below).
+    sh("cd ../.. && flutter pub get")
+    UI.important("🔨 Building Flutter (release, no codesign)...")
+    sh("cd ../.. && flutter build ios --release --no-codesign")
+
+    # Sync certificates via match, then switch the project to manual signing
+    # so the archive uses the Match-managed Distribution profile.
+    sync_certificates
+
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      code_sign_identity: "Apple Distribution",
+      path: "Runner.xcodeproj",
+      bundle_identifier: APP_IDENTIFIER,
+      profile_name: ENV["sigh_#{APP_IDENTIFIER}_appstore_profile-name"],
+      team_id: TEAM_ID
+    )
+
+    build_app(
+      workspace: "Runner.xcworkspace",
+      scheme: "Runner",
+      configuration: "Release",
+      derived_data_path: "build",
+      destination: "generic/platform=iOS",
+      export_method: "app-store",
+      export_options: {
+        method: "app-store",
+        signingStyle: "manual",
+        teamID: TEAM_ID,
+        provisioningProfileMapping: {
+          APP_IDENTIFIER => ENV["sigh_#{APP_IDENTIFIER}_appstore"]
+        },
+        uploadBitcode: true,
+        uploadSymbols: true
+      },
+      output_directory: "build/",
+      output_name: "relay.ipa",
+      skip_package_ipa: false,
+      skip_package_pkg: true,
+      skip_profile_detection: true,
+      xcargs: "-allowProvisioningUpdates -verbose"
+    )
+
+    UI.success("✅ IPA successfully built and signed!")
+    UI.important("📦 IPA location: build/relay.ipa")
+  end
+
+  desc "Upload IPA to TestFlight"
+  lane :upload_testflight do
+    ipa_path = "build/relay.ipa"
+
+    unless File.exist?(File.join("..", ipa_path))
+      UI.error("❌ IPA not found at #{ipa_path}. Run 'fastlane build_ipa' first.")
+      raise "Missing IPA"
+    end
+
+    if ENV["FASTLANE_API_KEY_PATH"] && ENV["APP_STORE_CONNECT_KEY_ID"] && ENV["APP_STORE_CONNECT_ISSUER_ID"]
+      UI.important("📤 Uploading to TestFlight using App Store Connect API key...")
+      # FASTLANE_API_KEY_PATH points at the raw .p8; build the key object from it
+      # plus the key id + issuer id (upload_to_testflight's api_key_path expects a
+      # JSON file, not a .p8 — this avoids that mismatch).
+      api_key = app_store_connect_api_key(
+        key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
+        issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+        key_filepath: ENV["FASTLANE_API_KEY_PATH"]
+      )
+      upload_to_testflight(
+        ipa: ipa_path,
+        api_key: api_key,
+        skip_waiting_for_build_processing: true,
+        skip_submission: true,
+        app_platform: "ios",
+        app_identifier: APP_IDENTIFIER
+      )
+      UI.success("✅ Successfully uploaded to TestFlight!")
+    elsif ENV["FASTLANE_USER"] && ENV["FASTLANE_PASSWORD"]
+      UI.important("📤 Uploading to TestFlight...")
+      upload_to_testflight(
+        ipa: ipa_path,
+        skip_waiting_for_build_processing: true,
+        skip_submission: true,
+        app_platform: "ios",
+        app_identifier: APP_IDENTIFIER
+      )
+      UI.success("✅ Successfully uploaded to TestFlight!")
+    else
+      UI.important("✅ IPA is ready at: build/relay.ipa")
+      UI.important("📝 To upload, set FASTLANE_API_KEY_PATH or FASTLANE_USER/FASTLANE_PASSWORD, then run: fastlane upload_testflight")
+    end
+  end
+
+  desc "Build and upload to TestFlight"
+  lane :deploy do
+    build_ipa
+    upload_testflight
+  end
+end

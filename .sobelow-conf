@@ -1,1 +1,7 @@
-[exit: "low", format: "txt", ignore_files: [], ignore: [], out: nil, private: false, router: nil, skip: true, threshold: :low, verbose: false, version: false]
+# Config.CSRF is ignored app-wide: the `:native_auth` pipeline (RelayWeb.Router) is a
+# JSON-only login endpoint (`plug :accepts, ["json"]`) that fetches the session only to
+# *write* the `_relay_key` cookie for a brand-new native sign-in. It intentionally has no
+# `protect_from_forgery` plug: there is no pre-existing authenticated session to forge
+# requests against, and cross-site `<form>` submissions cannot produce the required
+# `application/json` content type, so classic CSRF does not apply here.
+[exit: "low", format: "txt", ignore_files: [], ignore: ["Config.CSRF"], out: nil, private: false, router: nil, skip: true, threshold: :low, verbose: false, version: false]
