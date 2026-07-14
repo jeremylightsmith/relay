@@ -5,6 +5,7 @@ defmodule RelayWeb.Router do
   import RelayWeb.Auth
 
   alias RelayWeb.Plugs.ApiLogger
+  alias RelayWeb.Plugs.Embed
 
   @content_security_policy "default-src 'self'; " <>
                              "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; " <>
@@ -19,6 +20,7 @@ defmodule RelayWeb.Router do
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
+    plug Embed
     plug :fetch_live_flash
     plug :put_root_layout, html: {RelayWeb.Layouts, :root}
     plug :protect_from_forgery
@@ -66,7 +68,7 @@ defmodule RelayWeb.Router do
         if(Application.compile_env(:relay, :sql_sandbox),
           do: [RelayWeb.LiveAcceptance],
           else: []
-        ) ++ [{RelayWeb.Auth, :require_authenticated}] do
+        ) ++ [{RelayWeb.Auth, :require_authenticated}, {RelayWeb.Auth, :mount_embed}] do
       live "/boards", BoardsLive
       live "/board/:slug", BoardLive
       live "/board/:slug/settings", BoardSettingsLive

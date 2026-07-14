@@ -1,6 +1,7 @@
 defmodule RelayWeb.AuthTest do
   use RelayWeb.ConnCase, async: true
 
+  alias Phoenix.LiveView.Socket
   alias Relay.Repo
   alias RelayWeb.Auth
   alias Schemas.Membership
@@ -108,6 +109,21 @@ defmodule RelayWeb.AuthTest do
 
       refute get_session(conn, :user_id)
       assert redirected_to(conn) == ~p"/"
+    end
+  end
+
+  describe "on_mount :mount_embed" do
+    test "assigns @embed true when the session flags embedded" do
+      {:cont, socket} =
+        Auth.on_mount(:mount_embed, %{}, %{"embed" => true}, %Socket{})
+
+      assert socket.assigns.embed == true
+    end
+
+    test "assigns @embed false when the session has no embed flag" do
+      {:cont, socket} = Auth.on_mount(:mount_embed, %{}, %{}, %Socket{})
+
+      assert socket.assigns.embed == false
     end
   end
 end
