@@ -115,78 +115,81 @@ jobs:
           APP_STORE_CONNECT_KEY_ID: ${{ vars.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
 
+  # Android build - DISABLED for now (iOS-first; Android is deferred per RLY-103).
+  # Re-enable by uncommenting the job below once the Android keystore + Play Store
+  # secrets are set (ANDROID_KEYSTORE_BASE64/PASSWORD, ANDROID_KEY_PASSWORD, PLAY_STORE_CONFIG_JSON_BASE64).
   # Android build - ships to Play Store internal testing
-  build-android:
-    needs: validate
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: '3.44.1'
-          cache: true
-          cache-key: ${{ runner.os }}-flutter-${{ hashFiles('flutter/pubspec.lock') }}
-
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.2'
-          bundler-cache: true
-          working-directory: flutter/android
-
-      - name: Install Fastlane
-        working-directory: flutter/android
-        run: |
-          if ! gem list -i fastlane > /dev/null; then
-            gem install fastlane
-          fi
-
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-            flutter/android/.gradle
-          key: ${{ runner.os }}-gradle-${{ hashFiles('flutter/android/**/build.gradle.kts') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
-      - name: Setup Android Keystore
-        run: |
-          mkdir -p ~/keystore
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > ~/keystore/upload-keystore.jks
-
-      - name: Create Android key.properties
-        working-directory: flutter/android
-        run: |
-          cat > key.properties << EOF
-          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
-          keyAlias=${{ vars.ANDROID_KEY_ALIAS }}
-          storeFile=$HOME/keystore/upload-keystore.jks
-          EOF
-
-      - name: Setup Play Store API
-        run: |
-          mkdir -p ~/.play-store
-          echo "${{ secrets.PLAY_STORE_CONFIG_JSON_BASE64 }}" | base64 -d > ~/.play-store/play-store-api-key.json
-
-      - name: Build and upload to Play Store
-        working-directory: flutter/android
-        run: |
-          export PLAY_STORE_CONFIG_JSON_PATH="${HOME}/.play-store/play-store-api-key.json"
-          fastlane deploy
-        env:
-          BUILD_NUMBER: ${{ github.run_number }}
+#   build-android:
+#     needs: validate
+#     runs-on: ubuntu-latest
+#     permissions:
+#       contents: write
+#     steps:
+#       - uses: actions/checkout@v4
+# 
+#       - name: Setup Java
+#         uses: actions/setup-java@v4
+#         with:
+#           distribution: 'temurin'
+#           java-version: '17'
+# 
+#       - name: Setup Flutter
+#         uses: subosito/flutter-action@v2
+#         with:
+#           channel: stable
+#           flutter-version: '3.44.1'
+#           cache: true
+#           cache-key: ${{ runner.os }}-flutter-${{ hashFiles('flutter/pubspec.lock') }}
+# 
+#       - name: Setup Ruby
+#         uses: ruby/setup-ruby@v1
+#         with:
+#           ruby-version: '3.2'
+#           bundler-cache: true
+#           working-directory: flutter/android
+# 
+#       - name: Install Fastlane
+#         working-directory: flutter/android
+#         run: |
+#           if ! gem list -i fastlane > /dev/null; then
+#             gem install fastlane
+#           fi
+# 
+#       - name: Cache Gradle
+#         uses: actions/cache@v4
+#         with:
+#           path: |
+#             ~/.gradle/caches
+#             ~/.gradle/wrapper
+#             flutter/android/.gradle
+#           key: ${{ runner.os }}-gradle-${{ hashFiles('flutter/android/**/build.gradle.kts') }}
+#           restore-keys: |
+#             ${{ runner.os }}-gradle-
+# 
+#       - name: Setup Android Keystore
+#         run: |
+#           mkdir -p ~/keystore
+#           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > ~/keystore/upload-keystore.jks
+# 
+#       - name: Create Android key.properties
+#         working-directory: flutter/android
+#         run: |
+#           cat > key.properties << EOF
+#           storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+#           keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+#           keyAlias=${{ vars.ANDROID_KEY_ALIAS }}
+#           storeFile=$HOME/keystore/upload-keystore.jks
+#           EOF
+# 
+#       - name: Setup Play Store API
+#         run: |
+#           mkdir -p ~/.play-store
+#           echo "${{ secrets.PLAY_STORE_CONFIG_JSON_BASE64 }}" | base64 -d > ~/.play-store/play-store-api-key.json
+# 
+#       - name: Build and upload to Play Store
+#         working-directory: flutter/android
+#         run: |
+#           export PLAY_STORE_CONFIG_JSON_PATH="${HOME}/.play-store/play-store-api-key.json"
+#           fastlane deploy
+#         env:
+#           BUILD_NUMBER: ${{ github.run_number }}
