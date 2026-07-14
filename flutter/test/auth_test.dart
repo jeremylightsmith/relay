@@ -4,7 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/main.dart';
 
 void main() {
-  testWidgets('unauthenticated app is gated to the sign-in screen', (tester) async {
+  testWidgets('unauthenticated app is gated to the sign-in screen', (
+    tester,
+  ) async {
     await tester.pumpWidget(const ProviderScope(child: RelayApp()));
     await tester.pumpAndSettle();
 

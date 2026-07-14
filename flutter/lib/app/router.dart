@@ -63,7 +63,10 @@ final routerProvider = Provider<GoRouter>((ref) {
   return buildRouter(
     refreshListenable: refresh,
     extraRoutes: [
-      GoRoute(path: '/sign-in', builder: (context, state) => const SignInScreen()),
+      GoRoute(
+        path: '/sign-in',
+        builder: (context, state) => const SignInScreen(),
+      ),
     ],
     redirect: (context, state) {
       final signedIn = ref.read(authProvider).signedIn;

@@ -34,37 +34,63 @@ class SignInScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 22),
-              Text('Relay',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w600)),
+              Text(
+                'Relay',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               const SizedBox(height: 8),
-              Text('Keep work moving when you\'re away from your desk.',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyMedium?.copyWith(color: Colors.black54)),
+              Text(
+                'Keep work moving when you\'re away from your desk.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: Colors.black54,
+                ),
+              ),
               const SizedBox(height: 40),
               FilledButton.icon(
                 key: const Key('sign_in_google'),
-                onPressed: auth.signingIn ? null : () => ref.read(authProvider.notifier).signInWithGoogle(),
+                onPressed: auth.signingIn
+                    ? null
+                    : () => ref.read(authProvider.notifier).signInWithGoogle(),
                 icon: auth.signingIn
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : const Icon(Icons.login),
-                label: Text(auth.signingIn ? 'Signing in…' : 'Continue with Google'),
-                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+                label: Text(
+                  auth.signingIn ? 'Signing in…' : 'Continue with Google',
+                ),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                ),
               ),
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 key: const Key('sign_in_apple'),
-                onPressed: null, // device-only; enabled once the Apple capability exists
+                onPressed:
+                    null, // device-only; enabled once the Apple capability exists
                 icon: const Icon(Icons.apple),
                 label: const Text('Sign in with Apple (soon)'),
-                style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                ),
               ),
               if (auth.error != null) ...[
                 const SizedBox(height: 20),
-                Text(auth.error!,
-                    key: const Key('sign_in_error'),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: theme.colorScheme.error, fontSize: 12.5)),
+                Text(
+                  auth.error!,
+                  key: const Key('sign_in_error'),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: theme.colorScheme.error,
+                    fontSize: 12.5,
+                  ),
+                ),
               ],
             ],
           ),

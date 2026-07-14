@@ -32,12 +32,13 @@ class AuthController extends Notifier<AuthState> {
   @override
   AuthState build() {
     _jar = CookieJar();
-    _dio = Dio(BaseOptions(
-      baseUrl: AppConfig.baseUrl,
-      // Treat 4xx as a normal response so we can read the backend's error body.
-      validateStatus: (s) => s != null && s < 500,
-    ))
-      ..interceptors.add(CookieManager(_jar));
+    _dio = Dio(
+      BaseOptions(
+        baseUrl: AppConfig.baseUrl,
+        // Treat 4xx as a normal response so we can read the backend's error body.
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    )..interceptors.add(CookieManager(_jar));
     return const AuthState();
   }
 
@@ -67,14 +68,24 @@ class AuthController extends Notifier<AuthState> {
         throw Exception('Google returned no ID token');
       }
 
-      final resp = await _dio.post('/api/auth/native/google', data: {'id_token': idToken});
-      final ok = resp.statusCode == 200 && (resp.data is Map) && resp.data['success'] == true;
+      final resp = await _dio.post(
+        '/api/auth/native/google',
+        data: {'id_token': idToken},
+      );
+      final ok =
+          resp.statusCode == 200 &&
+          (resp.data is Map) &&
+          resp.data['success'] == true;
       if (!ok) {
-        throw Exception('Backend rejected sign-in: ${resp.statusCode} ${resp.data}');
+        throw Exception(
+          'Backend rejected sign-in: ${resp.statusCode} ${resp.data}',
+        );
       }
 
       await _injectSessionIntoWebviews();
-      state = AuthState(user: Map<String, dynamic>.from(resp.data['user'] as Map));
+      state = AuthState(
+        user: Map<String, dynamic>.from(resp.data['user'] as Map),
+      );
     } catch (e) {
       state = AuthState(error: e.toString());
     }
@@ -109,4 +120,6 @@ class AuthController extends Notifier<AuthState> {
   }
 }
 
-final authProvider = NotifierProvider<AuthController, AuthState>(AuthController.new);
+final authProvider = NotifierProvider<AuthController, AuthState>(
+  AuthController.new,
+);
