@@ -310,6 +310,46 @@ defmodule Relay.Cards do
   end
 
   @doc """
+  Like `set_status/3`, but first coerces an externally-supplied status to one valid for
+  the card's **current** stage type (RLY-75): the requested status is kept if
+  `Stage.valid_status?/2`, otherwise replaced with `Stage.default_status/1` — the same snap
+  rule `move_card/4` applies on arrival. A status value that isn't a real status enum is
+  passed through unchanged so the delegated `set_status/3` returns its changeset error
+  (400 at the API). Used by the untrusted `PATCH /api/cards/:ref` status path so a card can
+  never persist a status its stage forbids. Same return contract as `set_status/3`.
+  """
+  def set_status_snapped(%Card{} = card, attrs, actor \\ :agent) do
+    type = Repo.get!(Stage, card.stage_id).type
+    set_status(card, snap_requested_status(attrs, type), actor)
+  end
+
+  # Keep the requested status if valid for `type`, else the type's default. A non-enum
+  # value is returned untouched (as the original attrs) so set_status/3's changeset rejects it.
+  defp snap_requested_status(attrs, type) do
+    case normalize_status(attrs["status"] || attrs[:status]) do
+      {:ok, status} ->
+        snapped = if Stage.valid_status?(status, type), do: status, else: Stage.default_status(type)
+        %{"status" => snapped}
+
+      :error ->
+        attrs
+    end
+  end
+
+  defp normalize_status(status) when is_atom(status) and not is_nil(status) do
+    if status in Ecto.Enum.values(Card, :status), do: {:ok, status}, else: :error
+  end
+
+  defp normalize_status(status) when is_binary(status) do
+    case Enum.find(Ecto.Enum.values(Card, :status), &(Atom.to_string(&1) == status)) do
+      nil -> :error
+      atom -> {:ok, atom}
+    end
+  end
+
+  defp normalize_status(_status), do: :error
+
+  @doc """
   Replaces the card's whole owner list with `actors`
   (`:agent | {:user, user_id}`) atomically, attributed to `actor`
   (`:agent | {:user, user_id}`, defaults to `:agent`), returning

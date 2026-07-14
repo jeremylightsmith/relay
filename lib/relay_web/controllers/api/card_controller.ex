@@ -91,7 +91,7 @@ defmodule RelayWeb.Api.CardController do
   defp update_sub_tasks(card, _params), do: {:ok, card}
 
   defp update_status(card, %{"status" => status}) do
-    Cards.set_status(card, %{"status" => status}, :agent)
+    Cards.set_status_snapped(card, %{"status" => status}, :agent)
   end
 
   defp update_status(card, _params), do: {:ok, card}

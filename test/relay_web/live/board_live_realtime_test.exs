@@ -292,15 +292,18 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       assert has_element?(view, "#stage-col-2 .stage-count", "1")
     end
 
-    test "an API status change updates an open board live", %{conn: conn, backlog: backlog, token: token, user: user} do
-      {:ok, _card} = Cards.create_card(backlog, %{title: "Agent works"})
+    test "an API status change updates an open board live", %{conn: conn, board: board, token: token, user: user} do
+      # :needs_input is only stage-valid in a work/planning-type stage (RLY-75); "Spec"
+      # (position 3, :planning) is used here, unlike the queue-type Backlog/"Next up".
+      spec = Enum.find(board.stages, &(&1.type == :planning))
+      {:ok, _card} = Cards.create_card(spec, %{title: "Agent works"})
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert token |> api_conn() |> patch(~p"/api/cards/RLY-1", %{status: "needs_input"}) |> json_response(200)
 
-      assert has_element?(view, "#stage-col-1-cards .board-card .card-needs-input", "needs you")
+      assert has_element?(view, "#stage-col-#{spec.position}-cards .board-card .card-needs-input", "needs you")
     end
 
     test "an API comment appends to an open drawer's timeline", %{conn: conn, backlog: backlog, token: token, user: user} do
