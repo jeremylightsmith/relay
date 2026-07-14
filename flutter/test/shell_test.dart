@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/app/theme.dart';
-import 'package:relay_mobile/main.dart';
 
+/// The tab shell in isolation (ungated). The auth gate is exercised separately in
+/// auth_test.dart; here we assert the three-tab shell itself.
 Future<void> pumpApp(WidgetTester tester) async {
-  await tester.pumpWidget(const ProviderScope(child: RelayApp()));
+  await tester.pumpWidget(
+    ProviderScope(child: MaterialApp.router(routerConfig: buildRouter())),
+  );
   await tester.pumpAndSettle();
 }
 

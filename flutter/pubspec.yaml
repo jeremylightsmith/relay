@@ -40,6 +40,14 @@ dependencies:
   # Routing (matches ../rotation).
   go_router: ^17.3.0
 
+  # F2 auth: native Google sign-in → backend token exchange → session cookie.
+  google_sign_in: ^7.2.0
+  dio: ^5.7.0
+  dio_cookie_manager: ^3.1.1
+  cookie_jar: ^4.0.8
+  # Inject the session cookie into embedded webviews (proves the session end-to-end).
+  flutter_inappwebview: ^6.1.5
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
