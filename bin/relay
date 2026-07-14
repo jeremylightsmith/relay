@@ -728,7 +728,6 @@ def work(card, entry, mode, cwd=ROOT, tag=""):
         return flag(ref, f"{entry['stage']} stage did not complete")
     comment(ref, f"{entry['stage']} done → pushing to {entry['done']}")
     move(ref, entry["done"])
-    set_status(ref, "in_review" if entry["done"].lower().endswith(":review") else "ready")
     log(f"  ✓ {ref} pushed to {entry['done']}")
 
 

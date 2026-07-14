@@ -57,8 +57,9 @@ defmodule RelayWeb.Api.CardControllerTest do
     assert conn |> get(~p"/api/cards/#{ref(board, other_card)}") |> json_response(404)
   end
 
-  test "PATCH updates title and status", %{conn: conn, board: board, stage: stage} do
-    card = insert(:card, stage: stage, title: "Old")
+  test "PATCH updates title and status", %{conn: conn, board: board} do
+    review = insert(:stage, board: board, type: :review, position: 2)
+    card = insert(:card, stage: review, status: :in_review, title: "Old")
 
     body =
       conn
@@ -67,6 +68,19 @@ defmodule RelayWeb.Api.CardControllerTest do
       |> Map.fetch!("data")
 
     assert body["title"] == "New"
+    assert body["status"] == "in_review"
+  end
+
+  test "PATCH status ready on a review-stage card is coerced to in_review", %{conn: conn, board: board} do
+    review = insert(:stage, board: board, type: :review, position: 3)
+    card = insert(:card, stage: review, status: :in_review)
+
+    body =
+      conn
+      |> patch(~p"/api/cards/#{ref(board, card)}", %{status: "ready"})
+      |> json_response(200)
+      |> Map.fetch!("data")
+
     assert body["status"] == "in_review"
   end
 

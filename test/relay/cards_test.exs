@@ -640,6 +640,54 @@ defmodule Relay.CardsTest do
     end
   end
 
+  describe "set_status_snapped/3" do
+    test "a review-stage card set to :ready persists :in_review and logs the change", %{board: board} do
+      review = insert(:stage, board: board, type: :review, position: 30)
+      card = insert(:card, stage: review, status: :working)
+
+      assert {:ok, %Card{} = updated} = Cards.set_status_snapped(card, %{"status" => "ready"})
+      assert updated.status == :in_review
+      assert Repo.get!(Card, card.id).status == :in_review
+
+      assert %Schemas.Activity{type: :status_changed, meta: meta} =
+               updated |> activities() |> Enum.find(&(&1.type == :status_changed))
+
+      assert meta == %{"from_status" => "working", "to_status" => "in_review"}
+    end
+
+    test "a work-stage card set to :ready stays :ready (valid, not coerced)", %{board: board} do
+      work = insert(:stage, board: board, type: :work, position: 31)
+      card = insert(:card, stage: work, status: :working)
+
+      assert {:ok, %Card{} = updated} = Cards.set_status_snapped(card, %{"status" => "ready"})
+      assert updated.status == :ready
+    end
+
+    test "a queue-stage card set to :in_review coerces to :ready", %{board: board} do
+      queue = insert(:stage, board: board, type: :queue, position: 32)
+      card = insert(:card, stage: queue, status: :ready)
+
+      assert {:ok, %Card{} = updated} = Cards.set_status_snapped(card, %{"status" => "in_review"})
+      assert updated.status == :ready
+    end
+
+    test "a valid same-status re-set logs nothing (parity with set_status/3)", %{board: board} do
+      work = insert(:stage, board: board, type: :work, position: 33)
+      card = insert(:card, stage: work, status: :working)
+
+      {:ok, card} = Cards.set_status_snapped(card, %{"status" => "working"})
+
+      refute Enum.any?(activities(card), &(&1.type == :status_changed))
+    end
+
+    test "a non-enum status still returns an error changeset", %{board: board} do
+      work = insert(:stage, board: board, type: :work, position: 34)
+      card = insert(:card, stage: work, status: :working)
+
+      assert {:error, %Ecto.Changeset{}} = Cards.set_status_snapped(card, %{"status" => "nope"})
+    end
+  end
+
   describe "owner management" do
     setup %{stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "Owned"})
