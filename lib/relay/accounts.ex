@@ -1,10 +1,12 @@
 defmodule Relay.Accounts do
   @moduledoc """
-  The Accounts context: users and the current-user scope.
+  The Accounts context: users, the current-user scope, and user-scoped API tokens.
 
   Google OAuth is the only real sign-in path (open signup — any Google
   account gets a user). `ensure_dev_user!/0` backs the dev/test-only
   login bypass. Web/session concerns live in `RelayWeb.Auth`, not here.
+  `create_user_api_token/2` and `authenticate_user_api_token/1` mint and verify
+  the bearer tokens the native app uses for its JSON calls.
   """
 
   use Boundary, deps: [Relay.Repo, Schemas], exports: [GoogleTokenValidator]
@@ -95,9 +97,8 @@ defmodule Relay.Accounts do
         last_four: String.slice(secret, -4, 4)
       })
 
-    case Repo.insert(changeset) do
-      {:ok, token} -> {:ok, %{user_api_token: token, token: raw}}
-      {:error, changeset} -> {:error, changeset}
+    with {:ok, token} <- Repo.insert(changeset) do
+      {:ok, %{user_api_token: token, token: raw}}
     end
   end
 

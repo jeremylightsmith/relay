@@ -48,6 +48,15 @@ defmodule Relay.UserApiTokensTest do
     assert :error = Accounts.authenticate_user_api_token(token)
   end
 
+  test "rejects a token with a known prefix but the wrong secret" do
+    user = insert(:user)
+    {:ok, %{user_api_token: record}} = Accounts.create_user_api_token(user)
+
+    forged = "relayu_#{record.token_prefix}_#{String.duplicate("0", 64)}"
+    assert :error = Accounts.authenticate_user_api_token(forged)
+    assert Repo.get!(UserApiToken, record.id).last_used_at == nil
+  end
+
   test "user tokens and board keys can never authenticate as each other" do
     user = insert(:user)
     {:ok, %{token: user_token}} = Accounts.create_user_api_token(user)
