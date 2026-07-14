@@ -49,20 +49,6 @@ defmodule Relay.Factory do
     }
   end
 
-  # A persisted user token whose raw token is intentionally unknown — use
-  # Relay.Accounts.create_user_api_token/2 in tests that need the raw secret.
-  def user_api_token_factory do
-    secret = 32 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower)
-
-    %Schemas.UserApiToken{
-      context: "mobile",
-      token_prefix: sequence(:user_token_prefix, &String.pad_leading("#{&1}", 12, "0")),
-      token_hash: Base.encode16(:crypto.hash(:sha256, secret), case: :lower),
-      last_four: String.slice(secret, -4, 4),
-      user: build(:user)
-    }
-  end
-
   def stage_factory do
     %Schemas.Stage{
       name: sequence(:stage_name, &"Stage #{&1}"),

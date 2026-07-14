@@ -10,17 +10,16 @@ defmodule Relay.ApiKeys do
   call: prefix lookup, then constant-time hash comparison.
   """
 
-  use Boundary, deps: [Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Repo, Relay.Tokens, Schemas]
 
   alias Relay.Repo
+  alias Relay.Tokens
   alias Schemas.ApiKey
   alias Schemas.Board
   alias Schemas.User
 
   @default_name "Board API key"
-  @prefix_bytes 6
-  @secret_bytes 32
-  @last_used_throttle_seconds 60
+  @sentinel "relay"
 
   @doc """
   Creates the board's API key. Returns `{:ok, %{api_key: key, token: raw}}` —
@@ -29,7 +28,7 @@ defmodule Relay.ApiKeys do
   has a key (single-key invariant — the UI replaces keys via `regenerate/1`).
   """
   def create_key(%Board{} = board, %User{} = creator) do
-    {prefix, secret, raw} = generate_token()
+    {prefix, secret, raw} = Tokens.generate(@sentinel)
 
     changeset =
       ApiKey.changeset(%ApiKey{
@@ -37,7 +36,7 @@ defmodule Relay.ApiKeys do
         created_by_id: creator.id,
         name: @default_name,
         token_prefix: prefix,
-        token_hash: hash_secret(secret),
+        token_hash: Tokens.hash(secret),
         last_four: String.slice(secret, -4, 4)
       })
 
@@ -57,13 +56,13 @@ defmodule Relay.ApiKeys do
   immediately.
   """
   def regenerate(%ApiKey{} = key) do
-    {prefix, secret, raw} = generate_token()
+    {prefix, secret, raw} = Tokens.generate(@sentinel)
 
     key =
       key
       |> Ecto.Changeset.change(
         token_prefix: prefix,
-        token_hash: hash_secret(secret),
+        token_hash: Tokens.hash(secret),
         last_four: String.slice(secret, -4, 4),
         last_used_at: nil
       )
@@ -83,43 +82,14 @@ defmodule Relay.ApiKeys do
   09's API authentication calls.
   """
   def authenticate(raw_token) when is_binary(raw_token) do
-    with ["relay", prefix, secret] <- String.split(raw_token, "_", parts: 3),
+    with {:ok, prefix, secret} <- Tokens.parse(raw_token, @sentinel),
          %ApiKey{} = key <- Repo.get_by(ApiKey, token_prefix: prefix),
-         true <- Plug.Crypto.secure_compare(hash_secret(secret), key.token_hash) do
-      touch_last_used(key)
+         true <- Plug.Crypto.secure_compare(Tokens.hash(secret), key.token_hash) do
+      Tokens.touch_last_used(key)
 
       {:ok, Repo.preload(key, :board).board}
     else
       _not_authenticated -> :error
     end
   end
-
-  # Throttle the last_used_at write so a once-per-minute poll (RLY-12) doesn't
-  # write a row on every request. Only writes when never used or the stored
-  # timestamp is older than the threshold, keeping the auth path near-free.
-  defp touch_last_used(%ApiKey{last_used_at: last_used_at} = key) do
-    now = DateTime.truncate(DateTime.utc_now(), :second)
-
-    if stale?(last_used_at, now) do
-      key
-      |> Ecto.Changeset.change(last_used_at: now)
-      |> Repo.update!()
-    end
-  end
-
-  defp stale?(nil, _now), do: true
-
-  defp stale?(last_used_at, now) do
-    DateTime.diff(now, last_used_at, :second) >= @last_used_throttle_seconds
-  end
-
-  defp generate_token do
-    prefix = random_hex(@prefix_bytes)
-    secret = random_hex(@secret_bytes)
-    {prefix, secret, "relay_#{prefix}_#{secret}"}
-  end
-
-  defp random_hex(bytes), do: bytes |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower)
-
-  defp hash_secret(secret), do: Base.encode16(:crypto.hash(:sha256, secret), case: :lower)
 end

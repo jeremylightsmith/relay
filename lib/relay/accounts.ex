@@ -7,17 +7,16 @@ defmodule Relay.Accounts do
   login bypass. Web/session concerns live in `RelayWeb.Auth`, not here.
   """
 
-  use Boundary, deps: [Relay.Repo, Schemas], exports: [GoogleTokenValidator]
+  use Boundary, deps: [Relay.Repo, Relay.Tokens, Schemas], exports: [GoogleTokenValidator]
 
   alias Relay.Repo
+  alias Relay.Tokens
   alias Schemas.User
   alias Schemas.UserApiToken
 
   @dev_user_email "dev@relay.local"
   @dev_user_uid "dev-user"
-  @user_token_prefix_bytes 6
-  @user_token_secret_bytes 32
-  @user_token_last_used_throttle_seconds 60
+  @user_token_sentinel "relayu"
   @default_user_token_context "mobile"
 
   @doc "Fetches a user by primary key. Returns nil when not found."
@@ -84,20 +83,19 @@ defmodule Relay.Accounts do
   tokens and board keys (`relay_…`, `Relay.ApiKeys`) mutually unauthenticable.
   """
   def create_user_api_token(%User{} = user, context \\ @default_user_token_context) do
-    {prefix, secret, raw} = generate_user_token()
+    {prefix, secret, raw} = Tokens.generate(@user_token_sentinel)
 
     changeset =
       UserApiToken.changeset(%UserApiToken{
         user_id: user.id,
         context: context,
         token_prefix: prefix,
-        token_hash: hash_user_token_secret(secret),
+        token_hash: Tokens.hash(secret),
         last_four: String.slice(secret, -4, 4)
       })
 
-    case Repo.insert(changeset) do
-      {:ok, token} -> {:ok, %{user_api_token: token, token: raw}}
-      {:error, changeset} -> {:error, changeset}
+    with {:ok, token} <- Repo.insert(changeset) do
+      {:ok, %{user_api_token: token, token: raw}}
     end
   end
 
@@ -108,10 +106,10 @@ defmodule Relay.Accounts do
   `RelayWeb.ApiUserAuth` calls.
   """
   def authenticate_user_api_token(raw_token) when is_binary(raw_token) do
-    with ["relayu", prefix, secret] <- String.split(raw_token, "_", parts: 3),
+    with {:ok, prefix, secret} <- Tokens.parse(raw_token, @user_token_sentinel),
          %UserApiToken{} = token <- Repo.get_by(UserApiToken, token_prefix: prefix),
-         true <- Plug.Crypto.secure_compare(hash_user_token_secret(secret), token.token_hash) do
-      touch_user_token_last_used(token)
+         true <- Plug.Crypto.secure_compare(Tokens.hash(secret), token.token_hash) do
+      Tokens.touch_last_used(token)
 
       {:ok, Repo.preload(token, :user).user}
     else
@@ -123,32 +121,4 @@ defmodule Relay.Accounts do
 
   @doc "Revokes (deletes) a user token. It stops authenticating immediately."
   def revoke_user_api_token(%UserApiToken{} = token), do: Repo.delete(token)
-
-  # Throttled exactly like Relay.ApiKeys: a polling client must not write a row per
-  # request, so only stamp when never used or older than the threshold.
-  defp touch_user_token_last_used(%UserApiToken{last_used_at: last_used_at} = token) do
-    now = DateTime.truncate(DateTime.utc_now(), :second)
-
-    if user_token_stale?(last_used_at, now) do
-      token
-      |> Ecto.Changeset.change(last_used_at: now)
-      |> Repo.update!()
-    end
-  end
-
-  defp user_token_stale?(nil, _now), do: true
-
-  defp user_token_stale?(last_used_at, now) do
-    DateTime.diff(now, last_used_at, :second) >= @user_token_last_used_throttle_seconds
-  end
-
-  defp generate_user_token do
-    prefix = random_user_token_hex(@user_token_prefix_bytes)
-    secret = random_user_token_hex(@user_token_secret_bytes)
-    {prefix, secret, "relayu_#{prefix}_#{secret}"}
-  end
-
-  defp random_user_token_hex(bytes), do: bytes |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower)
-
-  defp hash_user_token_secret(secret), do: Base.encode16(:crypto.hash(:sha256, secret), case: :lower)
 end

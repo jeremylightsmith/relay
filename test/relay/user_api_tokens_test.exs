@@ -10,19 +10,22 @@ defmodule Relay.UserApiTokensTest do
     assert {:ok, %{user_api_token: %UserApiToken{} = record, token: token}} =
              Accounts.create_user_api_token(user)
 
-    assert String.starts_with?(token, "relayu_")
+    assert token =~ ~r/^relayu_[0-9a-f]{12}_[0-9a-f]{64}$/
     assert record.context == "mobile"
     assert {:ok, authenticated} = Accounts.authenticate_user_api_token(token)
     assert authenticated.id == user.id
   end
 
-  test "the raw secret is never persisted" do
+  test "stores only a SHA-256 hash — the raw secret is never persisted" do
     {:ok, %{user_api_token: record, token: token}} = Accounts.create_user_api_token(insert(:user))
     ["relayu", prefix, secret] = String.split(token, "_", parts: 3)
 
-    assert record.token_prefix == prefix
-    refute record.token_hash == secret
-    assert record.last_four == String.slice(secret, -4, 4)
+    reloaded = Repo.get!(UserApiToken, record.id)
+
+    assert reloaded.token_prefix == prefix
+    assert reloaded.token_hash == Base.encode16(:crypto.hash(:sha256, secret), case: :lower)
+    assert reloaded.last_four == String.slice(secret, -4, 4)
+    refute inspect(Map.from_struct(reloaded)) =~ secret
   end
 
   test "a user may hold several tokens (one per device)" do
@@ -52,5 +55,37 @@ defmodule Relay.UserApiTokensTest do
 
     assert :error = Accounts.authenticate_user_api_token(board_token)
     assert :error = Relay.ApiKeys.authenticate(user_token)
+  end
+
+  describe "authenticate_user_api_token/1 last_used_at throttling" do
+    test "writes last_used_at when it was never set" do
+      {:ok, %{user_api_token: record, token: token}} = Accounts.create_user_api_token(insert(:user))
+      assert record.last_used_at == nil
+
+      assert {:ok, _user} = Accounts.authenticate_user_api_token(token)
+      assert %DateTime{} = Repo.get!(UserApiToken, record.id).last_used_at
+    end
+
+    test "skips the write when last_used_at is recent" do
+      {:ok, %{user_api_token: record, token: token}} = Accounts.create_user_api_token(insert(:user))
+
+      # 5s ago: inside the 60s throttle window, but far enough from "now" that
+      # this can't accidentally match an unthrottled write's timestamp.
+      recent = DateTime.utc_now() |> DateTime.add(-5, :second) |> DateTime.truncate(:second)
+      record |> Ecto.Changeset.change(last_used_at: recent) |> Repo.update!()
+
+      assert {:ok, _user} = Accounts.authenticate_user_api_token(token)
+      assert Repo.get!(UserApiToken, record.id).last_used_at == recent
+    end
+
+    test "writes last_used_at when the stored value is stale" do
+      {:ok, %{user_api_token: record, token: token}} = Accounts.create_user_api_token(insert(:user))
+
+      stale = DateTime.utc_now() |> DateTime.add(-120, :second) |> DateTime.truncate(:second)
+      record |> Ecto.Changeset.change(last_used_at: stale) |> Repo.update!()
+
+      assert {:ok, _user} = Accounts.authenticate_user_api_token(token)
+      assert DateTime.after?(Repo.get!(UserApiToken, record.id).last_used_at, stale)
+    end
   end
 end
