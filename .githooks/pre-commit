@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Auto-format staged Flutter (Dart) files so anything committed — and therefore
+# anything pushed to GitHub — already passes CI's `dart format --set-exit-if-changed`.
+#
+# Best-effort: if the Dart toolchain (via mise) isn't available, it warns and lets
+# the commit through rather than blocking. Applies in linked worktrees too (they
+# share this repo's core.hooksPath).
+set -uo pipefail
+
+files="$(git diff --cached --name-only --diff-filter=ACM | grep -E '^flutter/.*\.dart$' || true)"
+[ -z "$files" ] && exit 0
+
+if ! command -v mise >/dev/null 2>&1; then
+  echo "pre-commit: mise not found — skipping dart format (Flutter toolchain missing)." >&2
+  exit 0
+fi
+
+# Format the staged Dart files (paths are relative to flutter/).
+rel="$(echo "$files" | sed 's|^flutter/||')"
+if ! ( cd flutter && echo "$rel" | tr '\n' '\0' | xargs -0 mise exec -- dart format >/dev/null 2>&1 ); then
+  echo "pre-commit: dart format failed — leaving files unchanged." >&2
+  exit 0
+fi
+
+# Re-stage anything formatting changed, so the commit contains the formatted code.
+echo "$files" | tr '\n' '\0' | xargs -0 git add
+exit 0

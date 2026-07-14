@@ -77,9 +77,11 @@ refactor that benefits from isolation (e.g. keep a pure schema migration its own
 - **`## Verification`** — declares the gate the executor runs, because not every card is a
   Phoenix card. Two lines:
   - **`Gate:`** the command(s) that must pass. **Default `mix precommit`** (the Elixir/LiveView
-    app). A card that only touches **`flutter/`** declares `flutter analyze` + `flutter test`
-    (run in `flutter/`) instead — `mix precommit` does not exercise Dart. A card touching both
-    declares both.
+    app). A card that only touches **`flutter/`** declares `dart format --set-exit-if-changed .`
+    + `flutter analyze` + `flutter test` (run in `flutter/`) instead — matching CI's Flutter Deploy
+    `validate` job; `mix precommit` does not exercise Dart. A card touching both declares both.
+    (A committed `.githooks/pre-commit` auto-formats staged Dart, so `dart format` is a belt-and-
+    suspenders check, not a formatting step.)
   - **`Smoke:`** how the acceptance smoke drives it. Default: the running web app on
     `:4003` via Playwright. A **Flutter** card declares the iOS-simulator smoke (boot the app,
     screenshot each state, compare to `docs/designs/Relay Mobile.dc.html`). Say "none" only for
