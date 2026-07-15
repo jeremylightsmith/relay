@@ -3,6 +3,7 @@ defmodule Relay.PlanSkillsTest do
 
   @write_plan Path.join([File.cwd!(), ".claude", "commands", "write-plan.md"])
   @exec_plan Path.join([File.cwd!(), ".claude", "commands", "exec-plan.md"])
+  @execute_plan_js Path.join([File.cwd!(), ".claude", "workflows", "execute-plan.js"])
 
   describe "write-plan reads the spec from the card and writes the plan to the card" do
     setup do
@@ -91,6 +92,30 @@ defmodule Relay.PlanSkillsTest do
     test "enumerates the acceptance statuses so the runner sentinel can gate on them", %{doc: doc} do
       assert doc =~ "acceptance-failed"
       assert doc =~ "acceptance-blocked"
+    end
+  end
+
+  describe "execute-plan.js gates the acceptance phase on whether the criteria fetch actually succeeded" do
+    setup do
+      {:ok, doc: File.read!(@execute_plan_js)}
+    end
+
+    test "the criteria probe distinguishes a fetch error from a genuinely empty field", %{doc: doc} do
+      assert doc =~ "enum: ['present', 'absent', 'error']"
+    end
+
+    test "a probe fetch error is routed to blocked, never silently treated as no criteria", %{doc: doc} do
+      assert doc =~ "probe.result === 'error'"
+      assert doc =~ "verdict: 'blocked'"
+    end
+
+    test "a missing probe result (framework failure) is also treated as blocked, not skipped", %{doc: doc} do
+      assert doc =~ "!probe || probe.result === 'error'"
+    end
+
+    test "the acceptance fix-loop has no redundant done flag mirroring the smoke loop's plain breaks",
+         %{doc: doc} do
+      refute doc =~ "acceptDone"
     end
   end
 end

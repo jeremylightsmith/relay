@@ -115,9 +115,17 @@ const SMOKE = {
 const CRITERIA = {
   type: 'object',
   additionalProperties: false,
-  required: ['present', 'detail'],
+  required: ['result', 'detail'],
   properties: {
-    present: { type: 'boolean', description: 'true when the card has a non-empty acceptance_criteria field.' },
+    result: {
+      type: 'string',
+      enum: ['present', 'absent', 'error'],
+      description:
+        'present = the card fetch succeeded and acceptance_criteria is non-empty. absent = the fetch ' +
+        'succeeded and it is empty (a pre-RLY-108 card, or none authored). error = the fetch ITSELF ' +
+        'failed (non-zero exit from ./bin/relay, e.g. 404 / API down / expired key) — this is not the ' +
+        'same as absent and must never be treated as "no criteria".',
+    },
     detail: { type: 'string', description: 'One line: how many criteria were found, or why the fetch failed.' },
   },
 }
@@ -337,19 +345,23 @@ let acceptanceRan = false
 if (smokeStatus === 'ready' && args && args.ref) {
   phase('Acceptance')
   const probe = await agent(
-    `Read Relay card ${args.ref}'s acceptance criteria and report ONLY whether it has any. ` +
-      `This repo has a CLI at ./bin/relay and RELAY_URL + RELAY_API_KEY are already set. Run ` +
-      `\`./bin/relay card ${args.ref} --json | jq -r '.acceptance_criteria // ""'\`. Return ` +
-      `present=true when that prints non-whitespace text, present=false when it is empty. ` +
-      `Do NOT run the criteria, edit anything, or touch the card.`,
+    `Read Relay card ${args.ref}'s acceptance criteria and report ONLY whether it has any — do NOT ` +
+      `run the criteria, edit anything, or touch the card. This repo has a CLI at ./bin/relay and ` +
+      `RELAY_URL + RELAY_API_KEY are already set. Run \`./bin/relay card ${args.ref} --json\` ON ITS ` +
+      `OWN first (not through a pipe) and check ITS OWN exit status, separately from anything ` +
+      `downstream. On a non-zero exit (404 / API down / expired key / bogus ref — the CLI writes the ` +
+      `error to stderr and prints NOTHING to stdout), return result="error" with the stderr text in ` +
+      `detail. An error is NOT the same as an empty field — never report "absent" when the fetch ` +
+      `itself failed. Only once you've confirmed a zero exit, pipe that same JSON through ` +
+      `\`jq -r '.acceptance_criteria // ""'\` and return result="present" when it prints non-whitespace ` +
+      `text, result="absent" when it is empty.`,
     { schema: CRITERIA, phase: 'Acceptance', model: 'haiku', label: 'criteria probe' },
   )
 
-  if (probe && probe.present) {
+  if (probe && probe.result === 'present') {
     acceptanceRan = true
-    let acceptDone = false
 
-    for (let visit = 1; visit <= MAX_ACCEPT_VISITS && !acceptDone; visit++) {
+    for (let visit = 1; visit <= MAX_ACCEPT_VISITS; visit++) {
       acceptance = await agent(
         role('acceptance-tester',
           `Card ref: ${args.ref} (visit ${visit}). Read its acceptance criteria off the card and run ` +
@@ -364,7 +376,7 @@ if (smokeStatus === 'ready' && args && args.ref) {
       )
       // pass/blocked both end the loop: blocked is an environment problem, not a code
       // defect, so it is reported without fix-looping (same rule as smoke).
-      if (!acceptance || acceptance.verdict !== 'fail') { acceptDone = true; break }
+      if (!acceptance || acceptance.verdict !== 'fail') break
       // Last visit: a fix here would never be re-tested, so don't spend it.
       if (visit === MAX_ACCEPT_VISITS) break
 
@@ -374,8 +386,23 @@ if (smokeStatus === 'ready' && args && args.ref) {
         { agentType: 'general-purpose', model: 'sonnet', phase: 'Acceptance', effort: 'high', label: `accept-fix #${visit}` },
       )
     }
+  } else if (!probe || probe.result === 'error') {
+    // Fail CLOSED, not open: a probe that itself failed, or that couldn't fetch the
+    // card, tells us nothing about whether criteria exist. Treating that the same as
+    // "no criteria" would let a flaky API / bad ref silently skip enforcement and ship
+    // a branch whose criteria were never run. Synthesize the same shape a real
+    // acceptance-tester would return for an environment blocker, so it flows through
+    // the existing verdict → finalStatus mapping below unchanged.
+    acceptanceRan = true
+    acceptance = {
+      verdict: 'blocked',
+      summary: '',
+      findings: (probe && probe.detail) || 'The criteria probe failed to return a verdict.',
+      criteria: [],
+    }
+    log(`Could not confirm acceptance criteria on ${args.ref} — treating as blocked: ${acceptance.findings}`)
   } else {
-    log(`No acceptance criteria on ${args.ref} — skipping the acceptance phase.`)
+    log(`No acceptance criteria on ${args.ref} — skipping the acceptance phase. ${probe.detail || ''}`.trim())
   }
 }
 
