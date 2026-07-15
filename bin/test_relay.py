@@ -260,7 +260,7 @@ class WorkOwnershipTest(unittest.TestCase):
         relay.set_status = lambda ref, status: self.calls.append(("set_status", ref, status))
         relay.comment = lambda ref, body: self.calls.append(("comment", ref))
         relay.flag = lambda ref, msg: self.calls.append(("flag", ref))
-        relay.run_step = lambda step, vars, cwd=relay.ROOT, tag="": True
+        relay.run_step = lambda step, vars, cwd=relay.ROOT, tag="", sink=None: True
         relay.get_card = lambda ref: {"status": "in_review"}
         relay.log = lambda *a, **k: None
 
@@ -288,6 +288,119 @@ class WorkOwnershipTest(unittest.TestCase):
         relay.work(self.CARD, self.ENTRY, "fresh")  # self.ENTRY["done"] == "Code:Review"
         set_status_calls = [c for c in self.calls if c[0] == "set_status"]
         self.assertEqual(set_status_calls, [("set_status", "RLY-9", "working")])
+
+
+class FailureReasonTest(unittest.TestCase):
+    """A failing step streamed its error to the runner's console and then dropped it:
+    the card only ever said "<stage> stage did not complete". Three cards stalled that
+    way in one day, each needing a transcript dig to learn why. The card must carry
+    the reason."""
+
+    CARD = {"ref": "RLY-9", "title": "t"}
+    ENTRY = {"stage": "Code", "from": "Plan", "done": "Review",
+             "action": [{"shell": "false"}]}
+    PATCHED = ("DRY", "move", "set_status", "comment", "get_card", "log",
+               "needs_input", "_stream_shell")
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in self.PATCHED}
+        relay.DRY = False
+        self.flagged = []
+        relay.move = lambda *a, **k: None
+        relay.set_status = lambda *a, **k: None
+        relay.comment = lambda *a, **k: None
+        relay.get_card = lambda ref: {"status": "working"}
+        relay.log = lambda *a, **k: None
+        relay.needs_input = lambda ref, msg: self.flagged.append((ref, msg))
+        # The real failure shape: git refusing to clobber a leftover edit.
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None: (
+            sink is not None
+            and sink.extend([
+                "error: Your local changes to the following files would be "
+                "overwritten by checkout:",
+                "\t.claude/workflows/execute-plan.js",
+                "Aborting",
+            ])
+        ) or False
+        self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+
+    def test_the_flagged_reason_includes_the_failing_step_output(self):
+        relay.work(self.CARD, self.ENTRY, "fresh")
+
+        self.assertEqual(len(self.flagged), 1, self.flagged)
+        _, msg = self.flagged[0]
+        # Without this, the card says only "Code stage did not complete" and the cause
+        # is buried in a runner log nobody is watching.
+        self.assertIn("execute-plan.js", msg)
+        self.assertIn("would be overwritten by checkout", msg)
+
+    def test_the_flagged_reason_still_names_the_stage(self):
+        relay.work(self.CARD, self.ENTRY, "fresh")
+
+        _, msg = self.flagged[0]
+        self.assertIn("Code", msg)
+
+
+class ResetWorktreeTest(unittest.TestCase):
+    """A leftover edit in a pool worktree once blocked every Code stage for hours:
+    `git checkout -B` refuses to clobber local changes, the step exited 1, and the
+    runner reported only "Code stage did not complete". Preparing a worktree must
+    therefore never be blocked by what a previous job left behind."""
+
+    def setUp(self):
+        self.runs = []
+        real = relay.subprocess.run
+
+        def fake_run(cmd, **kw):
+            self.runs.append((cmd, kw.get("cwd")))
+            # Report the worktree as dirty so the salvage path is exercised.
+            if cmd[:3] == ["git", "status", "--porcelain"]:
+                return argparse.Namespace(stdout=" M .claude/workflows/execute-plan.js\n")
+            return argparse.Namespace(stdout="", returncode=0)
+
+        relay.subprocess.run = fake_run
+        self.addCleanup(setattr, relay.subprocess, "run", real)
+
+    def git_cmds(self):
+        return [c for c, _ in self.runs if c and c[0] == "git"]
+
+    def test_a_dirty_worktree_is_reset_hard_and_cleaned_before_checkout(self):
+        relay.reset_worktree("/tmp/wt", "origin/main")
+        cmds = [" ".join(c) for c in self.git_cmds()]
+
+        # The two that actually unblock it, in order, before the checkout.
+        self.assertTrue(any(c.startswith("git reset --hard") for c in cmds), cmds)
+        self.assertTrue(any(c.startswith("git clean -fd") for c in cmds), cmds)
+        reset_at = next(i for i, c in enumerate(cmds) if c.startswith("git reset --hard"))
+        checkout_at = next(i for i, c in enumerate(cmds) if "checkout --detach" in c)
+        self.assertLess(reset_at, checkout_at, cmds)
+
+    def test_leftovers_are_stashed_not_silently_destroyed(self):
+        relay.reset_worktree("/tmp/wt", "origin/main")
+        cmds = [" ".join(c) for c in self.git_cmds()]
+
+        # A pool worktree is scratch space, but a real fix was once stranded in one.
+        # Salvage first so it is recoverable via `git stash list`.
+        self.assertTrue(any(c.startswith("git stash push") for c in cmds), cmds)
+        stash_at = next(i for i, c in enumerate(cmds) if c.startswith("git stash push"))
+        reset_at = next(i for i, c in enumerate(cmds) if c.startswith("git reset --hard"))
+        self.assertLess(stash_at, reset_at, cmds)
+
+    def test_clean_does_not_use_x_so_build_caches_survive(self):
+        relay.reset_worktree("/tmp/wt", "origin/main")
+        clean = next(c for c in self.git_cmds() if c[:2] == ["git", "clean"])
+
+        # -fdx would nuke gitignored deps/_build/node_modules and make every job pay
+        # a full rebuild.
+        self.assertNotIn("-fdx", clean)
+        self.assertNotIn("-x", clean)
+
+    def test_every_git_call_targets_the_worktree_not_the_repo_root(self):
+        relay.reset_worktree("/tmp/wt", "origin/main")
+
+        # A reset --hard aimed at ROOT would blow away the user's own working tree.
+        for cmd, cwd in self.runs:
+            self.assertEqual(cwd, "/tmp/wt", cmd)
 
 
 class BuildPoolsTest(unittest.TestCase):
@@ -325,7 +438,7 @@ class CwdRoutingTest(unittest.TestCase):
 
     def test_shell_step_routes_rendered_cmd_cwd_and_tag(self):
         seen = {}
-        relay._stream_shell = lambda cmd, cwd, tag="": (
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None: (
             seen.update(cmd=cmd, cwd=cwd, tag=tag) or True)
         relay.run_step({"shell": "echo {ref}"}, {"ref": "RLY-7"},
                        cwd="/tmp/wt", tag="[RLY-7] ")
