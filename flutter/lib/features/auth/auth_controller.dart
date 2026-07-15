@@ -32,11 +32,23 @@ const relaySessionCookie = '_relay_key';
 enum AuthStatus { restoring, signedOut, signingIn, signedIn }
 
 class AuthState {
-  const AuthState({this.status = AuthStatus.restoring, this.user, this.error});
+  const AuthState({
+    this.status = AuthStatus.restoring,
+    this.user,
+    this.error,
+    this.token,
+  });
 
   final AuthStatus status;
   final Map<String, dynamic>? user;
   final String? error;
+
+  /// The `/api/all/*` bearer (RLY-78). Minted by both native sign-in and the
+  /// session verify, and deliberately **not** persisted: it is unrecoverable
+  /// once returned, so a restored launch gets a fresh one from /me rather than
+  /// storing this. Null means the inbox honestly cannot load — see
+  /// MissingTokenException — rather than an empty "all caught up" queue.
+  final String? token;
 
   bool get signedIn => status == AuthStatus.signedIn;
   bool get signingIn => status == AuthStatus.signingIn;
@@ -86,6 +98,7 @@ class AuthController extends Notifier<AuthState> {
         state = AuthState(
           status: AuthStatus.signedIn,
           user: Map<String, dynamic>.from(resp.data['user'] as Map),
+          token: resp.data['token'] as String?,
         );
         return;
       }
@@ -145,6 +158,7 @@ class AuthController extends Notifier<AuthState> {
       state = AuthState(
         status: AuthStatus.signedIn,
         user: Map<String, dynamic>.from(resp.data['user'] as Map),
+        token: resp.data['token'] as String?,
       );
     } catch (e) {
       // The raw error stays debuggable here and never reaches the UI.

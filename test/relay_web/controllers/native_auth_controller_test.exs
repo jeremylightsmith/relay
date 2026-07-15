@@ -33,6 +33,25 @@ defmodule RelayWeb.NativeAuthControllerTest do
       assert Map.has_key?(conn.resp_cookies, "_relay_key")
     end
 
+    test "returns a bearer token that authenticates the /api/all scope", %{conn: conn} do
+      stub_google(@tokeninfo)
+
+      conn = post(conn, ~p"/api/auth/native/google", %{id_token: "tok"})
+
+      assert %{"success" => true, "token" => token} = json_response(conn, 200)
+      assert is_binary(token) and String.starts_with?(token, "relayu_")
+
+      # The point is not that a `token` key exists — it is that the native app can
+      # actually call the bearer-only scope with it. Without this the app signs in
+      # and the inbox still cannot load, which is the bug users see.
+      authed =
+        build_conn()
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get(~p"/api/all/feed")
+
+      assert json_response(authed, 200)
+    end
+
     test "resolves pending invites on native login", %{conn: conn} do
       stub_google(@tokeninfo)
       membership = insert(:membership, email: "ada@example.com", user: nil)
@@ -76,15 +95,39 @@ defmodule RelayWeb.NativeAuthControllerTest do
   end
 
   describe "GET /api/auth/native/me" do
+    test "returns a bearer token so a restored session can call /api/all", %{conn: conn} do
+      user = insert(:user, name: "Ada Lovelace", email: "ada@example.com")
+
+      conn = conn |> log_in_user(user) |> get(~p"/api/auth/native/me")
+
+      # RLY-86 restores the session cookie from the Keychain but the raw bearer is
+      # never persisted (it is unrecoverable by design), so a restored launch would
+      # otherwise hold a cookie and no token — the inbox broken exactly as on a
+      # cold sign-in. The verify round-trip is where the app gets a fresh one.
+      assert %{"success" => true, "token" => token} = json_response(conn, 200)
+      assert String.starts_with?(token, "relayu_")
+
+      authed =
+        build_conn()
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get(~p"/api/all/feed")
+
+      assert json_response(authed, 200)
+    end
+
     test "returns the signed-in user", %{conn: conn} do
       user = insert(:user, name: "Ada Lovelace", email: "ada@example.com")
 
       conn = conn |> log_in_user(user) |> get(~p"/api/auth/native/me")
 
-      assert json_response(conn, 200) == %{
+      # `token` is asserted by its own test above; it is unrecoverable and differs
+      # per call, so match the stable shape rather than the whole body.
+      assert %{
                "success" => true,
-               "user" => %{"id" => user.id, "name" => "Ada Lovelace", "email" => "ada@example.com"}
-             }
+               "user" => %{"id" => id, "name" => "Ada Lovelace", "email" => "ada@example.com"}
+             } = json_response(conn, 200)
+
+      assert id == user.id
     end
 
     test "with no session returns 401", %{conn: conn} do
