@@ -109,6 +109,26 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
     }
   }
 
+  /// Reject (send back) the current item with [note]. Same shape and policy as
+  /// [approveCurrent] — routed through the same [_settle], so `not_in_review` and
+  /// `unauthorized` behave identically regardless of which button the human
+  /// pressed, and reject gets the [ReviewQueueState.inFlight] double-tap guard
+  /// for free.
+  Future<String?> rejectCurrent({required String note}) async {
+    final item = state.current;
+    if (item == null || state.inFlight) return null;
+
+    state = state.copyWith(inFlight: true, clearError: true);
+    try {
+      final result = await ref
+          .read(decisionApiProvider)
+          .reject(ref: item.ref, boardSlug: item.boardSlug, note: note);
+      return await _settle(result, item, okBanner: 'Sent back · ${item.ref}');
+    } finally {
+      state = state.copyWith(inFlight: false);
+    }
+  }
+
   Future<String?> _settle(
     DecisionResult result,
     QueueItem item, {

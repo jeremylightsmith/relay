@@ -33,6 +33,12 @@ class FakeDecisionApi implements DecisionApi {
   final List<String> approved = [];
   final List<String> rejected = [];
 
+  /// Parallel to [rejected] — the note and board slug that ref actually carried,
+  /// so callers can catch plumbing bugs (a dropped controller read, a typo'd
+  /// query param) that a bare ref list would miss.
+  final List<String> rejectedNotes = [];
+  final List<String> rejectedBoards = [];
+
   @override
   Future<DecisionResult> approve({
     required String ref,
@@ -49,6 +55,8 @@ class FakeDecisionApi implements DecisionApi {
     required String note,
   }) async {
     rejected.add(ref);
+    rejectedNotes.add(note);
+    rejectedBoards.add(boardSlug);
     return result;
   }
 }
@@ -72,7 +80,10 @@ class BlockedDecisionApi implements DecisionApi {
     required String ref,
     required String boardSlug,
     required String note,
-  }) => throw UnimplementedError();
+  }) {
+    calls++;
+    return completer.future;
+  }
 }
 
 class FakeFeedRepository implements FeedRepository {
@@ -300,6 +311,84 @@ void main() {
     expect(await queue.approveCurrent(), isNull);
     expect(h.auth.signOutCalls, 1);
   });
+
+  test(
+    'rejecting posts the note and board slug and advances, bannering the ref',
+    () async {
+      final api = FakeDecisionApi();
+      final h = harness(api: api);
+      final queue = h.container.read(reviewQueueProvider.notifier);
+      queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
+
+      final dest = await queue.rejectCurrent(note: 'Needs error handling');
+
+      expect(dest, '/card/RLY-B?kind=in_review');
+      expect(api.rejected, ['RLY-A']);
+      expect(api.rejectedNotes, ['Needs error handling']);
+      expect(api.rejectedBoards, ['relay']);
+      expect(h.container.read(reviewQueueProvider).banner, 'Sent back · RLY-A');
+    },
+  );
+
+  test(
+    'rejecting into a 422 not_in_review is "already handled", same as approve',
+    () async {
+      final h = harness(
+        api: FakeDecisionApi(
+          const DecisionFailed(
+            'not_in_review',
+            'This card is not in a review stage',
+          ),
+        ),
+      );
+      final queue = h.container.read(reviewQueueProvider.notifier);
+      queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
+
+      final dest = await queue.rejectCurrent(note: 'Please revise');
+
+      expect(dest, '/card/RLY-B?kind=in_review');
+      expect(
+        h.container.read(reviewQueueProvider).banner,
+        'Already handled · RLY-A',
+      );
+      expect(h.container.read(reviewQueueProvider).error, isNull);
+    },
+  );
+
+  test('rejecting on a 401 signs out — the router does the rest', () async {
+    final h = harness(
+      api: FakeDecisionApi(
+        const DecisionFailed('unauthorized', 'Invalid or missing user token'),
+      ),
+    );
+    final queue = h.container.read(reviewQueueProvider.notifier);
+    queue.enter(rows: [row('RLY-A')], atRef: 'RLY-A');
+
+    expect(await queue.rejectCurrent(note: 'Please revise'), isNull);
+    expect(h.auth.signOutCalls, 1);
+  });
+
+  test(
+    'a second reject during an in-flight decision issues no second POST',
+    () async {
+      final api = BlockedDecisionApi();
+      final h = harness(api: api);
+      final queue = h.container.read(reviewQueueProvider.notifier);
+      queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
+
+      final first = queue.rejectCurrent(note: 'first');
+      final second = await queue.rejectCurrent(
+        note: 'second',
+      ); // the double-tap
+
+      expect(api.calls, 1);
+      expect(second, isNull, reason: 'the second tap must not navigate either');
+
+      api.completer.complete(const DecisionOk({}));
+      expect(await first, '/card/RLY-B?kind=in_review');
+      expect(h.container.read(reviewQueueProvider).inFlight, isFalse);
+    },
+  );
 
   test('takeBanner hands the banner over exactly once', () async {
     final h = harness(api: FakeDecisionApi());

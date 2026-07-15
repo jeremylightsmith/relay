@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/theme.dart';
-import 'decision_api.dart';
 import 'review_queue.dart';
 
 /// CORE-07 "Reject · note required" (docs/designs/Relay Mobile.dc.html — the artboard
@@ -32,8 +31,6 @@ class RejectNoteScreen extends ConsumerStatefulWidget {
 
 class _RejectNoteScreenState extends ConsumerState<RejectNoteScreen> {
   final _controller = TextEditingController();
-  bool _sending = false;
-  String? _error;
 
   @override
   void dispose() {
@@ -41,44 +38,33 @@ class _RejectNoteScreenState extends ConsumerState<RejectNoteScreen> {
     super.dispose();
   }
 
-  bool get _canSend => _controller.text.trim().isNotEmpty && !_sending;
-
+  /// Routed through [ReviewQueue.rejectCurrent] rather than calling
+  /// `DecisionApi.reject` directly — that keeps reject's outcome policy
+  /// identical to approve's: `not_in_review` advances with "Already handled",
+  /// `unauthorized` signs out (the router sends the human to `/welcome`), and
+  /// only everything else lands as `reviewQueueProvider`'s `state.error`. It
+  /// also puts reject behind the same `inFlight` double-tap guard approve gets.
   Future<void> _send() async {
-    if (!_canSend) return;
-    setState(() {
-      _sending = true;
-      _error = null;
-    });
+    final router = GoRouter.of(context);
+    final dest = await ref
+        .read(reviewQueueProvider.notifier)
+        .rejectCurrent(note: _controller.text.trim());
+    if (!mounted || dest == null) return;
 
-    final result = await ref
-        .read(decisionApiProvider)
-        .reject(
-          ref: widget.cardRef,
-          boardSlug: widget.boardSlug,
-          note: _controller.text,
-        );
-    if (!mounted) return;
-
-    switch (result) {
-      case DecisionOk():
-        final router = GoRouter.of(context);
-        final dest = await ref
-            .read(reviewQueueProvider.notifier)
-            .advanceAfter(banner: 'Sent back · ${widget.cardRef}');
-        // Drop the reject screen first, so the next card replaces the card we just
-        // sent back rather than stacking on top of it.
-        router.pop();
-        navigateQueue(router, dest);
-      case DecisionFailed(:final message):
-        setState(() {
-          _sending = false;
-          _error = message;
-        });
-    }
+    // Drop the reject screen first, so the next card replaces the card we just
+    // sent back rather than stacking on top of it. A cold deep link (or a
+    // stashed sign-in resuming straight here) can leave nothing to pop — in
+    // that case there is no card underneath to reveal, so just replace this
+    // screen outright.
+    if (router.canPop()) router.pop();
+    navigateQueue(router, dest);
   }
 
   @override
   Widget build(BuildContext context) {
+    final queueState = ref.watch(reviewQueueProvider);
+    final canSend = _controller.text.trim().isNotEmpty && !queueState.inFlight;
+
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
@@ -102,10 +88,10 @@ class _RejectNoteScreenState extends ConsumerState<RejectNoteScreen> {
                     ),
                     const SizedBox(height: 8), // artboard margin-top:8px
                     const _Hint(),
-                    if (_error != null) ...[
+                    if (queueState.error != null) ...[
                       const SizedBox(height: 12),
                       Text(
-                        _error!,
+                        queueState.error!,
                         key: const Key('reject_error'),
                         style: const TextStyle(
                           fontSize: 13,
@@ -117,7 +103,7 @@ class _RejectNoteScreenState extends ConsumerState<RejectNoteScreen> {
                 ),
               ),
             ),
-            _BottomBar(onSend: _canSend ? _send : null),
+            _BottomBar(onSend: canSend ? _send : null),
           ],
         ),
       ),
@@ -218,26 +204,33 @@ class _NoteField extends StatelessWidget {
     return Container(
       key: const Key('reject_note_field'),
       constraints: const BoxConstraints(minHeight: 120),
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border.all(color: RelayTheme.relayRejectBorder, width: 1.5),
         borderRadius: BorderRadius.circular(12),
       ),
+      // The 12px padding belongs to the text, not the Stack: CSS resolves the
+      // mic's `bottom:10px right:10px` against the field's padding box (inside
+      // the border, ignoring the 12px text inset). Padding the Stack itself
+      // would carry that 12px into the Positioned offset too, drifting the mic
+      // to 22px instead of the artboard's 10px.
       child: Stack(
         children: [
-          TextField(
-            key: const Key('reject_note_input'),
-            controller: controller,
-            onChanged: onChanged,
-            maxLines: null,
-            autofocus: true,
-            style: const TextStyle(fontSize: 12.5),
-            decoration: const InputDecoration.collapsed(
-              hintText: 'Reason…',
-              hintStyle: TextStyle(
-                fontSize: 12.5,
-                color: Color(0xFF7E8792), // oklch(0.62 0.02 255)
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: TextField(
+              key: const Key('reject_note_input'),
+              controller: controller,
+              onChanged: onChanged,
+              maxLines: null,
+              autofocus: true,
+              style: const TextStyle(fontSize: 12.5),
+              decoration: const InputDecoration.collapsed(
+                hintText: 'Reason…',
+                hintStyle: TextStyle(
+                  fontSize: 12.5,
+                  color: Color(0xFF7E8792), // oklch(0.62 0.02 255)
+                ),
               ),
             ),
           ),

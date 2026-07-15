@@ -3,12 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:relay_mobile/app/theme.dart';
+import 'package:relay_mobile/features/auth/auth_controller.dart';
 import 'package:relay_mobile/features/decisions/decision_api.dart';
 import 'package:relay_mobile/features/decisions/reject_note_screen.dart';
 import 'package:relay_mobile/features/decisions/review_queue.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
 
 import 'review_queue_test.dart' show FakeDecisionApi, FakeFeedRepository, row;
+import 'support/fake_auth.dart';
 
 final _input = find.byKey(const Key('reject_note_input'));
 final _send = find.byKey(const Key('reject_send'));
@@ -16,8 +18,8 @@ final _send = find.byKey(const Key('reject_send'));
 FilledButton _sendButton(WidgetTester tester) =>
     tester.widget<FilledButton>(_send);
 
-GoRouter _router() => GoRouter(
-  initialLocation: '/card/RLY-A',
+GoRouter _router({String initialLocation = '/card/RLY-A'}) => GoRouter(
+  initialLocation: initialLocation,
   routes: [
     GoRoute(
       path: '/needs-you',
@@ -43,15 +45,24 @@ GoRouter _router() => GoRouter(
   ],
 );
 
+/// Signed-in by default so `rejectCurrent`'s `unauthorized` arm has an
+/// `authProvider` to sign out — tests that care about that pass their own [auth].
+FakeAuthController _signedInAuth() => FakeAuthController(
+  const AuthState(status: AuthStatus.signedIn, token: 'relayu_t'),
+);
+
 Future<GoRouter> pumpReject(
   WidgetTester tester, {
   required DecisionApi api,
   FeedRepository? feed,
+  FakeAuthController? auth,
+  String initialLocation = '/card/RLY-A',
 }) async {
   final container = ProviderContainer(
     overrides: [
       decisionApiProvider.overrideWithValue(api),
       feedRepositoryProvider.overrideWithValue(feed ?? FakeFeedRepository()),
+      authProvider.overrideWith(() => auth ?? _signedInAuth()),
     ],
   );
   addTearDown(container.dispose);
@@ -59,7 +70,7 @@ Future<GoRouter> pumpReject(
       .read(reviewQueueProvider.notifier)
       .enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
 
-  final router = _router();
+  final router = _router(initialLocation: initialLocation);
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
@@ -67,8 +78,10 @@ Future<GoRouter> pumpReject(
     ),
   );
   await tester.pumpAndSettle();
-  router.push('/card/RLY-A/reject?board=relay');
-  await tester.pumpAndSettle();
+  if (initialLocation != '/card/RLY-A/reject?board=relay') {
+    router.push('/card/RLY-A/reject?board=relay');
+    await tester.pumpAndSettle();
+  }
   return router;
 }
 
@@ -152,6 +165,16 @@ void main() {
       expect(deco.shape, BoxShape.circle);
       expect(deco.color, RelayTheme.micGhostFill);
       expect(deco.border, Border.all(color: RelayTheme.micGhostBorder));
+
+      // The artboard anchors the mic 10px off the note field's own border —
+      // not 10px off the 12px text padding, which would drift it to 22px.
+      final fieldRect = tester.getRect(
+        find.byKey(const Key('reject_note_field')),
+      );
+      final micRect = tester.getRect(find.byKey(const Key('reject_mic')));
+      const borderWidth = 1.5;
+      expect(fieldRect.right - micRect.right, closeTo(10 + borderWidth, 0.1));
+      expect(fieldRect.bottom - micRect.bottom, closeTo(10 + borderWidth, 0.1));
     });
 
     testWidgets(
@@ -215,25 +238,42 @@ void main() {
     expect(_sendButton(tester).onPressed, isNotNull);
   });
 
-  testWidgets('sending posts the note and auto-advances to the next item', (
+  testWidgets(
+    'sending posts the note and board slug and auto-advances to the next item',
+    (tester) async {
+      final api = FakeDecisionApi();
+      await pumpReject(tester, api: api);
+
+      await tester.enterText(_input, 'Needs error handling');
+      await tester.pump();
+      await tester.tap(_send);
+      await tester.pumpAndSettle();
+
+      expect(api.rejected, ['RLY-A']);
+      expect(api.rejectedNotes, ['Needs error handling']);
+      expect(api.rejectedBoards, ['relay']);
+      expect(find.text('card RLY-B'), findsOneWidget);
+      expect(_send, findsNothing, reason: 'the reject screen is gone');
+      expect(
+        find.text('card RLY-A'),
+        findsNothing,
+        reason: 'RLY-A was replaced, not stacked under RLY-B',
+      );
+    },
+  );
+
+  testWidgets('sending trims the note before it reaches the server', (
     tester,
   ) async {
     final api = FakeDecisionApi();
     await pumpReject(tester, api: api);
 
-    await tester.enterText(_input, 'Needs error handling');
+    await tester.enterText(_input, '  fix it  ');
     await tester.pump();
     await tester.tap(_send);
     await tester.pumpAndSettle();
 
-    expect(api.rejected, ['RLY-A']);
-    expect(find.text('card RLY-B'), findsOneWidget);
-    expect(_send, findsNothing, reason: 'the reject screen is gone');
-    expect(
-      find.text('card RLY-A'),
-      findsNothing,
-      reason: 'RLY-A was replaced, not stacked under RLY-B',
-    );
+    expect(api.rejectedNotes, ['fix it']);
   });
 
   testWidgets('a failure keeps the typed note and shows the server message', (
@@ -255,4 +295,72 @@ void main() {
     expect(find.text('card RLY-B'), findsNothing, reason: 'must not advance');
     expect(_sendButton(tester).onPressed, isNotNull, reason: 'retryable');
   });
+
+  testWidgets(
+    'a 401 mid-note follows the same policy as approve: signed out, no dead-end error',
+    (tester) async {
+      final api = FakeDecisionApi(
+        const DecisionFailed('unauthorized', 'Invalid or missing user token'),
+      );
+      final auth = _signedInAuth();
+      await pumpReject(tester, api: api, auth: auth);
+
+      await tester.enterText(_input, 'Please revise');
+      await tester.pump();
+      await tester.tap(_send);
+      await tester.pumpAndSettle();
+
+      expect(auth.signOutCalls, 1);
+      // Unlike a generic failure, this must not strand the human on a screen
+      // that keeps 401ing on retry — there is no inline error to retry against.
+      expect(find.byKey(const Key('reject_error')), findsNothing);
+      expect(
+        find.text('Invalid or missing user token'),
+        findsNothing,
+        reason:
+            'the router (production side) sends a signed-out user to /welcome',
+      );
+    },
+  );
+
+  testWidgets(
+    'a 422 not_in_review advances like approve\'s "Already handled", not an error',
+    (tester) async {
+      final api = FakeDecisionApi(
+        const DecisionFailed(
+          'not_in_review',
+          'This card is not in a review stage',
+        ),
+      );
+      await pumpReject(tester, api: api);
+
+      await tester.enterText(_input, 'Please revise');
+      await tester.pump();
+      await tester.tap(_send);
+      await tester.pumpAndSettle();
+
+      expect(find.text('card RLY-B'), findsOneWidget);
+      expect(_send, findsNothing, reason: 'the reject screen is gone');
+    },
+  );
+
+  testWidgets(
+    'a cold deep link with nothing to pop still advances after sending',
+    (tester) async {
+      final api = FakeDecisionApi();
+      await pumpReject(
+        tester,
+        api: api,
+        initialLocation: '/card/RLY-A/reject?board=relay',
+      );
+
+      await tester.enterText(_input, 'Needs error handling');
+      await tester.pump();
+      await tester.tap(_send);
+      await tester.pumpAndSettle();
+
+      expect(api.rejected, ['RLY-A']);
+      expect(find.text('card RLY-B'), findsOneWidget);
+    },
+  );
 }
