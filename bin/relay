@@ -25,6 +25,7 @@ TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output.
 """
 import argparse
 import base64
+import collections
 import json
 import mimetypes
 import os
@@ -484,6 +485,33 @@ def ensure_worktree(name, base):
     return path
 
 
+def reset_worktree(path, base):
+    """Force `path` to a clean detached checkout of `base`, whatever state it is in.
+
+    A pool worktree is scratch space, but a job that dies mid-run can leave edits
+    behind — and `git checkout` REFUSES to clobber them. That is not a small thing:
+    an uncommitted execute-plan.js edit sat in work-1 and silently failed every Code
+    stage two seconds in, for hours, reported only as "Code stage did not complete".
+    So preparing a worktree must never be blockable by leftovers.
+
+    Leftovers are stashed rather than dropped: that stranded edit turned out to
+    contain a real fix, so silent destruction is the wrong default. Recover with
+    `git stash list` in the worktree. The salvage is best-effort — the hard reset
+    runs regardless, so a dirty worktree can never block a job again.
+    """
+    dirty = subprocess.run(["git", "status", "--porcelain"], cwd=path,
+                           capture_output=True, text=True).stdout.strip()
+    if dirty:
+        log(f"  salvaging leftovers in {path} → git stash (recover with `git stash list`)")
+        subprocess.run(["git", "stash", "push", "-u", "-m",
+                        f"auto-salvage before {base}"], cwd=path, check=False)
+    subprocess.run(["git", "reset", "--hard", "-q"], cwd=path, check=False)
+    # -fd, NOT -fdx: gitignored build caches (deps/, _build/, node_modules/) must
+    # survive or every job pays a full rebuild.
+    subprocess.run(["git", "clean", "-fdq"], cwd=path, check=False)
+    subprocess.run(["git", "checkout", "--detach", base], cwd=path, check=False)
+
+
 def refresh_worktree(name, base):
     """Fast-forward an existing detached worktree to `base`. Caller guarantees the
     worktree is idle (no in-flight job using it)."""
@@ -491,7 +519,7 @@ def refresh_worktree(name, base):
     if not os.path.isdir(path):
         return
     subprocess.run(["git", "fetch", "origin", "--prune"], cwd=ROOT, check=False)
-    subprocess.run(["git", "checkout", "--detach", base], cwd=path, check=False)
+    reset_worktree(path, base)
 
 
 def blocked(card):
@@ -645,13 +673,23 @@ def _print_claude_event(ev, tag=""):
         forward("claude", line, ref)
 
 
-def _stream_shell(cmd, cwd, tag=""):
-    """Run a shell step with a live, tag-prefixed feed. Returns True on success."""
+def _stream_shell(cmd, cwd, tag="", sink=None):
+    """Run a shell step with a live, tag-prefixed feed. Returns True on success.
+
+    On failure the tail of the output is appended to `sink` so the card can carry the
+    actual reason. Streaming it to the console alone was not enough: the console is
+    not what a human reads later, so a stage that died on one line of git output
+    surfaced as a bare "stage did not complete"."""
     proc = subprocess.Popen(cmd, shell=True, cwd=cwd, text=True, bufsize=1,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    tail = collections.deque(maxlen=12)
     for line in proc.stdout:
         print(f"    {tag}{line.rstrip()}", flush=True)
-    return proc.wait() == 0
+        tail.append(line.rstrip())
+    ok = proc.wait() == 0
+    if not ok and sink is not None:
+        sink.extend(tail)
+    return ok
 
 
 def _stream_claude(prompt, cwd=ROOT, tag=""):
@@ -680,14 +718,14 @@ def _stream_claude(prompt, cwd=ROOT, tag=""):
     return proc.wait() == 0
 
 
-def run_step(step, vars, cwd=ROOT, tag=""):
+def run_step(step, vars, cwd=ROOT, tag="", sink=None):
     """A pipeline step is {shell: cmd} or {claude: prompt}. Returns True on success."""
     if "shell" in step:
         cmd = render(step["shell"], vars)
         if DRY:
             log(f"  (dry) {tag}shell: {cmd}")
             return True
-        return _stream_shell(cmd, cwd, tag)
+        return _stream_shell(cmd, cwd, tag, sink=sink)
     if "claude" in step:
         prompt = render(step["claude"], vars)
         if DRY:
@@ -703,8 +741,11 @@ def flag(ref, reason):
     log(f"  ⚑ {ref}: {reason}", ref=ref, kind="error")
     if not DRY:
         try:
-            needs_input(ref, f"[auto] stage failed: {reason}. A human needs to look — the runner "
-                             f"won't retry until this is cleared.")
+            # `reason` may carry the failing step's multi-line output, so the closing
+            # note goes on its own line rather than being glued onto a stack trace.
+            needs_input(ref, f"[auto] stage failed: {reason}\n\n"
+                             f"A human needs to look — the runner won't retry until "
+                             f"this is cleared.")
         except SystemExit:
             pass
 
@@ -728,12 +769,18 @@ def work(card, entry, mode, cwd=ROOT, tag=""):
     if mode == "fresh":
         move(ref, entry["stage"])
     set_status(ref, "working")
-    ok = all(run_step(step, vars, cwd, tag) for step in entry["action"])
+    tail = []
+    ok = all(run_step(step, vars, cwd, tag, sink=tail) for step in entry["action"])
     after = get_card(ref)
     if after.get("status") == "needs_input":
         return log(f"  {ref} asked the human — left blocked in {entry['stage']}")
     if not ok:
-        return flag(ref, f"{entry['stage']} stage did not complete")
+        # Carry the failing step's own output onto the card. "<stage> stage did not
+        # complete" alone sends a human digging through a runner log they were not
+        # watching to find one line of git output.
+        why = "\n".join(tail).strip()
+        reason = f"{entry['stage']} stage did not complete"
+        return flag(ref, f"{reason}:\n\n{why}" if why else reason)
     comment(ref, f"{entry['stage']} done → pushing to {entry['done']}")
     move(ref, entry["done"])
     log(f"  ✓ {ref} pushed to {entry['done']}")
@@ -763,6 +810,14 @@ def cmd_watch(args):
         ref = card["ref"]
         cwd = worktree_path(slot) if slot else ROOT
         try:
+            # Take an exclusive slot back to a clean base before using it: this slot
+            # is held by this job alone, and a previous job's leftovers would
+            # otherwise make the stage's `git checkout -B` refuse and fail the card
+            # two seconds in with no usable reason. Shared slots are deliberately NOT
+            # reset here — scan() refreshes those only when every slot is idle, so
+            # resetting one now could clobber a sibling job mid-run.
+            if slot and not DRY and pools[pool_name]["spec"].get("mode") != "shared":
+                reset_worktree(cwd, pools[pool_name]["spec"]["base"])
             work(card, entry, mode, cwd=cwd, tag=f"[{ref}] ")
         except Exception as e:                     # never leak a slot on crash
             flag(ref, f"worker crashed: {e}")
