@@ -202,6 +202,21 @@
   padding: 0.3em 0.6em;
 }
 
+/* The "Relay AI needs your input" panel renders the AI's question(s) as a
+   markdown numbered list. The global .md list styling is deliberately compact
+   (for dense spec/plan bodies), which leaves a multi-question ask cramped and
+   indented. Scope a roomier, flush-left treatment to this panel only so the
+   questions are easy to read and line up with the rest of the panel. */
+#needs-input-question { text-align: left; }
+#needs-input-question ol,
+#needs-input-question ul {
+  margin: 0.75em 0;
+  padding-left: 0;
+  list-style-position: inside;
+}
+#needs-input-question li { margin: 0.7em 0; }
+#needs-input-question li::marker { font-weight: 600; }
+
 /* --- Public docs site (RLY-64): chrome + content styles.
    Matches docs/designs/Relay Docs.dc.html (anchor: Relay Landing.dc.html + design system).
    MIRROR verbatim into assets/css/storybook.css. --- */
