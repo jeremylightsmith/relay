@@ -15,6 +15,9 @@ class SignInScreen extends ConsumerWidget {
     final theme = Theme.of(context);
 
     return Scaffold(
+      // Pushed from Welcome — the back chevron is how you get back. The artboard
+      // draws only the flow arrow, but the push is real.
+      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 28),

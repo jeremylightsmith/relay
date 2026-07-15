@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../features/auth/auth_controller.dart';
 import '../features/auth/sign_in_screen.dart';
+import '../features/auth/welcome_screen.dart';
 import '../features/board/board_screen.dart';
 import '../features/card/card_screen.dart';
 import '../features/needs_you/needs_you_screen.dart';
@@ -13,7 +14,7 @@ import '../widgets/main_scaffold.dart';
 
 /// Builds the app's GoRouter. Kept as a plain function so tests can construct the
 /// tab shell directly (ungated). Production wraps it with the auth gate via
-/// [routerProvider] (redirect + extra `/sign-in` route).
+/// [routerProvider] (redirect + the extra `/welcome` auth stack).
 ///
 /// [cardBodyBuilder] overrides the card screen's webview body — tests pass a stub,
 /// because flutter_inappwebview has no host-platform implementation (RLY-81).
@@ -83,8 +84,12 @@ GoRouter buildRouter({
   );
 }
 
-/// The app's single GoRouter instance, **auth-gated**: an unauthenticated user is
-/// redirected to `/sign-in`; a signed-in user at `/sign-in` bounces to the shell.
+/// The app's single GoRouter instance, **auth-gated**: a signed-out user is sent to
+/// `/welcome`, and Sign in lives *under* it at `/welcome/sign-in` so go_router builds
+/// the `[Welcome, SignIn]` stack itself — back (and iOS swipe-back) returns to Welcome
+/// with no manual push bookkeeping, even on a cold deep-link. A signed-in user anywhere
+/// in the auth stack bounces to the shell; [refreshListenable] re-runs this the moment
+/// sign-in succeeds, which is why no navigation call belongs in [AuthController].
 final routerProvider = Provider<GoRouter>((ref) {
   final refresh = ValueNotifier<bool>(ref.read(authProvider).signedIn);
   ref.onDispose(refresh.dispose);
@@ -94,15 +99,21 @@ final routerProvider = Provider<GoRouter>((ref) {
     refreshListenable: refresh,
     extraRoutes: [
       GoRoute(
-        path: '/sign-in',
-        builder: (context, state) => const SignInScreen(),
+        path: '/welcome',
+        builder: (context, state) => const WelcomeScreen(),
+        routes: [
+          GoRoute(
+            path: 'sign-in',
+            builder: (context, state) => const SignInScreen(),
+          ),
+        ],
       ),
     ],
     redirect: (context, state) {
       final signedIn = ref.read(authProvider).signedIn;
-      final atSignIn = state.matchedLocation == '/sign-in';
-      if (!signedIn) return atSignIn ? null : '/sign-in';
-      if (atSignIn) return '/needs-you';
+      final atAuth = state.matchedLocation.startsWith('/welcome');
+      if (!signedIn) return atAuth ? null : '/welcome';
+      if (atAuth) return '/needs-you';
       return null;
     },
   );
