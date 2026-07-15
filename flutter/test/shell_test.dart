@@ -1,23 +1,39 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/app/theme.dart';
+import 'package:relay_mobile/features/needs_you/feed_repository.dart';
+
+import 'needs_you_screen_test.dart' show FakeFeedRepository;
 
 /// The tab shell in isolation (ungated). The auth gate is exercised separately in
-/// auth_test.dart; here we assert the three-tab shell itself.
-Future<void> pumpApp(WidgetTester tester) async {
+/// auth_test.dart; here we assert the three-tab shell itself. The inbox's repository
+/// is faked — the shell watches the feed count for its badge (D6), so pumping the
+/// shell would otherwise fire a real request.
+Future<void> pumpApp(WidgetTester tester, {FakeFeedRepository? repo}) async {
   await tester.pumpWidget(
-    ProviderScope(child: MaterialApp.router(routerConfig: buildRouter())),
+    ProviderScope(
+      overrides: [
+        feedRepositoryProvider.overrideWithValue(repo ?? FakeFeedRepository()),
+        authTokenProvider.overrideWithValue('relayu_test'),
+      ],
+      child: MaterialApp.router(
+        theme: RelayTheme.light,
+        routerConfig: buildRouter(),
+      ),
+    ),
   );
   await tester.pumpAndSettle();
 }
 
 void main() {
-  testWidgets('boots to the Needs you tab', (tester) async {
+  testWidgets('boots to the Needs you inbox', (tester) async {
     await pumpApp(tester);
-    expect(find.widgetWithText(AppBar, 'Needs you'), findsOneWidget);
-    expect(find.text('Arriving soon'), findsOneWidget);
+    expect(find.byKey(const Key('needs_you_header')), findsOneWidget);
+    expect(find.text('Needs you'), findsWidgets); // header + tab label
+    expect(find.text('Arriving soon'), findsNothing);
   });
 
   testWidgets('shows exactly three destinations with stable keys, in order', (
