@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/features/card/card_screen.dart';
+import 'package:relay_mobile/features/decisions/reject_note_screen.dart';
 import 'package:relay_mobile/features/push/push_platform.dart';
 import 'package:relay_mobile/features/push/push_prefs.dart';
 import 'package:relay_mobile/features/push/push_service.dart';
@@ -51,6 +52,23 @@ void main() {
     expect(screen.cardRef, 'RLY-123');
     expect(screen.boardSlug, 'my-board');
   });
+
+  testWidgets(
+    'a reject deep link routes to RejectNoteScreen carrying ref and board '
+    '(RLY-88 · CORE-07)',
+    (tester) async {
+      final router = await pumpRouter(tester);
+
+      router.go('/card/RLY-A/reject?board=relay');
+      await tester.pumpAndSettle();
+
+      final screen = tester.widget<RejectNoteScreen>(
+        find.byType(RejectNoteScreen),
+      );
+      expect(screen.cardRef, 'RLY-A');
+      expect(screen.boardSlug, 'relay');
+    },
+  );
 
   testWidgets('the push permission screen is routable', (tester) async {
     final router = await pumpRouter(tester);

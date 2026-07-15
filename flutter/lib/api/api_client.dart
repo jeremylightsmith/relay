@@ -44,6 +44,16 @@ class BearerInterceptor extends Interceptor {
   }
 }
 
+/// The raw status + decoded body of a call. Unlike [ApiClient.getJson], which
+/// collapses a non-200 into an [ApiException] message, this hands the body back
+/// intact — callers that branch on the API's error *codes* need them.
+class ApiResponse {
+  const ApiResponse(this.statusCode, this.data);
+
+  final int? statusCode;
+  final dynamic data;
+}
+
 /// The shared client for the bearer-authenticated `/api/all/*` scope (RLY-80).
 ///
 /// Deliberately its own Dio, not the cookie-jar client in `features/auth/http_providers.dart`:
@@ -83,6 +93,17 @@ class ApiClient {
         );
       }
       return resp.data;
+    } on DioException catch (e) {
+      throw ApiException(e.message ?? 'Network error — could not reach Relay.');
+    }
+  }
+
+  /// POSTs [body] to [path]. Only transport failures throw ([ApiException]); every
+  /// answer the server actually gave — including 4xx — comes back as an [ApiResponse].
+  Future<ApiResponse> postJson(String path, Map<String, dynamic> body) async {
+    try {
+      final resp = await _dio.post<dynamic>(path, data: body);
+      return ApiResponse(resp.statusCode, resp.data);
     } on DioException catch (e) {
       throw ApiException(e.message ?? 'Network error — could not reach Relay.');
     }

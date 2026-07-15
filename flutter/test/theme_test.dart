@@ -23,4 +23,48 @@ void main() {
     expect(RelayTheme.relayDone, const Color(0xFF4AB074));
     expect(RelayTheme.relayBlocked, const Color(0xFFD58C3B));
   });
+
+  test('CORE-07 reject tokens are the artboard oklch values, converted', () {
+    expect(
+      RelayTheme.relayReject,
+      const Color(0xFFDB6656),
+    ); // oklch(0.65 0.15 30)
+    expect(
+      RelayTheme.relayRejectBorder,
+      const Color(0xFFF9C6BD),
+    ); // oklch(0.87 0.06 30)
+    expect(
+      RelayTheme.relayRejectHint,
+      const Color(0xFFAC5346),
+    ); // oklch(0.55 0.12 30)
+    expect(
+      RelayTheme.relayRejectDisabledBg,
+      const Color(0xFFEBD9D6),
+    ); // oklch(0.9 0.02 30)
+    expect(
+      RelayTheme.relayRejectDisabledFg,
+      const Color(0xFFC8978F),
+    ); // oklch(0.72 0.06 30)
+  });
+
+  test(
+    'the inert mic ghosts the artboard violet rather than inventing a grey',
+    () {
+      expect(
+        RelayTheme.micGhostFill,
+        const Color(0xFFF2F1F8),
+      ); // oklch(0.96 0.01 292)
+      expect(
+        RelayTheme.micGhostBorder,
+        const Color(0xFFD7D6DE),
+      ); // oklch(0.88 0.01 292)
+      expect(
+        RelayTheme.micGhostGlyph,
+        const Color(0xFFAEACBA),
+      ); // oklch(0.75 0.02 292)
+
+      // Ghosted, not the live violet RLY-99 will restore.
+      expect(RelayTheme.micGhostGlyph, isNot(RelayTheme.relayAI));
+    },
+  );
 }
