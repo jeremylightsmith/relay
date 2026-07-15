@@ -114,6 +114,12 @@ jobs:
           MATCH_GIT_BASIC_AUTHORIZATION: "${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}"
           APP_STORE_CONNECT_KEY_ID: ${{ vars.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
+          # Public app config baked into the release build via --dart-define
+          # (flutter/lib/config.dart). Not secrets — an iOS OAuth client has no
+          # secret and the host is public.
+          RELAY_BASE_URL: ${{ vars.RELAY_BASE_URL }}
+          GOOGLE_IOS_CLIENT_ID: ${{ vars.GOOGLE_IOS_CLIENT_ID }}
+          GOOGLE_SERVER_CLIENT_ID: ${{ vars.GOOGLE_SERVER_CLIENT_ID }}
 
   # Android build - DISABLED for now (iOS-first; Android is deferred per RLY-103).
   # Re-enable by uncommenting the job below once the Android keystore + Play Store

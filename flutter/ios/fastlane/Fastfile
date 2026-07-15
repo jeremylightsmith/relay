@@ -40,8 +40,17 @@ platform :ios do
 
     # Get Flutter dependencies and build (unsigned; fastlane signs below).
     sh("cd ../.. && flutter pub get")
+
+    # Public app config baked in at build time via --dart-define (see
+    # flutter/lib/config.dart). Without these the shipped app has an empty
+    # base URL / Google client ids and sign-in can't work. Supplied by the
+    # workflow from repo vars; skipped cleanly if unset (e.g. a local build).
+    dart_defines = %w[RELAY_BASE_URL GOOGLE_IOS_CLIENT_ID GOOGLE_SERVER_CLIENT_ID]
+                   .filter_map { |k| "--dart-define=#{k}=#{ENV[k]}" unless ENV[k].to_s.empty? }
+                   .join(" ")
+
     UI.important("🔨 Building Flutter (release, no codesign)...")
-    sh("cd ../.. && flutter build ios --release --no-codesign")
+    sh("cd ../.. && flutter build ios --release --no-codesign #{dart_defines}")
 
     # Sync certificates via match, then switch the project to manual signing
     # so the archive uses the Match-managed Distribution profile.
