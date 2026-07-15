@@ -57,6 +57,17 @@ class RelayTheme {
     0xFFC8978F,
   ); // Send back disabled  (oklch 0.72 0.06 30)
 
+  // --- Card review bar · CORE-03 in docs/designs/Relay Mobile.dc.html line 188 (RLY-87) ---
+  // The Reject label's red and the bar's hairline top border; the artboard's own oklch
+  // values, converted. Approve needs no token — the artboard's oklch(0.60 0.14 250) is
+  // already relayHumanLight, i.e. colorScheme.primary.
+  static const Color relayRejectLabel = Color(
+    0xFFA74639,
+  ); //  Reject label      (oklch 0.52 0.13 30)
+  static const Color relayHairline = Color(
+    0xFFE2E5E9,
+  ); //  bar top border    (oklch 0.92 0.006 255)
+
   // The mic is drawn but dead until RLY-99 (D4). Ghosted along the artboard's *own*
   // disabled convention — the move it makes for the Send back button (0.65 0.15 30 →
   // 0.9 0.02 30: hold hue, drop chroma, lift lightness) — so it reads as a

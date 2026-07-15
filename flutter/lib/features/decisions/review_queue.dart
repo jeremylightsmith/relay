@@ -281,11 +281,11 @@ final reviewQueueProvider = NotifierProvider<ReviewQueue, ReviewQueueState>(
 /// (`needs_you_screen`) and the queue's own advance must agree, or opening a card and
 /// advancing to it would land on different screens.
 ///
-/// needs_input → RLY-89's native answer screen. in_review → the card host, `kind`
-/// riding along so it picks its bottom bar (RLY-85 · D4).
+/// needs_input → RLY-89's native answer screen. in_review → the unified `/cards/:ref`
+/// card host (RLY-87), `board` and `kind` riding along so it picks its bottom bar.
 String routeFor(QueueItem item) => item.kind == 'needs_input'
     ? '/card/${item.ref}/answer'
-    : '/card/${item.ref}?kind=${item.kind}';
+    : '/cards/${item.ref}?board=${item.boardSlug}&kind=${item.kind}';
 
 /// Applies a destination from [ReviewQueue]. `/needs-you` goes back to the shell tab;
 /// a card *replaces* the one just decided, so clearing a long queue never grows the
