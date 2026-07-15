@@ -42,6 +42,12 @@ export const meta = {
   ],
 }
 
+// `args` can arrive JSON-encoded rather than as an object (notably via a resume, where
+// the recovery hint stringifies it). Everything downstream reads `input.ref`, and a
+// string has no `.ref` — which silently skipped the whole acceptance gate while the run
+// still reported `ready`. Normalize once here so that can't fail open again.
+const input = typeof args === 'string' ? JSON.parse(args) : args
+
 const VERDICT = {
   type: 'object',
   additionalProperties: false,
@@ -99,15 +105,19 @@ const SYNC = {
 const SMOKE = {
   type: 'object',
   additionalProperties: false,
-  required: ['verdict', 'findings', 'summary', 'screenshots'],
+  // Only `verdict` is required: a passing smoke has no findings to report, and every
+  // consumer below already null-guards the rest. Requiring all four made the agent
+  // thrash the retry cap re-emitting a long summary just to satisfy a field it had
+  // correctly left empty.
+  required: ['verdict'],
   properties: {
     verdict: {
       type: 'string',
       enum: ['pass', 'broken', 'blocked'],
       description: 'pass = feature demonstrably works end-to-end (UI matches artboard). broken = exercised it and it misbehaves / diverges. blocked = could not run the smoke for an environment/setup reason (not a code defect).',
     },
-    findings: { type: 'string', description: 'broken: actionable file:line findings a fixer can act on without re-deriving. blocked: what blocked the smoke and what would unblock it. pass: empty.' },
-    summary: { type: 'string', description: 'One-paragraph account of what was driven through the app and what was observed.' },
+    findings: { type: 'string', description: 'broken: actionable file:line findings a fixer can act on without re-deriving. blocked: what blocked the smoke and what would unblock it. pass: omit or empty.' },
+    summary: { type: 'string', description: 'A few sentences on what was driven through the app and what was observed. Keep it short — this is a report field, not a transcript.' },
     screenshots: { type: 'array', items: { type: 'string' }, description: 'Absolute paths to screenshots captured under tmp/smoke/ (empty list if none).' },
   },
 }
@@ -133,15 +143,18 @@ const CRITERIA = {
 const ACCEPTANCE = {
   type: 'object',
   additionalProperties: false,
-  required: ['verdict', 'summary', 'findings', 'criteria'],
+  // Only `verdict` and `criteria` are required — a passing run has no findings, and the
+  // per-criterion checklist is this stage's real payload. See SMOKE above: requiring a
+  // field the agent is told to leave empty burns the StructuredOutput retry cap.
+  required: ['verdict', 'criteria'],
   properties: {
     verdict: {
       type: 'string',
       enum: ['pass', 'fail', 'blocked'],
       description: 'pass = every criterion is pass or human-verify. fail = at least one criterion failed. blocked = the criteria could not be fetched or the environment prevented the whole run (not a code defect).',
     },
-    summary: { type: 'string', description: 'One-paragraph account of what was run against the criteria.' },
-    findings: { type: 'string', description: 'fail: actionable findings a fixer can act on without re-deriving. blocked: what blocked the run and what would unblock it. pass: empty.' },
+    summary: { type: 'string', description: 'A few sentences on what was run against the criteria. Keep it short — a report field, not a transcript.' },
+    findings: { type: 'string', description: 'fail: actionable findings a fixer can act on without re-deriving. blocked: what blocked the run and what would unblock it. pass: omit or empty.' },
     criteria: {
       type: 'array',
       description: 'One entry per authored criterion, in the card order.',
@@ -342,12 +355,12 @@ const smokeStatus =
 let acceptance = null
 let acceptanceRan = false
 
-if (smokeStatus === 'ready' && args && args.ref) {
+if (smokeStatus === 'ready' && input && input.ref) {
   phase('Acceptance')
   const probe = await agent(
-    `Read Relay card ${args.ref}'s acceptance criteria and report ONLY whether it has any — do NOT ` +
+    `Read Relay card ${input.ref}'s acceptance criteria and report ONLY whether it has any — do NOT ` +
       `run the criteria, edit anything, or touch the card. This repo has a CLI at ./bin/relay and ` +
-      `RELAY_URL + RELAY_API_KEY are already set. Run \`./bin/relay card ${args.ref} --json\` ON ITS ` +
+      `RELAY_URL + RELAY_API_KEY are already set. Run \`./bin/relay card ${input.ref} --json\` ON ITS ` +
       `OWN first (not through a pipe) and check ITS OWN exit status, separately from anything ` +
       `downstream. On a non-zero exit (404 / API down / expired key / bogus ref — the CLI writes the ` +
       `error to stderr and prints NOTHING to stdout), return result="error" with the stderr text in ` +
@@ -364,7 +377,7 @@ if (smokeStatus === 'ready' && args && args.ref) {
     for (let visit = 1; visit <= MAX_ACCEPT_VISITS; visit++) {
       acceptance = await agent(
         role('acceptance-tester',
-          `Card ref: ${args.ref} (visit ${visit}). Read its acceptance criteria off the card and run ` +
+          `Card ref: ${input.ref} (visit ${visit}). Read its acceptance criteria off the card and run ` +
           `every one of them against this branch.\n\nThe smoke-tester already drove this branch ` +
           `end-to-end. Its evidence — judge from it rather than re-driving anything it already ` +
           `settles:\n` +
@@ -400,9 +413,9 @@ if (smokeStatus === 'ready' && args && args.ref) {
       findings: (probe && probe.detail) || 'The criteria probe failed to return a verdict.',
       criteria: [],
     }
-    log(`Could not confirm acceptance criteria on ${args.ref} — treating as blocked: ${acceptance.findings}`)
+    log(`Could not confirm acceptance criteria on ${input.ref} — treating as blocked: ${acceptance.findings}`)
   } else {
-    log(`No acceptance criteria on ${args.ref} — skipping the acceptance phase. ${probe.detail || ''}`.trim())
+    log(`No acceptance criteria on ${input.ref} — skipping the acceptance phase. ${probe.detail || ''}`.trim())
   }
 }
 
@@ -442,20 +455,20 @@ const acceptanceBlock = (() => {
 // workflow orchestration). The agent posts a COMMENT and never a status change.
 const shotPaths = (smoke && Array.isArray(smoke.screenshots) && smoke.screenshots) || []
 
-if (args && args.ref && (acceptanceBlock || shotPaths.length)) {
+if (input && input.ref && (acceptanceBlock || shotPaths.length)) {
   phase('Post')
   const shots = shotPaths.map((s) => `   - ${s}`).join('\n')
   const attachStep = shotPaths.length
-    ? `1. For EACH screenshot path below, run \`./bin/relay attach ${args.ref} <path> --json\` and keep the ` +
+    ? `1. For EACH screenshot path below, run \`./bin/relay attach ${input.ref} <path> --json\` and keep the ` +
       `"markdown" field it prints:\n${shots}\n`
     : `1. There are no screenshots to attach — skip straight to step 2.\n`
   const body = [acceptanceBlock, smoke && smoke.summary].filter(Boolean).join('\n\n') || 'Smoke results'
 
   await agent(
-    `Post the acceptance + smoke results to Relay card ${args.ref}. This repo has a CLI at ./bin/relay ` +
+    `Post the acceptance + smoke results to Relay card ${input.ref}. This repo has a CLI at ./bin/relay ` +
       `and RELAY_URL + RELAY_API_KEY are already set in the environment. Do EXACTLY this and nothing else:\n` +
       attachStep +
-      `2. Post ONE comment with \`./bin/relay comment ${args.ref} @<tmpfile>\` whose body is the text ` +
+      `2. Post ONE comment with \`./bin/relay comment ${input.ref} @<tmpfile>\` whose body is the text ` +
       `below, then a blank line, then the collected markdown snippets one per line (one image per ` +
       `new/changed state — do not add extras):\n\n${body}\n\n` +
       `Post at most ONE comment, VERBATIM — do not re-judge, re-word, or drop any criterion. Do NOT ` +
