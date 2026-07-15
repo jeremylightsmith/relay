@@ -4,6 +4,7 @@ defmodule RelayWeb.BoardLiveEmbedTest do
   import Phoenix.LiveViewTest
 
   alias Relay.Boards
+  alias Relay.Cards
 
   describe "embedded board (?embed=1)" do
     setup :register_and_log_in_user
@@ -74,6 +75,45 @@ defmodule RelayWeb.BoardLiveEmbedTest do
       {:ok, view, _html} = live(conn, ~p"/boards")
 
       assert has_element?(view, "#top-bar")
+    end
+  end
+
+  describe "embedded card drawer (?card=&embed=1)" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      review = Enum.find(board.stages, &(&1.name == "Review"))
+      {:ok, card} = Cards.create_card(review, %{title: "Review me"})
+      {:ok, _card} = Cards.set_status(card, %{status: :in_review})
+
+      %{board: board, ref: Cards.ref(board, card)}
+    end
+
+    test "keeps the review context but drops the web actions", %{conn: conn, board: board, ref: ref} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}&embed=1")
+      render_async(view)
+
+      assert has_element?(view, "#review-panel", "READY FOR YOUR REVIEW")
+      refute has_element?(view, "#review-approve")
+      refute has_element?(view, "#review-request-changes")
+      refute has_element?(view, "#card-drawer-scrim")
+      refute has_element?(view, "#card-drawer-close")
+    end
+
+    test "the web board is unchanged — no embed, all actions present", %{
+      conn: conn,
+      board: board,
+      ref: ref
+    } do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
+      render_async(view)
+
+      assert has_element?(view, "#review-panel", "READY FOR YOUR REVIEW")
+      assert has_element?(view, "#review-approve")
+      assert has_element?(view, "#review-request-changes")
+      assert has_element?(view, "#card-drawer-scrim")
+      assert has_element?(view, "#card-drawer-close")
     end
   end
 end

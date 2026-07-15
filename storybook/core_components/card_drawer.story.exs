@@ -176,6 +176,33 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         }
       },
       %Variation{
+        id: :in_review_embedded,
+        description:
+          "RLY-87 — hosted in the native shell: the panel and hint stay, the web buttons and the close ✕ are gone (the native action bar owns the decision).",
+        attributes: %{
+          id: "story-drawer-embed",
+          ref: "RLY-12",
+          card: %{story_card() | status: :in_review, progress: nil},
+          stage_name: "Review",
+          stage_owner: :human,
+          active_owner: :ai,
+          current_user_id: 2,
+          embed: true,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
+          review_gate: %{
+            approve_label: "Approve → Deploy",
+            reject_target_name: "Code",
+            can_reject: true
+          },
+          reject_form: Phoenix.Component.to_form(%{"note" => ""}, as: :reject),
+          conversation: story_conversation(),
+          activity: story_activity(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
         id: :with_branch_and_plan,
         attributes: %{
           id: "story-drawer-6",

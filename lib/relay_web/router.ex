@@ -90,6 +90,12 @@ defmodule RelayWeb.Router do
       live "/boards", BoardsLive
       live "/board/:slug", BoardLive
       live "/board/:slug/settings", BoardSettingsLive
+
+      # RLY-87 — the native app's card host: BoardLive rendering the drawer alone.
+      # Chromeless by construction (the :card mount forces embed: true), so it can
+      # never render half-native-half-web. This is a **native-host surface, not a
+      # browser destination** — the web opens a card at /board/:slug?card=:ref.
+      live "/cards/:ref", BoardLive, :card
     end
   end
 

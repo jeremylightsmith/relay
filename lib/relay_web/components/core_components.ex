@@ -1151,6 +1151,11 @@ defmodule RelayWeb.CoreComponents do
     doc:
       "RLY-68 optimistic drawer: when true, the heavy sections (description/acceptance_criteria/spec/plan/ai_result/needs-input question/timeline) render daisyUI skeletons instead of their content; the async fill flips this false"
 
+  attr :embed, :boolean,
+    default: false,
+    doc:
+      "RLY-87: hosted inside the native shell — drops the web review buttons (the native action bar is the only actor) and the drawer's own dismissal affordances (scrim + close ✕), which the native back chevron owns. Keeps the review panel's label and hint: the context for the decision is the point of the screen."
+
   def card_drawer(assigns) do
     assigns =
       assigns
@@ -1174,7 +1179,7 @@ defmodule RelayWeb.CoreComponents do
         aria-hidden="true"
       />
       <div class="drawer-side z-40">
-        <.link id={"#{@id}-scrim"} patch={@close_patch} class="drawer-overlay">
+        <.link :if={!@embed} id={"#{@id}-scrim"} patch={@close_patch} class="drawer-overlay">
           <span class="sr-only">Close</span>
         </.link>
         <aside class="drawer-panel flex h-dvh w-full flex-col overflow-y-auto bg-base-100 shadow-xl drawer:overflow-hidden drawer:w-[min(760px,94vw)]">
@@ -1218,6 +1223,7 @@ defmodule RelayWeb.CoreComponents do
               </h2>
             </div>
             <.link
+              :if={!@embed}
               id={"#{@id}-close"}
               patch={@close_patch}
               class="btn btn-ghost btn-sm btn-square"
@@ -1490,7 +1496,7 @@ defmodule RelayWeb.CoreComponents do
                 <p class="text-[13px] leading-normal" style="color:oklch(0.36 0.03 155);">
                   {review_hint(@review_gate)}
                 </p>
-                <div :if={@review_gate && !@reject_open} class="flex gap-2">
+                <div :if={@review_gate && !@reject_open && !@embed} class="flex gap-2">
                   <button
                     id="review-approve"
                     type="button"
@@ -1512,7 +1518,7 @@ defmodule RelayWeb.CoreComponents do
                   </button>
                 </div>
                 <div
-                  :if={@review_gate && @reject_open}
+                  :if={@review_gate && @reject_open && !@embed}
                   id="review-reject-panel"
                   class="flex flex-col gap-2 rounded-lg bg-white p-3"
                   style="border:1px solid oklch(0.90 0.02 255);"
