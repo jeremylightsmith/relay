@@ -84,26 +84,6 @@ class FakeDecisionApi implements DecisionApi {
   }
 }
 
-/// Holds a POST open so the in-flight guard can be observed.
-class BlockingDecisionApi extends FakeDecisionApi {
-  BlockingDecisionApi(this.gate);
-
-  final Completer<void> gate;
-  int calls = 0;
-
-  @override
-  Future<DecisionResult> answer({
-    required String ref,
-    required String boardSlug,
-    List<Map<String, String>>? answers,
-    String? text,
-  }) async {
-    calls++;
-    await gate.future;
-    return result;
-  }
-}
-
 /// Never answers until the test says so — the only way to observe an in-flight decision.
 class BlockedDecisionApi implements DecisionApi {
   final completer = Completer<DecisionResult>();
@@ -543,8 +523,7 @@ void main() {
   });
 
   test('a needs_input row carries its questions into the queue', () {
-    final container = ProviderContainer();
-    addTearDown(container.dispose);
+    final h = harness(api: FakeDecisionApi());
     final questions = [
       const FeedQuestion(
         prompt: 'Which region?',
@@ -553,7 +532,7 @@ void main() {
       ),
     ];
 
-    container
+    h.container
         .read(reviewQueueProvider.notifier)
         .enter(
           rows: [
@@ -568,7 +547,7 @@ void main() {
           atRef: 'RLY-A',
         );
 
-    final current = container.read(reviewQueueProvider).current!;
+    final current = h.container.read(reviewQueueProvider).current!;
     expect(current.questions, hasLength(1));
     expect(current.questions!.single.prompt, 'Which region?');
     expect(current.boardName, 'Data pipeline');
@@ -593,14 +572,8 @@ void main() {
     'answerCurrent posts the picks and advances with the answer banner',
     () async {
       final api = FakeDecisionApi();
-      final container = ProviderContainer(
-        overrides: [
-          decisionApiProvider.overrideWithValue(api),
-          feedRepositoryProvider.overrideWithValue(FakeFeedRepository()),
-        ],
-      );
-      addTearDown(container.dispose);
-      final queue = container.read(reviewQueueProvider.notifier);
+      final h = harness(api: api);
+      final queue = h.container.read(reviewQueueProvider.notifier);
       queue.enter(
         rows: [
           row('RLY-A', kind: 'needs_input'),
@@ -626,14 +599,8 @@ void main() {
 
   test('answerCurrent sends free text through for a legacy question', () async {
     final api = FakeDecisionApi();
-    final container = ProviderContainer(
-      overrides: [
-        decisionApiProvider.overrideWithValue(api),
-        feedRepositoryProvider.overrideWithValue(FakeFeedRepository()),
-      ],
-    );
-    addTearDown(container.dispose);
-    final queue = container.read(reviewQueueProvider.notifier);
+    final h = harness(api: api);
+    final queue = h.container.read(reviewQueueProvider.notifier);
     queue.enter(
       rows: [row('RLY-A', kind: 'needs_input')],
       atRef: 'RLY-A',
@@ -652,14 +619,8 @@ void main() {
         'This card is not waiting on an answer',
       ),
     );
-    final container = ProviderContainer(
-      overrides: [
-        decisionApiProvider.overrideWithValue(api),
-        feedRepositoryProvider.overrideWithValue(FakeFeedRepository()),
-      ],
-    );
-    addTearDown(container.dispose);
-    final queue = container.read(reviewQueueProvider.notifier);
+    final h = harness(api: api);
+    final queue = h.container.read(reviewQueueProvider.notifier);
     queue.enter(
       rows: [
         row('RLY-A', kind: 'needs_input'),
@@ -673,22 +634,15 @@ void main() {
     // Someone answered it on the web while we walked. Not a failure.
     expect(dest, '/card/RLY-B/answer');
     expect(queue.takeBanner(), 'Already handled · RLY-A');
-    expect(container.read(reviewQueueProvider).error, isNull);
+    expect(h.container.read(reviewQueueProvider).error, isNull);
   });
 
   test(
     'answerCurrent cannot be fired twice while a POST is in flight',
     () async {
-      final gate = Completer<void>();
-      final api = BlockingDecisionApi(gate);
-      final container = ProviderContainer(
-        overrides: [
-          decisionApiProvider.overrideWithValue(api),
-          feedRepositoryProvider.overrideWithValue(FakeFeedRepository()),
-        ],
-      );
-      addTearDown(container.dispose);
-      final queue = container.read(reviewQueueProvider.notifier);
+      final api = BlockedDecisionApi();
+      final h = harness(api: api);
+      final queue = h.container.read(reviewQueueProvider.notifier);
       queue.enter(
         rows: [row('RLY-A', kind: 'needs_input')],
         atRef: 'RLY-A',
@@ -698,7 +652,7 @@ void main() {
       final second = await queue.answerCurrent(text: 'eu');
 
       expect(second, isNull); // the second tap did nothing
-      gate.complete();
+      api.completer.complete(const DecisionOk({}));
       await first;
       expect(api.calls, 1);
     },

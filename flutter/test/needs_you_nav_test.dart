@@ -11,19 +11,24 @@ import 'package:relay_mobile/features/needs_you/models/feed_row.dart';
 
 import 'needs_you_screen_test.dart' show FakeFeedRepository, makeRow;
 
-Future<GoRouter> pumpShell(WidgetTester tester, FakeFeedRepository repo) async {
-  final router = buildRouter();
+Future<void> pumpShell(
+  WidgetTester tester,
+  FakeFeedRepository repo, {
+  List<RouteBase> extraRoutes = const [],
+}) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
         feedRepositoryProvider.overrideWithValue(repo),
         authTokenProvider.overrideWithValue('relayu_test'),
       ],
-      child: MaterialApp.router(theme: RelayTheme.light, routerConfig: router),
+      child: MaterialApp.router(
+        theme: RelayTheme.light,
+        routerConfig: buildRouter(extraRoutes: extraRoutes),
+      ),
     ),
   );
   await tester.pumpAndSettle();
-  return router;
 }
 
 void main() {
@@ -55,7 +60,15 @@ void main() {
       // Task 3 registers the real `/card/:ref/answer` screen; here only the
       // destination matters, so a stub stands in for it (same technique
       // card_deep_link_test.dart uses for the not-yet-buildable webview body).
-      final router = buildRouter(
+      final repo = FakeFeedRepository(
+        page: FeedPage(
+          rows: [makeRow(ref: 'RLY-2', kind: 'needs_input')],
+          meta: const FeedMeta(count: 1),
+        ),
+      );
+      await pumpShell(
+        tester,
+        repo,
         extraRoutes: [
           GoRoute(
             path: '/card/:ref/answer',
@@ -65,25 +78,6 @@ void main() {
           ),
         ],
       );
-      final repo = FakeFeedRepository(
-        page: FeedPage(
-          rows: [makeRow(ref: 'RLY-2', kind: 'needs_input')],
-          meta: const FeedMeta(count: 1),
-        ),
-      );
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            feedRepositoryProvider.overrideWithValue(repo),
-            authTokenProvider.overrideWithValue('relayu_test'),
-          ],
-          child: MaterialApp.router(
-            theme: RelayTheme.light,
-            routerConfig: router,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const Key('inbox_row_RLY-2')));
       await tester.pumpAndSettle();
