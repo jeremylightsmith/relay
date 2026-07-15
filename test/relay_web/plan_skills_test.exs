@@ -87,5 +87,10 @@ defmodule Relay.PlanSkillsTest do
          %{doc: doc} do
       assert doc =~ "leave `plan.md` in place"
     end
+
+    test "enumerates the acceptance statuses so the runner sentinel can gate on them", %{doc: doc} do
+      assert doc =~ "acceptance-failed"
+      assert doc =~ "acceptance-blocked"
+    end
   end
 end
