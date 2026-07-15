@@ -24,7 +24,7 @@ defmodule RelayWeb.Api.AllController do
   end
 
   def approve(conn, %{"ref" => ref} = params) do
-    with {:ok, board, card} <- resolve(conn, ref, params),
+    with {:ok, board, card} <- Cards.resolve_ref(conn.assigns.current_user, ref, params["board"]),
          {:ok, card} <- Cards.approve(card, conn.assigns.actor) do
       render_card(conn, board, card)
     end
@@ -32,49 +32,19 @@ defmodule RelayWeb.Api.AllController do
 
   def reject(conn, %{"ref" => ref} = params) do
     with {:ok, note} <- reject_note(params),
-         {:ok, board, card} <- resolve(conn, ref, params),
+         {:ok, board, card} <- Cards.resolve_ref(conn.assigns.current_user, ref, params["board"]),
          {:ok, card} <- Cards.reject(card, note, conn.assigns.actor) do
       render_card(conn, board, card)
     end
   end
 
   def answer(conn, %{"ref" => ref} = params) do
-    with {:ok, board, card} <- resolve(conn, ref, params),
+    with {:ok, board, card} <- Cards.resolve_ref(conn.assigns.current_user, ref, params["board"]),
          {:ok, answer} <- compose(card, params),
          {:ok, card} <- Cards.answer_input(card, answer, conn.assigns.actor) do
       render_card(conn, board, card)
     end
   end
-
-  # Resolves `ref` against the boards the caller is a member of — Boards.list_boards/1 is
-  # already membership-scoped, so it is both the lookup and the authorization check.
-  # get_card_by_ref/2 only queries when the board's key prefixes the ref, so this walks the
-  # caller's boards without a query per board.
-  #
-  # Board keys are NOT unique (every board defaults to "RLY"; create_board derives the key from
-  # the name without a collision check), so a bare ref can match two boards. The optional `board`
-  # slug disambiguates — the feed hands every row its slug, so real clients always have it.
-  # Acting on the wrong card would be silent corruption, so ambiguity is an error, not a guess.
-  defp resolve(conn, ref, params) do
-    conn.assigns.current_user
-    |> Boards.list_boards()
-    |> candidate_boards(params["board"])
-    |> Enum.flat_map(fn board ->
-      case Cards.get_card_by_ref(board, ref) do
-        %Schemas.Card{} = card -> [{board, card}]
-        nil -> []
-      end
-    end)
-    |> case do
-      [{board, card}] -> {:ok, board, card}
-      # Unknown ref, or a board the caller cannot see — never leak the difference.
-      [] -> {:error, :not_found}
-      _ambiguous -> {:error, :ambiguous_ref}
-    end
-  end
-
-  defp candidate_boards(boards, nil), do: boards
-  defp candidate_boards(boards, slug), do: Enum.filter(boards, &(&1.slug == slug))
 
   # The note is required for rejects (spec: 422 when missing).
   defp reject_note(%{"note" => note}) when is_binary(note) do
