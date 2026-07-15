@@ -187,7 +187,9 @@ defmodule Relay.Push.TriggerTest do
     # runs) dispatches through `Relay.Push.TaskSupervisor`. If that named process
     # is ever unavailable, `Task.Supervisor.start_child/2` exits (:noproc) rather
     # than returning an error tuple — this proves `dispatch/1` contains that exit
-    # too, not just exceptions raised inside the dispatched fun.
+    # too, not just exceptions raised inside the dispatched fun. Wrapped in
+    # capture_log both to silence the expected "[push] dispatch exit" error line
+    # and to assert `safely/1` actually logged it.
     test "the async branch never fails set_status when its supervisor is unavailable" do
       %{card: card, users: [alice]} = board_with_members(1)
       with_device(alice, "tok-alice")
@@ -199,8 +201,72 @@ defmodule Relay.Push.TriggerTest do
       :ok = Supervisor.terminate_child(Relay.Supervisor, TaskSupervisor)
       on_exit(fn -> Supervisor.restart_child(Relay.Supervisor, TaskSupervisor) end)
 
-      assert {:ok, updated} = Cards.set_status(card, %{status: :needs_input}, :agent)
-      assert updated.status == :needs_input
+      log =
+        capture_log(fn ->
+          assert {:ok, updated} = Cards.set_status(card, %{status: :needs_input}, :agent)
+          assert updated.status == :needs_input
+        end)
+
+      assert log =~ "[push] dispatch exit"
+    end
+  end
+
+  describe "the real async path (Task.Supervisor actually runs the task)" do
+    # Relay.Push.Delivery.Test sends to a configured pid (defaulting to self()) so
+    # a dispatched Task — which is a different process than the caller — can still
+    # reach the test process. Without this, async: true could only be exercised by
+    # killing the supervisor (above), never by letting a task actually deliver.
+    test "a dispatched Task delivers the push to the configured test pid" do
+      %{card: card, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-alice")
+
+      previous = Application.get_env(:relay, Push)
+      Application.put_env(:relay, Push, Keyword.put(previous, :async, true))
+      Application.put_env(:relay, :push_test_pid, self())
+
+      on_exit(fn ->
+        Application.put_env(:relay, Push, previous)
+        Application.delete_env(:relay, :push_test_pid)
+      end)
+
+      assert {:ok, _updated} = Cards.set_status(card, %{status: :in_review}, :agent)
+
+      assert_receive {:push_delivered, "tok-alice", payload}, 1000
+      assert payload["kind"] == "in_review"
+    end
+  end
+
+  describe "transactional callers (RLY-81 review fix)" do
+    # Cards.set_status/3's push must never fire from inside an open transaction:
+    # an uncommitted write is invisible to a Task running on another DB
+    # connection (the async: true production path), and a push is irrevocable —
+    # unlike a rolled-back write, it cannot be taken back once delivered.
+    test "card_status_changed/3 does not dispatch while inside an open transaction" do
+      %{card: card, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-alice")
+
+      Repo.transaction(fn ->
+        assert :ok = Push.card_status_changed(%{card | status: :in_review}, :working, :agent)
+      end)
+
+      refute_received {:push_delivered, _, _}
+    end
+
+    # The canonical transactional caller: Cards.move_card/4 snaps a card's status
+    # to the destination stage's default (ADR 0003) from inside its own
+    # transaction. The push must still reach the recipient — just deferred until
+    # after that transaction commits.
+    test "moving a card into a review stage still delivers the push, once, after commit" do
+      %{board: board, card: card, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-alice")
+      review_stage = insert(:stage, board: board, type: :review, category: :complete)
+
+      assert {:ok, moved} = Cards.move_card(card, review_stage, 0, :agent)
+      assert moved.status == :in_review
+
+      assert_received {:push_delivered, "tok-alice", payload}
+      assert payload["kind"] == "in_review"
+      refute_received {:push_delivered, _, _}
     end
   end
 

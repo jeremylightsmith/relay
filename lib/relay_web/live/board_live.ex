@@ -1535,8 +1535,11 @@ defmodule RelayWeb.BoardLive do
   # question) can beat the `:needs_input` Activity entry to this session, so refresh_card/2's
   # question ends up blank until this later `:timeline_appended` for that entry lands — recompute
   # it here too rather than waiting on the next unrelated card_upserted to paper over it.
-  defp refresh_needs_input_question(socket, %Card{} = card, %Schemas.Activity{type: :needs_input}) do
-    assign_question(socket, card, Activity.list_activity(card))
+  # `entry` already carries the full `:needs_input` meta (question/questions) that
+  # latest_question/2 and latest_questions/2 scan for, so it stands in for a freshly-fetched
+  # activity list without the round trip.
+  defp refresh_needs_input_question(socket, %Card{} = card, %Schemas.Activity{type: :needs_input} = entry) do
+    assign_question(socket, card, [entry])
   end
 
   defp refresh_needs_input_question(socket, %Card{}, _entry), do: socket

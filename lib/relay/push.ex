@@ -109,6 +109,14 @@ defmodule Relay.Push do
   (`Relay.Cards.set_status/3`), which is the only place that sees it. Which
   statuses are push-worthy is decided here, by this clause's guard — the one
   and only place that list lives, so `Cards` never has to know it.
+
+  **Never dispatches from inside an open transaction** (`dispatch/1`): an
+  uncommitted write is invisible to a `Task` on another DB connection (the
+  `async: true` production path gives the wrong badge), and a delivered push
+  is irrevocable — unlike a rolled-back write, it cannot be taken back if the
+  transaction never commits. A caller inside a transaction (`Cards.move_card/4`
+  snapping status via `snap_status/3`) must re-invoke this — or, more simply,
+  call `Cards.maybe_notify/3` again — once its transaction returns `{:ok, _}`.
   """
   def card_status_changed(card, from_status, actor)
 
@@ -126,8 +134,12 @@ defmodule Relay.Push do
   # returning an error tuple, and an unprotected exit here would propagate
   # straight into the caller of `set_status/3`.
   defp dispatch(fun) do
-    safely(fn -> dispatch_now(fun) end)
-    :ok
+    if Repo.in_transaction?() do
+      :ok
+    else
+      safely(fn -> dispatch_now(fun) end)
+      :ok
+    end
   end
 
   defp dispatch_now(fun) do

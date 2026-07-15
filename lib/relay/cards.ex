@@ -693,6 +693,7 @@ defmodule Relay.Cards do
   def move_card(%Card{board_id: board_id} = card, %Stage{board_id: board_id} = target_stage, index, actor \\ :agent)
       when is_integer(index) do
     previous_stage_id = card.stage_id
+    from_status = card.status
 
     result =
       Repo.transaction(fn ->
@@ -715,6 +716,12 @@ defmodule Relay.Cards do
     case result do
       {:ok, moved} ->
         Events.broadcast(moved.board_id, {:card_moved, moved, previous_stage_id})
+        # snap_status/3 may have run set_status/3 (and its maybe_notify/3) from
+        # INSIDE the transaction above; Relay.Push.dispatch/1 refuses to fire from
+        # inside an open transaction (RLY-81 — see its moduledoc), so the push
+        # never went out. Re-run the same edge check now that the move has
+        # actually committed; a no-op unless the snap changed the status.
+        maybe_notify({:ok, moved}, from_status, actor)
         {:ok, moved}
 
       {:error, _changeset} = error ->
