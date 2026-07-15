@@ -201,6 +201,31 @@ defmodule RelayWeb.Api.CardControllerTest do
     refute Map.has_key?(card_json, "spec")
   end
 
+  test "PATCH sets acceptance_criteria and GET /api/cards/:ref returns it",
+       %{conn: conn, board: board, stage: stage} do
+    card = insert(:card, stage: stage, title: "Criteria card")
+    criteria = "### 1. It round-trips\n1. Set it\n2. Expect: it comes back"
+
+    body =
+      conn
+      |> patch(~p"/api/cards/#{ref(board, card)}", %{acceptance_criteria: criteria})
+      |> json_response(200)
+      |> Map.fetch!("data")
+
+    assert body["acceptance_criteria"] == criteria
+
+    fetched = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200) |> Map.fetch!("data")
+    assert fetched["acceptance_criteria"] == criteria
+  end
+
+  test "GET /api/cards index omits acceptance_criteria (it is heavy text)", %{conn: conn, stage: stage} do
+    insert(:card, stage: stage, acceptance_criteria: "### 1. Heavy\n1. Expect: not in the list shape")
+
+    [card_json] = conn |> get(~p"/api/cards") |> json_response(200) |> Map.fetch!("data")
+
+    refute Map.has_key?(card_json, "acceptance_criteria")
+  end
+
   describe "POST /api/cards" do
     test "creates a ready, unowned card in the board's first stage with title only",
          %{conn: conn, stage: stage} do

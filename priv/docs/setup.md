@@ -57,6 +57,7 @@ Most agents drive the API through the `bin/relay` CLI rather than raw HTTP. Comm
 | `bin/relay move RLY-12 Code` | Move the card to a stage (by name) |
 | `bin/relay status RLY-12 working` | Set the card's status |
 | `bin/relay describe RLY-12 @spec.md` | Set the card's description (the spec) |
+| `bin/relay criteria RLY-12 @criteria.md` | Set the card's acceptance criteria (numbered; read at the review gate) |
 | `bin/relay plan RLY-12 @plan.md` | Set the card's plan |
 | `bin/relay needs-input RLY-12 "…"` | Ask the human a question — blocks the card |
 | `bin/relay approve RLY-12` / `bin/relay reject RLY-12 "note"` | Gate: advance / send back |

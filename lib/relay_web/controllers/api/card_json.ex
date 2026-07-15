@@ -5,7 +5,7 @@ defmodule RelayWeb.Api.CardJSON do
 
   @doc """
   The shared card shape. `board` supplies the ref + key; `stages` (the board's in-memory stage
-  list) drives the derived `done`/`needs_you` facts. Heavy plan/spec live on show/1.
+  list) drives the derived `done`/`needs_you` facts. Heavy acceptance_criteria/plan/spec live on show/1.
   """
   def data(board, card, stages) do
     %{
@@ -50,6 +50,7 @@ defmodule RelayWeb.Api.CardJSON do
         board
         |> data(card, stages)
         |> Map.put(:description, card.description)
+        |> Map.put(:acceptance_criteria, card.acceptance_criteria)
         |> Map.put(:plan, card.plan)
         |> Map.put(:spec, card.spec)
         |> Map.put(:ai_result, card.ai_result)
