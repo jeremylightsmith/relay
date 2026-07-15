@@ -17,6 +17,35 @@ class FeedBoard {
   );
 }
 
+/// One structured question from RLY-71's `meta["questions"]`, as FeedJSON ships it.
+///
+/// The defaults mirror `Cards.normalize_question/1` **exactly** — an absent `options`
+/// is `[]`, an absent or null `allow_text` is `true` — so the native stepper and the
+/// web stepper read one identical question.
+class FeedQuestion {
+  const FeedQuestion({
+    required this.prompt,
+    required this.options,
+    required this.allowText,
+  });
+
+  final String prompt;
+
+  /// Plain strings — RLY-71's merged wire format has no per-option description (D3).
+  final List<String> options;
+
+  /// `allow_text` on the wire. NOT `allow_free_text`, which exists nowhere in Relay.
+  final bool allowText;
+
+  factory FeedQuestion.fromJson(Map<String, dynamic> json) => FeedQuestion(
+    prompt: json['prompt'] as String? ?? '',
+    options: ((json['options'] as List<dynamic>?) ?? const [])
+        .map((e) => e.toString())
+        .toList(growable: false),
+    allowText: json['allow_text'] as bool? ?? true,
+  );
+}
+
 class FeedRow {
   const FeedRow({
     required this.ref,
@@ -26,6 +55,7 @@ class FeedRow {
     required this.kind,
     required this.blockedAt,
     this.tag,
+    this.stage,
     this.reason,
     this.questions,
   });
@@ -34,6 +64,9 @@ class FeedRow {
   final String title;
   final FeedBoard board;
   final String? tag;
+
+  /// The stage's display name (`Code`, `Code · Review`) — INPUT-01's breadcrumb.
+  final String? stage;
 
   /// The card's status. Present for completeness; the two-type contract reads [kind].
   final String status;
@@ -44,7 +77,10 @@ class FeedRow {
 
   final String? reason;
   final DateTime blockedAt;
-  final List<dynamic>? questions;
+
+  /// Structured questions on a needs_input row; null on in_review rows and on a card
+  /// blocked with a plain-string question (the legacy free-text path).
+  final List<FeedQuestion>? questions;
 
   /// The mono uppercase label HOME-01 draws.
   String get kindLabel => kind == 'needs_input' ? 'NEEDS INPUT' : 'REVIEW';
@@ -56,11 +92,14 @@ class FeedRow {
       (json['board'] as Map?)?.cast<String, dynamic>() ?? const {},
     ),
     tag: json['tag'] as String?,
+    stage: json['stage'] as String?,
     status: json['status'] as String? ?? '',
     kind: json['kind'] as String? ?? '',
     reason: json['reason'] as String?,
     blockedAt: _parseBlockedAt(json['blocked_at'] as String?),
-    questions: json['questions'] as List<dynamic>?,
+    questions: (json['questions'] as List<dynamic>?)
+        ?.map((e) => FeedQuestion.fromJson((e as Map).cast<String, dynamic>()))
+        .toList(growable: false),
   );
 }
 

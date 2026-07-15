@@ -35,6 +35,7 @@ void main() {
       'ref': 'RLY-2',
       'status': 'needs_input',
       'kind': 'needs_input',
+      'stage': 'Code',
       'questions': [
         {
           'prompt': 'Column order?',
@@ -44,7 +45,37 @@ void main() {
     });
     expect(row.kind, 'needs_input');
     expect(row.kindLabel, 'NEEDS INPUT');
+    expect(row.stage, 'Code');
     expect(row.questions, hasLength(1));
+    expect(row.questions!.single.prompt, 'Column order?');
+    expect(row.questions!.single.options, ['A', 'B']);
+  });
+
+  test('a question fills the same defaults as Cards.normalize_question/1', () {
+    final row = FeedRow.fromJson({
+      ...reviewRowJson(),
+      'status': 'needs_input',
+      'kind': 'needs_input',
+      'questions': [
+        {'prompt': 'Column order?'},
+        {
+          'prompt': 'Which region?',
+          'options': ['us', 'eu'],
+          'allow_text': false,
+        },
+      ],
+    });
+
+    // normalize_question/1: options || [], allow_text defaults true. The native
+    // stepper must read a question exactly as the web stepper does.
+    expect(row.questions![0].options, isEmpty);
+    expect(row.questions![0].allowText, isTrue);
+    expect(row.questions![1].options, ['us', 'eu']);
+    expect(row.questions![1].allowText, isFalse);
+  });
+
+  test('a row with no stage parses rather than throwing', () {
+    expect(FeedRow.fromJson(reviewRowJson()).stage, isNull);
   });
 
   test('a Z-less blocked_at is read as UTC, not local time', () {
