@@ -28,7 +28,8 @@ defmodule Relay.Cards do
   # move_card/4 clamps this into range.
   @append_index 1_000_000
 
-  # Every Card column EXCEPT the heavy text bodies (:description, :spec, :plan).
+  # Every Card column EXCEPT the heavy text bodies (:description,
+  # :acceptance_criteria, :spec, :plan).
   # list_cards/1,2 loads only these so a whole-board render (LiveView columns + the
   # API index) never drags multi-KB spec/plan/description text it doesn't show
   # (RLY-67). :rejection is an inline embeds_one column and rides along in the struct;
@@ -89,8 +90,8 @@ defmodule Relay.Cards do
   (RLY-4) are excluded, so they drop out of every stage/category/WIP count
   for free.
 
-  **Loads a trimmed projection (RLY-67):** `description`, `spec`, and `plan`
-  come back `nil` — a whole-board view never renders them. Anything needing
+  **Loads a trimmed projection (RLY-67):** `description`, `acceptance_criteria`,
+  `spec`, and `plan` come back `nil` — a whole-board view never renders them. Anything needing
   those heavy text bodies must fetch the full card via `get_card_by_ref/2`
   (the drawer already does). Every other column, the `owners: :user` and
   ordered `sub_tasks` preloads, and the `rejection` embed are populated.
@@ -220,9 +221,9 @@ defmodule Relay.Cards do
 
   @doc """
   Updates a card's user/agent-editable attributes (`:title`, `:description`,
-  `:tag`, `:branch`, `:plan`), returning `{:ok, card}` or
-  `{:error, changeset}`. The programmatic fields (`board_id`, `stage_id`,
-  `position`, `ref_number`) are never cast and cannot be changed here.
+  `:acceptance_criteria`, `:spec`, `:tag`, `:branch`, `:plan`), returning
+  `{:ok, card}` or `{:error, changeset}`. The programmatic fields (`board_id`,
+  `stage_id`, `position`, `ref_number`) are never cast and cannot be changed here.
   """
   def update_card(%Card{} = card, attrs) do
     card
@@ -624,15 +625,17 @@ defmodule Relay.Cards do
 
   # Light card columns for the optimistic drawer's first paint (RLY-68):
   # every Card field except the multi-KB heavy text
-  # (description/spec/plan/ai_result). Derived from @list_card_fields (RLY-67)
-  # minus :ai_result, so there is one source of truth for the board's light
-  # projection and this even-lighter drawer projection never drifts from it.
+  # (description/acceptance_criteria/spec/plan/ai_result). Derived from
+  # @list_card_fields (RLY-67) minus :ai_result, so there is one source of
+  # truth for the board's light projection and this even-lighter drawer
+  # projection never drifts from it.
   @light_card_fields @list_card_fields -- [:ai_result]
 
   @doc """
   Like `get_card_by_ref/2`, but selects only the card's light columns
-  (everything except the heavy `description`/`spec`/`plan`/`ai_result`
-  text), still preloading `owners: :user` and position-ordered
+  (everything except the heavy
+  `description`/`acceptance_criteria`/`spec`/`plan`/`ai_result` text),
+  still preloading `owners: :user` and position-ordered
   `sub_tasks`. The heavy string fields come back `nil`. Powers the
   optimistic card drawer's instant first paint (RLY-68); the drawer's
   async fill re-fetches the full card via `get_card_by_ref/2`.

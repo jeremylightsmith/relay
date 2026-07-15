@@ -67,6 +67,7 @@ heavy fields:
 ```json
 {
   "description": "…markdown…",
+  "acceptance_criteria": "…markdown…",
   "plan": "…markdown…",
   "spec": "…markdown…",
   "timeline": [
@@ -117,8 +118,8 @@ All cards on the board (base shape).
 ### POST /api/cards
 
 Create a card. Optional `stage` (a stage **id**; defaults to the board's first stage).
-Accepts `title`, `description`, `spec`, `tag`, `branch`, `plan`, `pr_url`. Returns
-`201` with the single-card shape.
+Accepts `title`, `description`, `acceptance_criteria`, `spec`, `tag`, `branch`, `plan`,
+`pr_url`. Returns `201` with the single-card shape.
 
 ```
 curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application/json" \
@@ -131,7 +132,7 @@ curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application
 
 ### GET /api/cards/:ref
 
-One card, single-card shape (with `description`, `plan`, `spec`, `timeline`).
+One card, single-card shape (with `description`, `acceptance_criteria`, `plan`, `spec`, `timeline`).
 
 ```
 curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-12
@@ -139,8 +140,8 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-1
 
 ### PATCH /api/cards/:ref
 
-Update a card. Any of `title`, `description`, `spec`, `tag`, `branch`, `plan`,
-`pr_url`; plus `status` (with optional `progress`); plus `owners` (a list of
+Update a card. Any of `title`, `description`, `acceptance_criteria`, `spec`, `tag`, `branch`,
+`plan`, `pr_url`; plus `status` (with optional `progress`); plus `owners` (a list of
 `"agent"` or `"user:<id>"`). Returns the single-card shape.
 
 ```

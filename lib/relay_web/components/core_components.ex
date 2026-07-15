@@ -1068,6 +1068,13 @@ defmodule RelayWeb.CoreComponents do
   attr :spec_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[spec]"
   attr :plan_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[plan]"
 
+  attr :editing_acceptance_criteria, :boolean, default: false
+  attr :expanded_acceptance_criteria, :boolean, default: false
+
+  attr :acceptance_criteria_form, :any,
+    default: nil,
+    doc: "a Phoenix.HTML.Form for card[acceptance_criteria]"
+
   attr :current_user_id, :integer,
     default: nil,
     doc: "the signed-in user's id, for the Add me owner control"
@@ -1142,7 +1149,7 @@ defmodule RelayWeb.CoreComponents do
   attr :body_loading, :boolean,
     default: false,
     doc:
-      "RLY-68 optimistic drawer: when true, the heavy sections (description/spec/plan/ai_result/needs-input question/timeline) render daisyUI skeletons instead of their content; the async fill flips this false"
+      "RLY-68 optimistic drawer: when true, the heavy sections (description/acceptance_criteria/spec/plan/ai_result/needs-input question/timeline) render daisyUI skeletons instead of their content; the async fill flips this false"
 
   def card_drawer(assigns) do
     assigns =
@@ -1587,6 +1594,54 @@ defmodule RelayWeb.CoreComponents do
                   class="md min-h-16 p-1 text-sm leading-relaxed"
                 >
                   {Relay.Markdown.to_html(@card.description || "_No description._")}
+                </div>
+              </section>
+
+              <section
+                :if={@body_loading}
+                id={"#{@id}-acceptance-criteria-skeleton-section"}
+                class="space-y-2"
+              >
+                <.section_label>Acceptance Criteria</.section_label>
+                <div
+                  id={"#{@id}-acceptance-criteria-skeleton"}
+                  class="skeleton h-32 w-full rounded-lg"
+                >
+                </div>
+              </section>
+              <section
+                :if={!@body_loading and !@archived}
+                id={"#{@id}-acceptance-criteria"}
+                class="space-y-2"
+              >
+                <.boxed_field
+                  id={"#{@id}-acceptance-criteria"}
+                  value={@card.acceptance_criteria}
+                  editing={@editing_acceptance_criteria}
+                  form={@acceptance_criteria_form}
+                  field={:acceptance_criteria}
+                  edit_event="edit_acceptance_criteria"
+                  save_event="save_card_acceptance_criteria"
+                  cancel_event="cancel_acceptance_criteria"
+                  placeholder="Add acceptance criteria…"
+                  label="Acceptance Criteria"
+                  accent={:accent}
+                  collapsible
+                  expanded={@expanded_acceptance_criteria}
+                  toggle_event="toggle_acceptance_criteria"
+                  markdown
+                  multiline
+                  rows="12"
+                />
+              </section>
+              <section
+                :if={(!@body_loading and @archived) && @card.acceptance_criteria}
+                id={"#{@id}-acceptance-criteria-archived"}
+                class="space-y-2"
+              >
+                <.section_label>Acceptance Criteria</.section_label>
+                <div id={"#{@id}-acceptance-criteria-view"} class="md text-sm leading-relaxed">
+                  {Relay.Markdown.to_html(@card.acceptance_criteria)}
                 </div>
               </section>
 
@@ -2803,6 +2858,7 @@ defmodule RelayWeb.CoreComponents do
 
   defp accent_bar_class(:primary), do: "bg-primary"
   defp accent_bar_class(:secondary), do: "bg-secondary"
+  defp accent_bar_class(:accent), do: "bg-accent"
 
   defp toggle_label(true, _value), do: "Collapse"
   defp toggle_label(false, value), do: if(field_blank?(value), do: "Add", else: "Expand")
@@ -2834,7 +2890,7 @@ defmodule RelayWeb.CoreComponents do
   attr :label, :string, default: nil, doc: "eyebrow header text; when set the field renders its own header row"
 
   attr :accent, :atom,
-    values: [:primary, :secondary, nil],
+    values: [:primary, :secondary, :accent, nil],
     default: nil,
     doc: "left accent bar color"
 

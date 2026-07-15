@@ -30,4 +30,17 @@ defmodule Relay.BrainstormSkillTest do
   test "no longer writes a docs/superpowers/specs file", %{doc: doc} do
     refute doc =~ "docs/superpowers/specs"
   end
+
+  test "writes the card's acceptance criteria via relay criteria", %{doc: doc} do
+    assert doc =~ "bin/relay criteria"
+  end
+
+  test "specifies the numbered-criterion / numbered-steps / one-expectation format", %{doc: doc} do
+    assert doc =~ "one observable expectation"
+    assert doc =~ "Expect:"
+  end
+
+  test "authors criteria even when the card has no runtime surface", %{doc: doc} do
+    assert doc =~ "no runtime surface"
+  end
 end

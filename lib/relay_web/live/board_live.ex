@@ -238,6 +238,9 @@ defmodule RelayWeb.BoardLive do
         editing_title={@editing_title}
         editing_description={@editing_description}
         description_form={@description_form}
+        editing_acceptance_criteria={@editing_acceptance_criteria}
+        expanded_acceptance_criteria={@expanded_acceptance_criteria?}
+        acceptance_criteria_form={@acceptance_criteria_form}
         editing_spec={@editing_spec}
         editing_plan={@editing_plan}
         expanded_spec={@expanded_spec?}
@@ -412,7 +415,7 @@ defmodule RelayWeb.BoardLive do
   @impl true
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
         compose create_card move_card save_card_title save_card_description
-        save_card_spec save_card_plan
+        save_card_acceptance_criteria save_card_spec save_card_plan
         add_owner remove_owner take_over post_comment answer_input
         answer_select answer_custom answer_next answer_back answer_goto answer_submit
         review_approve review_reject
@@ -673,6 +676,43 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("save_card_description", _params, socket), do: {:noreply, socket}
 
+  def handle_event("edit_acceptance_criteria", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    {:noreply,
+     socket
+     |> assign(:editing_acceptance_criteria, true)
+     |> assign(
+       :acceptance_criteria_form,
+       to_form(%{"acceptance_criteria" => card.acceptance_criteria || ""}, as: :card)
+     )}
+  end
+
+  def handle_event("edit_acceptance_criteria", _params, socket), do: {:noreply, socket}
+
+  def handle_event("cancel_acceptance_criteria", _params, socket) do
+    {:noreply, assign(socket, editing_acceptance_criteria: false, acceptance_criteria_form: nil)}
+  end
+
+  def handle_event(
+        "save_card_acceptance_criteria",
+        %{"card" => card_params},
+        %{assigns: %{selected_card: %Card{} = card}} = socket
+      ) do
+    case Cards.update_card(card, Map.take(card_params, ["acceptance_criteria"])) do
+      {:ok, card} ->
+        {:noreply,
+         socket
+         |> assign(:selected_card, card)
+         |> assign(:editing_acceptance_criteria, false)
+         |> assign(:acceptance_criteria_form, nil)
+         |> stream_insert(stream_name(card.stage_id), card)}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :acceptance_criteria_form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("save_card_acceptance_criteria", _params, socket), do: {:noreply, socket}
+
   def handle_event("edit_spec", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
     {:noreply,
      socket
@@ -732,6 +772,10 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("save_card_plan", _params, socket), do: {:noreply, socket}
+
+  def handle_event("toggle_acceptance_criteria", _params, socket) do
+    {:noreply, update(socket, :expanded_acceptance_criteria?, &(!&1))}
+  end
 
   def handle_event("toggle_spec", _params, socket) do
     {:noreply, update(socket, :expanded_spec?, &(!&1))}
@@ -1545,6 +1589,9 @@ defmodule RelayWeb.BoardLive do
           |> assign(:editing_title, false)
           |> assign(:editing_description, false)
           |> assign(:description_form, nil)
+          |> assign(:editing_acceptance_criteria, false)
+          |> assign(:expanded_acceptance_criteria?, false)
+          |> assign(:acceptance_criteria_form, nil)
           |> assign(:editing_spec, false)
           |> assign(:editing_plan, false)
           |> assign(:expanded_spec?, false)
@@ -1576,6 +1623,9 @@ defmodule RelayWeb.BoardLive do
           editing_title: false,
           editing_description: false,
           description_form: nil,
+          editing_acceptance_criteria: false,
+          expanded_acceptance_criteria?: false,
+          acceptance_criteria_form: nil,
           editing_spec: false,
           editing_plan: false,
           expanded_spec?: false,

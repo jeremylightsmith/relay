@@ -137,15 +137,25 @@ defmodule Relay.CardsTest do
       assert Enum.map(Cards.list_cards(board), & &1.id) == [keep.id]
     end
 
-    test "omits description/spec/plan but keeps every other field and the preloads",
+    test "omits description/acceptance_criteria/spec/plan but keeps every other field and the preloads",
          %{board: board, stage: stage} do
-      card = insert(:card, stage: stage, description: "d", spec: "s", plan: "p", status: :working)
+      card =
+        insert(:card,
+          stage: stage,
+          description: "d",
+          acceptance_criteria: "ac",
+          spec: "s",
+          plan: "p",
+          status: :working
+        )
+
       insert(:card_owner, card: card)
       insert(:sub_task, card: card, title: "todo")
 
       assert [loaded] = Cards.list_cards(board)
 
       assert loaded.description == nil
+      assert loaded.acceptance_criteria == nil
       assert loaded.spec == nil
       assert loaded.plan == nil
       assert loaded.title == card.title
@@ -377,6 +387,7 @@ defmodule Relay.CardsTest do
       {:ok, _} =
         Cards.update_card(card, %{
           description: "d",
+          acceptance_criteria: "ac",
           spec: "s",
           plan: "p",
           ai_result: %{"summary" => "x"}
@@ -392,6 +403,7 @@ defmodule Relay.CardsTest do
       assert light.status == :ready
       # heavy fields are not selected
       assert light.description == nil
+      assert light.acceptance_criteria == nil
       assert light.spec == nil
       assert light.plan == nil
       assert light.ai_result == nil

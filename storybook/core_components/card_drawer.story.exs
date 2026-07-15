@@ -166,6 +166,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           card: %{
             story_card()
             | branch: "rly-12-wire-the-runner",
+              acceptance_criteria:
+                "### 1. The drawer shows all three long fields\n1. Open the card\n2. Expect: Description, Acceptance Criteria, Spec, Plan — in that order\n\n### 2. Acceptance criteria carry the teal accent\n1. Look at the section header\n2. Expect: a teal bar, distinct from Spec's blue and Plan's violet",
               spec:
                 "## Goal\n\nWire the runner end-to-end so an agent can pull a card, work it, and hand it back.\n\n## Acceptance\n\n- `PATCH /api/cards/:ref` accepts `branch` + `plan`\n- The drawer shows collapsed **Spec** and **Plan** blocks immediately before Activity",
               plan:
@@ -337,6 +339,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           card: %{
             story_card()
             | description: nil,
+              acceptance_criteria: nil,
               spec: nil,
               plan: nil,
               ai_result: nil,
@@ -413,6 +416,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
     %{
       title: "Draft the onboarding spec",
       description: "Cover the Google sign-in flow.\n\nList open questions for review.",
+      acceptance_criteria: nil,
       spec: nil,
       tag: "spec",
       status: :working,

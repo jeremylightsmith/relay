@@ -85,11 +85,47 @@ get approval before moving on.
 
   Do **NOT** write or commit a spec file under a shared `docs/…` specs directory — that home is
   retired; work travels with the card.
+- Write the card's **acceptance criteria** in this same step — they are a required output of
+  the Spec stage, not an optional extra. Save them to a temp file and:
+
+      ./bin/relay criteria <ref> @<tmpfile>
+
+  They are the human's Approve checklist first and the robot's script second: at the Code
+  stage the `acceptance-tester` reads this field off the card and actually runs them.
+
+  **Required format** — a numbered criterion, each with numbered steps, each ending in one
+  observable expectation:
+
+  ```markdown
+  ### 1. <Short criterion title>
+  1. <action step>
+  2. <action step>
+  3. Expect: <one observable outcome>
+
+  ### 2. <Short criterion title>
+  1. …
+  ```
+
+  Rules:
+  - Every criterion ends in **one observable expectation** — something a tester can see, not a
+    feeling. "The page loads" is not a criterion; "the drawer shows Acceptance Criteria above
+    Spec" is.
+  - Steps are concrete and executable from a cold start: name the URL, the button, the command.
+  - Criteria describe **user-observable behavior**, not implementation.
+  - Aim for the handful that would actually change an Approve decision. YAGNI — this is not a
+    test plan, and it does not restate the unit tests.
+  - **Always author them**, including for a card with **no runtime surface** (META work on
+    skills, docs, workflow files). For those, the criteria are static-verifiable assertions
+    ("file X contains Y", "`mix test <path>` passes") — which is what makes them checkable at all.
+  - A criterion the robot cannot possibly check (needs a real device, a subjective aesthetic
+    call) is still authored: the tester returns `human-verify` for it, which does not block.
 - Self-review: placeholder scan, internal consistency, scope, ambiguity — fix inline. **For any
   UI feature, confirm the spec records an explicit artboard decision** — either "match
   `docs/designs/<file>.dc.html`" naming the elements/states, or a deliberate "no mockup"
   (with why: none fits / known-stale / not visual enough). A UI spec with *no* artboard
   decision is a gap: resolve it (ask the user if it's still open) before writing the spec.
+  **Confirm the spec has acceptance criteria** in the required format: a spec written without
+  them is a gap, not a style choice. Resolve it before writing.
 - Point the user to `/write-plan <ref>`. Do NOT start implementation or launch execution.
 
 ## Headless / runner use (no human to dialogue with)

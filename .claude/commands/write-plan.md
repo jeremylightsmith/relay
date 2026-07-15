@@ -86,8 +86,13 @@ refactor that benefits from isolation (e.g. keep a pure schema migration its own
     `:4003` via Playwright. A **Flutter** card declares the iOS-simulator smoke (boot the app,
     screenshot each state, compare to `docs/designs/Relay Mobile.dc.html`). Say "none" only for
     a card with no runtime surface.
-  The `plan-implementer`, the whole-suite gate, and the `smoke-tester` all read these lines, so
-  they must be exact.
+  The `plan-implementer`, the whole-suite gate, the `smoke-tester`, and the `acceptance-tester`
+  all read these lines, so they must be exact.
+- **Cover the card's acceptance criteria.** Read the card's `acceptance_criteria` field
+  (`./bin/relay card <ref> --json`) and make sure the plan's tasks actually deliver every
+  criterion — a criterion no task covers is a gap: add a task for it. Do **NOT** copy the
+  criteria into the plan: the `acceptance-tester` reads them off the card at the Code stage, so
+  a copy here would only drift.
 - Then a series of **bite-sized tasks**. Each task:
   - `### Task N: <name>` with **Files** (exact create/modify/test paths) and
     **Interfaces** — split as **Consumes** (exact signatures this task uses from earlier

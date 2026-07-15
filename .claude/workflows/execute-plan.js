@@ -2,7 +2,8 @@
 // Claude Code subscription. Invoked by the /exec-plan command.
 //
 //   manager loop (pick → sync→origin/main → implement(TDD) → spec review → quality review → mark),
-//   then mix precommit, then a whole-branch review with a bounded fix loop.
+//   then mix precommit, then a whole-branch review with a bounded fix loop, then an acceptance
+//   smoke, then the card's own acceptance criteria — each with a bounded fix loop.
 //
 // Each cycle first keeps the branch current with origin/main: a cheap haiku `sync` agent
 // detects drift (a no-op in the common case) and only on a real conflict spawns a sonnet
@@ -15,11 +16,11 @@
 // agents' reports. Tasks therefore run strictly sequentially (a for-loop, not
 // pipeline/parallel) — they mutate the same files and plan.md.
 //
-// EDITING THE PROMPTS: the five judgment roles live as editable agent definitions in
+// EDITING THE PROMPTS: the judgment roles live as editable agent definitions in
 // .claude/agents/ (plan-implementer, spec-reviewer, quality-reviewer, final-reviewer,
-// final-fixer) — each owns its instructions AND its model (frontmatter). This script
-// only orchestrates and passes per-call dynamic context (which task, which findings).
-// The two trivial mechanical steps (pick, mark) stay inline below.
+// final-fixer, smoke-tester, acceptance-tester) — each owns its instructions AND its model
+// (frontmatter). This script only orchestrates and passes per-call dynamic context (which
+// task, which findings, which card ref).
 //
 // Run it (requires an approved plan.md at the repo root, and your opt-in) via /exec-plan,
 // or directly: Workflow({scriptPath: ".claude/workflows/execute-plan.js"}).
@@ -36,7 +37,8 @@ export const meta = {
     { title: 'Final check', detail: 'plan-declared gate, default mix precommit (haiku)', model: 'haiku' },
     { title: 'Final review', detail: 'whole-branch review + bounded fix loop (opus)', model: 'opus' },
     { title: 'Smoke', detail: 'drive the feature through the running app + visual review, bounded fix loop (opus)', model: 'opus' },
-    { title: 'Post', detail: 'attach smoke screenshots + one "Smoke results" comment (sonnet)', model: 'sonnet' },
+    { title: 'Acceptance', detail: 'run the card acceptance criteria, bounded fix loop (opus)', model: 'opus' },
+    { title: 'Post', detail: 'acceptance checklist + smoke screenshots as one card comment (sonnet)', model: 'sonnet' },
   ],
 }
 
@@ -110,6 +112,54 @@ const SMOKE = {
   },
 }
 
+const CRITERIA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['result', 'detail'],
+  properties: {
+    result: {
+      type: 'string',
+      enum: ['present', 'absent', 'error'],
+      description:
+        'present = the card fetch succeeded and acceptance_criteria is non-empty. absent = the fetch ' +
+        'succeeded and it is empty (a pre-RLY-108 card, or none authored). error = the fetch ITSELF ' +
+        'failed (non-zero exit from ./bin/relay, e.g. 404 / API down / expired key) — this is not the ' +
+        'same as absent and must never be treated as "no criteria".',
+    },
+    detail: { type: 'string', description: 'One line: how many criteria were found, or why the fetch failed.' },
+  },
+}
+
+const ACCEPTANCE = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['verdict', 'summary', 'findings', 'criteria'],
+  properties: {
+    verdict: {
+      type: 'string',
+      enum: ['pass', 'fail', 'blocked'],
+      description: 'pass = every criterion is pass or human-verify. fail = at least one criterion failed. blocked = the criteria could not be fetched or the environment prevented the whole run (not a code defect).',
+    },
+    summary: { type: 'string', description: 'One-paragraph account of what was run against the criteria.' },
+    findings: { type: 'string', description: 'fail: actionable findings a fixer can act on without re-deriving. blocked: what blocked the run and what would unblock it. pass: empty.' },
+    criteria: {
+      type: 'array',
+      description: 'One entry per authored criterion, in the card order.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'title', 'result', 'evidence'],
+        properties: {
+          id: { type: 'string', description: "The criterion's number as authored, e.g. \"1\"." },
+          title: { type: 'string', description: "The criterion's short title." },
+          result: { type: 'string', enum: ['pass', 'fail', 'human-verify'], description: 'pass = expectation observed. fail = executed, expectation not met. human-verify = could not be executed/judged here.' },
+          evidence: { type: 'string', description: 'pass: what was done and seen. fail: what happened instead. human-verify: why it could not be checked.' },
+        },
+      },
+    },
+  },
+}
+
 // The specialized role instructions live in .claude/agents/*.md, but those custom agent
 // types are not registered in this session, so we run each role on `general-purpose` and
 // have it adopt its role file as instructions. Models are set explicitly per call below.
@@ -122,7 +172,8 @@ const role = (name, body) =>
 const MAX_CYCLES = 50      // max plan tasks per run
 const MAX_ATTEMPTS = 6     // implement↔review retries per task
 const MAX_FINAL_VISITS = 3 // whole-branch review↔fix passes
-const MAX_SMOKE_VISITS = 3 // acceptance-smoke↔fix passes
+const MAX_SMOKE_VISITS = 3  // acceptance-smoke↔fix passes
+const MAX_ACCEPT_VISITS = 3 // acceptance-criteria↔fix passes
 
 // ---- manager loop: one cycle == one plan task -----------------------------
 phase('Execute')
@@ -283,31 +334,139 @@ const smokeStatus =
   smoke && smoke.verdict === 'blocked' ? 'smoke-blocked' :
   'smoke-failed'
 
-// ---- post smoke screenshots to the card (RLY-13) --------------------------
-// When a smoke run produced screenshots and the card ref was threaded in via
-// args, attach each screenshot and post ONE "Smoke results" comment embedding
-// them inline, so a human reviewing the card on the board sees what smoke
-// rendered. Fires whenever screenshots exist (pass or broken), per the spec —
-// no verdict gating. `relay attach` is the tested primitive; this glue is not
-// unit-tested (consistent with the rest of the workflow orchestration).
-if (smoke && Array.isArray(smoke.screenshots) && smoke.screenshots.length && args && args.ref) {
+// ---- acceptance: run the card's human-authored criteria (RLY-108) ---------
+// The criteria live on the card, never in plan.md, so a cheap haiku probe fetches
+// them first: an empty/absent field is a no-op (a pre-RLY-108 card still reaches
+// `ready`), not an error. Runs only after a passing smoke — a branch that already
+// failed smoke has nothing to accept — and only with a card ref to read from.
+let acceptance = null
+let acceptanceRan = false
+
+if (smokeStatus === 'ready' && args && args.ref) {
+  phase('Acceptance')
+  const probe = await agent(
+    `Read Relay card ${args.ref}'s acceptance criteria and report ONLY whether it has any — do NOT ` +
+      `run the criteria, edit anything, or touch the card. This repo has a CLI at ./bin/relay and ` +
+      `RELAY_URL + RELAY_API_KEY are already set. Run \`./bin/relay card ${args.ref} --json\` ON ITS ` +
+      `OWN first (not through a pipe) and check ITS OWN exit status, separately from anything ` +
+      `downstream. On a non-zero exit (404 / API down / expired key / bogus ref — the CLI writes the ` +
+      `error to stderr and prints NOTHING to stdout), return result="error" with the stderr text in ` +
+      `detail. An error is NOT the same as an empty field — never report "absent" when the fetch ` +
+      `itself failed. Only once you've confirmed a zero exit, pipe that same JSON through ` +
+      `\`jq -r '.acceptance_criteria // ""'\` and return result="present" when it prints non-whitespace ` +
+      `text, result="absent" when it is empty.`,
+    { schema: CRITERIA, phase: 'Acceptance', model: 'haiku', label: 'criteria probe' },
+  )
+
+  if (probe && probe.result === 'present') {
+    acceptanceRan = true
+
+    for (let visit = 1; visit <= MAX_ACCEPT_VISITS; visit++) {
+      acceptance = await agent(
+        role('acceptance-tester',
+          `Card ref: ${args.ref} (visit ${visit}). Read its acceptance criteria off the card and run ` +
+          `every one of them against this branch.\n\nThe smoke-tester already drove this branch ` +
+          `end-to-end. Its evidence — judge from it rather than re-driving anything it already ` +
+          `settles:\n` +
+          `- verdict: ${smoke.verdict}\n` +
+          `- summary: ${smoke.summary || '(none)'}\n` +
+          `- findings: ${smoke.findings || '(none)'}\n` +
+          `- screenshots:\n${(smoke.screenshots || []).map((s) => `   - ${s}`).join('\n') || '   (none)'}`),
+        { agentType: 'general-purpose', model: 'opus', schema: ACCEPTANCE, phase: 'Acceptance', effort: 'high', label: `acceptance #${visit}` },
+      )
+      // pass/blocked both end the loop: blocked is an environment problem, not a code
+      // defect, so it is reported without fix-looping (same rule as smoke).
+      if (!acceptance || acceptance.verdict !== 'fail') break
+      // Last visit: a fix here would never be re-tested, so don't spend it.
+      if (visit === MAX_ACCEPT_VISITS) break
+
+      await agent(
+        role('final-fixer',
+          'The acceptance criteria on this card failed — fix ALL of it in one pass:\n' + (acceptance.findings || '')),
+        { agentType: 'general-purpose', model: 'sonnet', phase: 'Acceptance', effort: 'high', label: `accept-fix #${visit}` },
+      )
+    }
+  } else if (!probe || probe.result === 'error') {
+    // Fail CLOSED, not open: a probe that itself failed, or that couldn't fetch the
+    // card, tells us nothing about whether criteria exist. Treating that the same as
+    // "no criteria" would let a flaky API / bad ref silently skip enforcement and ship
+    // a branch whose criteria were never run. Synthesize the same shape a real
+    // acceptance-tester would return for an environment blocker, so it flows through
+    // the existing verdict → finalStatus mapping below unchanged.
+    acceptanceRan = true
+    acceptance = {
+      verdict: 'blocked',
+      summary: '',
+      findings: (probe && probe.detail) || 'The criteria probe failed to return a verdict.',
+      criteria: [],
+    }
+    log(`Could not confirm acceptance criteria on ${args.ref} — treating as blocked: ${acceptance.findings}`)
+  } else {
+    log(`No acceptance criteria on ${args.ref} — skipping the acceptance phase. ${probe.detail || ''}`.trim())
+  }
+}
+
+// Fail closed on a missing verdict (matching Smoke's ternary, not Final review's
+// fail-open). When the phase did not run, the smoke status stands.
+const finalStatus = !acceptanceRan
+  ? smokeStatus
+  : acceptance && acceptance.verdict === 'pass' ? 'ready'
+  : acceptance && acceptance.verdict === 'blocked' ? 'acceptance-blocked'
+  : 'acceptance-failed'
+
+const RESULT_ICON = { pass: '✅', fail: '❌', 'human-verify': '👤' }
+
+const acceptanceBlock = (() => {
+  if (!acceptance || !Array.isArray(acceptance.criteria) || !acceptance.criteria.length) return ''
+  const counts = acceptance.criteria.reduce((acc, c) => {
+    acc[c.result] = (acc[c.result] || 0) + 1
+    return acc
+  }, {})
+  const parts = []
+  if (counts.pass) parts.push(`${counts.pass} passed`)
+  if (counts.fail) parts.push(`${counts.fail} failed`)
+  if (counts['human-verify']) parts.push(`${counts['human-verify']} human-verify`)
+  const lines = acceptance.criteria
+    .map((c, i) => `${i + 1}. ${RESULT_ICON[c.result] || '•'} **${c.title}** — ${c.evidence}`)
+    .join('\n')
+  return `## Acceptance — ${parts.join(' · ')}\n\n${lines}`
+})()
+
+// ---- post the acceptance checklist + smoke screenshots to the card -------
+// ONE comment per run: the per-criterion checklist first (what a human reads at
+// the review gate), then the smoke screenshots inline beneath. Fires whenever the
+// card ref was threaded in via args AND there is something to report — an
+// acceptance report or screenshots. No verdict gating: a failing run is exactly
+// when the human most needs the report. `relay attach` + `relay comment` are the
+// tested primitives; this glue is not unit-tested (consistent with the rest of the
+// workflow orchestration). The agent posts a COMMENT and never a status change.
+const shotPaths = (smoke && Array.isArray(smoke.screenshots) && smoke.screenshots) || []
+
+if (args && args.ref && (acceptanceBlock || shotPaths.length)) {
   phase('Post')
-  const shots = smoke.screenshots.map((s) => `   - ${s}`).join('\n')
+  const shots = shotPaths.map((s) => `   - ${s}`).join('\n')
+  const attachStep = shotPaths.length
+    ? `1. For EACH screenshot path below, run \`./bin/relay attach ${args.ref} <path> --json\` and keep the ` +
+      `"markdown" field it prints:\n${shots}\n`
+    : `1. There are no screenshots to attach — skip straight to step 2.\n`
+  const body = [acceptanceBlock, smoke && smoke.summary].filter(Boolean).join('\n\n') || 'Smoke results'
+
   await agent(
-    `Post the smoke screenshots to Relay card ${args.ref}. This repo has a CLI at ./bin/relay ` +
+    `Post the acceptance + smoke results to Relay card ${args.ref}. This repo has a CLI at ./bin/relay ` +
       `and RELAY_URL + RELAY_API_KEY are already set in the environment. Do EXACTLY this and nothing else:\n` +
-      `1. For EACH screenshot path below, run \`./bin/relay attach ${args.ref} <path> --json\` and keep the ` +
-      `"markdown" field it prints:\n${shots}\n` +
-      `2. Post ONE comment with \`./bin/relay comment ${args.ref} @<tmpfile>\` whose body is the summary ` +
+      attachStep +
+      `2. Post ONE comment with \`./bin/relay comment ${args.ref} @<tmpfile>\` whose body is the text ` +
       `below, then a blank line, then the collected markdown snippets one per line (one image per ` +
-      `new/changed state — do not add extras):\n\n${smoke.summary || 'Smoke results'}\n\n` +
-      `Post at most ONE comment. Do not touch git or any other card. Report what you posted.`,
-    { agentType: 'general-purpose', model: 'sonnet', phase: 'Post', effort: 'low', label: 'post-smoke' },
+      `new/changed state — do not add extras):\n\n${body}\n\n` +
+      `Post at most ONE comment, VERBATIM — do not re-judge, re-word, or drop any criterion. Do NOT ` +
+      `change the card's status, and do not touch git or any other card. Report what you posted.`,
+    { agentType: 'general-purpose', model: 'sonnet', phase: 'Post', effort: 'low', label: 'post-results' },
   )
 }
 
 return {
-  status: smokeStatus,
+  status: finalStatus,
   precommit: precommit ? precommit.slice(0, 400) : null,
   smoke: smoke && { verdict: smoke.verdict, summary: smoke.summary, findings: smoke.findings, screenshots: smoke.screenshots },
+  acceptance: acceptance && { verdict: acceptance.verdict, summary: acceptance.summary, findings: acceptance.findings, criteria: acceptance.criteria },
 }

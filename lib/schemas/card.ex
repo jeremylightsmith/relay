@@ -10,7 +10,10 @@ defmodule Schemas.Card do
   `description`. `pr_url` carries the runner's pull request link with the
   card; nullable, cast like `branch`/`plan`. `spec` (RLY-3) carries the
   design spec authored at the SPEC stage — nullable, cast like
-  `description`/`plan`. `archived_at` (RLY-4) soft-hides the card from the
+  `description`/`plan`. `acceptance_criteria` (RLY-108) carries the
+  numbered acceptance-criteria contract authored at the SPEC stage and run
+  by the Code stage's acceptance-tester — nullable, cast like `spec`.
+  `archived_at` (RLY-4) soft-hides the card from the
   board; nullable, never cast — set programmatically like `archived_at` on
   boards. `ai_result` (RLY-18) carries the agent's structured result blob
   (summary/changes/screens/deploy_url), nullable, cast like `spec`;
@@ -25,6 +28,7 @@ defmodule Schemas.Card do
   schema "cards" do
     field :title, :string
     field :description, :string
+    field :acceptance_criteria, :string
     field :spec, :string
     field :position, :integer
     field :tag, :string
@@ -52,13 +56,23 @@ defmodule Schemas.Card do
 
   @doc """
   Changeset for user/agent-supplied card attributes (`:title`,
-  `:description`, `:spec`, `:tag`, `:branch`, `:plan`, `:pr_url`,
-  `:ai_result`). `board_id`, `stage_id`, `position`, and `ref_number` must
-  already be set on the struct and are never cast.
+  `:description`, `:acceptance_criteria`, `:spec`, `:tag`, `:branch`,
+  `:plan`, `:pr_url`, `:ai_result`). `board_id`, `stage_id`, `position`, and
+  `ref_number` must already be set on the struct and are never cast.
   """
   def changeset(card, attrs) do
     card
-    |> cast(attrs, [:title, :description, :spec, :tag, :branch, :plan, :pr_url, :ai_result])
+    |> cast(attrs, [
+      :title,
+      :description,
+      :acceptance_criteria,
+      :spec,
+      :tag,
+      :branch,
+      :plan,
+      :pr_url,
+      :ai_result
+    ])
     |> validate_required([:title])
     |> unique_constraint([:board_id, :ref_number], name: :cards_board_id_ref_number_index)
   end

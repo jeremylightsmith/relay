@@ -17,6 +17,7 @@ Config (env): RELAY_URL, RELAY_API_KEY  (a board key from /board/settings)
   relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF [Q] [--questions @file]
   relay own REF / release REF relay approve REF           relay reject REF NOTE
   relay sub-tasks REF @file   relay check REF ID / uncheck REF ID   relay result REF @file
+  relay criteria REF @file    # acceptance criteria (numbered, authored at Spec)
   relay attach REF FILE [--caption TEXT] [--json]
   relay layout   # config skeleton
 
@@ -237,6 +238,10 @@ def set_description(ref, text):
     return api("PATCH", f"/api/cards/{ref}", {"description": text})["data"]
 
 
+def set_acceptance_criteria(ref, text):
+    return api("PATCH", f"/api/cards/{ref}", {"acceptance_criteria": text})["data"]
+
+
 def set_spec(ref, text):
     return api("PATCH", f"/api/cards/{ref}", {"spec": text})["data"]
 
@@ -341,6 +346,9 @@ def print_card(c):
     print(f'{c["ref"]}  {c["title"]}')
     print(f'status: {c.get("status", "?")}   active: {c.get("active_owner") or "-"}   owners: {owners}\n')
     print(c.get("description") or "(no description)")
+    if c.get("acceptance_criteria"):
+        print("\n--- acceptance criteria ---")
+        print(c["acceptance_criteria"])
     if c.get("spec"):
         print("\n--- spec ---")
         print(c["spec"])
@@ -836,6 +844,7 @@ def build_parser():
     add("move", _simple(lambda a: move(a.ref, a.stage)), "ref", "stage", json_flag=True)
     add("status", _simple(lambda a: set_status(a.ref, a.status)), "ref", "status", json_flag=True)
     add("describe", _simple(lambda a: set_description(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
+    add("criteria", _simple(lambda a: set_acceptance_criteria(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("spec", _simple(lambda a: set_spec(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("plan", _simple(lambda a: set_plan(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("branch", _simple(lambda a: set_branch(a.ref, a.name)), "ref", "name", json_flag=True)

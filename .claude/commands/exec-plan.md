@@ -7,7 +7,8 @@ Run `/exec-plan <ref>` to completion using the Claude Workflow engine. The card 
 TDD-implemented, passed through sequential spec-compliance then code-quality review, and
 committed; then `mix precommit` runs, then a whole-branch review with a bounded fix loop,
 then an **acceptance smoke** that drives the feature end-to-end through the running app
-(screenshots + design-artboard comparison for UI), also with a bounded fix loop.
+(screenshots + design-artboard comparison for UI), and finally an **acceptance check** that runs
+the card's own human-authored `acceptance_criteria` — the last two also with bounded fix loops.
 The orchestration lives in `.claude/workflows/execute-plan.js`.
 
 ## Preflight — verify BEFORE launching (stop and report if any fails)
@@ -28,8 +29,8 @@ into that **transient** file just before launching:
     ./bin/relay card <ref> --json | jq -r '.plan // ""' > plan.md
 
 Then invoke the Workflow tool with the committed script, passing the card ref through `args` so
-the workflow can attach smoke screenshots and post the "Smoke results" comment on this card after
-the smoke loop:
+the workflow can read the card's acceptance criteria, attach the smoke screenshots, and post the
+results comment on this card:
 
     Workflow({ scriptPath: ".claude/workflows/execute-plan.js", args: { ref: "<ref>" } })
 
@@ -51,14 +52,16 @@ here; whether it survives the run depends on how the run ends (see On completion
 
 Do this for **every** status below (`ready` and every failure alike). The Code-stage runner
 refuses to push the branch, open the PR, or merge unless this file reads exactly `ready`, so a
-`broken`/`blocked`/`stalled`/`smoke-failed` run stops at the branch instead of shipping.
+`broken`/`blocked`/`stalled`/`smoke-failed`/`acceptance-failed` run stops at the branch instead
+of shipping.
 
 Then read the workflow's returned object and report faithfully:
-- `status: "ready"` — all tasks done, precommit passed, whole-branch review approved, AND the
-  acceptance smoke drove the feature successfully. Surface `smoke.summary` and the
-  `smoke.screenshots` paths so the user can eyeball them, then suggest `/finish` to merge /
-  open the PR (the human-gated step). The run is fully done, so now delete the transient plan
-  so it never becomes a shared file another card clobbers:
+- `status: "ready"` — all tasks done, precommit passed, whole-branch review approved, the
+  acceptance smoke drove the feature successfully, AND every one of the card's acceptance
+  criteria came back `pass` or `human-verify`. Surface `smoke.summary`, the `smoke.screenshots`
+  paths, and any 👤 `human-verify` criteria the human still needs to eyeball, then suggest
+  `/finish` to merge / open the PR (the human-gated step). The run is fully done, so now delete
+  the transient plan so it never becomes a shared file another card clobbers:
 
       rm -f plan.md
 
@@ -83,6 +86,19 @@ Then read the workflow's returned object and report faithfully:
   (`smoke.findings`), not a code defect. The branch may still be fine; report what blocked the
   smoke and what would unblock it (e.g. start the dev server, install the browser), and offer
   to re-run once resolved.
+- `status: "acceptance-failed"` — the branch built, reviewed, and smoked clean, but at least one
+  of the card's acceptance criteria FAILED after up to 3 fix passes. Read `acceptance.criteria`
+  and relay every failing criterion with its evidence (what was expected, what happened
+  instead), plus `acceptance.findings`. Stop; do not suggest merging. The per-criterion
+  checklist was also posted to the card as a comment.
+- `status: "acceptance-blocked"` — the acceptance criteria could not be fetched or run for an
+  environment/setup reason (`acceptance.findings`), not a code defect. The branch may still be
+  fine; report what blocked the run and what would unblock it, and offer to re-run once
+  resolved.
+
+Note: `human-verify` criteria do **not** block — a run whose criteria are all `pass` /
+`human-verify` returns `ready`, and the 👤 lines appear in the card comment for the human to
+check at the gate.
 
 For every status above other than `ready`, **leave `plan.md` in place** — do NOT `rm -f` it.
 It holds the `- [x]` progress `execute-plan.js` tracks, and deleting it would lose every
