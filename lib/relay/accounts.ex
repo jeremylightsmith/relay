@@ -11,6 +11,8 @@ defmodule Relay.Accounts do
 
   use Boundary, deps: [Relay.Repo, Schemas], exports: [GoogleTokenValidator]
 
+  import Ecto.Query
+
   alias Relay.Repo
   alias Schemas.User
   alias Schemas.UserApiToken
@@ -98,8 +100,44 @@ defmodule Relay.Accounts do
       })
 
     with {:ok, token} <- Repo.insert(changeset) do
+      prune_user_api_tokens(user, context)
       {:ok, %{user_api_token: token, token: raw}}
     end
+  end
+
+  @max_user_api_tokens 10
+
+  @doc """
+  How many `relayu_…` tokens a user keeps per context. Public so tests can assert the
+  bound without hard-coding it.
+  """
+  def max_user_api_tokens, do: @max_user_api_tokens
+
+  # The native app does not persist its bearer — it follows the session, so sign-in
+  # AND every session verify mint one. That is a row per app launch, forever, and
+  # nothing else prunes them. Reuse is impossible by construction (only the SHA-256
+  # hash is kept; the raw is unrecoverable), so the only lever is dropping rows that
+  # can no longer be in use — and a token from a previous launch is dead the moment
+  # the app restarts, because the client kept no copy of it.
+  #
+  # Ordered by last_used_at (maintained on every authenticate), so a live sibling
+  # device is evicted only if this user really has more than @max_user_api_tokens
+  # of them in play at once. Scoped to one user + context: never touches anyone else.
+  defp prune_user_api_tokens(%User{} = user, context) do
+    keep =
+      from(t in UserApiToken,
+        where: t.user_id == ^user.id and t.context == ^context,
+        order_by: [desc: coalesce(t.last_used_at, t.inserted_at), desc: t.id],
+        limit: @max_user_api_tokens,
+        select: t.id
+      )
+
+    Repo.delete_all(
+      from(t in UserApiToken,
+        where: t.user_id == ^user.id and t.context == ^context,
+        where: t.id not in subquery(keep)
+      )
+    )
   end
 
   @doc """
