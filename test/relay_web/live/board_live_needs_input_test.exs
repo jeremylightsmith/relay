@@ -156,8 +156,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     assert has_element?(view, "#needs-input-panel", "Which region?")
   end
 
-  test "a card_upserted that beats the :needs_input activity write still lands the question
-        once the timeline_appended for it arrives (RLY-81 race)",
+  test "a card_upserted that beats the :needs_input activity write still lands the question once the timeline_appended for it arrives (RLY-81 race)",
        %{conn: conn, code: code, user: user} do
     {:ok, card} = Cards.create_card(code, %{title: "Race card"})
     {:ok, blocked} = Cards.set_status(card, %{status: :needs_input})

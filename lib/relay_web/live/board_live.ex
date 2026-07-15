@@ -1291,8 +1291,7 @@ defmodule RelayWeb.BoardLive do
     socket
     |> assign(:selected_card, card)
     |> assign(:body_loading?, false)
-    |> assign(:question, latest_question(card, activity))
-    |> assign(:answer_questions, latest_questions(card, activity))
+    |> assign_question(card, activity)
     |> assign(:answer_step, 0)
     |> assign(:answer_values, %{})
     |> assign(:answer_form, empty_answer_form())
@@ -1537,14 +1536,19 @@ defmodule RelayWeb.BoardLive do
   # question ends up blank until this later `:timeline_appended` for that entry lands — recompute
   # it here too rather than waiting on the next unrelated card_upserted to paper over it.
   defp refresh_needs_input_question(socket, %Card{} = card, %Schemas.Activity{type: :needs_input}) do
-    activity = Activity.list_activity(card)
+    assign_question(socket, card, Activity.list_activity(card))
+  end
 
+  defp refresh_needs_input_question(socket, %Card{}, _entry), do: socket
+
+  # Shared by refresh_card/2 and refresh_needs_input_question/3: recompute the
+  # needs-input panel's current question/step options from a freshly-fetched
+  # activity timeline.
+  defp assign_question(socket, %Card{} = card, activity) do
     socket
     |> assign(:question, latest_question(card, activity))
     |> assign(:answer_questions, latest_questions(card, activity))
   end
-
-  defp refresh_needs_input_question(socket, %Card{}, _entry), do: socket
 
   # stages_changed (or an event for a stage this socket doesn't know yet):
   # refetch the board and rebuild every stage-derived assign and stream,

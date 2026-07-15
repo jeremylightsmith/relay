@@ -104,9 +104,11 @@ defmodule Relay.Push do
   fail the status change that triggered it — the same contract as
   `Relay.Events.broadcast/2`.
 
-  `from_status` is part of the contract but unused: the *edge* guard lives at the
-  call site (`Relay.Cards.set_status/3`), which is the only place that sees it.
-  This clause guard is a second line of defence.
+  `from_status` is part of the contract but unused: the *edge* guard (only fire
+  when `card.status` actually changed) lives at the call site
+  (`Relay.Cards.set_status/3`), which is the only place that sees it. Which
+  statuses are push-worthy is decided here, by this clause's guard — the one
+  and only place that list lives, so `Cards` never has to know it.
   """
   def card_status_changed(card, from_status, actor)
 
@@ -117,14 +119,23 @@ defmodule Relay.Push do
 
   def card_status_changed(%Card{}, _from_status, _actor), do: :ok
 
+  # The whole dispatch decision — including the `start_child` call itself — runs
+  # under `safely/1`. `start_child` is a `GenServer.call` to the named
+  # supervisor: if that process is ever unavailable (crashed and mid-restart, a
+  # rename drifted out of sync with `Relay.Application`) it *exits* rather than
+  # returning an error tuple, and an unprotected exit here would propagate
+  # straight into the caller of `set_status/3`.
   defp dispatch(fun) do
+    safely(fn -> dispatch_now(fun) end)
+    :ok
+  end
+
+  defp dispatch_now(fun) do
     if async?() do
       Task.Supervisor.start_child(Relay.Push.TaskSupervisor, fn -> safely(fun) end)
     else
-      safely(fun)
+      fun.()
     end
-
-    :ok
   end
 
   defp async? do
@@ -150,10 +161,10 @@ defmodule Relay.Push do
     board = Repo.get!(Board, card.board_id)
     adapter = adapter()
 
-    for user <- recipients(board, actor) do
+    for user <- recipients(board, actor), tokens = device_tokens(user), tokens != [] do
       payload = payload(card, board, needs_you_count(user))
 
-      for token <- device_tokens(user) do
+      for token <- tokens do
         adapter.deliver(token, payload)
       end
     end

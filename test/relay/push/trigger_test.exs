@@ -2,8 +2,11 @@ defmodule Relay.Push.TriggerTest do
   # Not async: several tests swap the Relay.Push adapter via Application.put_env.
   use Relay.DataCase, async: false
 
+  import ExUnit.CaptureLog
+
   alias Relay.Cards
   alias Relay.Push
+  alias Relay.Push.TaskSupervisor
 
   # A board with one stage, one card, and `n` resolved human members.
   defp board_with_members(n) do
@@ -155,6 +158,8 @@ defmodule Relay.Push.TriggerTest do
     # A broken adapter, without defining a second module in this file (AGENTS.md
     # forbids that): a module that does not exist raises UndefinedFunctionError
     # at the `adapter.deliver/2` call — exactly the blast radius we need contained.
+    # Wrapped in capture_log both to silence the expected "[push] dispatch failed"
+    # error line and to assert `safely/1` actually logged it.
     test "an exploding adapter never fails set_status" do
       %{card: card, users: [alice]} = board_with_members(1)
       with_device(alice, "tok-alice")
@@ -168,6 +173,31 @@ defmodule Relay.Push.TriggerTest do
       )
 
       on_exit(fn -> Application.put_env(:relay, Push, previous) end)
+
+      log =
+        capture_log(fn ->
+          assert {:ok, updated} = Cards.set_status(card, %{status: :needs_input}, :agent)
+          assert updated.status == :needs_input
+        end)
+
+      assert log =~ "[push] dispatch failed"
+    end
+
+    # The async branch (`config :relay, Relay.Push, async: true`, what production
+    # runs) dispatches through `Relay.Push.TaskSupervisor`. If that named process
+    # is ever unavailable, `Task.Supervisor.start_child/2` exits (:noproc) rather
+    # than returning an error tuple — this proves `dispatch/1` contains that exit
+    # too, not just exceptions raised inside the dispatched fun.
+    test "the async branch never fails set_status when its supervisor is unavailable" do
+      %{card: card, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-alice")
+
+      previous = Application.get_env(:relay, Push)
+      Application.put_env(:relay, Push, Keyword.put(previous, :async, true))
+      on_exit(fn -> Application.put_env(:relay, Push, previous) end)
+
+      :ok = Supervisor.terminate_child(Relay.Supervisor, TaskSupervisor)
+      on_exit(fn -> Supervisor.restart_child(Relay.Supervisor, TaskSupervisor) end)
 
       assert {:ok, updated} = Cards.set_status(card, %{status: :needs_input}, :agent)
       assert updated.status == :needs_input
