@@ -626,6 +626,34 @@ defmodule Relay.Cards do
     end)
   end
 
+  @doc """
+  Stamps `agent_heartbeat_at = now` on `board`'s cards named by `refs` (RLY-112),
+  returning `{stamped_count, nil}`. Unparseable and unknown refs are ignored — the
+  runner beats best-effort and must never be told off for a stale ref.
+
+  One `update_all` per tick regardless of card count, and deliberately **no
+  broadcast**: a broadcast per beat per card would bump the board version on every
+  tick, the exact storm `{:card_log_appended, ...}` batching exists to avoid. Open
+  boards learn about a heartbeat on their own 30s health tick.
+  """
+  def touch_heartbeats(%Board{id: board_id} = board, refs) when is_list(refs) do
+    ref_numbers =
+      for ref <- refs, is_binary(ref), {:ok, ref_number} <- [parse_ref_number(board, ref)], do: ref_number
+
+    case ref_numbers do
+      [] ->
+        {0, nil}
+
+      ref_numbers ->
+        now = DateTime.truncate(DateTime.utc_now(), :second)
+
+        Repo.update_all(
+          from(c in Card, where: c.board_id == ^board_id and c.ref_number in ^ref_numbers),
+          set: [agent_heartbeat_at: now]
+        )
+    end
+  end
+
   # Light card columns for the optimistic drawer's first paint (RLY-68):
   # every Card field except the multi-KB heavy text
   # (description/acceptance_criteria/spec/plan/ai_result). Derived from

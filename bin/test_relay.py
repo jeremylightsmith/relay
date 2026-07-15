@@ -659,7 +659,7 @@ class LogForwarderTest(unittest.TestCase):
         fw.enqueue("claude", "hello", "RLY-1")
         fw._send(fw._drain())
         self.assertEqual(sent, [("POST", "/api/board/logs",
-                                 [{"kind": "claude", "ref": "RLY-1", "text": "hello"}])])
+                                 [{"kind": "claude", "ref": "RLY-1", "text": "hello", "run_id": None}])])
 
     def test_send_swallows_api_die(self):
         relay.api = lambda *a, **k: relay.die("API 500: nope")  # die() raises SystemExit
@@ -682,7 +682,8 @@ class LogForwarderTest(unittest.TestCase):
         fw = relay.LogForwarder()
         relay.FORWARDER = fw
         relay.forward("lifecycle", "started", None)
-        self.assertEqual(fw.q.get_nowait(), {"kind": "lifecycle", "ref": None, "text": "started"})
+        self.assertEqual(fw.q.get_nowait(),
+                          {"kind": "lifecycle", "ref": None, "text": "started", "run_id": None})
 
 
 class ForwardEmitPointsTest(unittest.TestCase):
