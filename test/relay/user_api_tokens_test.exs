@@ -1,6 +1,8 @@
 defmodule Relay.UserApiTokensTest do
   use Relay.DataCase, async: true
 
+  import Ecto.Query
+
   alias Relay.Accounts
   alias Schemas.UserApiToken
 
@@ -95,6 +97,65 @@ defmodule Relay.UserApiTokensTest do
 
       assert {:ok, _user} = Accounts.authenticate_user_api_token(token)
       assert DateTime.after?(Repo.get!(UserApiToken, record.id).last_used_at, stale)
+    end
+  end
+
+  describe "minting does not accumulate rows without bound" do
+    # The native app does not persist its bearer (it follows the session), so
+    # BOTH sign-in and every session verify mint one — i.e. one row per app
+    # launch, forever, and nothing prunes them. The raw token is unrecoverable
+    # by design, so reusing an existing row is impossible; the only lever is to
+    # drop the ones that can no longer be in use.
+    test "keeps a bounded number of tokens per user and context" do
+      user = insert(:user)
+
+      for _ <- 1..(Accounts.max_user_api_tokens() + 5) do
+        {:ok, _} = Accounts.create_user_api_token(user)
+      end
+
+      kept = Repo.all(from t in UserApiToken, where: t.user_id == ^user.id)
+      assert length(kept) == Accounts.max_user_api_tokens()
+    end
+
+    test "the newest token still authenticates after pruning" do
+      user = insert(:user)
+
+      for _ <- 1..(Accounts.max_user_api_tokens() + 3) do
+        {:ok, _} = Accounts.create_user_api_token(user)
+      end
+
+      {:ok, %{token: newest}} = Accounts.create_user_api_token(user)
+
+      # Pruning must never evict the token we just handed the caller.
+      assert {:ok, authenticated} = Accounts.authenticate_user_api_token(newest)
+      assert authenticated.id == user.id
+    end
+
+    test "a recently-used sibling device is not evicted by another launch" do
+      user = insert(:user)
+      {:ok, %{token: device_a}} = Accounts.create_user_api_token(user)
+
+      # Device A is live: authenticating touches last_used_at.
+      {:ok, _} = Accounts.authenticate_user_api_token(device_a)
+
+      # Device B launches repeatedly, minting a token each time.
+      for _ <- 1..(Accounts.max_user_api_tokens() - 1) do
+        {:ok, _} = Accounts.create_user_api_token(user)
+      end
+
+      assert {:ok, _} = Accounts.authenticate_user_api_token(device_a)
+    end
+
+    test "another user's tokens are untouched" do
+      mine = insert(:user)
+      theirs = insert(:user)
+      {:ok, %{token: their_token}} = Accounts.create_user_api_token(theirs)
+
+      for _ <- 1..(Accounts.max_user_api_tokens() + 2) do
+        {:ok, _} = Accounts.create_user_api_token(mine)
+      end
+
+      assert {:ok, _} = Accounts.authenticate_user_api_token(their_token)
     end
   end
 end
