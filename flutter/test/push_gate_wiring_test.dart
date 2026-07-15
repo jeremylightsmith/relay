@@ -10,9 +10,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/features/push/push_onboarding.dart';
 import 'package:relay_mobile/features/push/push_platform.dart';
-import 'package:relay_mobile/features/push/push_service.dart';
 
-import 'support/fake_push.dart';
+import 'support/fake_push_platform.dart';
+import 'support/fake_push_prefs.dart';
 
 void main() {
   testWidgets('"Not now" defers priming and lands on Needs you', (
@@ -25,10 +25,6 @@ void main() {
     );
     final gate = PushOnboarding(
       platform: platform,
-      service: PushService(
-        platform: platform,
-        dio: dioWith(RecordingAdapter()),
-      ),
       prefs: prefs,
       clock: () => now,
     );

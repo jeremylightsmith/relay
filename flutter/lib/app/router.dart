@@ -38,6 +38,22 @@ GoRouter buildRouter({
       // AUTH-03. `onAllow` is what actually asks iOS and registers the token.
       GoRoute(
         path: '/push-permission',
+        // The gate (RLY-84 §1). `routerProvider`'s redirect decides *when* this
+        // is the right moment — an interactive sign-in with nothing to resume —
+        // and this decides *whether* iOS and the cooldown actually allow it.
+        // Splitting it that way keeps the async status read out of the top-level
+        // redirect, which runs on every navigation and is effectively sync.
+        //
+        // Route-level, so only a navigation *here* pays for it. Returning
+        // /needs-you is a no-op detour: the redirect was already sending the
+        // user there.
+        redirect: (context, state) async {
+          final gate = ProviderScope.containerOf(
+            context,
+          ).read(pushOnboardingProvider);
+          final decision = await gate.resolve();
+          return decision == PushGateDecision.prime ? null : '/needs-you';
+        },
         builder: (context, state) => Consumer(
           builder: (context, ref, _) => PushPermissionScreen(
             onAllow: () async {

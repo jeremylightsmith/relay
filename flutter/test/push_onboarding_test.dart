@@ -1,11 +1,16 @@
 // The RLY-84 §1 gating matrix, one test per row. The fixed clock makes the 7-day
 // cooldown deterministic.
+//
+// `resolve()` is a *decision*, so these tests assert only the decision. The other
+// half of the skip — silently re-registering the token (§2) — is main.dart's,
+// keyed on a session going live so it also covers the restored sessions that
+// never reach this gate; it is asserted in push_gate_integration_test.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/features/push/push_onboarding.dart';
 import 'package:relay_mobile/features/push/push_platform.dart';
-import 'package:relay_mobile/features/push/push_service.dart';
 
-import 'support/fake_push.dart';
+import 'support/fake_push_platform.dart';
+import 'support/fake_push_prefs.dart';
 
 final now = DateTime.utc(2026, 7, 14, 12);
 
@@ -16,24 +21,16 @@ class Harness {
     String? authorizedToken = 'apns-tok-123',
     DateTime? deferredAt,
     Object? statusError,
-    int registerStatusCode = 201,
   }) : platform = FakePushPlatform(
          status: status,
          authorizedToken: authorizedToken,
          statusError: statusError,
        ),
-       adapter = RecordingAdapter(statusCode: registerStatusCode),
        prefs = FakePushPrefs(deferredAt: deferredAt) {
-    gate = PushOnboarding(
-      platform: platform,
-      service: PushService(platform: platform, dio: dioWith(adapter)),
-      prefs: prefs,
-      clock: () => now,
-    );
+    gate = PushOnboarding(platform: platform, prefs: prefs, clock: () => now);
   }
 
   final FakePushPlatform platform;
-  final RecordingAdapter adapter;
   final FakePushPrefs prefs;
   late final PushOnboarding gate;
 }
@@ -43,8 +40,6 @@ void main() {
     final h = Harness(status: PushAuthorizationStatus.notDetermined);
 
     expect(await h.gate.resolve(), PushGateDecision.prime);
-    // Priming must not register anything — the user has not decided yet.
-    expect(h.adapter.requests, isEmpty);
   });
 
   test('notDetermined deferred 1 day ago skips (do not nag)', () async {
@@ -56,7 +51,7 @@ void main() {
     expect(await h.gate.resolve(), PushGateDecision.skip);
   });
 
-  test('notDetermined deferred 8 days ago primes again', () async {
+  test('notDetermined deferred 8 days ago primes once more', () async {
     final h = Harness(
       status: PushAuthorizationStatus.notDetermined,
       deferredAt: now.subtract(const Duration(days: 8)),
@@ -65,54 +60,24 @@ void main() {
     expect(await h.gate.resolve(), PushGateDecision.prime);
   });
 
-  test(
-    'the cooldown boundary is inclusive: exactly 7 days ago primes',
-    () async {
-      final h = Harness(
-        status: PushAuthorizationStatus.notDetermined,
-        deferredAt: now.subtract(PushOnboarding.primingCooldown),
-      );
-
-      expect(await h.gate.resolve(), PushGateDecision.prime);
-    },
-  );
-
-  test('authorized skips AND silently re-registers the token', () async {
-    final h = Harness(status: PushAuthorizationStatus.authorized);
-
-    expect(await h.gate.resolve(), PushGateDecision.skip);
-
-    // §2. This POST is the whole reason skipping is safe: without it, a
-    // previously-authorized device silently stops being registered.
-    expect(h.adapter.requests.single.method, 'POST');
-    expect(h.adapter.requests.single.path, '/api/all/devices');
-    expect(h.adapter.requests.single.data, {
-      'token': 'apns-tok-123',
-      'platform': 'ios',
-    });
-
-    // Silently: no OS prompt.
-    expect(h.platform.requestCount, 0);
-  });
-
   for (final status in const [
+    PushAuthorizationStatus.authorized,
     PushAuthorizationStatus.provisional,
     PushAuthorizationStatus.ephemeral,
   ]) {
-    test('$status skips and silently re-registers', () async {
+    test('$status skips — the decision is already made', () async {
       final h = Harness(status: status);
 
       expect(await h.gate.resolve(), PushGateDecision.skip);
-      expect(h.adapter.requests, hasLength(1));
+      // Silently: deciding must never surface an OS prompt.
       expect(h.platform.requestCount, 0);
     });
   }
 
-  test('denied skips, registers nothing, and never prompts', () async {
+  test('denied skips and never prompts', () async {
     final h = Harness(status: PushAuthorizationStatus.denied);
 
     expect(await h.gate.resolve(), PushGateDecision.skip);
-    expect(h.adapter.requests, isEmpty);
     expect(h.platform.requestCount, 0);
     expect(h.platform.tokenIfAuthorizedCount, 0);
   });
@@ -123,20 +88,25 @@ void main() {
       statusError: StateError('unknown push authorization status: null'),
     );
 
+    // Fail safe: never show a screen whose button we cannot back up, and never
+    // throw out of the gate — push is best-effort and must not break sign-in.
     expect(await h.gate.resolve(), PushGateDecision.skip);
   });
 
-  test('a registration failure while authorized still skips', () async {
-    final h = Harness(
-      status: PushAuthorizationStatus.authorized,
-      registerStatusCode: 401,
-    );
+  test(
+    'resolving does not register anything — that is main.dart\'s job',
+    () async {
+      final h = Harness(status: PushAuthorizationStatus.authorized);
 
-    // Never throws out of resolve(): push must not break sign-in.
-    expect(await h.gate.resolve(), PushGateDecision.skip);
-  });
+      await h.gate.resolve();
 
-  test("deferPriming() records the clock's now", () async {
+      // The gate has no PushService at all now; asserting the platform seam stays
+      // untouched is what keeps the responsibility from drifting back here.
+      expect(h.platform.tokenIfAuthorizedCount, 0);
+    },
+  );
+
+  test('deferPriming writes the clock\'s now', () async {
     final h = Harness(status: PushAuthorizationStatus.notDetermined);
 
     await h.gate.deferPriming();
@@ -144,16 +114,4 @@ void main() {
     expect(h.prefs.deferredAt, now);
     expect(h.prefs.writeCount, 1);
   });
-
-  test(
-    '"Not now" then a fresh launch skips — the nag this card fixes',
-    () async {
-      final h = Harness(status: PushAuthorizationStatus.notDetermined);
-      expect(await h.gate.resolve(), PushGateDecision.prime);
-
-      await h.gate.deferPriming();
-
-      expect(await h.gate.resolve(), PushGateDecision.skip);
-    },
-  );
 }

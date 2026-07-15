@@ -1,5 +1,5 @@
 // The named constructor params below shadow their private field names
-// (`_platform`/`_service`/`_prefs`/`_clock`), so they can't be initializing
+// (`_platform`/`_prefs`/`_clock`), so they can't be initializing
 // formals (`this._platform`) without making the params private too, which
 // callers outside this library couldn't pass. Same situation as PushService.
 // ignore_for_file: prefer_initializing_formals
@@ -20,9 +20,11 @@ enum PushGateDecision {
   skip,
 }
 
-/// The whole "should we show AUTH-03?" decision in one place (RLY-84 §1), plus its
-/// inseparable other half: silently re-registering the device token when push is
-/// already authorized (§2).
+/// The whole "should we show AUTH-03?" decision in one place (RLY-84 §1).
+///
+/// Decision only: the other half of the skip — silently re-registering the token
+/// (§2) — lives in main.dart, keyed on a session going live, because it must run
+/// on restored sessions too, which never route through this gate.
 ///
 /// A plain injectable class rather than a Notifier, matching the repo's
 /// structural-seam convention (buildRouter, PushService): tests construct it with
@@ -30,16 +32,13 @@ enum PushGateDecision {
 class PushOnboarding {
   PushOnboarding({
     required PushPlatform platform,
-    required PushService service,
     required PushPrefs prefs,
     DateTime Function() clock = DateTime.now,
   }) : _platform = platform,
-       _service = service,
        _prefs = prefs,
        _clock = clock;
 
   final PushPlatform _platform;
-  final PushService _service;
   final PushPrefs _prefs;
   final DateTime Function() _clock;
 
@@ -53,8 +52,9 @@ class PushOnboarding {
   /// changes.
   static const Duration primingCooldown = Duration(days: 7);
 
-  /// Decides whether AUTH-03 should be shown this launch, and silently
-  /// re-registers the device token when push is already authorized.
+  /// Decides whether AUTH-03 should be shown this launch. Decision only — the
+  /// silent token re-registration (§2) is main.dart's, because it must also run
+  /// on the restored sessions that never reach this gate.
   ///
   /// Never throws — push is best-effort and must not break sign-in. Any failure
   /// falls back to [PushGateDecision.skip]: never show a screen whose button we
@@ -67,12 +67,10 @@ class PushOnboarding {
         case PushAuthorizationStatus.authorized:
         case PushAuthorizationStatus.provisional:
         case PushAuthorizationStatus.ephemeral:
-          // §2: the other half of the skip. RLY-81 registers the token only on the
-          // "Allow" tap, so the moment we stop showing AUTH-03 this is the only
-          // thing keeping the device registered. Idempotent (the backend upserts
-          // by token), and Apple's guidance is to re-register on every launch
-          // anyway because the token can change.
-          await _service.registerIfAuthorized();
+          // The decision is already made; asking again is pure noise. The other
+          // half of the skip — silently re-registering the token (§2) — is *not*
+          // done here: it must happen on every session, including the restores
+          // that never route through this gate at all. main.dart owns it.
           return PushGateDecision.skip;
 
         case PushAuthorizationStatus.denied:
@@ -110,11 +108,11 @@ class PushOnboarding {
   }
 }
 
-/// The gate, on the shared platform / service / prefs singletons.
+/// The gate, on the shared platform / prefs singletons. No PushService: the gate
+/// only *decides*; main.dart owns the registration side effect (§2).
 final pushOnboardingProvider = Provider<PushOnboarding>((ref) {
   return PushOnboarding(
     platform: ref.watch(pushPlatformProvider),
-    service: ref.watch(pushServiceProvider),
     prefs: ref.watch(pushPrefsProvider),
   );
 });

@@ -4,11 +4,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
 import 'package:relay_mobile/features/card/card_screen.dart';
+import 'package:relay_mobile/features/push/push_prefs.dart';
 import 'package:relay_mobile/features/push/push_service.dart';
 import 'package:relay_mobile/main.dart';
 
 import 'support/fake_auth.dart';
 import 'support/fake_push_platform.dart';
+import 'support/fake_push_prefs.dart';
 
 const _cardPush = {
   'card_ref': 'RLY-1',
@@ -32,6 +34,11 @@ Future<(ScriptedAuthController, FakePushPlatform)> pumpLaunch(
       overrides: [
         authProvider.overrideWith(() => auth),
         pushPlatformProvider.overrideWithValue(platform),
+        // /push-permission gates itself on the OS status + deferral (RLY-84 §1).
+        // Fake the prefs seam or the gate reads a real IosPushPrefs over an
+        // unmocked MethodChannel, throws, and fail-safes to skip — which would
+        // silently defeat this file's "primes push permission" assertion.
+        pushPrefsProvider.overrideWithValue(FakePushPrefs()),
         cardBodyBuilderProvider.overrideWithValue(
           (_) => const SizedBox.shrink(key: Key('stub_card_body')),
         ),
