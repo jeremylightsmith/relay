@@ -33,6 +33,11 @@ defmodule Relay.PlanSkillsTest do
     test "no longer resolves the spec from a shared docs/superpowers/specs path", %{doc: doc} do
       refute doc =~ "docs/superpowers/specs"
     end
+
+    test "makes the plan cover the card's acceptance criteria without copying them in", %{doc: doc} do
+      assert doc =~ "acceptance_criteria"
+      assert doc =~ "acceptance-tester"
+    end
   end
 
   describe "exec-plan preflights on the card plan and materializes it transiently" do
