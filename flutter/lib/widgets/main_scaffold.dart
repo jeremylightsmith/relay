@@ -22,7 +22,9 @@ class MainScaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      body: child,
+      // Only the top inset: the NavigationBar below already reserves its own
+      // bottom safe area, and doubling it here would add dead space above it.
+      body: SafeArea(bottom: false, child: child),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex(context),
         indicatorColor: scheme.primary.withValues(alpha: 0.16),

@@ -36,6 +36,24 @@ void main() {
     expect(find.text('Arriving soon'), findsNothing);
   });
 
+  testWidgets('the inbox header sits below the status bar / notch inset', (
+    tester,
+  ) async {
+    // Simulate a device with a status bar / Dynamic Island: physical padding
+    // at devicePixelRatio 1 so logical == physical for this assertion.
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.padding = const FakeViewPadding(top: 59);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPadding);
+
+    await pumpApp(tester);
+
+    final headerTop = tester
+        .getTopLeft(find.byKey(const Key('needs_you_header')))
+        .dy;
+    expect(headerTop, greaterThanOrEqualTo(59));
+  });
+
   testWidgets('shows exactly three destinations with stable keys, in order', (
     tester,
   ) async {

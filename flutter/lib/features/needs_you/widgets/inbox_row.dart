@@ -13,7 +13,6 @@ class InboxRow extends StatelessWidget {
     required this.row,
     required this.showBoardChip,
     required this.onTap,
-    this.now,
   });
 
   final FeedRow row;
@@ -22,9 +21,6 @@ class InboxRow extends StatelessWidget {
   final bool showBoardChip;
 
   final VoidCallback onTap;
-
-  /// Injected in tests so the age is deterministic.
-  final DateTime? now;
 
   @override
   Widget build(BuildContext context) {
@@ -81,7 +77,7 @@ class InboxRow extends StatelessWidget {
                               ],
                               const Spacer(),
                               Text(
-                                formatAge(row.blockedAt, now: now),
+                                formatAge(row.blockedAt),
                                 style: TextStyle(
                                   fontSize: 14, // artboard 9
                                   fontFamily: 'monospace',
