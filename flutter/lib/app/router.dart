@@ -8,6 +8,7 @@ import '../features/auth/welcome_screen.dart';
 import '../features/board/board_screen.dart';
 import '../features/card/card_placeholder_screen.dart';
 import '../features/card/card_screen.dart';
+import '../features/decisions/reject_note_screen.dart';
 import '../features/needs_you/needs_you_screen.dart';
 import '../features/push/push_onboarding.dart';
 import '../features/push/push_permission_screen.dart';
@@ -91,6 +92,16 @@ GoRouter buildRouter({
         builder: (context, state) => CardPlaceholderScreen(
           cardRef: state.pathParameters['ref']!,
           kind: state.uri.queryParameters['kind'] ?? '',
+        ),
+      ),
+      // RLY-88 · CORE-07. Sibling of /card/:ref, not a child: it is a full-screen step, not
+      // part of the host. `board` rides as a query param like `kind` does above — `extra`
+      // would not survive a cold deep link.
+      GoRoute(
+        path: '/card/:ref/reject',
+        builder: (context, state) => RejectNoteScreen(
+          cardRef: state.pathParameters['ref']!,
+          boardSlug: state.uri.queryParameters['board'] ?? '',
         ),
       ),
       ShellRoute(
