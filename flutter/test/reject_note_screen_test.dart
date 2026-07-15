@@ -57,6 +57,7 @@ Future<GoRouter> pumpReject(
   FeedRepository? feed,
   FakeAuthController? auth,
   String initialLocation = '/card/RLY-A',
+  bool seedQueue = true,
 }) async {
   final container = ProviderContainer(
     overrides: [
@@ -66,9 +67,11 @@ Future<GoRouter> pumpReject(
     ],
   );
   addTearDown(container.dispose);
-  container
-      .read(reviewQueueProvider.notifier)
-      .enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
+  if (seedQueue) {
+    container
+        .read(reviewQueueProvider.notifier)
+        .enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
+  }
 
   final router = _router(initialLocation: initialLocation);
   await tester.pumpWidget(
@@ -345,7 +348,8 @@ void main() {
   );
 
   testWidgets(
-    'a cold deep link with nothing to pop still advances after sending',
+    'nothing to pop (a queue seeded but no back-stack) still advances after '
+    'sending',
     (tester) async {
       final api = FakeDecisionApi();
       await pumpReject(
@@ -361,6 +365,44 @@ void main() {
 
       expect(api.rejected, ['RLY-A']);
       expect(find.text('card RLY-B'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'a genuine cold deep link — the queue holds nothing at all — errors '
+    'instead of leaving Send back a dead-end button',
+    (tester) async {
+      final api = FakeDecisionApi();
+      await pumpReject(
+        tester,
+        api: api,
+        initialLocation: '/card/RLY-A/reject?board=relay',
+        seedQueue: false,
+      );
+
+      await tester.enterText(_input, 'Needs error handling');
+      await tester.pump();
+      expect(
+        _sendButton(tester).onPressed,
+        isNotNull,
+        reason: 'the button has no way to know the queue is empty upfront',
+      );
+
+      await tester.tap(_send);
+      await tester.pumpAndSettle();
+
+      expect(api.rejected, isEmpty, reason: 'nothing to reject against');
+      expect(
+        find.text('Needs error handling'),
+        findsOneWidget,
+        reason: 'the typed note must not be silently discarded',
+      );
+      expect(
+        find.byKey(const Key('reject_error')),
+        findsOneWidget,
+        reason: 'must not stay silently inert forever',
+      );
+      expect(_send, findsOneWidget, reason: 'still on the reject screen');
     },
   );
 }

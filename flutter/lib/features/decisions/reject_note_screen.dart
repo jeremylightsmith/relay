@@ -44,11 +44,21 @@ class _RejectNoteScreenState extends ConsumerState<RejectNoteScreen> {
   /// `unauthorized` signs out (the router sends the human to `/welcome`), and
   /// only everything else lands as `reviewQueueProvider`'s `state.error`. It
   /// also puts reject behind the same `inFlight` double-tap guard approve gets.
+  ///
+  /// `widget.cardRef`/`widget.boardSlug` — what the route says it's rejecting —
+  /// go along too, so `rejectCurrent` can catch a mismatch against the queue's
+  /// own snapshot (a stale queue, or nothing snapshotted at all on a cold deep
+  /// link) instead of quietly rejecting whatever the queue happens to be
+  /// sitting on, or no-oping with no signal.
   Future<void> _send() async {
     final router = GoRouter.of(context);
     final dest = await ref
         .read(reviewQueueProvider.notifier)
-        .rejectCurrent(note: _controller.text.trim());
+        .rejectCurrent(
+          cardRef: widget.cardRef,
+          boardSlug: widget.boardSlug,
+          note: _controller.text.trim(),
+        );
     if (!mounted || dest == null) return;
 
     // Drop the reject screen first, so the next card replaces the card we just

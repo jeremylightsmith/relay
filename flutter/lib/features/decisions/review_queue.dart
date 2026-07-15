@@ -114,9 +114,29 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
   /// `unauthorized` behave identically regardless of which button the human
   /// pressed, and reject gets the [ReviewQueueState.inFlight] double-tap guard
   /// for free.
-  Future<String?> rejectCurrent({required String note}) async {
+  ///
+  /// [cardRef] and [boardSlug] are what the *route* believes it is rejecting —
+  /// the reject screen is reachable by a deep link, whose `:ref`/`?board=` can
+  /// disagree with `state.current` (a stale queue, or a genuine cold start with
+  /// nothing snapshotted at all). Refs are only unique within a board, so both
+  /// must match. A mismatch surfaces as `state.error` rather than silently
+  /// returning null: an inert Send back button that never explains itself would
+  /// otherwise look enabled and just do nothing forever.
+  Future<String?> rejectCurrent({
+    required String cardRef,
+    required String boardSlug,
+    required String note,
+  }) async {
+    if (state.inFlight) return null;
     final item = state.current;
-    if (item == null || state.inFlight) return null;
+    if (item == null || item.ref != cardRef || item.boardSlug != boardSlug) {
+      state = state.copyWith(
+        error:
+            "This card isn't in your queue anymore — go back to Needs you "
+            'and try again.',
+      );
+      return null;
+    }
 
     state = state.copyWith(inFlight: true, clearError: true);
     try {

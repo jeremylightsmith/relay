@@ -320,7 +320,11 @@ void main() {
       final queue = h.container.read(reviewQueueProvider.notifier);
       queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
 
-      final dest = await queue.rejectCurrent(note: 'Needs error handling');
+      final dest = await queue.rejectCurrent(
+        cardRef: 'RLY-A',
+        boardSlug: 'relay',
+        note: 'Needs error handling',
+      );
 
       expect(dest, '/card/RLY-B?kind=in_review');
       expect(api.rejected, ['RLY-A']);
@@ -329,6 +333,69 @@ void main() {
       expect(h.container.read(reviewQueueProvider).banner, 'Sent back · RLY-A');
     },
   );
+
+  test(
+    'rejecting with a ref the queue is not sitting on errors instead of '
+    'silently no-opping — the route is not the authority, the snapshot is',
+    () async {
+      final h = harness(api: FakeDecisionApi());
+      final queue = h.container.read(reviewQueueProvider.notifier);
+      queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
+
+      final dest = await queue.rejectCurrent(
+        cardRef: 'RLY-B', // the queue is sitting on RLY-A
+        boardSlug: 'relay',
+        note: 'Wrong card',
+      );
+
+      expect(dest, isNull);
+      expect(
+        h.container.read(reviewQueueProvider).error,
+        isNotNull,
+        reason: 'a mismatch must surface, not silently do nothing',
+      );
+      expect(
+        h.container.read(reviewQueueProvider).index,
+        0,
+        reason: 'must not touch the snapshot cursor',
+      );
+    },
+  );
+
+  test('rejecting a board slug the queue disagrees with errors the same way '
+      '(refs are only unique within a board)', () async {
+    final h = harness(api: FakeDecisionApi());
+    final queue = h.container.read(reviewQueueProvider.notifier);
+    queue.enter(
+      rows: [row('RLY-A', slug: 'relay')],
+      atRef: 'RLY-A',
+    );
+
+    final dest = await queue.rejectCurrent(
+      cardRef: 'RLY-A',
+      boardSlug: 'other-board',
+      note: 'Wrong board',
+    );
+
+    expect(dest, isNull);
+    expect(h.container.read(reviewQueueProvider).error, isNotNull);
+  });
+
+  test('rejecting against an empty queue (a genuine cold deep link) errors '
+      'instead of returning null with no signal', () async {
+    final h = harness(api: FakeDecisionApi());
+    final queue = h.container.read(reviewQueueProvider.notifier);
+    // No `enter()` — this is what a cold deep link's queue looks like.
+
+    final dest = await queue.rejectCurrent(
+      cardRef: 'RLY-A',
+      boardSlug: 'relay',
+      note: 'Needs error handling',
+    );
+
+    expect(dest, isNull);
+    expect(h.container.read(reviewQueueProvider).error, isNotNull);
+  });
 
   test(
     'rejecting into a 422 not_in_review is "already handled", same as approve',
@@ -344,7 +411,11 @@ void main() {
       final queue = h.container.read(reviewQueueProvider.notifier);
       queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
 
-      final dest = await queue.rejectCurrent(note: 'Please revise');
+      final dest = await queue.rejectCurrent(
+        cardRef: 'RLY-A',
+        boardSlug: 'relay',
+        note: 'Please revise',
+      );
 
       expect(dest, '/card/RLY-B?kind=in_review');
       expect(
@@ -364,7 +435,14 @@ void main() {
     final queue = h.container.read(reviewQueueProvider.notifier);
     queue.enter(rows: [row('RLY-A')], atRef: 'RLY-A');
 
-    expect(await queue.rejectCurrent(note: 'Please revise'), isNull);
+    expect(
+      await queue.rejectCurrent(
+        cardRef: 'RLY-A',
+        boardSlug: 'relay',
+        note: 'Please revise',
+      ),
+      isNull,
+    );
     expect(h.auth.signOutCalls, 1);
   });
 
@@ -376,8 +454,14 @@ void main() {
       final queue = h.container.read(reviewQueueProvider.notifier);
       queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
 
-      final first = queue.rejectCurrent(note: 'first');
+      final first = queue.rejectCurrent(
+        cardRef: 'RLY-A',
+        boardSlug: 'relay',
+        note: 'first',
+      );
       final second = await queue.rejectCurrent(
+        cardRef: 'RLY-A',
+        boardSlug: 'relay',
         note: 'second',
       ); // the double-tap
 
