@@ -124,5 +124,17 @@ defmodule Relay.PushTest do
 
       assert Push.needs_you_count(user) == 0
     end
+
+    test "excludes needs_input/in_review cards on an archived board" do
+      user = insert(:user)
+      board = insert(:board, archived_at: DateTime.truncate(DateTime.utc_now(), :second))
+      insert(:membership, board: board, user: user)
+      stage = insert(:stage, board: board)
+
+      insert(:card, stage: stage, status: :needs_input)
+      insert(:card, stage: stage, status: :in_review)
+
+      assert Push.needs_you_count(user) == 0
+    end
   end
 end

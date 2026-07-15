@@ -11,7 +11,12 @@ defmodule RelayWeb.Plugs.RequireApiUser do
   actor).
 
   Sits after `RelayWeb.Auth.fetch_current_scope/2`, which assigns `:current_scope`.
-  RLY-80 (F4) extends this same scope with a user-scoped bearer token.
+
+  RLY-80 (F4) already shipped its own bearer-token pipeline (`RelayWeb.ApiUserAuth`) on a
+  separate `scope "/api/all"` block — this plug is a deliberate second credential on the same
+  URL prefix, not a reuse of F4's, because native sign-in doesn't mint a bearer token today.
+  See `lib/relay_web/router.ex`'s `:native_user_auth` pipeline doc and plan.md's Deviation 1 /
+  Deferred for the tracked follow-up to consolidate onto one credential.
   """
 
   import Plug.Conn

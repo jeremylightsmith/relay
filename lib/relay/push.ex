@@ -61,21 +61,27 @@ defmodule Relay.Push do
 
   @doc """
   How many cards need `user`: unarchived cards in `:needs_input` or `:in_review`
-  on any board `user` is a resolved member of, across boards. Stamped onto every
-  push as `aps.badge`.
+  on any non-archived board `user` is a resolved member of, across boards.
+  Stamped onto every push as `aps.badge`.
 
-  **F4 overlap (ADR 0005):** F4 (RLY-80) computes the same two-status set for the
-  inbox feed and the two must agree. F5 landed first, so this query owns the
-  definition; F4 reuses it rather than adding a second one.
+  **Must agree with `Cards.needs_you_feed/1`.** That function is the documented
+  single source of truth for this two-status set (ADR 0005) — the F4 feed, the
+  F5 badge (this function, RLY-81), and the inbox (RLY-85) all have to return
+  the same cards. `Push` cannot call `Cards` (that would be a Boundary cycle:
+  `Cards.set_status/3` calls `Push`), so this mirrors `Cards.needs_you_feed/1`'s
+  scoping by hand instead of sharing it. Keep the two in sync by hand too.
   """
   def needs_you_count(%User{id: user_id}) do
     Repo.aggregate(
       from(c in Card,
         join: m in Membership,
         on: m.board_id == c.board_id,
+        join: b in Schemas.Board,
+        on: b.id == c.board_id,
         where: m.user_id == ^user_id,
         where: c.status in [:needs_input, :in_review],
-        where: is_nil(c.archived_at)
+        where: is_nil(c.archived_at),
+        where: is_nil(b.archived_at)
       ),
       :count
     )
