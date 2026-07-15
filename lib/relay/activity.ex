@@ -9,7 +9,7 @@ defmodule Relay.Activity do
   This context never calls `Relay.Cards`; `Cards` depends on it to log.
   """
 
-  use Boundary, deps: [Relay.Events, Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Events, Relay.Repo, Schemas], exports: [LogSink, Pruner]
 
   import Ecto.Query
 

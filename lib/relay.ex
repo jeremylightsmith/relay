@@ -19,6 +19,8 @@ defmodule Relay do
       Accounts,
       Accounts.GoogleTokenValidator,
       Activity,
+      Activity.LogSink,
+      Activity.Pruner,
       AgentLog,
       ApiKeys,
       Attachments,
