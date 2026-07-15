@@ -1375,21 +1375,24 @@ defmodule RelayWeb.CoreComponents do
                     phx-change="answer_custom"
                   >
                     <input type="hidden" name="answer[index]" value={@answer_step} />
-                    <input
+                    <textarea
                       id="needs-input-text"
-                      type="text"
                       name="answer[text]"
-                      value={
-                        stepper_custom_text(
-                          @answer_values,
-                          @answer_step,
-                          @stepper_question["options"]
+                      rows="3"
+                      autocomplete="off"
+                      placeholder={
+                        if(@stepper_question["options"] == [],
+                          do: "Type your answer…",
+                          else: "Or type your own…"
                         )
                       }
-                      autocomplete="off"
-                      placeholder="Or type your own…"
-                      class="input input-sm w-full rounded-[7px]"
-                    />
+                      class="w-full resize-none rounded-[7px] p-[9px] text-[13px] leading-[1.45] outline-none"
+                      style="border:1px solid oklch(0.86 0.05 75);background:oklch(1 0 0);color:oklch(0.30 0.02 255);"
+                    ><%= stepper_custom_text(
+                      @answer_values,
+                      @answer_step,
+                      @stepper_question["options"]
+                    ) %></textarea>
                   </form>
                   <div class="flex items-center justify-between">
                     <button
