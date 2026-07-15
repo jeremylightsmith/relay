@@ -369,6 +369,39 @@ void main() {
   );
 
   testWidgets(
+    'a stale error from an earlier failed decision does not linger onto a '
+    'fresh visit to this screen',
+    (tester) async {
+      final api = FakeDecisionApi(
+        const DecisionFailed(
+          'network',
+          'Network error — could not reach Relay.',
+        ),
+      );
+      final router = await pumpReject(tester, api: api);
+
+      await tester.enterText(_input, 'Please revise');
+      await tester.pump();
+      await tester.tap(_send);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('reject_error')), findsOneWidget);
+
+      // Leave the reject screen and come back — a fresh visit, nothing done yet.
+      router.pop();
+      await tester.pumpAndSettle();
+      router.push('/card/RLY-A/reject?board=relay');
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('reject_error')),
+        findsNothing,
+        reason: 'the human has not done anything on this fresh visit yet',
+      );
+    },
+  );
+
+  testWidgets(
     'a genuine cold deep link — the queue holds nothing at all — errors '
     'instead of leaving Send back a dead-end button',
     (tester) async {

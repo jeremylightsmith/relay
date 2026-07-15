@@ -33,6 +33,19 @@ class _RejectNoteScreenState extends ConsumerState<RejectNoteScreen> {
   final _controller = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    // `state.error` is queue-global (ReviewQueueState), not scoped to a single
+    // visit to this screen — without clearing it here, an error left by an
+    // earlier failed decision would render immediately on a fresh visit, before
+    // the human has done anything on *this* screen. Deferred to after the first
+    // frame: Riverpod forbids modifying a provider from initState itself.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.read(reviewQueueProvider.notifier).clearError();
+    });
+  }
+
+  @override
   void dispose() {
     _controller.dispose();
     super.dispose();
