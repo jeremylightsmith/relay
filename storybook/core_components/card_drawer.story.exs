@@ -99,10 +99,17 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "needs_input", "progress" => nil}, as: :card),
           answer_form: Phoenix.Component.to_form(%{"body" => ""}, as: :answer),
+          # Sentence-length options on purpose: a real agent asks in prose, not in
+          # one-word labels, and daisyUI's .btn clipped those until it was told to
+          # wrap. Keep at least one long option here so that regression stays visible.
           answer_questions: [
             %{
               "prompt" => "Which timezone should exports use?",
-              "options" => ["Billing timezone", "Viewer's local timezone"],
+              "options" => [
+                "The billing timezone — consistent with what lands on the invoice, " <>
+                  "but surprising for a viewer reading the export from another country",
+                "Viewer's local timezone"
+              ],
               "allow_text" => true
             },
             %{"prompt" => "Any constraint on export file size?", "options" => [], "allow_text" => true}

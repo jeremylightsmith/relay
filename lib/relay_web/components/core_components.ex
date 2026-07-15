@@ -1346,11 +1346,18 @@ defmodule RelayWeb.CoreComponents do
                       phx-click="answer_select"
                       phx-value-index={@answer_step}
                       phx-value-option={option}
-                      class={[
-                        "btn btn-sm justify-start rounded-[7px] font-normal",
-                        Map.get(@answer_values, @answer_step) == option &&
-                          "needs-input-option-selected text-white"
-                      ]}
+                      class={
+                        [
+                          "btn btn-sm justify-start rounded-[7px] font-normal",
+                          # daisyUI's .btn is a fixed-height (`height: var(--size)`)
+                          # nowrap flex row, which clips a long option. Real agent
+                          # options are sentences, so let them grow to as many lines
+                          # as they need while a short one keeps the compact height.
+                          "h-auto min-h-8 whitespace-normal py-1.5 text-left leading-snug",
+                          Map.get(@answer_values, @answer_step) == option &&
+                            "needs-input-option-selected text-white"
+                        ]
+                      }
                       style={
                         if(Map.get(@answer_values, @answer_step) == option,
                           do: "background:oklch(0.70 0.13 65);border-color:oklch(0.70 0.13 65);",
