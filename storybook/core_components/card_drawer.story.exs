@@ -112,7 +112,12 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
               ],
               "allow_text" => true
             },
-            %{"prompt" => "Any constraint on export file size?", "options" => [], "allow_text" => true}
+            %{"prompt" => "Any constraint on export file size?", "options" => [], "allow_text" => true},
+            %{
+              "prompt" => "**Anything else** this ask should cover?",
+              "options" => [],
+              "allow_text" => true
+            }
           ],
           answer_step: 0,
           answer_values: %{},
