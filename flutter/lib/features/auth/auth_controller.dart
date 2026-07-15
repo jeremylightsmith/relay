@@ -17,8 +17,13 @@ import 'auth_errors.dart';
 import 'http_providers.dart';
 
 class AuthState {
-  const AuthState({this.user, this.signingIn = false, this.error});
+  const AuthState({this.user, this.token, this.signingIn = false, this.error});
   final Map<String, dynamic>? user;
+
+  /// The bearer token for `/api/all/*` (RLY-80 decision 2). Null until RLY-78/F2
+  /// returns one from the sign-in exchange — the inbox renders its error state
+  /// rather than an empty queue while it is null (D5).
+  final String? token;
   final bool signingIn;
   final String? error;
 
@@ -79,6 +84,7 @@ class AuthController extends Notifier<AuthState> {
       await _injectSessionIntoWebviews();
       state = AuthState(
         user: Map<String, dynamic>.from(resp.data['user'] as Map),
+        token: resp.data['token'] as String?,
       );
     } catch (e) {
       // The raw error stays debuggable here and never reaches the UI.
