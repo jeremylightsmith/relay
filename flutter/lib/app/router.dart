@@ -5,6 +5,7 @@ import '../features/auth/auth_controller.dart';
 import '../features/auth/sign_in_screen.dart';
 import '../features/auth/welcome_screen.dart';
 import '../features/board/board_screen.dart';
+import '../features/card/card_placeholder_screen.dart';
 import '../features/card/card_screen.dart';
 import '../features/needs_you/needs_you_screen.dart';
 import '../features/push/push_permission_screen.dart';
@@ -52,6 +53,19 @@ GoRouter buildRouter({
           cardRef: state.pathParameters['ref']!,
           boardSlug: state.uri.queryParameters['board'] ?? '',
           bodyBuilder: cardBodyBuilder,
+        ),
+      ),
+      // TEMPORARY (RLY-85 · D4) — **RLY-87 deletes this route** when it registers the
+      // real /card/:ref card-detail host. `kind` rides as a query param so that host can
+      // pick its bottom bar (review vs answer).
+      //
+      // Distinct from /cards/:ref above, which is RLY-81's push deep-link into the F3
+      // embedded LiveView. Don't merge the two here; RLY-87 reconciles them.
+      GoRoute(
+        path: '/card/:ref',
+        builder: (context, state) => CardPlaceholderScreen(
+          cardRef: state.pathParameters['ref']!,
+          kind: state.uri.queryParameters['kind'] ?? '',
         ),
       ),
       ShellRoute(

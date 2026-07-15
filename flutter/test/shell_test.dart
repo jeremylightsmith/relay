@@ -5,8 +5,9 @@ import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/app/theme.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
+import 'package:relay_mobile/features/needs_you/models/feed_row.dart';
 
-import 'needs_you_screen_test.dart' show FakeFeedRepository;
+import 'needs_you_screen_test.dart' show FakeFeedRepository, makeRow;
 
 /// The tab shell in isolation (ungated). The auth gate is exercised separately in
 /// auth_test.dart; here we assert the three-tab shell itself. The inbox's repository
@@ -65,20 +66,41 @@ void main() {
     expect(find.byKey(const Key('nav_settings')), findsOneWidget);
   });
 
-  testWidgets('Needs you destination carries the amber notification dot', (
+  testWidgets('the tab badge is hidden when the queue is clear (EMPTY-01)', (
     tester,
   ) async {
-    await pumpApp(tester);
-    final badge = tester.widget<Badge>(
-      find
-          .descendant(
-            of: find.byKey(const Key('nav_needs_you')),
-            matching: find.byType(Badge),
-          )
-          .first,
+    await pumpApp(tester, repo: FakeFeedRepository());
+
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('nav_needs_you')),
+        matching: find.byType(Badge),
+      ),
+      findsNothing,
     );
-    expect(badge.backgroundColor, RelayTheme.relayBlocked);
   });
+
+  testWidgets(
+    'the tab badge shows the amber dot when decisions wait (HOME-01)',
+    (tester) async {
+      await pumpApp(
+        tester,
+        repo: FakeFeedRepository(
+          page: FeedPage(rows: [makeRow()], meta: const FeedMeta(count: 1)),
+        ),
+      );
+
+      final badge = tester.widget<Badge>(
+        find
+            .descendant(
+              of: find.byKey(const Key('nav_needs_you')),
+              matching: find.byType(Badge),
+            )
+            .first,
+      );
+      expect(badge.backgroundColor, RelayTheme.relayBlocked);
+    },
+  );
 
   testWidgets('tapping Board then Settings navigates to those screens', (
     tester,
