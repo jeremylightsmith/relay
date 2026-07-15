@@ -37,6 +37,13 @@
 		<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 		<key>CFBundleInfoDictionaryVersion</key>
 		<string>6.0</string>
+		<!-- Export compliance: the app uses only exempt encryption (standard
+		     OS-provided HTTPS/TLS for the LiveView webview and Google OAuth); it
+		     implements no proprietary/non-standard crypto. Declaring this here
+		     auto-answers App Store Connect's compliance question so TestFlight
+		     builds go live without a manual per-release approval. -->
+		<key>ITSAppUsesNonExemptEncryption</key>
+		<false/>
 		<key>CFBundleName</key>
 		<string>relay_mobile</string>
 		<key>CFBundlePackageType</key>
