@@ -52,7 +52,8 @@ void main() {
     // The deferral is recorded…
     expect(prefs.deferredAt, now);
     expect(prefs.writeCount, 1);
-    // …and the user lands in the shell on Needs you.
-    expect(find.widgetWithText(AppBar, 'Needs you'), findsOneWidget);
+    // …and the user lands in the shell on Needs you. Keyed on the in-page header
+    // rather than an AppBar: RLY-85 replaced the AppBar with HOME-01's header.
+    expect(find.byKey(const Key('needs_you_header')), findsOneWidget);
   });
 }
