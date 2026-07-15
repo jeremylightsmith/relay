@@ -156,6 +156,30 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     assert has_element?(view, "#needs-input-panel", "Which region?")
   end
 
+  test "a card_upserted that beats the :needs_input activity write still lands the question once the timeline_appended for it arrives (RLY-81 race)",
+       %{conn: conn, code: code, user: user} do
+    {:ok, card} = Cards.create_card(code, %{title: "Race card"})
+    {:ok, blocked} = Cards.set_status(card, %{status: :needs_input})
+
+    board = Boards.get_or_create_default_board(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+    # Simulate `:card_upserted` winning the race against the `:needs_input` Activity
+    # write: the card is already `:needs_input` in the DB, but no `:needs_input` entry
+    # has been logged yet, so `refresh_card/2`'s question lookup comes back empty.
+    send(view.pid, {:card_upserted, blocked})
+    assert has_element?(view, "#needs-input-panel")
+    refute has_element?(view, "#needs-input-question")
+
+    {:ok, entry} =
+      Activity.log(blocked, %{type: :needs_input, actor: :agent, meta: %{"question" => "Which region?"}})
+
+    # The trailing `:timeline_appended` for that entry must recover the question rather
+    # than leaving the panel permanently blank.
+    send(view.pid, {:timeline_appended, card.id, entry})
+    assert has_element?(view, "#needs-input-question", "Which region?")
+  end
+
   defp structured_questions do
     [
       %{"prompt" => "Which timezone?", "options" => ["Billing", "Viewer"], "allow_text" => true},

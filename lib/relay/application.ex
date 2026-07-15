@@ -15,6 +15,12 @@ defmodule Relay.Application do
       {Phoenix.PubSub, name: Relay.PubSub},
       RelayWeb.ApiLog,
       Relay.BoardWatch,
+      # Push dispatch runs off the caller's process so a status change never waits
+      # on (or fails because of) Apple (RLY-81).
+      {Task.Supervisor, name: Relay.Push.TaskSupervisor},
+      # APNs requires HTTP/2. Req's shared default Finch pool is HTTP/1-first, so
+      # push gets its own h2 pool (RLY-81).
+      {Finch, name: Relay.Push.APNSFinch, pools: %{default: [protocols: [:http2], count: 1]}},
       # Start to serve requests, typically the last entry
       RelayWeb.Endpoint
     ]

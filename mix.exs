@@ -81,6 +81,12 @@ defmodule Relay.MixProject do
       # --- Architecture: enforced context/web boundaries (see lib/relay.ex) ---
       {:boundary, "~> 0.10"},
 
+      # --- Push: ES256 JWS for the APNs provider token (RLY-81). A small
+      # pure-Erlang crypto helper, not a push framework — we hand-roll the one
+      # APNs call over Req/Finch rather than pull in pigeon/FCM. Approved at
+      # RLY-81 Spec:Review.
+      {:jose, "~> 1.11"},
+
       # --- Component workbench ---
       {:phoenix_storybook, "~> 1.1"},
 

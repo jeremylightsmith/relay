@@ -4,6 +4,11 @@
 	<dict>
 		<key>CADisableMinimumFrameDurationOnPhone</key>
 		<true/>
+		<!-- Enables silent APNs delivery to the app process (RLY-81). -->
+		<key>UIBackgroundModes</key>
+		<array>
+			<string>remote-notification</string>
+		</array>
 		<!-- Dev: allow the app to reach the local Phoenix server (http://localhost:4003). -->
 		<key>NSAppTransportSecurity</key>
 		<dict>

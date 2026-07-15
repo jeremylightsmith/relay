@@ -29,6 +29,11 @@ config :phoenix_test,
 # In test we don't send emails
 config :relay, Relay.Mailer, adapter: Swoosh.Adapters.Test
 
+# Push (RLY-81): the Test adapter messages the caller, and `async: false` runs
+# dispatch inline in the test process — so deliveries land in the test's mailbox
+# and DB reads stay on the test's sandbox connection.
+config :relay, Relay.Push, adapter: Relay.Push.Delivery.Test, async: false
+
 # Configure your database
 #
 # The MIX_TEST_PARTITION environment variable can be used
@@ -48,6 +53,10 @@ config :relay, RelayWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base: "d7ZQNZUWtP3mPcEZbpa3EzYQ70t1YmaHBlp+2uxkBeAXR5d6FfGSGzr/toxbUS5k",
   server: true
+
+# APNs adapter tests inject a Req.Test plug (mirrors :google_tokeninfo_req_options),
+# so no real Apple contact happens in the suite.
+config :relay, :apns_req_options, plug: {Req.Test, Relay.Push.Delivery.APNS}
 
 # Native-auth Google token validator: static dummy client id + a Req.Test plug
 # so GoogleTokenValidator hits an in-process stub instead of real Google.

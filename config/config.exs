@@ -49,6 +49,11 @@ config :relay, Relay.Attachments, storage: Relay.Attachments.Storage.Local
 # at the `config/runtime.exs`.
 config :relay, Relay.Mailer, adapter: Swoosh.Adapters.Local
 
+# Push (RLY-81). The Log adapter is the default so dev runs — and the whole
+# trigger→recipient→dispatch pipeline is exercisable — without Apple credentials.
+# config/runtime.exs swaps in the real APNS adapter in prod when creds are present.
+config :relay, Relay.Push, adapter: Relay.Push.Delivery.Log, async: true
+
 # Configure the endpoint
 config :relay, RelayWeb.Endpoint,
   url: [host: "localhost"],

@@ -4,14 +4,15 @@
 // `/api/auth/native/google` (RelayWeb.NativeAuthController) → the response carries
 // `Set-Cookie: _relay_key=…`, which dio's cookie jar captures. We then inject that
 // cookie into flutter_inappwebview's store so embedded LiveView renders signed-in.
-import 'package:dio/dio.dart';
-import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:cookie_jar/cookie_jar.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart' as iaw;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../config.dart';
+import '../push/push_service.dart';
+import 'http_providers.dart';
 
 class AuthState {
   const AuthState({this.user, this.signingIn = false, this.error});
@@ -24,23 +25,16 @@ class AuthState {
 }
 
 class AuthController extends Notifier<AuthState> {
-  late final CookieJar _jar;
-  late final Dio _dio;
   final GoogleSignIn _google = GoogleSignIn.instance;
   bool _googleInitialized = false;
 
   @override
   AuthState build() {
-    _jar = CookieJar();
-    _dio = Dio(
-      BaseOptions(
-        baseUrl: AppConfig.baseUrl,
-        // Treat 4xx as a normal response so we can read the backend's error body.
-        validateStatus: (s) => s != null && s < 500,
-      ),
-    )..interceptors.add(CookieManager(_jar));
     return const AuthState();
   }
+
+  CookieJar get _jar => ref.read(cookieJarProvider);
+  Dio get _dio => ref.read(dioProvider);
 
   Future<void> signInWithGoogle() async {
     state = const AuthState(signingIn: true);
@@ -111,6 +105,12 @@ class AuthController extends Notifier<AuthState> {
   }
 
   Future<void> signOut() async {
+    // Unregister *before* clearing the jar — once the session cookie is gone the
+    // DELETE would 401 and the device would keep receiving pushes (RLY-81 §11).
+    final push = ref.read(pushServiceProvider);
+    final token = push.token;
+    if (token != null) await push.disable(token);
+
     try {
       await _google.signOut();
     } catch (_) {}

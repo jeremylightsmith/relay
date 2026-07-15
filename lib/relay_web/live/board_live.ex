@@ -1050,8 +1050,11 @@ defmodule RelayWeb.BoardLive do
 
   def handle_info({:timeline_appended, card_id, entry}, socket) do
     case socket.assigns.selected_card do
-      %Card{id: ^card_id} -> {:noreply, insert_timeline_entry(socket, entry)}
-      _other -> {:noreply, socket}
+      %Card{id: ^card_id} = card ->
+        {:noreply, socket |> insert_timeline_entry(entry) |> refresh_needs_input_question(card, entry)}
+
+      _other ->
+        {:noreply, socket}
     end
   end
 
@@ -1288,8 +1291,7 @@ defmodule RelayWeb.BoardLive do
     socket
     |> assign(:selected_card, card)
     |> assign(:body_loading?, false)
-    |> assign(:question, latest_question(card, activity))
-    |> assign(:answer_questions, latest_questions(card, activity))
+    |> assign_question(card, activity)
     |> assign(:answer_step, 0)
     |> assign(:answer_values, %{})
     |> assign(:answer_form, empty_answer_form())
@@ -1527,6 +1529,28 @@ defmodule RelayWeb.BoardLive do
       %Card{id: ^id} -> refresh_card(socket, card)
       _other -> socket
     end
+  end
+
+  # `:card_upserted` (fired inside Cards.set_status/3, before Cards.request_input/3 logs the
+  # question) can beat the `:needs_input` Activity entry to this session, so refresh_card/2's
+  # question ends up blank until this later `:timeline_appended` for that entry lands — recompute
+  # it here too rather than waiting on the next unrelated card_upserted to paper over it.
+  # `entry` already carries the full `:needs_input` meta (question/questions) that
+  # latest_question/2 and latest_questions/2 scan for, so it stands in for a freshly-fetched
+  # activity list without the round trip.
+  defp refresh_needs_input_question(socket, %Card{} = card, %Schemas.Activity{type: :needs_input} = entry) do
+    assign_question(socket, card, [entry])
+  end
+
+  defp refresh_needs_input_question(socket, %Card{}, _entry), do: socket
+
+  # Shared by refresh_card/2 and refresh_needs_input_question/3: recompute the
+  # needs-input panel's current question/step options from a freshly-fetched
+  # activity timeline.
+  defp assign_question(socket, %Card{} = card, activity) do
+    socket
+    |> assign(:question, latest_question(card, activity))
+    |> assign(:answer_questions, latest_questions(card, activity))
   end
 
   # stages_changed (or an event for a stage this socket doesn't know yet):

@@ -47,6 +47,20 @@ defmodule RelayWeb.Router do
     plug ApiLogger
   end
 
+  # The native shell's device-registration API (RLY-81). Authenticated by the
+  # session cookie F2's native sign-in issued, NOT F4 (RLY-80)'s `relayu_…`
+  # bearer token below — the Flutter shell has no bearer token to send yet
+  # (native sign-in mints only a session cookie). This is a deliberate, known
+  # second credential on the `/api/all` prefix pending consolidation onto F4's
+  # bearer scope (see plan.md's Deviation 1 / Deferred).
+  pipeline :native_user_auth do
+    plug :accepts, ["json"]
+    plug :fetch_session
+    plug ApiLogger
+    plug :fetch_current_scope
+    plug RelayWeb.Plugs.RequireApiUser
+  end
+
   pipeline :require_authenticated_user do
     plug :require_authenticated
   end
@@ -110,6 +124,17 @@ defmodule RelayWeb.Router do
     pipe_through :native_auth
 
     post "/google", NativeAuthController, :google
+  end
+
+  # RLY-81 device registration. Shares the `/api/all` prefix with the bearer-token scope below
+  # but is authenticated separately (session cookie, not `relayu_…` bearer) — see the
+  # `:native_user_auth` pipeline doc above for why, and plan.md's Deviation 1 for the tracked
+  # follow-up to consolidate onto one credential.
+  scope "/api/all", RelayWeb.Api do
+    pipe_through :native_user_auth
+
+    post "/devices", DeviceController, :create
+    delete "/devices/:token", DeviceController, :delete
   end
 
   # RLY-80 — the native app's human-authed decision surface. Deliberately separate from the

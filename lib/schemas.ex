@@ -17,6 +17,7 @@ defmodule Schemas do
       CardOwner,
       CardRejection,
       Comment,
+      DeviceToken,
       Membership,
       Scope,
       Stage,
