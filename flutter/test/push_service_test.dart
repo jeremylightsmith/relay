@@ -1,49 +1,9 @@
-import 'dart:async';
-import 'dart:convert';
-import 'dart:typed_data';
-
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/features/push/push_service.dart';
 
 import 'support/fake_push_platform.dart';
-
-/// Records requests and replays canned responses through dio's adapter seam.
-class RecordingAdapter implements HttpClientAdapter {
-  RecordingAdapter({this.statusCode = 201, this.body = const {'ok': true}});
-
-  final int statusCode;
-  final Map<String, dynamic> body;
-  final List<RequestOptions> requests = [];
-
-  @override
-  Future<ResponseBody> fetch(
-    RequestOptions options,
-    Stream<Uint8List>? requestStream,
-    Future<void>? cancelFuture,
-  ) async {
-    requests.add(options);
-    return ResponseBody.fromString(
-      jsonEncode(body),
-      statusCode,
-      headers: {
-        Headers.contentTypeHeader: [Headers.jsonContentType],
-      },
-    );
-  }
-
-  @override
-  void close({bool force = false}) {}
-}
-
-Dio dioWith(RecordingAdapter adapter) {
-  return Dio(
-    BaseOptions(
-      baseUrl: 'http://localhost:4003',
-      validateStatus: (s) => s != null && s < 500,
-    ),
-  )..httpClientAdapter = adapter;
-}
+import 'support/recording_adapter.dart';
 
 void main() {
   test('enable() requests permission and registers the token', () async {
@@ -101,4 +61,47 @@ void main() {
 
     expect(await service.enable(), isFalse);
   });
+
+  test(
+    'registerIfAuthorized() registers the token without prompting',
+    () async {
+      final platform = FakePushPlatform(authorizedToken: 'apns-tok-123');
+      final adapter = RecordingAdapter();
+      final service = PushService(platform: platform, dio: dioWith(adapter));
+
+      expect(await service.registerIfAuthorized(), isTrue);
+      expect(service.token, 'apns-tok-123');
+
+      // The whole point: no OS permission dialog is requested.
+      expect(platform.requestCount, 0);
+
+      expect(adapter.requests.single.method, 'POST');
+      expect(adapter.requests.single.path, '/api/all/devices');
+      expect(adapter.requests.single.data, {
+        'token': 'apns-tok-123',
+        'platform': 'ios',
+      });
+    },
+  );
+
+  test('registerIfAuthorized() does nothing without a token', () async {
+    final platform = FakePushPlatform(authorizedToken: null);
+    final adapter = RecordingAdapter();
+    final service = PushService(platform: platform, dio: dioWith(adapter));
+
+    expect(await service.registerIfAuthorized(), isFalse);
+    expect(adapter.requests, isEmpty);
+    expect(service.token, isNull);
+  });
+
+  test(
+    'a network failure never throws out of registerIfAuthorized()',
+    () async {
+      final platform = FakePushPlatform(authorizedToken: 'apns-tok-123');
+      final dio = Dio(BaseOptions(baseUrl: 'http://127.0.0.1:1'));
+      final service = PushService(platform: platform, dio: dio);
+
+      expect(await service.registerIfAuthorized(), isFalse);
+    },
+  );
 }
