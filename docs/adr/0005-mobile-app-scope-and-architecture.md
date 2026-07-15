@@ -116,6 +116,11 @@ surfaces.
   **native** pinch-zoom viewer handles *viewing* attachments. (RLY-96, RLY-97)
 - **Structured question options** ("pick an option") ride on **RLY-71** (Make questions
   smoother), not a new mobile feature. (RLY-89)
+- **Structured-question rendering:** **native stepper**, consuming RLY-71's JSON wire
+  format — not the web stepper in a webview. §5 already assigns "an answer field" to
+  Layer 1; a webview could not tell Flutter the answer landed (no JS↔native bridge), and
+  F3's embed mode is board-scoped, so there is no standalone card-body URL to load.
+  (RLY-89, decided at Spec:Review.)
 - **Voice:** **voice-first entry is V1** (not Later), **on-device Whisper** (not OS dictation).
   (RLY-99)
 - **@mentions:** don't exist yet; comments-only @mentions is a **separate cross-cutting
@@ -141,8 +146,6 @@ V1.1 **RLY-91, 94–98**; Later **RLY-100–103**.
 - **Mobile-responsiveness of reused surfaces.** Which LiveView views already work at phone
   width (RLY-62 board scroll) vs. need dedicated mobile design before embedding — per-surface
   polish lives in RLY-87 / 91 / 94 / 96.
-- **Structured-question rendering.** Native stepper (consume RLY-71's JSON wire format) vs.
-  reuse RLY-71's web stepper via the embedded webview. (RLY-89.)
 
 ## Consequences
 

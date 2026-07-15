@@ -27,6 +27,18 @@ class RelayTheme {
     0xFFD58C3B,
   ); //    blocked · amber (oklch 0.70 0.13 65)
 
+  // INPUT-01's "NEEDS INPUT" pill (RLY-89) — the lighter trio beside relayBlocked's
+  // solid amber, and the same values as the web's #needs-input-panel (RLY-71).
+  static const Color relayNeedsInputText = Color(
+    0xFF935A11,
+  ); // needs-input · amber text (oklch 0.52 0.11 65)
+  static const Color relayNeedsInputBg = Color(
+    0xFFFFF3DF,
+  ); //   needs-input · amber bg   (oklch 0.97 0.03 75)
+  static const Color relayNeedsInputBorder = Color(
+    0xFFF0CEA1,
+  ); // needs-input · amber border (oklch 0.87 0.07 75)
+
   // --- Reject / send-back · CORE-07 in docs/designs/Relay Mobile.dc.html (RLY-88) ---
   // theme.dart had no reject-red; these are the artboard's own oklch values, converted.
   static const Color relayReject = Color(

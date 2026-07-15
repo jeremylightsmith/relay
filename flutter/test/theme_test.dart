@@ -67,4 +67,24 @@ void main() {
       expect(RelayTheme.micGhostGlyph, isNot(RelayTheme.relayAI));
     },
   );
+
+  test('the NEEDS INPUT pill is the artboard oklch trio, converted', () {
+    // INPUT-01's pill (Relay Mobile.dc.html ~line 329) — the same three tokens as the
+    // web's #needs-input-panel, so the two surfaces stay recognizably one feature.
+    expect(
+      RelayTheme.relayNeedsInputText,
+      const Color(0xFF935A11),
+    ); // oklch(0.52 0.11 65)
+    expect(
+      RelayTheme.relayNeedsInputBg,
+      const Color(0xFFFFF3DF),
+    ); // oklch(0.97 0.03 75)
+    expect(
+      RelayTheme.relayNeedsInputBorder,
+      const Color(0xFFF0CEA1),
+    ); // oklch(0.87 0.07 75)
+
+    // The lighter pill trio, not the existing needs-you amber it sits beside.
+    expect(RelayTheme.relayNeedsInputText, isNot(RelayTheme.relayBlocked));
+  });
 }
