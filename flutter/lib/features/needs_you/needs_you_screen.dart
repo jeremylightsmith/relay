@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/api_client.dart';
+import '../decisions/review_queue.dart';
 import 'feed_controller.dart';
 import 'models/feed_row.dart';
 import 'widgets/caught_up.dart';
@@ -45,7 +46,13 @@ class _NeedsYouScreenState extends ConsumerState<NeedsYouScreen>
 
   /// D4: rows push /card/:ref, carrying `kind` so the host picks its bottom bar
   /// (RLY-87's review bar vs RLY-89's answer field). D2: acting on a card refetches.
+  ///
+  /// RLY-88: the tap is also where the review queue is snapshotted — the rows the human
+  /// can see are exactly the queue they will clear, in that order.
   Future<void> _openCard(FeedRow row) async {
+    final rows =
+        ref.read(feedControllerProvider).value?.rows ?? const <FeedRow>[];
+    ref.read(reviewQueueProvider.notifier).enter(rows: rows, atRef: row.ref);
     await context.push('/card/${row.ref}?kind=${row.kind}');
     if (!mounted) return;
     await ref.read(feedControllerProvider.notifier).refresh();

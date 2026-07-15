@@ -12,6 +12,7 @@ class FakeAuthController extends AuthController {
 
   final AuthState initial;
   int signInCalls = 0;
+  int signOutCalls = 0;
 
   @override
   AuthState build() => initial;
@@ -19,6 +20,12 @@ class FakeAuthController extends AuthController {
   @override
   Future<void> signInWithGoogle() async {
     signInCalls++;
+  }
+
+  @override
+  Future<void> signOut() async {
+    signOutCalls++;
+    state = const AuthState(status: AuthStatus.signedOut);
   }
 }
 
