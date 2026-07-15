@@ -67,6 +67,14 @@ if config_env() == :prod do
   tigris_endpoint =
     URI.parse(System.get_env("AWS_ENDPOINT_URL_S3") || "https://fly.storage.tigris.dev")
 
+  # Push (RLY-81). Only switch to the real APNs adapter when the credentials are
+  # actually present — a prod boot without them keeps the Log adapter rather than
+  # crashing the release. Secrets come from `fly secrets set`.
+  apns_key = System.get_env("APNS_KEY_P8")
+  apns_key_id = System.get_env("APNS_KEY_ID")
+  apns_team_id = System.get_env("APNS_TEAM_ID")
+  apns_topic = System.get_env("APNS_TOPIC")
+
   config :ex_aws, :s3,
     scheme: "#{tigris_endpoint.scheme}://",
     host: tigris_endpoint.host,
@@ -76,6 +84,23 @@ if config_env() == :prod do
     access_key_id: System.get_env("AWS_ACCESS_KEY_ID"),
     secret_access_key: System.get_env("AWS_SECRET_ACCESS_KEY"),
     region: "auto"
+
+  if apns_key && apns_key_id && apns_team_id && apns_topic do
+    config :relay, Relay.Push,
+      adapter: Relay.Push.Delivery.APNS,
+      async: true,
+      apns: [
+        key: apns_key,
+        key_id: apns_key_id,
+        team_id: apns_team_id,
+        topic: apns_topic,
+        env: System.get_env("APNS_ENV", "sandbox")
+      ]
+  else
+    require Logger
+
+    Logger.warning("[push] APNs credentials absent — falling back to the Log delivery adapter")
+  end
 
   # RLY-13: attachments go to Tigris (S3-compatible) in prod. `fly storage create`
   # provisions the bucket and sets AWS_* / BUCKET_NAME / AWS_ENDPOINT_URL_S3.

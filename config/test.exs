@@ -54,6 +54,10 @@ config :relay, RelayWeb.Endpoint,
   secret_key_base: "d7ZQNZUWtP3mPcEZbpa3EzYQ70t1YmaHBlp+2uxkBeAXR5d6FfGSGzr/toxbUS5k",
   server: true
 
+# APNs adapter tests inject a Req.Test plug (mirrors :google_tokeninfo_req_options),
+# so no real Apple contact happens in the suite.
+config :relay, :apns_req_options, plug: {Req.Test, Relay.Push.Delivery.APNS}
+
 # Native-auth Google token validator: static dummy client id + a Req.Test plug
 # so GoogleTokenValidator hits an in-process stub instead of real Google.
 config :relay, :google_client_id, "test-google-client-id"
