@@ -44,8 +44,9 @@ class _NeedsYouScreenState extends ConsumerState<NeedsYouScreen>
     }
   }
 
-  /// D4: rows push /card/:ref, carrying `kind` so the host picks its bottom bar
-  /// (RLY-87's review bar vs RLY-89's answer field). D2: acting on a card refetches.
+  /// D4: rows push the card's screen — a needs_input row opens RLY-89's answer screen,
+  /// an in_review row the card host (carrying `kind` so it picks its bottom bar).
+  /// D2: acting on a card refetches.
   ///
   /// RLY-88: the tap is also where the review queue is snapshotted — the rows the human
   /// can see are exactly the queue they will clear, in that order.
@@ -53,7 +54,7 @@ class _NeedsYouScreenState extends ConsumerState<NeedsYouScreen>
     final rows =
         ref.read(feedControllerProvider).value?.rows ?? const <FeedRow>[];
     ref.read(reviewQueueProvider.notifier).enter(rows: rows, atRef: row.ref);
-    await context.push('/card/${row.ref}?kind=${row.kind}');
+    await context.push(routeFor(QueueItem.fromRow(row)));
     if (!mounted) return;
     await ref.read(feedControllerProvider.notifier).refresh();
   }

@@ -10,16 +10,25 @@ import 'package:relay_mobile/features/needs_you/models/feed_row.dart';
 
 import 'support/fake_auth.dart';
 
-FeedRow row(String ref, {String kind = 'in_review', String slug = 'relay'}) =>
-    FeedRow(
-      ref: ref,
-      title: 'Card $ref',
-      board: FeedBoard(name: 'Relay', key: 'RLY', slug: slug),
-      status: kind,
-      kind: kind,
-      reason: 'Review',
-      blockedAt: DateTime.utc(2026, 7, 15),
-    );
+FeedRow row(
+  String ref, {
+  String kind = 'in_review',
+  String slug = 'relay',
+  String boardName = 'Relay',
+  String stage = 'Code',
+  String reason = 'Review',
+  List<FeedQuestion>? questions,
+}) => FeedRow(
+  ref: ref,
+  title: 'Card $ref',
+  board: FeedBoard(name: boardName, key: 'RLY', slug: slug),
+  status: kind,
+  kind: kind,
+  stage: stage,
+  reason: reason,
+  blockedAt: DateTime.utc(2026, 7, 15),
+  questions: questions,
+);
 
 FeedPage page(List<FeedRow> rows) => FeedPage(
   rows: rows,
@@ -39,6 +48,9 @@ class FakeDecisionApi implements DecisionApi {
   final List<String> rejectedNotes = [];
   final List<String> rejectedBoards = [];
 
+  final List<({String ref, List<Map<String, String>>? answers, String? text})>
+  answered = [];
+
   @override
   Future<DecisionResult> approve({
     required String ref,
@@ -57,6 +69,37 @@ class FakeDecisionApi implements DecisionApi {
     rejected.add(ref);
     rejectedNotes.add(note);
     rejectedBoards.add(boardSlug);
+    return result;
+  }
+
+  @override
+  Future<DecisionResult> answer({
+    required String ref,
+    required String boardSlug,
+    List<Map<String, String>>? answers,
+    String? text,
+  }) async {
+    answered.add((ref: ref, answers: answers, text: text));
+    return result;
+  }
+}
+
+/// Holds a POST open so the in-flight guard can be observed.
+class BlockingDecisionApi extends FakeDecisionApi {
+  BlockingDecisionApi(this.gate);
+
+  final Completer<void> gate;
+  int calls = 0;
+
+  @override
+  Future<DecisionResult> answer({
+    required String ref,
+    required String boardSlug,
+    List<Map<String, String>>? answers,
+    String? text,
+  }) async {
+    calls++;
+    await gate.future;
     return result;
   }
 }
@@ -80,6 +123,17 @@ class BlockedDecisionApi implements DecisionApi {
     required String ref,
     required String boardSlug,
     required String note,
+  }) {
+    calls++;
+    return completer.future;
+  }
+
+  @override
+  Future<DecisionResult> answer({
+    required String ref,
+    required String boardSlug,
+    List<Map<String, String>>? answers,
+    String? text,
   }) {
     calls++;
     return completer.future;
@@ -487,4 +541,166 @@ void main() {
       reason: 'the next screen must not re-show it',
     );
   });
+
+  test('a needs_input row carries its questions into the queue', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final questions = [
+      const FeedQuestion(
+        prompt: 'Which region?',
+        options: ['us', 'eu'],
+        allowText: true,
+      ),
+    ];
+
+    container
+        .read(reviewQueueProvider.notifier)
+        .enter(
+          rows: [
+            row(
+              'RLY-A',
+              kind: 'needs_input',
+              questions: questions,
+              boardName: 'Data pipeline',
+              stage: 'Prep',
+            ),
+          ],
+          atRef: 'RLY-A',
+        );
+
+    final current = container.read(reviewQueueProvider).current!;
+    expect(current.questions, hasLength(1));
+    expect(current.questions!.single.prompt, 'Which region?');
+    expect(current.boardName, 'Data pipeline');
+    expect(current.stage, 'Prep');
+  });
+
+  test(
+    'routeFor sends needs_input to the answer screen and in_review to the host',
+    () {
+      expect(
+        routeFor(QueueItem.fromRow(row('RLY-A', kind: 'needs_input'))),
+        '/card/RLY-A/answer',
+      );
+      expect(
+        routeFor(QueueItem.fromRow(row('RLY-B'))),
+        '/card/RLY-B?kind=in_review',
+      );
+    },
+  );
+
+  test(
+    'answerCurrent posts the picks and advances with the answer banner',
+    () async {
+      final api = FakeDecisionApi();
+      final container = ProviderContainer(
+        overrides: [
+          decisionApiProvider.overrideWithValue(api),
+          feedRepositoryProvider.overrideWithValue(FakeFeedRepository()),
+        ],
+      );
+      addTearDown(container.dispose);
+      final queue = container.read(reviewQueueProvider.notifier);
+      queue.enter(
+        rows: [
+          row('RLY-A', kind: 'needs_input'),
+          row('RLY-B', kind: 'needs_input'),
+        ],
+        atRef: 'RLY-A',
+      );
+
+      final dest = await queue.answerCurrent(
+        answers: [
+          {'value': 'eu'},
+        ],
+      );
+
+      expect(api.answered.single.ref, 'RLY-A');
+      expect(api.answered.single.answers, [
+        {'value': 'eu'},
+      ]);
+      expect(dest, '/card/RLY-B/answer');
+      expect(queue.takeBanner(), 'Answer sent · RLY-A');
+    },
+  );
+
+  test('answerCurrent sends free text through for a legacy question', () async {
+    final api = FakeDecisionApi();
+    final container = ProviderContainer(
+      overrides: [
+        decisionApiProvider.overrideWithValue(api),
+        feedRepositoryProvider.overrideWithValue(FakeFeedRepository()),
+      ],
+    );
+    addTearDown(container.dispose);
+    final queue = container.read(reviewQueueProvider.notifier);
+    queue.enter(
+      rows: [row('RLY-A', kind: 'needs_input')],
+      atRef: 'RLY-A',
+    );
+
+    await queue.answerCurrent(text: 'eu, please');
+
+    expect(api.answered.single.text, 'eu, please');
+    expect(api.answered.single.answers, isNull);
+  });
+
+  test('a 422 not_needs_input skips rather than erroring', () async {
+    final api = FakeDecisionApi(
+      const DecisionFailed(
+        'not_needs_input',
+        'This card is not waiting on an answer',
+      ),
+    );
+    final container = ProviderContainer(
+      overrides: [
+        decisionApiProvider.overrideWithValue(api),
+        feedRepositoryProvider.overrideWithValue(FakeFeedRepository()),
+      ],
+    );
+    addTearDown(container.dispose);
+    final queue = container.read(reviewQueueProvider.notifier);
+    queue.enter(
+      rows: [
+        row('RLY-A', kind: 'needs_input'),
+        row('RLY-B', kind: 'needs_input'),
+      ],
+      atRef: 'RLY-A',
+    );
+
+    final dest = await queue.answerCurrent(text: 'eu');
+
+    // Someone answered it on the web while we walked. Not a failure.
+    expect(dest, '/card/RLY-B/answer');
+    expect(queue.takeBanner(), 'Already handled · RLY-A');
+    expect(container.read(reviewQueueProvider).error, isNull);
+  });
+
+  test(
+    'answerCurrent cannot be fired twice while a POST is in flight',
+    () async {
+      final gate = Completer<void>();
+      final api = BlockingDecisionApi(gate);
+      final container = ProviderContainer(
+        overrides: [
+          decisionApiProvider.overrideWithValue(api),
+          feedRepositoryProvider.overrideWithValue(FakeFeedRepository()),
+        ],
+      );
+      addTearDown(container.dispose);
+      final queue = container.read(reviewQueueProvider.notifier);
+      queue.enter(
+        rows: [row('RLY-A', kind: 'needs_input')],
+        atRef: 'RLY-A',
+      );
+
+      final first = queue.answerCurrent(text: 'eu');
+      final second = await queue.answerCurrent(text: 'eu');
+
+      expect(second, isNull); // the second tap did nothing
+      gate.complete();
+      await first;
+      expect(api.calls, 1);
+    },
+  );
 }

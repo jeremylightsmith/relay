@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/app/theme.dart';
@@ -10,20 +11,19 @@ import 'package:relay_mobile/features/needs_you/models/feed_row.dart';
 
 import 'needs_you_screen_test.dart' show FakeFeedRepository, makeRow;
 
-Future<void> pumpShell(WidgetTester tester, FakeFeedRepository repo) async {
+Future<GoRouter> pumpShell(WidgetTester tester, FakeFeedRepository repo) async {
+  final router = buildRouter();
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
         feedRepositoryProvider.overrideWithValue(repo),
         authTokenProvider.overrideWithValue('relayu_test'),
       ],
-      child: MaterialApp.router(
-        theme: RelayTheme.light,
-        routerConfig: buildRouter(),
-      ),
+      child: MaterialApp.router(theme: RelayTheme.light, routerConfig: router),
     ),
   );
   await tester.pumpAndSettle();
+  return router;
 }
 
 void main() {
@@ -49,25 +49,48 @@ void main() {
     },
   );
 
-  testWidgets('tapping a NEEDS INPUT row carries kind=needs_input', (
-    tester,
-  ) async {
-    final repo = FakeFeedRepository(
-      page: FeedPage(
-        rows: [makeRow(ref: 'RLY-2', kind: 'needs_input')],
-        meta: const FeedMeta(count: 1),
-      ),
-    );
-    await pumpShell(tester, repo);
+  testWidgets(
+    'tapping a NEEDS INPUT row routes to the answer screen (RLY-89)',
+    (tester) async {
+      // Task 3 registers the real `/card/:ref/answer` screen; here only the
+      // destination matters, so a stub stands in for it (same technique
+      // card_deep_link_test.dart uses for the not-yet-buildable webview body).
+      final router = buildRouter(
+        extraRoutes: [
+          GoRoute(
+            path: '/card/:ref/answer',
+            builder: (context, state) => SizedBox(
+              key: Key('answer_stub_${state.pathParameters['ref']}'),
+            ),
+          ),
+        ],
+      );
+      final repo = FakeFeedRepository(
+        page: FeedPage(
+          rows: [makeRow(ref: 'RLY-2', kind: 'needs_input')],
+          meta: const FeedMeta(count: 1),
+        ),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            feedRepositoryProvider.overrideWithValue(repo),
+            authTokenProvider.overrideWithValue('relayu_test'),
+          ],
+          child: MaterialApp.router(
+            theme: RelayTheme.light,
+            routerConfig: router,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('inbox_row_RLY-2')));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('inbox_row_RLY-2')));
+      await tester.pumpAndSettle();
 
-    final screen = tester.widget<CardPlaceholderScreen>(
-      find.byType(CardPlaceholderScreen),
-    );
-    expect(screen.kind, 'needs_input');
-  });
+      expect(find.byKey(const Key('answer_stub_RLY-2')), findsOneWidget);
+    },
+  );
 
   testWidgets('the placeholder reads as a stub and shows what it received', (
     tester,
