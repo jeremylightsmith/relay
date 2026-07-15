@@ -20,7 +20,7 @@ void main() {
   testWidgets(
     'a signed-out app is gated to Welcome; the shell is unreachable',
     (tester) async {
-      await pumpApp(tester, const AuthState());
+      await pumpApp(tester, const AuthState(status: AuthStatus.signedOut));
 
       expect(find.byKey(const Key('welcome_screen')), findsOneWidget);
 
@@ -33,7 +33,13 @@ void main() {
   testWidgets('a signed-in app boots to the shell, not the auth stack', (
     tester,
   ) async {
-    await pumpApp(tester, const AuthState(user: {'email': 'dana@acme.co'}));
+    await pumpApp(
+      tester,
+      const AuthState(
+        status: AuthStatus.signedIn,
+        user: {'email': 'dana@acme.co'},
+      ),
+    );
 
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.byKey(const Key('welcome_screen')), findsNothing);

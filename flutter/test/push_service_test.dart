@@ -4,33 +4,9 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:relay_mobile/features/push/push_platform.dart';
 import 'package:relay_mobile/features/push/push_service.dart';
 
-/// A fake PushPlatform — no MethodChannel, no OS. The repo has no mocking
-/// package and no ProviderScope-override idiom, so seams are structural.
-class FakePushPlatform implements PushPlatform {
-  FakePushPlatform({this.tokenToReturn});
-
-  final String? tokenToReturn;
-  int requestCount = 0;
-  void Function(Map<String, dynamic>)? tapHandler;
-  Map<String, dynamic>? initial;
-
-  @override
-  Future<String?> requestPermissionAndToken() async {
-    requestCount++;
-    return tokenToReturn;
-  }
-
-  @override
-  Future<Map<String, dynamic>?> initialNotification() async => initial;
-
-  @override
-  void onNotificationTap(void Function(Map<String, dynamic>) handler) {
-    tapHandler = handler;
-  }
-}
+import 'support/fake_push_platform.dart';
 
 /// Records requests and replays canned responses through dio's adapter seam.
 class RecordingAdapter implements HttpClientAdapter {

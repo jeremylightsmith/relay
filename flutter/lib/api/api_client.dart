@@ -2,7 +2,6 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config.dart';
-import '../features/auth/auth_controller.dart';
 
 /// A failed call to the JSON API, surfaced to the UI as a message rather than a
 /// raw DioException. [statusCode] is null for transport failures (offline, DNS).
@@ -98,9 +97,11 @@ class ApiClient {
 
 /// The bearer token seam (D5). A plain provider so tests override it with a value
 /// instead of driving the whole Google sign-in flow.
-final authTokenProvider = Provider<String?>(
-  (ref) => ref.watch(authProvider.select((s) => s.token)),
-);
+///
+/// Always null in production for now: nothing mints a bearer (`relayu_`) token yet
+/// — that is RLY-80/RLY-87's job, not RLY-86's (see AuthState, which carries no
+/// token). `ref` stays unused until that lands.
+final authTokenProvider = Provider<String?>((ref) => null);
 
 final apiClientProvider = Provider<ApiClient>(
   (ref) => ApiClient(tokenReader: () => ref.read(authTokenProvider)),

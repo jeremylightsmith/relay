@@ -65,4 +65,24 @@ void main() {
     );
     expect(pathForPayload({'kind': 'in_review'}), isNull);
   });
+
+  test(
+    'pathForPayload ignores `kind` — every push routes to the card (RLY-86 §8)',
+    () {
+      // Routing on `kind` is exactly what breaks when a push is stale: a card that was
+      // :needs_input at send time and :in_review at tap time would open the answer
+      // surface for a question that no longer exists. The card's *current* state picks
+      // the surface (RLY-87), which makes stale-push handling free.
+      const card = {'card_ref': 'RLY-9', 'board_slug': 'b1'};
+
+      expect(
+        pathForPayload({...card, 'kind': 'needs_input'}),
+        pathForPayload({...card, 'kind': 'in_review'}),
+      );
+      expect(
+        pathForPayload({...card, 'kind': 'needs_input'}),
+        '/cards/RLY-9?board=b1',
+      );
+    },
+  );
 }

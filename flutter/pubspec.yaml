@@ -45,6 +45,9 @@ dependencies:
   dio: ^5.7.0
   dio_cookie_manager: ^3.1.1
   cookie_jar: ^4.0.8
+  # RLY-86: the session cookie's only correct home is the Keychain
+  # (shared_preferences is plaintext). Approved at Spec:Review.
+  flutter_secure_storage: ^9.2.4
   # Inject the session cookie into embedded webviews (proves the session end-to-end).
   flutter_inappwebview: ^6.1.5
 
