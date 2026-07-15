@@ -34,19 +34,42 @@ class PushService {
     try {
       final token = await _platform.requestPermissionAndToken();
       if (token == null) return false;
-
-      final resp = await _dio.post(
-        '/api/all/devices',
-        data: {'token': token, 'platform': 'ios'},
-      );
-
-      final ok = resp.statusCode == 201 || resp.statusCode == 200;
-      if (ok) _token = token;
-      return ok;
+      return await _register(token);
     } catch (e) {
       debugPrint('[push] enable failed: $e');
       return false;
     }
+  }
+
+  /// Registers the device token when iOS has **already** authorized push — no
+  /// prompt, no dialog. Returns whether a token was registered. Never throws.
+  ///
+  /// This is the other half of the AUTH-03 skip (RLY-84 §2). [enable] only runs on
+  /// the "Allow" tap; once the gate stops showing that screen, this is the only
+  /// thing keeping an authorized device registered. Safe to call every launch: the
+  /// backend upserts by token, so it is idempotent, and it re-points the row
+  /// cleanly after an account switch.
+  Future<bool> registerIfAuthorized() async {
+    try {
+      final token = await _platform.tokenIfAuthorized();
+      if (token == null) return false;
+      return await _register(token);
+    } catch (e) {
+      debugPrint('[push] registerIfAuthorized failed: $e');
+      return false;
+    }
+  }
+
+  /// POSTs [token] to the backend, remembering it on success.
+  Future<bool> _register(String token) async {
+    final resp = await _dio.post(
+      '/api/all/devices',
+      data: {'token': token, 'platform': 'ios'},
+    );
+
+    final ok = resp.statusCode == 201 || resp.statusCode == 200;
+    if (ok) _token = token;
+    return ok;
   }
 
   /// Unregisters [token] on sign-out. Never throws — the backend delete is

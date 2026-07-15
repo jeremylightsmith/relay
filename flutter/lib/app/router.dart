@@ -9,6 +9,7 @@ import '../features/board/board_screen.dart';
 import '../features/card/card_placeholder_screen.dart';
 import '../features/card/card_screen.dart';
 import '../features/needs_you/needs_you_screen.dart';
+import '../features/push/push_onboarding.dart';
 import '../features/push/push_permission_screen.dart';
 import '../features/push/push_service.dart';
 import '../features/settings/settings_screen.dart';
@@ -37,13 +38,35 @@ GoRouter buildRouter({
       // AUTH-03. `onAllow` is what actually asks iOS and registers the token.
       GoRoute(
         path: '/push-permission',
+        // The gate (RLY-84 §1). `routerProvider`'s redirect decides *when* this
+        // is the right moment — an interactive sign-in with nothing to resume —
+        // and this decides *whether* iOS and the cooldown actually allow it.
+        // Splitting it that way keeps the async status read out of the top-level
+        // redirect, which runs on every navigation and is effectively sync.
+        //
+        // Route-level, so only a navigation *here* pays for it. Returning
+        // /needs-you is a no-op detour: the redirect was already sending the
+        // user there.
+        redirect: (context, state) async {
+          final gate = ProviderScope.containerOf(
+            context,
+          ).read(pushOnboardingProvider);
+          final decision = await gate.resolve();
+          return decision == PushGateDecision.prime ? null : '/needs-you';
+        },
         builder: (context, state) => Consumer(
           builder: (context, ref, _) => PushPermissionScreen(
             onAllow: () async {
               await ref.read(pushServiceProvider).enable();
               if (context.mounted) context.go('/needs-you');
             },
-            onSkip: () => context.go('/needs-you'),
+            onSkip: () async {
+              // "Not now" never invokes the OS prompt, so iOS stays notDetermined
+              // — if we don't remember this ourselves we re-prime every launch,
+              // which is the defect RLY-84 exists to fix.
+              await ref.read(pushOnboardingProvider).deferPriming();
+              if (context.mounted) context.go('/needs-you');
+            },
           ),
         ),
       ),

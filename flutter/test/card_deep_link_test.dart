@@ -4,6 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/features/card/card_screen.dart';
+import 'package:relay_mobile/features/push/push_platform.dart';
+import 'package:relay_mobile/features/push/push_prefs.dart';
+import 'package:relay_mobile/features/push/push_service.dart';
+
+import 'support/fake_push_platform.dart';
+import 'support/fake_push_prefs.dart';
 
 // `pathForPayload` and `CardScreen.cardUrl` are pure functions — unit-tested
 // below without pumping anything.
@@ -15,7 +21,19 @@ Future<GoRouter> pumpRouter(WidgetTester tester) async {
     cardBodyBuilder: (_) => const SizedBox.shrink(key: Key('stub_card_body')),
   );
   await tester.pumpWidget(
-    ProviderScope(child: MaterialApp.router(routerConfig: router)),
+    ProviderScope(
+      // /push-permission now gates itself on the OS status + the deferral
+      // (RLY-84 §1), so this route needs both seams faked. Without them the gate
+      // reads a real IosPushPrefs over an unmocked MethodChannel, throws, and
+      // fail-safes to skip — the screen would never render.
+      overrides: [
+        pushPlatformProvider.overrideWithValue(
+          FakePushPlatform(status: PushAuthorizationStatus.notDetermined),
+        ),
+        pushPrefsProvider.overrideWithValue(FakePushPrefs()),
+      ],
+      child: MaterialApp.router(routerConfig: router),
+    ),
   );
   await tester.pumpAndSettle();
   return router;

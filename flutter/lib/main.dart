@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/router.dart';
 import 'app/theme.dart';
+import 'features/auth/auth_controller.dart';
 import 'features/push/push_service.dart';
 
 void main() => runApp(const ProviderScope(child: RelayApp()));
@@ -27,10 +28,29 @@ class _RelayAppState extends ConsumerState<RelayApp> {
   Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
 
-    // AUTH-03's permission prime is decided by routerProvider's redirect, not here:
-    // it is the only place that sees both auth status and the pending deep link
-    // (RLY-86 §6), so it alone can tell "interactive sign-in, nothing to resume"
-    // apart from every other path that lands back on signed-in scaffolding.
+    // AUTH-03's permission prime is decided by routerProvider's redirect and the
+    // /push-permission route's own gate, not here: the redirect is the only place
+    // that sees both auth status and the pending deep link (RLY-86 §6), so it
+    // alone can tell "interactive sign-in, nothing to resume" apart from every
+    // other path that lands back on signed-in scaffolding.
+
+    // Re-register the device token whenever a session becomes live — on a
+    // restore as well as an interactive sign-in (RLY-84 §2). RLY-81 registers
+    // only on the AUTH-03 "Allow" tap, which used to be reached on every launch
+    // because F2 never persisted the session. Now that RLY-86 restores it, a
+    // returning user never sees AUTH-03 and would silently stop being
+    // registered. It is also right on its own terms: APNs tokens can change, and
+    // the backend upserts by token, so re-running is idempotent and re-points
+    // the row after an account switch.
+    //
+    // Keyed on the signedOut→signedIn edge rather than done in _wirePush: that
+    // runs before auth resolves (see initState), so registering there would race
+    // the Keychain read and POST with no session cookie.
+    ref.listen(authProvider, (previous, next) {
+      if (next.signedIn && !(previous?.signedIn ?? false)) {
+        ref.read(pushServiceProvider).registerIfAuthorized();
+      }
+    });
 
     return MaterialApp.router(
       title: 'Relay',
