@@ -6,12 +6,14 @@
 // cookie into flutter_inappwebview's store so embedded LiveView renders signed-in.
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart' as iaw;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../config.dart';
 import '../push/push_service.dart';
+import 'auth_errors.dart';
 import 'http_providers.dart';
 
 class AuthState {
@@ -71,9 +73,7 @@ class AuthController extends Notifier<AuthState> {
           (resp.data is Map) &&
           resp.data['success'] == true;
       if (!ok) {
-        throw Exception(
-          'Backend rejected sign-in: ${resp.statusCode} ${resp.data}',
-        );
+        throw SignInRejected(resp.statusCode);
       }
 
       await _injectSessionIntoWebviews();
@@ -81,7 +81,10 @@ class AuthController extends Notifier<AuthState> {
         user: Map<String, dynamic>.from(resp.data['user'] as Map),
       );
     } catch (e) {
-      state = AuthState(error: e.toString());
+      // The raw error stays debuggable here and never reaches the UI.
+      debugPrint('Sign-in failed: $e');
+      final message = signInErrorMessage(e);
+      state = message == null ? const AuthState() : AuthState(error: message);
     }
   }
 
