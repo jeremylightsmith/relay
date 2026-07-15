@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
 import 'package:relay_mobile/features/decisions/decision_api.dart';
 import 'package:relay_mobile/features/decisions/review_queue.dart';
+import 'package:relay_mobile/features/needs_you/feed_controller.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
 import 'package:relay_mobile/features/needs_you/models/feed_row.dart';
 
@@ -263,6 +264,72 @@ void main() {
 
       expect(dest, '/needs-you');
       expect(h.container.read(reviewQueueProvider).banner, 'Approved · RLY-A');
+    },
+  );
+
+  test(
+    'the end-of-snapshot refetch also lands in feedControllerProvider, so the '
+    'inbox actually renders caught up rather than staying stale (RLY-89)',
+    () async {
+      // Only one page queued: the inbox's own initial load. The walk's own
+      // end-of-snapshot refetch falls through FakeFeedRepository's default —
+      // an empty page — with no second page needed, because it must be served
+      // from that *same* refetch rather than firing a request of its own.
+      final feed = FakeFeedRepository([
+        page([row('RLY-SEED')]),
+      ]);
+      final h = harness(api: FakeDecisionApi(), feed: feed);
+
+      // Stand in for NeedsYouScreen already having the inbox live, the way it
+      // is by the time a human can tap into a queue walk at all.
+      await h.container.read(feedControllerProvider.future);
+      expect(feed.calls, 1);
+      expect(
+        h.container.read(feedControllerProvider).value?.rows.map((r) => r.ref),
+        ['RLY-SEED'],
+      );
+
+      final queue = h.container.read(reviewQueueProvider.notifier);
+      queue.enter(rows: [row('RLY-A')], atRef: 'RLY-A');
+
+      final dest = await queue.approveCurrent();
+
+      expect(dest, '/needs-you');
+      expect(
+        feed.calls,
+        2,
+        reason:
+            'the initial load plus the one end-of-snapshot refetch — '
+            'landing on the inbox must not cost a second request',
+      );
+      final inbox = h.container.read(feedControllerProvider).value;
+      expect(inbox, isNotNull);
+      expect(inbox!.rows, isEmpty);
+      expect(inbox.caughtUp, isTrue);
+    },
+  );
+
+  test(
+    'a mid-walk refetch that finds fresh rows also updates feedControllerProvider',
+    () async {
+      final feed = FakeFeedRepository([
+        page([row('RLY-SEED')]),
+        page([row('RLY-D'), row('RLY-E')]),
+      ]);
+      final h = harness(api: FakeDecisionApi(), feed: feed);
+
+      await h.container.read(feedControllerProvider.future);
+      expect(feed.calls, 1);
+
+      final queue = h.container.read(reviewQueueProvider.notifier);
+      queue.enter(rows: [row('RLY-A')], atRef: 'RLY-A');
+
+      final dest = await queue.approveCurrent();
+
+      expect(dest, '/card/RLY-D?kind=in_review');
+      expect(feed.calls, 2);
+      final inbox = h.container.read(feedControllerProvider).value;
+      expect(inbox!.rows.map((r) => r.ref), ['RLY-D', 'RLY-E']);
     },
   );
 

@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../api/api_client.dart';
 import '../auth/auth_controller.dart';
+import '../needs_you/feed_controller.dart';
 import '../needs_you/feed_repository.dart';
 import '../needs_you/models/feed_row.dart';
 import 'decision_api.dart';
@@ -222,6 +223,14 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
   /// route to go to. At the end of the snapshot, refetch **once**: fresh rows
   /// re-snapshot at 0 and the walk continues; nothing fresh lands on the inbox,
   /// which renders EMPTY-01 (RLY-85's).
+  ///
+  /// That refetched page is also handed straight to [feedControllerProvider]
+  /// (when it's alive) so the inbox is current the instant we land on it — the
+  /// queue walk's own `router.go('/needs-you')`/`pushReplacement` exit never
+  /// completes `NeedsYouScreen._openCard`'s awaited `push`, so nothing else
+  /// refreshes it. Guarded by [Ref.exists] rather than an unconditional
+  /// `.notifier` read so a cold container (nothing has watched the inbox yet,
+  /// as in these tests) doesn't pay for a redundant build-time fetch.
   Future<String> advanceAfter({required String banner}) async {
     final next = state.index + 1;
     if (next < state.items.length) {
@@ -229,13 +238,16 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
       return routeFor(state.items[next]);
     }
 
-    final rows = await _refetch();
-    if (rows.isEmpty) {
+    final page = await _refetch();
+    if (ref.exists(feedControllerProvider)) {
+      ref.read(feedControllerProvider.notifier).applyFeed(page);
+    }
+    if (page.rows.isEmpty) {
       state = ReviewQueueState(banner: banner);
       return '/needs-you';
     }
 
-    final items = rows.map(QueueItem.fromRow).toList(growable: false);
+    final items = page.rows.map(QueueItem.fromRow).toList(growable: false);
     state = ReviewQueueState(items: items, banner: banner);
     return routeFor(items.first);
   }
@@ -243,11 +255,11 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
   /// A feed we cannot reach is indistinguishable from an empty one *for this
   /// purpose*: either way the walk is over and the inbox is where to land — and the
   /// inbox has its own retry.
-  Future<List<FeedRow>> _refetch() async {
+  Future<FeedPage> _refetch() async {
     try {
-      return (await ref.read(feedRepositoryProvider).fetchFeed()).rows;
+      return await ref.read(feedRepositoryProvider).fetchFeed();
     } on ApiException {
-      return const [];
+      return const FeedPage(rows: <FeedRow>[], meta: FeedMeta(count: 0));
     }
   }
 
