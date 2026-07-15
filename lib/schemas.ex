@@ -21,6 +21,7 @@ defmodule Schemas do
       Scope,
       Stage,
       SubTask,
-      User
+      User,
+      UserApiToken
     ]
 end

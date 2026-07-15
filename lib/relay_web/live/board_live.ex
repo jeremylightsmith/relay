@@ -902,7 +902,7 @@ defmodule RelayWeb.BoardLive do
           }
         } = socket
       ) do
-    case Cards.answer_input(card, compose_answers(questions, values), current_actor(socket)) do
+    case Cards.answer_input(card, Cards.compose_answer(questions, values), current_actor(socket)) do
       {:ok, updated} -> {:noreply, refresh_card(socket, updated)}
       {:error, _changeset} -> {:noreply, socket}
     end
@@ -1660,16 +1660,6 @@ defmodule RelayWeb.BoardLive do
   end
 
   defp latest_questions(_card, _activity), do: nil
-
-  # RLY-71 — compose the single numbered Q->A comment the timeline records on submit, so the
-  # answers still show as one block (and the AI reads them from it), exactly like today.
-  defp compose_answers(questions, values) do
-    questions
-    |> Enum.with_index()
-    |> Enum.map_join("\n", fn {%{"prompt" => prompt}, index} ->
-      "#{index + 1}. #{prompt} → #{Map.get(values, index, "")}"
-    end)
-  end
 
   defp conversation_dom_id(%Schemas.Comment{id: id}), do: "timeline-comment-#{id}"
   defp activity_dom_id(%Schemas.Activity{id: id}), do: "timeline-activity-#{id}"
