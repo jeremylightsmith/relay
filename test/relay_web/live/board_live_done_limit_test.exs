@@ -105,6 +105,32 @@ defmodule RelayWeb.BoardLiveDoneLimitTest do
     end
   end
 
+  describe "Show more button placement" do
+    # RLY-53 rejection: the button rendered *inside* the lane's scroll
+    # container, after the #...-cards div. That div carries min-height:100%
+    # (RLY-1's full-height drop zone), so it always fills the scroll viewport
+    # and pushed the button past the bottom edge — a 3px sliver, 45px of
+    # scrolling away. has_element?/2 passed the whole time because the button
+    # was in the DOM; only its position was wrong. Keep it out of the scroller.
+    test "the button is not trapped inside the lane's scroll container",
+         %{conn: conn, board: board, done: done} do
+      seed_done_cards(done, 12)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      doc = view |> render() |> LazyHTML.from_fragment()
+
+      assert doc
+             |> LazyHTML.query("#stage-col-#{done.position}-show-more-done")
+             |> Enum.count() == 1
+
+      assert doc
+             |> LazyHTML.query("#stage-col-#{done.position}-scroll #stage-col-#{done.position}-show-more-done")
+             |> Enum.count() == 0,
+             "the Show more button is inside the scroll container, where the " <>
+               "min-height:100% drop zone pushes it out of view"
+    end
+  end
+
   describe "scope" do
     test "a Done sub-lane with more than 8 cards is not limited",
          %{conn: conn, board: _board, code: code, user: user} do

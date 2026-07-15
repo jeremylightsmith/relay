@@ -2532,7 +2532,10 @@ defmodule RelayWeb.CoreComponents do
                   {@count}
                 </span>
               </div>
-              <div style={"flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:#{if(@labeled, do: "0", else: "13px")} 13px 13px 15px;"}>
+              <div
+                id={"#{@id}-scroll"}
+                style={"flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:#{if(@labeled, do: "0", else: "13px")} 13px 13px 15px;"}
+              >
                 <div
                   :if={@composing}
                   id={"#{@id}-composer"}
@@ -2610,22 +2613,32 @@ defmodule RelayWeb.CoreComponents do
                     category={@category}
                   />
                 </div>
-                <button
-                  :if={(@terminal and @revealed) && @count > @revealed}
-                  type="button"
-                  id={"#{@id}-show-more-done"}
-                  phx-click="show_more_done"
-                  phx-value-stage-id={@stage_id}
-                  class="stage-show-more"
-                  style="flex:0 0 auto;width:100%;margin-top:2px;padding:8px 10px;border:1px solid var(--color-base-300);border-radius:8px;background:var(--color-base-100);color:oklch(0.52 0.02 255);font-size:11px;font-weight:600;letter-spacing:0.01em;text-align:center;cursor:pointer;"
-                >
-                  Show
-                  <span style="font-family:var(--font-mono);">
-                    {min(@page_size, @count - @revealed)}
-                  </span>
-                  more
-                </button>
               </div>
+              <%!--
+                RLY-53 — pinned footer, deliberately OUTSIDE #{@id}-scroll. The
+                #{@id}-cards div above carries min-height:100% (RLY-1's full-height
+                drop zone), so it always fills the scroll viewport regardless of card
+                count; a button placed after it inside the scroller is pushed past the
+                bottom edge and is invisible without scrolling. As a sibling of the
+                scroller it pins to the column's bottom and is always visible, and the
+                drop zone keeps its full height. The 13px/15px margins match the
+                scroller's horizontal padding, so the button aligns with the cards.
+              --%>
+              <button
+                :if={(@terminal and @revealed) && @count > @revealed}
+                type="button"
+                id={"#{@id}-show-more-done"}
+                phx-click="show_more_done"
+                phx-value-stage-id={@stage_id}
+                class="stage-show-more"
+                style="flex:0 0 auto;margin:0 13px 13px 15px;padding:8px 10px;border:1px solid var(--color-base-300);border-radius:8px;background:var(--color-base-100);color:oklch(0.52 0.02 255);font-size:11px;font-weight:600;letter-spacing:0.01em;text-align:center;cursor:pointer;"
+              >
+                Show
+                <span style="font-family:var(--font-mono);">
+                  {min(@page_size, @count - @revealed)}
+                </span>
+                more
+              </button>
             </div>
           <% end %>
           <%!-- Review / Done sub-lanes, side by side; empty ones collapse to 34px strips --%>
