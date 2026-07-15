@@ -101,4 +101,26 @@ defmodule RelayWeb.BoardLiveBrainstormQuestionsTest do
     refute has_element?(view, "#needs-input-option-0")
     assert has_element?(view, ~s|textarea#needs-input-text[placeholder="Type your answer…"]|)
   end
+
+  # RLY-109 — the card's follow-up ask: "more padding and margin on the questions." This
+  # deliberately deviates from docs/designs/Relay Board.dc.html's padding:14px panel; the
+  # artboard also predates the stepper entirely, so it is not the authority here. The real
+  # wrap/clip geometry is covered by the Playwright suite
+  # (test/relay_web/browser/needs_input_stepper_test.exs); these assertions just pin the
+  # spacing decision so a future refactor can't quietly undo it.
+  test "the questions panel and its stepper have room to breathe",
+       %{conn: conn, board: board} = ctx do
+    ref = block_with_fixture(ctx)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
+    render_async(view)
+
+    # panel: 14px → 20px, per the card comment
+    assert has_element?(view, "#needs-input-panel.p-5.gap-4")
+    assert has_element?(view, "#needs-input-stepper.gap-4")
+    # a long unbroken token (a URL, a module path) must wrap, not widen the panel
+    assert has_element?(view, "#needs-input-question.break-words")
+    # a wrapped two-line option needs real internal padding or it reads cramped
+    assert has_element?(view, "#needs-input-option-0.px-3.py-2")
+  end
 end
