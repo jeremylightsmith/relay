@@ -1050,8 +1050,11 @@ defmodule RelayWeb.BoardLive do
 
   def handle_info({:timeline_appended, card_id, entry}, socket) do
     case socket.assigns.selected_card do
-      %Card{id: ^card_id} -> {:noreply, insert_timeline_entry(socket, entry)}
-      _other -> {:noreply, socket}
+      %Card{id: ^card_id} = card ->
+        {:noreply, socket |> insert_timeline_entry(entry) |> refresh_needs_input_question(card, entry)}
+
+      _other ->
+        {:noreply, socket}
     end
   end
 
@@ -1528,6 +1531,20 @@ defmodule RelayWeb.BoardLive do
       _other -> socket
     end
   end
+
+  # `:card_upserted` (fired inside Cards.set_status/3, before Cards.request_input/3 logs the
+  # question) can beat the `:needs_input` Activity entry to this session, so refresh_card/2's
+  # question ends up blank until this later `:timeline_appended` for that entry lands — recompute
+  # it here too rather than waiting on the next unrelated card_upserted to paper over it.
+  defp refresh_needs_input_question(socket, %Card{} = card, %Schemas.Activity{type: :needs_input}) do
+    activity = Activity.list_activity(card)
+
+    socket
+    |> assign(:question, latest_question(card, activity))
+    |> assign(:answer_questions, latest_questions(card, activity))
+  end
+
+  defp refresh_needs_input_question(socket, %Card{}, _entry), do: socket
 
   # stages_changed (or an event for a stage this socket doesn't know yet):
   # refetch the board and rebuild every stage-derived assign and stream,

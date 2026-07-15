@@ -8,13 +8,14 @@ defmodule Relay.Cards do
   (MMF 07) and API attribution (MMF 09).
   """
 
-  use Boundary, deps: [Relay.Activity, Relay.Boards, Relay.Events, Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Activity, Relay.Boards, Relay.Events, Relay.Push, Relay.Repo, Schemas]
 
   import Ecto.Query
 
   alias Relay.Activity
   alias Relay.Boards
   alias Relay.Events
+  alias Relay.Push
   alias Relay.Repo
   alias Schemas.Board
   alias Schemas.Card
@@ -308,6 +309,7 @@ defmodule Relay.Cards do
     |> preload_owners_result()
     |> log_status_changed(from_status, actor)
     |> broadcast_upserted()
+    |> maybe_notify(from_status, actor)
   end
 
   @doc """
@@ -1277,6 +1279,21 @@ defmodule Relay.Cards do
   end
 
   defp log_status_changed({:error, _changeset} = result, _from_status, _actor), do: result
+
+  # Push trigger (RLY-81): fires only on the *edge* into a push-worthy status —
+  # the same `card.status != from_status` guard `log_status_changed/3` uses, so a
+  # same-status re-set, a move, or an owner change never pushes. Fire-and-forget:
+  # `Push.card_status_changed/3` always returns :ok and dispatches off-process, so
+  # this returns `result` untouched and a push failure can never fail set_status.
+  defp maybe_notify({:ok, %Card{} = card} = result, from_status, actor) do
+    if card.status != from_status and card.status in [:needs_input, :in_review] do
+      :ok = Push.card_status_changed(card, from_status, actor)
+    end
+
+    result
+  end
+
+  defp maybe_notify({:error, _changeset} = result, _from_status, _actor), do: result
 
   defp log_owners_changed(%Card{} = card, actor, meta) do
     {:ok, _entry} = Activity.log(card, %{type: :owners_changed, actor: actor, meta: meta})

@@ -15,6 +15,9 @@ defmodule Relay.Application do
       {Phoenix.PubSub, name: Relay.PubSub},
       RelayWeb.ApiLog,
       Relay.BoardWatch,
+      # Push dispatch runs off the caller's process so a status change never waits
+      # on (or fails because of) Apple (RLY-81).
+      {Task.Supervisor, name: Relay.Push.TaskSupervisor},
       # Start to serve requests, typically the last entry
       RelayWeb.Endpoint
     ]

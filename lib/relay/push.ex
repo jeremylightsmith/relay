@@ -16,11 +16,15 @@ defmodule Relay.Push do
 
   import Ecto.Query
 
+  alias Relay.Members
   alias Relay.Repo
+  alias Schemas.Board
   alias Schemas.Card
   alias Schemas.DeviceToken
   alias Schemas.Membership
   alias Schemas.User
+
+  require Logger
 
   @doc """
   Registers `token` as a push device for `user`, upserting on the token: a
@@ -76,7 +80,7 @@ defmodule Relay.Push do
       from(c in Card,
         join: m in Membership,
         on: m.board_id == c.board_id,
-        join: b in Schemas.Board,
+        join: b in Board,
         on: b.id == c.board_id,
         where: m.user_id == ^user_id,
         where: c.status in [:needs_input, :in_review],
@@ -86,6 +90,125 @@ defmodule Relay.Push do
       :count
     )
   end
+
+  @doc """
+  The push trigger: `card` just **entered** `from_status → card.status`, performed
+  by `actor`. Notifies every resolved human member of the card's board except the
+  actor, one push per registered device, each stamped with that recipient's own
+  `needs_you_count/1` as the badge.
+
+  **Fire-and-forget.** Always returns `:ok` immediately and never raises into the
+  caller: the recipient query and the network call run under
+  `Relay.Push.TaskSupervisor` (inline when `config :relay, Relay.Push, async: false`,
+  as in `:test`), and any error is logged and swallowed. A push failure can never
+  fail the status change that triggered it — the same contract as
+  `Relay.Events.broadcast/2`.
+
+  `from_status` is part of the contract but unused: the *edge* guard lives at the
+  call site (`Relay.Cards.set_status/3`), which is the only place that sees it.
+  This clause guard is a second line of defence.
+  """
+  def card_status_changed(card, from_status, actor)
+
+  def card_status_changed(%Card{status: status} = card, _from_status, actor) when status in [:needs_input, :in_review] do
+    dispatch(fn -> notify(card, actor) end)
+    :ok
+  end
+
+  def card_status_changed(%Card{}, _from_status, _actor), do: :ok
+
+  defp dispatch(fun) do
+    if async?() do
+      Task.Supervisor.start_child(Relay.Push.TaskSupervisor, fn -> safely(fun) end)
+    else
+      safely(fun)
+    end
+
+    :ok
+  end
+
+  defp async? do
+    :relay
+    |> Application.get_env(Relay.Push, [])
+    |> Keyword.get(:async, true)
+  end
+
+  defp safely(fun) do
+    fun.()
+    :ok
+  rescue
+    error ->
+      Logger.error("[push] dispatch failed: #{Exception.format(:error, error, __STACKTRACE__)}")
+      :ok
+  catch
+    kind, reason ->
+      Logger.error("[push] dispatch #{kind}: #{inspect(reason)}")
+      :ok
+  end
+
+  defp notify(%Card{} = card, actor) do
+    board = Repo.get!(Board, card.board_id)
+    adapter = adapter()
+
+    for user <- recipients(board, actor) do
+      payload = payload(card, board, needs_you_count(user))
+
+      for token <- device_tokens(user) do
+        adapter.deliver(token, payload)
+      end
+    end
+
+    :ok
+  end
+
+  # Every resolved human member of the board, minus the acting user. Ownership is
+  # provenance (and is often the AI), so there is no per-card human assignee to
+  # narrow to — the board's Members roster is the recipient set (ADR 0005, matching
+  # F4's board-level "needs you"). `:agent` excludes nobody.
+  defp recipients(%Board{} = board, actor) do
+    actor_user_id =
+      case actor do
+        {:user, id} -> id
+        _other -> nil
+      end
+
+    board
+    |> Members.list_members()
+    |> Enum.reject(&Membership.invited?/1)
+    |> Enum.map(& &1.user)
+    |> Enum.reject(&(&1.id == actor_user_id))
+    |> Enum.uniq_by(& &1.id)
+  end
+
+  defp device_tokens(%User{id: user_id}) do
+    Repo.all(from d in DeviceToken, where: d.user_id == ^user_id, select: d.token)
+  end
+
+  # The APNs payload (RLY-81 spec §5). `card_ref` + `board_slug` are the deep-link
+  # keys the app routes on: the web opens a card at /board/:slug?card=:ref.
+  defp payload(%Card{} = card, %Board{} = board, badge) do
+    {title, kind} = copy(card.status)
+    ref = ref(board, card)
+
+    %{
+      "aps" => %{
+        "alert" => %{"title" => title, "body" => "#{ref}: #{card.title}"},
+        "badge" => badge,
+        "sound" => "default"
+      },
+      "card_ref" => ref,
+      "board_slug" => board.slug,
+      "kind" => kind
+    }
+  end
+
+  # V1 copy, kept in one place so it is trivial to tune.
+  defp copy(:needs_input), do: {"Question from the AI", "needs_input"}
+  defp copy(:in_review), do: {"Ready for your review", "in_review"}
+
+  # Duplicates `Relay.Cards.ref/2` on purpose: `Push` cannot depend on `Cards`
+  # (Cards calls Push — a back-dep would be a boundary cycle).
+  defp ref(%Board{key: key}, %Card{ref_number: ref_number}), do: "#{key}-#{ref_number}"
 
   @doc "The configured delivery adapter (see `Relay.Push.Delivery`)."
   def adapter do
