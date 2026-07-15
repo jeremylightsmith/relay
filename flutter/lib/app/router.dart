@@ -9,6 +9,7 @@ import '../features/board/board_screen.dart';
 import '../features/card/card_placeholder_screen.dart';
 import '../features/card/card_screen.dart';
 import '../features/needs_you/needs_you_screen.dart';
+import '../features/push/push_onboarding.dart';
 import '../features/push/push_permission_screen.dart';
 import '../features/push/push_service.dart';
 import '../features/settings/settings_screen.dart';
@@ -43,7 +44,13 @@ GoRouter buildRouter({
               await ref.read(pushServiceProvider).enable();
               if (context.mounted) context.go('/needs-you');
             },
-            onSkip: () => context.go('/needs-you'),
+            onSkip: () async {
+              // "Not now" never invokes the OS prompt, so iOS stays notDetermined
+              // — if we don't remember this ourselves we re-prime every launch,
+              // which is the defect RLY-84 exists to fix.
+              await ref.read(pushOnboardingProvider).deferPriming();
+              if (context.mounted) context.go('/needs-you');
+            },
           ),
         ),
       ),

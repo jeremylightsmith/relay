@@ -37,9 +37,56 @@ import UserNotifications
       case "initialNotification":
         result(self?.launchNotification)
         self?.launchNotification = nil
+      case "authorizationStatus":
+        self?.authorizationStatus(result: result)
+      case "tokenIfAuthorized":
+        self?.tokenIfAuthorized(result: result)
+      case "primingDeferredAt":
+        let stored = UserDefaults.standard.object(forKey: Self.primingDeferredAtKey) as? NSNumber
+        result(stored?.int64Value)
+      case "setPrimingDeferredAt":
+        guard let args = call.arguments as? [String: Any],
+              let epochMs = args["epochMs"] as? NSNumber else {
+          result(FlutterError(code: "bad_args", message: "epochMs is required", details: nil))
+          return
+        }
+        UserDefaults.standard.set(epochMs.int64Value, forKey: Self.primingDeferredAtKey)
+        result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }
+    }
+  }
+
+  /// When the user last tapped "Not now" on AUTH-03, as epoch milliseconds (UTC).
+  /// UserDefaults rather than a new Flutter dependency — see RLY-84's PushPrefs.
+  private static let primingDeferredAtKey = "relay.push.primingDeferredAt"
+
+  /// What iOS currently thinks about notification permission (RLY-84 §1). Returns
+  /// nil for an @unknown future status: Dart turns "unavailable" into a safe skip,
+  /// which beats guessing a status that every gate decision hangs off.
+  private func authorizationStatus(result: @escaping FlutterResult) {
+    UNUserNotificationCenter.current().getNotificationSettings { settings in
+      let name: String?
+      switch settings.authorizationStatus {
+      case .notDetermined: name = "notDetermined"
+      case .denied: name = "denied"
+      case .authorized: name = "authorized"
+      case .provisional: name = "provisional"
+      case .ephemeral: name = "ephemeral"
+      @unknown default: name = nil
+      }
+      DispatchQueue.main.async { result(name) }
+    }
+  }
+
+  /// Registers for remote notifications **without** requestAuthorization — no
+  /// prompt — and resolves the token through the existing delegate callback
+  /// (RLY-84 §2). Only meaningful when already authorized; iOS will not prompt.
+  private func tokenIfAuthorized(result: @escaping FlutterResult) {
+    DispatchQueue.main.async {
+      self.tokenCompletion = { token in result(token) }
+      UIApplication.shared.registerForRemoteNotifications()
     }
   }
 

@@ -58,5 +58,16 @@ class _RelayAppState extends ConsumerState<RelayApp> {
     final cold = await platform.initialNotification();
     final coldPath = cold == null ? null : pathForPayload(cold);
     if (coldPath != null) router.go(coldPath);
+
+    // Re-register the device token on every launch when push is already
+    // authorized (RLY-84 §2). This is not part of the AUTH-03 decision — that
+    // is the /push-permission route's own redirect, which only runs when the
+    // router sends us there. It has to happen here, unconditionally: RLY-81
+    // registers only on the "Allow" tap, and now that RLY-86 persists the
+    // session, a restored launch never shows AUTH-03 and would otherwise
+    // silently stop being registered. It is also correct on its own terms —
+    // APNs tokens can change, and the backend upserts by token, so re-running
+    // it is idempotent and re-points the row after an account switch.
+    await ref.read(pushServiceProvider).registerIfAuthorized();
   }
 }
