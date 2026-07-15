@@ -32,6 +32,23 @@ defmodule RelayWeb.Api.FallbackController do
     |> render(:error, code: "not_in_review", message: "This card is not in a review stage")
   end
 
+  def call(conn, {:error, :not_needs_input}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "not_needs_input", message: "This card is not waiting on an answer")
+  end
+
+  def call(conn, {:error, :ambiguous_ref}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "ambiguous_ref",
+      message: "That ref matches cards on more than one of your boards — pass board: <slug>"
+    )
+  end
+
   def call(conn, {:error, :missing_note}) do
     conn
     |> put_status(:unprocessable_entity)

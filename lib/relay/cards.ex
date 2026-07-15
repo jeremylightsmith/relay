@@ -1004,6 +1004,39 @@ defmodule Relay.Cards do
     Stage.default_status(Repo.get!(Stage, stage_id).type)
   end
 
+  @doc """
+  Composes the single numbered `N. prompt → answer` block that an answered card records as its
+  comment (RLY-71). `values` is a 0-based index→answer map matching `questions`' order; a missing
+  index composes an empty answer.
+
+  Shared by the drawer's stepper and the native answer endpoint (RLY-80) so both compose one
+  identical answer — the composition lives here precisely so the two cannot drift.
+  """
+  def compose_answer(questions, values) when is_list(questions) and is_map(values) do
+    questions
+    |> Enum.with_index()
+    |> Enum.map_join("\n", fn {%{"prompt" => prompt}, index} ->
+      "#{index + 1}. #{prompt} → #{Map.get(values, index, "")}"
+    end)
+  end
+
+  @doc """
+  The structured questions from the card's newest `:needs_input` entry (RLY-71's
+  `meta["questions"]`), or `nil` when the card was blocked with a plain-string question or was
+  never blocked. The native answer endpoint (RLY-80) reads this to compose its `answers[]` picks
+  against the prompts they answer.
+  """
+  def latest_questions(%Card{id: card_id}) do
+    from(a in Schemas.Activity,
+      where: a.card_id == ^card_id and a.type == :needs_input,
+      order_by: [desc: a.inserted_at, desc: a.id],
+      limit: 1,
+      select: a.meta
+    )
+    |> Repo.one()
+    |> structured_questions()
+  end
+
   defp parse_ref_number(%Board{key: key}, ref) do
     prefix = key <> "-"
 

@@ -119,6 +119,9 @@ defmodule RelayWeb.Router do
     pipe_through [:api, :api_user_auth]
 
     get "/feed", AllController, :feed
+    post "/cards/:ref/approve", AllController, :approve
+    post "/cards/:ref/reject", AllController, :reject
+    post "/cards/:ref/answer", AllController, :answer
   end
 
   scope "/api", RelayWeb.Api do
