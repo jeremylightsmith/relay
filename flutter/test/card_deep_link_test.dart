@@ -44,13 +44,14 @@ void main() {
   testWidgets('a notification tap routes to the card screen', (tester) async {
     final router = await pumpRouter(tester);
 
-    // What the tap handler does with a {card_ref, board_slug} payload.
-    router.go('/cards/RLY-123?board=my-board');
+    // What the tap handler does with a {card_ref, board_slug, kind} payload.
+    router.go('/cards/RLY-123?board=my-board&kind=in_review');
     await tester.pumpAndSettle();
 
     final screen = tester.widget<CardScreen>(find.byType(CardScreen));
     expect(screen.cardRef, 'RLY-123');
     expect(screen.boardSlug, 'my-board');
+    expect(screen.kind, 'in_review');
   });
 
   testWidgets(
@@ -86,7 +87,7 @@ void main() {
         boardSlug: 'my-board',
         baseUrl: 'http://localhost:4003',
       ),
-      'http://localhost:4003/board/my-board?card=RLY-123&embed=1',
+      'http://localhost:4003/cards/RLY-123?board=my-board&embed=1',
     );
   });
 
@@ -97,28 +98,30 @@ void main() {
         'board_slug': 'b1',
         'kind': 'in_review',
       }),
-      '/cards/RLY-9?board=b1',
+      '/cards/RLY-9?board=b1&kind=in_review',
     );
     expect(pathForPayload({'kind': 'in_review'}), isNull);
   });
 
   test(
-    'pathForPayload ignores `kind` — every push routes to the card (RLY-86 §8)',
+    'pathForPayload carries `kind` so a push tap lands on the right bar (RLY-87 §5)',
     () {
-      // Routing on `kind` is exactly what breaks when a push is stale: a card that was
-      // :needs_input at send time and :in_review at tap time would open the answer
-      // surface for a question that no longer exists. The card's *current* state picks
-      // the surface (RLY-87), which makes stale-push handling free.
+      // Supersedes RLY-86 §8, which dropped `kind` so the card's current state could pick
+      // the surface. RLY-87 is surface-only and does no fetch, so the payload's kind is
+      // what the host has. A stale push therefore shows the wrong bar — accepted here
+      // (the actions are stubbed) and RLY-88's to handle.
       const card = {'card_ref': 'RLY-9', 'board_slug': 'b1'};
 
       expect(
         pathForPayload({...card, 'kind': 'needs_input'}),
-        pathForPayload({...card, 'kind': 'in_review'}),
+        '/cards/RLY-9?board=b1&kind=needs_input',
       );
       expect(
-        pathForPayload({...card, 'kind': 'needs_input'}),
-        '/cards/RLY-9?board=b1',
+        pathForPayload({...card, 'kind': 'in_review'}),
+        '/cards/RLY-9?board=b1&kind=in_review',
       );
+      // No kind in an older payload in flight: no bar, rather than the wrong one.
+      expect(pathForPayload(card), '/cards/RLY-9?board=b1');
     },
   );
 }

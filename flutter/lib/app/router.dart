@@ -6,7 +6,6 @@ import '../features/auth/sign_in_screen.dart';
 import '../features/auth/splash_screen.dart';
 import '../features/auth/welcome_screen.dart';
 import '../features/board/board_screen.dart';
-import '../features/card/card_placeholder_screen.dart';
 import '../features/card/card_screen.dart';
 import '../features/decisions/answer_screen.dart';
 import '../features/decisions/reject_note_screen.dart';
@@ -72,30 +71,19 @@ GoRouter buildRouter({
           ),
         ),
       ),
-      // Where a notification tap lands (RLY-81). The board slug rides as a query
-      // param because the web opens a card at /board/:slug?card=:ref.
+      // The card-detail host (RLY-87). Both entry paths land here: the inbox tap and a
+      // notification tap. `board` and `kind` ride as query params — `extra` would not
+      // survive a cold deep link.
       GoRoute(
         path: '/cards/:ref',
         builder: (context, state) => CardScreen(
           cardRef: state.pathParameters['ref']!,
           boardSlug: state.uri.queryParameters['board'] ?? '',
+          kind: state.uri.queryParameters['kind'],
           bodyBuilder: cardBodyBuilder,
         ),
       ),
-      // TEMPORARY (RLY-85 · D4) — **RLY-87 deletes this route** when it registers the
-      // real /card/:ref card-detail host. `kind` rides as a query param so that host can
-      // pick its bottom bar (review vs answer).
-      //
-      // Distinct from /cards/:ref above, which is RLY-81's push deep-link into the F3
-      // embedded LiveView. Don't merge the two here; RLY-87 reconciles them.
-      GoRoute(
-        path: '/card/:ref',
-        builder: (context, state) => CardPlaceholderScreen(
-          cardRef: state.pathParameters['ref']!,
-          kind: state.uri.queryParameters['kind'] ?? '',
-        ),
-      ),
-      // RLY-88 · CORE-07. Sibling of /card/:ref, not a child: it is a full-screen step, not
+      // RLY-88 · CORE-07. Sibling of /cards/:ref, not a child: it is a full-screen step, not
       // part of the host. `board` rides as a query param like `kind` does above — `extra`
       // would not survive a cold deep link.
       GoRoute(
@@ -240,11 +228,23 @@ final routerProvider = Provider<GoRouter>((ref) {
   );
 });
 
-/// The route a push payload (RLY-81 §5) deep-links to. Null when the payload
-/// carries no card — nothing to route to, so the tap just opens the app.
+/// The route a push payload (RLY-81 §5) deep-links to. Null when the payload carries no
+/// card — nothing to route to, so the tap just opens the app.
+///
+/// `kind` rides through so the host can pick its bottom bar without a fetch (RLY-87 §5);
+/// `Relay.Push.payload/3` has always emitted it. **Accepted cost:** a *stale* push — the
+/// card was `needs_input` when sent and `in_review` when tapped — carries the old kind and
+/// shows the wrong bar. Harmless here (RLY-87's actions are stubbed), but **RLY-88 must
+/// handle it** when the buttons start calling the API. Absent kind → no bar, rather than
+/// the wrong one. This deliberately supersedes RLY-86 §8, which routed every push without
+/// `kind` on the assumption RLY-87 would read the card's current state; the approved spec
+/// chose the URL instead.
 String? pathForPayload(Map<String, dynamic> payload) {
   final ref = payload['card_ref'] as String?;
   final slug = payload['board_slug'] as String?;
   if (ref == null || slug == null) return null;
-  return '/cards/$ref?board=$slug';
+
+  final kind = payload['kind'] as String?;
+  final base = '/cards/$ref?board=$slug';
+  return kind == null ? base : '$base&kind=$kind';
 }

@@ -85,6 +85,7 @@ defmodule RelayWeb.BoardLive do
         </li>
       </:menu_items>
       <div
+        :if={@live_action != :card}
         id="board-viewport"
         class={[
           "flex flex-col",
@@ -226,6 +227,7 @@ defmodule RelayWeb.BoardLive do
       <.card_drawer
         :if={@selected_card}
         id="card-drawer"
+        embed={@embed}
         ref={Cards.ref(@board, @selected_card)}
         card={@selected_card}
         stage_name={drawer_stage_name(@selected_stage, @board.stages)}
@@ -333,7 +335,34 @@ defmodule RelayWeb.BoardLive do
   end
 
   @impl true
-  def mount(%{"slug" => slug}, _session, socket) do
+  def mount(%{"slug" => slug}, _session, socket), do: mount_board(socket, slug)
+
+  # RLY-87 — /cards/:ref, the native card host. Resolves the ref across the user's boards
+  # (Cards.resolve_ref/3, the same rule the /api/all surface uses), then runs the *same*
+  # board setup as the slug clause, so every assign card_drawer/1 expects is present and
+  # identical to the board path.
+  #
+  # resolve_ref/3 returns a board from list_boards/1 — no stages preloaded — so we reload by
+  # slug through Boards.get_board!/2, which is exactly what mount_board/2 already does.
+  #
+  # Card mode implies embed: this route exists to be hosted in the app's webview, so it is
+  # chromeless by construction rather than by the caller passing ?embed=1. The on_mount
+  # :mount_embed hook assign_new's :embed from the session before mount/3 runs; assigning
+  # here overrides it.
+  @impl true
+  def mount(%{"ref" => ref} = params, _session, socket) do
+    case Cards.resolve_ref(socket.assigns.current_scope.user, ref, params["board"]) do
+      {:ok, board, _card} ->
+        socket |> assign(:embed, true) |> mount_board(board.slug)
+
+      # Unknown ref, a board the user cannot see, or an ambiguous duplicate-key ref: all 404.
+      # Never leak the difference, and never guess a card.
+      {:error, _reason} ->
+        raise Ecto.NoResultsError, queryable: Card
+    end
+  end
+
+  defp mount_board(socket, slug) do
     board = Boards.get_board!(socket.assigns.current_scope.user, slug)
 
     if connected?(socket), do: Events.subscribe(board.id)
@@ -376,8 +405,13 @@ defmodule RelayWeb.BoardLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    {:noreply, assign_selected_card(socket, params["card"])}
+    {:noreply, assign_selected_card(socket, card_ref(socket.assigns.live_action, params))}
   end
+
+  # Card mode selects from the path (/cards/:ref); board mode from ?card=<ref>. In card mode
+  # the selection is never nil'd — there is no board behind the drawer to close back to.
+  defp card_ref(:card, params), do: params["ref"]
+  defp card_ref(_action, params), do: params["card"]
 
   # RLY-68 — the async heavy-body fetch kicked off by
   # maybe_start_body_load/4. Compares the result's card id against the
@@ -485,6 +519,12 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("select_card", %{"ref" => ref}, socket) do
     {:noreply, push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}?card=#{ref}")}
+  end
+
+  # Card mode (/cards/:ref) has no board behind the drawer to close back to — the native
+  # back chevron owns dismissal (RLY-87).
+  def handle_event("close_drawer", _params, %{assigns: %{live_action: :card}} = socket) do
+    {:noreply, socket}
   end
 
   def handle_event("close_drawer", _params, socket) do

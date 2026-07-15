@@ -678,6 +678,49 @@ defmodule Relay.Cards do
   end
 
   @doc """
+  Resolves a card `ref` against the boards `user` is a member of, returning the board it
+  belongs to alongside the card.
+
+  `Boards.list_boards/1` is already membership-scoped, so it is both the lookup and the
+  authorization check. `get_card_by_ref/2` only queries when the board's key prefixes the
+  ref, so this walks the caller's boards without a query per board.
+
+  Board keys are **not** unique (every board defaults to "RLY"; `create_board/2` derives the
+  key from the name without a collision check), so a bare ref can match two boards. The
+  optional `board_slug` disambiguates — the needs-you feed hands every row its slug and the
+  push payload carries `board_slug`, so real clients always have it. Acting on the wrong card
+  would be silent corruption, so ambiguity is an error, not a guess.
+
+  An unknown ref and a board the caller cannot see are both `{:error, :not_found}` — never
+  leak the difference.
+
+  Note the returned board comes from `list_boards/1`: **stages are not preloaded**, and
+  archived boards are excluded. Callers needing stages should reload via
+  `Boards.get_board!/2` with the returned slug.
+  """
+  @spec resolve_ref(User.t(), String.t(), String.t() | nil) ::
+          {:ok, Board.t(), Card.t()} | {:error, :not_found} | {:error, :ambiguous_ref}
+  def resolve_ref(%User{} = user, ref, board_slug \\ nil) when is_binary(ref) do
+    user
+    |> Boards.list_boards()
+    |> candidate_boards(board_slug)
+    |> Enum.flat_map(fn board ->
+      case get_card_by_ref(board, ref) do
+        %Card{} = card -> [{board, card}]
+        nil -> []
+      end
+    end)
+    |> case do
+      [{board, card}] -> {:ok, board, card}
+      [] -> {:error, :not_found}
+      _ambiguous -> {:error, :ambiguous_ref}
+    end
+  end
+
+  defp candidate_boards(boards, nil), do: boards
+  defp candidate_boards(boards, slug), do: Enum.filter(boards, &(&1.slug == slug))
+
+  @doc """
   Moves `card` into `target_stage` at the 0-based `index` among the
   stage's cards (excluding the moved card itself), attributed to `actor`
   (`:agent | {:user, user_id}`, defaults to `:agent`), returning

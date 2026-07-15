@@ -187,7 +187,7 @@ void main() {
 
       final dest = await queue.approveCurrent();
 
-      expect(dest, '/card/RLY-B?kind=in_review');
+      expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
       expect(h.container.read(reviewQueueProvider).banner, 'Approved · RLY-A');
     },
   );
@@ -205,7 +205,7 @@ void main() {
 
       final dest = await queue.approveCurrent();
 
-      expect(dest, '/card/RLY-B?kind=in_review');
+      expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
       expect(
         feed.calls,
         0,
@@ -228,7 +228,7 @@ void main() {
 
     final dest = await queue.approveCurrent();
 
-    expect(dest, '/card/RLY-B?kind=in_review');
+    expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
     expect(
       h.container.read(reviewQueueProvider).banner,
       'Already handled · RLY-A',
@@ -247,7 +247,7 @@ void main() {
     final dest = await queue.approveCurrent();
 
     expect(feed.calls, 1);
-    expect(dest, '/card/RLY-D?kind=in_review');
+    expect(dest, '/cards/RLY-D?board=relay&kind=in_review');
     final state = h.container.read(reviewQueueProvider);
     expect(state.items.map((i) => i.ref), ['RLY-D', 'RLY-E']);
     expect(state.index, 0);
@@ -326,7 +326,7 @@ void main() {
 
       final dest = await queue.approveCurrent();
 
-      expect(dest, '/card/RLY-D?kind=in_review');
+      expect(dest, '/cards/RLY-D?board=relay&kind=in_review');
       expect(feed.calls, 2);
       final inbox = h.container.read(feedControllerProvider).value;
       expect(inbox!.rows.map((r) => r.ref), ['RLY-D', 'RLY-E']);
@@ -348,7 +348,7 @@ void main() {
       expect(second, isNull, reason: 'the second tap must not navigate either');
 
       api.completer.complete(const DecisionOk({}));
-      expect(await first, '/card/RLY-B?kind=in_review');
+      expect(await first, '/cards/RLY-B?board=relay&kind=in_review');
       expect(h.container.read(reviewQueueProvider).inFlight, isFalse);
     },
   );
@@ -427,7 +427,7 @@ void main() {
         note: 'Needs error handling',
       );
 
-      expect(dest, '/card/RLY-B?kind=in_review');
+      expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
       expect(api.rejected, ['RLY-A']);
       expect(api.rejectedNotes, ['Needs error handling']);
       expect(api.rejectedBoards, ['relay']);
@@ -518,7 +518,7 @@ void main() {
         note: 'Please revise',
       );
 
-      expect(dest, '/card/RLY-B?kind=in_review');
+      expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
       expect(
         h.container.read(reviewQueueProvider).banner,
         'Already handled · RLY-A',
@@ -570,7 +570,7 @@ void main() {
       expect(second, isNull, reason: 'the second tap must not navigate either');
 
       api.completer.complete(const DecisionOk({}));
-      expect(await first, '/card/RLY-B?kind=in_review');
+      expect(await first, '/cards/RLY-B?board=relay&kind=in_review');
       expect(h.container.read(reviewQueueProvider).inFlight, isFalse);
     },
   );
@@ -630,7 +630,7 @@ void main() {
       );
       expect(
         routeFor(QueueItem.fromRow(row('RLY-B'))),
-        '/card/RLY-B?kind=in_review',
+        '/cards/RLY-B?board=relay&kind=in_review',
       );
     },
   );

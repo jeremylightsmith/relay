@@ -18,7 +18,7 @@ final _send = find.byKey(const Key('reject_send'));
 FilledButton _sendButton(WidgetTester tester) =>
     tester.widget<FilledButton>(_send);
 
-GoRouter _router({String initialLocation = '/card/RLY-A'}) => GoRouter(
+GoRouter _router({String initialLocation = '/cards/RLY-A'}) => GoRouter(
   initialLocation: initialLocation,
   routes: [
     GoRoute(
@@ -27,7 +27,7 @@ GoRouter _router({String initialLocation = '/card/RLY-A'}) => GoRouter(
           const Scaffold(body: Text('inbox', key: Key('inbox_stub'))),
     ),
     GoRoute(
-      path: '/card/:ref',
+      path: '/cards/:ref',
       builder: (c, s) => Scaffold(
         body: Text(
           'card ${s.pathParameters['ref']}',
@@ -56,7 +56,7 @@ Future<GoRouter> pumpReject(
   required DecisionApi api,
   FeedRepository? feed,
   FakeAuthController? auth,
-  String initialLocation = '/card/RLY-A',
+  String initialLocation = '/cards/RLY-A',
   bool seedQueue = true,
 }) async {
   final container = ProviderContainer(
