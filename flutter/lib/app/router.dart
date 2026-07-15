@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../features/auth/auth_controller.dart';
 import '../features/auth/sign_in_screen.dart';
+import '../features/auth/splash_screen.dart';
 import '../features/auth/welcome_screen.dart';
 import '../features/board/board_screen.dart';
 import '../features/card/card_placeholder_screen.dart';
@@ -12,6 +13,7 @@ import '../features/push/push_permission_screen.dart';
 import '../features/push/push_service.dart';
 import '../features/settings/settings_screen.dart';
 import '../widgets/main_scaffold.dart';
+import 'pending_deep_link.dart';
 
 /// Builds the app's GoRouter. Kept as a plain function so tests can construct the
 /// tab shell directly (ungated). Production wraps it with the auth gate via
@@ -98,20 +100,36 @@ GoRouter buildRouter({
   );
 }
 
+/// Overrides the card screen's webview body. Null in production; tests override it
+/// because flutter_inappwebview has no host-platform implementation (RLY-81), so
+/// the gated router cannot otherwise be pumped through a card route.
+final cardBodyBuilderProvider = Provider<WidgetBuilder?>((ref) => null);
+
 /// The app's single GoRouter instance, **auth-gated**: a signed-out user is sent to
 /// `/welcome`, and Sign in lives *under* it at `/welcome/sign-in` so go_router builds
 /// the `[Welcome, SignIn]` stack itself — back (and iOS swipe-back) returns to Welcome
 /// with no manual push bookkeeping, even on a cold deep-link. A signed-in user anywhere
 /// in the auth stack bounces to the shell; [refreshListenable] re-runs this the moment
 /// sign-in succeeds, which is why no navigation call belongs in [AuthController].
+///
+/// RLY-86 adds the third state: while auth is *restoring*, the destination is stashed
+/// and the router parks on `/splash` — so a cold-start deep link survives the Keychain
+/// read, and then survives sign-in if the session turns out to be gone.
 final routerProvider = Provider<GoRouter>((ref) {
-  final refresh = ValueNotifier<bool>(ref.read(authProvider).signedIn);
+  // Status, not `signedIn`: the restoring → signedOut transition must re-run the
+  // redirect too, or the app parks on the splash forever.
+  final refresh = ValueNotifier<AuthStatus>(ref.read(authProvider).status);
   ref.onDispose(refresh.dispose);
-  ref.listen(authProvider, (_, next) => refresh.value = next.signedIn);
+  ref.listen(authProvider, (_, next) => refresh.value = next.status);
 
   return buildRouter(
     refreshListenable: refresh,
+    cardBodyBuilder: ref.watch(cardBodyBuilderProvider),
     extraRoutes: [
+      GoRoute(
+        path: '/splash',
+        builder: (context, state) => const SplashScreen(),
+      ),
       GoRoute(
         path: '/welcome',
         builder: (context, state) => const WelcomeScreen(),
@@ -124,10 +142,26 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
     redirect: (context, state) {
-      final signedIn = ref.read(authProvider).signedIn;
-      final atAuth = state.matchedLocation.startsWith('/welcome');
-      if (!signedIn) return atAuth ? null : '/welcome';
-      if (atAuth) return '/needs-you';
+      final auth = ref.read(authProvider);
+      final pending = ref.read(pendingDeepLinkProvider);
+      final loc = state.matchedLocation;
+      final atAuth = loc.startsWith('/welcome');
+      final atSplash = loc == '/splash';
+
+      // Still reading the Keychain: hold the destination, show the splash.
+      if (auth.restoring) {
+        if (atSplash) return null;
+        pending.set(state.uri.toString());
+        return '/splash';
+      }
+      if (!auth.signedIn) {
+        if (atAuth) return null;
+        // Never stash the splash itself — it is scaffolding, not a destination.
+        if (!atSplash) pending.set(state.uri.toString());
+        return '/welcome';
+      }
+      // Signed in, sitting on scaffolding → resume what the launch was actually for.
+      if (atAuth || atSplash) return pending.take() ?? '/needs-you';
       return null;
     },
   );

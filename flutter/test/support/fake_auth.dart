@@ -21,3 +21,23 @@ class FakeAuthController extends AuthController {
     signInCalls++;
   }
 }
+
+/// An [AuthController] whose lifecycle the test drives by hand: it starts
+/// `restoring` — like the real one — and lands wherever [resolve] says.
+class ScriptedAuthController extends AuthController {
+  @override
+  AuthState build() => const AuthState();
+
+  void resolve(AuthState next) => state = next;
+
+  @override
+  Future<void> signInWithGoogle() async {
+    // Two steps, like the real flow: `signingIn` is what tells main.dart this was
+    // an *interactive* sign-in and not a restore.
+    state = const AuthState(status: AuthStatus.signingIn);
+    state = const AuthState(
+      status: AuthStatus.signedIn,
+      user: {'email': 'dana@acme.co'},
+    );
+  }
+}
