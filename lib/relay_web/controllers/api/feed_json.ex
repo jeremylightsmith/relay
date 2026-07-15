@@ -1,8 +1,8 @@
 defmodule RelayWeb.Api.FeedJSON do
   @moduledoc """
   The native inbox's row shape (RLY-80). Every row carries enough to render without a
-  second fetch: the ref, its board, why it needs you, and (on structured needs-input
-  rows) the questions the native stepper renders as option buttons.
+  second fetch: the ref, its board and stage, why it needs you, and (on structured
+  needs-input rows) the questions the native stepper renders as option buttons.
   """
 
   alias Relay.Boards
@@ -17,6 +17,9 @@ defmodule RelayWeb.Api.FeedJSON do
       ref: Cards.ref(card.board, card),
       title: card.title,
       board: %{name: card.board.name, key: card.board.key, slug: card.board.slug},
+      # INPUT-01's breadcrumb is "<Board> / <Stage>" (RLY-89). Cards.needs_you_feed/1 already
+      # preloads :stage, and reason/1 already renders it for in_review rows.
+      stage: Boards.stage_display_name(card.stage),
       tag: card.tag,
       status: card.status,
       # == status. Explicit, because the mobile two-type contract (needs_input | in_review)

@@ -8,6 +8,7 @@ import '../features/auth/welcome_screen.dart';
 import '../features/board/board_screen.dart';
 import '../features/card/card_placeholder_screen.dart';
 import '../features/card/card_screen.dart';
+import '../features/decisions/answer_screen.dart';
 import '../features/decisions/reject_note_screen.dart';
 import '../features/needs_you/needs_you_screen.dart';
 import '../features/push/push_onboarding.dart';
@@ -103,6 +104,14 @@ GoRouter buildRouter({
           cardRef: state.pathParameters['ref']!,
           boardSlug: state.uri.queryParameters['board'] ?? '',
         ),
+      ),
+      // RLY-89 · INPUT-01. Sibling of /card/:ref, not a child: a full-screen answer
+      // surface, not part of the host. No `board` query param — unlike /card/:ref/reject,
+      // this screen reads its QueueItem (slug and all) from the ReviewQueue snapshot.
+      GoRoute(
+        path: '/card/:ref/answer',
+        builder: (context, state) =>
+            AnswerScreen(cardRef: state.pathParameters['ref']!),
       ),
       ShellRoute(
         builder: (context, state, child) => MainScaffold(child: child),

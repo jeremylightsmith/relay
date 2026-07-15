@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../api/api_client.dart';
 import '../auth/auth_controller.dart';
+import '../needs_you/feed_controller.dart';
 import '../needs_you/feed_repository.dart';
 import '../needs_you/models/feed_row.dart';
 import 'decision_api.dart';
@@ -12,21 +13,42 @@ class QueueItem {
   const QueueItem({
     required this.ref,
     required this.boardSlug,
+    required this.boardName,
     required this.title,
     required this.kind,
+    this.stage,
+    this.reason,
+    this.questions,
   });
 
   factory QueueItem.fromRow(FeedRow row) => QueueItem(
     ref: row.ref,
     boardSlug: row.board.slug,
+    boardName: row.board.name,
     title: row.title,
     kind: row.kind,
+    stage: row.stage,
+    reason: row.reason,
+    questions: row.questions,
   );
 
   final String ref;
   final String boardSlug;
+
+  /// INPUT-01's breadcrumb is `<Board> / <Stage>` (RLY-89).
+  final String boardName;
   final String title;
   final String kind;
+  final String? stage;
+
+  /// The row's one-line "why it needs you". RLY-89: on a **legacy** needs_input row
+  /// (`questions == null`) this IS the question — `FeedJSON.reason/1` renders it from
+  /// the flattened `meta["question"]` — so it is what the free-text mode prompts with.
+  final String? reason;
+
+  /// RLY-89: the structured questions, straight off the feed snapshot — null on an
+  /// in_review row and on a card blocked with a plain-string question.
+  final List<FeedQuestion>? questions;
 }
 
 class ReviewQueueState {
@@ -149,6 +171,33 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
     }
   }
 
+  /// Answer the current item. [answers] for a structured question (the stepper's
+  /// positional picks), [text] for a legacy string one. Returns where to navigate, or
+  /// null to stay put. Shares `_settle` with approve, so the skip, the 401 sign-out
+  /// and the in-flight guard are the same code on both paths.
+  Future<String?> answerCurrent({
+    List<Map<String, String>>? answers,
+    String? text,
+  }) async {
+    final item = state.current;
+    if (item == null || state.inFlight) return null;
+
+    state = state.copyWith(inFlight: true, clearError: true);
+    try {
+      final result = await ref
+          .read(decisionApiProvider)
+          .answer(
+            ref: item.ref,
+            boardSlug: item.boardSlug,
+            answers: answers,
+            text: text,
+          );
+      return await _settle(result, item, okBanner: 'Answer sent · ${item.ref}');
+    } finally {
+      state = state.copyWith(inFlight: false);
+    }
+  }
+
   Future<String?> _settle(
     DecisionResult result,
     QueueItem item, {
@@ -158,7 +207,7 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
       case DecisionOk():
         return advanceAfter(banner: okBanner);
       // Someone cleared it on the web while we walked. Not a failure.
-      case DecisionFailed(code: 'not_in_review'):
+      case DecisionFailed(code: 'not_in_review' || 'not_needs_input'):
         return advanceAfter(banner: 'Already handled · ${item.ref}');
       // The token expired or was revoked; the router sends a signed-out user to /welcome.
       case DecisionFailed(code: 'unauthorized'):
@@ -174,32 +223,43 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
   /// route to go to. At the end of the snapshot, refetch **once**: fresh rows
   /// re-snapshot at 0 and the walk continues; nothing fresh lands on the inbox,
   /// which renders EMPTY-01 (RLY-85's).
+  ///
+  /// That refetched page is also handed straight to [feedControllerProvider]
+  /// (when it's alive) so the inbox is current the instant we land on it — the
+  /// queue walk's own `router.go('/needs-you')`/`pushReplacement` exit never
+  /// completes `NeedsYouScreen._openCard`'s awaited `push`, so nothing else
+  /// refreshes it. Guarded by [Ref.exists] rather than an unconditional
+  /// `.notifier` read so a cold container (nothing has watched the inbox yet,
+  /// as in these tests) doesn't pay for a redundant build-time fetch.
   Future<String> advanceAfter({required String banner}) async {
     final next = state.index + 1;
     if (next < state.items.length) {
       state = state.copyWith(index: next, banner: banner, clearError: true);
-      return _routeFor(state.items[next]);
+      return routeFor(state.items[next]);
     }
 
-    final rows = await _refetch();
-    if (rows.isEmpty) {
+    final page = await _refetch();
+    if (ref.exists(feedControllerProvider)) {
+      ref.read(feedControllerProvider.notifier).applyFeed(page);
+    }
+    if (page.rows.isEmpty) {
       state = ReviewQueueState(banner: banner);
       return '/needs-you';
     }
 
-    final items = rows.map(QueueItem.fromRow).toList(growable: false);
+    final items = page.rows.map(QueueItem.fromRow).toList(growable: false);
     state = ReviewQueueState(items: items, banner: banner);
-    return _routeFor(items.first);
+    return routeFor(items.first);
   }
 
   /// A feed we cannot reach is indistinguishable from an empty one *for this
   /// purpose*: either way the walk is over and the inbox is where to land — and the
   /// inbox has its own retry.
-  Future<List<FeedRow>> _refetch() async {
+  Future<FeedPage> _refetch() async {
     try {
-      return (await ref.read(feedRepositoryProvider).fetchFeed()).rows;
+      return await ref.read(feedRepositoryProvider).fetchFeed();
     } on ApiException {
-      return const [];
+      return const FeedPage(rows: <FeedRow>[], meta: FeedMeta(count: 0));
     }
   }
 
@@ -211,14 +271,21 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
   }
 
   void clearError() => state = state.copyWith(clearError: true);
-
-  /// `kind` rides along so the card host picks its bottom bar (RLY-85 · D4).
-  String _routeFor(QueueItem item) => '/card/${item.ref}?kind=${item.kind}';
 }
 
 final reviewQueueProvider = NotifierProvider<ReviewQueue, ReviewQueueState>(
   ReviewQueue.new,
 );
+
+/// Where a queue item is answered or reviewed. **The one routing rule** — the inbox tap
+/// (`needs_you_screen`) and the queue's own advance must agree, or opening a card and
+/// advancing to it would land on different screens.
+///
+/// needs_input → RLY-89's native answer screen. in_review → the card host, `kind`
+/// riding along so it picks its bottom bar (RLY-85 · D4).
+String routeFor(QueueItem item) => item.kind == 'needs_input'
+    ? '/card/${item.ref}/answer'
+    : '/card/${item.ref}?kind=${item.kind}';
 
 /// Applies a destination from [ReviewQueue]. `/needs-you` goes back to the shell tab;
 /// a card *replaces* the one just decided, so clearing a long queue never grows the

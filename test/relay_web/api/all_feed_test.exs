@@ -99,6 +99,9 @@ defmodule RelayWeb.Api.AllFeedTest do
     assert row["ref"] == Cards.ref(board, card)
     assert row["title"] == card.title
     assert row["board"] == %{"name" => board.name, "key" => "AAA", "slug" => "alpha"}
+    # INPUT-01's breadcrumb is "<Board> / <Stage>", and D7 forbids a second fetch —
+    # so the stage rides on the row like the board does.
+    assert row["stage"] == "Code"
     assert row["tag"] == "mobile"
     assert row["status"] == "needs_input"
     assert row["kind"] == "needs_input"
@@ -137,5 +140,20 @@ defmodule RelayWeb.Api.AllFeedTest do
     assert reasons[Cards.ref(board, with_pr)] == "https://example.com/pr/1"
     assert reasons[Cards.ref(board, without_pr)] == "Code · Review"
     assert Enum.all?(feed(conn)["data"], &(&1["kind"] == "in_review"))
+  end
+
+  test "every row carries its stage display name, sublane included", %{conn: conn, user: user} do
+    board = member_board(user, "AAA", "alpha")
+    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
+    {:ok, review} = Boards.enable_lane(code, :review)
+
+    blocked = insert(:card, stage: code, status: :needs_input)
+    {:ok, _} = Cards.request_input(blocked, "Which region?", :agent)
+    reviewing = insert(:card, stage: review, status: :in_review)
+
+    stages = Map.new(feed(conn)["data"], &{&1["ref"], &1["stage"]})
+
+    assert stages[Cards.ref(board, blocked)] == "Code"
+    assert stages[Cards.ref(board, reviewing)] == "Code · Review"
   end
 end

@@ -46,6 +46,14 @@ class FeedController extends AsyncNotifier<FeedState> {
   Future<void> refresh() async {
     state = await AsyncValue.guard(_load);
   }
+
+  /// Adopt a page the caller already fetched. RLY-89: the review-queue walk's own
+  /// end-of-snapshot refetch (`ReviewQueue.advanceAfter`) lands exactly the rows
+  /// this inbox needs at exactly the moment it needs them — this is the seam that
+  /// hands them over without a second, redundant request.
+  void applyFeed(FeedPage page) {
+    state = AsyncValue.data(FeedState(rows: page.rows, meta: page.meta));
+  }
 }
 
 final feedControllerProvider = AsyncNotifierProvider<FeedController, FeedState>(

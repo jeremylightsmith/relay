@@ -42,6 +42,28 @@ class DecisionApi {
     required String note,
   }) => _post('/api/all/cards/$ref/reject', {'board': boardSlug, 'note': note});
 
+  /// F4's third action. Exactly one shape goes on the wire, and **the row's `questions`
+  /// field is the switch**: non-null → [answers] (the stepper's positional picks);
+  /// null → [text] (a card blocked with a plain-string question — the path every
+  /// `bin/relay needs-input REF "…"` and the runner's `[auto]` flag take). Sending
+  /// `answers` against a string question is a 400 `invalid`, because
+  /// `Cards.latest_questions/1` returns nil for it.
+  Future<DecisionResult> answer({
+    required String ref,
+    required String boardSlug,
+    List<Map<String, String>>? answers,
+    String? text,
+  }) {
+    assert(
+      (answers == null) != (text == null),
+      'answer takes exactly one of answers (structured) or text (free-text)',
+    );
+    return _post('/api/all/cards/$ref/answer', {
+      'board': boardSlug,
+      if (answers != null) 'answers': answers else 'answer': text,
+    });
+  }
+
   /// `board` rides on every call: board keys are not unique, so F4 answers a bare
   /// ref with 422 ambiguous_ref. The feed hands every row its slug.
   Future<DecisionResult> _post(String path, Map<String, dynamic> body) async {
