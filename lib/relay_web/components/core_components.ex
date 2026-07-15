@@ -1299,7 +1299,7 @@ defmodule RelayWeb.CoreComponents do
               <section
                 :if={@card.status == :needs_input and !@archived}
                 id="needs-input-panel"
-                class="flex flex-col gap-[11px] rounded-[10px] p-3.5"
+                class="flex flex-col gap-4 rounded-[10px] p-5"
                 style="background:oklch(0.975 0.025 75);border:1px solid oklch(0.87 0.07 75);"
               >
                 <div class="flex items-center justify-between">
@@ -1319,7 +1319,7 @@ defmodule RelayWeb.CoreComponents do
                   </span>
                 </div>
                 <%!-- RLY-71 stepper: one structured question at a time --%>
-                <div :if={@answer_questions} id="needs-input-stepper" class="flex flex-col gap-[11px]">
+                <div :if={@answer_questions} id="needs-input-stepper" class="flex flex-col gap-4">
                   <div
                     id="needs-input-progress"
                     class="font-mono text-[10px]"
@@ -1329,12 +1329,12 @@ defmodule RelayWeb.CoreComponents do
                   </div>
                   <div
                     id="needs-input-question"
-                    class="md text-[13.5px] leading-normal"
+                    class="md text-[13.5px] leading-normal break-words"
                     style="color:oklch(0.33 0.03 65);"
                   >
                     {Relay.Markdown.to_html(@stepper_question["prompt"])}
                   </div>
-                  <div :if={@stepper_question["options"] != []} class="flex flex-col gap-1.5">
+                  <div :if={@stepper_question["options"] != []} class="flex flex-col gap-2">
                     <%!-- phx-value-option, not phx-value-value: "value" collides with the
                     button's intrinsic DOM .value property (empty for a value-less <button>),
                     which wins over the phx-value-* attribute when a real browser serializes
@@ -1353,7 +1353,7 @@ defmodule RelayWeb.CoreComponents do
                           # nowrap flex row, which clips a long option. Real agent
                           # options are sentences, so let them grow to as many lines
                           # as they need while a short one keeps the compact height.
-                          "h-auto min-h-8 whitespace-normal py-1.5 text-left leading-snug",
+                          "h-auto min-h-8 whitespace-normal px-3 py-2 text-left leading-snug",
                           Map.get(@answer_values, @answer_step) == option &&
                             "needs-input-option-selected text-white"
                         ]
@@ -1375,21 +1375,24 @@ defmodule RelayWeb.CoreComponents do
                     phx-change="answer_custom"
                   >
                     <input type="hidden" name="answer[index]" value={@answer_step} />
-                    <input
+                    <textarea
                       id="needs-input-text"
-                      type="text"
                       name="answer[text]"
-                      value={
-                        stepper_custom_text(
-                          @answer_values,
-                          @answer_step,
-                          @stepper_question["options"]
+                      rows="3"
+                      autocomplete="off"
+                      placeholder={
+                        if(@stepper_question["options"] == [],
+                          do: "Type your answer…",
+                          else: "Or type your own…"
                         )
                       }
-                      autocomplete="off"
-                      placeholder="Or type your own…"
-                      class="input input-sm w-full rounded-[7px]"
-                    />
+                      class="w-full resize-none rounded-[7px] p-[9px] text-[13px] leading-[1.45] outline-none"
+                      style="border:1px solid oklch(0.86 0.05 75);background:oklch(1 0 0);color:oklch(0.30 0.02 255);"
+                    ><%= stepper_custom_text(
+                      @answer_values,
+                      @answer_step,
+                      @stepper_question["options"]
+                    ) %></textarea>
                   </form>
                   <div class="flex items-center justify-between">
                     <button
