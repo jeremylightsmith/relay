@@ -68,7 +68,12 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "needs_input", "progress" => nil}, as: :card),
-          question: "Should exports use the billing timezone or the viewer's local timezone?",
+          question:
+            "Before I can spec this I need a few decisions — reply like `1. … 2. …`:\n\n" <>
+              "1. Should exports use the billing timezone or the viewer's local timezone?\n" <>
+              "2. Do we include archived cards in the export, or only the active board?\n" <>
+              "3. What formats do we ship first — CSV only, or CSV **and** JSON?\n" <>
+              "4. Should a scheduled export email a link, or attach the file directly?",
           answer_form: Phoenix.Component.to_form(%{"body" => ""}, as: :answer),
           conversation: story_conversation(),
           activity: story_activity(),
