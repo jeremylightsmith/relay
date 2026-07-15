@@ -43,6 +43,7 @@ defmodule Relay.Cards do
     :ref_number,
     :status,
     :blocked_since,
+    :agent_heartbeat_at,
     :archived_at,
     :branch,
     :pr_url,
