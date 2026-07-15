@@ -124,6 +124,7 @@ defmodule RelayWeb.Router do
     pipe_through :native_auth
 
     post "/google", NativeAuthController, :google
+    get "/me", NativeAuthController, :me
   end
 
   # RLY-81 device registration. Shares the `/api/all` prefix with the bearer-token scope below

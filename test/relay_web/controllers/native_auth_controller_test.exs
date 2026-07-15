@@ -74,4 +74,42 @@ defmodule RelayWeb.NativeAuthControllerTest do
       refute get_session(conn, :user_id)
     end
   end
+
+  describe "GET /api/auth/native/me" do
+    test "returns the signed-in user", %{conn: conn} do
+      user = insert(:user, name: "Ada Lovelace", email: "ada@example.com")
+
+      conn = conn |> log_in_user(user) |> get(~p"/api/auth/native/me")
+
+      assert json_response(conn, 200) == %{
+               "success" => true,
+               "user" => %{"id" => user.id, "name" => "Ada Lovelace", "email" => "ada@example.com"}
+             }
+    end
+
+    test "with no session returns 401", %{conn: conn} do
+      conn = get(conn, ~p"/api/auth/native/me")
+
+      assert json_response(conn, 401) == %{"success" => false, "error" => "Not signed in"}
+    end
+
+    test "with a session whose user is gone returns 401", %{conn: conn} do
+      conn =
+        conn
+        |> Plug.Test.init_test_session(user_id: -1)
+        |> get(~p"/api/auth/native/me")
+
+      assert json_response(conn, 401) == %{"success" => false, "error" => "Not signed in"}
+    end
+
+    test "the user JSON cannot drift from what sign-in returned", %{conn: conn} do
+      stub_google(@tokeninfo)
+      signed_in = post(conn, ~p"/api/auth/native/google", %{id_token: "tok"})
+      user = Repo.get_by!(User, provider_uid: "google-sub-1")
+
+      me = build_conn() |> log_in_user(user) |> get(~p"/api/auth/native/me")
+
+      assert json_response(me, 200)["user"] == json_response(signed_in, 200)["user"]
+    end
+  end
 end
