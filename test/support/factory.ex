@@ -34,6 +34,15 @@ defmodule Relay.Factory do
     }
   end
 
+  def device_token_factory do
+    %Schemas.DeviceToken{
+      token: sequence(:device_token, &"apns-device-token-#{&1}"),
+      platform: :ios,
+      last_registered_at: DateTime.truncate(DateTime.utc_now(), :second),
+      user: build(:user)
+    }
+  end
+
   # A persisted key whose raw token is intentionally unknown — use
   # Relay.ApiKeys.create_key/2 in tests that need the raw secret.
   def api_key_factory do

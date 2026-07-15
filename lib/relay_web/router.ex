@@ -47,6 +47,17 @@ defmodule RelayWeb.Router do
     plug ApiLogger
   end
 
+  # The native shell's *user*-scoped JSON API (RLY-81). Authenticated by the
+  # session cookie F2's native sign-in issued; RLY-80 (F4) layers a user-scoped
+  # bearer token onto this same pipeline.
+  pipeline :native_user_auth do
+    plug :accepts, ["json"]
+    plug :fetch_session
+    plug ApiLogger
+    plug :fetch_current_scope
+    plug RelayWeb.Plugs.RequireApiUser
+  end
+
   pipeline :require_authenticated_user do
     plug :require_authenticated
   end
@@ -110,6 +121,13 @@ defmodule RelayWeb.Router do
     pipe_through :native_auth
 
     post "/google", NativeAuthController, :google
+  end
+
+  scope "/api/all", RelayWeb.Api do
+    pipe_through :native_user_auth
+
+    post "/devices", DeviceController, :create
+    delete "/devices/:token", DeviceController, :delete
   end
 
   # RLY-80 — the native app's human-authed decision surface. Deliberately separate from the

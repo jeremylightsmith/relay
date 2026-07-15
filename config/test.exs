@@ -29,6 +29,11 @@ config :phoenix_test,
 # In test we don't send emails
 config :relay, Relay.Mailer, adapter: Swoosh.Adapters.Test
 
+# Push (RLY-81): the Test adapter messages the caller, and `async: false` runs
+# dispatch inline in the test process — so deliveries land in the test's mailbox
+# and DB reads stay on the test's sandbox connection.
+config :relay, Relay.Push, adapter: Relay.Push.Delivery.Test, async: false
+
 # Configure your database
 #
 # The MIX_TEST_PARTITION environment variable can be used
