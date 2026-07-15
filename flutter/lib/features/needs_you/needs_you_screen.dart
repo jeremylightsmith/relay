@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../api/api_client.dart';
 import 'feed_controller.dart';
 import 'models/feed_row.dart';
 import 'widgets/caught_up.dart';
@@ -73,7 +74,7 @@ class _NeedsYouScreenState extends ConsumerState<NeedsYouScreen>
               child: CircularProgressIndicator(),
             ),
             error: (e, _) => _ErrorState(
-              message: e is Exception ? _messageOf(e) : 'Something went wrong.',
+              message: e is ApiException ? e.message : 'Something went wrong.',
               onRetry: () =>
                   ref.read(feedControllerProvider.notifier).refresh(),
             ),
@@ -82,13 +83,6 @@ class _NeedsYouScreenState extends ConsumerState<NeedsYouScreen>
         ),
       ],
     );
-  }
-
-  String _messageOf(Object e) {
-    final raw = e.toString();
-    // ApiException.toString is prefixed for logs; the UI wants the message alone.
-    final marker = RegExp(r'^ApiException\([^)]*\): ');
-    return raw.replaceFirst(marker, '');
   }
 }
 

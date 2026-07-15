@@ -217,8 +217,24 @@ void main() {
 
     expect(find.byKey(const Key('feed_error')), findsOneWidget);
     expect(find.byKey(const Key('feed_retry')), findsOneWidget);
+    expect(find.text('Network error'), findsOneWidget);
     expect(find.byType(CaughtUp), findsNothing);
   });
+
+  testWidgets(
+    'a non-ApiException failure renders the generic message, never the raw exception text',
+    (tester) async {
+      final repo = FakeFeedRepository(
+        error: const FormatException('Invalid date format (at character 5)'),
+      );
+      await pumpInbox(tester, repo: repo);
+
+      expect(find.byKey(const Key('feed_error')), findsOneWidget);
+      expect(find.text('Something went wrong.'), findsOneWidget);
+      expect(find.textContaining('FormatException'), findsNothing);
+      expect(find.textContaining('Invalid date format'), findsNothing);
+    },
+  );
 
   testWidgets('Retry re-calls the repository and recovers', (tester) async {
     final repo = FakeFeedRepository(error: const ApiException('Network error'));
