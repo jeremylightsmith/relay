@@ -12,7 +12,7 @@
       "done": "Spec:Review",
       "pool": "clean",
       "action": [
-        { "claude": "You are the AI working Relay card {ref} at the SPEC stage. Run /brainstorm {ref} to completion — headless, no human to dialogue with. It reads the card (honoring any CHANGES REQUESTED block), asks the human any clarifying questions it would normally ask first — batched as a single numbered {relay} needs-input {ref} \"<questions>\" — and otherwise designs the feature and writes the spec back to the card. This is authorized; proceed without asking. Then STOP. Do not touch git or other cards." }
+        { "claude": "You are the AI working Relay card {ref} at the SPEC stage. Run /brainstorm {ref} to completion — headless, no human to dialogue with. It reads the card (honoring any CHANGES REQUESTED block), asks the human any clarifying questions it would normally ask first — asked in ONE {relay} needs-input {ref} --questions @<tmpfile> call carrying a JSON array of `{prompt, options, allow_text}` objects, NOT a hand-numbered question string — the drawer only renders its one-question-at-a-time stepper for the structured form, and a string falls back to a wall of text (RLY-109) — and otherwise designs the feature and writes the spec back to the card. This is authorized; proceed without asking. Then STOP. Do not touch git or other cards." }
       ]
     },
     {
