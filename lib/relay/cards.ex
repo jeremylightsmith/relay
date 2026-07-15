@@ -568,12 +568,12 @@ defmodule Relay.Cards do
     board_ids = user |> Boards.list_boards() |> Enum.map(& &1.id)
 
     cards =
-      Repo.all(
-        from c in Card,
-          where: c.board_id in ^board_ids and is_nil(c.archived_at) and c.status in ^@feed_statuses,
-          order_by: [desc: coalesce(c.blocked_since, c.updated_at), desc: c.id],
-          preload: [:board, :stage]
-      )
+      Card
+      |> where([c], c.board_id in ^board_ids and is_nil(c.archived_at) and c.status in ^@feed_statuses)
+      |> order_by([c], desc: coalesce(c.blocked_since, c.updated_at), desc: c.id)
+      |> select([c], struct(c, @list_card_fields))
+      |> Repo.all()
+      |> Repo.preload([:board, :stage])
 
     metas = feed_question_metas(cards)
 
