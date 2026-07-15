@@ -134,17 +134,45 @@ that does **not** mean skip the questions. Do the **same** clarifying-question d
 do interactively (Process step 2) — surface every question you'd ask a human. Headless mode
 changes only *how* you deliver them, not *whether* you ask.
 
-- **If you have questions, ask them.** Collect *all* of them and send a **single**
-  `needs-input` call formatted as a numbered list, then STOP. Do not guess-and-write a spec
-  when real questions remain. Tell the human the reply shape:
+- **If you have questions, ask them.** Collect *all* of them into a **single**
+  `needs-input` call carrying a **structured** question array, then STOP. Do not
+  guess-and-write a spec when real questions remain. Write the array to a temp JSON file
+  and pass it with `--questions`:
 
-      ./bin/relay needs-input <ref> "Before I spec this I need a few decisions — reply like 1. … 2. … :
-      1. <question one>
-      2. <question two>
-      3. <question three>"
+      cat > /tmp/questions.json <<'JSON'
+      [
+        {
+          "prompt": "**<Subject of the decision>.** <The question, stated plainly.>",
+          "options": [
+            "<A full, self-contained choice.> — RECOMMENDED",
+            "<Another full, self-contained choice.>"
+          ],
+          "allow_text": true
+        },
+        {
+          "prompt": "**<Subject>.** <A genuinely open-ended ask.>",
+          "options": [],
+          "allow_text": true
+        }
+      ]
+      JSON
+      ./bin/relay needs-input <ref> --questions @/tmp/questions.json
 
-  Calling `needs-input` blocks the card on a human and posts your questions to its timeline;
-  the runner stops working it until the human answers.
+  The array **is** the batch — the drawer paginates it into a one-question-at-a-time
+  stepper, so **never** hand-number questions into one big string. Prose gives the human
+  a wall of text where they should get clickable options.
+
+  - **One decision per array item.** `prompt` is markdown (the drawer renders it) — bold
+    the decision's subject, then state the question plainly.
+  - **`options` are the concrete choices**, each a full self-contained sentence. The
+    human sees one option per button with **no surrounding prose**, so an option must
+    make sense alone. Mark the one you'd pick with a trailing `— RECOMMENDED`.
+  - **`allow_text` defaults to `true`** — leave it true unless the options are genuinely
+    exhaustive. Use `"options": []` for a genuinely open-ended ask; the stepper then
+    renders just its multi-line answer box.
+
+  Calling `needs-input` blocks the card on a human and posts your questions to its
+  timeline; the runner stops working it until the human answers.
 
 - **On re-entry** (the card comes back after the human answers): the answers are in the card
   timeline — `./bin/relay card <ref>` shows your question comment and the human's answer

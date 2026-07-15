@@ -1,0 +1,24 @@
+[
+  {
+    "prompt": "**Open-ended questions in the stepper.** Some clarifying questions are genuinely open-ended, with no sensible options. Today the stepper's free-text box is a single-line `<input>`, while the wall-of-text fallback is a 3-row `<textarea>`. So always-structured would *downgrade* the answer box for open-ended asks. What should happen?",
+    "options": [
+      "Always structured; also widen the stepper's free-text box to a textarea, so an open-ended ask keeps a roomy multi-line answer box — RECOMMENDED",
+      "Always structured; keep the single-line input as-is and accept the downgrade for open-ended asks",
+      "Structured only when a question has real options; open-ended asks keep the plain-string fallback"
+    ],
+    "allow_text": true
+  },
+  {
+    "prompt": "**Where should the end-to-end test start?** Nothing today covers the seam from a brainstorm-shaped `--questions @file` all the way to a rendered stepper.",
+    "options": [
+      "One shared fixture JSON, pinned from both sides — RECOMMENDED",
+      "Full stack: a Playwright test that shells out to the real bin/relay"
+    ],
+    "allow_text": false
+  },
+  {
+    "prompt": "**Anything else** about how the questions panel should behave that these options miss?",
+    "options": [],
+    "allow_text": true
+  }
+]

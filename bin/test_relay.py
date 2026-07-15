@@ -12,11 +12,16 @@ import contextlib
 import importlib.machinery
 import importlib.util
 import io
+import json
 import os
 import unittest
 import urllib.error
 
 RELAY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "relay")
+FIXTURE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "test", "fixtures", "brainstorm_questions.json",
+)
 _loader = importlib.machinery.SourceFileLoader("relay_runner", RELAY_PATH)
 _spec = importlib.util.spec_from_file_location("relay_runner", RELAY_PATH, loader=_loader)
 relay = importlib.util.module_from_spec(_spec)
@@ -124,6 +129,40 @@ class NeedsInputBodyTest(unittest.TestCase):
     def test_empty_array_dies(self):
         with self.assertRaises(SystemExit):
             relay.needs_input_body(None, "[]")
+
+    def test_brainstorm_fixture_builds_questions_body_verbatim(self):
+        """RLY-109 — the producer seam. The same fixture the Elixir drawer test posts must
+        survive --questions @file into the POST body untouched: prompts, options, and
+        allow_text all preserved. Task 2's board_live_brainstorm_questions_test.exs pins
+        the other end of this contract."""
+        with open(FIXTURE_PATH) as f:
+            raw = f.read()
+        expected = json.loads(raw)
+
+        body = relay.needs_input_body(None, raw)
+
+        self.assertEqual(body, {"questions": expected})
+        self.assertNotIn("question", body)
+
+    def test_brainstorm_fixture_covers_the_shapes_the_stepper_must_render(self):
+        """The fixture is only a useful contract if it stays brainstorm-shaped: a long-option
+        question (the overflow case that motivated this card) and an open-ended one (the
+        textarea path). Guard the fixture itself so a future edit can't quietly gut it."""
+        with open(FIXTURE_PATH) as f:
+            questions = json.load(f)
+
+        self.assertIsInstance(questions, list)
+        self.assertEqual(len(questions), 3)
+        for q in questions:
+            self.assertIn("prompt", q)
+            self.assertIsInstance(q["options"], list)
+            self.assertIsInstance(q["allow_text"], bool)
+
+        # index 0 — sentence-length options: the labels that overflowed a nowrap .btn
+        self.assertTrue(any(len(o) > 80 for o in questions[0]["options"]))
+        # index 2 — open-ended: no options, so the stepper shows only its textarea
+        self.assertEqual(questions[2]["options"], [])
+        self.assertTrue(questions[2]["allow_text"])
 
 
 class WorkBannerTest(unittest.TestCase):
