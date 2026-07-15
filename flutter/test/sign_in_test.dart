@@ -9,7 +9,7 @@ import 'support/fake_auth.dart';
 
 Future<FakeAuthController> pumpSignIn(
   WidgetTester tester, {
-  AuthState seed = const AuthState(),
+  AuthState seed = const AuthState(status: AuthStatus.signedOut),
   ThemeData? theme,
 }) async {
   final fake = FakeAuthController(seed);
@@ -108,7 +108,10 @@ void main() {
   testWidgets('while signing in, Google is disabled and says so', (
     tester,
   ) async {
-    await pumpSignIn(tester, seed: const AuthState(signingIn: true));
+    await pumpSignIn(
+      tester,
+      seed: const AuthState(status: AuthStatus.signingIn),
+    );
 
     final google = tester.widget<OutlinedButton>(
       find.byKey(const Key('sign_in_google')),
@@ -125,7 +128,7 @@ void main() {
     const message = 'Something went wrong signing you in. Please try again.';
     final fake = await pumpSignIn(
       tester,
-      seed: const AuthState(error: message),
+      seed: const AuthState(status: AuthStatus.signedOut, error: message),
     );
 
     expect(
