@@ -18,6 +18,7 @@ defmodule RelayWeb.BoardLiveOptimisticDrawerTest do
     {:ok, _} =
       Cards.update_card(card, %{
         description: "## Desc\n\n**descbold**",
+        acceptance_criteria: "**acbold**",
         spec: "**specbold**",
         plan: "**planbold**"
       })
@@ -38,6 +39,7 @@ defmodule RelayWeb.BoardLiveOptimisticDrawerTest do
     assert html =~ "RLY-1"
     # heavy sections show skeletons, not content
     assert html =~ ~s(id="card-drawer-description-skeleton")
+    assert html =~ ~s(id="card-drawer-acceptance-criteria-skeleton")
     assert html =~ ~s(id="card-drawer-spec-skeleton")
     assert html =~ ~s(id="card-plan-skeleton")
     refute html =~ ~s(id="card-drawer-description-view")
@@ -46,6 +48,7 @@ defmodule RelayWeb.BoardLiveOptimisticDrawerTest do
     render_async(view)
 
     assert has_element?(view, "#card-drawer-description-view strong", "descbold")
+    assert has_element?(view, "#card-drawer-acceptance-criteria-view strong", "acbold")
     assert has_element?(view, "#card-drawer-spec-view strong", "specbold")
     assert has_element?(view, "#card-plan-view strong", "planbold")
     refute has_element?(view, "#card-drawer-description-skeleton")

@@ -635,6 +635,7 @@ defmodule RelayWeb.CoreComponentsTest do
           sub_tasks: [],
           tag: nil,
           description: nil,
+          acceptance_criteria: nil,
           spec: nil,
           plan: nil,
           pr_url: nil,
@@ -816,6 +817,36 @@ defmodule RelayWeb.CoreComponentsTest do
       html = render_component(&CoreComponents.card_drawer/1, attrs)
 
       refute html =~ ~s(id="sub-tasks")
+    end
+
+    test "the acceptance-criteria section renders before spec, labelled, on the teal accent bar" do
+      attrs =
+        drawer_attrs(
+          %{acceptance_criteria: "### 1. It works\n1. Expect: **yes**", spec: "the spec"},
+          %{}
+        )
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      assert html =~ ~s(id="card-drawer-acceptance-criteria")
+      assert html =~ "Acceptance Criteria"
+      # teal accent bar — distinct from spec's bg-primary and plan's bg-secondary
+      assert html =~ ~s(class="commit-field-accent bg-accent")
+
+      # DOM order: acceptance criteria sits above spec (the review-gate read order)
+      {ac_idx, _} = :binary.match(html, ~s(id="card-drawer-acceptance-criteria"))
+      {spec_idx, _} = :binary.match(html, ~s(id="card-drawer-spec"))
+      assert ac_idx < spec_idx
+    end
+
+    test "acceptance criteria collapses to a preview with a Show more toggle" do
+      attrs = drawer_attrs(%{acceptance_criteria: "### 1. It works\n1. Expect: **yes**"}, %{})
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      assert html =~ ~s(id="card-drawer-acceptance-criteria-show-more")
+      assert html =~ ~s(id="card-drawer-acceptance-criteria-view")
+      assert html =~ "<strong>yes</strong>"
     end
   end
 
@@ -1062,6 +1093,7 @@ defmodule RelayWeb.CoreComponentsTest do
         card: %{
           title: "Optimistic drawer",
           description: nil,
+          acceptance_criteria: nil,
           spec: nil,
           plan: nil,
           tag: "perf",
