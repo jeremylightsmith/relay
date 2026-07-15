@@ -18,18 +18,20 @@ const _cardPush = {
 
 /// The real gated app (routerProvider + its redirect), with auth scripted and the
 /// card body stubbed — flutter_inappwebview has no host-platform implementation.
-Future<ScriptedAuthController> pumpLaunch(
+///
+/// Returns both the auth controller (to script auth transitions) and the push
+/// platform (to drive `tapHandler` — the *warm* tap path — directly).
+Future<(ScriptedAuthController, FakePushPlatform)> pumpLaunch(
   WidgetTester tester, {
   Map<String, dynamic>? coldNotification,
 }) async {
   final auth = ScriptedAuthController();
+  final platform = FakePushPlatform()..initial = coldNotification;
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
         authProvider.overrideWith(() => auth),
-        pushPlatformProvider.overrideWithValue(
-          FakePushPlatform()..initial = coldNotification,
-        ),
+        pushPlatformProvider.overrideWithValue(platform),
         cardBodyBuilderProvider.overrideWithValue(
           (_) => const SizedBox.shrink(key: Key('stub_card_body')),
         ),
@@ -40,7 +42,7 @@ Future<ScriptedAuthController> pumpLaunch(
   // pump(), not pumpAndSettle(): the splash's indeterminate progress indicator
   // schedules frames forever, so settling *on* the splash would time out.
   await tester.pump();
-  return auth;
+  return (auth, platform);
 }
 
 void main() {
@@ -59,7 +61,7 @@ void main() {
 
   testWidgets('a restored session resumes the launch destination, and does '
       'not prime push permission', (tester) async {
-    final auth = await pumpLaunch(tester);
+    final (auth, _) = await pumpLaunch(tester);
 
     auth.resolve(
       const AuthState(
@@ -81,7 +83,7 @@ void main() {
   testWidgets(
     'a cold-start push tap lands on the card once the session restores',
     (tester) async {
-      final auth = await pumpLaunch(tester, coldNotification: _cardPush);
+      final (auth, _) = await pumpLaunch(tester, coldNotification: _cardPush);
       // Let _wirePush read the cold notification and fire it at the router.
       await tester.pump();
 
@@ -103,7 +105,7 @@ void main() {
   testWidgets(
     'with no session, the card is held through sign-in and resumed after',
     (tester) async {
-      final auth = await pumpLaunch(tester, coldNotification: _cardPush);
+      final (auth, _) = await pumpLaunch(tester, coldNotification: _cardPush);
       await tester.pump();
 
       auth.resolve(const AuthState(status: AuthStatus.signedOut));
@@ -128,7 +130,7 @@ void main() {
   testWidgets(
     'an interactive sign-in with no deep link primes push permission',
     (tester) async {
-      final auth = await pumpLaunch(tester);
+      final (auth, _) = await pumpLaunch(tester);
 
       auth.resolve(const AuthState(status: AuthStatus.signedOut));
       await tester.pumpAndSettle();
@@ -138,6 +140,36 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Let Relay reach you'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'a warm push tap while signed out is held through sign-in and resumed after',
+    (tester) async {
+      final (auth, platform) = await pumpLaunch(tester);
+
+      auth.resolve(const AuthState(status: AuthStatus.signedOut));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('welcome_screen')), findsOneWidget);
+
+      // Warm: a tap while the app is already running, sitting on Welcome —
+      // distinct from the cold-notification path exercised above.
+      platform.tapHandler!(_cardPush);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('welcome_sign_in')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('sign_in_google')));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<CardScreen>(find.byType(CardScreen)).cardRef,
+        'RLY-1',
+        reason:
+            'a warm tap while signed out must not be eaten by sign-in or '
+            'the AUTH-03 permission prime either',
+      );
+      expect(find.byType(NavigationBar), findsNothing);
     },
   );
 }

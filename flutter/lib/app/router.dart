@@ -120,7 +120,20 @@ final routerProvider = Provider<GoRouter>((ref) {
   // redirect too, or the app parks on the splash forever.
   final refresh = ValueNotifier<AuthStatus>(ref.read(authProvider).status);
   ref.onDispose(refresh.dispose);
-  ref.listen(authProvider, (_, next) => refresh.value = next.status);
+
+  // Whether the most recent signedIn arrived via an *interactive* sign-in
+  // (signingIn → signedIn) rather than a restore. AUTH-03 only primes for
+  // permission after an interactive sign-in with nothing to resume — and the
+  // redirect below is the only place that sees both auth and the pending
+  // deep link, so it (not main.dart) is what decides. A launch-time bool in
+  // main.dart can't: it answers "was this launch cold?", not "is there a card
+  // to land on?", and a warm tap while signed out never touches it at all.
+  var interactiveSignIn = false;
+  ref.listen(authProvider, (previous, next) {
+    interactiveSignIn =
+        previous?.status == AuthStatus.signingIn && next.signedIn;
+    refresh.value = next.status;
+  });
 
   return buildRouter(
     refreshListenable: refresh,
@@ -147,21 +160,38 @@ final routerProvider = Provider<GoRouter>((ref) {
       final loc = state.matchedLocation;
       final atAuth = loc.startsWith('/welcome');
       final atSplash = loc == '/splash';
+      // GoRouter always matches its `initialLocation` first, on every cold
+      // launch, push or no push — so stashing it unconditionally would make
+      // `pending` non-null even with nothing to resume, indistinguishable
+      // from a real deep link. It's also already the fallback below, so
+      // skipping it here changes nothing about where a plain launch lands.
+      final isDefaultLanding = loc == '/needs-you';
 
       // Still reading the Keychain: hold the destination, show the splash.
       if (auth.restoring) {
         if (atSplash) return null;
-        pending.set(state.uri.toString());
+        if (!isDefaultLanding) pending.set(state.uri.toString());
         return '/splash';
       }
       if (!auth.signedIn) {
         if (atAuth) return null;
         // Never stash the splash itself — it is scaffolding, not a destination.
-        if (!atSplash) pending.set(state.uri.toString());
+        if (!atSplash && !isDefaultLanding) pending.set(state.uri.toString());
         return '/welcome';
       }
-      // Signed in, sitting on scaffolding → resume what the launch was actually for.
-      if (atAuth || atSplash) return pending.take() ?? '/needs-you';
+      // Signed in, sitting on scaffolding → resume what the launch was actually
+      // for. Nothing pending and this was an interactive sign-in: prime for
+      // push permission instead (AUTH-03) — consumed once, so it doesn't fire
+      // again on some later, unrelated visit to this scaffolding.
+      if (atAuth || atSplash) {
+        final resumed = pending.take();
+        if (resumed != null) return resumed;
+        if (interactiveSignIn) {
+          interactiveSignIn = false;
+          return '/push-permission';
+        }
+        return '/needs-you';
+      }
       return null;
     },
   );

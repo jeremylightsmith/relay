@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/router.dart';
 import 'app/theme.dart';
-import 'features/auth/auth_controller.dart';
 import 'features/push/push_service.dart';
 
 void main() => runApp(const ProviderScope(child: RelayApp()));
@@ -15,10 +14,6 @@ class RelayApp extends ConsumerStatefulWidget {
 }
 
 class _RelayAppState extends ConsumerState<RelayApp> {
-  /// Whether this launch came from a notification tap. Decides whether AUTH-03's
-  /// permission prime would be trampling a deep link.
-  bool _launchedFromNotification = false;
-
   @override
   void initState() {
     super.initState();
@@ -32,16 +27,10 @@ class _RelayAppState extends ConsumerState<RelayApp> {
   Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
 
-    ref.listen(authProvider, (previous, next) {
-      // AUTH-03: prime for permission after an *interactive* sign-in only, and only
-      // when there is no card to land on. Priming on any → signedIn transition would
-      // fire on every restored cold start and trample the deep link the router just
-      // resumed (RLY-86 §6).
-      final interactive = previous?.status == AuthStatus.signingIn;
-      if (interactive && next.signedIn && !_launchedFromNotification) {
-        router.go('/push-permission');
-      }
-    });
+    // AUTH-03's permission prime is decided by routerProvider's redirect, not here:
+    // it is the only place that sees both auth status and the pending deep link
+    // (RLY-86 §6), so it alone can tell "interactive sign-in, nothing to resume"
+    // apart from every other path that lands back on signed-in scaffolding.
 
     return MaterialApp.router(
       title: 'Relay',
@@ -68,9 +57,6 @@ class _RelayAppState extends ConsumerState<RelayApp> {
     // is still restoring — the redirect holds it until there is somewhere to land.
     final cold = await platform.initialNotification();
     final coldPath = cold == null ? null : pathForPayload(cold);
-    if (coldPath != null) {
-      _launchedFromNotification = true;
-      router.go(coldPath);
-    }
+    if (coldPath != null) router.go(coldPath);
   }
 }
