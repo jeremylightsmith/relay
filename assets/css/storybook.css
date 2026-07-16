@@ -140,7 +140,7 @@
 .board-card.dragging {
   opacity: 0.5;
 }
-.stage-cards.drag-over {
+.stage-drop.drag-over {
   outline: 2px dashed var(--color-primary);
   outline-offset: 2px;
   border-radius: var(--radius-field);

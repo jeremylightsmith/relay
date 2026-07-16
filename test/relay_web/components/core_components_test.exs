@@ -239,7 +239,9 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(phx-click="expand_stage")
       assert html =~ ~s(phx-value-stage-id="6")
       assert html =~ ~s(data-stage-id="6")
-      assert html =~ "stage-cards"
+      assert html =~ "stage-drop"
+      # the strip is a drop zone, not a stream list
+      refute html =~ "stage-cards"
       # none of the expanded chrome renders
       refute html =~ ~s(id="stage-col-6-new-card")
       refute html =~ "No cards yet"
@@ -433,6 +435,7 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "border-left:1px solid oklch(0.90 0.04 75)"
       # drop target + click-to-expand contract
       assert html =~ ~s(data-stage-id="401")
+      assert html =~ ~s(class="sublane-strip stage-drop")
       assert html =~ ~s(phx-value-stage-id="401")
       refute html =~ ~s(id="sublane-401-cards")
 

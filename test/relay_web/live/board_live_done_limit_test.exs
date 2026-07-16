@@ -106,28 +106,30 @@ defmodule RelayWeb.BoardLiveDoneLimitTest do
   end
 
   describe "Show more button placement" do
-    # RLY-53 rejection: the button rendered *inside* the lane's scroll
-    # container, after the #...-cards div. That div carries min-height:100%
-    # (RLY-1's full-height drop zone), so it always fills the scroll viewport
-    # and pushed the button past the bottom edge — a 3px sliver, 45px of
-    # scrolling away. has_element?/2 passed the whole time because the button
-    # was in the DOM; only its position was wrong. Keep it out of the scroller.
-    test "the button is not trapped inside the lane's scroll container",
+    # RLY-116: RLY-53's pinned footer stranded the button at the column bottom,
+    # ~263px below the last card and clipped by the lane edge. The .stage-drop
+    # wrapper now owns the stretched drop zone (RLY-1) while the .stage-cards
+    # stream list is natural-height, so the button flows inside the scroller
+    # directly after the list — right below the last card.
+    test "the button flows right after the card list inside the drop-zone wrapper",
          %{conn: conn, board: board, done: done} do
       seed_done_cards(done, 12)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       doc = view |> render() |> LazyHTML.from_fragment()
+      col = "stage-col-#{done.position}"
 
+      # the wrapper (not the stream list) carries the drop-zone contract
+      assert doc |> LazyHTML.query("##{col}-drop.stage-drop[data-stage-id]") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("##{col}-cards[data-stage-id]") |> Enum.count() == 0
+
+      # the button directly follows the stream list inside the wrapper — it is
+      # NOT a child of the stream container itself
       assert doc
-             |> LazyHTML.query("#stage-col-#{done.position}-show-more-done")
+             |> LazyHTML.query("##{col}-drop > ##{col}-cards + ##{col}-show-more-done")
              |> Enum.count() == 1
 
-      assert doc
-             |> LazyHTML.query("#stage-col-#{done.position}-scroll #stage-col-#{done.position}-show-more-done")
-             |> Enum.count() == 0,
-             "the Show more button is inside the scroll container, where the " <>
-               "min-height:100% drop zone pushes it out of view"
+      assert doc |> LazyHTML.query("##{col}-cards ##{col}-show-more-done") |> Enum.count() == 0
     end
   end
 
