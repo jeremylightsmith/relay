@@ -44,6 +44,11 @@ defmodule RelayWeb.BoardLive do
   # is. Without this clock a card never goes amber until something unrelated re-renders it.
   @health_tick_ms to_timeout(second: 30)
 
+  # RLY-112: bounds ONE render (distinct from Pruner's storage retention). The artboard
+  # rules a filter/expand toggle out of v1, so without this a card mid-run would try to
+  # paint thousands of :action rows into the drawer. 200 covers the readable recent history.
+  @activity_render_limit 200
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -239,6 +244,7 @@ defmodule RelayWeb.BoardLive do
         stage_owner={stage_owner(@selected_stage)}
         stages={move_targets(@board, @selected_card)}
         active_owner={Cards.active_owner_type(@selected_card)}
+        health={health_state(@health_by_card, @selected_card.id)}
         done={Cards.done?(@selected_card, @board.stages)}
         close_patch={~p"/board/#{@board.slug}"}
         title_form={@title_form}
@@ -1422,7 +1428,7 @@ defmodule RelayWeb.BoardLive do
   # card so the board card re-renders its colour/badge. Also recomputes
   # the needs-input panel's question from the fresh timeline (MMF 14).
   defp refresh_card(socket, %Card{} = card) do
-    activity = Activity.list_activity(card)
+    activity = Activity.list_activity(card, limit: @activity_render_limit)
 
     socket
     |> assign(:selected_card, card)
@@ -1650,7 +1656,7 @@ defmodule RelayWeb.BoardLive do
         |> assign(:selected_stage, find_stage_by_id(socket, moved.stage_id))
         |> assign_review(moved)
         |> stream(:conversation, Activity.list_conversation(moved), reset: true)
-        |> stream(:activity, Activity.list_activity(moved), reset: true)
+        |> stream(:activity, Activity.list_activity(moved, limit: @activity_render_limit), reset: true)
 
       _ ->
         socket
@@ -1824,7 +1830,7 @@ defmodule RelayWeb.BoardLive do
       %{
         card_id: card_id,
         card: full,
-        activity: Activity.list_activity(full),
+        activity: Activity.list_activity(full, limit: @activity_render_limit),
         conversation: Activity.list_conversation(full)
       }
     end)

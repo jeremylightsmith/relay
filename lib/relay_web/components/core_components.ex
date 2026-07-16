@@ -1012,6 +1012,41 @@ defmodule RelayWeb.CoreComponents do
   defp strip_time_color(:stopped), do: "oklch(0.50 0.14 15)"
   defp strip_time_color(_health), do: "oklch(0.60 0.02 255)"
 
+  # RLY-112 §04: the Activity section header's health chip. No Retry (Q6→C).
+  defp health_chip_color(:live), do: "var(--color-secondary)"
+  defp health_chip_color(:stale), do: "var(--color-warning)"
+  defp health_chip_color(:stopped), do: "var(--color-error)"
+  defp health_chip_color(_health), do: "var(--color-base-300)"
+
+  defp health_chip_label(:live), do: "Relay AI is live"
+  defp health_chip_label(:stale), do: "Relay AI has gone quiet"
+  defp health_chip_label(:stopped), do: "Relay AI stopped"
+  defp health_chip_label(_health), do: ""
+
+  # §04 dot colour by kind. The artboard paints the Approved decision green; the spec's
+  # mapping (decision → amber) wins. :move never reaches here — it renders as a chip.
+  # :failure and :decision are always genuine agent/system events, so they stay
+  # kind-only. :action is kind/1's catch-all — it ALSO carries every legacy audit
+  # row (:created, :commented, :status_changed, :owners_changed, :archived,
+  # :unarchived), which a human can trigger. AGENTS.md reserves violet for AI and
+  # blue for human, so within :action fall back to the row's actor: an agent's
+  # runner line stays violet, a human's audit row goes blue.
+  #
+  # RESOLVED 2026-07-15 (Jeremy): actor-aware, not kind-only. This block previously
+  # read `_action -> "var(--color-secondary)"`, which the implementer correctly
+  # refused to ship — it would render a human's own :commented / :status_changed row
+  # in the AI colour, contradicting the palette rule that encodes this product's core
+  # idea (who holds the baton). The plan is the thing that was wrong. Two tests pin
+  # the shipped behaviour: board_drawer_activity_test.exs:102 and :118.
+  defp entry_dot_color(entry) do
+    # Fully qualified on purpose: `Activity` in this module is `Schemas.Activity`.
+    case Relay.Activity.kind(entry) do
+      :failure -> "var(--color-error)"
+      :decision -> "var(--color-warning)"
+      _action -> if entry.actor_type == :agent, do: "var(--color-secondary)", else: "var(--color-primary)"
+    end
+  end
+
   # The artboard's compact relative time: now / 8m / 2h / 3d.
   defp relative_time(nil), do: ""
 
@@ -1213,6 +1248,11 @@ defmodule RelayWeb.CoreComponents do
   attr :activity, :any,
     required: true,
     doc: "the :activity LiveView stream — the card's activity-log entries, newest first"
+
+  attr :health, :atom,
+    values: [:live, :stale, :stopped, :none],
+    default: :none,
+    doc: "RLY-112 derived agent health, for the Activity section's header chip"
 
   attr :comment_form, :any, required: true, doc: "a Phoenix.HTML.Form for comment[body]"
 
@@ -2049,13 +2089,34 @@ defmodule RelayWeb.CoreComponents do
               <section class="space-y-2 border-t border-base-300 pt-4">
                 <.section_label>Activity</.section_label>
                 <div
+                  :if={@health != :none}
+                  id={"#{@id}-activity-health-chip"}
+                  class="activity-health-chip flex items-center gap-2"
+                  style={"border-radius:7px;padding:7px 10px;#{strip_box_style(@health)}"}
+                  data-health={@health}
+                >
+                  <span style={"width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:#{health_chip_color(@health)};#{if(@health == :live, do: "animation:relaypulse 1.4s ease-in-out infinite;")}"}>
+                  </span>
+                  <span
+                    class="text-[11.5px]"
+                    style={"font-family:var(--font-mono);color:#{strip_text_color(@health)};"}
+                  >
+                    {health_chip_label(@health)}
+                  </span>
+                </div>
+                <div
                   :if={@body_loading}
                   id={"#{@id}-activity-loading"}
                   class="flex justify-center py-3"
                 >
                   <span class="loading loading-spinner loading-sm text-base-content/40"></span>
                 </div>
-                <ol :if={!@body_loading} id={"#{@id}-activity"} phx-update="stream" class="space-y-1">
+                <ol
+                  :if={!@body_loading}
+                  id={"#{@id}-activity"}
+                  phx-update="stream"
+                  class="relative space-y-1 pl-[18px]"
+                >
                   <li
                     id={"#{@id}-activity-empty"}
                     class="hidden text-sm text-base-content/50 only:block"
@@ -2065,22 +2126,36 @@ defmodule RelayWeb.CoreComponents do
                   <li
                     :for={{dom_id, entry} <- @activity}
                     id={dom_id}
-                    class="activity-entry flex items-start gap-2.5 py-1"
+                    class="activity-entry relative py-1"
+                    data-kind={Relay.Activity.kind(entry)}
                     data-actor-type={entry.actor_type}
                   >
-                    <span class={[
-                      "mt-1.5 size-1.5 shrink-0 rounded-full",
-                      if(entry.actor_type == :agent, do: "bg-secondary/60", else: "bg-primary/60")
-                    ]}>
-                    </span>
-                    <div class="flex min-w-0 flex-col">
-                      <span class="timeline-activity-phrase text-[13px] leading-snug text-base-content/70">
-                        {activity_phrase(entry)}
+                    <%= if Relay.Activity.kind(entry) == :move do %>
+                      <span
+                        class="activity-move-chip inline-flex items-center gap-2"
+                        style="background:oklch(0.965 0.006 255);border:1px solid oklch(0.90 0.006 255);border-radius:20px;padding:4px 12px;font-size:11.5px;font-family:var(--font-mono);color:oklch(0.50 0.02 255);"
+                      >
+                        moved
+                        <span class="font-semibold" style="color:oklch(0.40 0.02 255);">
+                          {entry.meta["from_stage"]} → {entry.meta["to_stage"]}
+                        </span>
+                        · {relative_time(entry.inserted_at)}
                       </span>
-                      <time class="timeline-time font-mono text-[11px] text-base-content/45">
-                        {Calendar.strftime(entry.inserted_at, "%b %d, %H:%M")}
-                      </time>
-                    </div>
+                    <% else %>
+                      <span
+                        class="activity-entry-dot absolute"
+                        style={"left:-16.5px;top:7px;width:7px;height:7px;border-radius:50%;background:#{entry_dot_color(entry)};box-shadow:0 0 0 2.5px var(--color-base-100);"}
+                      >
+                      </span>
+                      <div class="flex items-baseline gap-1.5">
+                        <span class="timeline-activity-phrase min-w-0 text-[13px] leading-snug text-base-content/70">
+                          {entry_text(entry)}
+                        </span>
+                        <time class="timeline-time ml-auto shrink-0 font-mono text-[11px] text-base-content/45">
+                          {relative_time(entry.inserted_at)}
+                        </time>
+                      </div>
+                    <% end %>
                   </li>
                 </ol>
               </section>
