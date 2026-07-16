@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/theme.dart';
+import '../voice/mic_button.dart';
+import '../voice/voice_transcriber.dart';
 import 'answer_stepper.dart';
 import 'review_queue.dart';
 
@@ -44,9 +46,12 @@ const _rowDivider = Color(0xFFE8EBEF); // oklch(0.94 0.006 255)
 /// INPUT-02 ("Answer sent") is **superseded** (spec D4): sending auto-advances, and the
 /// "it happened" signal is the banner shown over the *next* item.
 class AnswerScreen extends ConsumerStatefulWidget {
-  const AnswerScreen({super.key, required this.cardRef});
+  const AnswerScreen({super.key, required this.cardRef, this.transcriber});
 
   final String cardRef;
+
+  /// Structural seam for tests; null → the real WhisperKit-backed engine.
+  final VoiceTranscriber? transcriber;
 
   @override
   ConsumerState<AnswerScreen> createState() => _AnswerScreenState();
@@ -228,6 +233,7 @@ class _AnswerScreenState extends ConsumerState<AnswerScreen> {
                         // free-text step — there is nothing to be something else than.
                         withPickerChrome:
                             question != null && question.options.isNotEmpty,
+                        transcriber: widget.transcriber,
                         onChanged: (value) => setState(() {
                           if (stepper != null) stepper.setText(value);
                         }),
@@ -506,16 +512,19 @@ class _OptionRow extends StatelessWidget {
 }
 
 /// INPUT-01's "Something else…" row in stepper mode; the whole answer field in legacy
-/// mode. **No mic** (D5) — RLY-99 adds voice, and the helper copy says so.
+/// mode. INPUT-01 drew no mic here (D5 deferred it); RLY-99 (U5) adds one, reusing the
+/// same [MicButton] the reject note field got.
 class _TextRow extends StatelessWidget {
   const _TextRow({
     required this.controller,
     required this.withPickerChrome,
+    required this.transcriber,
     required this.onChanged,
   });
 
   final TextEditingController controller;
   final bool withPickerChrome;
+  final VoiceTranscriber? transcriber;
   final ValueChanged<String> onChanged;
 
   @override
@@ -538,18 +547,32 @@ class _TextRow extends StatelessWidget {
               color: _optionTitle,
             ),
           ),
-        TextField(
-          key: const Key('answer_text'),
-          controller: controller,
-          onChanged: onChanged,
-          minLines: 1,
-          maxLines: 4,
-          decoration: const InputDecoration(
-            isDense: true,
-            border: InputBorder.none,
-            hintText: 'Type your answer…',
-          ),
-          style: const TextStyle(fontSize: 21, color: _promptColor),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(
+              child: TextField(
+                key: const Key('answer_text'),
+                controller: controller,
+                onChanged: onChanged,
+                minLines: 1,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  hintText: 'Type your answer…',
+                ),
+                style: const TextStyle(fontSize: 21, color: _promptColor),
+              ),
+            ),
+            const SizedBox(width: 8),
+            MicButton(
+              key: const Key('answer_mic'),
+              controller: controller,
+              transcriber: transcriber,
+              onInserted: onChanged,
+            ),
+          ],
         ),
         if (withPickerChrome) ...[
           const Divider(

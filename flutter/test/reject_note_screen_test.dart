@@ -8,9 +8,11 @@ import 'package:relay_mobile/features/decisions/decision_api.dart';
 import 'package:relay_mobile/features/decisions/reject_note_screen.dart';
 import 'package:relay_mobile/features/decisions/review_queue.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
+import 'package:relay_mobile/features/voice/voice_transcriber.dart';
 
 import 'review_queue_test.dart' show FakeDecisionApi, FakeFeedRepository, row;
 import 'support/fake_auth.dart';
+import 'support/fake_voice_transcriber.dart';
 
 final _input = find.byKey(const Key('reject_note_input'));
 final _send = find.byKey(const Key('reject_send'));
@@ -18,7 +20,10 @@ final _send = find.byKey(const Key('reject_send'));
 FilledButton _sendButton(WidgetTester tester) =>
     tester.widget<FilledButton>(_send);
 
-GoRouter _router({String initialLocation = '/cards/RLY-A'}) => GoRouter(
+GoRouter _router({
+  String initialLocation = '/cards/RLY-A',
+  VoiceTranscriber? transcriber,
+}) => GoRouter(
   initialLocation: initialLocation,
   routes: [
     GoRoute(
@@ -40,6 +45,7 @@ GoRouter _router({String initialLocation = '/cards/RLY-A'}) => GoRouter(
       builder: (c, s) => RejectNoteScreen(
         cardRef: s.pathParameters['ref']!,
         boardSlug: s.uri.queryParameters['board'] ?? '',
+        transcriber: transcriber,
       ),
     ),
   ],
@@ -58,6 +64,7 @@ Future<GoRouter> pumpReject(
   FakeAuthController? auth,
   String initialLocation = '/cards/RLY-A',
   bool seedQueue = true,
+  VoiceTranscriber? transcriber,
 }) async {
   final container = ProviderContainer(
     overrides: [
@@ -73,7 +80,10 @@ Future<GoRouter> pumpReject(
         .enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
   }
 
-  final router = _router(initialLocation: initialLocation);
+  final router = _router(
+    initialLocation: initialLocation,
+    transcriber: transcriber,
+  );
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
@@ -148,64 +158,84 @@ void main() {
       );
     });
 
-    testWidgets('the hint drops the "or dictate it" half (D4a)', (
+    testWidgets('the hint restores the artboard copy now the mic is live', (
       tester,
     ) async {
       await pumpReject(tester, api: FakeDecisionApi());
 
-      expect(find.text('Add a reason to continue'), findsOneWidget);
-      expect(find.textContaining('dictate'), findsNothing);
-    });
-
-    testWidgets('the mic is drawn to the artboard geometry but ghosted', (
-      tester,
-    ) async {
-      await pumpReject(tester, api: FakeDecisionApi());
-
-      final mic = tester.widget<Container>(find.byKey(const Key('reject_mic')));
-      expect(mic.constraints, BoxConstraints.tight(const Size(30, 30)));
-      final deco = mic.decoration! as BoxDecoration;
-      expect(deco.shape, BoxShape.circle);
-      expect(deco.color, RelayTheme.micGhostFill);
-      expect(deco.border, Border.all(color: RelayTheme.micGhostBorder));
-
-      // The artboard anchors the mic 10px off the note field's own border —
-      // not 10px off the 12px text padding, which would drift it to 22px.
-      final fieldRect = tester.getRect(
-        find.byKey(const Key('reject_note_field')),
+      expect(
+        find.text('Add a reason to continue · or dictate it'),
+        findsOneWidget,
       );
-      final micRect = tester.getRect(find.byKey(const Key('reject_mic')));
-      const borderWidth = 1.5;
-      expect(fieldRect.right - micRect.right, closeTo(10 + borderWidth, 0.1));
-      expect(fieldRect.bottom - micRect.bottom, closeTo(10 + borderWidth, 0.1));
     });
 
     testWidgets(
-      'the mic is inert: no tap handler, and no screen-reader button',
+      'the mic keeps the artboard geometry, now in the live violet trio',
       (tester) async {
-        final api = FakeDecisionApi();
-        await pumpReject(tester, api: api);
+        await pumpReject(tester, api: FakeDecisionApi());
 
-        await tester.tap(find.byKey(const Key('reject_mic')));
-        await tester.pumpAndSettle();
-
-        expect(api.rejected, isEmpty);
-        expect(
-          find.byType(SnackBar),
-          findsNothing,
-          reason: 'no "coming soon" toast',
+        final mic = tester.widget<Container>(
+          find
+              .descendant(
+                of: find.byKey(const Key('reject_mic')),
+                matching: find.byType(Container),
+              )
+              .first,
         );
-        expect(_send, findsOneWidget, reason: 'still on the reject screen');
-        // A dead control must not be announced as a live one.
+        expect(mic.constraints, BoxConstraints.tight(const Size(30, 30)));
+        final deco = mic.decoration! as BoxDecoration;
+        expect(deco.shape, BoxShape.circle);
+        expect(deco.color, RelayTheme.relayMicFill);
+        expect(deco.border, Border.all(color: RelayTheme.relayMicBorder));
+
+        // The artboard anchors the mic 10px off the note field's own border —
+        // not 10px off the 12px text padding, which would drift it to 22px.
+        final fieldRect = tester.getRect(
+          find.byKey(const Key('reject_note_field')),
+        );
+        final micRect = tester.getRect(find.byKey(const Key('reject_mic')));
+        const borderWidth = 1.5;
+        expect(fieldRect.right - micRect.right, closeTo(10 + borderWidth, 0.1));
         expect(
-          find.ancestor(
-            of: find.byKey(const Key('reject_mic')),
-            matching: find.byType(ExcludeSemantics),
-          ),
-          findsOneWidget,
+          fieldRect.bottom - micRect.bottom,
+          closeTo(10 + borderWidth, 0.1),
         );
       },
     );
+
+    testWidgets('tapping the mic dictates into the note and never submits', (
+      tester,
+    ) async {
+      final api = FakeDecisionApi();
+      final fake = FakeVoiceTranscriber(
+        transcript: 'not quite, the copy is wrong',
+      );
+      await pumpReject(tester, api: api, transcriber: fake);
+
+      expect(_sendButton(tester).onPressed, isNull, reason: 'empty note');
+
+      await tester.tap(find.byKey(const Key('reject_mic')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.tap(find.byKey(const Key('voice_stop')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(find.byKey(const Key('voice_use')));
+      await tester.pumpAndSettle();
+
+      final input = tester.widget<TextField>(_input);
+      expect(input.controller!.text, 'not quite, the copy is wrong');
+      expect(
+        api.rejected,
+        isEmpty,
+        reason: '"Use this" fills; the human still sends (D6)',
+      );
+      expect(
+        _sendButton(tester).onPressed,
+        isNotNull,
+        reason: 'dictated text must enable Send back like typed text does',
+      );
+    });
 
     testWidgets('the disabled button wears the artboard disabled treatment', (
       tester,

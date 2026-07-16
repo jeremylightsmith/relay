@@ -8,9 +8,11 @@ import 'package:relay_mobile/features/decisions/decision_api.dart';
 import 'package:relay_mobile/features/decisions/review_queue.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
 import 'package:relay_mobile/features/needs_you/models/feed_row.dart';
+import 'package:relay_mobile/features/voice/voice_transcriber.dart';
 
 import 'review_queue_test.dart'
     show BlockedDecisionApi, FakeDecisionApi, FakeFeedRepository, row;
+import 'support/fake_voice_transcriber.dart';
 
 final _submit = find.byKey(const Key('answer_submit'));
 final _text = find.byKey(const Key('answer_text'));
@@ -24,7 +26,7 @@ FeedQuestion q(
 FilledButton _submitButton(WidgetTester tester) =>
     tester.widget<FilledButton>(_submit);
 
-GoRouter _router() => GoRouter(
+GoRouter _router({VoiceTranscriber? transcriber}) => GoRouter(
   initialLocation: '/card/RLY-A/answer',
   routes: [
     GoRoute(
@@ -43,7 +45,10 @@ GoRouter _router() => GoRouter(
     ),
     GoRoute(
       path: '/card/:ref/answer',
-      builder: (c, s) => AnswerScreen(cardRef: s.pathParameters['ref']!),
+      builder: (c, s) => AnswerScreen(
+        cardRef: s.pathParameters['ref']!,
+        transcriber: transcriber,
+      ),
     ),
   ],
 );
@@ -53,6 +58,7 @@ Future<ProviderContainer> pumpAnswer(
   required DecisionApi api,
   required List<FeedRow> rows,
   FeedRepository? feed,
+  VoiceTranscriber? transcriber,
 }) async {
   final container = ProviderContainer(
     overrides: [
@@ -70,7 +76,7 @@ Future<ProviderContainer> pumpAnswer(
       container: container,
       child: MaterialApp.router(
         theme: RelayTheme.light,
-        routerConfig: _router(),
+        routerConfig: _router(transcriber: transcriber),
       ),
     ),
   );
@@ -148,6 +154,35 @@ void main() {
     },
   );
 
+  testWidgets('the answer field dictates and does not send', (tester) async {
+    final api = FakeDecisionApi();
+    final fake = FakeVoiceTranscriber(transcript: 'use the EU region');
+    await pumpAnswer(
+      tester,
+      api: api,
+      rows: [row('RLY-A', kind: 'needs_input', reason: 'Which region?')],
+      transcriber: fake,
+    );
+
+    await tester.tap(find.byKey(const Key('answer_mic')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.tap(find.byKey(const Key('voice_stop')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.byKey(const Key('voice_use')));
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(_text);
+    expect(field.controller!.text, 'use the EU region');
+    expect(api.answered, isEmpty, reason: 'no answer sent yet');
+    expect(
+      _submitButton(tester).onPressed,
+      isNotNull,
+      reason: 'the dictated answer must enable Send',
+    );
+  });
+
   testWidgets(
     'allow_text false hides the free-text row and shortens the label',
     (tester) async {
@@ -181,16 +216,18 @@ void main() {
     },
   );
 
-  testWidgets('the free-text row offers no mic and says "Type your own answer"', (
-    tester,
-  ) async {
-    await pumpAnswer(tester, api: FakeDecisionApi(), rows: _structured());
+  testWidgets(
+    'the free-text row carries the live mic (RLY-99) and says "Type your own answer"',
+    (tester) async {
+      await pumpAnswer(tester, api: FakeDecisionApi(), rows: _structured());
 
-    // D5: RLY-99 adds voice. INPUT-01's 30px violet mic is deliberately absent.
-    expect(find.text('Type your own answer'), findsOneWidget);
-    expect(find.textContaining('dictate'), findsNothing);
-    expect(find.byIcon(Icons.mic), findsNothing);
-  });
+      // D5 deferred INPUT-01's own mic; RLY-99 (U5) adds the shared MicButton here
+      // instead, so this is the retrofit's component, not the artboard's drawn one.
+      expect(find.text('Type your own answer'), findsOneWidget);
+      expect(find.byKey(const Key('answer_mic')), findsOneWidget);
+      expect(find.byIcon(Icons.mic), findsNothing);
+    },
+  );
 
   testWidgets('Send is disabled until the current question is answered', (
     tester,

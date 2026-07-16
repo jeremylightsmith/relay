@@ -47,26 +47,20 @@ void main() {
     ); // oklch(0.72 0.06 30)
   });
 
-  test(
-    'the inert mic ghosts the artboard violet rather than inventing a grey',
-    () {
-      expect(
-        RelayTheme.micGhostFill,
-        const Color(0xFFF2F1F8),
-      ); // oklch(0.96 0.01 292)
-      expect(
-        RelayTheme.micGhostBorder,
-        const Color(0xFFD7D6DE),
-      ); // oklch(0.88 0.01 292)
-      expect(
-        RelayTheme.micGhostGlyph,
-        const Color(0xFFAEACBA),
-      ); // oklch(0.75 0.02 292)
-
-      // Ghosted, not the live violet RLY-99 will restore.
-      expect(RelayTheme.micGhostGlyph, isNot(RelayTheme.relayAI));
-    },
-  );
+  test('the mic wears its own live violet trio (RLY-99)', () {
+    expect(
+      RelayTheme.relayMicFill,
+      const Color(0xFFF2EFFF),
+    ); // oklch(0.96 0.03 292)
+    expect(
+      RelayTheme.relayMicBorder,
+      const Color(0xFFD7D2F7),
+    ); // oklch(0.88 0.05 292)
+    expect(
+      RelayTheme.relayMicGlyph,
+      const Color(0xFF6750AB),
+    ); // oklch(0.50 0.14 292)
+  });
 
   test('the NEEDS INPUT pill is the artboard oklch trio, converted', () {
     // INPUT-01's pill (Relay Mobile.dc.html ~line 329) — the same three tokens as the
