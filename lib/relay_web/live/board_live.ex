@@ -950,7 +950,7 @@ defmodule RelayWeb.BoardLive do
         %{assigns: %{selected_card: %Card{status: :needs_input} = card}} = socket
       ) do
     case Cards.answer_input(card, body, current_actor(socket)) do
-      {:ok, card} -> {:noreply, refresh_card(socket, card)}
+      {:ok, card} -> {:noreply, after_answer(socket, card)}
       {:error, _changeset} -> {:noreply, socket}
     end
   end
@@ -1035,7 +1035,7 @@ defmodule RelayWeb.BoardLive do
         } = socket
       ) do
     case Cards.answer_input(card, Cards.compose_answer(questions, values), current_actor(socket)) do
-      {:ok, updated} -> {:noreply, refresh_card(socket, updated)}
+      {:ok, updated} -> {:noreply, after_answer(socket, updated)}
       {:error, _changeset} -> {:noreply, socket}
     end
   end
@@ -1050,7 +1050,7 @@ defmodule RelayWeb.BoardLive do
   # keep every other session in sync.
   def handle_event("review_approve", _params, %{assigns: %{selected_card: %Card{status: :in_review} = card}} = socket) do
     case Cards.approve(card, current_actor(socket)) do
-      {:ok, updated} -> {:noreply, refresh_after_review(socket, card, updated)}
+      {:ok, updated} -> {:noreply, after_review_decision(socket, card, updated)}
       {:error, _reason} -> {:noreply, socket}
     end
   end
@@ -1078,7 +1078,7 @@ defmodule RelayWeb.BoardLive do
        )}
     else
       case Cards.reject(card, note, current_actor(socket)) do
-        {:ok, updated} -> {:noreply, refresh_after_review(socket, card, updated)}
+        {:ok, updated} -> {:noreply, after_review_decision(socket, card, updated)}
         {:error, _reason} -> {:noreply, socket}
       end
     end
@@ -1490,6 +1490,42 @@ defmodule RelayWeb.BoardLive do
     socket
     |> apply_move(before.stage_id, updated)
     |> refresh_card(updated)
+  end
+
+  # RLY-115 — a primary review decision (Approve / Request changes) dispatches the
+  # card, so the drawer's job is done: keep the column re-stream + counts
+  # (apply_move/3) but skip the drawer refresh, and patch back to the board URL —
+  # the patch's handle_params clears selected_card, which closes the drawer.
+  # Archive's precedent, minus the flash: the card's new column placement is the
+  # confirmation. Card mode (/cards/:ref) keeps refresh-in-place — the native
+  # shell owns dismissal (RLY-87) and there is no board behind the drawer.
+  defp after_review_decision(%{assigns: %{live_action: :card}} = socket, %Card{} = before, %Card{} = updated) do
+    refresh_after_review(socket, before, updated)
+  end
+
+  defp after_review_decision(socket, %Card{} = before, %Card{} = updated) do
+    socket
+    |> apply_move(before.stage_id, updated)
+    |> close_drawer_after_action()
+  end
+
+  defp close_drawer_after_action(socket) do
+    push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}")
+  end
+
+  # RLY-115 — an answered block resumes the card, so the drawer's job is done:
+  # re-stream the card tile (the amber badge flips off synchronously, as
+  # refresh_card/2 does today), refresh the board-level question previews, then
+  # patch back to the board URL. Card mode keeps refresh-in-place (RLY-87).
+  defp after_answer(%{assigns: %{live_action: :card}} = socket, %Card{} = updated) do
+    refresh_card(socket, updated)
+  end
+
+  defp after_answer(socket, %Card{} = updated) do
+    socket
+    |> stream_insert(stream_name(updated.stage_id), updated)
+    |> assign(:needs_input_questions, Cards.needs_input_questions(socket.assigns.board))
+    |> close_drawer_after_action()
   end
 
   # MMF 15 — the drawer's review-panel assigns. Recomputed on every drawer

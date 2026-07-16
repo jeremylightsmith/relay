@@ -82,7 +82,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     refute has_element?(view, "#review-pull")
   end
 
-  test "Approve advances the card to the next main stage and logs :approved",
+  test "Approve closes the drawer and lands the card in the next main stage (RLY-115)",
        %{conn: conn, user: user, board: board, review: review, deploy: deploy} do
     in_review_card(review)
 
@@ -91,14 +91,15 @@ defmodule RelayWeb.BoardLiveReviewTest do
 
     view |> element("#review-approve") |> render_click()
 
+    # the drawer closed back to the board — silently: the card's new column is the confirmation
+    assert_patch(view, ~p"/board/#{board.slug}")
+    refute has_element?(view, "#card-drawer")
+    refute has_element?(view, "#flash-info")
+    assert has_element?(view, "#stage-col-#{deploy.position}-cards .board-card", "Review me")
+
     reloaded = Cards.get_card_by_ref(board, "RLY-1")
     assert reloaded.stage_id == deploy.id
     assert reloaded.status == :working
-
-    refute has_element?(view, "#review-panel")
-    assert has_element?(view, "#card-drawer .drawer-stage-chip", "Deploy")
-    assert has_element?(view, "#stage-col-#{deploy.position}-cards .board-card", "Review me")
-    assert has_element?(view, "#card-drawer-activity .timeline-activity-phrase", "approved")
 
     entry = reloaded |> Activity.list_timeline() |> Enum.find(&match?(%Schemas.Activity{type: :approved}, &1))
     assert entry.actor_type == :user
@@ -129,13 +130,15 @@ defmodule RelayWeb.BoardLiveReviewTest do
     |> form("#review-reject-form", reject: %{note: "Tighten the error handling"})
     |> render_submit()
 
+    # the drawer closed back to the board — no flash
+    assert_patch(view, ~p"/board/#{board.slug}")
+    refute has_element?(view, "#card-drawer")
+    refute has_element?(view, "#flash-info")
+    assert has_element?(view, "#stage-col-#{code.position}-cards .board-card", "Review me")
+
     reloaded = Cards.get_card_by_ref(board, "RLY-1")
     assert reloaded.stage_id == code.id
     assert reloaded.status == :working
-
-    refute has_element?(view, "#review-panel")
-    assert has_element?(view, "#card-drawer-conversation .timeline-comment-body", "Tighten the error handling")
-    assert has_element?(view, "#card-drawer-activity .timeline-activity-phrase", "requested changes")
 
     timeline = Activity.list_timeline(reloaded)
     note = Enum.find(timeline, &match?(%Comment{body: "Tighten the error handling"}, &1))

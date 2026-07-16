@@ -76,7 +76,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     refute has_element?(view, "#needs-input-question", "First question?")
   end
 
-  test "answering resumes an AI-stage card to :working, logs, and hides the panel",
+  test "answering closes the drawer, resumes the card to :working, and clears the amber badge (RLY-115)",
        %{conn: conn, board: board, code: code} do
     {:ok, card} = Cards.create_card(code, %{title: "Ship exports"})
     {:ok, _blocked} = Cards.request_input(card, "Which bucket?")
@@ -88,9 +88,10 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     |> form("#needs-input-form", answer: %{body: "The relay-exports bucket"})
     |> render_submit()
 
-    refute has_element?(view, "#needs-input-panel")
-    assert has_element?(view, "#card-drawer-conversation .timeline-comment-body", "The relay-exports bucket")
-    assert has_element?(view, "#card-drawer-activity .timeline-activity-phrase", "answered the question")
+    # the drawer closed back to the board — silently — and the tile's amber treatment is gone
+    assert_patch(view, ~p"/board/#{board.slug}")
+    refute has_element?(view, "#card-drawer")
+    refute has_element?(view, "#flash-info")
     refute has_element?(view, "#stage-col-#{code.position}-cards .card-needs-input")
 
     reloaded = Cards.get_card_by_ref(board, "RLY-1")
@@ -105,7 +106,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     assert answer.actor_type == :user
   end
 
-  test "answering a human-stage card returns it to :ready",
+  test "answering a human-stage card closes the drawer and returns it to :ready",
        %{conn: conn, board: board, backlog: backlog} do
     {:ok, card} = Cards.create_card(backlog, %{title: "Human next"})
     {:ok, _blocked} = Cards.request_input(card, "Ready to start?")
@@ -114,7 +115,8 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
 
     view |> form("#needs-input-form", answer: %{body: "Yes, go"}) |> render_submit()
 
-    refute has_element?(view, "#needs-input-panel")
+    assert_patch(view, ~p"/board/#{board.slug}")
+    refute has_element?(view, "#card-drawer")
     assert Cards.get_card_by_ref(board, "RLY-1").status == :ready
   end
 
@@ -263,14 +265,15 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
 
     view |> element("#needs-input-send") |> render_click()
 
-    refute has_element?(view, "#needs-input-panel")
+    # the drawer closed back to the board
+    assert_patch(view, ~p"/board/#{board.slug}")
+    refute has_element?(view, "#card-drawer")
 
     reloaded = Cards.get_card_by_ref(board, "RLY-1")
     assert reloaded.status == :working
     assert reloaded.blocked_since == nil
 
     composed = "1. Which timezone? → Billing\n2. Any size limit? → Under 10 MB"
-    assert has_element?(view, "#card-drawer-conversation .timeline-comment-body", "Which timezone?")
 
     comment =
       reloaded
