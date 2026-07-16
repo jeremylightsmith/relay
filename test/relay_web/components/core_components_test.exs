@@ -288,6 +288,38 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "No cards yet"
     end
 
+    test "collapsible renders a ghost collapse control in the expanded header (RLY-111)" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-5",
+          name: "Code",
+          type: :work,
+          stage_id: 5,
+          count: 2,
+          collapsible: true
+        )
+
+      assert html =~ ~s(id="stage-col-5-collapse")
+      assert html =~ ~s(phx-click="collapse_stage")
+      assert html =~ ~s(phx-value-stage-id="5")
+      assert html =~ ~s(aria-label="Collapse stage Code")
+      assert html =~ "btn-ghost"
+    end
+
+    test "the collapse control does not render by default (RLY-111)" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-1",
+          name: "Backlog",
+          type: :queue,
+          stage_id: 7,
+          count: 2
+        )
+
+      refute html =~ ~s(id="stage-col-1-collapse")
+      refute html =~ ~s(phx-click="collapse_stage")
+    end
+
     test "shows the violet AI-listening pill on an ai-enabled non-complete stage" do
       html =
         render_component(&CoreComponents.stage_column/1,

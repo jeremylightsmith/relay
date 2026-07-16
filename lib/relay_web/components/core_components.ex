@@ -2596,7 +2596,9 @@ defmodule RelayWeb.CoreComponents do
   When `collapsed` (MMF 12c), the stage renders instead as the mockup's 44px dashed
   vertical strip — owner swatch, rotated name, total count — which remains a
   `.stage-cards[data-stage-id]` drop zone and emits `"expand_stage"`
-  (`phx-value-stage-id`) on click.
+  (`phx-value-stage-id`) on click. When `collapsible` (RLY-111 — the stage is
+  collapsed-by-default), the expanded header shows a ghost collapse button that emits
+  `"collapse_stage"` (`phx-value-stage-id`).
 
   ## Examples
 
@@ -2636,6 +2638,12 @@ defmodule RelayWeb.CoreComponents do
   attr :main_collapsed, :boolean,
     default: false,
     doc: "render the main 'In progress' lane as a 44px strip (RLY-1 item 3)"
+
+  attr :collapsible, :boolean,
+    default: false,
+    doc:
+      "RLY-111 — the stage is collapsed-by-default, so its expanded header offers a " <>
+        "re-collapse control (emits \"collapse_stage\" with phx-value-stage-id)"
 
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
 
@@ -2743,6 +2751,19 @@ defmodule RelayWeb.CoreComponents do
             wip {@total_count}/{@wip_limit}
           </span>
           <span style="flex:1;"></span>
+          <button
+            :if={@collapsible}
+            type="button"
+            id={"#{@id}-collapse"}
+            class="stage-collapse btn btn-ghost btn-xs btn-circle"
+            phx-click="collapse_stage"
+            phx-value-stage-id={@stage_id}
+            title="Collapse stage"
+            aria-label={"Collapse stage #{@name}"}
+            style="color:oklch(0.52 0.02 255);flex:0 0 auto;"
+          >
+            <.icon name="hero-chevron-left" class="size-4" />
+          </button>
           <button
             :if={!@composing and !@read_only}
             type="button"
