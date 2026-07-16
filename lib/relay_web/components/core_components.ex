@@ -536,6 +536,140 @@ defmodule RelayWeb.CoreComponents do
   defp status_badge_label(:in_review, _progress), do: "in review"
 
   @doc """
+  The one avatar (RLY-90). A person renders their photo when we have one
+  (`src`), white initials on a colored circle otherwise; the AI renders the
+  violet dot mark and never a photo. Every people surface (top bar, card
+  owner cluster, member stack, comment timeline, reassign picker, board
+  settings) draws through this, so the same person looks the same everywhere.
+
+  Takes primitives, not structs — storybook stories pass plain values, and
+  invited members have no user row at all.
+
+  `tint={:role}` fills with `--color-primary` (human=blue is load-bearing);
+  `tint={:identity}` seeds a stable hue from the email, so one person keeps
+  one color across surfaces.
+  """
+  attr :src, :string, default: nil, doc: "the avatar_url; ignored when actor={:ai}"
+  attr :name, :string, default: nil, doc: "display name — title text + initials"
+  attr :email, :string, default: nil, doc: "initials fallback + identity hue seed"
+  attr :actor, :atom, values: [:human, :ai], default: :human
+  attr :size, :integer, default: 24, doc: "circle diameter in px"
+  attr :tint, :atom, values: [:role, :identity], default: :identity
+  attr :ring, :string, default: nil, doc: "CSS ring color, or nil — the active-owner double shadow"
+  attr :grayed, :boolean, default: false
+  attr :class, :string, default: nil
+
+  def avatar(%{actor: :ai} = assigns) do
+    assigns = assign(assigns, :mark_size, round(assigns.size * 0.36))
+
+    ~H"""
+    <span
+      class={@class}
+      style={avatar_circle_style(@size, "var(--color-secondary)", @ring, @grayed)}
+      title="Relay AI"
+      data-avatar="ai"
+    >
+      <span style={"width:#{@mark_size}px;height:#{@mark_size}px;border-radius:50%;border:1.5px solid oklch(1 0 0);display:block"}>
+      </span>
+    </span>
+    """
+  end
+
+  def avatar(%{src: src} = assigns) when is_binary(src) and src != "" do
+    ~H"""
+    <span
+      class={@class}
+      style={avatar_circle_style(@size, nil, @ring, @grayed) <> ";overflow:hidden"}
+      title={@name || @email}
+      data-avatar="photo"
+    >
+      <img
+        src={@src}
+        alt={@name || @email}
+        referrerpolicy="no-referrer"
+        style="width:100%;height:100%;object-fit:cover"
+      />
+    </span>
+    """
+  end
+
+  def avatar(assigns) do
+    fill = if assigns.tint == :role, do: "var(--color-primary)", else: avatar_fill(assigns.email)
+
+    # Spread as dynamic attrs, and keep the child on the tag's own line: with
+    # a bare-text child, mix format's HEEx formatter (unlike for element
+    # children) hoists surrounding whitespace into literal text nodes the
+    # moment the opening tag wraps onto multiple lines — which the `>DK<`
+    # style tests below would otherwise fail on.
+    assigns =
+      assign(assigns,
+        attrs: %{
+          class: assigns.class,
+          style: avatar_circle_style(assigns.size, fill, assigns.ring, assigns.grayed),
+          title: assigns.name || assigns.email,
+          "data-avatar": "initials"
+        },
+        initials: avatar_initials(assigns.name, assigns.email)
+      )
+
+    ~H"""
+    <span {@attrs}>{@initials}</span>
+    """
+  end
+
+  defp avatar_circle_style(size, fill, ring, grayed) do
+    [
+      "width:#{size}px",
+      "height:#{size}px",
+      "border-radius:50%",
+      fill && "background:#{fill}",
+      "color:oklch(1 0 0)",
+      "display:flex",
+      "align-items:center",
+      "justify-content:center",
+      "font-size:#{round(size * 0.42)}px",
+      "font-weight:600",
+      "flex:0 0 auto",
+      "box-sizing:border-box",
+      ring && "box-shadow:0 0 0 3.5px #{ring}, 0 0 0 2px var(--color-base-100)",
+      grayed && "filter:grayscale(1)",
+      grayed && "opacity:0.5"
+    ]
+    |> Enum.filter(&is_binary/1)
+    |> Enum.join(";")
+  end
+
+  # The one initials rule (RLY-90 [E4]), mirrored by the mobile app's
+  # initialsFor/2: a name yields the first letters of its first two words;
+  # with no name, the email's LOCAL PART split on [._\s-] (dana@acme.co → D,
+  # dana.kim@acme.co → DK); both blank yields "?". Never crashes on nil.
+  defp avatar_initials(name, email) do
+    cond do
+      filled?(name) -> take_initials(String.split(name, ~r/\s+/, trim: true))
+      filled?(email) -> email |> String.split("@") |> List.first("") |> local_part_initials()
+      true -> "?"
+    end
+  end
+
+  defp filled?(value), do: is_binary(value) and String.trim(value) != ""
+
+  defp local_part_initials(local), do: take_initials(String.split(local, ~r/[._\s-]+/, trim: true))
+
+  defp take_initials(words) do
+    case words |> Enum.take(2) |> Enum.map_join("", &String.first/1) |> String.upcase() do
+      "" -> "?"
+      initials -> initials
+    end
+  end
+
+  # The identity fill (RLY-90 [E2]): one hue per email, everywhere — the same
+  # oklch(0.62 0.13 h) formula the member stack and board settings already used.
+  defp avatar_fill(email) do
+    hue = rem(:erlang.phash2(email || ""), 360)
+    "oklch(0.62 0.13 #{hue})"
+  end
+
+  @doc """
   Renders the owner avatar cluster for a card — the mockup's "who holds the
   baton" glance (`docs/designs/Relay Board.dc.html`, `buildCluster`). Human
   owners are ~22px initialed circles (blue); the AI owner is a violet circle

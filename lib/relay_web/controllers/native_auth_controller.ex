@@ -79,7 +79,7 @@ defmodule RelayWeb.NativeAuthController do
   end
 
   # Shared with google/2 so the two responses cannot drift.
-  defp user_json(user), do: %{id: user.id, name: user.name, email: user.email}
+  defp user_json(user), do: %{id: user.id, name: user.name, email: user.email, avatar_url: user.avatar_url}
 
   defp translate_errors(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->

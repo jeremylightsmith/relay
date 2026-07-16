@@ -4,6 +4,7 @@ defmodule Storybook.CoreComponents do
 
   def folder_open?, do: true
 
+  def entry("avatar"), do: [icon: {:fa, "circle-user", :thin}]
   def entry("back"), do: [icon: {:fa, "circle-left", :thin}]
   def entry("board_card"), do: [icon: {:fa, "note-sticky", :thin}]
   def entry("button"), do: [icon: {:fa, "rectangle-ad", :thin}]
@@ -14,6 +15,7 @@ defmodule Storybook.CoreComponents do
   def entry("icon"), do: [icon: {:fa, "icons", :thin}]
   def entry("input"), do: [icon: {:fa, "input-text", :thin}]
   def entry("list"), do: [icon: {:fa, "list", :thin}]
+  def entry("member_stack"), do: [icon: {:fa, "people-group", :thin}]
   def entry("owner_avatars"), do: [icon: {:fa, "user-group", :thin}]
   def entry("owner_pill"), do: [icon: {:fa, "tag", :thin}]
   def entry("section_label"), do: [icon: {:fa, "heading", :thin}]

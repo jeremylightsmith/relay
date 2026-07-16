@@ -28,7 +28,14 @@ defmodule RelayWeb.NativeAuthControllerTest do
 
       user = Repo.get_by!(User, provider_uid: "google-sub-1")
       assert %{"success" => true, "user" => body_user} = json_response(conn, 200)
-      assert body_user == %{"id" => user.id, "name" => "Ada Lovelace", "email" => "ada@example.com"}
+
+      assert body_user == %{
+               "id" => user.id,
+               "name" => "Ada Lovelace",
+               "email" => "ada@example.com",
+               "avatar_url" => "https://example.com/ada.png"
+             }
+
       assert get_session(conn, :user_id) == user.id
       assert Map.has_key?(conn.resp_cookies, "_relay_key")
     end
@@ -143,6 +150,23 @@ defmodule RelayWeb.NativeAuthControllerTest do
         |> get(~p"/api/auth/native/me")
 
       assert json_response(conn, 401) == %{"success" => false, "error" => "Not signed in"}
+    end
+
+    test "returns the avatar_url so the photo survives an app restart", %{conn: conn} do
+      user = insert(:user, avatar_url: "https://example.com/ada.png")
+
+      conn = conn |> log_in_user(user) |> get(~p"/api/auth/native/me")
+
+      assert %{"success" => true, "user" => %{"avatar_url" => "https://example.com/ada.png"}} =
+               json_response(conn, 200)
+    end
+
+    test "avatar_url is null-safe for a user without one", %{conn: conn} do
+      user = insert(:user, avatar_url: nil)
+
+      conn = conn |> log_in_user(user) |> get(~p"/api/auth/native/me")
+
+      assert %{"success" => true, "user" => %{"avatar_url" => nil}} = json_response(conn, 200)
     end
 
     test "the user JSON cannot drift from what sign-in returned", %{conn: conn} do
