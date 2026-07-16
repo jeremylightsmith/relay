@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../config.dart';
+import '../decisions/review_queue.dart';
 import 'widgets/card_review_bar.dart';
 
 /// The card-detail host: the native back bar, the **embedded chromeless LiveView card
@@ -14,7 +17,13 @@ import 'widgets/card_review_bar.dart';
 ///
 /// The bar swaps by [kind] and lives in `bottomNavigationBar` — outside the webview's
 /// scroll, so no amount of body scrolling can lose it (brief §04).
-class CardScreen extends StatelessWidget {
+///
+/// RLY-88 wires the bar: Approve posts through [ReviewQueue.approveCurrent] and
+/// auto-advances (D1 — no confirmation screens); Reject opens the CORE-07 note
+/// screen. Arrivals the inbox tap didn't snapshot (a push deep link) are seeded as a
+/// one-item queue here, so the bar is never dead and never decides a different card
+/// than the one on screen.
+class CardScreen extends ConsumerStatefulWidget {
   const CardScreen({
     super.key,
     required this.cardRef,
@@ -49,40 +58,149 @@ class CardScreen extends StatelessWidget {
   }
 
   @override
+  ConsumerState<CardScreen> createState() => _CardScreenState();
+}
+
+class _CardScreenState extends ConsumerState<CardScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _seedIfNeeded();
+    _scheduleBanner();
+  }
+
+  // go_router's default page key is derived from the route *pattern*
+  // (`/cards/:ref`), not the resolved path — advancing from RLY-A's card to
+  // RLY-B's via pushReplacement reuses this State rather than remounting it
+  // (same trap AnswerScreen documents). didUpdateWidget is what notices the
+  // ref changed.
+  @override
+  void didUpdateWidget(covariant CardScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.cardRef != oldWidget.cardRef ||
+        widget.boardSlug != oldWidget.boardSlug) {
+      _seedIfNeeded();
+      _scheduleBanner();
+    }
+  }
+
+  /// An inbox tap snapshots the queue before pushing here, and a queue advance
+  /// lands with the cursor already on this card — both match and are left
+  /// alone (the snapshot's order is the whole point, D3). A push deep link or
+  /// a stale stack doesn't match: seed a one-item snapshot so Approve decides
+  /// *this* card, and the end-of-snapshot refetch picks the walk up from the
+  /// live feed. This closes pathForPayload's "RLY-88 must handle it" note —
+  /// a stale push's wrong `kind` resolves as a 422 skip, not an error.
+  ///
+  /// The actual notifier write is deferred a frame (same reason as
+  /// [_scheduleBanner]): Riverpod forbids modifying a provider synchronously
+  /// from a widget lifecycle method (initState/didUpdateWidget/build), so
+  /// seeding here — not from a button's onPressed — must happen post-frame.
+  void _seedIfNeeded() {
+    if (widget.kind != 'in_review') return;
+    final current = ref.read(reviewQueueProvider).current;
+    if (current != null &&
+        current.ref == widget.cardRef &&
+        current.boardSlug == widget.boardSlug) {
+      return;
+    }
+    final item = QueueItem(
+      ref: widget.cardRef,
+      boardSlug: widget.boardSlug,
+      boardName: '',
+      title: '',
+      kind: widget.kind!,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(reviewQueueProvider.notifier).enterSingle(item);
+    });
+  }
+
+  /// The banner belongs to the card just decided, shown over the one we land
+  /// on (same pattern as AnswerScreen._scheduleBanner) — the D1 replacement
+  /// for the superseded CORE-06/CORE-08 confirmation screens.
+  void _scheduleBanner() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final banner = ref.read(reviewQueueProvider.notifier).takeBanner();
+      if (banner != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(banner)));
+      }
+    });
+  }
+
+  Future<void> _approve() async {
+    final dest = await ref
+        .read(reviewQueueProvider.notifier)
+        .approveCurrent(cardRef: widget.cardRef, boardSlug: widget.boardSlug);
+    if (!mounted || dest == null) return;
+    navigateQueue(GoRouter.of(context), dest);
+  }
+
+  void _reject() {
+    context.push('/card/${widget.cardRef}/reject?board=${widget.boardSlug}');
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // A failed decision surfaces here (spec: snackbar + Retry, stay put).
+    // Only when this screen is current — the reject screen handles its own
+    // failures with an inline strip, and must not get a second snackbar.
+    ref.listen(reviewQueueProvider.select((s) => s.error), (previous, error) {
+      if (error == null || !(ModalRoute.of(context)?.isCurrent ?? true)) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error),
+          action: SnackBarAction(label: 'Retry', onPressed: _approve),
+        ),
+      );
+    });
+
     return Scaffold(
-      appBar: AppBar(title: Text(cardRef)),
-      body:
-          bodyBuilder?.call(context) ??
-          InAppWebView(
-            key: const Key('card_webview'),
-            initialUrlRequest: URLRequest(
-              url: WebUri(cardUrl(cardRef: cardRef, boardSlug: boardSlug)),
+      appBar: AppBar(title: Text(widget.cardRef)),
+      // Advancing reuses this State (see didUpdateWidget) — and an *updated*
+      // InAppWebView keeps the old card's page, since initialUrlRequest only
+      // applies on mount. The per-card key remounts the body so the new card
+      // actually loads.
+      body: KeyedSubtree(
+        key: ValueKey('card_body_${widget.cardRef}'),
+        child:
+            widget.bodyBuilder?.call(context) ??
+            InAppWebView(
+              key: const Key('card_webview'),
+              initialUrlRequest: URLRequest(
+                url: WebUri(
+                  CardScreen.cardUrl(
+                    cardRef: widget.cardRef,
+                    boardSlug: widget.boardSlug,
+                  ),
+                ),
+              ),
             ),
-          ),
-      bottomNavigationBar: _actionBar(context),
+      ),
+      bottomNavigationBar: _actionBar(),
     );
   }
 
-  /// The action-bar slot. RLY-89 adds the `needs_input` answer bar here; until then the
-  /// web stepper inside the body is still how V1-7 answers, so rendering nothing is
-  /// correct.
-  Widget? _actionBar(BuildContext context) {
-    return switch (kind) {
+  /// The action-bar slot. RLY-89's needs_input answering still happens through
+  /// the web stepper inside the body, so rendering nothing there is correct.
+  Widget? _actionBar() {
+    final inFlight = ref.watch(reviewQueueProvider.select((s) => s.inFlight));
+    return switch (widget.kind) {
+      // Disabling while a POST is in flight is the visible half of the
+      // double-tap guard (the queue's inFlight short-circuit is the
+      // authoritative half). Approve/reject are irreversible — no domain
+      // undo — so both go quiet together.
       'in_review' => CardReviewBar(
-        onApprove: () => _stub(context, 'Approve'),
-        onReject: () => _stub(context, 'Reject'),
+        onApprove: inFlight ? null : _approve,
+        onReject: inFlight ? null : _reject,
       ),
       _ => null,
     };
-  }
-
-  /// RLY-87 is the surface; RLY-88 replaces these bodies with the real API calls,
-  /// the reject-note sheet and the result states. Say so out loud rather than
-  /// failing silently.
-  void _stub(BuildContext context, String action) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('$action lands in RLY-88')));
   }
 }
