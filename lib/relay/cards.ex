@@ -471,31 +471,34 @@ defmodule Relay.Cards do
   @stale_after to_timeout(minute: 10)
 
   @doc """
-  The card's derived agent health (RLY-112, artboard §03) —
-  `:stopped | :none | :stale | :live`.
+  The card's derived agent health (RLY-112) — `:none | :stopped | :stale | :live`.
 
   Pure: takes a plain map (`:newest` — the card's newest `Schemas.Activity` or `nil`;
-  `:heartbeat_at`; `:ai_active?`; `:now`), touches no DB, and builds no structs, so the
-  four branches unit-test directly. Health is derived at render and **never stored**.
+  `:heartbeat_at`; `:ai_active?`; `:ai_stage?` — whether the card's stage is `ai_enabled`;
+  `:now`), touches no DB, and builds no structs, so every branch unit-tests directly.
+  Health is derived at render and **never stored**.
 
-  The artboard's branch order, including failure-before-`ai_active?`:
+  Branch order (the 2026-07-16 rejection layered over the artboard's §03):
 
-    1. the newest entry is a `:failure` → `:stopped` (rose)
-    2. no active AI → `:none` (no strip)
-    3. quiet longer than `STALE_AFTER` → `:stale` (amber), where the age is measured
-       from the *later* of the newest entry and the heartbeat
-    4. otherwise → `:live` (violet, pulsing)
+    1. the stage is not AI-enabled → `:none` — "only show the log status in the ai
+       enabled columns". Checked before everything, so even a failure goes dark when
+       the card leaves an AI column.
+    2. the newest entry is a `:failure` → `:stopped` (rose strip, `!` disc)
+    3. no active AI owner → `:none`
+    4. quiet longer than `STALE_AFTER` → `:stale` (muted gray strip — never amber, and
+       never a card border/accent change), age measured from the *later* of the newest
+       entry and the heartbeat
+    5. otherwise → `:live` (violet, pulsing)
 
-  Two accepted v1 consequences: a failure that is never superseded keeps reading
-  `:stopped` even after the AI is released (any later move supersedes it); and no
-  timestamp at all reads `:live`, not `:stale` — unreachable in practice, and choosing
+  No timestamp at all reads `:live`, not `:stale` — unreachable in practice, and choosing
   `:live` means we never cry wolf on zero evidence.
 
   `STALE_AFTER` is 10 minutes (Q5→C) and is a module attribute, not config — the 30s
   heartbeat interval that pairs with it lives in the runner.
   """
-  def health(%{newest: newest, heartbeat_at: heartbeat_at, ai_active?: ai_active?, now: now}) do
+  def health(%{newest: newest, heartbeat_at: heartbeat_at, ai_active?: ai_active?, ai_stage?: ai_stage?, now: now}) do
     cond do
+      not ai_stage? -> :none
       newest && Activity.kind(newest) == :failure -> :stopped
       not ai_active? -> :none
       stale?(newest, heartbeat_at, now) -> :stale
