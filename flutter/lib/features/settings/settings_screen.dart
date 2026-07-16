@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../widgets/relay_avatar.dart';
 import '../auth/auth_controller.dart';
+import 'logout_confirm_dialog.dart';
 
-/// SET-01 Settings (RLY-90): the identity block + one `Account ›` row.
-/// Log out lives on the Account screen [answer 1(b)], and the artboard's
-/// Notifications / Voice replies rows are deliberately not built — SET-03 is
-/// deferred and RLY-99 is still in Backlog. The auth gate makes signed-out
+/// SET-01 Settings (RLY-90): the identity block + the outlined destructive
+/// Log out button, as the artboard draws it. The artboard's rows card is
+/// deliberately not built — Notifications / Voice replies await SET-03 and
+/// RLY-99, and the Account row was cut at Review ("add logout to the
+/// settings page and get rid of account"). The auth gate makes signed-out
 /// unreachable here; the null-tolerant reads below are for the ungated
 /// shell test, not a real state.
 class SettingsScreen extends ConsumerWidget {
@@ -63,39 +64,24 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          // The rows card, down to its one backed row (SET-01 divergence 1).
-          Container(
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              color: scheme.surface,
-              border: Border.all(color: scheme.outlineVariant),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: InkWell(
-              key: const Key('settings_account_row'),
-              onTap: () => context.push('/account'),
-              child: Padding(
-                padding: const EdgeInsets.all(13),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Account',
-                        style: TextStyle(fontSize: 13, color: scheme.onSurface),
-                      ),
-                    ),
-                    Text(
-                      '›',
-                      style: TextStyle(
-                        fontSize: 15,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
+          const SizedBox(height: 24),
+          // SET-01's outlined destructive Log out (artboard line ~571).
+          OutlinedButton(
+            key: const Key('settings_log_out'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: scheme.error,
+              side: BorderSide(color: scheme.error.withValues(alpha: 0.45)),
+              padding: const EdgeInsets.all(13),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              textStyle: const TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
               ),
             ),
+            onPressed: () => showLogoutConfirmDialog(context),
+            child: const Text('Log out'),
           ),
         ],
       ),
