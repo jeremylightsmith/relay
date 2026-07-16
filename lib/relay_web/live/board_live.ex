@@ -154,7 +154,16 @@ defmodule RelayWeb.BoardLive do
                   ai_enabled={stage.ai_enabled}
                   category={category}
                   stage_id={stage.id}
-                  collapsed={stage_collapsed?(stage, @stage_counts, @sublanes_by_parent, @force_open)}
+                  collapsed={
+                    stage_collapsed?(
+                      stage,
+                      @stage_counts,
+                      @sublanes_by_parent,
+                      @force_open,
+                      @stage_force_closed
+                    )
+                  }
+                  collapsible={stage.collapsed_by_default}
                   main_collapsed={
                     lane_collapsed?(stage.id, :main, @stage_counts, @force_open, @force_closed)
                   }
@@ -403,6 +412,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:done_revealed, @done_page_size)
       |> assign(:force_open, MapSet.new())
       |> assign(:force_closed, MapSet.new())
+      |> assign(:stage_force_closed, MapSet.new())
       |> assign(:composing_stage_id, nil)
       |> assign(:compose_form, empty_compose_form())
       |> assign(:members, Members.list_members(board))
@@ -630,12 +640,34 @@ defmodule RelayWeb.BoardLive do
     end
   end
 
-  # MMF 12c — clicking a collapsed stage/lane strip force-opens it for this
-  # session only (a MapSet in the socket; not persisted, not broadcast).
+  # MMF 12c — clicking a collapsed stage strip force-opens it for this session only
+  # (a MapSet in the socket; not persisted, not broadcast). RLY-111: also clears any
+  # session re-collapse, so force_open and stage_force_closed never both hold one id.
   def handle_event("expand_stage", %{"stage-id" => stage_id}, socket) do
     case parse_int(stage_id) do
-      nil -> {:noreply, socket}
-      id -> {:noreply, update(socket, :force_open, &MapSet.put(&1, id))}
+      nil ->
+        {:noreply, socket}
+
+      id ->
+        {:noreply,
+         socket
+         |> update(:stage_force_closed, &MapSet.delete(&1, id))
+         |> update(:force_open, &MapSet.put(&1, id))}
+    end
+  end
+
+  # RLY-111 — the header control on a collapsed-by-default stage re-collapses it for
+  # this session, without a reload. Complementary to expand_stage.
+  def handle_event("collapse_stage", %{"stage-id" => stage_id}, socket) do
+    case parse_int(stage_id) do
+      nil ->
+        {:noreply, socket}
+
+      id ->
+        {:noreply,
+         socket
+         |> update(:force_open, &MapSet.delete(&1, id))
+         |> update(:stage_force_closed, &MapSet.put(&1, id))}
     end
   end
 
@@ -1313,18 +1345,26 @@ defmodule RelayWeb.BoardLive do
     end
   end
 
-  # MMF 12c — a stage auto-collapses to the mockup's strip only when it is
-  # empty across its main lane AND all its sub-lanes, and the user hasn't
-  # force-opened it this session (mockup: collapsed = all.length === 0).
-  defp stage_collapsed?(%Stage{} = stage, stage_counts, sublanes_by_parent, force_open) do
-    total =
-      sublanes_by_parent
-      |> Map.get(stage.id, [])
-      |> Enum.reduce(Map.fetch!(stage_counts, stage.id), fn sub, acc ->
-        acc + Map.fetch!(stage_counts, sub.id)
-      end)
+  # MMF 12c + RLY-111 — a stage renders as the mockup's 44px strip when: the user
+  # re-collapsed it this session (stage_force_closed, RLY-111); else NOT when they
+  # force-opened it; else when it is collapsed-by-default (RLY-111, count-independent);
+  # else when it is empty across its main lane AND all sub-lanes (MMF 12c). An explicit
+  # session gesture beats the board-wide setting; the setting beats the count.
+  defp stage_collapsed?(%Stage{} = stage, stage_counts, sublanes_by_parent, force_open, stage_force_closed) do
+    cond do
+      MapSet.member?(stage_force_closed, stage.id) -> true
+      MapSet.member?(force_open, stage.id) -> false
+      stage.collapsed_by_default -> true
+      true -> total_count(stage, stage_counts, sublanes_by_parent) == 0
+    end
+  end
 
-    total == 0 and not MapSet.member?(force_open, stage.id)
+  defp total_count(stage, stage_counts, sublanes_by_parent) do
+    sublanes_by_parent
+    |> Map.get(stage.id, [])
+    |> Enum.reduce(Map.fetch!(stage_counts, stage.id), fn sub, acc ->
+      acc + Map.fetch!(stage_counts, sub.id)
+    end)
   end
 
   # RLY-1 items 2 & 3 — effective per-session collapse state for a main lane or a

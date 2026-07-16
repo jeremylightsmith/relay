@@ -25,6 +25,31 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         }
       },
       %Variation{
+        id: :collapsed_by_default_with_cards,
+        description: "RLY-111 — a collapsed-by-default stage holding cards: the same 44px strip, non-zero count",
+        attributes: %{
+          id: "story-stage-someday",
+          name: "Someday",
+          type: :queue,
+          stage_id: 9,
+          count: 3,
+          collapsed: true
+        }
+      },
+      %Variation{
+        id: :collapsible_expanded,
+        description:
+          "RLY-111 — a collapsed-by-default stage expanded for the session: header shows the ghost collapse control",
+        attributes: %{
+          id: "story-stage-someday-open",
+          name: "Someday",
+          type: :queue,
+          stage_id: 9,
+          count: 0,
+          collapsible: true
+        }
+      },
+      %Variation{
         id: :with_cards,
         attributes: %{
           id: "story-stage-code",

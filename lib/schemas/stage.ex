@@ -9,7 +9,9 @@ defmodule Schemas.Stage do
   A **sub-lane is a child stage**: `parent_id` set, `type in [:review, :done]`. `ai_enabled`
   ("Relay AI listens here") is only meaningful for `:work`/`:planning` stages and is forced
   `false` for every other type. `board_id`/`parent_id` are set programmatically, never cast.
-  `wip_limit` is the optional MMF 11 limit (`nil` = no limit).
+  `wip_limit` is the optional MMF 11 limit (`nil` = no limit). `collapsed_by_default`
+  (RLY-111) makes the stage start as its 44px strip regardless of card count and applies to
+  any stage type.
   """
 
   use Ecto.Schema
@@ -26,6 +28,7 @@ defmodule Schemas.Stage do
     field :type, Ecto.Enum, values: @types
     field :ai_enabled, :boolean, default: false
     field :wip_limit, :integer
+    field :collapsed_by_default, :boolean, default: false
 
     belongs_to :board, Schemas.Board
     belongs_to :parent, Schemas.Stage
@@ -46,6 +49,7 @@ defmodule Schemas.Stage do
       :type,
       :ai_enabled,
       :wip_limit,
+      :collapsed_by_default,
       :reject_to_stage_id
     ])
     |> validate_required([:name, :position, :category, :type])
