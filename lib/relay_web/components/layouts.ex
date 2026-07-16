@@ -92,24 +92,15 @@ defmodule RelayWeb.Layouts do
           role="button"
           id="user-avatar"
           title={@current_scope.user.email}
-          class={[
-            "flex min-h-[44px] min-w-[44px] items-center justify-center",
-            if(@current_scope.user.avatar_url, do: "avatar", else: "avatar avatar-placeholder")
-          ]}
+          class="flex min-h-[44px] min-w-[44px] items-center justify-center"
         >
-          <div :if={@current_scope.user.avatar_url} class="w-7 rounded-full">
-            <img
-              src={@current_scope.user.avatar_url}
-              alt={@current_scope.user.name || @current_scope.user.email}
-              referrerpolicy="no-referrer"
-            />
-          </div>
-          <div
-            :if={!@current_scope.user.avatar_url}
-            class="bg-primary text-primary-content w-7 rounded-full"
-          >
-            <span class="text-xs">{initials(@current_scope.user)}</span>
-          </div>
+          <.avatar
+            size={28}
+            tint={:role}
+            src={@current_scope.user.avatar_url}
+            name={@current_scope.user.name}
+            email={@current_scope.user.email}
+          />
         </div>
         <ul
           tabindex="0"
@@ -142,17 +133,6 @@ defmodule RelayWeb.Layouts do
 
     <.flash_group flash={@flash} />
     """
-  end
-
-  # Initials for the avatar fallback, from the user's name (or email
-  # when the name is missing). Works on any user-shaped map or the
-  # Schemas.User struct.
-  defp initials(user) do
-    (user.name || user.email)
-    |> String.split(~r/[\s@._-]+/, trim: true)
-    |> Enum.take(2)
-    |> Enum.map_join("", &String.first/1)
-    |> String.upcase()
   end
 
   @doc """

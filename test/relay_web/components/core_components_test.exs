@@ -1354,4 +1354,39 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "opacity:0.5"
     end
   end
+
+  describe "avatar call sites (RLY-90)" do
+    test "owner_avatars renders the owner's photo when they have one" do
+      html =
+        render_component(&CoreComponents.owner_avatars/1,
+          active_owner: :human,
+          owners: [
+            %{
+              actor_type: :user,
+              user: %{name: "Dana Kim", email: "dana@acme.co", avatar_url: "https://lh3.example.com/p.png"}
+            }
+          ]
+        )
+
+      assert html =~ ~s(data-avatar="photo")
+      assert html =~ ~s(src="https://lh3.example.com/p.png")
+      # the baton ring survives the refactor
+      assert html =~ "0 0 0 3.5px var(--color-primary)"
+    end
+
+    test "member_stack renders a member's photo and hashes invited rows on email" do
+      members = [
+        %{
+          email: "dana@acme.co",
+          user: %{name: "Dana Kim", email: "dana@acme.co", avatar_url: "https://lh3.example.com/p.png"}
+        },
+        %{email: "guest@example.com", user: nil}
+      ]
+
+      html = render_component(&CoreComponents.member_stack/1, members: members)
+
+      assert html =~ ~s(data-avatar="photo")
+      assert html =~ ">G<"
+    end
+  end
 end
