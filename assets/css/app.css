@@ -118,6 +118,13 @@
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
 /* --- Drag-and-drop affordances (classes toggled by the BoardDnD hook) --- */
+/* RLY-116: .sr-only (the card-ref span) is position:absolute; without a
+   positioned ancestor it resolves against the viewport, escapes the lane
+   scroller's clipping, and adds ~1.5 screens of phantom scroll below the
+   board. The card is the containing block for its own absolute children. */
+.board-card {
+  position: relative;
+}
 .board-card.dragging {
   opacity: 0.5;
 }
