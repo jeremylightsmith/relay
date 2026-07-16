@@ -530,18 +530,22 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#stage-col-1-cards .board-card[draggable='true'][data-ref='RLY-1']")
     end
 
-    test "every stage's card container is a drop zone carrying its stage id",
+    test "every stage's lane has a .stage-drop zone carrying its stage id",
          %{conn: conn, backlog: backlog, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#stage-col-1-cards.stage-cards[data-stage-id='#{backlog.id}']")
+      # RLY-116: the .stage-drop wrapper owns the drop-zone contract; the
+      # .stage-cards stream list sits inside it and no longer carries the id
+      assert has_element?(view, "#stage-col-1-drop.stage-drop[data-stage-id='#{backlog.id}']")
+      assert has_element?(view, "#stage-col-1-drop #stage-col-1-cards.stage-cards")
+      refute has_element?(view, "#stage-col-1-cards[data-stage-id]")
 
       zones =
         view
         |> render()
         |> LazyHTML.from_fragment()
-        |> LazyHTML.query("#board .stage-cards[data-stage-id]")
+        |> LazyHTML.query("#board .stage-drop[data-stage-id]")
         |> Enum.count()
 
       assert zones == 8
@@ -2105,7 +2109,7 @@ defmodule RelayWeb.BoardLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#stage-strip-#{spec.id}.stage-cards[data-stage-id='#{spec.id}']")
+      assert has_element?(view, "#stage-strip-#{spec.id}.stage-drop[data-stage-id='#{spec.id}']")
     end
 
     test "clicking a strip force-opens the empty stage for the session",
@@ -2190,7 +2194,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(
                view,
-               "#sublane-#{review.id}-strip.sublane-strip.stage-cards[data-stage-id='#{review.id}']"
+               "#sublane-#{review.id}-strip.sublane-strip.stage-drop[data-stage-id='#{review.id}']"
              )
 
       assert has_element?(view, "#sublane-#{review.id}-strip .sublane-strip-name", "Review")

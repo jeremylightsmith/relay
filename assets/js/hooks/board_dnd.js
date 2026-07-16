@@ -1,10 +1,11 @@
 // Hand-rolled HTML5 drag-and-drop for board cards (MMF 05) — no JS
 // dependency. One delegated hook on #board: dragstart/dragend bubble up
-// from .board-card, dragover/drop from the .stage-cards zones. The hook
-// never mutates the card lists — it only pushes "move_card" with what
-// was dropped where; the server owns all state and re-streams.
+// from .board-card, dragover/drop from the .stage-drop zones (RLY-116:
+// the zone wraps the .stage-cards stream list; cards may be grandchildren).
+// The hook never mutates the card lists — it only pushes "move_card" with
+// what was dropped where; the server owns all state and re-streams.
 const CARD_SELECTOR = ".board-card"
-const ZONE_SELECTOR = ".stage-cards"
+const ZONE_SELECTOR = ".stage-drop"
 
 const BoardDnD = {
   mounted() {
@@ -88,6 +89,8 @@ const BoardDnD = {
 
   // Insert a thin line at the computed drop slot, tracking the cursor. Uses the
   // same midpoint rule as dropIndex, excluding the dragged card and the placeholder.
+  // Cards live in the .stage-cards list *inside* the zone (RLY-116), so insertion
+  // targets the card's own parent, never the zone itself, except when empty.
   showPlaceholder(zone, y) {
     const placeholder = this.placeholder()
     const cards = Array.from(zone.querySelectorAll(CARD_SELECTOR))
@@ -98,9 +101,12 @@ const BoardDnD = {
     }).length
     const before = cards[index]
     if (before) {
-      zone.insertBefore(placeholder, before)
+      before.parentNode.insertBefore(placeholder, before)
+    } else if (cards.length > 0) {
+      cards[cards.length - 1].after(placeholder)
     } else {
-      zone.appendChild(placeholder)
+      const list = zone.querySelector(".stage-cards") || zone
+      list.appendChild(placeholder)
     }
   },
 

@@ -1,15 +1,14 @@
 defmodule RelayWeb.Browser.DoneShowMoreTest do
   @moduledoc """
-  Real-browser (Playwright) regression test for RLY-53.
+  Real-browser (Playwright) regression test for the Done "Show N more" button.
 
-  The "Show N more" button shipped inside the Done lane's scroll container, as
-  a sibling after the `#...-cards` div. That div carries `min-height:100%`
-  (RLY-1's full-height drop zone), so it fills the scroll viewport however few
-  cards it holds — pinning the button just past the bottom edge: a 3px sliver,
-  45px of scrolling away, below a tall blank drop zone. The button was in the
-  DOM the entire time, so `has_element?/2` and the element counts in
-  `board_live_done_limit_test.exs` all passed while no user could see it.
-  Geometry in a real browser is the only honest assertion here.
+  RLY-53 pinned the button as a column footer outside the lane scroller;
+  RLY-116 reverses that: the `.stage-drop` wrapper owns the stretched drop
+  zone (RLY-1) while the `.stage-cards` list is natural-height, so the button
+  flows directly after the last card inside the scroller (~263px of dead
+  space -> the lane's normal 8px flex gap). With many cards revealed the
+  button may sit below the lane's fold — intended; scrolling the lane reaches
+  it. Geometry in a real browser is the only honest assertion here.
   """
   use PhoenixTest.Playwright.Case, async: false
 
@@ -20,7 +19,7 @@ defmodule RelayWeb.Browser.DoneShowMoreTest do
 
   @moduletag :playwright
 
-  test "the Show more button is visible inside the Done column", %{conn: conn} do
+  test "the Show more button flows right after the last Done card", %{conn: conn} do
     user = Accounts.ensure_dev_user!()
     board = Boards.get_or_create_default_board(user)
     done = Boards.terminal_stage(board.stages)
@@ -43,9 +42,13 @@ defmodule RelayWeb.Browser.DoneShowMoreTest do
           expression: """
           (() => {
             const btn = document.querySelector('#stage-col-#{done.position}-show-more-done');
+            btn.scrollIntoView({block: 'nearest'});
+            const cards = document.querySelectorAll('#stage-col-#{done.position}-cards .board-card');
+            const last = cards[cards.length - 1];
             const col = btn.closest('.stage-column');
             const b = btn.getBoundingClientRect(), c = col.getBoundingClientRect();
             return {
+              gap: Math.round(b.top - last.getBoundingClientRect().bottom),
               belowColumn: Math.round(b.bottom - c.bottom),
               height: Math.round(b.height),
               inScroller: btn.closest('[id$="-scroll"]') ? 1 : 0
@@ -55,17 +58,21 @@ defmodule RelayWeb.Browser.DoneShowMoreTest do
           timeout: 2_000
         )
 
-      # The button lies fully within the column's visible box — not clipped off
-      # the bottom edge by the full-height drop zone.
-      assert box["belowColumn"] <= 0,
-             "the Show more button sits #{box["belowColumn"]}px below the Done " <>
-               "column's visible area, where no user can see it"
+      # The button flows right after the last card (the lane's normal 8px
+      # flex gap), not ~263px below it at the bottom of a stretched drop zone.
+      assert box["gap"] >= 0 and box["gap"] <= 24,
+             "expected the Show more button ~8px after the last card, got #{box["gap"]}px"
 
       assert box["height"] > 0, "the Show more button has no height"
 
-      # …because it is a pinned footer, not trapped in the scrolling area.
-      assert box["inScroller"] == 0,
-             "the Show more button is inside the lane's scroll container"
+      # It flows inside the lane scroller now (not a pinned footer), and after
+      # scrolling the lane to it, it is fully visible within the column.
+      assert box["inScroller"] == 1,
+             "the Show more button should flow inside the lane's scroll container"
+
+      assert box["belowColumn"] <= 0,
+             "the Show more button sits #{box["belowColumn"]}px below the Done " <>
+               "column's visible area even after scrolling the lane to it"
     end)
   end
 end

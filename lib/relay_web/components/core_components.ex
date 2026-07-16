@@ -2582,11 +2582,12 @@ defmodule RelayWeb.CoreComponents do
   `cards` accepts a LiveView stream (preferred) or a list of
   `{dom_id, card}` tuples; each card needs `title`, `tag`, `ref_number`,
   `status`, a loaded `owners` list, and (for the derived working-progress
-  bar/label) a loaded `sub_tasks` list. Each lane body is its own
-  `phx-update="stream"` drop zone carrying `data-stage-id` (the main stage id
-  for the ongoing lane, each child stage id for the sub-lanes) — the DnD
-  contract is unchanged. The empty-state placeholder is CSS-hidden
-  (`only:block`) once the lane has cards.
+  bar/label) a loaded `sub_tasks` list. Each lane's `phx-update="stream"`
+  list (`.stage-cards`) sits inside a `.stage-drop` zone carrying
+  `data-stage-id` (the main stage id for the ongoing lane, each child stage
+  id for the sub-lanes) — `.stage-drop` owns the DnD drop contract,
+  `.stage-cards` is purely the stream list (RLY-116). The empty-state
+  placeholder is CSS-hidden (`only:block`) once the lane has cards.
 
   The compose control emits events handled by the parent LiveView:
   `"compose"` (with `phx-value-stage-id`) to open the composer,
@@ -2595,7 +2596,7 @@ defmodule RelayWeb.CoreComponents do
 
   When `collapsed` (MMF 12c), the stage renders instead as the mockup's 44px dashed
   vertical strip — owner swatch, rotated name, total count — which remains a
-  `.stage-cards[data-stage-id]` drop zone and emits `"expand_stage"`
+  `.stage-drop[data-stage-id]` drop zone and emits `"expand_stage"`
   (`phx-value-stage-id`) on click. When `collapsible` (RLY-111 — the stage is
   collapsed-by-default), the expanded header shows a ghost collapse button that emits
   `"collapse_stage"` (`phx-value-stage-id`).
@@ -2691,7 +2692,7 @@ defmodule RelayWeb.CoreComponents do
     <%= if @collapsed do %>
       <section
         id={"stage-strip-#{@stage_id}"}
-        class="stage-column stage-strip stage-cards"
+        class="stage-column stage-strip stage-drop"
         data-stage-id={@stage_id}
         phx-click="expand_stage"
         phx-value-stage-id={@stage_id}
@@ -2783,7 +2784,7 @@ defmodule RelayWeb.CoreComponents do
           <%= if @main_collapsed do %>
             <div
               id={"#{@id}-main-strip"}
-              class="main-lane-strip stage-cards"
+              class="main-lane-strip stage-drop"
               data-stage-id={@stage_id}
               phx-click="toggle_collapse"
               phx-value-stage-id={@stage_id}
@@ -2865,63 +2866,67 @@ defmodule RelayWeb.CoreComponents do
                   </.form>
                 </div>
                 <div
-                  id={"#{@id}-cards"}
-                  phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}
+                  id={"#{@id}-drop"}
+                  class="stage-drop"
                   data-stage-id={@stage_id}
-                  class="stage-cards"
                   style="flex:1 1 auto;min-height:100%;display:flex;flex-direction:column;gap:8px;"
                 >
                   <div
-                    id={"#{@id}-empty"}
-                    class="stage-empty hidden only:block"
-                    style="border:1px dashed var(--color-base-300);border-radius:8px;padding:18px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);"
+                    id={"#{@id}-cards"}
+                    phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}
+                    class="stage-cards"
+                    style="flex:0 0 auto;display:flex;flex-direction:column;gap:8px;"
                   >
-                    No cards yet
+                    <div
+                      id={"#{@id}-empty"}
+                      class="stage-empty hidden only:block"
+                      style="border:1px dashed var(--color-base-300);border-radius:8px;padding:18px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);"
+                    >
+                      No cards yet
+                    </div>
+                    <.board_card
+                      :for={{dom_id, card} <- @cards}
+                      {card_log_attrs(@health, card.id)}
+                      id={dom_id}
+                      title={card.title}
+                      tag={card.tag}
+                      ref={"#{@board_key}-#{card.ref_number}"}
+                      status={card.status}
+                      stage_type={@type}
+                      done={@terminal and card.status == :ready}
+                      question={Map.get(@questions, card.id)}
+                      progress={board_card_progress(card)}
+                      owners={card.owners}
+                      active_owner={Cards.active_owner_type(card)}
+                      lane={:main}
+                      category={@category}
+                    />
                   </div>
-                  <.board_card
-                    :for={{dom_id, card} <- @cards}
-                    {card_log_attrs(@health, card.id)}
-                    id={dom_id}
-                    title={card.title}
-                    tag={card.tag}
-                    ref={"#{@board_key}-#{card.ref_number}"}
-                    status={card.status}
-                    stage_type={@type}
-                    done={@terminal and card.status == :ready}
-                    question={Map.get(@questions, card.id)}
-                    progress={board_card_progress(card)}
-                    owners={card.owners}
-                    active_owner={Cards.active_owner_type(card)}
-                    lane={:main}
-                    category={@category}
-                  />
+                  <%!--
+                    RLY-116 — the .stage-drop wrapper owns the droppable region: it keeps the
+                    min-height:100% stretch so a column's empty space stays a drop target
+                    (RLY-1), while the .stage-cards list above is natural-height so this
+                    button flows directly after the last card (reversing RLY-53's pinned
+                    footer). The button must stay OUTSIDE the -cards div: that is a
+                    phx-update="stream" container and may only hold stream items.
+                  --%>
+                  <button
+                    :if={(@terminal and @revealed) && @count > @revealed}
+                    type="button"
+                    id={"#{@id}-show-more-done"}
+                    phx-click="show_more_done"
+                    phx-value-stage-id={@stage_id}
+                    class="stage-show-more"
+                    style="flex:0 0 auto;padding:8px 10px;border:1px solid var(--color-base-300);border-radius:8px;background:var(--color-base-100);color:oklch(0.52 0.02 255);font-size:11px;font-weight:600;letter-spacing:0.01em;text-align:center;cursor:pointer;"
+                  >
+                    Show
+                    <span style="font-family:var(--font-mono);">
+                      {min(@page_size, @count - @revealed)}
+                    </span>
+                    more
+                  </button>
                 </div>
               </div>
-              <%!--
-                RLY-53 — pinned footer, deliberately OUTSIDE #{@id}-scroll. The
-                #{@id}-cards div above carries min-height:100% (RLY-1's full-height
-                drop zone), so it always fills the scroll viewport regardless of card
-                count; a button placed after it inside the scroller is pushed past the
-                bottom edge and is invisible without scrolling. As a sibling of the
-                scroller it pins to the column's bottom and is always visible, and the
-                drop zone keeps its full height. The 13px/15px margins match the
-                scroller's horizontal padding, so the button aligns with the cards.
-              --%>
-              <button
-                :if={(@terminal and @revealed) && @count > @revealed}
-                type="button"
-                id={"#{@id}-show-more-done"}
-                phx-click="show_more_done"
-                phx-value-stage-id={@stage_id}
-                class="stage-show-more"
-                style="flex:0 0 auto;margin:0 13px 13px 15px;padding:8px 10px;border:1px solid var(--color-base-300);border-radius:8px;background:var(--color-base-100);color:oklch(0.52 0.02 255);font-size:11px;font-weight:600;letter-spacing:0.01em;text-align:center;cursor:pointer;"
-              >
-                Show
-                <span style="font-family:var(--font-mono);">
-                  {min(@page_size, @count - @revealed)}
-                </span>
-                more
-              </button>
             </div>
           <% end %>
           <%!-- Review / Done sub-lanes, side by side; empty ones collapse to 34px strips --%>
@@ -2929,7 +2934,7 @@ defmodule RelayWeb.CoreComponents do
             <div
               :if={sub.collapsed}
               id={"sublane-#{sub.id}-strip"}
-              class="sublane-strip stage-cards"
+              class="sublane-strip stage-drop"
               data-stage-id={sub.id}
               phx-click="toggle_collapse"
               phx-value-stage-id={sub.id}
@@ -2977,7 +2982,7 @@ defmodule RelayWeb.CoreComponents do
                 id={"sublane-#{sub.id}-cards"}
                 phx-update="stream"
                 data-stage-id={sub.id}
-                class="stage-cards"
+                class="stage-cards stage-drop"
                 style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:0 13px 13px 13px;"
               >
                 <div
