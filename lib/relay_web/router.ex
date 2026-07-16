@@ -162,6 +162,7 @@ defmodule RelayWeb.Router do
     get "/board", BoardController, :show
     get "/board/version", BoardController, :version
     post "/board/logs", BoardController, :logs
+    post "/board/heartbeat", BoardController, :heartbeat
     get "/cards", CardController, :index
     post "/cards", CardController, :create
     get "/cards/:ref", CardController, :show

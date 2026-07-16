@@ -17,9 +17,18 @@ defmodule Relay.AgentLog do
     * `ref`  — the card ref the line belongs to (may be `nil` for board-level lines).
     * `kind` — `:lifecycle | :claude | :error`; drives line color.
     * `text` — the message.
+
+  RLY-112: `record/2` additionally hands the **ref-tagged** entries to
+  `Relay.Activity.LogSink`, which persists them onto their card. This broadcast is
+  deliberately unchanged (Q7→A) — the per-board sheet keeps its ephemeral feed, and
+  ref-less board-level lines stay broadcast-only, never persisted. Each stamped entry
+  also carries `run_id` — the AI session that emitted the line, captured from day one
+  though nothing renders it yet.
   """
 
-  use Boundary, deps: []
+  use Boundary, deps: [Relay.Activity]
+
+  alias Relay.Activity.LogSink
 
   @pubsub Relay.PubSub
 
@@ -35,15 +44,20 @@ defmodule Relay.AgentLog do
   def topic(board_id), do: "board:#{board_id}:logs"
 
   @doc """
-  Stamps each raw entry in `entries` with a server-assigned `id`/`ts` and
-  broadcasts it as `{:agent_log, entry}` on `topic(board_id)`. Fire-and-forget:
-  always returns `:ok`. Each raw entry is a string-keyed map with `"ref"`
-  (optional), `"kind"`, and `"text"`.
+  Stamps each raw entry in `entries` with a server-assigned `id`/`ts`, broadcasts it
+  as `{:agent_log, entry}` on `topic(board_id)`, and hands the ref-tagged ones to
+  `Relay.Activity.LogSink` for persistence. Fire-and-forget: always returns `:ok`.
+  Each raw entry is a string-keyed map with `"ref"` (optional), `"kind"`, `"text"`,
+  and `"run_id"` (optional).
   """
   def record(board_id, entries) when is_list(entries) do
-    Enum.each(entries, fn entry ->
-      Phoenix.PubSub.broadcast(@pubsub, topic(board_id), {:agent_log, stamp(entry)})
+    stamped = Enum.map(entries, &stamp/1)
+
+    Enum.each(stamped, fn entry ->
+      Phoenix.PubSub.broadcast(@pubsub, topic(board_id), {:agent_log, entry})
     end)
+
+    LogSink.enqueue(board_id, Enum.filter(stamped, & &1.ref))
   end
 
   defp stamp(entry) do
@@ -52,7 +66,8 @@ defmodule Relay.AgentLog do
       ts: DateTime.utc_now(),
       ref: blank_to_nil(Map.get(entry, "ref")),
       kind: Map.get(@kinds, Map.get(entry, "kind"), :lifecycle),
-      text: to_string(Map.get(entry, "text", ""))
+      text: to_string(Map.get(entry, "text", "")),
+      run_id: blank_to_nil(Map.get(entry, "run_id"))
     }
   end
 

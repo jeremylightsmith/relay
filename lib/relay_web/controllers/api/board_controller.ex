@@ -28,6 +28,13 @@ defmodule RelayWeb.Api.BoardController do
     send_resp(conn, 200, "")
   end
 
+  def heartbeat(conn, params) do
+    refs = Map.get(params, "refs", [])
+    refs = if is_list(refs), do: refs, else: []
+    {stamped, _} = Cards.touch_heartbeats(conn.assigns.current_board, refs)
+    json(conn, %{stamped: stamped})
+  end
+
   # RLY-67: the board index drops the top-level Done column unless ?include_done is set.
   defp index_cards(board, stages, params) do
     if include_done?(params) do

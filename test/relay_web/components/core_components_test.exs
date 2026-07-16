@@ -1159,4 +1159,117 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(id="d-description")
     end
   end
+
+  # RLY-112 — the collapsed log strip. Every value below is pinned to
+  # docs/designs/Relay Card Activity.dc.html §02 (lines ~87-128); the light theme's
+  # --color-secondary/-warning/-error are byte-identical to the artboard's violet/amber/rose.
+  # Module-level, and `log_at` is computed per call: a `@log_at DateTime.utc_now()`
+  # module attribute would freeze at COMPILE time, so "now" would drift to "3d" once
+  # the build is a few days old.
+  defp strip(health, opts \\ []) do
+    render_component(
+      &CoreComponents.board_card/1,
+      Keyword.merge(
+        [
+          id: "cards-1",
+          ref: "RLY-3",
+          title: "Migrate 40 blog posts",
+          status: :working,
+          active_owner: :ai,
+          health: health,
+          log_text: "uploaded 24/40 posts",
+          log_at: DateTime.utc_now()
+        ],
+        opts
+      )
+    )
+  end
+
+  describe "board_card/1 log strip" do
+    test "health :none renders no strip at all and keeps today's working label" do
+      html = strip(:none)
+
+      refute html =~ "card-RLY-3-log-strip"
+      assert html =~ ~s(class="card-status")
+      assert html =~ "working"
+    end
+
+    test "the strip replaces the working label when health is live" do
+      html = strip(:live)
+
+      assert html =~ ~s(id="card-RLY-3-log-strip")
+      assert html =~ "uploaded 24/40 posts"
+      refute html =~ ~s(class="card-status")
+    end
+
+    test "live is violet with a pulsing dot and a tinted box" do
+      html = strip(:live)
+
+      assert html =~ "oklch(0.985 0.012 292)"
+      assert html =~ "animation:relaypulse 1.4s ease-in-out infinite"
+      assert html =~ "var(--color-secondary)"
+      assert html =~ "oklch(0.44 0.08 292)"
+    end
+
+    test "stale is amber, the dot is still, and the card border + shadow go amber" do
+      html = strip(:stale)
+
+      assert html =~ ~s(data-health="stale")
+      assert html =~ "var(--color-warning)"
+      assert html =~ "oklch(0.97 0.03 75)"
+      assert html =~ "oklch(0.86 0.06 70)"
+      assert html =~ "0 1px 3px oklch(0.6 0.08 70/0.12)"
+      refute html =~ "animation:relaypulse"
+    end
+
+    test "stopped is rose with the white ! disc and a rose card border + shadow" do
+      html = strip(:stopped, log_text: "agent stopped")
+
+      assert html =~ ~s(data-health="stopped")
+      assert html =~ "var(--color-error)"
+      assert html =~ "oklch(0.97 0.03 20)"
+      assert html =~ "oklch(0.86 0.07 20)"
+      assert html =~ "0 1px 3px oklch(0.6 0.1 15/0.12)"
+      assert html =~ "agent stopped"
+      refute html =~ "animation:relaypulse"
+    end
+
+    # Q6→C: the artboard draws a Retry pill on the stopped strip; it is out of scope.
+    test "stopped renders NO Retry affordance" do
+      refute strip(:stopped, log_text: "agent stopped") =~ "Retry"
+    end
+
+    test "the accent border goes amber on stale and rose on stopped" do
+      assert strip(:stale) =~ "border-l-warning"
+      assert strip(:stopped) =~ "border-l-error"
+      assert strip(:live) =~ "border-l-secondary"
+    end
+
+    test "the strip text ellipsizes and the time is mono and right-aligned" do
+      html = strip(:live)
+
+      assert html =~ "text-overflow:ellipsis"
+      assert html =~ "white-space:nowrap"
+      assert html =~ "font-family:var(--font-mono)"
+    end
+
+    test "the relative time reads now for a fresh line" do
+      assert strip(:live) =~ "now"
+    end
+
+    test "the relative time compacts to m / h / d" do
+      assert strip(:live, log_at: DateTime.add(DateTime.utc_now(), -8 * 60, :second)) =~ "8m"
+      assert strip(:stale, log_at: DateTime.add(DateTime.utc_now(), -2 * 3600, :second)) =~ "2h"
+      assert strip(:stale, log_at: DateTime.add(DateTime.utc_now(), -3 * 86_400, :second)) =~ "3d"
+    end
+
+    # The artboard's §02 live card shows the bar AND the strip. The progress bar is
+    # derived from sub-tasks and is very much alive — the strip replaces only the label.
+    test "the progress bar survives alongside the strip" do
+      html = strip(:live, progress: 62)
+
+      assert html =~ "width:62%"
+      assert html =~ ~s(id="card-RLY-3-log-strip")
+    end
+  end
 end

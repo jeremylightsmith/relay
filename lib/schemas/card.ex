@@ -39,6 +39,7 @@ defmodule Schemas.Card do
       default: :ready
 
     field :blocked_since, :utc_datetime
+    field :agent_heartbeat_at, :utc_datetime
     field :archived_at, :utc_datetime
     field :branch, :string
     field :plan, :string

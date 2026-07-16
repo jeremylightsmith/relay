@@ -12,6 +12,13 @@ defmodule Schemas.Activity do
   question. `:input_answered` (MMF 14) marks the human's answer, with
   empty meta. `:archived` / `:unarchived` (RLY-4) record a card being
   soft-hidden from the board and restored, with empty meta.
+
+  `:action` (RLY-112) is one runner log line, with the line in `text` and the AI
+  session that emitted it in `run_id`; `:failure` (RLY-112) is the agent erroring.
+  Both are written in bulk by `Relay.Activity.LogSink` via `insert_all`, which
+  bypasses `changeset/1` by design — they are best-effort chatter, not audit rows.
+  `text`/`run_id` are null on every human/system row. There is deliberately no
+  `:heartbeat` type: liveness is `cards.agent_heartbeat_at` (Q3→B).
   """
 
   use Ecto.Schema
@@ -29,13 +36,17 @@ defmodule Schemas.Activity do
     :needs_input,
     :input_answered,
     :archived,
-    :unarchived
+    :unarchived,
+    :action,
+    :failure
   ]
 
   schema "activities" do
     field :type, Ecto.Enum, values: @types
     field :meta, :map, default: %{}
     field :actor_type, Ecto.Enum, values: [:user, :agent]
+    field :text, :string
+    field :run_id, :string
 
     belongs_to :card, Schemas.Card
     belongs_to :user, Schemas.User

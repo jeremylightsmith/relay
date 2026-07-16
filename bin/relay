@@ -38,12 +38,15 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 
 HERE = os.path.abspath(__file__)
 ROOT = os.path.dirname(os.path.dirname(HERE))
 CONFIG_PATH = os.path.join(ROOT, "relay_config.json")
 DRY = False
 FORWARDER = None
+HEARTBEAT = None
+RUN_IDS = {}   # ref -> uuid4 of the run currently working it (RLY-112)
 
 
 def die(msg):
@@ -140,7 +143,7 @@ def _ref_from_tag(tag):
 def forward(kind, text, ref=None):
     """Best-effort: hand one feed line to the background mirror, if one is running."""
     if FORWARDER is not None:
-        FORWARDER.enqueue(kind, text, ref)
+        FORWARDER.enqueue(kind, text, ref, RUN_IDS.get(ref))
 
 
 class LogForwarder:
@@ -163,9 +166,9 @@ class LogForwarder:
     def stop(self):
         self._stop.set()
 
-    def enqueue(self, kind, text, ref=None):
+    def enqueue(self, kind, text, ref=None, run_id=None):
         try:
-            self.q.put_nowait({"kind": kind, "ref": ref, "text": text})
+            self.q.put_nowait({"kind": kind, "ref": ref, "text": text, "run_id": run_id})
         except queue.Full:
             pass
 
@@ -195,6 +198,44 @@ class LogForwarder:
             batch = self._drain()
             if batch:
                 self._send(batch)
+
+
+class Heartbeat:
+    """Background thread posting the refs currently being worked to /api/board/heartbeat.
+
+    Best-effort by construction, exactly like LogForwarder._send: swallows api()'s
+    die() (SystemExit) and every other exception, so a heartbeat can never stall or
+    raise into work(). One request per tick regardless of card count.
+
+    `refs_fn` returns the live in-flight ref list; the watch loop's `in_flight` dict
+    IS the exact set of cards being worked, so there is nothing else to track."""
+
+    def __init__(self, refs_fn, interval=30):
+        self.refs_fn = refs_fn
+        self.interval = interval
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def _beat(self):
+        refs = list(self.refs_fn())
+        if not refs:
+            return
+        try:
+            api("POST", "/api/board/heartbeat", {"refs": refs})
+        except SystemExit:  # api() die()s on HTTP/network error
+            pass
+        except Exception:
+            pass
+
+    def _run(self):
+        while not self._stop.wait(self.interval):
+            self._beat()
 
 
 def read_arg(text):
@@ -752,6 +793,7 @@ def flag(ref, reason):
 
 def work(card, entry, mode, cwd=ROOT, tag=""):
     ref = card["ref"]
+    RUN_IDS[ref] = str(uuid.uuid4())
     n = ref.split("-")[-1]
     vars = {"ref": ref, "title": card["title"], "stage": entry["stage"], "from": entry["from"],
             "done": entry["done"],
@@ -787,7 +829,7 @@ def work(card, entry, mode, cwd=ROOT, tag=""):
 
 
 def cmd_watch(args):
-    global DRY, FORWARDER
+    global DRY, FORWARDER, HEARTBEAT
     DRY = args.dry_run
     cfg = load_config()
     interval = args.interval or cfg.get("poll_interval", 45)
@@ -800,6 +842,10 @@ def cmd_watch(args):
     wake = threading.Event()
     stop = threading.Event()
     in_flight = {}   # ref -> worker thread
+
+    if not DRY:
+        HEARTBEAT = Heartbeat(lambda: list(in_flight))
+        HEARTBEAT.start()
 
     if not DRY:
         for p in pools.values():

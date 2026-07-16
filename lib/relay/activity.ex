@@ -9,7 +9,7 @@ defmodule Relay.Activity do
   This context never calls `Relay.Cards`; `Cards` depends on it to log.
   """
 
-  use Boundary, deps: [Relay.Events, Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Events, Relay.Repo, Schemas], exports: [LogSink, Pruner]
 
   import Ecto.Query
 
@@ -66,6 +66,27 @@ defmodule Relay.Activity do
   end
 
   @doc """
+  The design's entry `kind` (`:action | :failure | :move | :decision`), derived
+  from the stored `type` at render — never stored, so every pre-RLY-112 row
+  classifies itself with no backfill (RLY-112, artboard §03).
+
+  The catch-all maps the legacy audit types (`:created`, `:status_changed`,
+  `:owners_changed`, `:archived`, `:unarchived`, `:commented`) to `:action`, which
+  keeps today's entries rendering exactly as they do now.
+
+  **Never prune by `kind`** — it lumps those audit rows in with runner chatter.
+  `Relay.Activity.Pruner` matches `type == :action`, which is exactly the runner lines.
+  """
+  def kind(%Schemas.Activity{type: :action}), do: :action
+  def kind(%Schemas.Activity{type: :failure}), do: :failure
+  def kind(%Schemas.Activity{type: :moved}), do: :move
+
+  def kind(%Schemas.Activity{type: type}) when type in [:approved, :rejected, :needs_input, :input_answered],
+    do: :decision
+
+  def kind(%Schemas.Activity{}), do: :action
+
+  @doc """
   The card's full timeline: its comments and activity entries merged
   into one list, ascending by `inserted_at` (comments sort before
   activity entries logged in the same second; within a source, ties
@@ -108,17 +129,42 @@ defmodule Relay.Activity do
   end
 
   @doc """
-  The card's activity log: its activity entries only, descending by
-  `inserted_at` (ties break by id), so the newest sits at the top. Each
-  entry has its `:user` preloaded (`nil` for the agent).
+  The card's activity log: its activity entries only, descending by `inserted_at`
+  (ties break by id), so the newest sits at the top. Each entry has its `:user`
+  preloaded (`nil` for the agent).
+
+  `opts[:limit]` caps the rows returned (RLY-112: the drawer renders the newest
+  200 — without a cap a card mid-run would try to paint thousands of `:action`
+  rows). This is a *render* cap, distinct from `Relay.Activity.Pruner`'s
+  *storage* retention.
   """
-  def list_activity(%Card{id: card_id}) do
-    Repo.all(
-      from a in Schemas.Activity,
-        where: a.card_id == ^card_id,
-        order_by: [desc: a.inserted_at, desc: a.id],
-        preload: :user
+  def list_activity(%Card{id: card_id}, opts \\ []) do
+    Schemas.Activity
+    |> where([a], a.card_id == ^card_id)
+    |> order_by([a], desc: a.inserted_at, desc: a.id)
+    |> maybe_limit(Keyword.get(opts, :limit))
+    |> preload(:user)
+    |> Repo.all()
+  end
+
+  defp maybe_limit(query, nil), do: query
+  defp maybe_limit(query, limit) when is_integer(limit) and limit > 0, do: limit(query, ^limit)
+
+  @doc """
+  The newest activity entry for each of `card_ids`, as `%{card_id => entry}` —
+  one `DISTINCT ON` query, so a board renders its whole health column without an
+  N+1 (RLY-112). Cards with no entries are simply absent. `:user` is NOT
+  preloaded: the only caller derives health and strip text, neither of which
+  reads the actor.
+  """
+  def newest_per_card(card_ids) when is_list(card_ids) do
+    from(a in Schemas.Activity,
+      where: a.card_id in ^card_ids,
+      distinct: [a.card_id],
+      order_by: [asc: a.card_id, desc: a.inserted_at, desc: a.id]
     )
+    |> Repo.all()
+    |> Map.new(&{&1.card_id, &1})
   end
 
   # MMF 18: announce the new timeline entry to every open board session.

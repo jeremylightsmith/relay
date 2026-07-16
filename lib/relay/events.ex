@@ -17,6 +17,12 @@ defmodule Relay.Events do
       `{:card_upserted, card}`.
     * `{:timeline_appended, card_id, entry}` — a new `Schemas.Comment` or
       `Schemas.Activity` entry (with `:user` preloaded).
+    * `{:card_log_appended, card_id, entries}` — a batch of runner log rows
+      (`Schemas.Activity`, `:user` nil, chronological ascending) was persisted onto a
+      card by `Relay.Activity.LogSink` (RLY-112). Deliberately **one event per card per
+      flush**, not one per entry: `broadcast/2` bumps the board version every call, so a
+      per-entry event would bump once per log line — a write storm under exactly the load
+      the sink exists to absorb.
     * `{:stages_changed, board_id}` — any stage/config change; coarse on
       purpose, receivers refetch stages.
     * `{:board_updated, board}` — a board's editable attributes (currently

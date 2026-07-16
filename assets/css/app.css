@@ -589,3 +589,10 @@ textarea.commit-field-input { min-height: 64px; }
 
 /* RLY-48: the drawer's "Relay AI is working" strip pulse. */
 @keyframes relaypulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* RLY-112: the Activity timeline's connecting rule (Relay Card Activity.dc.html §04). */
+#card-drawer-activity { position: relative; }
+#card-drawer-activity::before {
+  content: ""; position: absolute; left: 4px; top: 6px; bottom: 6px;
+  width: 1.5px; background: oklch(0.91 0.01 255);
+}

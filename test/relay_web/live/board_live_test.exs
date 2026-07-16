@@ -1968,10 +1968,11 @@ defmodule RelayWeb.BoardLiveTest do
 
       view |> element("#card-drawer-move-to-#{plan.id}") |> render_click()
 
+      # RLY-112: a move renders as an inline pill chip, not a dot phrase.
       assert has_element?(
                view,
-               "#card-drawer-activity .timeline-activity-phrase",
-               "moved Backlog → Plan"
+               "#card-drawer-activity .activity-move-chip",
+               "Backlog → Plan"
              )
     end
 

@@ -805,6 +805,15 @@ defmodule RelayWeb.CoreComponents do
     doc: "the latest needs_input question, echoed as a one-line preview on needs_input cards"
 
   attr :progress, :integer, default: nil
+
+  attr :health, :atom,
+    values: [:live, :stale, :stopped, :none],
+    default: :none,
+    doc: "RLY-112 derived agent health (Relay.Cards.health/1); :none renders no strip at all"
+
+  attr :log_text, :string, default: nil, doc: "the newest entry's text, shown in the log strip"
+  attr :log_at, :any, default: nil, doc: "the newest entry's inserted_at, shown as a relative time"
+
   attr :owners, :list, default: [], doc: "the card's loaded owner rows, for the avatar cluster"
 
   attr :lane, :atom,
@@ -829,12 +838,13 @@ defmodule RelayWeb.CoreComponents do
     <article
       id={@id}
       class={["board-card group", @accent_class]}
-      style={"background:var(--color-base-100);border:1px solid var(--color-base-300);border-left:3px solid #{@accent_color};border-radius:9px;padding:10px 11px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px oklch(0.55 0.03 255/0.05);cursor:pointer;"}
+      style={"background:var(--color-base-100);border:1px solid #{card_shell_border(@health)};border-left:3px solid #{@accent_color};border-radius:9px;padding:10px 11px;display:flex;flex-direction:column;gap:8px;box-shadow:#{card_shell_shadow(@health)};cursor:pointer;"}
       role="button"
       tabindex="0"
       draggable="true"
       data-ref={@ref}
       data-status={@status}
+      data-health={@health}
       data-done={to_string(@done)}
       data-active-owner={@active_owner}
       phx-click="select_card"
@@ -853,6 +863,34 @@ defmodule RelayWeb.CoreComponents do
       >
         <div style={"height:100%;width:#{@progress || 0}%;background:var(--color-secondary);border-radius:3px;"}>
         </div>
+      </div>
+      <div
+        :if={@health != :none}
+        id={"card-#{@ref}-log-strip"}
+        class="card-log-strip"
+        data-health={@health}
+        style={"display:flex;align-items:center;gap:7px;border-radius:6px;padding:6px 8px;#{strip_box_style(@health)}"}
+      >
+        <span
+          id={"card-#{@ref}-log-strip-dot"}
+          class="card-log-strip-dot"
+          data-health={@health}
+          style={strip_dot_style(@health)}
+        >
+          {if @health == :stopped, do: "!"}
+        </span>
+        <span
+          class="card-log-strip-text"
+          style={"font-size:10.5px;font-family:var(--font-mono);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#{strip_text_color(@health)};"}
+        >
+          {@log_text}
+        </span>
+        <span
+          class="card-log-strip-time"
+          style={"font-size:10.5px;font-family:var(--font-mono);flex:0 0 auto;color:#{strip_time_color(@health)};"}
+        >
+          {relative_time(@log_at)}
+        </span>
       </div>
       <div
         :if={@status == :needs_input}
@@ -874,7 +912,7 @@ defmodule RelayWeb.CoreComponents do
       </p>
       <div style="display:flex;align-items:center;gap:7px;">
         <span
-          :if={@status == :working}
+          :if={@status == :working and @health == :none}
           class="card-status"
           data-status={@status}
           style="font-size:11px;font-family:var(--font-mono);color:oklch(0.52 0.10 292);"
@@ -919,14 +957,126 @@ defmodule RelayWeb.CoreComponents do
   # board_card/1 via card_accent_color/1 (an inline `style` beats the class, so
   # the class carries no colour). Do not delete these classes as "unused": the
   # board/card tests select on them (e.g. `.border-l-warning`).
+  # RLY-112: health outranks status on the accent. :stopped is rose (it reads needs-you
+  # and floats the card up in triage next to questions and reviews); :stale reuses the
+  # existing amber needs-you accent.
+  defp card_accent_class(%{health: :stopped}), do: "border-l-error"
+  defp card_accent_class(%{health: :stale}), do: "border-l-warning"
   defp card_accent_class(%{status: :needs_input}), do: "border-l-warning"
   defp card_accent_class(%{status: :in_review}), do: "border-l-warning"
   defp card_accent_class(%{status: :working}), do: "border-l-secondary"
   defp card_accent_class(_assigns), do: "border-l-base-300"
 
+  defp card_accent_color("border-l-error"), do: "var(--color-error)"
   defp card_accent_color("border-l-warning"), do: "var(--color-warning)"
   defp card_accent_color("border-l-secondary"), do: "var(--color-secondary)"
   defp card_accent_color("border-l-base-300"), do: "var(--color-base-300)"
+
+  # RLY-112 — the collapsed log strip, pinned to docs/designs/Relay Card Activity.dc.html
+  # §02 (lines ~87-128). The light theme's --color-secondary/-warning/-error are
+  # byte-identical to the artboard's violet/amber/rose, so the tokens ARE the mockup's
+  # values; the box tints have no token and stay literal.
+  defp card_shell_border(:stale), do: "oklch(0.86 0.06 70)"
+  defp card_shell_border(:stopped), do: "oklch(0.86 0.07 20)"
+  defp card_shell_border(_health), do: "var(--color-base-300)"
+
+  defp card_shell_shadow(:stale), do: "0 1px 3px oklch(0.6 0.08 70/0.12)"
+  defp card_shell_shadow(:stopped), do: "0 1px 3px oklch(0.6 0.1 15/0.12)"
+  defp card_shell_shadow(_health), do: "0 1px 2px oklch(0.55 0.03 255/0.05)"
+
+  defp strip_box_style(:live), do: "background:oklch(0.985 0.012 292);"
+  defp strip_box_style(:stale), do: "background:oklch(0.97 0.03 75);border:1px solid oklch(0.88 0.06 75);"
+  defp strip_box_style(:stopped), do: "background:oklch(0.97 0.03 20);border:1px solid oklch(0.88 0.06 20);"
+  defp strip_box_style(_health), do: ""
+
+  defp strip_dot_style(:live),
+    do:
+      "width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:var(--color-secondary);animation:relaypulse 1.4s ease-in-out infinite;"
+
+  defp strip_dot_style(:stale),
+    do: "width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:var(--color-warning);"
+
+  defp strip_dot_style(:stopped),
+    do:
+      "width:14px;height:14px;border-radius:50%;flex:0 0 auto;background:var(--color-error);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;"
+
+  defp strip_dot_style(_health), do: ""
+
+  defp strip_text_color(:live), do: "oklch(0.44 0.08 292)"
+  defp strip_text_color(:stale), do: "oklch(0.50 0.10 65)"
+  defp strip_text_color(:stopped), do: "oklch(0.50 0.14 15)"
+  defp strip_text_color(_health), do: "oklch(0.44 0.02 255)"
+
+  defp strip_time_color(:live), do: "oklch(0.60 0.02 255)"
+  defp strip_time_color(:stale), do: "oklch(0.52 0.11 65)"
+  defp strip_time_color(:stopped), do: "oklch(0.50 0.14 15)"
+  defp strip_time_color(_health), do: "oklch(0.60 0.02 255)"
+
+  # RLY-112 §04: the Activity section header's health chip. No Retry (Q6→C).
+  defp health_chip_color(:live), do: "var(--color-secondary)"
+  defp health_chip_color(:stale), do: "var(--color-warning)"
+  defp health_chip_color(:stopped), do: "var(--color-error)"
+  defp health_chip_color(_health), do: "var(--color-base-300)"
+
+  defp health_chip_label(:live), do: "Relay AI is live"
+  defp health_chip_label(:stale), do: "Relay AI has gone quiet"
+  defp health_chip_label(:stopped), do: "Relay AI stopped"
+  defp health_chip_label(_health), do: ""
+
+  # §04 dot colour by kind. The artboard paints the Approved decision green; the spec's
+  # mapping (decision → amber) wins. :move never reaches here — it renders as a chip.
+  # :failure and :decision are always genuine agent/system events, so they stay
+  # kind-only. :action is kind/1's catch-all — it ALSO carries every legacy audit
+  # row (:created, :commented, :status_changed, :owners_changed, :archived,
+  # :unarchived), which a human can trigger. AGENTS.md reserves violet for AI and
+  # blue for human, so within :action fall back to the row's actor: an agent's
+  # runner line stays violet, a human's audit row goes blue.
+  #
+  # RESOLVED 2026-07-15 (Jeremy): actor-aware, not kind-only. This block previously
+  # read `_action -> "var(--color-secondary)"`, which the implementer correctly
+  # refused to ship — it would render a human's own :commented / :status_changed row
+  # in the AI colour, contradicting the palette rule that encodes this product's core
+  # idea (who holds the baton). The plan is the thing that was wrong. Two tests pin
+  # the shipped behaviour: board_drawer_activity_test.exs:102 and :118.
+  defp entry_dot_color(entry) do
+    # Fully qualified on purpose: `Activity` in this module is `Schemas.Activity`.
+    case Relay.Activity.kind(entry) do
+      :failure -> "var(--color-error)"
+      :decision -> "var(--color-warning)"
+      _action -> if entry.actor_type == :agent, do: "var(--color-secondary)", else: "var(--color-primary)"
+    end
+  end
+
+  # The artboard's compact relative time: now / 8m / 2h / 3d.
+  defp relative_time(nil), do: ""
+
+  defp relative_time(%DateTime{} = at) do
+    seconds = max(DateTime.diff(DateTime.utc_now(), at, :second), 0)
+
+    cond do
+      seconds < 60 -> "now"
+      seconds < 3600 -> "#{div(seconds, 60)}m"
+      seconds < 86_400 -> "#{div(seconds, 3600)}h"
+      true -> "#{div(seconds, 86_400)}d"
+    end
+  end
+
+  # RLY-112: %{card_id => %{state:, entry:}} -> board_card/1's three log attrs. Deriving
+  # the text here (rather than in BoardLive) keeps activity_phrase/1 — the shared fallback
+  # for audit rows, which carry no `text` — private to this module.
+  defp card_log_attrs(health_by_card, card_id) do
+    case Map.get(health_by_card, card_id) do
+      nil -> %{health: :none, log_text: nil, log_at: nil}
+      %{state: :none} -> %{health: :none, log_text: nil, log_at: nil}
+      %{state: state, entry: nil} -> %{health: state, log_text: nil, log_at: nil}
+      %{state: state, entry: entry} -> %{health: state, log_text: entry_text(entry), log_at: entry.inserted_at}
+    end
+  end
+
+  # A runner line renders its own text; an audit row has none, so it borrows the
+  # drawer's sentence. One helper, shared by the strip and the timeline.
+  defp entry_text(%Activity{text: text}) when is_binary(text) and text != "", do: text
+  defp entry_text(%Activity{} = entry), do: activity_phrase(entry)
 
   defp sublane_width(%{collapsed: true}), do: 34
   defp sublane_width(_sub), do: 178
@@ -1098,6 +1248,11 @@ defmodule RelayWeb.CoreComponents do
   attr :activity, :any,
     required: true,
     doc: "the :activity LiveView stream — the card's activity-log entries, newest first"
+
+  attr :health, :atom,
+    values: [:live, :stale, :stopped, :none],
+    default: :none,
+    doc: "RLY-112 derived agent health, for the Activity section's header chip"
 
   attr :comment_form, :any, required: true, doc: "a Phoenix.HTML.Form for comment[body]"
 
@@ -1934,13 +2089,34 @@ defmodule RelayWeb.CoreComponents do
               <section class="space-y-2 border-t border-base-300 pt-4">
                 <.section_label>Activity</.section_label>
                 <div
+                  :if={@health != :none}
+                  id={"#{@id}-activity-health-chip"}
+                  class="activity-health-chip flex items-center gap-2"
+                  style={"border-radius:7px;padding:7px 10px;#{strip_box_style(@health)}"}
+                  data-health={@health}
+                >
+                  <span style={"width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:#{health_chip_color(@health)};#{if(@health == :live, do: "animation:relaypulse 1.4s ease-in-out infinite;")}"}>
+                  </span>
+                  <span
+                    class="text-[11.5px]"
+                    style={"font-family:var(--font-mono);color:#{strip_text_color(@health)};"}
+                  >
+                    {health_chip_label(@health)}
+                  </span>
+                </div>
+                <div
                   :if={@body_loading}
                   id={"#{@id}-activity-loading"}
                   class="flex justify-center py-3"
                 >
                   <span class="loading loading-spinner loading-sm text-base-content/40"></span>
                 </div>
-                <ol :if={!@body_loading} id={"#{@id}-activity"} phx-update="stream" class="space-y-1">
+                <ol
+                  :if={!@body_loading}
+                  id={"#{@id}-activity"}
+                  phx-update="stream"
+                  class="relative space-y-1 pl-[18px]"
+                >
                   <li
                     id={"#{@id}-activity-empty"}
                     class="hidden text-sm text-base-content/50 only:block"
@@ -1950,22 +2126,36 @@ defmodule RelayWeb.CoreComponents do
                   <li
                     :for={{dom_id, entry} <- @activity}
                     id={dom_id}
-                    class="activity-entry flex items-start gap-2.5 py-1"
+                    class="activity-entry relative py-1"
+                    data-kind={Relay.Activity.kind(entry)}
                     data-actor-type={entry.actor_type}
                   >
-                    <span class={[
-                      "mt-1.5 size-1.5 shrink-0 rounded-full",
-                      if(entry.actor_type == :agent, do: "bg-secondary/60", else: "bg-primary/60")
-                    ]}>
-                    </span>
-                    <div class="flex min-w-0 flex-col">
-                      <span class="timeline-activity-phrase text-[13px] leading-snug text-base-content/70">
-                        {activity_phrase(entry)}
+                    <%= if Relay.Activity.kind(entry) == :move do %>
+                      <span
+                        class="activity-move-chip inline-flex items-center gap-2"
+                        style="background:oklch(0.965 0.006 255);border:1px solid oklch(0.90 0.006 255);border-radius:20px;padding:4px 12px;font-size:11.5px;font-family:var(--font-mono);color:oklch(0.50 0.02 255);"
+                      >
+                        moved
+                        <span class="font-semibold" style="color:oklch(0.40 0.02 255);">
+                          {entry.meta["from_stage"]} → {entry.meta["to_stage"]}
+                        </span>
+                        · {relative_time(entry.inserted_at)}
                       </span>
-                      <time class="timeline-time font-mono text-[11px] text-base-content/45">
-                        {Calendar.strftime(entry.inserted_at, "%b %d, %H:%M")}
-                      </time>
-                    </div>
+                    <% else %>
+                      <span
+                        class="activity-entry-dot absolute"
+                        style={"left:-16.5px;top:7px;width:7px;height:7px;border-radius:50%;background:#{entry_dot_color(entry)};box-shadow:0 0 0 2.5px var(--color-base-100);"}
+                      >
+                      </span>
+                      <div class="flex items-baseline gap-1.5">
+                        <span class="timeline-activity-phrase min-w-0 text-[13px] leading-snug text-base-content/70">
+                          {entry_text(entry)}
+                        </span>
+                        <time class="timeline-time ml-auto shrink-0 font-mono text-[11px] text-base-content/45">
+                          {relative_time(entry.inserted_at)}
+                        </time>
+                      </div>
+                    <% end %>
                   </li>
                 </ol>
               </section>
@@ -2291,6 +2481,8 @@ defmodule RelayWeb.CoreComponents do
   defp activity_phrase(%Activity{type: :input_answered}), do: "answered the question"
   defp activity_phrase(%Activity{type: :archived}), do: "archived this card"
   defp activity_phrase(%Activity{type: :unarchived}), do: "restored this card"
+  defp activity_phrase(%Activity{type: :action}), do: "agent activity"
+  defp activity_phrase(%Activity{type: :failure}), do: "the agent stopped"
 
   # The one-line hint under READY FOR YOUR REVIEW (MMF 15): a gated stage
   # offers the approve/send-back pair; an ungated one has no drawer decision
@@ -2403,6 +2595,10 @@ defmodule RelayWeb.CoreComponents do
         "(keep in sync with BoardLive @done_page_size)"
 
   attr :questions, :map, default: %{}, doc: "card_id => latest needs_input question, for previews"
+
+  attr :health, :map,
+    default: %{},
+    doc: "RLY-112 card_id => %{state:, entry:}, from BoardLive's :health_by_card assign"
 
   def stage_column(assigns) do
     sublanes = Enum.map(assigns.sublanes, &Map.put_new(&1, :collapsed, false))
@@ -2604,6 +2800,7 @@ defmodule RelayWeb.CoreComponents do
                   </div>
                   <.board_card
                     :for={{dom_id, card} <- @cards}
+                    {card_log_attrs(@health, card.id)}
                     id={dom_id}
                     title={card.title}
                     tag={card.tag}
@@ -2712,6 +2909,7 @@ defmodule RelayWeb.CoreComponents do
                 </div>
                 <.board_card
                   :for={{dom_id, card} <- sub.cards}
+                  {card_log_attrs(@health, card.id)}
                   id={dom_id}
                   title={card.title}
                   tag={card.tag}
