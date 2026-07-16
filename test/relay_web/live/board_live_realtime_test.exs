@@ -192,6 +192,23 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       assert has_element?(view_b, "#stage-strip-#{backlog.id} .stage-count", "0")
       refute has_element?(view_b, "#card-drawer")
     end
+
+    test "flipping collapsed_by_default collapses the stage in another open session",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, _card} = Cards.create_card(code, %{title: "Keep me"})
+
+      {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}")
+      refute has_element?(view_b, "#stage-strip-#{code.id}")
+
+      # Boards.update_stage/2 broadcasts {:stages_changed, board_id}; BoardLive's
+      # handle_info reloads the board, so session B re-renders collapsed live.
+      {:ok, _stage} = Boards.update_stage(code, %{collapsed_by_default: true})
+
+      assert has_element?(view_b, "#stage-strip-#{code.id} .stage-count", "1")
+      refute has_element?(view_b, "#stage-col-5")
+    end
   end
 
   describe "board scoping" do
