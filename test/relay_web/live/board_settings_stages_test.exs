@@ -266,6 +266,44 @@ defmodule RelayWeb.BoardSettingsStagesTest do
     end
   end
 
+  describe "collapsed-by-default toggle (RLY-111)" do
+    test "renders on every main stage row regardless of type, and flips the flag",
+         %{conn: conn, board: board} do
+      backlog = stage_named(board, "Backlog")
+      review = stage_named(board, "Review")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      # Unlike AI-ENABLED there is no type guard: queue and review rows both carry it.
+      assert has_element?(view, "#stage-#{backlog.id}-collapsed-toggle")
+      assert has_element?(view, "#stage-#{review.id}-collapsed-toggle")
+      refute has_element?(view, "#stage-#{backlog.id}-collapsed-toggle[checked]")
+
+      view |> element("#stage-#{backlog.id}-collapsed-toggle") |> render_click()
+
+      assert Boards.get_stage(board, backlog.id).collapsed_by_default
+      assert has_element?(view, "#stage-#{backlog.id}-collapsed-toggle[checked]")
+
+      view |> element("#stage-#{backlog.id}-collapsed-toggle") |> render_click()
+
+      refute Boards.get_stage(board, backlog.id).collapsed_by_default
+      refute has_element?(view, "#stage-#{backlog.id}-collapsed-toggle[checked]")
+    end
+
+    test "an archived (read-only) board flashes the error and does not flip the flag",
+         %{conn: conn, user: user} do
+      {:ok, board} = Boards.create_board(user, %{name: "Frozen"})
+      {:ok, board} = Boards.archive_board(board)
+      stage = hd(board.stages)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      html = view |> element("#stage-#{stage.id}-collapsed-toggle") |> render_click()
+
+      assert html =~ "This board is archived (read-only)."
+      refute Boards.get_stage(board, stage.id).collapsed_by_default
+    end
+  end
+
   describe "10b sub-lane toggles in the stage card" do
     test "the Done and Review toggles live inside the card and still drive lanes",
          %{conn: conn, board: board} do

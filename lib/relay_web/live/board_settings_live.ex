@@ -383,6 +383,20 @@ defmodule RelayWeb.BoardSettingsLive do
                           Relay AI listens here
                         </span>
                       </div>
+                      <%!-- COLLAPSED toggle (RLY-111) — board-wide default-collapse; any stage type. --%>
+                      <div style="display:flex;align-items:center;gap:9px;">
+                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
+                          COLLAPSED
+                        </span>
+                        <input
+                          id={"stage-#{stage.id}-collapsed-toggle"}
+                          type="checkbox"
+                          class="toggle toggle-sm"
+                          checked={stage.collapsed_by_default}
+                          phx-click="toggle_collapsed_default"
+                          phx-value-stage-id={stage.id}
+                        />
+                      </div>
                     </div>
                     <%!-- Controls row — WIP (MMF 11). --%>
                     <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
@@ -860,7 +874,7 @@ defmodule RelayWeb.BoardSettingsLive do
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
         save_board_name save_board_slug edit_stage save_stage add_stage delete_stage
         toggle_wip bump_wip reorder_stage toggle_lane set_type toggle_ai set_reject_to
-        invite_member remove_member
+        toggle_collapsed_default invite_member remove_member
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -966,6 +980,12 @@ defmodule RelayWeb.BoardSettingsLive do
   def handle_event("toggle_ai", %{"stage-id" => stage_id}, socket) do
     stage = find_stage(socket, stage_id)
     {:ok, _stage} = Boards.update_stage(stage, %{ai_enabled: not stage.ai_enabled})
+    {:noreply, refresh_stages(socket)}
+  end
+
+  def handle_event("toggle_collapsed_default", %{"stage-id" => stage_id}, socket) do
+    stage = find_stage(socket, stage_id)
+    {:ok, _stage} = Boards.update_stage(stage, %{collapsed_by_default: not stage.collapsed_by_default})
     {:noreply, refresh_stages(socket)}
   end
 

@@ -320,6 +320,32 @@ defmodule Relay.BoardsTest do
     end
   end
 
+  describe "update_stage/2 collapsed_by_default" do
+    test "persists collapsed_by_default" do
+      board = insert(:board)
+      backlog = insert(:stage, board: board, name: "Backlog", type: :queue, category: :unstarted, position: 1)
+
+      assert {:ok, updated} = Boards.update_stage(backlog, %{collapsed_by_default: true})
+      assert updated.collapsed_by_default
+      assert Repo.get!(Stage, backlog.id).collapsed_by_default
+
+      assert {:ok, cleared} = Boards.update_stage(updated, %{collapsed_by_default: false})
+      refute cleared.collapsed_by_default
+    end
+
+    test "is not forced false for non-work stage types (unlike ai_enabled)" do
+      board = insert(:board)
+      done = insert(:stage, board: board, name: "Done", type: :done, category: :complete, position: 1)
+      review = insert(:stage, board: board, name: "Review", type: :review, category: :in_progress, position: 2)
+
+      assert {:ok, %Stage{collapsed_by_default: true}} =
+               Boards.update_stage(done, %{collapsed_by_default: true})
+
+      assert {:ok, %Stage{collapsed_by_default: true}} =
+               Boards.update_stage(review, %{collapsed_by_default: true})
+    end
+  end
+
   describe "top_level_done_stage_ids/1" do
     test "returns top-level complete-stage ids, excluding done sub-lanes" do
       board = insert(:board)
