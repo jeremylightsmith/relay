@@ -9,23 +9,21 @@ import 'support/fake_auth.dart';
 
 const _user = {'id': 1, 'name': 'Dana Kim', 'email': 'dana@acme.co'};
 
-Future<void> pumpSettings(
+Future<FakeAuthController> pumpSettings(
   WidgetTester tester, {
   Map<String, dynamic> user = _user,
 }) async {
+  final auth = FakeAuthController(
+    AuthState(status: AuthStatus.signedIn, user: user),
+  );
   await tester.pumpWidget(
     ProviderScope(
-      overrides: [
-        authProvider.overrideWith(
-          () => FakeAuthController(
-            AuthState(status: AuthStatus.signedIn, user: user),
-          ),
-        ),
-      ],
+      overrides: [authProvider.overrideWith(() => auth)],
       child: MaterialApp(theme: RelayTheme.light, home: const SettingsScreen()),
     ),
   );
   await tester.pumpAndSettle();
+  return auth;
 }
 
 void main() {
@@ -72,18 +70,65 @@ void main() {
   });
 
   testWidgets(
-    'exactly one row — Account with a chevron — and no Log out button',
+    'a Log out button below the identity block — no Account row, no toggles',
     (tester) async {
       await pumpSettings(tester);
 
-      expect(find.byKey(const Key('settings_account_row')), findsOneWidget);
-      expect(find.text('Account'), findsOneWidget);
-      expect(find.text('›'), findsOneWidget);
-      // pin the SET-01 divergences: no Log out here, no unbacked rows, no toggles
-      expect(find.text('Log out'), findsNothing);
+      expect(find.byKey(const Key('settings_log_out')), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'Log out'), findsOneWidget);
+      // pin the SET-01 divergence: no rows card at all — Account was cut at
+      // Review, Notifications / Voice replies still await SET-03 / RLY-99
+      expect(find.byKey(const Key('settings_account_row')), findsNothing);
+      expect(find.text('Account'), findsNothing);
+      expect(find.text('›'), findsNothing);
       expect(find.byType(Switch), findsNothing);
       expect(find.text('Notifications'), findsNothing);
       expect(find.text('Voice replies'), findsNothing);
     },
   );
+
+  testWidgets('Log out opens the SET-02 confirm with the exact copy', (
+    tester,
+  ) async {
+    await pumpSettings(tester);
+
+    await tester.tap(find.byKey(const Key('settings_log_out')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('logout_confirm')), findsOneWidget);
+    expect(find.text('Log out of Relay?'), findsOneWidget);
+    expect(
+      find.text("You'll stop receiving notifications until you sign back in."),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('logout_confirm_logout')), findsOneWidget);
+    expect(find.byKey(const Key('logout_confirm_cancel')), findsOneWidget);
+  });
+
+  testWidgets('Cancel dismisses without signing out', (tester) async {
+    final auth = await pumpSettings(tester);
+
+    await tester.tap(find.byKey(const Key('settings_log_out')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('logout_confirm_cancel')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('logout_confirm')), findsNothing);
+    expect(auth.signOutCalls, 0);
+    // still on Settings, still signed in
+    expect(find.text('Dana Kim'), findsOneWidget);
+    expect(find.text('dana@acme.co'), findsOneWidget);
+  });
+
+  testWidgets('confirming calls signOut exactly once', (tester) async {
+    final auth = await pumpSettings(tester);
+
+    await tester.tap(find.byKey(const Key('settings_log_out')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('logout_confirm_logout')));
+    await tester.pumpAndSettle();
+
+    expect(auth.signOutCalls, 1);
+    expect(find.byKey(const Key('logout_confirm')), findsNothing);
+  });
 }

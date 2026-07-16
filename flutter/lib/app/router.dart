@@ -13,7 +13,6 @@ import '../features/needs_you/needs_you_screen.dart';
 import '../features/push/push_onboarding.dart';
 import '../features/push/push_permission_screen.dart';
 import '../features/push/push_service.dart';
-import '../features/settings/account_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../widgets/main_scaffold.dart';
 import 'pending_deep_link.dart';
@@ -101,12 +100,6 @@ GoRouter buildRouter({
         path: '/card/:ref/answer',
         builder: (context, state) =>
             AnswerScreen(cardRef: state.pathParameters['ref']!),
-      ),
-      // RLY-90: Settings' Account screen. Top-level — OUTSIDE the ShellRoute — so
-      // it covers the bottom nav and gets a back chevron, like /card/:ref.
-      GoRoute(
-        path: '/account',
-        builder: (context, state) => const AccountScreen(),
       ),
       ShellRoute(
         builder: (context, state, child) => MainScaffold(child: child),
