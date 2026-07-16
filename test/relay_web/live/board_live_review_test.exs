@@ -33,6 +33,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     assert has_element?(view, "#card-drawer")
     refute has_element?(view, "#review-panel")
@@ -74,6 +75,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     assert has_element?(view, "#review-panel", "READY FOR YOUR REVIEW")
     refute has_element?(view, "#review-approve")
@@ -211,6 +213,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
     assert has_element?(view, "#review-panel")
     refute has_element?(view, "#needs-input-panel")
 
@@ -227,6 +230,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
     refute has_element?(view, "#review-panel")
 
     {:ok, card} = Cards.set_status(card, %{status: :in_review})

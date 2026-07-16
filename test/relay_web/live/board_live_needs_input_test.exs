@@ -22,6 +22,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     assert has_element?(view, "#card-drawer")
     refute has_element?(view, "#needs-input-panel")
@@ -34,6 +35,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     assert has_element?(view, "#needs-input-form > div.w-full #needs-input-answer")
   end
@@ -82,6 +84,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, _blocked} = Cards.request_input(card, "Which bucket?")
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
     assert has_element?(view, "#stage-col-#{code.position}-cards .card-needs-input", "needs you")
 
     view
@@ -112,6 +115,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, _blocked} = Cards.request_input(card, "Ready to start?")
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     view |> form("#needs-input-form", answer: %{body: "Yes, go"}) |> render_submit()
 
@@ -127,6 +131,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     assert has_element?(view, "#needs-input-panel")
     refute has_element?(view, "#needs-input-question")
@@ -138,6 +143,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, _blocked} = Cards.request_input(card, "Which bucket?")
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     view |> form("#needs-input-form", answer: %{body: ""}) |> render_submit()
 
@@ -151,6 +157,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
     refute has_element?(view, "#needs-input-panel")
 
     {:ok, _blocked} = Cards.request_input(card, "Which region?")
@@ -165,6 +172,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     # Simulate `:card_upserted` winning the race against the `:needs_input` Activity
     # write: the card is already `:needs_input` in the DB, but no `:needs_input` entry
