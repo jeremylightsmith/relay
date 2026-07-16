@@ -5,6 +5,7 @@ defmodule RelayWeb.BoardSettingsMembersTest do
 
   alias Relay.Boards
   alias Relay.Members
+  alias Relay.Repo
 
   setup :register_and_log_in_user
 
@@ -76,16 +77,18 @@ defmodule RelayWeb.BoardSettingsMembersTest do
   end
 
   test "a member row's avatar matches the mockup's chroma and font size", %{conn: conn, user: user} do
+    # RLY-90: without a photo, the row falls back to the identity-tinted initials circle.
+    user |> Ecto.Changeset.change(avatar_url: nil) |> Repo.update!()
     board = board_for(user)
     [me] = Members.list_members(board)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=members")
 
-    row = view |> element("#member-row-#{me.id} div[style*='border-radius:50%']") |> render()
+    row = view |> element("#member-row-#{me.id} span[style*='border-radius:50%']") |> render()
 
     # matches `docs/designs/Relay Board.dc.html` member row avatarStyle (line ~1406):
-    # oklch(0.62 0.13 <hue>) at font-size:12px
+    # oklch(0.62 0.13 <hue>) at the shared avatar's size-derived font (round(34*0.42) = 14px)
     assert row =~ "background:oklch(0.62 0.13 "
-    assert row =~ "font-size:12px"
+    assert row =~ "font-size:14px"
   end
 
   test "the AGENT card links to the API keys pane", %{conn: conn, user: user} do

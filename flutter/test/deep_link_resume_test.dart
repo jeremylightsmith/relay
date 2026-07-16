@@ -179,4 +179,44 @@ void main() {
       expect(find.byType(NavigationBar), findsNothing);
     },
   );
+
+  testWidgets('signing out from Account does not arm the deep-link resume', (
+    tester,
+  ) async {
+    final (auth, _) = await pumpLaunch(tester);
+    auth.resolve(
+      const AuthState(
+        status: AuthStatus.signedIn,
+        user: {'email': 'd@acme.co'},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Settings → Account, then sign out from there (what the confirm's
+    // Log out button does via signOut()).
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('settings_account_row')));
+    await tester.pumpAndSettle();
+    auth.resolve(const AuthState(status: AuthStatus.signedOut));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('welcome_screen')), findsOneWidget);
+
+    // Sign back in: land on the inbox — NOT back on Account. Without the
+    // justSignedOut flag, the redirect stashes /account as a pending deep
+    // link the moment the sign-out redirect runs, and sign-in resumes it.
+    auth.resolve(
+      const AuthState(
+        status: AuthStatus.signedIn,
+        user: {'email': 'd@acme.co'},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(AppBar, 'Account'), findsNothing);
+    // back in the tab shell at the default landing (pumpLaunch does not fake
+    // the feed, so assert the shell rather than the inbox's loaded state)
+    expect(find.byType(NavigationBar), findsOneWidget);
+  });
 }

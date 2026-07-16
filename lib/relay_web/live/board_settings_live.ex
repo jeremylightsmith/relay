@@ -581,7 +581,13 @@ defmodule RelayWeb.BoardSettingsLive do
                   id={"member-row-#{m.id}"}
                   style="display:flex;align-items:center;gap:12px;padding:13px 16px;border-top:1px solid oklch(0.95 0.006 255);"
                 >
-                  <div style={member_avatar_style(m)}>{member_initials(m)}</div>
+                  <.avatar
+                    size={34}
+                    tint={:identity}
+                    src={m.user && m.user.avatar_url}
+                    name={m.user && m.user.name}
+                    email={m.email}
+                  />
                   <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;">
                     <div style="display:flex;align-items:center;gap:8px;">
                       <span style="font-size:14px;font-weight:600;color:oklch(0.28 0.02 255);">
@@ -1105,25 +1111,6 @@ defmodule RelayWeb.BoardSettingsLive do
   defp member_name(%Membership{user: %User{name: name}}) when is_binary(name) and name != "", do: name
 
   defp member_name(%Membership{email: email}), do: email |> String.split("@") |> hd()
-
-  defp member_initials(membership) do
-    membership
-    |> member_name()
-    |> String.split(~r/[\s@.]+/, trim: true)
-    |> Enum.map(&String.first/1)
-    |> Enum.take(2)
-    |> Enum.join()
-    |> String.upcase()
-  end
-
-  defp member_avatar_style(%Membership{} = m) do
-    seed = m.email || ""
-    hue = rem(:erlang.phash2(seed), 360)
-
-    "width:34px;height:34px;border-radius:50%;background:oklch(0.62 0.13 #{hue});" <>
-      "color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;" <>
-      "font-size:12px;font-weight:600;flex:0 0 auto;"
-  end
 
   # The effective reject target id: the explicit reject_to, else the previous main stage.
   defp effective_reject_to(stage) do

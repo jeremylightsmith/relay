@@ -6,6 +6,7 @@ defmodule RelayWeb.BoardLiveMembersTest do
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Members
+  alias Relay.Repo
 
   setup :register_and_log_in_user
 
@@ -25,6 +26,8 @@ defmodule RelayWeb.BoardLiveMembersTest do
   end
 
   test "the reassign picker's person avatars match the mockup's chroma", %{conn: conn, user: user} do
+    # RLY-90: without a photo, the row falls back to the identity-tinted initials circle.
+    user |> Ecto.Changeset.change(avatar_url: nil) |> Repo.update!()
     board = Boards.get_or_create_default_board(user)
     [stage | _] = board.stages
     card = insert(:card, stage: stage)

@@ -13,6 +13,7 @@ import '../features/needs_you/needs_you_screen.dart';
 import '../features/push/push_onboarding.dart';
 import '../features/push/push_permission_screen.dart';
 import '../features/push/push_service.dart';
+import '../features/settings/account_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../widgets/main_scaffold.dart';
 import 'pending_deep_link.dart';
@@ -101,6 +102,12 @@ GoRouter buildRouter({
         builder: (context, state) =>
             AnswerScreen(cardRef: state.pathParameters['ref']!),
       ),
+      // RLY-90: Settings' Account screen. Top-level — OUTSIDE the ShellRoute — so
+      // it covers the bottom nav and gets a back chevron, like /card/:ref.
+      GoRoute(
+        path: '/account',
+        builder: (context, state) => const AccountScreen(),
+      ),
       ShellRoute(
         builder: (context, state, child) => MainScaffold(child: child),
         routes: [
@@ -160,9 +167,17 @@ final routerProvider = Provider<GoRouter>((ref) {
   // main.dart can't: it answers "was this launch cold?", not "is there a card
   // to land on?", and a warm tap while signed out never touches it at all.
   var interactiveSignIn = false;
+  // A deliberate sign-out is not a deep link to resume (RLY-90 §10): without
+  // this, signing out from /account (or /settings, /board) stashes that
+  // location as pending and the *next* sign-in lands back there instead of
+  // the inbox.
+  var justSignedOut = false;
   ref.listen(authProvider, (previous, next) {
     interactiveSignIn =
         previous?.status == AuthStatus.signingIn && next.signedIn;
+    if (previous?.signedIn == true && next.status == AuthStatus.signedOut) {
+      justSignedOut = true;
+    }
     refresh.value = next.status;
   });
 
@@ -206,6 +221,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       }
       if (!auth.signedIn) {
         if (atAuth) return null;
+        if (justSignedOut) {
+          justSignedOut = false;
+          return '/welcome';
+        }
         // Never stash the splash itself — it is scaffolding, not a destination.
         if (!atSplash && !isDefaultLanding) pending.set(state.uri.toString());
         return '/welcome';

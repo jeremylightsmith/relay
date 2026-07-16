@@ -1272,4 +1272,121 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(id="card-RLY-3-log-strip")
     end
   end
+
+  describe "avatar/1" do
+    test "renders the photo when src is present" do
+      html =
+        render_component(&CoreComponents.avatar/1,
+          src: "https://lh3.example.com/p.png",
+          name: "Dana Kim",
+          email: "dana@acme.co"
+        )
+
+      assert html =~ ~s(data-avatar="photo")
+      assert html =~ ~s(src="https://lh3.example.com/p.png")
+      assert html =~ ~s(referrerpolicy="no-referrer")
+      assert html =~ ~s(alt="Dana Kim")
+      refute html =~ ">DK<"
+    end
+
+    test "falls back to white initials on the tint fill when there is no photo" do
+      html = render_component(&CoreComponents.avatar/1, name: "Dana Kim", email: "dana@acme.co")
+
+      assert html =~ ~s(data-avatar="initials")
+      assert html =~ ">DK<"
+      assert html =~ "color:oklch(1 0 0)"
+    end
+
+    test "derives initials from the email local part when there is no name (the [E4] rule)" do
+      assert render_component(&CoreComponents.avatar/1, email: "dana@acme.co") =~ ">D<"
+      assert render_component(&CoreComponents.avatar/1, email: "dana.kim@acme.co") =~ ">DK<"
+    end
+
+    test "never crashes: nil or blank name and email render ?" do
+      assert render_component(&CoreComponents.avatar/1, name: nil, email: nil) =~ ">?<"
+      assert render_component(&CoreComponents.avatar/1, name: "   ", email: "") =~ ">?<"
+    end
+
+    test "the AI renders the violet dot mark and ignores src" do
+      html =
+        render_component(&CoreComponents.avatar/1,
+          actor: :ai,
+          src: "https://example.com/never.png",
+          size: 22
+        )
+
+      assert html =~ ~s(data-avatar="ai")
+      assert html =~ "background:var(--color-secondary)"
+      # round(22 * 0.36) = 8px mark with the 1.5px white border, as the card cluster draws it
+      assert html =~ "width:8px;height:8px;border-radius:50%;border:1.5px solid oklch(1 0 0)"
+      refute html =~ "<img"
+    end
+
+    test "identity tint hashes the email — same email, same hue at any size" do
+      a = render_component(&CoreComponents.avatar/1, email: "dana@acme.co", size: 24)
+      b = render_component(&CoreComponents.avatar/1, email: "dana@acme.co", size: 34)
+
+      [hue] = Regex.run(~r/background:oklch\(0\.62 0\.13 (\d+)\)/, a, capture: :all_but_first)
+      assert b =~ "background:oklch(0.62 0.13 #{hue})"
+    end
+
+    test "role tint fills with the primary token" do
+      html = render_component(&CoreComponents.avatar/1, name: "Dana Kim", tint: :role)
+      assert html =~ "background:var(--color-primary)"
+    end
+
+    test "sizes the circle and text from the size attr" do
+      html = render_component(&CoreComponents.avatar/1, name: "Dana Kim", size: 44)
+      assert html =~ "width:44px;height:44px"
+      assert html =~ "font-size:18px"
+    end
+
+    test "ring and grayed compose the existing owner-cluster treatments" do
+      html =
+        render_component(&CoreComponents.avatar/1,
+          name: "Dana Kim",
+          ring: "var(--color-primary)",
+          grayed: true
+        )
+
+      assert html =~ "box-shadow:0 0 0 3.5px var(--color-primary), 0 0 0 2px var(--color-base-100)"
+      assert html =~ "filter:grayscale(1)"
+      assert html =~ "opacity:0.5"
+    end
+  end
+
+  describe "avatar call sites (RLY-90)" do
+    test "owner_avatars renders the owner's photo when they have one" do
+      html =
+        render_component(&CoreComponents.owner_avatars/1,
+          active_owner: :human,
+          owners: [
+            %{
+              actor_type: :user,
+              user: %{name: "Dana Kim", email: "dana@acme.co", avatar_url: "https://lh3.example.com/p.png"}
+            }
+          ]
+        )
+
+      assert html =~ ~s(data-avatar="photo")
+      assert html =~ ~s(src="https://lh3.example.com/p.png")
+      # the baton ring survives the refactor
+      assert html =~ "0 0 0 3.5px var(--color-primary)"
+    end
+
+    test "member_stack renders a member's photo and hashes invited rows on email" do
+      members = [
+        %{
+          email: "dana@acme.co",
+          user: %{name: "Dana Kim", email: "dana@acme.co", avatar_url: "https://lh3.example.com/p.png"}
+        },
+        %{email: "guest@example.com", user: nil}
+      ]
+
+      html = render_component(&CoreComponents.member_stack/1, members: members)
+
+      assert html =~ ~s(data-avatar="photo")
+      assert html =~ ">G<"
+    end
+  end
 end

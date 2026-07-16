@@ -536,6 +536,140 @@ defmodule RelayWeb.CoreComponents do
   defp status_badge_label(:in_review, _progress), do: "in review"
 
   @doc """
+  The one avatar (RLY-90). A person renders their photo when we have one
+  (`src`), white initials on a colored circle otherwise; the AI renders the
+  violet dot mark and never a photo. Every people surface (top bar, card
+  owner cluster, member stack, comment timeline, reassign picker, board
+  settings) draws through this, so the same person looks the same everywhere.
+
+  Takes primitives, not structs — storybook stories pass plain values, and
+  invited members have no user row at all.
+
+  `tint={:role}` fills with `--color-primary` (human=blue is load-bearing);
+  `tint={:identity}` seeds a stable hue from the email, so one person keeps
+  one color across surfaces.
+  """
+  attr :src, :string, default: nil, doc: "the avatar_url; ignored when actor={:ai}"
+  attr :name, :string, default: nil, doc: "display name — title text + initials"
+  attr :email, :string, default: nil, doc: "initials fallback + identity hue seed"
+  attr :actor, :atom, values: [:human, :ai], default: :human
+  attr :size, :integer, default: 24, doc: "circle diameter in px"
+  attr :tint, :atom, values: [:role, :identity], default: :identity
+  attr :ring, :string, default: nil, doc: "CSS ring color, or nil — the active-owner double shadow"
+  attr :grayed, :boolean, default: false
+  attr :class, :string, default: nil
+
+  def avatar(%{actor: :ai} = assigns) do
+    assigns = assign(assigns, :mark_size, round(assigns.size * 0.36))
+
+    ~H"""
+    <span
+      class={@class}
+      style={avatar_circle_style(@size, "var(--color-secondary)", @ring, @grayed)}
+      title="Relay AI"
+      data-avatar="ai"
+    >
+      <span style={"width:#{@mark_size}px;height:#{@mark_size}px;border-radius:50%;border:1.5px solid oklch(1 0 0);display:block"}>
+      </span>
+    </span>
+    """
+  end
+
+  def avatar(%{src: src} = assigns) when is_binary(src) and src != "" do
+    ~H"""
+    <span
+      class={@class}
+      style={avatar_circle_style(@size, nil, @ring, @grayed) <> ";overflow:hidden"}
+      title={@name || @email}
+      data-avatar="photo"
+    >
+      <img
+        src={@src}
+        alt={@name || @email}
+        referrerpolicy="no-referrer"
+        style="width:100%;height:100%;object-fit:cover"
+      />
+    </span>
+    """
+  end
+
+  def avatar(assigns) do
+    fill = if assigns.tint == :role, do: "var(--color-primary)", else: avatar_fill(assigns.email)
+
+    # Spread as dynamic attrs, and keep the child on the tag's own line: with
+    # a bare-text child, mix format's HEEx formatter (unlike for element
+    # children) hoists surrounding whitespace into literal text nodes the
+    # moment the opening tag wraps onto multiple lines — which the `>DK<`
+    # style tests below would otherwise fail on.
+    assigns =
+      assign(assigns,
+        attrs: %{
+          class: assigns.class,
+          style: avatar_circle_style(assigns.size, fill, assigns.ring, assigns.grayed),
+          title: assigns.name || assigns.email,
+          "data-avatar": "initials"
+        },
+        initials: avatar_initials(assigns.name, assigns.email)
+      )
+
+    ~H"""
+    <span {@attrs}>{@initials}</span>
+    """
+  end
+
+  defp avatar_circle_style(size, fill, ring, grayed) do
+    [
+      "width:#{size}px",
+      "height:#{size}px",
+      "border-radius:50%",
+      fill && "background:#{fill}",
+      "color:oklch(1 0 0)",
+      "display:flex",
+      "align-items:center",
+      "justify-content:center",
+      "font-size:#{round(size * 0.42)}px",
+      "font-weight:600",
+      "flex:0 0 auto",
+      "box-sizing:border-box",
+      ring && "box-shadow:0 0 0 3.5px #{ring}, 0 0 0 2px var(--color-base-100)",
+      grayed && "filter:grayscale(1)",
+      grayed && "opacity:0.5"
+    ]
+    |> Enum.filter(&is_binary/1)
+    |> Enum.join(";")
+  end
+
+  # The one initials rule (RLY-90 [E4]), mirrored by the mobile app's
+  # initialsFor/2: a name yields the first letters of its first two words;
+  # with no name, the email's LOCAL PART split on [._\s-] (dana@acme.co → D,
+  # dana.kim@acme.co → DK); both blank yields "?". Never crashes on nil.
+  defp avatar_initials(name, email) do
+    cond do
+      filled?(name) -> take_initials(String.split(name, ~r/\s+/, trim: true))
+      filled?(email) -> email |> String.split("@") |> List.first("") |> local_part_initials()
+      true -> "?"
+    end
+  end
+
+  defp filled?(value), do: is_binary(value) and String.trim(value) != ""
+
+  defp local_part_initials(local), do: take_initials(String.split(local, ~r/[._\s-]+/, trim: true))
+
+  defp take_initials(words) do
+    case words |> Enum.take(2) |> Enum.map_join("", &String.first/1) |> String.upcase() do
+      "" -> "?"
+      initials -> initials
+    end
+  end
+
+  # The identity fill (RLY-90 [E2]): one hue per email, everywhere — the same
+  # oklch(0.62 0.13 h) formula the member stack and board settings already used.
+  defp avatar_fill(email) do
+    hue = rem(:erlang.phash2(email || ""), 360)
+    "oklch(0.62 0.13 #{hue})"
+  end
+
+  @doc """
   Renders the owner avatar cluster for a card — the mockup's "who holds the
   baton" glance (`docs/designs/Relay Board.dc.html`, `buildCluster`). Human
   owners are ~22px initialed circles (blue); the AI owner is a violet circle
@@ -553,21 +687,29 @@ defmodule RelayWeb.CoreComponents do
   attr :size, :integer, default: 22
 
   def owner_avatars(assigns) do
-    assigns = assign(assigns, :avatars, build_cluster(assigns.owners, assigns.active_owner, assigns.size))
+    assigns = assign(assigns, :avatars, build_cluster(assigns.owners, assigns.active_owner))
 
     ~H"""
     <div :if={@avatars != []} class="card-owners flex items-center" style="padding-left:2px;">
-      <div :for={av <- @avatars} style={av.wrap} title={av.name} data-actor-type={av.actor_type}>
-        <span :if={av.ai?} style={av.mark}></span>
-        <span :if={!av.ai?}>{av.initials}</span>
+      <div :for={av <- @avatars} style={av.wrap} title={av.title} data-actor-type={av.actor_type}>
+        <.avatar
+          actor={av.actor}
+          src={av.src}
+          name={av.name}
+          email={av.email}
+          size={@size}
+          tint={:role}
+          ring={av.ring}
+          grayed={av.grayed}
+        />
       </div>
     </div>
     """
   end
 
-  defp build_cluster(_owners, nil, _size), do: []
+  defp build_cluster(_owners, nil), do: []
 
-  defp build_cluster(owners, active_owner, size) do
+  defp build_cluster(owners, active_owner) do
     ai_active = active_owner == :ai
     humans = Enum.filter(owners, &(&1.actor_type == :user))
 
@@ -575,16 +717,36 @@ defmodule RelayWeb.CoreComponents do
       humans
       |> Enum.with_index()
       |> Enum.map(fn {owner, i} ->
-        avatar_data(:human, Map.get(owner, :user), size,
-          overlap?: i > 0,
-          ring?: not ai_active and i == 0,
-          grayed?: ai_active
-        )
+        user = Map.get(owner, :user)
+
+        %{
+          actor: :human,
+          src: user && Map.get(user, :avatar_url),
+          name: user && Map.get(user, :name),
+          email: user && Map.get(user, :email),
+          title: user_name(user) || "Someone",
+          actor_type: :user,
+          ring: if(not ai_active and i == 0, do: "var(--color-primary)"),
+          grayed: ai_active,
+          wrap: cluster_wrap(i > 0)
+        }
       end)
 
     ai_avatars =
       if ai_active do
-        [avatar_data(:ai, nil, size, overlap?: humans != [], ring?: true, grayed?: false)]
+        [
+          %{
+            actor: :ai,
+            src: nil,
+            name: nil,
+            email: nil,
+            title: "Relay AI",
+            actor_type: :agent,
+            ring: "var(--color-secondary)",
+            grayed: false,
+            wrap: cluster_wrap(humans != [])
+          }
+        ]
       else
         []
       end
@@ -592,69 +754,13 @@ defmodule RelayWeb.CoreComponents do
     human_avatars ++ ai_avatars
   end
 
-  defp avatar_data(kind, user, size, opts) do
-    ai? = kind == :ai
-    bg = if ai?, do: "var(--color-secondary)", else: "var(--color-primary)"
-    ring_color = if ai?, do: "var(--color-secondary)", else: "var(--color-primary)"
+  # Overlap is the cluster's concern, not the avatar's: later circles tuck
+  # -6px behind the previous one with a 2px base-100 separation ring.
+  defp cluster_wrap(false), do: "display:flex;border-radius:50%;position:relative"
 
-    shadows =
-      []
-      |> prepend_when(opts[:overlap?], "0 0 0 2px var(--color-base-100)")
-      |> prepend_when(opts[:ring?], "0 0 0 2px var(--color-base-100)")
-      |> prepend_when(opts[:ring?], "0 0 0 3.5px #{ring_color}")
-
-    wrap =
-      [
-        "width:#{size}px",
-        "height:#{size}px",
-        "border-radius:50%",
-        "background:#{bg}",
-        "color:oklch(1 0 0)",
-        "display:flex",
-        "align-items:center",
-        "justify-content:center",
-        "font-size:#{round(size * 0.42)}px",
-        "font-weight:600",
-        "flex:0 0 auto",
-        "box-sizing:border-box",
-        "position:relative"
-      ]
-      |> append_when(opts[:overlap?], "margin-left:-6px")
-      |> append_when(opts[:grayed?], "filter:grayscale(1)")
-      |> append_when(opts[:grayed?], "opacity:0.5")
-      |> append_when(shadows != [], "box-shadow:#{Enum.join(shadows, ", ")}")
-      |> Enum.join(";")
-
-    mark_size = round(size * 0.36)
-
-    %{
-      wrap: wrap,
-      mark: "width:#{mark_size}px;height:#{mark_size}px;border-radius:50%;border:1.5px solid oklch(1 0 0);display:block",
-      ai?: ai?,
-      initials: initials_of(user),
-      name: if(ai?, do: "Relay AI", else: user_name(user) || "Someone"),
-      actor_type: if(ai?, do: :agent, else: :user)
-    }
-  end
-
-  defp append_when(list, true, value), do: list ++ [value]
-  defp append_when(list, _false, _value), do: list
-  defp prepend_when(list, true, value), do: [value | list]
-  defp prepend_when(list, _false, _value), do: list
-
-  defp initials_of(user) do
-    case user_name(user) do
-      nil ->
-        "?"
-
-      name ->
-        name
-        |> String.split(~r/\s+/, trim: true)
-        |> Enum.map(&String.first/1)
-        |> Enum.take(2)
-        |> Enum.join()
-        |> String.upcase()
-    end
+  defp cluster_wrap(true) do
+    "display:flex;border-radius:50%;position:relative;margin-left:-6px;" <>
+      "box-shadow:0 0 0 2px var(--color-base-100)"
   end
 
   defp user_name(nil), do: nil
@@ -685,55 +791,31 @@ defmodule RelayWeb.CoreComponents do
 
     ~H"""
     <div :if={@members != []} id={@id} data-role="member-stack" class="flex items-center">
-      <span :for={av <- @avatars} style={av.style} title={av.name}>{av.initials}</span>
+      <span :for={av <- @avatars} style={av.wrap} title={av.title}>
+        <.avatar src={av.src} name={av.name} email={av.email} size={24} tint={:identity} />
+      </span>
       <span :if={@ov > 0} data-role="member-overflow" style={@ov_style}>+{@ov}</span>
     </div>
     """
   end
 
   defp member_avatar_data(m, index) do
-    %{
-      style: member_circle_style(m, index),
-      name: user_name(Map.get(m, :user)) || member_email(m),
-      initials: member_stack_initials(m)
-    }
-  end
+    user = Map.get(m, :user)
 
-  defp member_stack_initials(m) do
-    case user_name(Map.get(m, :user)) do
-      nil -> m |> member_email() |> email_initials()
-      _name -> initials_of(Map.get(m, :user))
-    end
+    %{
+      src: user && Map.get(user, :avatar_url),
+      name: user && Map.get(user, :name),
+      email: member_email(m),
+      title: user_name(user) || member_email(m),
+      wrap: member_wrap(index)
+    }
   end
 
   defp member_email(m), do: Map.get(m, :email) || ""
 
-  defp email_initials(email) do
-    email
-    |> String.split("@")
-    |> List.first("")
-    |> String.split(~r/[._\s-]+/, trim: true)
-    |> Enum.map(&String.first/1)
-    |> Enum.take(2)
-    |> Enum.join()
-    |> String.upcase()
-    |> case do
-      "" -> "?"
-      initials -> initials
-    end
-  end
-
-  defp member_circle_style(m, index) do
-    hue = rem(:erlang.phash2(member_email(m)), 360)
-
-    base =
-      "width:24px;height:24px;border-radius:50%;background:oklch(0.62 0.13 #{hue});" <>
-        "color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;" <>
-        "font-size:10px;font-weight:600;flex:0 0 auto;box-sizing:border-box;" <>
-        "box-shadow:0 0 0 2px oklch(1 0 0);"
-
-    if index == 0, do: base, else: base <> "margin-left:-7px;"
-  end
+  # The stack's white separation ring + -7px tuck (mockup lines ~114-124).
+  defp member_wrap(0), do: "display:flex;border-radius:50%;box-shadow:0 0 0 2px oklch(1 0 0)"
+  defp member_wrap(_index), do: member_wrap(0) <> ";margin-left:-7px"
 
   defp member_overflow_style do
     "width:24px;height:24px;border-radius:50%;background:oklch(0.94 0.006 255);" <>
@@ -2025,15 +2107,15 @@ defmodule RelayWeb.CoreComponents do
                     class="timeline-entry flex items-start gap-3"
                     data-actor-type={comment.actor_type}
                   >
-                    <span class={[
-                      "timeline-avatar flex size-7 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold",
-                      if(comment.actor_type == :agent,
-                        do: "bg-secondary/15 text-secondary",
-                        else: "bg-primary/15 text-primary"
-                      )
-                    ]}>
-                      {timeline_initials(comment)}
-                    </span>
+                    <.avatar
+                      class="timeline-avatar shrink-0"
+                      size={28}
+                      tint={:role}
+                      actor={if(comment.actor_type == :agent, do: :ai, else: :human)}
+                      src={comment.user && comment.user.avatar_url}
+                      name={comment.user && comment.user.name}
+                      email={comment.user && comment.user.email}
+                    />
                     <div class="min-w-0 flex-1 space-y-1">
                       <div class="flex items-baseline gap-2">
                         <span class="timeline-author text-[13px] font-semibold">
@@ -2280,9 +2362,13 @@ defmodule RelayWeb.CoreComponents do
                       phx-value-user_id={m.user_id}
                       style="display:flex;align-items:center;gap:8px;background:transparent;border:none;border-radius:7px;padding:5px 6px;cursor:pointer;text-align:left;"
                     >
-                      <span style={reassign_avatar_style(:human, m.user_id)}>
-                        {initials_of(m.user)}
-                      </span>
+                      <.avatar
+                        size={22}
+                        tint={:identity}
+                        src={m.user && m.user.avatar_url}
+                        name={m.user && m.user.name}
+                        email={m.user && m.user.email}
+                      />
                       <span style="font-size:12.5px;color:oklch(0.34 0.02 255);flex:1;">
                         {user_name(m.user)}
                       </span>
@@ -2300,10 +2386,7 @@ defmodule RelayWeb.CoreComponents do
                       phx-value-actor_type="agent"
                       style="display:flex;align-items:center;gap:8px;background:transparent;border:none;border-radius:7px;padding:5px 6px;cursor:pointer;text-align:left;"
                     >
-                      <span style={reassign_avatar_style(:ai, nil)}>
-                        <span style="width:9px;height:9px;border-radius:50%;border:1.5px solid oklch(1 0 0);display:block;">
-                        </span>
-                      </span>
+                      <.avatar size={22} actor={:ai} />
                       <span style="font-size:12.5px;color:oklch(0.34 0.02 255);flex:1;">
                         Relay AI
                       </span>
@@ -2413,19 +2496,6 @@ defmodule RelayWeb.CoreComponents do
   # (user-less) rows are skipped in the reassign picker.
   defp reassignable_members(members), do: Enum.filter(members, & &1.user_id)
 
-  defp reassign_avatar_style(:ai, _id) do
-    "width:22px;height:22px;border-radius:50%;background:var(--color-secondary);" <>
-      "display:flex;align-items:center;justify-content:center;flex:0 0 auto;box-sizing:border-box;"
-  end
-
-  defp reassign_avatar_style(:human, user_id) do
-    hue = rem(:erlang.phash2(user_id), 360)
-
-    "width:22px;height:22px;border-radius:50%;background:oklch(0.62 0.13 #{hue});" <>
-      "color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;" <>
-      "font-size:10px;font-weight:600;flex:0 0 auto;box-sizing:border-box;"
-  end
-
   defp owner_dom_suffix(%{actor_type: :agent}), do: "agent"
   defp owner_dom_suffix(%{actor_type: :user, user_id: user_id}), do: "user-#{user_id}"
 
@@ -2437,17 +2507,6 @@ defmodule RelayWeb.CoreComponents do
 
   defp comment_tag_color(:question), do: "oklch(0.52 0.11 65)"
   defp comment_tag_color(:changes_requested), do: "oklch(0.55 0.13 65)"
-
-  defp timeline_initials(%{actor_type: :agent}), do: "AI"
-
-  defp timeline_initials(%{actor_type: :user, user: user}) do
-    (user.name || user.email)
-    |> String.split(~r/\s+/, trim: true)
-    |> Enum.map(&String.first/1)
-    |> Enum.take(2)
-    |> Enum.join()
-    |> String.upcase()
-  end
 
   defp activity_phrase(%Activity{type: :created}), do: "created this card"
 
