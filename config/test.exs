@@ -48,9 +48,16 @@ config :relay, Relay.Repo,
   pool_size: System.schedulers_online() * 2
 
 # Browser (Playwright) tests need a real running server; the plain LiveView
-# tests don't care. Running the server always is harmless for the fast suite.
+# tests don't care. Port 0 makes the OS assign a free port per run, so
+# concurrent test runs (runner worktrees, a human's ad-hoc `mix precommit`)
+# never collide on :eaddrinuse. Playwright reads the actually-bound port
+# back in test/test_helper.exs via RelayWeb.Endpoint.server_info(:http).
+# `url: [host: ...]` must match the `127.0.0.1` bind IP (not the "localhost"
+# from config/config.exs) or the LiveView socket's default check_origin
+# rejects the browser's Origin header and every :playwright test 403s.
 config :relay, RelayWeb.Endpoint,
-  http: [ip: {127, 0, 0, 1}, port: 4002],
+  url: [host: "127.0.0.1"],
+  http: [ip: {127, 0, 0, 1}, port: 0],
   secret_key_base: "d7ZQNZUWtP3mPcEZbpa3EzYQ70t1YmaHBlp+2uxkBeAXR5d6FfGSGzr/toxbUS5k",
   server: true
 
