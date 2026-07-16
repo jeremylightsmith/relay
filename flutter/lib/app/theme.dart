@@ -68,19 +68,24 @@ class RelayTheme {
     0xFFE2E5E9,
   ); //  bar top border    (oklch 0.92 0.006 255)
 
-  // The mic is drawn but dead until RLY-99 (D4). Ghosted along the artboard's *own*
-  // disabled convention — the move it makes for the Send back button (0.65 0.15 30 →
-  // 0.9 0.02 30: hold hue, drop chroma, lift lightness) — so it reads as a
-  // neutral-violet placeholder rather than an invented grey.
-  static const Color micGhostFill = Color(
-    0xFFF2F1F8,
-  ); //  ← oklch 0.96 0.03 292 (oklch 0.96 0.01 292)
-  static const Color micGhostBorder = Color(
-    0xFFD7D6DE,
-  ); // ← oklch 0.88 0.05 292 (oklch 0.88 0.01 292)
-  static const Color micGhostGlyph = Color(
-    0xFFAEACBA,
-  ); //  ← oklch 0.50 0.14 292 (oklch 0.75 0.02 292)
+  // The mic, live as of RLY-99 (U5). These are CORE-07's own drawn values —
+  // the ghost trio that sat here pre-RLY-99 was these, desaturated.
+  static const Color relayMicFill = Color(
+    0xFFF2EFFF,
+  ); //   mic · violet fill   (oklch 0.96 0.03 292)
+  static const Color relayMicBorder = Color(
+    0xFFD7D2F7,
+  ); // mic · violet border (oklch 0.88 0.05 292)
+  static const Color relayMicGlyph = Color(
+    0xFF6750AB,
+  ); //  mic · violet glyph  (oklch 0.50 0.14 292)
+
+  // --- Voice · Whisper (RLY-99) — the review sheet's provenance line ---
+  // A deliberately darker green than relayDone: 9.5px monospace on white needs
+  // the contrast. The artboard's own value, converted oklch → sRGB.
+  static const Color relayVoiceTranscribed = Color(
+    0xFF0B7643,
+  ); // transcribed · green (oklch 0.5 0.12 155)
 
   /// Convenience aliases used by downstream feature cards (badges, inbox rows).
   static const Color relayHuman = relayHumanLight;

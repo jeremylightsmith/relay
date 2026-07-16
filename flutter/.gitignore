@@ -43,3 +43,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# RLY-99: the bundled WhisperKit CoreML model (~147MB) is fetched by
+# ios/scripts/fetch_whisper_model.sh, never committed.
+ios/Runner/Models/

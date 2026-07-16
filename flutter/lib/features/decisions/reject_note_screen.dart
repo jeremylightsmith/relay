@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/theme.dart';
+import '../voice/mic_button.dart';
+import '../voice/voice_transcriber.dart';
 import 'review_queue.dart';
 
 /// CORE-07 "Reject · note required" (docs/designs/Relay Mobile.dc.html — the artboard
@@ -20,10 +22,14 @@ class RejectNoteScreen extends ConsumerStatefulWidget {
     super.key,
     required this.cardRef,
     required this.boardSlug,
+    this.transcriber,
   });
 
   final String cardRef;
   final String boardSlug;
+
+  /// Structural seam for tests; null → the real WhisperKit-backed engine.
+  final VoiceTranscriber? transcriber;
 
   @override
   ConsumerState<RejectNoteScreen> createState() => _RejectNoteScreenState();
@@ -107,6 +113,7 @@ class _RejectNoteScreenState extends ConsumerState<RejectNoteScreen> {
                     const _BodyCopy(),
                     _NoteField(
                       controller: _controller,
+                      transcriber: widget.transcriber,
                       onChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 8), // artboard margin-top:8px
@@ -217,9 +224,14 @@ class _BodyCopy extends StatelessWidget {
 }
 
 class _NoteField extends StatelessWidget {
-  const _NoteField({required this.controller, required this.onChanged});
+  const _NoteField({
+    required this.controller,
+    required this.transcriber,
+    required this.onChanged,
+  });
 
   final TextEditingController controller;
+  final VoiceTranscriber? transcriber;
   final ValueChanged<String> onChanged;
 
   @override
@@ -257,40 +269,17 @@ class _NoteField extends StatelessWidget {
               ),
             ),
           ),
-          const Positioned(bottom: 10, right: 10, child: _InertMic()),
-        ],
-      ),
-    );
-  }
-}
-
-/// The mic, drawn and dead (D4). RLY-99 makes it live; until then it is a visual
-/// placeholder only — no tap target, no "coming soon" toast, and kept out of the
-/// semantics tree so screen readers do not announce a button that does nothing.
-class _InertMic extends StatelessWidget {
-  const _InertMic();
-
-  @override
-  Widget build(BuildContext context) {
-    return ExcludeSemantics(
-      child: Container(
-        key: const Key('reject_mic'),
-        width: 30,
-        height: 30,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: RelayTheme.micGhostFill,
-          shape: BoxShape.circle,
-          border: Border.all(color: RelayTheme.micGhostBorder),
-        ),
-        child: Container(
-          width: 7,
-          height: 12,
-          decoration: BoxDecoration(
-            color: RelayTheme.micGhostGlyph,
-            borderRadius: BorderRadius.circular(4),
+          Positioned(
+            bottom: 10,
+            right: 10,
+            child: MicButton(
+              key: const Key('reject_mic'),
+              controller: controller,
+              transcriber: transcriber,
+              onInserted: onChanged,
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -312,11 +301,10 @@ class _Hint extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 6),
-        // D4a: the artboard reads "Add a reason to continue · or dictate it", but the
-        // mic is inert — promising dictation next to a dead control is a promise the
-        // screen cannot keep, so that half is dropped.
+        // The mic is live as of RLY-99, so the artboard's full copy is restored —
+        // D4a's drop only held while the mic was a dead placeholder.
         const Text(
-          'Add a reason to continue',
+          'Add a reason to continue · or dictate it',
           key: Key('reject_hint'),
           style: TextStyle(
             fontSize: 10.5,
