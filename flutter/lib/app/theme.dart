@@ -82,6 +82,13 @@ class RelayTheme {
     0xFFAEACBA,
   ); //  ← oklch 0.50 0.14 292 (oklch 0.75 0.02 292)
 
+  // --- Voice · Whisper (RLY-99) — the review sheet's provenance line ---
+  // A deliberately darker green than relayDone: 9.5px monospace on white needs
+  // the contrast. The artboard's own value, converted oklch → sRGB.
+  static const Color relayVoiceTranscribed = Color(
+    0xFF0B7643,
+  ); // transcribed · green (oklch 0.5 0.12 155)
+
   /// Convenience aliases used by downstream feature cards (badges, inbox rows).
   static const Color relayHuman = relayHumanLight;
   static const Color relayAI = relayAILight;
