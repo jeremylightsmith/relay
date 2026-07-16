@@ -65,6 +65,23 @@ defmodule RelayWeb.CardLiveTest do
       refute has_element?(view, "#card-drawer-close")
     end
 
+    test "approving stays on the card and updates in place (RLY-115)",
+         %{conn: conn, board: board, ref: ref} do
+      {:ok, view, _html} = live(conn, ~p"/cards/#{ref}?board=#{board.slug}")
+      render_async(view)
+
+      assert has_element?(view, "#review-panel", "READY FOR YOUR REVIEW")
+
+      # Card mode drops the web review buttons (the native bar is the actor, RLY-87), so
+      # push the event straight to the view — the handler is shared with board mode.
+      render_click(view, "review_approve", %{})
+
+      assert has_element?(view, "#card-drawer")
+      refute has_element?(view, "#review-panel")
+      assert has_element?(view, "#card-drawer .drawer-stage-chip", "Deploy")
+      assert Cards.get_card_by_ref(board, ref).status == :working
+    end
+
     test "an unknown ref is a 404", %{conn: conn} do
       assert_raise Ecto.NoResultsError, fn -> live(conn, ~p"/cards/ZZZ-9999") end
     end

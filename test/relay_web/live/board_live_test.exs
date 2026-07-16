@@ -1729,6 +1729,23 @@ defmodule RelayWeb.BoardLiveTest do
       assert Repo.all(CardOwner) == []
       assert has_element?(view, "#card-drawer-rail .rail-owners", "None")
     end
+
+    test "Take over keeps the drawer open (RLY-115 scope guard)",
+         %{conn: conn, user: user, card: card} do
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      view |> element("#card-drawer-take-over") |> render_click()
+
+      assert has_element?(view, "#card-drawer")
+
+      assert has_element?(
+               view,
+               "#card-drawer-rail .rail-owner[data-actor-type='user'][data-active='true']"
+             )
+    end
   end
 
   describe "board title" do
