@@ -468,6 +468,67 @@ defmodule Relay.Cards do
     end
   end
 
+  @stale_after to_timeout(minute: 10)
+
+  @doc """
+  The card's derived agent health (RLY-112, artboard §03) —
+  `:stopped | :none | :stale | :live`.
+
+  Pure: takes a plain map (`:newest` — the card's newest `Schemas.Activity` or `nil`;
+  `:heartbeat_at`; `:ai_active?`; `:now`), touches no DB, and builds no structs, so the
+  four branches unit-test directly. Health is derived at render and **never stored**.
+
+  The artboard's branch order, including failure-before-`ai_active?`:
+
+    1. the newest entry is a `:failure` → `:stopped` (rose)
+    2. no active AI → `:none` (no strip)
+    3. quiet longer than `STALE_AFTER` → `:stale` (amber), where the age is measured
+       from the *later* of the newest entry and the heartbeat
+    4. otherwise → `:live` (violet, pulsing)
+
+  Two accepted v1 consequences: a failure that is never superseded keeps reading
+  `:stopped` even after the AI is released (any later move supersedes it); and no
+  timestamp at all reads `:live`, not `:stale` — unreachable in practice, and choosing
+  `:live` means we never cry wolf on zero evidence.
+
+  `STALE_AFTER` is 10 minutes (Q5→C) and is a module attribute, not config — the 30s
+  heartbeat interval that pairs with it lives in the runner.
+  """
+  def health(%{newest: newest, heartbeat_at: heartbeat_at, ai_active?: ai_active?, now: now}) do
+    cond do
+      newest && Activity.kind(newest) == :failure -> :stopped
+      not ai_active? -> :none
+      stale?(newest, heartbeat_at, now) -> :stale
+      true -> :live
+    end
+  end
+
+  defp stale?(newest, heartbeat_at, now) do
+    case last_seen_at(newest, heartbeat_at) do
+      nil -> false
+      at -> DateTime.diff(now, at, :millisecond) > @stale_after
+    end
+  end
+
+  defp last_seen_at(nil, heartbeat_at), do: heartbeat_at
+  defp last_seen_at(%{inserted_at: at}, nil), do: at
+
+  defp last_seen_at(%{inserted_at: at}, heartbeat_at) do
+    if DateTime.after?(at, heartbeat_at), do: at, else: heartbeat_at
+  end
+
+  @doc """
+  `board`'s card with `card_id`, owners and sub_tasks preloaded, or `nil` — the
+  board-scoped by-id read `BoardLive` needs to refresh one card's strip when a
+  `{:card_log_appended, ...}` batch lands (RLY-112).
+  """
+  def get_card(%Board{id: board_id}, card_id) when is_integer(card_id) do
+    case Repo.get_by(Card, id: card_id, board_id: board_id) do
+      nil -> nil
+      card -> Repo.preload(card, card_preloads())
+    end
+  end
+
   @doc """
   Derived Done: a `:ready` card parked at the board's **terminal** stage (the last top-level
   stage in `stages`, `Relay.Boards.terminal_stage/1`). A `:ready` card in a *mid-board* Done

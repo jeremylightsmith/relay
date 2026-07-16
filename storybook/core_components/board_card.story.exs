@@ -83,6 +83,49 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
           active_owner: :ai,
           owners: [%{actor_type: :agent}]
         }
+      },
+      %Variation{
+        id: :ai_live,
+        attributes: %{
+          id: "story-card-live",
+          ref: "RLY-10",
+          title: "Migrate 40 blog posts",
+          active_owner: :ai,
+          status: :working,
+          progress: 62,
+          health: :live,
+          log_text: "uploaded 24/40 posts",
+          log_at: DateTime.utc_now(),
+          owners: [%{actor_type: :agent}]
+        }
+      },
+      %Variation{
+        id: :ai_stale,
+        attributes: %{
+          id: "story-card-stale",
+          ref: "RLY-11",
+          title: "Deploy the search reindex job",
+          active_owner: :ai,
+          status: :working,
+          health: :stale,
+          log_text: "reindexing 12k documents",
+          log_at: DateTime.add(DateTime.utc_now(), -8 * 60, :second),
+          owners: [%{actor_type: :agent}]
+        }
+      },
+      %Variation{
+        id: :ai_stopped,
+        attributes: %{
+          id: "story-card-stopped",
+          ref: "RLY-12",
+          title: "Generate the API client",
+          active_owner: :ai,
+          status: :working,
+          health: :stopped,
+          log_text: "agent stopped",
+          log_at: DateTime.add(DateTime.utc_now(), -2 * 60, :second),
+          owners: [%{actor_type: :agent}]
+        }
       }
     ]
   end
