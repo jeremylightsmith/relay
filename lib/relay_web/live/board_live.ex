@@ -950,7 +950,7 @@ defmodule RelayWeb.BoardLive do
         %{assigns: %{selected_card: %Card{status: :needs_input} = card}} = socket
       ) do
     case Cards.answer_input(card, body, current_actor(socket)) do
-      {:ok, card} -> {:noreply, refresh_card(socket, card)}
+      {:ok, card} -> {:noreply, after_answer(socket, card)}
       {:error, _changeset} -> {:noreply, socket}
     end
   end
@@ -1035,7 +1035,7 @@ defmodule RelayWeb.BoardLive do
         } = socket
       ) do
     case Cards.answer_input(card, Cards.compose_answer(questions, values), current_actor(socket)) do
-      {:ok, updated} -> {:noreply, refresh_card(socket, updated)}
+      {:ok, updated} -> {:noreply, after_answer(socket, updated)}
       {:error, _changeset} -> {:noreply, socket}
     end
   end
@@ -1511,6 +1511,21 @@ defmodule RelayWeb.BoardLive do
 
   defp close_drawer_after_action(socket) do
     push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}")
+  end
+
+  # RLY-115 — an answered block resumes the card, so the drawer's job is done:
+  # re-stream the card tile (the amber badge flips off synchronously, as
+  # refresh_card/2 does today), refresh the board-level question previews, then
+  # patch back to the board URL. Card mode keeps refresh-in-place (RLY-87).
+  defp after_answer(%{assigns: %{live_action: :card}} = socket, %Card{} = updated) do
+    refresh_card(socket, updated)
+  end
+
+  defp after_answer(socket, %Card{} = updated) do
+    socket
+    |> stream_insert(stream_name(updated.stage_id), updated)
+    |> assign(:needs_input_questions, Cards.needs_input_questions(socket.assigns.board))
+    |> close_drawer_after_action()
   end
 
   # MMF 15 — the drawer's review-panel assigns. Recomputed on every drawer

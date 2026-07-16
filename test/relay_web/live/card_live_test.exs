@@ -82,6 +82,27 @@ defmodule RelayWeb.CardLiveTest do
       assert Cards.get_card_by_ref(board, ref).status == :working
     end
 
+    test "answering stays on the card and updates in place (RLY-115)",
+         %{conn: conn, board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, card} = Cards.create_card(code, %{title: "Blocked native"})
+      {:ok, _blocked} = Cards.request_input(card, "Which bucket?")
+      ref = Cards.ref(board, card)
+
+      {:ok, view, _html} = live(conn, ~p"/cards/#{ref}?board=#{board.slug}")
+      render_async(view)
+
+      assert has_element?(view, "#needs-input-panel", "Which bucket?")
+
+      view
+      |> form("#needs-input-form", answer: %{body: "The relay-exports bucket"})
+      |> render_submit()
+
+      assert has_element?(view, "#card-drawer")
+      refute has_element?(view, "#needs-input-panel")
+      assert Cards.get_card_by_ref(board, ref).status == :working
+    end
+
     test "an unknown ref is a 404", %{conn: conn} do
       assert_raise Ecto.NoResultsError, fn -> live(conn, ~p"/cards/ZZZ-9999") end
     end
