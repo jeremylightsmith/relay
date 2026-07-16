@@ -10,8 +10,8 @@ defmodule RelayWeb.BoardDrawerActivityTest do
 
   setup %{user: user} do
     board = Boards.get_or_create_default_board(user)
-    [backlog | _rest] = board.stages
-    {:ok, card} = Cards.create_card(backlog, %{title: "Migrate 40 blog posts"})
+    code = Enum.find(board.stages, &(&1.name == "Code"))
+    {:ok, card} = Cards.create_card(code, %{title: "Migrate 40 blog posts"})
     %{board: board, card: card, ref: Cards.ref(board, card)}
   end
 

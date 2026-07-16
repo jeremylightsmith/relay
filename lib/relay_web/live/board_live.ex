@@ -408,7 +408,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
       |> assign_board_derivations(board)
-      |> assign(:health_by_card, health_by_card(cards))
+      |> assign(:health_by_card, health_by_card(cards, board.stages))
       |> assign(:done_revealed, @done_page_size)
       |> assign(:force_open, MapSet.new())
       |> assign(:force_closed, MapSet.new())
@@ -1105,6 +1105,7 @@ defmodule RelayWeb.BoardLive do
 
       {:noreply,
        socket
+       |> refresh_card_health(card.id)
        |> assign(:needs_input_questions, Cards.needs_input_questions(socket.assigns.board))
        |> upsert_card_stream(card, cards_by_stage)
        |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, cards_by_stage))
@@ -1119,7 +1120,7 @@ defmodule RelayWeb.BoardLive do
 
   def handle_info({:card_moved, %Card{} = moved, from_stage_id}, socket) do
     if find_stage_by_id(socket, moved.stage_id) do
-      {:noreply, apply_move(socket, from_stage_id, moved)}
+      {:noreply, socket |> refresh_card_health(moved.id) |> apply_move(from_stage_id, moved)}
     else
       {:noreply, reload_board(socket)}
     end
@@ -1194,7 +1195,7 @@ defmodule RelayWeb.BoardLive do
   # heartbeat column reaches this socket, since heartbeats deliberately never broadcast.
   def handle_info(:health_tick, socket) do
     cards = Cards.list_cards(socket.assigns.board)
-    fresh = health_by_card(cards)
+    fresh = health_by_card(cards, socket.assigns.board.stages)
     previous = socket.assigns.health_by_card
 
     changed = Enum.filter(cards, &(health_state(fresh, &1.id) != health_state(previous, &1.id)))
@@ -1237,8 +1238,9 @@ defmodule RelayWeb.BoardLive do
     stream_insert(socket, :activity, activity, at: 0)
   end
 
-  defp health_by_card(cards) do
+  defp health_by_card(cards, stages) do
     newest = Activity.newest_per_card(Enum.map(cards, & &1.id))
+    ai_stage_ids = MapSet.new(for stage <- stages, stage.ai_enabled, do: stage.id)
     now = DateTime.utc_now()
 
     Map.new(cards, fn card ->
@@ -1249,6 +1251,7 @@ defmodule RelayWeb.BoardLive do
           newest: entry,
           heartbeat_at: card.agent_heartbeat_at,
           ai_active?: Cards.active_owner_type(card) == :ai,
+          ai_stage?: MapSet.member?(ai_stage_ids, card.stage_id),
           now: now
         })
 
@@ -1260,26 +1263,15 @@ defmodule RelayWeb.BoardLive do
     health_by_card |> Map.get(card_id, %{}) |> Map.get(:state, :none)
   end
 
+  # A new newest entry arrived ({:card_log_appended, …}): store it, recompute,
+  # and restream the card so the strip updates in place.
   defp refresh_card_health(socket, card_id, newest_entry) do
     case Cards.get_card(socket.assigns.board, card_id) do
       nil ->
         socket
 
       card ->
-        state =
-          Cards.health(%{
-            newest: newest_entry,
-            heartbeat_at: card.agent_heartbeat_at,
-            ai_active?: Cards.active_owner_type(card) == :ai,
-            now: DateTime.utc_now()
-          })
-
-        socket =
-          assign(
-            socket,
-            :health_by_card,
-            Map.put(socket.assigns.health_by_card, card_id, %{state: state, entry: newest_entry})
-          )
+        socket = put_card_health(socket, card, newest_entry)
 
         if is_nil(card.archived_at) and find_stage_by_id(socket, card.stage_id) do
           stream_insert(socket, stream_name(card.stage_id), card)
@@ -1287,6 +1279,36 @@ defmodule RelayWeb.BoardLive do
           socket
         end
     end
+  end
+
+  # The card's stage or owners changed but its newest entry did not ({:card_moved, …} /
+  # {:card_upserted, …}): recompute from the stored entry; the caller restreams.
+  defp refresh_card_health(socket, card_id) do
+    entry = socket.assigns.health_by_card |> Map.get(card_id, %{}) |> Map.get(:entry)
+
+    case Cards.get_card(socket.assigns.board, card_id) do
+      nil -> socket
+      card -> put_card_health(socket, card, entry)
+    end
+  end
+
+  defp put_card_health(socket, %Card{} = card, entry) do
+    state =
+      Cards.health(%{
+        newest: entry,
+        heartbeat_at: card.agent_heartbeat_at,
+        ai_active?: Cards.active_owner_type(card) == :ai,
+        ai_stage?: ai_stage?(socket, card.stage_id),
+        now: DateTime.utc_now()
+      })
+
+    assign(socket, :health_by_card, Map.put(socket.assigns.health_by_card, card.id, %{state: state, entry: entry}))
+  end
+
+  # "Relay AI listens here" — the stage flag that gates the whole health surface
+  # (2026-07-16 rejection). A stage this socket can't see gates closed.
+  defp ai_stage?(socket, stage_id) do
+    match?(%Stage{ai_enabled: true}, find_stage_by_id(socket, stage_id))
   end
 
   # Groups position-ordered stages under their category, keeping the fixed

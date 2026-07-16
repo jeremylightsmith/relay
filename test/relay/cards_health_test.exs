@@ -9,30 +9,50 @@ defmodule Relay.CardsHealthTest do
   defp entry(type, seconds_ago), do: %Schemas.Activity{type: type, inserted_at: ago(seconds_ago)}
 
   defp health(overrides) do
-    Cards.health(Map.merge(%{newest: nil, heartbeat_at: nil, ai_active?: true, now: @now}, overrides))
+    Cards.health(
+      Map.merge(
+        %{newest: nil, heartbeat_at: nil, ai_active?: true, ai_stage?: true, now: @now},
+        overrides
+      )
+    )
   end
 
   describe "health/1 — the artboard §03 decision table, in order" do
-    test "branch 1: the newest entry is a failure → :stopped" do
+    # 2026-07-16 rejection: "only show the log status in the ai enabled columns". The stage
+    # gate is checked before EVERYTHING — even a failure goes dark outside an AI column, which
+    # also retires the v1 wart where an unsuperseded failure read :stopped forever.
+    test "branch 1: a non-AI stage → :none, before everything else" do
+      assert health(%{newest: entry(:action, 5), ai_stage?: false}) == :none
+    end
+
+    test "branch 1 beats the failure branch: a failure outside an AI column is :none" do
+      assert health(%{newest: entry(:failure, 5), ai_stage?: false}) == :none
+    end
+
+    test "branch 1 beats a fresh heartbeat: a beating card outside an AI column is :none" do
+      assert health(%{heartbeat_at: ago(10), ai_stage?: false}) == :none
+    end
+
+    test "branch 2: the newest entry is a failure → :stopped" do
       assert health(%{newest: entry(:failure, 5)}) == :stopped
     end
 
     # Ordering is the artboard's: failure is checked BEFORE ai_active. A failure that is
     # never superseded keeps reading stopped even after the AI is released — accepted for
     # v1, and in practice any subsequent move logs a :moved entry, which supersedes it.
-    test "branch 1 beats branch 2: a failure with no active AI still reads :stopped" do
+    test "branch 2 beats branch 3: a failure with no active AI still reads :stopped" do
       assert health(%{newest: entry(:failure, 5), ai_active?: false}) == :stopped
     end
 
-    test "branch 2: no active AI → :none, so no strip renders" do
+    test "branch 3: no active AI → :none, so no strip renders" do
       assert health(%{newest: entry(:action, 5), ai_active?: false}) == :none
     end
 
-    test "branch 3: quiet past STALE_AFTER → :stale" do
+    test "branch 4: quiet past STALE_AFTER → :stale" do
       assert health(%{newest: entry(:action, 11 * 60)}) == :stale
     end
 
-    test "branch 4: recent chatter → :live" do
+    test "branch 5: recent chatter → :live" do
       assert health(%{newest: entry(:action, 30)}) == :live
     end
   end

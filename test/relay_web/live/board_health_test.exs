@@ -10,13 +10,14 @@ defmodule RelayWeb.BoardHealthTest do
 
   setup :register_and_log_in_user
 
-  # Build the board the way the app does — a real default board with real stages —
-  # rather than hand-wiring factories.
+  # Build the board the way the app does — a real default board with real stages. The
+  # card lives in Code: a real ai_enabled stage, since the strip only renders in one
+  # (2026-07-16 rejection).
   setup %{user: user} do
     board = Boards.get_or_create_default_board(user)
-    [backlog | _rest] = board.stages
-    {:ok, card} = Cards.create_card(backlog, %{title: "Migrate 40 blog posts"})
-    %{board: board, stage: backlog, card: card, ref: Cards.ref(board, card)}
+    code = Enum.find(board.stages, &(&1.name == "Code"))
+    {:ok, card} = Cards.create_card(code, %{title: "Migrate 40 blog posts"})
+    %{board: board, stage: code, card: card, ref: Cards.ref(board, card)}
   end
 
   defp claim_ai(card) do
@@ -114,5 +115,51 @@ defmodule RelayWeb.BoardHealthTest do
 
     assert render(view) =~ "🔧 Edit lib/relay/cards.ex"
     assert has_element?(view, "#card-#{ref}-log-strip[data-health='live']")
+  end
+
+  test "an AI card with fresh logs in a non-AI column shows no strip", %{conn: conn, board: board} do
+    backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+    {:ok, card} = Cards.create_card(backlog, %{title: "Queued research"})
+    card = claim_ai(card)
+    insert(:activity, card: card, type: :action, text: "ghost line")
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+    refute has_element?(view, "#card-#{Cards.ref(board, card)}-log-strip")
+  end
+
+  test "moving a live card out of an AI column drops the strip immediately, before any tick", %{
+    conn: conn,
+    board: board,
+    card: card,
+    ref: ref
+  } do
+    card = claim_ai(card)
+    insert(:activity, card: card, type: :action, text: "uploaded 24/40 posts")
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+    assert has_element?(view, "#card-#{ref}-log-strip[data-health='live']")
+
+    review = Enum.find(board.stages, &(&1.name == "Review"))
+    {:ok, _moved} = Cards.move_card(card, review, 0)
+
+    refute has_element?(view, "#card-#{ref}-log-strip")
+  end
+
+  test "releasing the AI owner drops the strip without waiting for the tick", %{
+    conn: conn,
+    board: board,
+    card: card,
+    ref: ref
+  } do
+    card = claim_ai(card)
+    insert(:activity, card: card, type: :action, text: "uploaded 24/40 posts")
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+    assert has_element?(view, "#card-#{ref}-log-strip[data-health='live']")
+
+    {:ok, _released} = Cards.set_owners(card, [])
+
+    refute has_element?(view, "#card-#{ref}-log-strip")
   end
 end
