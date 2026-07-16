@@ -11,8 +11,8 @@ import '../../../app/theme.dart';
 /// scroll, which is what makes it persistent (brief §04: "you never lose the approve/reject
 /// bar").
 ///
-/// **Surface only (RLY-87).** The callbacks are what RLY-88 replaces; it should not have to
-/// restructure this widget.
+/// The callbacks are nullable: [CardScreen] passes null while a decision is in
+/// flight, which is what disables both buttons (RLY-88's double-tap guard).
 class CardReviewBar extends StatelessWidget {
   const CardReviewBar({
     super.key,
@@ -20,8 +20,8 @@ class CardReviewBar extends StatelessWidget {
     required this.onReject,
   });
 
-  final VoidCallback onApprove;
-  final VoidCallback onReject;
+  final VoidCallback? onApprove;
+  final VoidCallback? onReject;
 
   @override
   Widget build(BuildContext context) {

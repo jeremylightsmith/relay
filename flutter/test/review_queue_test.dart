@@ -185,7 +185,10 @@ void main() {
       final queue = h.container.read(reviewQueueProvider.notifier);
       queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
 
-      final dest = await queue.approveCurrent();
+      final dest = await queue.approveCurrent(
+        cardRef: 'RLY-A',
+        boardSlug: 'relay',
+      );
 
       expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
       expect(h.container.read(reviewQueueProvider).banner, 'Approved · RLY-A');
@@ -203,7 +206,10 @@ void main() {
       final queue = h.container.read(reviewQueueProvider.notifier);
       queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
 
-      final dest = await queue.approveCurrent();
+      final dest = await queue.approveCurrent(
+        cardRef: 'RLY-A',
+        boardSlug: 'relay',
+      );
 
       expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
       expect(
@@ -226,7 +232,10 @@ void main() {
     final queue = h.container.read(reviewQueueProvider.notifier);
     queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
 
-    final dest = await queue.approveCurrent();
+    final dest = await queue.approveCurrent(
+      cardRef: 'RLY-A',
+      boardSlug: 'relay',
+    );
 
     expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
     expect(
@@ -244,7 +253,10 @@ void main() {
     final queue = h.container.read(reviewQueueProvider.notifier);
     queue.enter(rows: [row('RLY-A')], atRef: 'RLY-A');
 
-    final dest = await queue.approveCurrent();
+    final dest = await queue.approveCurrent(
+      cardRef: 'RLY-A',
+      boardSlug: 'relay',
+    );
 
     expect(feed.calls, 1);
     expect(dest, '/cards/RLY-D?board=relay&kind=in_review');
@@ -260,7 +272,10 @@ void main() {
       final queue = h.container.read(reviewQueueProvider.notifier);
       queue.enter(rows: [row('RLY-A')], atRef: 'RLY-A');
 
-      final dest = await queue.approveCurrent();
+      final dest = await queue.approveCurrent(
+        cardRef: 'RLY-A',
+        boardSlug: 'relay',
+      );
 
       expect(dest, '/needs-you');
       expect(h.container.read(reviewQueueProvider).banner, 'Approved · RLY-A');
@@ -292,7 +307,10 @@ void main() {
       final queue = h.container.read(reviewQueueProvider.notifier);
       queue.enter(rows: [row('RLY-A')], atRef: 'RLY-A');
 
-      final dest = await queue.approveCurrent();
+      final dest = await queue.approveCurrent(
+        cardRef: 'RLY-A',
+        boardSlug: 'relay',
+      );
 
       expect(dest, '/needs-you');
       expect(
@@ -324,7 +342,10 @@ void main() {
       final queue = h.container.read(reviewQueueProvider.notifier);
       queue.enter(rows: [row('RLY-A')], atRef: 'RLY-A');
 
-      final dest = await queue.approveCurrent();
+      final dest = await queue.approveCurrent(
+        cardRef: 'RLY-A',
+        boardSlug: 'relay',
+      );
 
       expect(dest, '/cards/RLY-D?board=relay&kind=in_review');
       expect(feed.calls, 2);
@@ -341,8 +362,11 @@ void main() {
       final queue = h.container.read(reviewQueueProvider.notifier);
       queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
 
-      final first = queue.approveCurrent();
-      final second = await queue.approveCurrent(); // the double-tap
+      final first = queue.approveCurrent(cardRef: 'RLY-A', boardSlug: 'relay');
+      final second = await queue.approveCurrent(
+        cardRef: 'RLY-A',
+        boardSlug: 'relay',
+      ); // the double-tap
 
       expect(api.calls, 1);
       expect(second, isNull, reason: 'the second tap must not navigate either');
@@ -365,7 +389,10 @@ void main() {
     final queue = h.container.read(reviewQueueProvider.notifier);
     queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
 
-    final dest = await queue.approveCurrent();
+    final dest = await queue.approveCurrent(
+      cardRef: 'RLY-A',
+      boardSlug: 'relay',
+    );
 
     expect(
       dest,
@@ -392,7 +419,10 @@ void main() {
       final queue = h.container.read(reviewQueueProvider.notifier);
       queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
 
-      expect(await queue.approveCurrent(), isNull);
+      expect(
+        await queue.approveCurrent(cardRef: 'RLY-A', boardSlug: 'relay'),
+        isNull,
+      );
       expect(
         h.container.read(reviewQueueProvider).error,
         'That ref matches cards on more than one of your boards — pass board: <slug>',
@@ -409,7 +439,10 @@ void main() {
     final queue = h.container.read(reviewQueueProvider.notifier);
     queue.enter(rows: [row('RLY-A')], atRef: 'RLY-A');
 
-    expect(await queue.approveCurrent(), isNull);
+    expect(
+      await queue.approveCurrent(cardRef: 'RLY-A', boardSlug: 'relay'),
+      isNull,
+    );
     expect(h.auth.signOutCalls, 1);
   });
 
@@ -579,7 +612,7 @@ void main() {
     final h = harness(api: FakeDecisionApi());
     final queue = h.container.read(reviewQueueProvider.notifier);
     queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
-    await queue.approveCurrent();
+    await queue.approveCurrent(cardRef: 'RLY-A', boardSlug: 'relay');
 
     expect(queue.takeBanner(), 'Approved · RLY-A');
     expect(
@@ -724,4 +757,99 @@ void main() {
       expect(api.calls, 1);
     },
   );
+
+  test('approving with a ref the queue is not sitting on errors instead of '
+      'approving whatever the cursor points at', () async {
+    final api = FakeDecisionApi();
+    final h = harness(api: api);
+    final queue = h.container.read(reviewQueueProvider.notifier);
+    queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
+
+    final dest = await queue.approveCurrent(
+      cardRef: 'RLY-B', // the queue is sitting on RLY-A
+      boardSlug: 'relay',
+    );
+
+    expect(dest, isNull);
+    expect(
+      api.approved,
+      isEmpty,
+      reason: 'approve is irreversible — never fire it at the wrong card',
+    );
+    expect(h.container.read(reviewQueueProvider).error, isNotNull);
+    expect(h.container.read(reviewQueueProvider).index, 0);
+  });
+
+  test('approving a board slug the queue disagrees with errors the same way '
+      '(refs are only unique within a board)', () async {
+    final api = FakeDecisionApi();
+    final h = harness(api: api);
+    final queue = h.container.read(reviewQueueProvider.notifier);
+    queue.enter(
+      rows: [row('RLY-A', slug: 'relay')],
+      atRef: 'RLY-A',
+    );
+
+    final dest = await queue.approveCurrent(
+      cardRef: 'RLY-A',
+      boardSlug: 'other-board',
+    );
+
+    expect(dest, isNull);
+    expect(api.approved, isEmpty);
+    expect(h.container.read(reviewQueueProvider).error, isNotNull);
+  });
+
+  test('approving against an empty queue errors instead of returning null '
+      'with no signal', () async {
+    final h = harness(api: FakeDecisionApi());
+    final queue = h.container.read(reviewQueueProvider.notifier);
+    // No enter() — a genuine cold deep link before anything seeded.
+
+    final dest = await queue.approveCurrent(
+      cardRef: 'RLY-A',
+      boardSlug: 'relay',
+    );
+
+    expect(dest, isNull);
+    expect(h.container.read(reviewQueueProvider).error, isNotNull);
+  });
+
+  test('enterSingle seeds a one-item snapshot whose decision walks into the '
+      'live feed', () async {
+    final feed = FakeFeedRepository([
+      page([row('RLY-D')]),
+    ]);
+    final h = harness(api: FakeDecisionApi(), feed: feed);
+    final queue = h.container.read(reviewQueueProvider.notifier);
+
+    queue.enterSingle(QueueItem.fromRow(row('RLY-X')));
+    final dest = await queue.approveCurrent(
+      cardRef: 'RLY-X',
+      boardSlug: 'relay',
+    );
+
+    expect(dest, '/cards/RLY-D?board=relay&kind=in_review');
+    expect(
+      feed.calls,
+      1,
+      reason: 'end of the one-item snapshot refetches once',
+    );
+    expect(h.container.read(reviewQueueProvider).banner, 'Approved · RLY-X');
+  });
+
+  test('enterSingle clears a lingering banner and error', () async {
+    final h = harness(api: FakeDecisionApi(), feed: FakeFeedRepository());
+    final queue = h.container.read(reviewQueueProvider.notifier);
+    queue.enter(rows: [row('RLY-A')], atRef: 'RLY-A');
+    await queue.approveCurrent(cardRef: 'RLY-A', boardSlug: 'relay');
+    expect(h.container.read(reviewQueueProvider).banner, isNotNull);
+
+    queue.enterSingle(QueueItem.fromRow(row('RLY-X')));
+
+    final state = h.container.read(reviewQueueProvider);
+    expect(state.banner, isNull);
+    expect(state.error, isNull);
+    expect(state.items.map((i) => i.ref), ['RLY-X']);
+  });
 }

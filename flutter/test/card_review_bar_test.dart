@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/app/theme.dart';
 import 'package:relay_mobile/features/card/card_screen.dart';
@@ -16,13 +17,15 @@ Widget tallBody(BuildContext context) => ListView(
 
 Future<void> pumpCard(WidgetTester tester, {String? kind}) async {
   await tester.pumpWidget(
-    MaterialApp(
-      theme: RelayTheme.light,
-      home: CardScreen(
-        cardRef: 'RLY-42',
-        boardSlug: 'marketing',
-        kind: kind,
-        bodyBuilder: tallBody,
+    ProviderScope(
+      child: MaterialApp(
+        theme: RelayTheme.light,
+        home: CardScreen(
+          cardRef: 'RLY-42',
+          boardSlug: 'marketing',
+          kind: kind,
+          bodyBuilder: tallBody,
+        ),
       ),
     ),
   );
@@ -172,28 +175,6 @@ void main() {
       );
     },
   );
-
-  // Separate tests, not two taps in one: a SnackBar lingers ~4s, so tapping both in one
-  // test would leave two 'RLY-88' texts on screen and fail findsOneWidget.
-  group('the actions are visibly stubbed (RLY-88 owns the behavior)', () {
-    testWidgets('Approve names where the behavior lands', (tester) async {
-      await pumpCard(tester, kind: 'in_review');
-
-      await tester.tap(find.byKey(const Key('card_approve')));
-      await tester.pump();
-
-      expect(find.text('Approve lands in RLY-88'), findsOneWidget);
-    });
-
-    testWidgets('Reject names where the behavior lands', (tester) async {
-      await pumpCard(tester, kind: 'in_review');
-
-      await tester.tap(find.byKey(const Key('card_reject')));
-      await tester.pump();
-
-      expect(find.text('Reject lands in RLY-88'), findsOneWidget);
-    });
-  });
 
   test('cardUrl builds the chromeless standalone card link', () {
     expect(

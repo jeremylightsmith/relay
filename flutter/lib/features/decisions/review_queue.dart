@@ -115,10 +115,36 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
     state = ReviewQueueState(items: items, index: at < 0 ? 0 : at);
   }
 
+  /// A deep-link arrival (a push-notification tap, or any route the inbox tap
+  /// didn't snapshot) has no walk to continue: seed one containing just this
+  /// card. Deciding it runs off the end of the snapshot, and [advanceAfter]'s
+  /// refetch picks the walk up from the live feed — or lands on the inbox.
+  void enterSingle(QueueItem item) {
+    state = ReviewQueueState(items: [item]);
+  }
+
   /// Approve the current item. Returns where to navigate, or null to stay put.
-  Future<String?> approveCurrent() async {
+  ///
+  /// [cardRef] and [boardSlug] are what the *screen* believes it is approving —
+  /// the card host is reachable by a push deep link, so the route can disagree
+  /// with `state.current` (see [rejectCurrent], which grew this guard first).
+  /// Approve is irreversible and refs are only unique within a board, so a
+  /// mismatch surfaces as [ReviewQueueState.error] and issues no POST — never a
+  /// silent approve of whatever the cursor happens to sit on.
+  Future<String?> approveCurrent({
+    required String cardRef,
+    required String boardSlug,
+  }) async {
+    if (state.inFlight) return null;
     final item = state.current;
-    if (item == null || state.inFlight) return null;
+    if (item == null || item.ref != cardRef || item.boardSlug != boardSlug) {
+      state = state.copyWith(
+        error:
+            "This card isn't in your queue anymore — go back to Needs you "
+            'and try again.',
+      );
+      return null;
+    }
 
     state = state.copyWith(inFlight: true, clearError: true);
     try {
