@@ -33,13 +33,13 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
     test "a move in session A restreams source and target in session B",
          %{conn: conn, backlog: backlog, spec: spec, user: user} do
-      {:ok, _card} = Cards.create_card(backlog, %{title: "Pass the baton"})
+      {:ok, card} = Cards.create_card(backlog, %{title: "Pass the baton"})
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view_a, _html} = live(conn, ~p"/board/#{board.slug}")
       {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      render_hook(view_a, "move_card", %{"ref" => "RLY-1", "stage_id" => spec.id, "index" => 0})
+      render_hook(view_a, "move_card", %{"ref" => Cards.ref(board, card), "stage_id" => spec.id, "index" => 0})
 
       assert has_element?(view_b, "#stage-col-2-cards .board-card", "Pass the baton")
       refute has_element?(view_b, "#stage-col-1-cards .board-card")
@@ -57,7 +57,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       {:ok, _card} = Cards.set_status(card, %{"status" => "in_review"})
 
       board = Boards.get_or_create_default_board(user)
-      {:ok, view_a, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
       {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}")
       render_async(view_a)
 
@@ -71,7 +71,8 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       {:ok, card} = Cards.create_card(backlog, %{title: "Drawer sync"})
 
       board = Boards.get_or_create_default_board(user)
-      {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
+      render_async(view_b)
 
       {:ok, _card} = Cards.set_status(card, %{"status" => "in_review"})
 
@@ -87,7 +88,8 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       {:ok, card} = Cards.create_card(backlog, %{title: "Baton"})
 
       board = Boards.get_or_create_default_board(user)
-      {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
+      render_async(view_b)
 
       {:ok, _card} = Cards.add_owner(card, :agent)
 
@@ -97,11 +99,12 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
     test "a comment posted in session A appends to session B's open drawer timeline exactly once",
          %{conn: conn, backlog: backlog, user: user} do
-      {:ok, _card} = Cards.create_card(backlog, %{title: "Chatty"})
+      {:ok, card} = Cards.create_card(backlog, %{title: "Chatty"})
 
       board = Boards.get_or_create_default_board(user)
-      {:ok, view_a, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
-      {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      ref = Cards.ref(board, card)
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
+      {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
       render_async(view_a)
       render_async(view_b)
 
@@ -117,10 +120,11 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
     test "a comment does not touch a session whose drawer shows a different card",
          %{conn: conn, backlog: backlog, user: user} do
       {:ok, card_one} = Cards.create_card(backlog, %{title: "One"})
-      {:ok, _card_two} = Cards.create_card(backlog, %{title: "Two"})
+      {:ok, card_two} = Cards.create_card(backlog, %{title: "Two"})
 
       board = Boards.get_or_create_default_board(user)
-      {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-2")
+      {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card_two)}")
+      render_async(view_b)
 
       {:ok, comment} = Activity.add_comment(card_one, %{actor: :agent, body: "For card one"})
 
@@ -142,7 +146,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
     test "emptying a stage in session A collapses it to a strip in session B",
          %{conn: conn, backlog: backlog, spec: spec, user: user} do
-      {:ok, _card} = Cards.create_card(backlog, %{title: "Last one"})
+      {:ok, card} = Cards.create_card(backlog, %{title: "Last one"})
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view_a, _html} = live(conn, ~p"/board/#{board.slug}")
@@ -150,7 +154,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
       refute has_element?(view_b, "#stage-strip-#{backlog.id}")
 
-      render_hook(view_a, "move_card", %{"ref" => "RLY-1", "stage_id" => spec.id, "index" => 0})
+      render_hook(view_a, "move_card", %{"ref" => Cards.ref(board, card), "stage_id" => spec.id, "index" => 0})
 
       assert has_element?(view_b, "#stage-strip-#{backlog.id} .stage-count", "0")
       assert has_element?(view_b, "#stage-col-2-cards .board-card", "Last one")
@@ -178,11 +182,14 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
     test "a card archived in session A disappears from session B and closes B's open drawer",
          %{conn: conn, backlog: backlog, user: user} do
-      {:ok, _card} = Cards.create_card(backlog, %{title: "Archive me"})
+      {:ok, card} = Cards.create_card(backlog, %{title: "Archive me"})
       board = Boards.get_or_create_default_board(user)
+      ref = Cards.ref(board, card)
 
-      {:ok, view_a, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
-      {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
+      {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
+      render_async(view_a)
+      render_async(view_b)
 
       view_a |> element("#archive-card-button") |> render_click()
 
@@ -276,7 +283,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       {:ok, comment} = Activity.add_comment(card, %{actor: :agent, body: "Once only"})
 
       board = Boards.get_or_create_default_board(user)
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
       render_async(view)
 
       send(view.pid, {:timeline_appended, card.id, comment})
@@ -297,12 +304,15 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
     end
 
     test "an API move updates an open board live", %{conn: conn, backlog: backlog, spec: spec, token: token, user: user} do
-      {:ok, _card} = Cards.create_card(backlog, %{title: "Agent moves me"})
+      {:ok, card} = Cards.create_card(backlog, %{title: "Agent moves me"})
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert token |> api_conn() |> post(~p"/api/cards/RLY-1/move", %{stage: spec.id}) |> json_response(200)
+      assert token
+             |> api_conn()
+             |> post(~p"/api/cards/#{Cards.ref(board, card)}/move", %{stage: spec.id})
+             |> json_response(200)
 
       assert has_element?(view, "#stage-col-2-cards .board-card", "Agent moves me")
       refute has_element?(view, "#stage-col-1-cards .board-card")
@@ -313,12 +323,15 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       # :needs_input is only stage-valid in a work/planning-type stage (RLY-75); "Spec"
       # (position 3, :planning) is used here, unlike the queue-type Backlog/"Next up".
       spec = Enum.find(board.stages, &(&1.type == :planning))
-      {:ok, _card} = Cards.create_card(spec, %{title: "Agent works"})
+      {:ok, card} = Cards.create_card(spec, %{title: "Agent works"})
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert token |> api_conn() |> patch(~p"/api/cards/RLY-1", %{status: "needs_input"}) |> json_response(200)
+      assert token
+             |> api_conn()
+             |> patch(~p"/api/cards/#{Cards.ref(board, card)}", %{status: "needs_input"})
+             |> json_response(200)
 
       assert has_element?(view, "#stage-col-#{spec.position}-cards .board-card .card-needs-input", "needs you")
     end
@@ -327,12 +340,13 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       {:ok, card} = Cards.create_card(backlog, %{title: "Ping"})
 
       board = Boards.get_or_create_default_board(user)
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      ref = Cards.ref(board, card)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
       render_async(view)
 
       assert token
              |> api_conn()
-             |> post(~p"/api/cards/RLY-1/comments", %{body: "From the agent"})
+             |> post(~p"/api/cards/#{ref}/comments", %{body: "From the agent"})
              |> json_response(201)
 
       comment = Repo.get_by!(Schemas.Comment, card_id: card.id)
@@ -342,16 +356,17 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
     test "an API branch/plan update refreshes another session's open drawer",
          %{conn: conn, backlog: backlog, token: token, user: user} do
-      {:ok, _card} = Cards.create_card(backlog, %{title: "Runner card"})
+      {:ok, card} = Cards.create_card(backlog, %{title: "Runner card"})
 
       board = Boards.get_or_create_default_board(user)
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      ref = Cards.ref(board, card)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
       render_async(view)
       refute has_element?(view, "#card-plan-view")
 
       assert token
              |> api_conn()
-             |> patch(~p"/api/cards/RLY-1", %{branch: "rly-9-live", plan: "Step 1: do it"})
+             |> patch(~p"/api/cards/#{ref}", %{branch: "rly-9-live", plan: "Step 1: do it"})
              |> json_response(200)
 
       assert has_element?(view, "#card-drawer-rail #card-branch", "rly-9-live")

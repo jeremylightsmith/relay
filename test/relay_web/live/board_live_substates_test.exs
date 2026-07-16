@@ -56,6 +56,7 @@ defmodule RelayWeb.BoardLiveSubstatesTest do
         ] do
       card = insert(:card, board: board, stage: stage, status: status)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-#{card.ref_number}")
+      render_async(view)
       assert has_element?(view, sel)
     end
   end

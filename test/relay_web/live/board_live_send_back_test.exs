@@ -28,6 +28,7 @@ defmodule RelayWeb.BoardLiveSendBackTest do
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     assert has_element?(view, "#rejection-banner", "Changes requested")
     assert has_element?(view, "#rejection-banner", "Handle the empty case")
@@ -38,6 +39,7 @@ defmodule RelayWeb.BoardLiveSendBackTest do
     {:ok, _card} = Cards.create_card(code, %{title: "Clean"})
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
     refute has_element?(view, "#rejection-banner")
   end
 
@@ -45,6 +47,7 @@ defmodule RelayWeb.BoardLiveSendBackTest do
     {:ok, _card} = Cards.create_card(code, %{title: "Bounce me"})
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
     assert has_element?(view, "#card-drawer")
     refute has_element?(view, "#send-back")
     refute has_element?(view, "#send-back-panel")

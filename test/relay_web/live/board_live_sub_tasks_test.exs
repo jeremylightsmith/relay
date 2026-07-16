@@ -19,6 +19,7 @@ defmodule RelayWeb.BoardLiveSubTasksTest do
     {:ok, _card} = Cards.create_card(code, %{title: "Bare"})
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
 
     assert has_element?(view, "#card-drawer")
     refute has_element?(view, "#sub-tasks")
@@ -32,6 +33,7 @@ defmodule RelayWeb.BoardLiveSubTasksTest do
     [first, _second] = card.sub_tasks
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    render_async(view)
     assert has_element?(view, "#sub-tasks-count", "0/2")
     assert has_element?(view, "#sub-task-#{first.id}", "First")
 

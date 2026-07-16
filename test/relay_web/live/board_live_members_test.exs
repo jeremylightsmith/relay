@@ -17,6 +17,7 @@ defmodule RelayWeb.BoardLiveMembersTest do
     [stage | _] = board.stages
     card = insert(:card, stage: stage)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
+    render_async(view)
 
     view |> element("#card-drawer-reassign-toggle") |> render_click()
     assert has_element?(view, "#card-drawer-reassign-picker")
@@ -32,6 +33,7 @@ defmodule RelayWeb.BoardLiveMembersTest do
     [stage | _] = board.stages
     card = insert(:card, stage: stage)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
+    render_async(view)
 
     view |> element("#card-drawer-reassign-toggle") |> render_click()
     row = view |> element("#card-drawer-assign-user-#{user.id} span[style*='border-radius:50%']") |> render()
@@ -48,6 +50,7 @@ defmodule RelayWeb.BoardLiveMembersTest do
     [stage | _] = board.stages
     card = insert(:card, stage: stage)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
+    render_async(view)
 
     view |> element("#card-drawer-reassign-toggle") |> render_click()
     view |> element("#card-drawer-assign-user-#{teammate.id}") |> render_click()
@@ -63,6 +66,7 @@ defmodule RelayWeb.BoardLiveMembersTest do
     card = insert(:card, stage: stage)
     stranger = insert(:user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
+    render_async(view)
 
     render_hook(view, "add_owner", %{"actor_type" => "user", "user_id" => to_string(stranger.id)})
 
