@@ -1246,27 +1246,32 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "oklch(0.44 0.08 292)"
     end
 
-    test "stale is amber, the dot is still, and the card border + shadow go amber" do
+    # 2026-07-16 rejection: age never recolors the card. Stale mutes the strip itself —
+    # lighter-gray text, still gray dot — and touches nothing outside it.
+    test "stale mutes the strip to gray — still dot, lighter-gray text, no amber anywhere" do
       html = strip(:stale)
 
       assert html =~ ~s(data-health="stale")
-      assert html =~ "var(--color-warning)"
-      assert html =~ "oklch(0.97 0.03 75)"
-      assert html =~ "oklch(0.86 0.06 70)"
-      assert html =~ "0 1px 3px oklch(0.6 0.08 70/0.12)"
+      assert html =~ "background:oklch(0.72 0.02 255)"
+      assert html =~ "color:oklch(0.60 0.02 255)"
       refute html =~ "animation:relaypulse"
+      refute html =~ "var(--color-warning)"
+      refute html =~ "oklch(0.86 0.06 70)"
+      refute html =~ "0 1px 3px oklch(0.6 0.08 70/0.12)"
     end
 
-    test "stopped is rose with the white ! disc and a rose card border + shadow" do
+    # A failure is an event, not an age: the strip keeps §02's rose + white ! disc,
+    # but the card shell stays as quiet as everyone else's.
+    test "stopped keeps the rose strip and ! disc, but the card shell stays quiet" do
       html = strip(:stopped, log_text: "agent stopped")
 
       assert html =~ ~s(data-health="stopped")
       assert html =~ "var(--color-error)"
       assert html =~ "oklch(0.97 0.03 20)"
-      assert html =~ "oklch(0.86 0.07 20)"
-      assert html =~ "0 1px 3px oklch(0.6 0.1 15/0.12)"
       assert html =~ "agent stopped"
       refute html =~ "animation:relaypulse"
+      refute html =~ "oklch(0.86 0.07 20)"
+      refute html =~ "0 1px 3px oklch(0.6 0.1 15/0.12)"
     end
 
     # Q6→C: the artboard draws a Retry pill on the stopped strip; it is out of scope.
@@ -1274,10 +1279,21 @@ defmodule RelayWeb.CoreComponentsTest do
       refute strip(:stopped, log_text: "agent stopped") =~ "Retry"
     end
 
-    test "the accent border goes amber on stale and rose on stopped" do
-      assert strip(:stale) =~ "border-l-warning"
-      assert strip(:stopped) =~ "border-l-error"
+    test "the accent border stays status-keyed for every health state" do
       assert strip(:live) =~ "border-l-secondary"
+      assert strip(:stale) =~ "border-l-secondary"
+      assert strip(:stopped) =~ "border-l-secondary"
+      refute strip(:stale) =~ "border-l-warning"
+      refute strip(:stopped) =~ "border-l-error"
+    end
+
+    test "the card shell border and shadow are constant across health states" do
+      for health <- [:none, :live, :stale, :stopped] do
+        html = strip(health)
+
+        assert html =~ "border:1px solid var(--color-base-300)"
+        assert html =~ "box-shadow:0 1px 2px oklch(0.55 0.03 255/0.05)"
+      end
     end
 
     test "the strip text ellipsizes and the time is mono and right-aligned" do

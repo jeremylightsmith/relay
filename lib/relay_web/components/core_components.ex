@@ -920,7 +920,7 @@ defmodule RelayWeb.CoreComponents do
     <article
       id={@id}
       class={["board-card group", @accent_class]}
-      style={"background:var(--color-base-100);border:1px solid #{card_shell_border(@health)};border-left:3px solid #{@accent_color};border-radius:9px;padding:10px 11px;display:flex;flex-direction:column;gap:8px;box-shadow:#{card_shell_shadow(@health)};cursor:pointer;"}
+      style={"background:var(--color-base-100);border:1px solid var(--color-base-300);border-left:3px solid #{@accent_color};border-radius:9px;padding:10px 11px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px oklch(0.55 0.03 255/0.05);cursor:pointer;"}
       role="button"
       tabindex="0"
       draggable="true"
@@ -1039,11 +1039,9 @@ defmodule RelayWeb.CoreComponents do
   # board_card/1 via card_accent_color/1 (an inline `style` beats the class, so
   # the class carries no colour). Do not delete these classes as "unused": the
   # board/card tests select on them (e.g. `.border-l-warning`).
-  # RLY-112: health outranks status on the accent. :stopped is rose (it reads needs-you
-  # and floats the card up in triage next to questions and reviews); :stale reuses the
-  # existing amber needs-you accent.
-  defp card_accent_class(%{health: :stopped}), do: "border-l-error"
-  defp card_accent_class(%{health: :stale}), do: "border-l-warning"
+  # RLY-112 (2026-07-16 rejection): health never touches the accent or the card
+  # shell — the log strip is the only surface that reads it. Accent stays keyed
+  # on status alone.
   defp card_accent_class(%{status: :needs_input}), do: "border-l-warning"
   defp card_accent_class(%{status: :in_review}), do: "border-l-warning"
   defp card_accent_class(%{status: :working}), do: "border-l-secondary"
@@ -1054,20 +1052,14 @@ defmodule RelayWeb.CoreComponents do
   defp card_accent_color("border-l-secondary"), do: "var(--color-secondary)"
   defp card_accent_color("border-l-base-300"), do: "var(--color-base-300)"
 
-  # RLY-112 — the collapsed log strip, pinned to docs/designs/Relay Card Activity.dc.html
-  # §02 (lines ~87-128). The light theme's --color-secondary/-warning/-error are
-  # byte-identical to the artboard's violet/amber/rose, so the tokens ARE the mockup's
-  # values; the box tints have no token and stay literal.
-  defp card_shell_border(:stale), do: "oklch(0.86 0.06 70)"
-  defp card_shell_border(:stopped), do: "oklch(0.86 0.07 20)"
-  defp card_shell_border(_health), do: "var(--color-base-300)"
-
-  defp card_shell_shadow(:stale), do: "0 1px 3px oklch(0.6 0.08 70/0.12)"
-  defp card_shell_shadow(:stopped), do: "0 1px 3px oklch(0.6 0.1 15/0.12)"
-  defp card_shell_shadow(_health), do: "0 1px 2px oklch(0.55 0.03 255/0.05)"
-
+  # RLY-112 — the collapsed log strip. Live and stopped internals are pinned to
+  # docs/designs/Relay Card Activity.dc.html §02 (violet pulse on the tint / rose white-!
+  # disc); the light theme's --color-secondary/-error are byte-identical to the artboard's
+  # violet/rose. Stale deliberately DIVERGES from the artboard's amber (2026-07-16
+  # rejection: age must never recolor the card): the strip mutes to gray — still dot,
+  # lighter-gray text — and the card shell/accent never change with health.
   defp strip_box_style(:live), do: "background:oklch(0.985 0.012 292);"
-  defp strip_box_style(:stale), do: "background:oklch(0.97 0.03 75);border:1px solid oklch(0.88 0.06 75);"
+  defp strip_box_style(:stale), do: "background:oklch(0.975 0.005 255);"
   defp strip_box_style(:stopped), do: "background:oklch(0.97 0.03 20);border:1px solid oklch(0.88 0.06 20);"
   defp strip_box_style(_health), do: ""
 
@@ -1076,7 +1068,7 @@ defmodule RelayWeb.CoreComponents do
       "width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:var(--color-secondary);animation:relaypulse 1.4s ease-in-out infinite;"
 
   defp strip_dot_style(:stale),
-    do: "width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:var(--color-warning);"
+    do: "width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:oklch(0.72 0.02 255);"
 
   defp strip_dot_style(:stopped),
     do:
@@ -1085,18 +1077,19 @@ defmodule RelayWeb.CoreComponents do
   defp strip_dot_style(_health), do: ""
 
   defp strip_text_color(:live), do: "oklch(0.44 0.08 292)"
-  defp strip_text_color(:stale), do: "oklch(0.50 0.10 65)"
+  defp strip_text_color(:stale), do: "oklch(0.60 0.02 255)"
   defp strip_text_color(:stopped), do: "oklch(0.50 0.14 15)"
   defp strip_text_color(_health), do: "oklch(0.44 0.02 255)"
 
   defp strip_time_color(:live), do: "oklch(0.60 0.02 255)"
-  defp strip_time_color(:stale), do: "oklch(0.52 0.11 65)"
+  defp strip_time_color(:stale), do: "oklch(0.65 0.02 255)"
   defp strip_time_color(:stopped), do: "oklch(0.50 0.14 15)"
   defp strip_time_color(_health), do: "oklch(0.60 0.02 255)"
 
-  # RLY-112 §04: the Activity section header's health chip. No Retry (Q6→C).
+  # RLY-112 §04 header chip. Stale is muted gray, not amber (2026-07-16 rejection).
+  # No Retry (Q6→C).
   defp health_chip_color(:live), do: "var(--color-secondary)"
-  defp health_chip_color(:stale), do: "var(--color-warning)"
+  defp health_chip_color(:stale), do: "oklch(0.60 0.02 255)"
   defp health_chip_color(:stopped), do: "var(--color-error)"
   defp health_chip_color(_health), do: "var(--color-base-300)"
 
