@@ -4,6 +4,8 @@
 	<dict>
 		<key>CADisableMinimumFrameDurationOnPhone</key>
 		<true/>
+		<key>NSMicrophoneUsageDescription</key>
+		<string>Relay records only while the voice sheet is open and transcribes on this phone — audio never leaves it.</string>
 		<!-- Enables silent APNs delivery to the app process (RLY-81). -->
 		<key>UIBackgroundModes</key>
 		<array>

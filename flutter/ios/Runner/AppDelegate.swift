@@ -7,6 +7,7 @@ import UserNotifications
   private var channel: FlutterMethodChannel?
   private var tokenCompletion: ((String?) -> Void)?
   private var launchNotification: [String: Any]?
+  private let voicePlugin = VoicePlugin()
 
   override func application(
     _ application: UIApplication,
@@ -56,6 +57,8 @@ import UserNotifications
         result(FlutterMethodNotImplemented)
       }
     }
+
+    voicePlugin.register(with: messenger)
   }
 
   /// When the user last tapped "Not now" on AUTH-03, as epoch milliseconds (UTC).
