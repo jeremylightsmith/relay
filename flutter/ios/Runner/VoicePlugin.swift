@@ -88,6 +88,14 @@ final class VoicePlugin: NSObject {
       let engine = AVAudioEngine()
       let input = engine.inputNode
       let inputFormat = input.outputFormat(forBus: 0)
+      // A 0Hz/0-channel input format (no usable mic) would make installTap raise
+      // an uncatchable NSException; fail soft instead — Dart maps this to
+      // recordingFailed and typing stays available (the spec's best-effort rule).
+      guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+        teardownRecording()
+        return result(FlutterError(
+          code: "recording_failed", message: "microphone unavailable", details: nil))
+      }
       // Whisper wants 16kHz mono; converting at the tap keeps the file — and
       // the disk cost of an uncapped clip (spec D8) — as small as possible.
       // Recording to a *file*, not memory, is what bounds an uncapped clip.
@@ -103,7 +111,15 @@ final class VoicePlugin: NSObject {
 
       let url = FileManager.default.temporaryDirectory
         .appendingPathComponent("relay-voice-\(UUID().uuidString).wav")
-      let file = try AVAudioFile(forWriting: url, settings: target.settings)
+      // The tap writes Int16 interleaved buffers (the converter's `target`
+      // output). The file must be opened with that same *processing* format:
+      // init(forWriting:settings:) alone opens with the standard deinterleaved
+      // Float32 processing format, and AVAudioFile.write(from:) raises an
+      // uncatchable NSException on the mismatch — the RLY-99 TestFlight crash.
+      // `settings` still controls the on-disk WAV format, unchanged.
+      let file = try AVAudioFile(
+        forWriting: url, settings: target.settings,
+        commonFormat: .pcmFormatInt16, interleaved: true)
 
       input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
         guard let self, let converter = self.converter, let target = self.targetFormat else { return }

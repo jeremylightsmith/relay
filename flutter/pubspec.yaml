@@ -55,6 +55,11 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
+  # RLY-99 crash fix: the on-simulator regression test for the REAL native
+  # recording path — the one path fakes can't cover (see integration_test/).
+  integration_test:
+    sdk: flutter
+
   # Virtual time for VoiceController's uncapped elapsed timer (RLY-99).
   fake_async: ^1.3.1
 
