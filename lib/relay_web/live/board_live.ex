@@ -317,6 +317,9 @@ defmodule RelayWeb.BoardLive do
         close_patch={~p"/board/#{@board.slug}"}
         title_form={@title_form}
         editing_title={@editing_title}
+        editing_tag={@editing_tag}
+        tag_form={@tag_form}
+        tag_suggestions={@tag_suggestions}
         editing_description={@editing_description}
         description_form={@description_form}
         editing_acceptance_criteria={@editing_acceptance_criteria}
@@ -534,7 +537,7 @@ defmodule RelayWeb.BoardLive do
 
   @impl true
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
-        compose create_card move_card save_card_title save_card_description
+        compose create_card move_card save_card_title save_card_tag save_card_description
         save_card_acceptance_criteria save_card_spec save_card_plan
         add_owner remove_owner take_over post_comment answer_input
         answer_select answer_custom answer_next answer_back answer_goto answer_submit
@@ -825,6 +828,37 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("save_card_title", _params, socket), do: {:noreply, socket}
+
+  def handle_event("edit_tag", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    {:noreply,
+     socket
+     |> assign(:editing_tag, true)
+     |> assign(:tag_form, to_form(%{"tag" => card.tag || ""}, as: :card))
+     |> assign(:tag_suggestions, Cards.list_board_tags(socket.assigns.board.id))}
+  end
+
+  def handle_event("edit_tag", _params, socket), do: {:noreply, socket}
+
+  def handle_event("cancel_tag", _params, socket) do
+    {:noreply, assign(socket, editing_tag: false, tag_form: nil)}
+  end
+
+  def handle_event("save_card_tag", %{"card" => card_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    case Cards.update_card(card, card_params) do
+      {:ok, card} ->
+        {:noreply,
+         socket
+         |> assign(:selected_card, card)
+         |> assign(:editing_tag, false)
+         |> assign(:tag_form, nil)
+         |> stream_insert(stream_name(card.stage_id), card)}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :tag_form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("save_card_tag", _params, socket), do: {:noreply, socket}
 
   def handle_event("edit_description", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
     {:noreply,
@@ -1988,6 +2022,9 @@ defmodule RelayWeb.BoardLive do
           |> assign(:selected_stage, find_stage_by_id(socket, card.stage_id))
           |> assign(:title_form, to_form(%{"title" => card.title}, as: :card))
           |> assign(:editing_title, false)
+          |> assign(:editing_tag, false)
+          |> assign(:tag_form, nil)
+          |> assign(:tag_suggestions, [])
           |> assign(:editing_description, false)
           |> assign(:description_form, nil)
           |> assign(:editing_acceptance_criteria, false)
@@ -2022,6 +2059,9 @@ defmodule RelayWeb.BoardLive do
           selected_stage: nil,
           title_form: nil,
           editing_title: false,
+          editing_tag: false,
+          tag_form: nil,
+          tag_suggestions: [],
           editing_description: false,
           description_form: nil,
           editing_acceptance_criteria: false,

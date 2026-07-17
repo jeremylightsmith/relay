@@ -19,6 +19,7 @@ Config (env): RELAY_URL, RELAY_API_KEY  (a board key from /board/settings)
   relay sub-tasks REF @file   relay check REF ID / uncheck REF ID   relay result REF @file
   relay criteria REF @file    # acceptance criteria (numbered, authored at Spec)
   relay attach REF FILE [--caption TEXT] [--json]
+  relay tag REF [VALUE]       # set the card's tag (omit VALUE to clear)
   relay layout   # config skeleton
 
 TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output.
@@ -316,6 +317,10 @@ def set_pr_url(ref, url):
     return api("PATCH", f"/api/cards/{ref}", {"pr_url": url})["data"]
 
 
+def set_tag(ref, value):
+    return api("PATCH", f"/api/cards/{ref}", {"tag": value or None})["data"]
+
+
 def set_sub_tasks(ref, text):
     return api("PATCH", f"/api/cards/{ref}", {"sub_tasks": _parse_sub_tasks(text)})["data"]
 
@@ -402,7 +407,10 @@ def print_card(c):
         print("   Address this, then redo the stage.\n")
     owners = ", ".join(o.get("name", "?") for o in c.get("owners", []))
     print(f'{c["ref"]}  {c["title"]}')
-    print(f'status: {c.get("status", "?")}   active: {c.get("active_owner") or "-"}   owners: {owners}\n')
+    line = f'status: {c.get("status", "?")}   active: {c.get("active_owner") or "-"}   owners: {owners}'
+    if c.get("tag"):
+        line += f'   tag: #{c["tag"]}'
+    print(line + "\n")
     print(c.get("description") or "(no description)")
     if c.get("acceptance_criteria"):
         print("\n--- acceptance criteria ---")
@@ -986,6 +994,8 @@ def build_parser():
     add("plan", _simple(lambda a: set_plan(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("branch", _simple(lambda a: set_branch(a.ref, a.name)), "ref", "name", json_flag=True)
     add("pr", _simple(lambda a: set_pr_url(a.ref, a.url)), "ref", "url", json_flag=True)
+    tg = add("tag", _simple(lambda a: set_tag(a.ref, a.value)), "ref", json_flag=True)
+    tg.add_argument("value", nargs="?")
     add("sub-tasks", _simple(lambda a: set_sub_tasks(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("check", _simple(lambda a: set_sub_task_done(a.ref, a.id, True)), "ref", "id", json_flag=True)
     add("uncheck", _simple(lambda a: set_sub_task_done(a.ref, a.id, False)), "ref", "id", json_flag=True)

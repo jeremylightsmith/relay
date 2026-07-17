@@ -1301,6 +1301,14 @@ defmodule RelayWeb.CoreComponents do
   attr :close_patch, :string, required: true, doc: "the patch target that closes the drawer"
   attr :title_form, :any, required: true, doc: "a Phoenix.HTML.Form for card[title]"
   attr :editing_title, :boolean, default: false
+
+  attr :editing_tag, :boolean, default: false
+  attr :tag_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[tag]; required when editing_tag"
+
+  attr :tag_suggestions, :list,
+    default: [],
+    doc: "distinct tags in use on the board — the tag editor's datalist entries"
+
   attr :editing_description, :boolean, default: false
 
   attr :description_form, :any,
@@ -2462,8 +2470,24 @@ defmodule RelayWeb.CoreComponents do
               <div class="rail-section flex flex-col gap-2">
                 <.section_label>Tags</.section_label>
                 <div class="rail-tags">
-                  <span :if={@card.tag} class="badge badge-ghost badge-sm">#{@card.tag}</span>
-                  <span :if={!@card.tag} class="text-base-content/50">None</span>
+                  <.inline_field
+                    :if={!@archived}
+                    id="card-tag"
+                    value={@card.tag && "##{@card.tag}"}
+                    placeholder="None"
+                    editing={@editing_tag}
+                    form={@tag_form}
+                    field={:tag}
+                    edit_event="edit_tag"
+                    save_event="save_card_tag"
+                    cancel_event="cancel_tag"
+                    datalist={@tag_suggestions}
+                    read_class={@card.tag && "badge badge-ghost badge-sm"}
+                  />
+                  <span :if={@archived && @card.tag} class="badge badge-ghost badge-sm">
+                    #{@card.tag}
+                  </span>
+                  <span :if={@archived && !@card.tag} class="text-base-content/50">None</span>
                 </div>
               </div>
 
@@ -3116,6 +3140,11 @@ defmodule RelayWeb.CoreComponents do
   attr :edit_attrs, :map, default: %{}
   attr :read_class, :any, default: nil
   attr :input_class, :any, default: nil
+
+  attr :datalist, :list,
+    default: [],
+    doc: "datalist suggestion strings; when non-empty the edit input gets list=\"{id}-datalist\""
+
   slot :hidden
 
   def inline_field(assigns) do
@@ -3156,7 +3185,11 @@ defmodule RelayWeb.CoreComponents do
           data-commit="enter"
           data-autofocus="true"
           data-cancel-id={"#{@id}-cancel"}
+          list={@datalist != [] && "#{@id}-datalist"}
         />
+        <datalist :if={@datalist != []} id={"#{@id}-datalist"}>
+          <option :for={entry <- @datalist} value={entry}></option>
+        </datalist>
         <.commit_pill id={@id} cancel_event={@cancel_event} hint="Enter · Esc" />
       </.form>
     </div>

@@ -43,6 +43,22 @@ defmodule Storybook.Components.CoreComponents.InlineField do
         template: """
         <div style="padding-bottom:64px"><.psb-variation/></div>
         """
+      },
+      %Variation{
+        id: :editing_with_datalist,
+        attributes: %{
+          id: "if-editing-datalist",
+          editing: true,
+          field: :tag,
+          form: Phoenix.Component.to_form(%{"tag" => ""}, as: :card),
+          datalist: ["design", "infra", "mobile"],
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
+        },
+        template: """
+        <div style="padding-bottom:64px"><.psb-variation/></div>
+        """
       }
     ]
   end

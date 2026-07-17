@@ -338,6 +338,78 @@ defmodule Relay.CardsTest do
     end
   end
 
+  describe "update_card/2 tag" do
+    setup %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Tagged"})
+      %{card: card}
+    end
+
+    test "sets, changes, and clears the tag", %{card: card} do
+      assert {:ok, card} = Cards.update_card(card, %{tag: "infra"})
+      assert card.tag == "infra"
+
+      assert {:ok, card} = Cards.update_card(card, %{tag: "design"})
+      assert card.tag == "design"
+
+      assert {:ok, card} = Cards.update_card(card, %{tag: ""})
+      assert card.tag == nil
+    end
+
+    test "nil clears the tag", %{card: card} do
+      {:ok, card} = Cards.update_card(card, %{tag: "infra"})
+
+      assert {:ok, card} = Cards.update_card(card, %{tag: nil})
+      assert card.tag == nil
+    end
+
+    test "trims whitespace and strips a single leading #", %{card: card} do
+      assert {:ok, card} = Cards.update_card(card, %{tag: " #infra "})
+      assert card.tag == "infra"
+
+      assert {:ok, card} = Cards.update_card(card, %{tag: "##meta"})
+      assert card.tag == "#meta"
+    end
+
+    test "whitespace-only and bare-# values clear the tag", %{card: card} do
+      {:ok, card} = Cards.update_card(card, %{tag: "infra"})
+
+      assert {:ok, card} = Cards.update_card(card, %{tag: "#"})
+      assert card.tag == nil
+
+      {:ok, card} = Cards.update_card(card, %{tag: "infra"})
+
+      assert {:ok, card} = Cards.update_card(card, %{tag: "   "})
+      assert card.tag == nil
+    end
+  end
+
+  describe "list_board_tags/1" do
+    test "returns distinct non-nil tags sorted alphabetically", %{board: board, stage: stage} do
+      {:ok, _} = Cards.create_card(stage, %{title: "A", tag: "infra"})
+      {:ok, _} = Cards.create_card(stage, %{title: "B", tag: "design"})
+      {:ok, _} = Cards.create_card(stage, %{title: "C", tag: "infra"})
+      {:ok, _} = Cards.create_card(stage, %{title: "D"})
+
+      assert Cards.list_board_tags(board.id) == ["design", "infra"]
+    end
+
+    test "excludes archived cards' tags", %{board: board, stage: stage} do
+      {:ok, _keep} = Cards.create_card(stage, %{title: "Keep", tag: "design"})
+      {:ok, gone} = Cards.create_card(stage, %{title: "Gone", tag: "legacy"})
+      {:ok, _} = Cards.archive_card(gone)
+
+      assert Cards.list_board_tags(board.id) == ["design"]
+    end
+
+    test "is scoped to the given board", %{board: board, stage: stage} do
+      other_stage = insert(:stage)
+      {:ok, _} = Cards.create_card(other_stage, %{title: "Elsewhere", tag: "other"})
+      {:ok, _} = Cards.create_card(stage, %{title: "Here", tag: "mine"})
+
+      assert Cards.list_board_tags(board.id) == ["mine"]
+    end
+  end
+
   describe "get_card_by_ref/2" do
     test "returns the card the ref points at on the board", %{board: board, stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "Find me"})

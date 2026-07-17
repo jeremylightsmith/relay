@@ -104,6 +104,52 @@ class PrintCardTest(unittest.TestCase):
         text = capture(relay.print_card, card)
         self.assertNotIn("CHANGES REQUESTED", text)
 
+    def test_print_card_shows_the_tag_on_the_status_line(self):
+        card = {"ref": "RLY-1", "title": "Do it", "status": "queued",
+                "active_owner": None, "owners": [], "tag": "infra"}
+        text = capture(relay.print_card, card)
+        status_line = next(l for l in text.splitlines() if l.startswith("status:"))
+        self.assertIn("tag: #infra", status_line)
+
+    def test_print_card_omits_tag_when_unset(self):
+        card = {"ref": "RLY-1", "title": "Do it", "status": "queued",
+                "active_owner": None, "owners": []}
+        text = capture(relay.print_card, card)
+        self.assertNotIn("tag:", text)
+
+
+class SetTagTest(unittest.TestCase):
+    """relay tag REF [VALUE] — PATCHes {"tag": value}, null when omitted/empty."""
+
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+        self.sent = []
+        relay.api = lambda method, path, body=None, **k: (
+            self.sent.append((method, path, body)) or
+            {"data": {"ref": "RLY-1", "title": "Do it", "status": "queued",
+                      "active_owner": None}}
+        )
+
+    def test_a_value_patches_the_tag(self):
+        relay.set_tag("RLY-1", "infra")
+        self.assertEqual(self.sent, [("PATCH", "/api/cards/RLY-1", {"tag": "infra"})])
+
+    def test_no_value_patches_null_to_clear(self):
+        relay.set_tag("RLY-1", None)
+        self.assertEqual(self.sent, [("PATCH", "/api/cards/RLY-1", {"tag": None})])
+
+    def test_empty_string_also_patches_null(self):
+        relay.set_tag("RLY-1", "")
+        self.assertEqual(self.sent, [("PATCH", "/api/cards/RLY-1", {"tag": None})])
+
+    def test_cli_wiring_parses_the_optional_value(self):
+        p = relay.build_parser()
+        args = p.parse_args(["tag", "RLY-1", "infra"])
+        self.assertEqual((args.ref, args.value), ("RLY-1", "infra"))
+        args = p.parse_args(["tag", "RLY-1"])
+        self.assertIsNone(args.value)
+
 
 class NeedsInputBodyTest(unittest.TestCase):
     """needs_input_body builds the POST body: plain question vs. structured --questions JSON."""
