@@ -54,6 +54,11 @@ config :relay, Relay.Mailer, adapter: Swoosh.Adapters.Local
 # config/runtime.exs swaps in the real APNS adapter in prod when creds are present.
 config :relay, Relay.Push, adapter: Relay.Push.Delivery.Log, async: true
 
+# Runs engine (ADR 0006 card 02 / RLY-132): runaway-protection knobs and the
+# dispatch behaviour implementation ("give this node-job to an executor").
+# NoopDispatcher = jobs sit :queued for the pull model (04's executors poll).
+config :relay, Relay.Runs, breaker_threshold: 3, visit_cap: 20
+
 # Configure the endpoint
 config :relay, RelayWeb.Endpoint,
   url: [host: "localhost"],
@@ -64,6 +69,8 @@ config :relay, RelayWeb.Endpoint,
   ],
   pubsub_server: Relay.PubSub,
   live_view: [signing_salt: "c7EFJnnN"]
+
+config :relay, :runs_dispatcher, Relay.Runs.NoopDispatcher
 
 config :relay,
   ecto_repos: [Relay.Repo],
