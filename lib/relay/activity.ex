@@ -44,10 +44,11 @@ defmodule Relay.Activity do
   @doc """
   Appends an activity entry to `card`'s log from `attrs` — `:type`
   (`:created | :moved | :status_changed | :owners_changed | :commented | :approved | :rejected | :needs_input | :input_answered`),
-  `:actor` (`:agent | {:user, user_id}`), and optional `:meta` (a map
+  `:actor` (`:agent | {:user, user_id}`), optional `:meta` (a map
   with STRING keys and primitive values, stored as jsonb; defaults to
-  `%{}`) — returning `{:ok, activity}` with the actor preloaded or
-  `{:error, changeset}`.
+  `%{}`), and optional `:text` (the rendered line for `:action` rows —
+  RLY-148's Retry writes `"retry requested"`; defaults to nil) — returning
+  `{:ok, activity}` with the actor preloaded or `{:error, changeset}`.
   """
   def log(%Card{} = card, %{type: type, actor: actor} = attrs) do
     {actor_type, user_id} = split_actor(actor)
@@ -56,6 +57,7 @@ defmodule Relay.Activity do
       card_id: card.id,
       type: type,
       meta: Map.get(attrs, :meta, %{}),
+      text: Map.get(attrs, :text),
       actor_type: actor_type,
       user_id: user_id
     }

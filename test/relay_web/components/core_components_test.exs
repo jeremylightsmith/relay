@@ -1300,9 +1300,20 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ "animation:relaypulse"
     end
 
-    # Q6→C: the artboard draws a Retry pill on the stopped strip; it is out of scope.
-    test "stopped renders NO Retry affordance" do
-      refute strip(:stopped, log_text: "agent stopped") =~ "Retry"
+    # RLY-148 (supersedes Q6→C): the artboard's §02 Retry pill on the stopped strip.
+    test "stopped shows the artboard's Retry chip on the strip" do
+      html = strip(:stopped, log_text: "agent stopped")
+
+      assert html =~ ~s(id="card-RLY-3-retry")
+      assert html =~ ~s(phx-click="retry_card")
+      assert html =~ ~s(phx-value-ref="RLY-3")
+      assert html =~ "border:1px solid oklch(0.84 0.08 20)"
+      assert html =~ "color:oklch(0.50 0.14 15)"
+    end
+
+    test "live and stale strips show no Retry" do
+      refute strip(:live) =~ "Retry"
+      refute strip(:stale) =~ "Retry"
     end
 
     test "the strip text ellipsizes and the time is mono and right-aligned" do

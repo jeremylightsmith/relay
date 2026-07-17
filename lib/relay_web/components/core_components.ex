@@ -974,6 +974,16 @@ defmodule RelayWeb.CoreComponents do
         >
           {relative_time(@log_at)}
         </span>
+        <button
+          :if={@health == :stopped}
+          id={"card-#{@ref}-retry"}
+          class="card-retry-chip"
+          phx-click="retry_card"
+          phx-value-ref={@ref}
+          style="font-size:10px;font-weight:600;font-family:var(--font-mono);color:oklch(0.50 0.14 15);background:oklch(1 0 0);border:1px solid oklch(0.84 0.08 20);border-radius:5px;padding:2px 7px;flex:0 0 auto;cursor:pointer;"
+        >
+          Retry
+        </button>
       </div>
       <div
         :if={@status == :needs_input}
@@ -2189,6 +2199,16 @@ defmodule RelayWeb.CoreComponents do
                   >
                     {health_chip_label(@health)}
                   </span>
+                  <button
+                    :if={@health == :stopped and !@archived}
+                    id={"#{@id}-activity-retry"}
+                    class="activity-retry-chip"
+                    phx-click="retry_card"
+                    phx-value-ref={@ref}
+                    style="margin-left:auto;font-size:10px;font-weight:600;font-family:var(--font-mono);color:oklch(0.50 0.14 15);background:oklch(1 0 0);border:1px solid oklch(0.84 0.08 20);border-radius:5px;padding:2px 7px;flex:0 0 auto;cursor:pointer;"
+                  >
+                    Retry
+                  </button>
                 </div>
                 <div
                   :if={@body_loading}

@@ -718,6 +718,34 @@ defmodule Relay.Cards do
     end
   end
 
+  @doc """
+  Minimal Retry for a dead agent (RLY-148, decision 2): appends a "retry requested"
+  `:action` entry (history never cleared — the newest entry is no longer a `:failure`,
+  so `health/1` leaves `:stopped`), ensures the card's status is `:working` so the
+  `relay watch` poller re-picks it on its next poll, and broadcasts
+  `{:card_log_appended, card_id, [entry]}` exactly like the runner's own appends so
+  every open board's strip updates in place. Deliberately **no eager dispatch** — no
+  new machinery; the poller is the re-dispatcher. Attributed to `actor`
+  (`:agent | {:user, user_id}`, defaults to `:agent`). Returns `{:ok, card}` with
+  owners preloaded or `{:error, changeset}`.
+  """
+  def retry(%Card{} = card, actor \\ :agent) do
+    # ensure_working/2 first so the "retry requested" entry lands with a strictly
+    # later id than any :status_changed row set_status/3 logs: same-second inserts
+    # tie-break on descending id, so logging the retry line last is what keeps it
+    # (not the status change) the newest entry — and the one health/1 reads.
+    with {:ok, card} <- ensure_working(card, actor),
+         {:ok, entry} <- Activity.log(card, %{type: :action, actor: actor, text: "retry requested"}) do
+      Events.broadcast(card.board_id, {:card_log_appended, card.id, [entry]})
+      {:ok, card}
+    end
+  end
+
+  # Same-status Retry must not log a spurious :status_changed row (set_status/3 already
+  # guards the log, but skipping the write entirely also skips its broadcast churn).
+  defp ensure_working(%Card{status: :working} = card, _actor), do: {:ok, preload_owners(card)}
+  defp ensure_working(%Card{} = card, actor), do: set_status(card, %{status: :working}, actor)
+
   # Light card columns for the optimistic drawer's first paint (RLY-68):
   # every Card field except the multi-KB heavy text
   # (description/acceptance_criteria/spec/plan/ai_result). Derived from

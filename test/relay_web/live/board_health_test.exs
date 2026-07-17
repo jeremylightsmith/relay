@@ -93,7 +93,7 @@ defmodule RelayWeb.BoardHealthTest do
     assert has_element?(view, "#card-#{ref}-log-strip[data-health='live']")
   end
 
-  test "a failure shows the rose strip and recolors the card, with no Retry", %{
+  test "a failure shows the rose strip and recolors the card, with a Retry chip", %{
     conn: conn,
     board: board,
     card: card,
@@ -106,7 +106,7 @@ defmodule RelayWeb.BoardHealthTest do
 
     assert has_element?(view, "#card-#{ref}-log-strip[data-health='stopped']")
     assert has_element?(view, "[data-ref='#{ref}'].border-l-error")
-    refute render(view) =~ "Retry"
+    assert has_element?(view, "#card-#{ref}-retry")
   end
 
   test "a card_log_appended batch updates the strip in place", %{conn: conn, board: board, card: card, ref: ref} do

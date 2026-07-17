@@ -17,8 +17,9 @@ defmodule Schemas.Activity do
   session that emitted it in `run_id`; `:failure` (RLY-112) is the agent erroring.
   Both are written in bulk by `Relay.Activity.LogSink` via `insert_all`, which
   bypasses `changeset/1` by design — they are best-effort chatter, not audit rows.
-  `text`/`run_id` are null on every human/system row. There is deliberately no
-  `:heartbeat` type: liveness is `cards.agent_heartbeat_at` (Q3→B).
+  `text`/`run_id` are null on every audit row; a human-triggered Retry (RLY-148)
+  writes an `:action` row with `text` set and `run_id` null. There is deliberately
+  no `:heartbeat` type: liveness is `cards.agent_heartbeat_at` (Q3→B).
   """
 
   use Ecto.Schema

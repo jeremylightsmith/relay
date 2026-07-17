@@ -130,7 +130,7 @@ defmodule RelayWeb.BoardDrawerActivityTest do
     assert chip =~ "var(--color-warning)"
   end
 
-  test "the health chip goes rose on a failure, still with no Retry", %{
+  test "the health chip goes rose on a failure, with a Retry button beside it", %{
     conn: conn,
     board: board,
     card: card,
@@ -142,7 +142,7 @@ defmodule RelayWeb.BoardDrawerActivityTest do
     view = open(conn, board, ref)
 
     assert has_element?(view, "#card-drawer-activity-health-chip[data-health='stopped']")
-    refute render(view) =~ "Retry"
+    assert has_element?(view, "#card-drawer-activity-retry")
   end
 
   test "no chip renders for a card with no active agent", %{conn: conn, board: board, ref: ref} do
