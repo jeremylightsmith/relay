@@ -74,8 +74,22 @@ defmodule Schemas.Card do
       :pr_url,
       :ai_result
     ])
+    |> normalize_tag()
     |> validate_required([:title])
     |> unique_constraint([:board_id, :ref_number], name: :cards_board_id_ref_number_index)
+  end
+
+  # "#infra " saves as "infra"; "", "#", and whitespace-only clear to nil. Runs on
+  # every write path (drawer, REST PATCH, CLI) so the stored value is always bare.
+  defp normalize_tag(changeset) do
+    case get_change(changeset, :tag) do
+      nil ->
+        changeset
+
+      value ->
+        normalized = value |> String.trim() |> String.replace_prefix("#", "") |> String.trim()
+        put_change(changeset, :tag, if(normalized == "", do: nil, else: normalized))
+    end
   end
 
   @doc """

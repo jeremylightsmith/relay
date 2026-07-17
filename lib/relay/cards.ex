@@ -201,6 +201,20 @@ defmodule Relay.Cards do
     )
   end
 
+  @doc """
+  The distinct tags in use on the board's non-archived cards, sorted
+  alphabetically — the drawer tag editor's datalist suggestions (RLY-114).
+  """
+  def list_board_tags(board_id) do
+    Repo.all(
+      from c in Card,
+        where: c.board_id == ^board_id and is_nil(c.archived_at) and not is_nil(c.tag),
+        distinct: true,
+        order_by: c.tag,
+        select: c.tag
+    )
+  end
+
   @doc "How many of the board's cards are archived (the header button's badge)."
   def count_archived_cards(%Board{id: board_id}) do
     Repo.aggregate(from(c in Card, where: c.board_id == ^board_id and not is_nil(c.archived_at)), :count)
