@@ -1,0 +1,31 @@
+# 04 — Node-job API: the server↔executor protocol
+
+**Why.** The engine (Fly) and the agents (developer machine) are separated by ADR 0006's
+brain/hands split. This is the contract between them — an extension of the existing
+board-key REST API, not a parallel surface (ADR 0001).
+
+**Scope.**
+
+- Endpoints (board-key auth, like the rest of `/api`):
+  - claim: an executor asks for the next node-job (long-poll or short-poll), advertising
+    its capacity per isolation class; payload carries node type, rendered `run`, the
+    isolation requirement (`shared_clean` / `exclusive`), and template vars — never
+    worktree paths, which are the executor's own business.
+  - logs: batched output lines per node-job (converge with the existing
+    `POST /api/board/logs` / RLY-112 run-id attribution rather than adding a twin).
+  - outcome: `{outcome, detail}` with `outcome` from the closed set; completes the node-job
+    and wakes the engine.
+  - heartbeat: per-executor liveness (replaces today's `/api/board/heartbeat` usage);
+    node-jobs on a dead executor become reclaimable after a timeout.
+- **Agent-node outcome contract**: how a headless `claude -p` signals its result — an
+  outcome JSON file the executor reads (plus "card went to needs_input" detection, as the
+  runner does today). Documented in `docs/agent-integration.md`.
+
+**Out of scope.** The Python executor itself (05), dispatch decisions (02/03 own those).
+
+**Acceptance criteria.**
+
+1. A scripted fake executor (curl-level) can claim a job, stream logs, report each of the
+   four outcomes, and the engine routes accordingly.
+2. A job claimed by an executor that stops heartbeating is reclaimable by another.
+3. Unknown outcome values are rejected (422). `mix precommit` passes.
