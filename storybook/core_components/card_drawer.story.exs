@@ -21,11 +21,52 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           stage_owner: :ai,
           active_owner: :ai,
           current_user_id: 1,
+          health: :live,
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 61}, as: :card),
           stages: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 7, name: "Done"}],
           conversation: story_conversation(),
+          activity: story_activity(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
+        id: :agent_stale,
+        attributes: %{
+          id: "story-drawer-stale",
+          ref: "RLY-11",
+          card: story_card(),
+          stage_name: "Code",
+          stage_owner: :ai,
+          active_owner: :ai,
+          current_user_id: 1,
+          health: :stale,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Deploy the search reindex job"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => nil}, as: :card),
+          stages: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 7, name: "Done"}],
+          conversation: [],
+          activity: story_activity(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
+        id: :agent_stopped_retry,
+        attributes: %{
+          id: "story-drawer-stopped",
+          ref: "RLY-12",
+          card: story_card(),
+          stage_name: "Code",
+          stage_owner: :ai,
+          active_owner: :ai,
+          current_user_id: 1,
+          health: :stopped,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Generate the API client"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => nil}, as: :card),
+          stages: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 7, name: "Done"}],
+          conversation: [],
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }

@@ -13,7 +13,10 @@ sharing behavior.
   `needs_input`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject, needs-input
   questions. Card state × stage validity is governed by
   [ADR 0003](../adr/0003-card-state-stage-type-validity.md); ownership and the claim rule
-  by [ADR 0004](../adr/0004-card-ownership-and-the-claim-rule.md).
+  by [ADR 0004](../adr/0004-card-ownership-and-the-claim-rule.md); derived agent health
+  (`Cards.health/1`, 90s `STALE_AFTER`) and the four-bucket needs-you rollup
+  (`needs_input` / `in_review` / `awaiting_human` / `agent_stalled` — RLY-148) surfaced by
+  `GET /api/board` and the boards-home badges.
 - **Members** — board membership; who can see and act on a board.
 - **Accounts** — users and Google sign-in (`GoogleTokenValidator` verifies native mobile
   tokens); user API tokens for `/api/all`.

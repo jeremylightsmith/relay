@@ -103,6 +103,21 @@ defmodule RelayWeb.BoardsLiveMobileTest do
 
       assert has_element?(view, "#board-needs-you-mobile-#{board.slug}", "2 NEEDS YOU")
     end
+
+    # RLY-148 Q1: a dead agent joins the needs-you badge — on the web three-type+stalled
+    # count AND the embedded two-type+stalled count (the spec adds it to both flavors).
+    test "a stopped agent joins both badge flavors", %{conn: conn, board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      stopped = insert(:card, board: board, stage: code, status: :working)
+      insert(:card_owner, card: stopped)
+      insert(:activity, card: stopped, type: :failure, text: "agent stopped")
+
+      {:ok, view, _html} = live(conn, ~p"/boards")
+      assert has_element?(view, "#board-needs-you-mobile-#{board.slug}", "4 NEEDS YOU")
+
+      {:ok, embed, _html} = live(conn, ~p"/boards?embed=1")
+      assert has_element?(embed, "#board-needs-you-mobile-#{board.slug}", "3 NEEDS YOU")
+    end
   end
 
   describe "what phone width hides" do

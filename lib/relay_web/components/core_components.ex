@@ -915,12 +915,13 @@ defmodule RelayWeb.CoreComponents do
       assigns
       |> assign(:accent_class, accent_class)
       |> assign(:accent_color, card_accent_color(accent_class))
+      |> assign(:shell_style, card_shell_style(assigns))
 
     ~H"""
     <article
       id={@id}
       class={["board-card group", @accent_class]}
-      style={"background:var(--color-base-100);border:1px solid var(--color-base-300);border-left:3px solid #{@accent_color};border-radius:9px;padding:10px 11px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px oklch(0.55 0.03 255/0.05);cursor:pointer;"}
+      style={"background:var(--color-base-100);#{@shell_style}border-left:3px solid #{@accent_color};border-radius:9px;padding:10px 11px;display:flex;flex-direction:column;gap:8px;cursor:pointer;"}
       role="button"
       tabindex="0"
       draggable="true"
@@ -973,6 +974,16 @@ defmodule RelayWeb.CoreComponents do
         >
           {relative_time(@log_at)}
         </span>
+        <button
+          :if={@health == :stopped}
+          id={"card-#{@ref}-retry"}
+          class="card-retry-chip"
+          phx-click="retry_card"
+          phx-value-ref={@ref}
+          style="font-size:10px;font-weight:600;font-family:var(--font-mono);color:oklch(0.50 0.14 15);background:oklch(1 0 0);border:1px solid oklch(0.84 0.08 20);border-radius:5px;padding:2px 7px;flex:0 0 auto;cursor:pointer;"
+        >
+          Retry
+        </button>
       </div>
       <div
         :if={@status == :needs_input}
@@ -1039,9 +1050,11 @@ defmodule RelayWeb.CoreComponents do
   # board_card/1 via card_accent_color/1 (an inline `style` beats the class, so
   # the class carries no colour). Do not delete these classes as "unused": the
   # board/card tests select on them (e.g. `.border-l-warning`).
-  # RLY-112 (2026-07-16 rejection): health never touches the accent or the card
-  # shell — the log strip is the only surface that reads it. Accent stays keyed
-  # on status alone.
+  # RLY-148 (supersedes the 2026-07-16 RLY-112 rejection): a dead agent DOES recolor
+  # the card — health :stale/:stopped beats the status accent (artboard §02 card
+  # chrome). Every other health state leaves the RLY-48 status accent as-is.
+  defp card_accent_class(%{health: :stale}), do: "border-l-warning"
+  defp card_accent_class(%{health: :stopped}), do: "border-l-error"
   defp card_accent_class(%{status: :needs_input}), do: "border-l-warning"
   defp card_accent_class(%{status: :in_review}), do: "border-l-warning"
   defp card_accent_class(%{status: :working}), do: "border-l-secondary"
@@ -1052,14 +1065,23 @@ defmodule RelayWeb.CoreComponents do
   defp card_accent_color("border-l-secondary"), do: "var(--color-secondary)"
   defp card_accent_color("border-l-base-300"), do: "var(--color-base-300)"
 
-  # RLY-112 — the collapsed log strip. Live and stopped internals are pinned to
-  # docs/designs/Relay Card Activity.dc.html §02 (violet pulse on the tint / rose white-!
-  # disc); the light theme's --color-secondary/-error are byte-identical to the artboard's
-  # violet/rose. Stale deliberately DIVERGES from the artboard's amber (2026-07-16
-  # rejection: age must never recolor the card): the strip mutes to gray — still dot,
-  # lighter-gray text — and the card shell/accent never change with health.
+  # RLY-148: the card shell escalates with health (artboard §02) — amber-tinted
+  # border + shadow when stale, rose when stopped, the quiet RLY-48 shell otherwise.
+  defp card_shell_style(%{health: :stale}),
+    do: "border:1px solid oklch(0.86 0.06 70);box-shadow:0 1px 3px oklch(0.6 0.08 70/0.12);"
+
+  defp card_shell_style(%{health: :stopped}),
+    do: "border:1px solid oklch(0.86 0.07 20);box-shadow:0 1px 3px oklch(0.6 0.1 15/0.12);"
+
+  defp card_shell_style(_assigns),
+    do: "border:1px solid var(--color-base-300);box-shadow:0 1px 2px oklch(0.55 0.03 255/0.05);"
+
+  # RLY-148 — the collapsed log strip, full artboard fidelity. Every value is pinned to
+  # docs/designs/Relay Card Activity.dc.html §02 (violet pulse / amber tint / rose white-!
+  # disc); the light theme's --color-secondary/-warning/-error are byte-identical to the
+  # artboard's violet/amber/rose. Supersedes the 2026-07-16 gray-stale rejection.
   defp strip_box_style(:live), do: "background:oklch(0.985 0.012 292);"
-  defp strip_box_style(:stale), do: "background:oklch(0.975 0.005 255);"
+  defp strip_box_style(:stale), do: "background:oklch(0.97 0.03 75);border:1px solid oklch(0.88 0.06 75);"
   defp strip_box_style(:stopped), do: "background:oklch(0.97 0.03 20);border:1px solid oklch(0.88 0.06 20);"
   defp strip_box_style(_health), do: ""
 
@@ -1068,7 +1090,7 @@ defmodule RelayWeb.CoreComponents do
       "width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:var(--color-secondary);animation:relaypulse 1.4s ease-in-out infinite;"
 
   defp strip_dot_style(:stale),
-    do: "width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:oklch(0.72 0.02 255);"
+    do: "width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:var(--color-warning);"
 
   defp strip_dot_style(:stopped),
     do:
@@ -1077,19 +1099,18 @@ defmodule RelayWeb.CoreComponents do
   defp strip_dot_style(_health), do: ""
 
   defp strip_text_color(:live), do: "oklch(0.44 0.08 292)"
-  defp strip_text_color(:stale), do: "oklch(0.60 0.02 255)"
+  defp strip_text_color(:stale), do: "oklch(0.50 0.10 65)"
   defp strip_text_color(:stopped), do: "oklch(0.50 0.14 15)"
   defp strip_text_color(_health), do: "oklch(0.44 0.02 255)"
 
   defp strip_time_color(:live), do: "oklch(0.60 0.02 255)"
-  defp strip_time_color(:stale), do: "oklch(0.65 0.02 255)"
+  defp strip_time_color(:stale), do: "oklch(0.52 0.11 65)"
   defp strip_time_color(:stopped), do: "oklch(0.50 0.14 15)"
   defp strip_time_color(_health), do: "oklch(0.60 0.02 255)"
 
-  # RLY-112 §04 header chip. Stale is muted gray, not amber (2026-07-16 rejection).
-  # No Retry (Q6→C).
+  # RLY-148 §04 header chip — amber when stale; Retry joins it on stopped (Task 2).
   defp health_chip_color(:live), do: "var(--color-secondary)"
-  defp health_chip_color(:stale), do: "oklch(0.60 0.02 255)"
+  defp health_chip_color(:stale), do: "var(--color-warning)"
   defp health_chip_color(:stopped), do: "var(--color-error)"
   defp health_chip_color(_health), do: "var(--color-base-300)"
 
@@ -2178,6 +2199,16 @@ defmodule RelayWeb.CoreComponents do
                   >
                     {health_chip_label(@health)}
                   </span>
+                  <button
+                    :if={@health == :stopped and !@archived}
+                    id={"#{@id}-activity-retry"}
+                    class="activity-retry-chip"
+                    phx-click="retry_card"
+                    phx-value-ref={@ref}
+                    style="margin-left:auto;font-size:10px;font-weight:600;font-family:var(--font-mono);color:oklch(0.50 0.14 15);background:oklch(1 0 0);border:1px solid oklch(0.84 0.08 20);border-radius:5px;padding:2px 7px;flex:0 0 auto;cursor:pointer;"
+                  >
+                    Retry
+                  </button>
                 </div>
                 <div
                   :if={@body_loading}

@@ -323,7 +323,13 @@ defmodule RelayWeb.Api.CardControllerTest do
     insert(:card, board: board, stage: review, status: :in_review)
 
     resp = conn |> get(~p"/api/board") |> json_response(200)
-    assert resp["needs_you"] == %{"needs_input" => 0, "in_review" => 1, "awaiting_human" => 0}
+
+    assert resp["needs_you"] == %{
+             "needs_input" => 0,
+             "in_review" => 1,
+             "awaiting_human" => 0,
+             "agent_stalled" => 0
+           }
   end
 
   describe "GET /api/cards Done-column exclusion (RLY-67)" do

@@ -115,7 +115,57 @@ defmodule Relay.CardDerivationsTest do
       insert(:card, board: ctx.board, stage: ctx.ai_work, status: :ready)
       insert(:card, board: ctx.board, stage: ctx.done, status: :ready)
 
-      assert Cards.needs_you_rollup(ctx.board) == %{needs_input: 1, in_review: 1, awaiting_human: 1}
+      assert Cards.needs_you_rollup(ctx.board) == %{
+               needs_input: 1,
+               in_review: 1,
+               awaiting_human: 1,
+               agent_stalled: 0
+             }
+    end
+
+    # RLY-148: dead agents float up in triage. Health here must be derived exactly as
+    # the board renders it (newest entry vs heartbeat · active AI owner · AI-enabled stage).
+    test "a stopped agent card counts in agent_stalled", ctx do
+      card = insert(:card, board: ctx.board, stage: ctx.ai_work, status: :working)
+      insert(:card_owner, card: card)
+      insert(:activity, card: card, type: :failure, text: "agent stopped")
+
+      assert Cards.needs_you_rollup(ctx.board) == %{
+               needs_input: 0,
+               in_review: 0,
+               awaiting_human: 0,
+               agent_stalled: 1
+             }
+    end
+
+    test "a quiet agent card past STALE_AFTER counts in agent_stalled", ctx do
+      card = insert(:card, board: ctx.board, stage: ctx.ai_work, status: :working)
+      insert(:card_owner, card: card)
+      quiet = DateTime.utc_now() |> DateTime.add(-3 * 60, :second) |> DateTime.truncate(:second)
+      insert(:activity, card: card, type: :action, text: "reindexing 12k documents", inserted_at: quiet)
+
+      assert Cards.needs_you_rollup(ctx.board).agent_stalled == 1
+    end
+
+    test "a live agent card does not count", ctx do
+      card = insert(:card, board: ctx.board, stage: ctx.ai_work, status: :working)
+      insert(:card_owner, card: card)
+      insert(:activity, card: card, type: :action, text: "uploaded 24/40 posts")
+
+      assert Cards.needs_you_rollup(ctx.board).agent_stalled == 0
+    end
+
+    test "a blocked card with a dead agent counts once, in needs_input", ctx do
+      card = insert(:card, board: ctx.board, stage: ctx.ai_work, status: :needs_input)
+      insert(:card_owner, card: card)
+      insert(:activity, card: card, type: :failure, text: "agent stopped")
+
+      assert Cards.needs_you_rollup(ctx.board) == %{
+               needs_input: 1,
+               in_review: 0,
+               awaiting_human: 0,
+               agent_stalled: 0
+             }
     end
   end
 

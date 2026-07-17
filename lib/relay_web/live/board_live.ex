@@ -538,7 +538,7 @@ defmodule RelayWeb.BoardLive do
         save_card_acceptance_criteria save_card_spec save_card_plan
         add_owner remove_owner take_over post_comment answer_input
         answer_select answer_custom answer_next answer_back answer_goto answer_submit
-        review_approve review_reject
+        review_approve review_reject retry_card
         archive_card restore_card toggle_sub_task
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
@@ -622,6 +622,17 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("close_drawer", _params, socket) do
     {:noreply, push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}")}
+  end
+
+  def handle_event("retry_card", %{"ref" => ref}, socket) do
+    with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
+         {:ok, _card} <- Cards.retry(card, current_actor(socket)) do
+      # The {:card_log_appended, ...} + {:card_upserted, ...} broadcasts update this
+      # session's strip/timeline like any other subscriber's — nothing local to assign.
+      {:noreply, socket}
+    else
+      _ -> {:noreply, socket}
+    end
   end
 
   def handle_event("archive_card", %{"ref" => ref}, socket) do

@@ -57,13 +57,13 @@ defmodule Relay.CardsHealthTest do
     end
   end
 
-  describe "health/1 — the STALE_AFTER boundary" do
-    test "exactly 10 minutes of quiet is still :live" do
-      assert health(%{newest: entry(:action, 600)}) == :live
+  describe "health/1 — the STALE_AFTER boundary (90s = 3× the runner's 30s heartbeat, RLY-148 Q4)" do
+    test "exactly 90 seconds of quiet is still :live" do
+      assert health(%{newest: entry(:action, 90)}) == :live
     end
 
-    test "a hair over 10 minutes is :stale" do
-      assert health(%{newest: %Schemas.Activity{type: :action, inserted_at: DateTime.add(@now, -600_001, :millisecond)}}) ==
+    test "a hair over 90 seconds is :stale" do
+      assert health(%{newest: %Schemas.Activity{type: :action, inserted_at: DateTime.add(@now, -90_001, :millisecond)}}) ==
                :stale
     end
   end

@@ -468,33 +468,33 @@ defmodule Relay.Cards do
     end
   end
 
-  @stale_after to_timeout(minute: 10)
+  @stale_after to_timeout(second: 90)
 
   @doc """
-  The card's derived agent health (RLY-112) — `:none | :stopped | :stale | :live`.
+  The card's derived agent health (RLY-112; escalation RLY-148) — `:none | :stopped | :stale | :live`.
 
   Pure: takes a plain map (`:newest` — the card's newest `Schemas.Activity` or `nil`;
   `:heartbeat_at`; `:ai_active?`; `:ai_stage?` — whether the card's stage is `ai_enabled`;
   `:now`), touches no DB, and builds no structs, so every branch unit-tests directly.
   Health is derived at render and **never stored**.
 
-  Branch order (the 2026-07-16 rejection layered over the artboard's §03):
+  Branch order (the artboard's §03 decision table):
 
     1. the stage is not AI-enabled → `:none` — "only show the log status in the ai
        enabled columns". Checked before everything, so even a failure goes dark when
        the card leaves an AI column.
-    2. the newest entry is a `:failure` → `:stopped` (rose strip, `!` disc)
+    2. the newest entry is a `:failure` → `:stopped` (rose strip + rose card border, `!` disc, Retry)
     3. no active AI owner → `:none`
-    4. quiet longer than `STALE_AFTER` → `:stale` (muted gray strip — never amber, and
-       never a card border/accent change), age measured from the *later* of the newest
-       entry and the heartbeat
+    4. quiet longer than `STALE_AFTER` → `:stale` (amber strip + amber-tinted card
+       border/shadow — RLY-148, superseding the 2026-07-16 rejection's gray-stale),
+       age measured from the *later* of the newest entry and the heartbeat
     5. otherwise → `:live` (violet, pulsing)
 
   No timestamp at all reads `:live`, not `:stale` — unreachable in practice, and choosing
   `:live` means we never cry wolf on zero evidence.
 
-  `STALE_AFTER` is 10 minutes (Q5→C) and is a module attribute, not config — the 30s
-  heartbeat interval that pairs with it lives in the runner.
+  `STALE_AFTER` is 90 seconds — 3× the runner's 30s heartbeat (RLY-148 Q4, replacing
+  RLY-112's 10 minutes) — and is a module attribute, not config.
   """
   def health(%{newest: newest, heartbeat_at: heartbeat_at, ai_active?: ai_active?, ai_stage?: ai_stage?, now: now}) do
     cond do
@@ -596,22 +596,44 @@ defmodule Relay.Cards do
   end
 
   @doc """
-  The board's three-way needs-you rollup: `%{needs_input: n, in_review: n, awaiting_human: n}`
-  (total needs-you = their sum). Loads the board's active cards + stages once and folds the
+  The board's four-way needs-you rollup:
+  `%{needs_input: n, in_review: n, awaiting_human: n, agent_stalled: n}` (total
+  needs-you = their sum). `:agent_stalled` (RLY-148) counts active cards whose derived
+  agent health is `:stale` or `:stopped` and that no earlier bucket already counted —
+  dead agents float up in triage alongside questions and reviews. Health is derived
+  exactly as `RelayWeb.BoardLive` renders it: newest entry vs heartbeat, active AI
+  owner, AI-enabled stage. Loads the board's active cards + stages once and folds the
   derivations. Used by the board API payload (§6.1) and the boards-home tiles (§6.3).
   """
   def needs_you_rollup(%Board{} = board) do
     stages = Boards.list_stages(board)
     cards = list_cards(board)
+    newest = Activity.newest_per_card(Enum.map(cards, & &1.id))
+    ai_stage_ids = MapSet.new(for stage <- stages, stage.ai_enabled, do: stage.id)
+    now = DateTime.utc_now()
 
-    Enum.reduce(cards, %{needs_input: 0, in_review: 0, awaiting_human: 0}, fn card, acc ->
+    acc = %{needs_input: 0, in_review: 0, awaiting_human: 0, agent_stalled: 0}
+
+    Enum.reduce(cards, acc, fn card, acc ->
       cond do
         card.status == :needs_input -> Map.update!(acc, :needs_input, &(&1 + 1))
         card.status == :in_review -> Map.update!(acc, :in_review, &(&1 + 1))
         ready_awaiting_human?(card, stages) -> Map.update!(acc, :awaiting_human, &(&1 + 1))
+        agent_stalled?(card, newest, ai_stage_ids, now) -> Map.update!(acc, :agent_stalled, &(&1 + 1))
         true -> acc
       end
     end)
+  end
+
+  # RLY-148: the same health/1 inputs BoardLive.health_by_card/2 assembles.
+  defp agent_stalled?(card, newest, ai_stage_ids, now) do
+    health(%{
+      newest: Map.get(newest, card.id),
+      heartbeat_at: card.agent_heartbeat_at,
+      ai_active?: active_owner_type(card) == :ai,
+      ai_stage?: MapSet.member?(ai_stage_ids, card.stage_id),
+      now: now
+    }) in [:stale, :stopped]
   end
 
   @feed_statuses [:needs_input, :in_review]
@@ -717,6 +739,34 @@ defmodule Relay.Cards do
         )
     end
   end
+
+  @doc """
+  Minimal Retry for a dead agent (RLY-148, decision 2): appends a "retry requested"
+  `:action` entry (history never cleared — the newest entry is no longer a `:failure`,
+  so `health/1` leaves `:stopped`), ensures the card's status is `:working` so the
+  `relay watch` poller re-picks it on its next poll, and broadcasts
+  `{:card_log_appended, card_id, [entry]}` exactly like the runner's own appends so
+  every open board's strip updates in place. Deliberately **no eager dispatch** — no
+  new machinery; the poller is the re-dispatcher. Attributed to `actor`
+  (`:agent | {:user, user_id}`, defaults to `:agent`). Returns `{:ok, card}` with
+  owners preloaded or `{:error, changeset}`.
+  """
+  def retry(%Card{} = card, actor \\ :agent) do
+    # ensure_working/2 first so the "retry requested" entry lands with a strictly
+    # later id than any :status_changed row set_status/3 logs: same-second inserts
+    # tie-break on descending id, so logging the retry line last is what keeps it
+    # (not the status change) the newest entry — and the one health/1 reads.
+    with {:ok, card} <- ensure_working(card, actor),
+         {:ok, entry} <- Activity.log(card, %{type: :action, actor: actor, text: "retry requested"}) do
+      Events.broadcast(card.board_id, {:card_log_appended, card.id, [entry]})
+      {:ok, card}
+    end
+  end
+
+  # Same-status Retry must not log a spurious :status_changed row (set_status/3 already
+  # guards the log, but skipping the write entirely also skips its broadcast churn).
+  defp ensure_working(%Card{status: :working} = card, _actor), do: {:ok, preload_owners(card)}
+  defp ensure_working(%Card{} = card, actor), do: set_status(card, %{status: :working}, actor)
 
   # Light card columns for the optimistic drawer's first paint (RLY-68):
   # every Card field except the multi-KB heavy text
