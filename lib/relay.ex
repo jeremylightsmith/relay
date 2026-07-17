@@ -32,6 +32,8 @@ defmodule Relay do
       Markdown,
       Members,
       Push,
-      RunnerPresence
+      RunnerPresence,
+      Runs,
+      Runs.Supervisor
     ]
 end
