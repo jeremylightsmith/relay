@@ -22,6 +22,12 @@ RLY-112's logging, independent of the flow engine) and is groundwork the runners
    grouped; moves render as full-width divider chips; header carries the health chip.
 5. Explicitly **not v1** (per the artboard): filters, verbose toggle, run grouping.
 
+**Durable invariant (for every later card):** this flat list never changes shape. The
+engine's `NodeExecution` (RLY-132) is a *separate* structured store rendered by the Run
+tab; the Activity tab stays this narrative list; `run_id` links the two. A node failure
+may write one of each — different consumers, not duplication. All future richness
+(grouping, filtering) is render-side.
+
 **Acceptance criteria.**
 
 1. With an agent working a card, the collapsed card shows the live strip updating over
