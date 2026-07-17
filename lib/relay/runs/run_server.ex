@@ -120,7 +120,14 @@ defmodule Relay.Runs.RunServer do
         {:reply, {:ok, run}, state}
 
       {{:park, :needs_input}, nil} ->
+        # Card effect BEFORE the run's own parked write (unlike the other
+        # terminal branches): the run row still reads :running in Postgres
+        # while ensure_card_blocked commits, so a concurrent Listener
+        # reconciliation (RLY-132) sees a run it must leave alone rather than
+        # a parked/needs_input run paired with a not-yet-blocked card — which
+        # it would misread as "the answer already arrived" and resume.
         ensure_card_blocked(run, execution)
+        run = run |> Ecto.Changeset.change(status: :parked, parked_reason: :needs_input) |> Repo.update!()
         Runs.broadcast_runs(board_id, {:run_parked, run})
         {:stop, :normal, {:ok, run}, state}
 
@@ -157,10 +164,9 @@ defmodule Relay.Runs.RunServer do
     {next, job}
   end
 
-  defp apply_decision({:park, :needs_input}, run, _flow, _execution) do
-    run |> Ecto.Changeset.change(status: :parked, parked_reason: :needs_input) |> Repo.update!()
-    nil
-  end
+  # The run's own parked write happens AFTER ensure_card_blocked, in
+  # apply_outcome's case handling below — not here (see the comment there).
+  defp apply_decision({:park, :needs_input}, _run, _flow, _execution), do: nil
 
   defp apply_decision({:finish, :done}, run, _flow, _execution) do
     Runs.close_run!(run, :done, nil)

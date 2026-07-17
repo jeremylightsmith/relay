@@ -28,6 +28,10 @@ defmodule Relay.Events do
     * `{:board_updated, board}` — a board's editable attributes (currently
       just `name`) changed; carries the fresh board (stages not preloaded).
 
+  A global firehose topic (`events:firehose`) additionally carries every
+  event as `{board_id, event}` — one subscription observes all boards
+  (RLY-132: `Relay.Runs.Listener` reconciles card events against runs).
+
   Broadcasting is fire-and-forget: `broadcast/2` swallows PubSub errors
   and always returns `:ok`, so a broadcast failure can never fail the
   mutation that triggered it.
@@ -36,10 +40,19 @@ defmodule Relay.Events do
   use Boundary, deps: [Relay.BoardWatch]
 
   @pubsub Relay.PubSub
+  @firehose "events:firehose"
 
   @doc "Subscribes the calling process to `board_id`'s event topic."
   def subscribe(board_id) do
     Phoenix.PubSub.subscribe(@pubsub, topic(board_id))
+  end
+
+  @doc """
+  Subscribes the calling process to the global firehose: every event from
+  every board, as `{board_id, event}`.
+  """
+  def subscribe_firehose do
+    Phoenix.PubSub.subscribe(@pubsub, @firehose)
   end
 
   @doc """
@@ -50,6 +63,7 @@ defmodule Relay.Events do
   """
   def broadcast(board_id, event) do
     _ = Phoenix.PubSub.broadcast(@pubsub, topic(board_id), event)
+    _ = Phoenix.PubSub.broadcast(@pubsub, @firehose, {board_id, event})
     _ = bump_version(board_id)
     :ok
   end

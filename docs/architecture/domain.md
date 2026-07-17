@@ -22,6 +22,17 @@ sharing behavior.
   nodes/edges/isolation comparison against the library — trigger wiring never counts),
   `default_key?/1`, `duplicate_flow/1` (disabled `<key>-copy` clone), and
   `reset_to_default/1` (restores the shipped definition; triggers and `enabled` untouched).
+- **Runs** — the workflow execution engine (ADR 0006 card 02 / RLY-132): a run executes a
+  flow graph against a card as a supervised, Postgres-backed state machine. Outcome routing
+  on `succeeded/failed/partial/needs_input`, per-node `max_retries`, per-edge `max_loops`, a
+  per-node visit cap and a failure-signature circuit breaker (both
+  `config :relay, Relay.Runs`), needs-input parking, restart resume, and baton interplay
+  (claim parks, hand-back resumes, rejection re-enters with the note — via
+  `Relay.Runs.Listener` on the Events firehose). A run points at the LIVE flow row (no
+  snapshot; versioning is RLY-152). Node execution goes through the
+  `Relay.Runs.Dispatcher` behaviour (`config :relay, :runs_dispatcher`; default
+  `NoopDispatcher` — jobs sit `:queued` for card 04's pull transport). All card writes go
+  through `Relay.Cards`, so ADR 0003/0004 rules apply automatically.
 - **Cards** — the card lifecycle: create/edit/move/archive, status (`working`,
   `needs_input`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject, needs-input
   questions. Card state × stage validity is governed by
@@ -49,8 +60,9 @@ sharing behavior.
   change never waits on Apple (RLY-81).
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
 
-Planned by [ADR 0006](../adr/0006-workflow-orchestration.md): **Runs** (the execution engine +
-scheduler).
+Planned by [ADR 0006](../adr/0006-workflow-orchestration.md): the trigger scheduler (03), the
+REST node-job transport + Executor table (04), the real executor (05), and the run UI (07).
+The engine itself (card 02, above) is live.
 
 ## Core schemas
 
@@ -69,6 +81,10 @@ erDiagram
     Card ||--o{ Activity : timeline
     Card ||--o{ Attachment : has
     Card ||--o| CardRejection : "embeds (CHANGES REQUESTED)"
+    Card ||--o{ Run : "flow traversals"
+    Flow |o--o{ Run : "live definition (nilified on delete)"
+    Run ||--o{ NodeExecution : "per-attempt history"
+    NodeExecution ||--o| NodeJob : "dispatch unit"
     Board ||--o{ Membership : has
     User ||--o{ Membership : has
     Board ||--o{ ApiKey : "agent credentials"
@@ -81,4 +97,4 @@ A `Stage` may point at a `parent` (sub-lanes like `Spec:Review`) and a `reject_t
 context threaded through web and API entry points.
 
 ---
-*Sources of truth: `lib/relay.ex` (`exports`), `lib/schemas/*.ex`, ADRs 0002–0004.*
+*Sources of truth: `lib/relay.ex` (`exports`), `lib/schemas/*.ex`, ADRs 0002–0004, 0006.*
