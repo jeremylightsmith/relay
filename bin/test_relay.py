@@ -841,5 +841,58 @@ class WatchLoopResilienceTest(unittest.TestCase):
         self.assertTrue(any(kind == "error" for _, kind in self.logs))
 
 
+class HeartbeatBeatTest(unittest.TestCase):
+    """RLY-141: the heartbeat carries identity + manifest and always beats."""
+
+    def _capture_beat(self, hb):
+        calls = []
+        orig = relay.api
+        relay.api = lambda *args, **kwargs: calls.append(args)
+        try:
+            hb._beat()
+        finally:
+            relay.api = orig
+        return calls
+
+    def test_beat_posts_identity_plus_manifest_even_when_idle(self):
+        hb = relay.Heartbeat(lambda: {"pools": [], "jobs": [], "refs": []}, interval=30)
+        calls = self._capture_beat(hb)
+
+        self.assertEqual(len(calls), 1)
+        method, path, body = calls[0]
+        self.assertEqual((method, path), ("POST", "/api/board/heartbeat"))
+        # the always-beat decision: an idle runner still posts, with empty lists
+        self.assertEqual(body["refs"], [])
+        self.assertEqual(body["jobs"], [])
+        self.assertEqual(body["interval"], 30)
+        self.assertEqual(body["host"], hb.identity["host"])
+        self.assertTrue(body["runner_id"].startswith(body["host"] + "-"))
+        self.assertTrue(body["started_at"].endswith("Z"))
+
+    def test_manifest_lands_in_the_payload(self):
+        manifest = {
+            "pools": [{"name": "clean", "mode": "shared", "used": 1, "total": 3}],
+            "jobs": [{"ref": "RLY-9", "stage": "Code", "pool": "clean",
+                      "started_at": "2026-07-17T08:01:00Z"}],
+            "refs": ["RLY-9"],
+        }
+        hb = relay.Heartbeat(lambda: manifest, interval=30)
+        (_, _, body), = self._capture_beat(hb)
+
+        self.assertEqual(body["pools"], manifest["pools"])
+        self.assertEqual(body["jobs"], manifest["jobs"])
+        self.assertEqual(body["refs"], ["RLY-9"])
+
+    def test_runner_id_is_stable_across_beats(self):
+        hb = relay.Heartbeat(lambda: {"pools": [], "jobs": [], "refs": []}, interval=30)
+        first = self._capture_beat(hb)[0][2]["runner_id"]
+        second = self._capture_beat(hb)[0][2]["runner_id"]
+        self.assertEqual(first, second)
+
+    def test_a_manifest_crash_never_raises_out_of_beat(self):
+        hb = relay.Heartbeat(lambda: 1 / 0, interval=30)
+        hb._beat()  # must swallow, exactly like an api() failure
+
+
 if __name__ == "__main__":
     unittest.main()
