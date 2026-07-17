@@ -70,6 +70,11 @@ config :relay, :apns_req_options, plug: {Req.Test, Relay.Push.Delivery.APNS}
 config :relay, :google_client_id, "test-google-client-id"
 config :relay, :google_tokeninfo_req_options, plug: {Req.Test, Relay.Accounts.GoogleTokenValidator}
 
+# Runs engine (RLY-132): tests start their own Relay.Runs.Supervisor via
+# start_supervised!/1 — the app tree must not race them or touch the DB
+# outside the test sandbox.
+config :relay, :start_runs_supervisor, false
+
 # Compile dev-only routes (GET /dev/login, LiveDashboard, storybook) into
 # the test router so tests and the acceptance smoke can authenticate
 # without real Google. Never enabled in prod.
