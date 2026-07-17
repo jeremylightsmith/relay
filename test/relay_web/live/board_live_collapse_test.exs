@@ -165,4 +165,144 @@ defmodule RelayWeb.BoardLiveCollapseTest do
       assert has_element?(view, "#stage-strip-#{backlog.id} .stage-count", "0")
     end
   end
+
+  describe "restream on expand (RLY-145)" do
+    test "a collapsed-by-default stage shows its cards on first expand",
+         %{conn: conn, code: code, user: user} do
+      {:ok, _} = Boards.update_stage(code, %{collapsed_by_default: true})
+      {:ok, _} = Cards.create_card(code, %{title: "Hidden treasure"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#stage-strip-#{code.id}") |> render_click()
+
+      assert has_element?(view, "#stage-col-5-cards .board-card .card-title", "Hidden treasure")
+    end
+
+    test "a card moved into a collapsed stage appears when the stage is expanded",
+         %{conn: conn, board: board, code: code, user: user} do
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      {:ok, _} = Boards.update_stage(code, %{collapsed_by_default: true})
+      {:ok, incoming} = Cards.create_card(backlog, %{title: "Incoming"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert has_element?(view, "#stage-strip-#{code.id}")
+
+      render_hook(view, "move_card", %{
+        "ref" => Cards.ref(board, incoming),
+        "stage_id" => code.id,
+        "index" => 0
+      })
+
+      assert has_element?(view, "#stage-strip-#{code.id} .stage-count", "1")
+
+      view |> element("#stage-strip-#{code.id}") |> render_click()
+      assert has_element?(view, "#stage-col-5-cards .board-card .card-title", "Incoming")
+    end
+
+    test "expanding a manually collapsed sub-lane shows a card that landed while it was collapsed",
+         %{conn: conn, code: code, user: user} do
+      {:ok, done} = Boards.enable_lane(code, :done)
+      {:ok, first} = Cards.create_card(code, %{title: "Shipped"})
+      {:ok, _} = Cards.move_card(first, done, 0)
+      {:ok, second} = Cards.create_card(code, %{title: "Also shipped"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      # user collapses the non-empty Done sub-lane…
+      view |> element("#sublane-#{done.id}-header") |> render_click()
+      assert has_element?(view, "#sublane-#{done.id}-strip")
+
+      # …a card lands in it while collapsed (its restream targets a hidden container)…
+      render_hook(view, "move_card", %{
+        "ref" => Cards.ref(board, second),
+        "stage_id" => done.id,
+        "index" => 0
+      })
+
+      assert has_element?(view, "#sublane-#{done.id}-strip .sublane-strip-count", "2")
+
+      # …expanding must show BOTH cards, not an empty lane
+      view |> element("#sublane-#{done.id}-strip") |> render_click()
+      assert has_element?(view, "#sublane-#{done.id}-cards .board-card .card-title", "Shipped")
+      assert has_element?(view, "#sublane-#{done.id}-cards .board-card .card-title", "Also shipped")
+    end
+
+    test "collapsing a stage by name and re-expanding restores its cards",
+         %{conn: conn, code: code, user: user} do
+      {:ok, _} = Cards.create_card(code, %{title: "Keeper"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert has_element?(view, "#stage-col-5-cards .board-card .card-title", "Keeper")
+
+      view |> element("#stage-col-5-name") |> render_click()
+      assert has_element?(view, "#stage-strip-#{code.id}")
+
+      view |> element("#stage-strip-#{code.id}") |> render_click()
+      assert has_element?(view, "#stage-col-5-cards .board-card .card-title", "Keeper")
+    end
+
+    test "expanding a manually collapsed In progress lane shows a card that landed while it was collapsed",
+         %{conn: conn, board: board, code: code, user: user} do
+      # anchor a card in the Done sub-lane so the stage itself stays expanded
+      # (an all-empty stage auto-collapses to its strip, hiding the lane header)
+      {:ok, done} = Boards.enable_lane(code, :done)
+      {:ok, anchor} = Cards.create_card(code, %{title: "Anchor"})
+      {:ok, _} = Cards.move_card(anchor, done, 0)
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      {:ok, incoming} = Cards.create_card(backlog, %{title: "Incoming"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#stage-col-5-main-lane-header") |> render_click()
+      assert has_element?(view, "#stage-col-5-main-strip")
+
+      render_hook(view, "move_card", %{
+        "ref" => Cards.ref(board, incoming),
+        "stage_id" => code.id,
+        "index" => 0
+      })
+
+      view |> element("#stage-col-5-main-strip") |> render_click()
+      assert has_element?(view, "#stage-col-5-cards .board-card .card-title", "Incoming")
+    end
+
+    test "expanding the Done stage still respects the done_revealed window",
+         %{conn: conn, board: board, user: user} do
+      done = Boards.terminal_stage(board.stages)
+
+      for i <- 1..12 do
+        insert(:card,
+          stage: done,
+          title: "Done #{i}",
+          updated_at: DateTime.add(~U[2026-07-01 00:00:00Z], i, :second)
+        )
+      end
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      # collapse the terminal stage by clicking its name (Task 1), then expand its strip
+      view |> element("#stage-col-#{done.position}-name") |> render_click()
+      assert has_element?(view, "#stage-strip-#{done.id}")
+
+      view |> element("#stage-strip-#{done.id}") |> render_click()
+
+      titles =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#stage-col-#{done.position}-cards .board-card .card-title")
+        |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+
+      assert length(titles) == 8
+      assert "Done 12" in titles
+      refute "Done 4" in titles
+    end
+  end
 end
