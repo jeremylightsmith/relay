@@ -32,6 +32,137 @@ UNCHANGED IN BOTH WORLDS: .claude/skills/* (brainstorm, TDD, debugging, …),
 .claude/commands/write-plan.md, CLAUDE.md/AGENTS.md, board stages, API key.
 ```
 
+## Per AI-enabled stage: the actual configuration
+
+| Stage | What it does | Today's configuration | Tomorrow's configuration |
+| --- | --- | --- | --- |
+| **Spec** | Reads the card, asks the human clarifying questions (needs-input stepper), writes the spec + acceptance criteria back to the card | [pipeline entry ↓](#spec-stage) + [`brainstorm` skill](../../../.claude/skills/brainstorm/SKILL.md) | [Flow row ↓](#spec-stage) (22 lines) |
+| **Plan** | Turns the approved spec into the implementation plan stored on the card | [pipeline entry ↓](#plan-stage) + [`write-plan` command](../../../.claude/commands/write-plan.md) (135 lines) | [Flow row ↓](#plan-stage) (18 lines) |
+| **Code** | Implements the plan task-by-task with TDD + two reviews each, then precommit, whole-branch review, smoke, acceptance, and PR + squash-merge | [pipeline entry ↓](#code-stage) + [`exec-plan` command](../../../.claude/commands/exec-plan.md) (119) + [`execute-plan.js`](../../../.claude/workflows/execute-plan.js) (485) + 8 agent files (533) | [Flow row ↓](#code-stage) (90 lines) |
+
+### Spec stage
+
+**Today** — `relay_config.json` pipeline entry, verbatim:
+
+```json
+{
+  "stage": "Spec",
+  "from": "Next up",
+  "done": "Spec:Review",
+  "pool": "clean",
+  "action": [
+    { "claude": "You are the AI working Relay card {ref} at the SPEC stage. Run /brainstorm {ref} to completion — headless, no human to dialogue with. It reads the card (honoring any CHANGES REQUESTED block), asks the human any clarifying questions it would normally ask first — asked in ONE {relay} needs-input {ref} --questions @<tmpfile> call carrying a JSON array of `{prompt, options, allow_text}` objects, NOT a hand-numbered question string — the drawer only renders its one-question-at-a-time stepper for the structured form, and a string falls back to a wall of text (RLY-109) — and otherwise designs the feature and writes the spec back to the card. This is authorized; proceed without asking. Then STOP. Do not touch git or other cards." }
+  ]
+}
+```
+
+Files it pulls in: [`.claude/skills/brainstorm/`](../../../.claude/skills/brainstorm/SKILL.md)
+(the behavior — stays in both worlds, developer-owned).
+
+**Tomorrow** — the `Flow` row (trigger stored as stage ids; names shown for readability):
+
+```jsonc
+{ "key": "spec", "board_id": 1, "enabled": false, "origin": "default", "version": 1,
+  "isolation": "shared_clean",
+  "trigger": { "from": "Next up", "stage": "Spec", "done": "Spec:Review" },
+  "nodes": {
+    "brainstorm": { "type": "agent", "run": "/brainstorm {ref}", "max_retries": 1 }
+  },
+  "edges": [
+    { "from": "start", "to": "brainstorm" },
+    { "from": "brainstorm", "to": "done", "on": "succeeded" }
+  ] }
+```
+
+Note what evaporated: the 9-line prompt above shrinks to `/brainstorm {ref}` because its
+other 8 lines are workarounds — "ask in ONE structured call" becomes the `needs_input`
+outcome contract; "then STOP, don't touch git" becomes node boundaries the engine enforces.
+
+### Plan stage
+
+**Today** — `relay_config.json` entry, verbatim:
+
+```json
+{
+  "stage": "Plan",
+  "from": "Spec:Done",
+  "done": "Plan:Done",
+  "pool": "clean",
+  "action": [
+    { "claude": "You are the AI working Relay card {ref} at the PLAN stage. Run /write-plan {ref} to completion — it reads the approved spec from the card and writes the implementation plan back to the card. This is authorized; proceed without asking. Then STOP. Do not touch git or other cards." }
+  ]
+}
+```
+
+Files it pulls in: [`.claude/commands/write-plan.md`](../../../.claude/commands/write-plan.md)
+(135 lines — stays, developer-owned).
+
+**Tomorrow** — the `Flow` row:
+
+```jsonc
+{ "key": "plan", "board_id": 1, "enabled": false, "origin": "default", "version": 1,
+  "isolation": "shared_clean",
+  "trigger": { "from": "Spec:Done", "stage": "Plan", "done": "Plan:Done" },
+  "nodes": {
+    "write_plan": { "type": "agent", "run": "/write-plan {ref}", "max_retries": 1 }
+  },
+  "edges": [
+    { "from": "start", "to": "write_plan" },
+    { "from": "write_plan", "to": "done", "on": "succeeded" }
+  ] }
+```
+
+### Code stage
+
+**Today** — `relay_config.json` entry, verbatim (the orchestration itself lives elsewhere —
+this entry only wraps it in shell):
+
+```json
+{
+  "stage": "Code",
+  "from": "Plan:Done",
+  "done": "Review",
+  "pool": "work",
+  "action": [
+    { "shell": "git fetch origin --prune && git checkout -B {branch} origin/main && rm -f tmp/exec-plan-status" },
+    { "claude": "You are the AI working Relay card {ref} at the CODE stage. Run /exec-plan {ref} on the current branch to completion — it materializes the plan from the card into a transient plan.md, runs the workflow, and cleans up after itself. This is authorized — proceed without asking for confirmation. Do not push or merge yourself; the shell steps that follow push the branch, open the PR, and squash-merge it." },
+    { "shell": "test \"$(cat tmp/exec-plan-status 2>/dev/null)\" = ready || { echo \"exec-plan did not reach 'ready' (review/smoke not passed) — refusing to push or merge\"; exit 1; }" },
+    { "shell": "git push -u origin {branch}" },
+    { "shell": "url=$(gh pr create --fill --head {branch} --base main) && {relay} branch {ref} {branch} && {relay} pr {ref} \"$url\" && echo \"PR: $url\"" },
+    { "shell": "git checkout --detach && gh pr merge {branch} --squash && { git push origin --delete {branch} || true; git branch -D {branch} || true; }" }
+  ]
+}
+```
+
+Files it pulls in:
+[`exec-plan.md`](../../../.claude/commands/exec-plan.md) (119) →
+[`execute-plan.js`](../../../.claude/workflows/execute-plan.js) (485) → the agents:
+[`plan-implementer`](../../../.claude/agents/plan-implementer.md) (57) ·
+[`spec-reviewer`](../../../.claude/agents/spec-reviewer.md) (67) ·
+[`quality-reviewer`](../../../.claude/agents/quality-reviewer.md) (74) ·
+[`final-reviewer`](../../../.claude/agents/final-reviewer.md) (60) ·
+[`final-fixer`](../../../.claude/agents/final-fixer.md) (27) ·
+[`smoke-tester`](../../../.claude/agents/smoke-tester.md) (127) ·
+[`acceptance-tester`](../../../.claude/agents/acceptance-tester.md) (82) ·
+[`rebaser`](../../../.claude/agents/rebaser.md) (39).
+
+**Tomorrow** — the `Flow` row is [`code.jsonc`](code.jsonc) **in its entirety** (90 lines:
+14 nodes, 22 edges, models per node) plus the record wrapper:
+
+```jsonc
+{ "key": "code", "board_id": 1, "enabled": false, "origin": "default", "version": 1,
+  "isolation": "exclusive",
+  "trigger": { "from": "Plan:Done", "stage": "Code", "done": "Review" },
+  "nodes": { /* the 14 nodes of code.jsonc — branch, implement, spec_review,
+                quality_review, next_task, precommit, final_review, final_fix,
+                smoke, smoke_fix, acceptance, acceptance_fix, post, merge */ },
+  "edges": [ /* its 22 outcome-routed edges, fix loops bounded by max_loops */ ] }
+```
+
+The 8 agent files' *prompts* become the nodes' `run` strings; the files themselves become
+optional repo-side overrides. The 4 trailing shell steps and the `tmp/exec-plan-status`
+gate become the `merge` node + routing.
+
 ## Tomorrow's repo files, in full
 
 **`.relay/executor.jsonc`** — the only *new* required repo file; replaces
