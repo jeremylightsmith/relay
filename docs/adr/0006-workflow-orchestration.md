@@ -242,6 +242,54 @@ before implementation:
 }
 ```
 
+### Setup & maintenance inventory — everything a board flow is made of
+
+The complete parts list for standing up and maintaining the board flow, today vs. under
+this ADR. The authored default flow definitions live in
+[`docs/designs/flows/`](../designs/flows/README.md).
+
+**1. Files in the project repo** (downloaded/scaffolded once, hand-customizable forever —
+this is the developer-owned layer):
+
+| Artifact | Today | Under ADR 0006 | Who customizes it |
+| --- | --- | --- | --- |
+| `bin/relay` | 995-line CLI + watcher, copied by hand | same file, smaller: CLI + executor (`relay execute`); `relay init` scaffolds a new project (lands with W6) | nobody — it's generic |
+| `relay_config.json` | 42 lines: pipeline (stages/prompts) + pools + poll interval | **gone** — pipeline moves into server-side flows; executor keeps a small local config (worktree namespace, capacity per isolation class) | developer (capacity only) |
+| `.claude/skills/` (brainstorm, systematic-debugging, TDD, verification…) | node behavior + process discipline | **unchanged** — agent nodes run in the checkout, so these keep working | developer, freely |
+| `.claude/commands/` (write-plan, exec-plan, finish, worktree) | stage entry points the runner prompts into | write-plan stays (Plan node calls it); **exec-plan retires with W10**; finish/worktree stay (human use) | developer |
+| `.claude/workflows/execute-plan.js` | 485 lines — the entire Code orchestration | **gone** — became [`code.jsonc`](../designs/flows/code.jsonc)'s nodes + edges | — |
+| `.claude/agents/*.md` (8: plan-implementer, spec/quality/final reviewers, final-fixer, smoke, acceptance, rebaser) | subagent types execute-plan.js spawns | optional — their prompts become flow-node `run` prompts; keep the files if a repo wants richer per-node system prompts and point node overrides at them | developer |
+| `.relay/flows.json` | n/a | per-project flow overrides (W11) | developer |
+| `CLAUDE.md` / `AGENTS.md` | project instructions every agent reads | unchanged | developer |
+
+**2. Domain objects on the server** (new contexts `Relay.Flows` / `Relay.Runs`), with the
+values that represent the current board flow:
+
+| Object | Key fields | Values for today's flow |
+| --- | --- | --- |
+| `Flow` | `key`, `board_id`, `trigger` (from/stage/done as stage ids), `isolation`, `enabled`, `origin` (default \| override), nodes, edges | 3 rows: `spec` (Next up → Spec → Spec:Review, `shared_clean`), `plan` (Spec:Done → Plan → Plan:Done, `shared_clean`), `code` (Plan:Done → Code → Review, `exclusive`); all `enabled: false` until their cutover |
+| `Flow.Node` (embedded) | `id`, `type` (agent\|shell\|gate\|parallel\|human), `run`, `model`, `effort`, `timeout`, `max_retries` | per [`docs/designs/flows/`](../designs/flows/README.md) — e.g. code's `implement` = agent/sonnet/high, `precommit` = gate/`mix precommit` |
+| `Flow.Edge` (embedded) | `from`, `to`, `on` (outcome), `max_loops` | e.g. `quality_review --failed→ implement, max_loops 3` |
+| `Run` | `card_id`, flow key + version snapshot, `status` (running \| parked \| done \| failed \| cancelled), `current_node`, timestamps | one per card per flow traversal; `parked` = today's `needs_input` wait |
+| `NodeExecution` | `run_id`, `node_id`, `attempt`, `outcome`, `detail`, `git_sha`, `session_id`, duration, cost | the per-node history W8 renders; `session_id` powers `--resume` re-entry |
+| `Executor` | `name`/host, `last_heartbeat`, capacity per isolation class, status | e.g. `jeremy-mbp: {shared_clean: 3, exclusive: 1}` — replaces the pools block of `relay_config.json` |
+| `NodeJob` | `run_id`, `node_id`, state (queued \| claimed \| running \| done \| revoked), `executor_id`, payload (rendered `run`, isolation, vars) | the unit the executor claims; `revoked` = human took the baton |
+
+**3. Everything else** (one-time or per-machine setup):
+
+| Item | Today | Under ADR 0006 |
+| --- | --- | --- |
+| Board stages (Next up, Spec ± Review/Done, Plan ± Done, Code, Review, Done; `ai_enabled`, WIP limits, reject-to) | configured in board settings | unchanged — triggers validate against them |
+| Board API key + `RELAY_URL` env | required for CLI + runner | unchanged (executor uses the same credential) |
+| Fly deploy | app has no workflow knowledge | migrations + default flows seeded per board + per-flow enable flags |
+| Runner/executor process on a dev machine | `bin/relay watch` in a terminal | `relay execute` in a terminal (or launchd); registers itself, advertises capacity |
+| Worktrees | `.claude/worktrees/{clean,work-N}` per config | executor-owned namespace (`exec-*`), auto-created |
+| `claude` CLI, `gh` auth, git push rights | required on the runner machine | unchanged, required on every executor machine |
+| `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` env hack | required for /exec-plan | **gone** |
+
+Maintenance story in one line: **developers edit files in their repo (table 1); Relay
+maintains the objects (table 2); machines need table 3 once.**
+
 ### Convergences and divergences with Fabro (read from its source, 2026-07-16)
 
 We read the Fabro codebase (`../fabro`), not just its docs. Notable correction to the
