@@ -40,6 +40,7 @@ defmodule Relay.Runs do
   @supported_node_types [:agent, :shell, :gate]
   @outcomes [:succeeded, :failed, :partial, :needs_input]
   @active_job_states [:queued, :claimed, :running]
+  @active_statuses [:running, :parked]
 
   ## Reads
 
@@ -68,6 +69,170 @@ defmodule Relay.Runs do
 
   @doc "Subscribes the calling process to `board_id`'s runs topic (`board:<id>:runs`)."
   def subscribe(board_id), do: Phoenix.PubSub.subscribe(@pubsub, topic(board_id))
+
+  @doc """
+  Coarse change signal for the read side (RLY-137): subscribers refetch the
+  card's runs/summary rather than patching state from the fine-grained
+  engine events also carried on this topic.
+  """
+  def broadcast_run_changed(board_id, card_id), do: broadcast_runs(board_id, {:run_changed, card_id})
+
+  @doc "The card's runs newest-first, node executions preloaded chronologically."
+  def list_runs_for_card(%Card{id: card_id}) do
+    node_executions = from ne in NodeExecution, order_by: [asc: ne.id]
+
+    Repo.all(
+      from r in Run,
+        where: r.card_id == ^card_id,
+        order_by: [desc: r.inserted_at, desc: r.id],
+        preload: [node_executions: ^node_executions]
+    )
+  end
+
+  @doc "The card's most recent run, or nil."
+  def latest_run(%Card{} = card), do: card |> list_runs_for_card() |> List.first()
+
+  @doc """
+  The board's card faces in one pass: %{card_id => summary} for every card
+  whose latest run exists. Three queries (latest run per card, node-execution
+  aggregates, flows for happy paths) — no per-card N+1. `duration_s` sums the
+  `finished_at - started_at` gap of each execution (the schema stores no
+  duration column); an in-flight execution (`finished_at: nil`) contributes
+  nothing to the sum. `flow_version` is nil — the run points at the live flow
+  row and carries no version column yet (RLY-152).
+  """
+  def run_summaries_for_board(%Board{id: board_id}) do
+    latest =
+      Repo.all(
+        from r in Run,
+          join: c in Card,
+          on: c.id == r.card_id,
+          where: c.board_id == ^board_id,
+          distinct: r.card_id,
+          order_by: [asc: r.card_id, desc: r.inserted_at, desc: r.id]
+      )
+
+    totals = node_totals(Enum.map(latest, & &1.id))
+
+    paths =
+      from(f in Flow, where: f.board_id == ^board_id)
+      |> Repo.all()
+      |> Map.new(&{&1.key, happy_path(&1)})
+
+    Map.new(latest, fn run ->
+      path = Map.get(paths, run.flow_key, [])
+      index = run.current_node && Enum.find_index(path, &(&1 == run.current_node))
+      tot = Map.get(totals, run.id, %{duration_s: nil, cost: nil, nodes: 0, attempts: 0})
+
+      {run.card_id,
+       %{
+         run_id: run.id,
+         card_id: run.card_id,
+         status: run.status,
+         flow_key: run.flow_key,
+         flow_version: nil,
+         current_node: run.current_node,
+         node_index: index && index + 1,
+         node_count: if(path == [], do: nil, else: length(path)),
+         started_at: run.started_at,
+         finished_at: run.finished_at,
+         duration_s: tot.duration_s,
+         cost: tot.cost,
+         nodes: tot.nodes,
+         attempts: tot.attempts
+       }}
+    end)
+  end
+
+  defp node_totals([]), do: %{}
+
+  defp node_totals(run_ids) do
+    from(ne in NodeExecution,
+      where: ne.run_id in ^run_ids,
+      group_by: ne.run_id,
+      select:
+        {ne.run_id,
+         %{
+           duration_s: sum(fragment("EXTRACT(EPOCH FROM (? - ?))::integer", ne.finished_at, ne.started_at)),
+           cost: sum(ne.cost),
+           nodes: count(ne.node_key, :distinct),
+           attempts: count(ne.id)
+         }}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
+  Happy-path linearization of a flow: node keys from the start edge following
+  :succeeded edges until the done sentinel (cycle-safe — stops on revisit).
+  """
+  def happy_path(%Flow{edges: edges}) do
+    next = Map.new(edges || [], fn edge -> {{edge.from, edge.on}, edge.to} end)
+    walk(next[{"start", nil}], next, [])
+  end
+
+  defp walk(node, _next, acc) when node in [nil, "done"], do: Enum.reverse(acc)
+
+  defp walk(node, next, acc) do
+    if node in acc do
+      Enum.reverse(acc)
+    else
+      walk(next[{node, :succeeded}], next, [node | acc])
+    end
+  end
+
+  @doc """
+  The enabled flow that will pick this card up, or nil. Queued (spec decision):
+  an enabled flow pulls from the card's stage, the card is AI-ready (:ready +
+  baton with AI), and no active run exists. Pure — no scheduler/NodeJob read.
+  """
+  def queued_flow(%Card{} = card, active_owner, flows, summary) do
+    active_run? = summary != nil and summary.status in @active_statuses
+
+    if card.status == :ready and active_owner == :ai and not active_run? do
+      Enum.find(flows, &(&1.enabled and &1.pulls_from_stage_id == card.stage_id))
+    end
+  end
+
+  @doc """
+  What the board card face shows: {:run, summary} for an active run, or for a
+  terminal run while the card still sits in one of that run's flow's trigger
+  stages (pulls-from / works-in / lands-on — the spec's "hasn't moved on" rule
+  made precise, so a done run's totals survive landing on lands-on);
+  {:queued, flow} when queued; nil → legacy strip logic.
+  """
+  def face_summary(%Card{} = card, active_owner, flows, summaries) do
+    summary = Map.get(summaries, card.id)
+
+    cond do
+      summary != nil and summary.status in @active_statuses ->
+        {:run, summary}
+
+      summary != nil and terminal_still_relevant?(card, summary, flows) ->
+        {:run, summary}
+
+      true ->
+        case queued_flow(card, active_owner, flows, summary) do
+          nil -> nil
+          flow -> {:queued, flow}
+        end
+    end
+  end
+
+  defp terminal_still_relevant?(card, summary, flows) do
+    case Enum.find(flows, &(&1.key == summary.flow_key)) do
+      nil ->
+        false
+
+      flow ->
+        card.stage_id in [
+          flow.pulls_from_stage_id,
+          flow.works_in_stage_id,
+          flow.lands_on_stage_id
+        ]
+    end
+  end
 
   ## Lifecycle
 

@@ -166,6 +166,57 @@ defmodule Relay.Factory do
   end
 
   # Full-control factory: `card` (when overridden) must be a persisted card.
+  def run_factory(attrs) do
+    {card, attrs} = Map.pop_lazy(attrs, :card, fn -> insert(:card) end)
+
+    run = %Schemas.Run{
+      card_id: card.id,
+      flow_key: "code",
+      status: :running,
+      current_node: "implement",
+      started_at: DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), -300, :second)
+    }
+
+    run |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
+
+  # Full-control factory: `run` (when overridden) must be a persisted run.
+  # `:node` and `:duration_s` are convenience params, not schema fields —
+  # `:node` maps onto `Schemas.NodeExecution`'s `node_key`, and `:duration_s`
+  # derives `started_at`/`finished_at` (the schema has no stored duration
+  # column; the read side sums the timestamp gap instead).
+  def node_execution_factory(attrs) do
+    {run, attrs} = Map.pop_lazy(attrs, :run, fn -> insert(:run) end)
+    {node_key, attrs} = pop_first(attrs, [:node_key, :node], "implement")
+    {duration_s, attrs} = Map.pop(attrs, :duration_s, 42)
+
+    started_at = DateTime.truncate(DateTime.utc_now(), :second)
+    finished_at = duration_s && DateTime.add(started_at, duration_s, :second)
+
+    node_execution = %Schemas.NodeExecution{
+      run_id: run.id,
+      node_key: node_key,
+      visit: 1,
+      attempt: 1,
+      outcome: :succeeded,
+      started_at: started_at,
+      finished_at: finished_at
+    }
+
+    node_execution |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
+
+  defp pop_first(attrs, [], default), do: {default, attrs}
+
+  defp pop_first(attrs, [key | rest], default) do
+    if Map.has_key?(attrs, key) do
+      Map.pop(attrs, key)
+    else
+      pop_first(attrs, rest, default)
+    end
+  end
+
+  # Full-control factory: `card` (when overridden) must be a persisted card.
   # Metadata only — no bytes are written to storage by the factory.
   def attachment_factory(attrs) do
     {card, attrs} = Map.pop_lazy(attrs, :card, fn -> insert(:card) end)
