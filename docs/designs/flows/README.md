@@ -2,7 +2,7 @@
 
 The three flows Relay ships under [ADR 0006](../../adr/0006-workflow-orchestration.md) —
 [`spec.jsonc`](spec.jsonc) · [`plan.jsonc`](plan.jsonc) · [`code.jsonc`](code.jsonc) —
-expressed as real files. This is the seed data for **W2 (RLY-131)** and the faithful
+expressed as real files. This is the seed data for **RLY-131** and the faithful
 translation of today's pipeline (`relay_config.json` + `execute-plan.js`). Fabro's own
 dogfood workflows (`../fabro/.fabro/workflows/implement-issue` + `implement-plan`) are the
 third column: same job, their vocabulary.
@@ -90,14 +90,14 @@ flowchart LR
 - `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` → no long-lived `claude -p` wrapping a workflow
 - `execute-plan.js` itself — orchestration becomes data the board can render
 
-## Open modeling questions (settle in W2/W3)
+## Open modeling questions (settle in RLY-131/132)
 
 1. **Per-task loops.** `next_task` as a grep-gate over `plan.md` works but is crude; the
    cleaner alternatives are context-conditioned edges (Fabro's approach) or a sub-flow
    node iterated per task (Fabro's `house`). Start with the gate; upgrade if it chafes.
 2. **Reviewer findings reaching the implementer.** Today the workflow engine threads
    findings into the next implement prompt; here the failed review's detail must travel
-   with the `failed` edge (node output as re-entry context — W3's contract).
+   with the `failed` edge (node output as re-entry context — RLY-132/134 contract).
 3. **Mid-run rebase.** Today a sync agent + `rebaser` handle origin/main drift per task;
    the flow above rebases only at `branch`. If drift bites, add a `rebase` agent node on
    `merge` failure.

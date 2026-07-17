@@ -252,7 +252,7 @@ on top, for customization that versions with the code:
 ### Setup & maintenance inventory — everything a board flow is made of
 
 The complete parts list for standing up and maintaining the board flow. In every table:
-**Today** = the system running right now; **Tomorrow** = after W1–W11. The authored
+**Today** = the system running right now; **Tomorrow** = after the W-cards land. The authored
 default flow definitions live in [`docs/designs/flows/`](../designs/flows/README.md), and
 the **literal contents of every file and database row — plus the domain-object ER diagram
 and a mid-flight snapshot — are in
@@ -263,13 +263,13 @@ this is the developer-owned layer):
 
 | Artifact | Today | Tomorrow | Who customizes it |
 | --- | --- | --- | --- |
-| `bin/relay` | 995-line CLI + watcher, copied by hand | same file, smaller: CLI + executor (`relay execute`); `relay init` scaffolds a new project (lands with W6) | nobody — it's generic |
+| `bin/relay` | 995-line CLI + watcher, copied by hand | same file, smaller: CLI + executor (`relay execute`); `relay init` scaffolds a new project (lands with RLY-135) | nobody — it's generic |
 | `relay_config.json` | 42 lines: pipeline (stages/prompts) + pools + poll interval | **gone** — pipeline moves into server-side flows; executor keeps a small local config (worktree namespace, capacity per isolation class) | developer (capacity only) |
 | `.claude/skills/` (brainstorm, systematic-debugging, TDD, verification…) | node behavior + process discipline | **unchanged** — agent nodes run in the checkout, so these keep working | developer, freely |
-| `.claude/commands/` (write-plan, exec-plan, finish, worktree) | stage entry points the runner prompts into | write-plan stays (Plan node calls it); **exec-plan retires with W10**; finish/worktree stay (human use) | developer |
+| `.claude/commands/` (write-plan, exec-plan, finish, worktree) | stage entry points the runner prompts into | write-plan stays (Plan node calls it); **exec-plan retires with RLY-139**; finish/worktree stay (human use) | developer |
 | `.claude/workflows/execute-plan.js` | 485 lines — the entire Code orchestration | **gone** — became [`code.jsonc`](../designs/flows/code.jsonc)'s nodes + edges | — |
 | `.claude/agents/*.md` (8: plan-implementer, spec/quality/final reviewers, final-fixer, smoke, acceptance, rebaser) | subagent types execute-plan.js spawns | optional — their prompts become flow-node `run` prompts; keep the files if a repo wants richer per-node system prompts and point node overrides at them | developer |
-| `.relay/flows.json` | n/a | per-project flow overrides (W11) | developer |
+| `.relay/flows.json` | n/a | per-project flow overrides (RLY-140) | developer |
 | `CLAUDE.md` / `AGENTS.md` | project instructions every agent reads | unchanged | developer |
 
 **2. Domain objects on the server — all Tomorrow** (new contexts `Relay.Flows` /
@@ -283,7 +283,7 @@ and literal example rows: see the
 | `Flow.Node` (embedded) | `id`, `type` (agent\|shell\|gate\|parallel\|human), `run`, `model`, `effort`, `timeout`, `max_retries` | per [`docs/designs/flows/`](../designs/flows/README.md) — e.g. code's `implement` = agent/sonnet/high, `precommit` = gate/`mix precommit` |
 | `Flow.Edge` (embedded) | `from`, `to`, `on` (outcome), `max_loops` | e.g. `quality_review --failed→ implement, max_loops 3` |
 | `Run` | `card_id`, flow key + version snapshot, `status` (running \| parked \| done \| failed \| cancelled), `current_node`, timestamps | one per card per flow traversal; `parked` = today's `needs_input` wait |
-| `NodeExecution` | `run_id`, `node_id`, `attempt`, `outcome`, `detail`, `git_sha`, `session_id`, duration, cost | the per-node history W8 renders; `session_id` powers `--resume` re-entry |
+| `NodeExecution` | `run_id`, `node_id`, `attempt`, `outcome`, `detail`, `git_sha`, `session_id`, duration, cost | the per-node history RLY-137 renders; `session_id` powers `--resume` re-entry |
 | `Executor` | `name`/host, `last_heartbeat`, capacity per isolation class, status | e.g. `jeremy-mbp: {shared_clean: 3, exclusive: 1}` — replaces the pools block of `relay_config.json` |
 | `NodeJob` | `run_id`, `node_id`, state (queued \| claimed \| running \| done \| revoked), `executor_id`, payload (rendered `run`, isolation, vars) | the unit the executor claims; `revoked` = human took the baton |
 
@@ -356,17 +356,17 @@ brain/hands problem we are taking on. What we adopt and where we deliberately di
   merge all; conflicts route to a rebase agent) or **ensemble** (N attempts at one
   thing: pick a winner, fast-forward to its SHA, losers recorded as `skipped` with
   their SHAs inspectable). Ensemble (a review judge-panel) is the expected first
-  customer, in or after W10. Until then: YAGNI — cold build caches make ephemeral
+  customer, in or after RLY-139. Until then: YAGNI — cold build caches make ephemeral
   forks expensive on a laptop, so this waits for proven value.
 
 ### Design pass (2026-07-17) — what the artboards decided
 
 Hi-fi artboards for this work now live in `docs/designs/` and are the UI source of truth:
-**Relay Flows** (W12), **Relay Flow Editor** (W13), **Relay Card Run Panel** +
-**Relay Board Run Affordances** (W8), **Relay Runners** (W1) — plus three companion
-explorations: **Relay Value Stream Map** (per-stage working-vs-waiting analytics, W15),
-**Relay Rework Loop** (the rework model, W16/W18), **Relay Card Activity** (committed
-activity/health spec, W17). Decisions and corrections out of the pass:
+**Relay Flows** (RLY-142), **Relay Flow Editor** (RLY-143), **Relay Card Run Panel** +
+**Relay Board Run Affordances** (RLY-137), **Relay Runners** (RLY-141) — plus three companion
+explorations: **Relay Value Stream Map** (per-stage working-vs-waiting analytics, RLY-146),
+**Relay Rework Loop** (the rework model, RLY-147/149), **Relay Card Activity** (committed
+activity/health spec, RLY-148). Decisions and corrections out of the pass:
 
 - **Placement**: Runners lives under board settings › *Engine*, not the board header.
   The run panel is a drawer tab (*Detail | Run | Activity*).

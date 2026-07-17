@@ -3,6 +3,11 @@
 **Why.** Requirement 1 of ADR 0006 — the reason we stopped tolerating the black box. Run
 state is now data in Postgres + PubSub; show it.
 
+**Sequencing note (UI-first).** This starts as soon as the engine (RLY-132) exists:
+build and demo against the engine's fake-executor dispatch stub and seeded runs. Final
+acceptance below still requires a real Spec-flow run (RLY-136) — the card lands in two
+sittings on purpose.
+
 **Scope.**
 
 - **Run tab in the card drawer** (*Detail | Run | Activity*), matching

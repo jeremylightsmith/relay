@@ -23,7 +23,7 @@ visible (runs snapshot the version they started on).
     board's real stages.
 - **Versioning UX**: unsaved-changes bar ("Save as v4 · Discard"); save confirm noting
   "N cards are mid-run on v3 — they finish on v3, new runs use v4"; inline validation
-  (W2's rules) blocking save, not erroring after.
+  (RLY-131's rules) blocking save, not erroring after.
 - Customized-from-default affordance: "n nodes differ from the shipped default — view
   diff / reset".
 - The graph **renderer** is shared: the run panel (run-visibility card) reuses it

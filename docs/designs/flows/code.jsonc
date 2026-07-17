@@ -1,5 +1,5 @@
 // Default flow: Code — replaces relay_config.json's "Code" entry AND the inside
-// of execute-plan.js (its 9 phases become nodes here). Seed data for W2 (RLY-131).
+// of execute-plan.js (its 9 phases become nodes here). Seed data for RLY-131.
 // Model tiers preserved from execute-plan.js meta. Illustrative per ADR 0006.
 {
   "key": "code",

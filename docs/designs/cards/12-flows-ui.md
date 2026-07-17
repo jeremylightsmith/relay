@@ -1,6 +1,6 @@
 # 12 — Flows management UI (board settings tab)
 
-**Why.** W7's cutover ritual needs a humane surface for "enable the Spec flow
+**Why.** The spec-flow cutover ritual (RLY-136) needs a humane surface for "enable the Spec flow
 server-side" — a toggle with a plain-language warning, not an iex incantation. And once
 flows are rows, humans need to *see* them: what's enabled, what's customized, what
 triggers where.
@@ -29,8 +29,10 @@ triggers where.
 
 1. `/board/:slug/settings` shows the Flows tab with the three seeded flows, their real
    triggers, versions, and origin badges.
-2. Toggling a flow prompts with the cutover warning; confirming flips `enabled` and the
-   scheduler honors it within one tick; cancel changes nothing.
+2. Toggling a flow prompts with the cutover warning; confirming persists `enabled`
+   (and, once the scheduler exists — RLY-133 — it honors the flag within one tick);
+   cancel changes nothing. Pre-scheduler, the tab shows a quiet "engine not running
+   yet" note so the toggle doesn't overpromise.
 3. Reset-to-default on a customized flow restores the shipped definition as a new
    version (history preserved).
 4. Matches the "Relay Flows" artboard's elements/states. `mix precommit` passes.

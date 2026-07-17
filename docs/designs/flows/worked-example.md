@@ -3,7 +3,7 @@
 Companion to [ADR 0006](../../adr/0006-workflow-orchestration.md)'s inventory: the actual
 file trees, the actual file contents, and the actual database rows, so the complexity is
 visible instead of asserted. **Today** = the system running right now. **Tomorrow** =
-after W1–W11.
+after the W-cards land.
 
 ## The file trees, side by side
 
@@ -177,7 +177,7 @@ point):
 }
 ```
 
-**`.relay/flows.json`** — optional, only if this repo overrides the shipped library (W11):
+**`.relay/flows.json`** — optional, only if this repo overrides the shipped library (RLY-140):
 
 ```jsonc
 {
@@ -254,7 +254,7 @@ Every row involved (abridged JSON; timestamps trimmed):
 { "id": "run_7f3a", "card_id": 150, "flow_key": "code", "flow_version": 1,
   "status": "running", "current_node": "implement", "started_at": "…T17:55:02Z" }
 
-// NodeExecution — the history so far (what W8 renders on the card)
+// NodeExecution — the history so far (what RLY-137 renders on the card)
 { "run": "run_7f3a", "node": "branch",         "attempt": 1, "outcome": "succeeded", "git_sha": "9c01d4e", "duration_s": 2 }
 { "run": "run_7f3a", "node": "implement",      "attempt": 1, "outcome": "succeeded", "git_sha": "5e2f90c", "session_id": "s_a41…", "duration_s": 861 }
 { "run": "run_7f3a", "node": "spec_review",    "attempt": 1, "outcome": "succeeded", "git_sha": "5e2f90c", "duration_s": 173 }
@@ -286,5 +286,5 @@ machine, and ~1 Run + ~15 NodeExecution rows + transient NodeJobs per card worke
 | State per worked card | scattered: card timeline + runner stdout | 1 Run + ~15 NodeExecution rows, queryable |
 
 The honest reading: total complexity doesn't vanish — the 485 lines of `execute-plan.js`
-become engine code in Elixir (W2–W4). What changes is *where it lives* (in the product,
+become engine code in Elixir (RLY-131…134). What changes is *where it lives* (in the product,
 tested, shared by every project) and *what a project carries* (2,174 lines → ~610 + data).

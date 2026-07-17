@@ -20,7 +20,7 @@ board-key REST API, not a parallel surface (ADR 0001).
   - heartbeat: per-executor liveness (replaces today's `/api/board/heartbeat` usage);
     node-jobs on a dead executor become reclaimable after a timeout. **Backward compat is
     required**: the legacy watcher's bare-refs heartbeat must keep working — both runner
-    generations run side by side until the last flow cuts over (W10), and heartbeat errors
+    generations run side by side until the last flow cuts over (RLY-139), and heartbeat errors
     are swallowed client-side, so a breaking change would fail silently.
 - **Agent-node outcome contract**: how a headless `claude -p` signals its result — an
   outcome JSON file the executor reads (plus "card went to needs_input" detection, as the

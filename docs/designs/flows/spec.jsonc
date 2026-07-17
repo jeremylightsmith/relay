@@ -1,5 +1,5 @@
 // Default flow: Spec — replaces relay_config.json's "Spec" pipeline entry.
-// Seed data for W2 (RLY-131). Illustrative field names per ADR 0006.
+// Seed data for RLY-131. Illustrative field names per ADR 0006.
 {
   "key": "spec",
   "trigger": { "from": "Next up", "stage": "Spec", "done": "Spec:Review" },

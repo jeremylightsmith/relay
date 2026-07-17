@@ -3,7 +3,7 @@
 **Why.** `docs/designs/Relay Card Activity.dc.html` is a **committed spec** ("this is
 the committed design"): today an agent's work on a card is invisible until you open it
 and squint, and a dead agent surfaces nothing. This card is buildable *now* (it evolves
-RLY-112's logging, independent of the flow engine) and is groundwork W1/W8 render on.
+RLY-112's logging, independent of the flow engine) and is groundwork the runners view (RLY-141) and run panel (RLY-137) render on.
 
 **Scope — the artboard's own build order.**
 
