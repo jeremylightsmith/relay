@@ -117,12 +117,12 @@ defmodule RelayWeb.FlowSettingsComponents do
       style="border:1px solid oklch(0.92 0.006 255);border-radius:12px;overflow:hidden;background:oklch(1 0 0);box-shadow:0 1px 2px oklch(0.55 0.03 255/0.04);"
     >
       <div style="overflow-x:auto;">
-        <div style="min-width:800px;">
+        <div style="min-width:660px;">
           <div
             class="font-mono"
             style="display:flex;align-items:center;gap:14px;padding:11px 18px;background:oklch(0.975 0.004 255);border-bottom:1px solid oklch(0.93 0.006 255);font-size:10.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.55 0.02 255);"
           >
-            <span style="flex:0 0 190px;">FLOW</span>
+            <span style="flex:0 0 150px;">FLOW</span>
             <span style="flex:1;min-width:0;white-space:nowrap;">
               TRIGGER · pulls / works / lands
             </span>
@@ -133,7 +133,7 @@ defmodule RelayWeb.FlowSettingsComponents do
 
           <div :for={row <- @rows} style="border-bottom:1px solid oklch(0.95 0.005 255);">
             <div id={"flow-row-#{row.flow.id}"} style={row_style(row.flow.enabled)}>
-              <div style="flex:0 0 190px;display:flex;flex-direction:column;gap:3px;min-width:0;">
+              <div style="flex:0 0 150px;display:flex;flex-direction:column;gap:3px;min-width:0;">
                 <span style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);letter-spacing:-0.01em;">
                   {flow_name(row.flow)}
                 </span>
@@ -154,7 +154,7 @@ defmodule RelayWeb.FlowSettingsComponents do
 
               <div
                 id={"flow-#{row.flow.id}-trigger"}
-                style="flex:1;min-width:0;display:flex;align-items:center;gap:6px;white-space:nowrap;"
+                style="flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:6px;row-gap:4px;"
               >
                 <.stage_chip stage={row.flow.pulls_from_stage} style={chip_style(:pulls)} />
                 <span style="color:oklch(0.72 0.02 255);font-size:12px;">→</span>
@@ -415,8 +415,8 @@ defmodule RelayWeb.FlowSettingsComponents do
           style="font-size:12px;line-height:1.5;color:oklch(0.38 0.02 255);"
         >
           <span style="font-weight:600;">{node.key}</span>
-          <span style="color:oklch(0.58 0.02 255);"> ·   {node.type}{node_meta(node)}</span>
-          <span :if={node.run} style="color:oklch(0.50 0.02 255);"> —   {node.run}</span>
+          <span style="color:oklch(0.58 0.02 255);"> ·    {node.type}{node_meta(node)}</span>
+          <span :if={node.run} style="color:oklch(0.50 0.02 255);"> —    {node.run}</span>
         </div>
       </div>
       <div
