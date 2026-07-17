@@ -313,7 +313,7 @@ class Component extends DCLogic {
       {
         ...POST, method: 'POST', path: '/api/cards',
         badge: '201', badgeColor: 'oklch(0.42 0.11 155)', badgeBg: 'oklch(0.95 0.02 155)',
-        desc: 'Create a card. Optional stage (a stage id; defaults to the board’s first stage). Accepts title, description, spec, tag, branch, plan, pr_url. Returns 201 with the single-card shape.',
+        desc: 'Create a card. Optional stage (a stage id; defaults to the board\u2019s first stage). Accepts title, description, spec, tag, branch, plan, pr_url. Returns 201 with the single-card shape.',
         hasCode: true, codeLabel: 'curl + response',
         code: html(sp(KW, 'curl') + ' -X POST -H ' + sp(S, '"Authorization: Bearer $RELAY_KEY"') + ' -H ' + sp(S, '"Content-Type: application/json"') + ' \\\n'
           + '  -d ' + sp(S, '\'{"title":"New card","stage":5}\'') + ' https://relay.example/api/cards\n'
@@ -355,12 +355,12 @@ class Component extends DCLogic {
       },
       {
         ...POST, method: 'POST', path: '/api/cards/:ref/approve',
-        desc: 'Approve a card sitting on an approval-gate stage (advances it). 422 not_gated if the card’s stage is not a gate. Returns the single-card shape.',
+        desc: 'Approve a card sitting on an approval-gate stage (advances it). 422 not_gated if the card\u2019s stage is not a gate. Returns the single-card shape.',
         hasCode: false,
       },
       {
         ...POST, method: 'POST', path: '/api/cards/:ref/reject',
-        desc: 'Send a card back. Requires a non-empty note (else 422 missing_note). Optional to (a stage id or name) routes to a specific earlier main-lane stage; an unresolvable target is 422 invalid_target. Without to, uses the gate’s reject flow. Returns the single-card shape.',
+        desc: 'Send a card back. Requires a non-empty note (else 422 missing_note). Optional to (a stage id or name) routes to a specific earlier main-lane stage; an unresolvable target is 422 invalid_target. Without to, uses the gate\u2019s reject flow. Returns the single-card shape.',
         hasCode: true, codeLabel: 'curl',
         code: html(sp(KW, 'curl') + ' -X POST -H ' + sp(S, '"Authorization: Bearer $RELAY_KEY"') + ' -H ' + sp(S, '"Content-Type: application/json"') + ' \\\n'
           + '  -d ' + sp(S, '\'{"note":"needs a test","to":"Plan"}\'') + ' https://relay.example/api/cards/RLY-12/reject'),
@@ -378,3 +378,4 @@ class Component extends DCLogic {
 </script>
 </body>
 </html>
+

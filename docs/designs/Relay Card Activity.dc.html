@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.32 0.02 255);background:oklch(0.955 0.008 255);-webkit-font-smoothing:antialiased;}
+  a{color:oklch(0.50 0.14 250);} a:hover{color:oklch(0.42 0.14 250);}
+  code{font-family:'JetBrains Mono',monospace;font-size:0.86em;background:oklch(0.96 0.006 255);padding:1px 5px;border-radius:4px;}
+  ::-webkit-scrollbar{width:10px;height:10px;}
+  ::-webkit-scrollbar-thumb{background:oklch(0.88 0.01 255);border-radius:6px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  @keyframes relaypulse{0%,100%{opacity:1;}50%{opacity:0.25;}}
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:oklch(0.955 0.008 255);">
+<div style="max-width:1040px;margin:0 auto;padding:52px 34px 120px;display:flex;flex-direction:column;">
+
+  <!-- MASTHEAD -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:22px;">
+    <img src="relay-mark.png" alt="Relay" style="width:26px;height:26px;object-fit:contain;flex:0 0 auto;">
+    <span style="font-size:11px;font-weight:600;letter-spacing:0.14em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);">RELAY · CARD ACTIVITY — SPEC</span>
+  </div>
+  <h1 style="font-size:38px;font-weight:600;letter-spacing:-0.03em;line-height:1.08;margin:0 0 16px;color:oklch(0.22 0.02 255);">Card activity</h1>
+  <p style="font-size:16.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0;max-width:680px;">The AI does a lot on a card, and sometimes it stalls or dies — today that work is invisible until you open the card and squint. Every card gets an <b style="color:oklch(0.28 0.02 255);">incoming stream of activity</b>: a live signal on the collapsed card, a readable history once you open it, and a <b style="color:oklch(0.28 0.02 255);">health</b> read so a dead agent surfaces on its own. This is the committed design — what to build and what it looks like. The live <b style="color:oklch(0.30 0.02 255);">Relay&nbsp;Board</b> is a working reference of every piece here.</p>
+
+  <!-- ===== 01 THE ENTRY ===== -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:44px 0 34px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">01 — The entry</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px;color:oklch(0.24 0.02 255);">One timestamped event: who · did what · when</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 22px;max-width:680px;">Everything is built from one atom. Each entry is tagged with a <b style="color:oklch(0.30 0.02 255);">kind</b> so we can colour it, pick the important ones out of the chatter, and later filter. Entries are stored as one flat, append-only list per card — <b style="color:oklch(0.30 0.02 255);">never grouped at rest</b>; any grouping is derived at render.</p>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:20px;">
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:11px;padding:13px 15px;display:flex;flex-direction:column;gap:6px;">
+      <div style="display:flex;align-items:center;gap:8px;"><span style="width:9px;height:9px;border-radius:50%;background:oklch(0.56 0.16 292);"></span><span style="font-size:12.5px;font-weight:600;color:oklch(0.30 0.02 255);">Action</span></div>
+      <span style="font-size:12px;line-height:1.45;color:oklch(0.52 0.02 255);">Routine chatter — read files, ran a command, edited the spec, pushed a commit.</span>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:11px;padding:13px 15px;display:flex;flex-direction:column;gap:6px;">
+      <div style="display:flex;align-items:center;gap:8px;"><span style="width:12px;height:11px;border-radius:3px;border:1.5px solid oklch(0.55 0.02 255);box-sizing:border-box;"></span><span style="font-size:12.5px;font-weight:600;color:oklch(0.30 0.02 255);">Move</span></div>
+      <span style="font-size:12px;line-height:1.45;color:oklch(0.52 0.02 255);">Card changed stage — claimed, advanced, or bounced back on reject. The backbone of the story.</span>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.90 0.05 70);border-radius:11px;padding:13px 15px;display:flex;flex-direction:column;gap:6px;">
+      <div style="display:flex;align-items:center;gap:8px;"><span style="width:9px;height:9px;border-radius:50%;background:oklch(0.70 0.13 65);"></span><span style="font-size:12.5px;font-weight:600;color:oklch(0.30 0.02 255);">Decision</span></div>
+      <span style="font-size:12px;line-height:1.45;color:oklch(0.52 0.02 255);">A needs-you moment — question asked/answered, approved, rejected with a note.</span>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.90 0.05 15);border-radius:11px;padding:13px 15px;display:flex;flex-direction:column;gap:6px;">
+      <div style="display:flex;align-items:center;gap:8px;"><span style="width:14px;height:14px;border-radius:50%;background:oklch(0.62 0.16 15);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">!</span><span style="font-size:12.5px;font-weight:600;color:oklch(0.30 0.02 255);">Failure</span></div>
+      <span style="font-size:12px;line-height:1.45;color:oklch(0.52 0.02 255);">The agent errored, got rate-limited, or the run died. The reason this stream exists.</span>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:11px;padding:13px 15px;display:flex;flex-direction:column;gap:6px;">
+      <div style="display:flex;align-items:center;gap:8px;"><span style="width:9px;height:9px;border-radius:50%;background:oklch(0.72 0.02 255);"></span><span style="font-size:12.5px;font-weight:600;color:oklch(0.30 0.02 255);">Heartbeat</span></div>
+      <span style="font-size:12px;line-height:1.45;color:oklch(0.52 0.02 255);">A silent "still alive" ping on an interval. Invisible in the UI; it's what makes silence mean something.</span>
+    </div>
+  </div>
+
+  <div style="background:oklch(0.24 0.02 255);border-radius:12px;padding:18px 20px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.75;color:oklch(0.86 0.02 255);overflow-x:auto;">
+    <div><span style="color:oklch(0.70 0.10 292);">Entry</span> {</div>
+    <div style="padding-left:20px;"><span style="color:oklch(0.72 0.11 155);">id</span>           uuid</div>
+    <div style="padding-left:20px;"><span style="color:oklch(0.72 0.11 155);">card_id</span>      ref</div>
+    <div style="padding-left:20px;"><span style="color:oklch(0.72 0.11 155);">kind</span>         <span style="color:oklch(0.80 0.10 65);">"action" | "move" | "decision" | "failure" | "heartbeat"</span></div>
+    <div style="padding-left:20px;"><span style="color:oklch(0.72 0.11 155);">actor</span>        <span style="color:oklch(0.80 0.10 65);">"ai" | user_id</span></div>
+    <div style="padding-left:20px;"><span style="color:oklch(0.72 0.11 155);">text</span>         one line, already human-readable</div>
+    <div style="padding-left:20px;"><span style="color:oklch(0.72 0.11 155);">run_id</span>       uuid — the AI session that emitted it <span style="color:oklch(0.62 0.02 255);">(null for human/system)</span></div>
+    <div style="padding-left:20px;"><span style="color:oklch(0.72 0.11 155);">from, to</span>     stage ids — <span style="color:oklch(0.62 0.02 255);">only when kind="move"</span></div>
+    <div style="padding-left:20px;"><span style="color:oklch(0.72 0.11 155);">inserted_at</span>  timestamp — the one source of truth for ordering &amp; health</div>
+    <div>}</div>
+  </div>
+  <p style="font-size:12.5px;line-height:1.55;color:oklch(0.52 0.02 255);margin:12px 0 0;max-width:680px;"><code>run_id</code> is captured from day one even though runs aren't shown in v1 — so grouping by run later needs no backfill. <code>heartbeat</code> entries are stored but never rendered.</p>
+
+  <!-- ===== 02 COLLAPSED CARD ===== -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:48px 0 34px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">02 — On the board</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px;color:oklch(0.24 0.02 255);">A one-line log strip, coloured by health</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 26px;max-width:680px;">When a card has an active agent, its collapsed card grows one line: <b style="color:oklch(0.30 0.02 255);">health dot · newest entry · relative time</b>. That's enough to know it's alive and roughly where it is, without opening anything. The line replaces the old <code>working · %</code> label (the progress bar stays). Cards with no active agent are unchanged from today.</p>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-bottom:16px;">
+    <!-- live -->
+    <div style="display:flex;flex-direction:column;gap:9px;">
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.10 292);">LIVE · log &lt; threshold</span>
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-left:3px solid oklch(0.56 0.16 292);border-radius:11px;padding:12px 13px;">
+        <div style="font-size:13px;font-weight:600;color:oklch(0.28 0.02 255);margin-bottom:9px;line-height:1.3;">Migrate 40 blog posts</div>
+        <div style="height:4px;border-radius:2px;background:oklch(0.93 0.02 292);overflow:hidden;margin-bottom:9px;"><div style="height:100%;width:62%;background:oklch(0.56 0.16 292);border-radius:2px;"></div></div>
+        <div style="display:flex;align-items:center;gap:7px;background:oklch(0.985 0.012 292);border-radius:6px;padding:6px 8px;">
+          <span style="width:6px;height:6px;border-radius:50%;background:oklch(0.56 0.16 292);flex:0 0 auto;animation:relaypulse 1.4s ease-in-out infinite;"></span>
+          <span style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.44 0.08 292);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">uploaded 24/40 posts</span>
+          <span style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.60 0.02 255);">now</span>
+        </div>
+      </div>
+      <span style="font-size:11px;line-height:1.4;color:oklch(0.58 0.02 255);"><b style="color:oklch(0.48 0.12 292);">Violet, dot pulsing.</b> Working fine — no attention needed.</span>
+    </div>
+    <!-- stale -->
+    <div style="display:flex;flex-direction:column;gap:9px;">
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 65);">STALE · quiet past threshold</span>
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.86 0.06 70);border-left:3px solid oklch(0.70 0.13 65);border-radius:11px;padding:12px 13px;box-shadow:0 1px 3px oklch(0.6 0.08 70/0.12);">
+        <div style="font-size:13px;font-weight:600;color:oklch(0.28 0.02 255);margin-bottom:9px;line-height:1.3;">Deploy the search reindex job</div>
+        <div style="display:flex;align-items:center;gap:7px;background:oklch(0.97 0.03 75);border:1px solid oklch(0.88 0.06 75);border-radius:6px;padding:6px 8px;">
+          <span style="width:6px;height:6px;border-radius:50%;background:oklch(0.70 0.13 65);flex:0 0 auto;"></span>
+          <span style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.10 65);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">reindexing 12k documents</span>
+          <span style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 65);">8m</span>
+        </div>
+      </div>
+      <span style="font-size:11px;line-height:1.4;color:oklch(0.58 0.02 255);"><b style="color:oklch(0.52 0.11 65);">Amber, still.</b> Long step or wedged — reads needs-you.</span>
+    </div>
+    <!-- stopped -->
+    <div style="display:flex;flex-direction:column;gap:9px;">
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.16 15);">STOPPED · newest is a failure</span>
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.86 0.07 20);border-left:3px solid oklch(0.62 0.16 15);border-radius:11px;padding:12px 13px;box-shadow:0 1px 3px oklch(0.6 0.1 15/0.12);">
+        <div style="font-size:13px;font-weight:600;color:oklch(0.28 0.02 255);margin-bottom:9px;line-height:1.3;">Generate the API client</div>
+        <div style="display:flex;align-items:center;gap:7px;background:oklch(0.97 0.03 20);border:1px solid oklch(0.88 0.06 20);border-radius:6px;padding:6px 8px;">
+          <span style="width:14px;height:14px;border-radius:50%;background:oklch(0.62 0.16 15);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;flex:0 0 auto;">!</span>
+          <span style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.14 15);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">agent stopped</span>
+          <span style="font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.14 15);background:oklch(1 0 0);border:1px solid oklch(0.84 0.08 20);border-radius:5px;padding:2px 7px;flex:0 0 auto;">Retry</span>
+        </div>
+      </div>
+      <span style="font-size:11px;line-height:1.4;color:oklch(0.58 0.02 255);"><b style="color:oklch(0.52 0.14 15);">Rose, with Retry.</b> Failed run — reads needs-you.</span>
+    </div>
+  </div>
+  <p style="font-size:12.5px;line-height:1.55;color:oklch(0.52 0.02 255);margin:0;max-width:680px;">New entries arrive over the socket and update the strip in place. When a card flips to stale or stopped it also fires the board's existing <b style="color:oklch(0.52 0.12 65);">needs&nbsp;you</b> pulse, so it floats up in triage alongside questions and reviews.</p>
+
+  <!-- ===== 03 HEALTH ===== -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:48px 0 34px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">03 — Health</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px;color:oklch(0.24 0.02 255);">Derived from the newest entry — never stored</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 22px;max-width:680px;">Health is a pure function of the activity list, computed at render. The running agent emits a heartbeat on an interval, so an absence of entries is itself a signal.</p>
+
+  <div style="background:oklch(0.24 0.02 255);border-radius:12px;padding:18px 20px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.85;color:oklch(0.86 0.02 255);overflow-x:auto;">
+    <div><span style="color:oklch(0.62 0.02 255);">age = now − newest.inserted_at</span></div>
+    <div style="height:6px;"></div>
+    <div><span style="color:oklch(0.80 0.10 65);">if</span>   newest.kind == <span style="color:oklch(0.75 0.12 15);">"failure"</span>      → <span style="color:oklch(0.72 0.14 15);">stopped</span>   <span style="color:oklch(0.62 0.02 255);">rose · show Retry</span></div>
+    <div><span style="color:oklch(0.80 0.10 65);">elif</span> not ai_active              → <span style="color:oklch(0.62 0.02 255);">none      no strip</span></div>
+    <div><span style="color:oklch(0.80 0.10 65);">elif</span> age &gt; STALE_AFTER           → <span style="color:oklch(0.80 0.10 65);">stale</span>     <span style="color:oklch(0.62 0.02 255);">amber · reads needs-you</span></div>
+    <div><span style="color:oklch(0.80 0.10 65);">else</span>                            → <span style="color:oklch(0.70 0.10 292);">live</span>      <span style="color:oklch(0.62 0.02 255);">violet · dot pulses</span></div>
+  </div>
+  <div style="background:oklch(0.99 0.006 255);border:1px solid oklch(0.92 0.006 255);border-radius:11px;padding:15px 17px;margin-top:14px;">
+    <div style="font-size:13px;line-height:1.6;color:oklch(0.42 0.02 255);"><b style="color:oklch(0.30 0.02 255);">The one number to set — <code>STALE_AFTER</code>.</b> v1 is a single global timeout; start around 3× the heartbeat interval and tune. It can go per-stage later (a test run is minutes, a deploy is longer) without changing anything else. <b style="color:oklch(0.30 0.02 255);">Retry</b> re-dispatches the agent on the same card and appends an <code>action</code> entry — it does not clear the history.</div>
+  </div>
+
+  <!-- ===== 04 OPENED CARD ===== -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:48px 0 34px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">04 — In the card detail</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px;color:oklch(0.24 0.02 255);">One flat timeline, moves shown inline</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 24px;max-width:680px;">An <b style="color:oklch(0.30 0.02 255);">Activity</b> section at the bottom of the detail, after Comments — no tab, no separate panel. Strictly newest-first by <code>inserted_at</code>, never grouped. A <b style="color:oklch(0.30 0.02 255);">move</b> renders as a full-width divider chip rather than a dot — that's how "which stage was this in?" is answered, without ever deciding which stage <i>owns</i> a log. Comments (human) and activity (system) stay separate but adjacent.</p>
+
+  <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;">
+
+    <!-- The timeline, detailed -->
+    <div style="flex:1.15;min-width:320px;display:flex;flex-direction:column;gap:10px;">
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">THE TIMELINE</span>
+      <div style="background:oklch(0.992 0.002 255);border:1px solid oklch(0.94 0.006 255);border-radius:12px;padding:8px 18px 14px;">
+        <div style="position:relative;padding-left:26px;">
+          <div style="position:absolute;left:6px;top:16px;bottom:16px;width:1.5px;background:oklch(0.90 0.01 255);"></div>
+          <div style="position:relative;padding:10px 0;">
+            <span style="position:absolute;left:-23px;top:13px;width:9px;height:9px;border-radius:50%;background:oklch(0.56 0.16 292);box-shadow:0 0 0 3px oklch(0.992 0.002 255);"></span>
+            <div style="display:flex;align-items:baseline;gap:8px;"><span style="font-size:13px;color:oklch(0.34 0.02 255);">Uploaded 24 / 40 posts</span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);margin-left:auto;flex:0 0 auto;">2m</span></div>
+            <span style="font-size:11.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.10 292);">Relay AI</span>
+          </div>
+          <div style="position:relative;padding:10px 0;">
+            <span style="position:absolute;left:-23px;top:13px;width:9px;height:9px;border-radius:50%;background:oklch(0.56 0.16 292);box-shadow:0 0 0 3px oklch(0.992 0.002 255);"></span>
+            <div style="display:flex;align-items:baseline;gap:8px;"><span style="font-size:13px;color:oklch(0.34 0.02 255);">Rewrote image paths in 40 posts</span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);margin-left:auto;flex:0 0 auto;">8m</span></div>
+            <span style="font-size:11.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.10 292);">Relay AI</span>
+          </div>
+          <div style="position:relative;padding:8px 0;">
+            <span style="position:absolute;left:-26.5px;top:10px;width:16px;height:16px;border-radius:4px;background:oklch(0.96 0.01 255);border:1px solid oklch(0.88 0.01 255);display:flex;align-items:center;justify-content:center;"><span style="font-size:10px;color:oklch(0.50 0.02 255);">→</span></span>
+            <div style="display:inline-flex;align-items:center;gap:8px;background:oklch(0.965 0.006 255);border:1px solid oklch(0.90 0.006 255);border-radius:20px;padding:4px 12px;">
+              <span style="font-size:11.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);">moved</span><span style="font-size:11.5px;font-weight:600;color:oklch(0.40 0.02 255);">Review → Build</span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);">14m</span>
+            </div>
+          </div>
+          <div style="position:relative;padding:10px 0;">
+            <span style="position:absolute;left:-23px;top:13px;width:9px;height:9px;border-radius:50%;background:oklch(0.60 0.13 155);box-shadow:0 0 0 3px oklch(0.992 0.002 255);"></span>
+            <div style="display:flex;align-items:baseline;gap:8px;"><span style="font-size:13px;color:oklch(0.34 0.02 255);">Approved the migration spec</span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);margin-left:auto;flex:0 0 auto;">15m</span></div>
+            <span style="font-size:11.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.11 250);">Dana K.</span>
+          </div>
+          <div style="position:relative;padding:8px 0;">
+            <span style="position:absolute;left:-26.5px;top:10px;width:16px;height:16px;border-radius:4px;background:oklch(0.96 0.01 255);border:1px solid oklch(0.88 0.01 255);display:flex;align-items:center;justify-content:center;"><span style="font-size:10px;color:oklch(0.50 0.02 255);">→</span></span>
+            <div style="display:inline-flex;align-items:center;gap:8px;background:oklch(0.965 0.006 255);border:1px solid oklch(0.90 0.006 255);border-radius:20px;padding:4px 12px;">
+              <span style="font-size:11.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);">moved</span><span style="font-size:11.5px;font-weight:600;color:oklch(0.40 0.02 255);">Spec → Review</span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);">22m</span>
+            </div>
+          </div>
+          <div style="position:relative;padding:10px 0 6px;">
+            <span style="position:absolute;left:-23px;top:13px;width:9px;height:9px;border-radius:50%;background:oklch(0.56 0.16 292);box-shadow:0 0 0 3px oklch(0.992 0.002 255);"></span>
+            <div style="display:flex;align-items:baseline;gap:8px;"><span style="font-size:13px;color:oklch(0.34 0.02 255);">Drafted migration spec</span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);margin-left:auto;flex:0 0 auto;">31m</span></div>
+            <span style="font-size:11.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.10 292);">Relay AI</span>
+          </div>
+        </div>
+      </div>
+      <span style="font-size:11.5px;line-height:1.45;color:oklch(0.58 0.02 255);">Dots for entries; chips for moves. The nearest move above any entry tells you the stage it happened in.</span>
+    </div>
+
+    <!-- In context of the detail -->
+    <div style="flex:1;min-width:280px;display:flex;flex-direction:column;gap:10px;">
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">IN THE DETAIL — after comments</span>
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:15px;box-shadow:0 1px 3px oklch(0.5 0.03 255/0.06);">
+        <div style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);margin-bottom:9px;">Migrate 40 blog posts</div>
+        <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:13px;">
+          <div style="height:7px;border-radius:4px;background:oklch(0.96 0.004 255);width:100%;"></div>
+          <div style="height:7px;border-radius:4px;background:oklch(0.96 0.004 255);width:88%;"></div>
+        </div>
+        <div style="font-size:10px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(0.60 0.02 255);border-top:1px solid oklch(0.94 0.006 255);padding-top:12px;margin-bottom:9px;">COMMENTS</div>
+        <div style="height:7px;border-radius:4px;background:oklch(0.96 0.004 255);width:70%;margin-bottom:15px;"></div>
+        <div style="font-size:10px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(0.60 0.02 255);border-top:1px solid oklch(0.94 0.006 255);padding-top:12px;margin-bottom:9px;">ACTIVITY</div>
+        <div style="display:flex;align-items:center;gap:8px;background:oklch(0.985 0.012 292);border-radius:7px;padding:7px 10px;margin-bottom:11px;">
+          <span style="width:7px;height:7px;border-radius:50%;background:oklch(0.56 0.16 292);flex:0 0 auto;animation:relaypulse 1.4s ease-in-out infinite;"></span>
+          <span style="font-size:11.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.12 292);">Relay AI is live</span>
+        </div>
+        <div style="position:relative;padding-left:18px;">
+          <div style="position:absolute;left:4px;top:6px;bottom:6px;width:1.5px;background:oklch(0.91 0.01 255);"></div>
+          <div style="position:relative;padding:4px 0;"><span style="position:absolute;left:-16.5px;top:7px;width:7px;height:7px;border-radius:50%;background:oklch(0.56 0.16 292);box-shadow:0 0 0 2.5px oklch(1 0 0);"></span><div style="display:flex;align-items:baseline;gap:6px;"><span style="font-size:11.5px;color:oklch(0.36 0.02 255);">Uploaded 24/40 posts</span><span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:oklch(0.64 0.02 255);margin-left:auto;">2m</span></div></div>
+          <div style="position:relative;padding:4px 0;"><span style="position:absolute;left:-16.5px;top:7px;width:7px;height:7px;border-radius:50%;background:oklch(0.56 0.16 292);box-shadow:0 0 0 2.5px oklch(1 0 0);"></span><div style="display:flex;align-items:baseline;gap:6px;"><span style="font-size:11.5px;color:oklch(0.36 0.02 255);">Rewrote image paths</span><span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:oklch(0.64 0.02 255);margin-left:auto;">8m</span></div></div>
+          <div style="position:relative;padding:4px 0;"><span style="position:absolute;left:-19px;top:5px;width:13px;height:13px;border-radius:3px;background:oklch(0.96 0.01 255);border:1px solid oklch(0.89 0.01 255);display:flex;align-items:center;justify-content:center;"><span style="font-size:8px;color:oklch(0.52 0.02 255);">→</span></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.02 255);">moved Review → Build · 14m</span></div>
+        </div>
+      </div>
+      <span style="font-size:11.5px;line-height:1.45;color:oklch(0.58 0.02 255);">The section header carries the same health chip; on <b style="color:oklch(0.52 0.14 15);">stopped</b> it shows Retry.</span>
+    </div>
+
+  </div>
+
+  <!-- ===== 05 BUILD ORDER ===== -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:48px 0 34px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">05 — Build order</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 20px;color:oklch(0.24 0.02 255);">How to land it on the stack</h2>
+
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:8px 24px;">
+    <div style="display:flex;gap:14px;padding:14px 0;border-bottom:1px solid oklch(0.94 0.006 255);"><span style="flex:0 0 auto;width:22px;height:22px;border-radius:50%;background:oklch(0.95 0.04 292);color:oklch(0.48 0.14 292);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace;">1</span><span style="font-size:14px;line-height:1.5;color:oklch(0.42 0.02 255);"><b style="color:oklch(0.30 0.02 255);">Entry model + append API.</b> Persist the flat list; emit an entry on every agent action, move, and decision, plus the heartbeat on an interval.</span></div>
+    <div style="display:flex;gap:14px;padding:14px 0;border-bottom:1px solid oklch(0.94 0.006 255);"><span style="flex:0 0 auto;width:22px;height:22px;border-radius:50%;background:oklch(0.95 0.04 292);color:oklch(0.48 0.14 292);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace;">2</span><span style="font-size:14px;line-height:1.5;color:oklch(0.42 0.02 255);"><b style="color:oklch(0.30 0.02 255);">Health function.</b> Pure, derived from the list; unit-test the four branches. This is the whole "it died" feature.</span></div>
+    <div style="display:flex;gap:14px;padding:14px 0;border-bottom:1px solid oklch(0.94 0.006 255);"><span style="flex:0 0 auto;width:22px;height:22px;border-radius:50%;background:oklch(0.95 0.04 292);color:oklch(0.48 0.14 292);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace;">3</span><span style="font-size:14px;line-height:1.5;color:oklch(0.42 0.02 255);"><b style="color:oklch(0.30 0.02 255);">Collapsed strip.</b> Add the health-coloured line to the card component; push updates over the LiveView socket and reuse the needs-you pulse for stale/stopped.</span></div>
+    <div style="display:flex;gap:14px;padding:14px 0;border-bottom:1px solid oklch(0.94 0.006 255);"><span style="flex:0 0 auto;width:22px;height:22px;border-radius:50%;background:oklch(0.95 0.04 292);color:oklch(0.48 0.14 292);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace;">4</span><span style="font-size:14px;line-height:1.5;color:oklch(0.42 0.02 255);"><b style="color:oklch(0.30 0.02 255);">Timeline section.</b> Flat render in the detail: entry dots, move dividers, rose failure rows, and the header health chip + Retry.</span></div>
+    <div style="display:flex;gap:14px;padding:14px 0;"><span style="flex:0 0 auto;width:22px;height:22px;border-radius:50%;background:oklch(0.96 0.006 255);color:oklch(0.55 0.02 255);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace;">5</span><span style="font-size:14px;line-height:1.5;color:oklch(0.50 0.02 255);"><b style="color:oklch(0.36 0.02 255);">Explicitly later, not v1:</b> a "moves only" filter, a verbose/expand toggle for fine actions, and grouping the same timeline under <code>run_id</code> headers once cards routinely get retried.</span></div>
+  </div>
+  <p style="font-size:12.5px;line-height:1.55;color:oklch(0.55 0.02 255);margin:16px 0 0;max-width:680px;">Reference implementation: the live <b style="color:oklch(0.34 0.02 255);">Relay Board</b> shows the collapsed strip in all three health states (Code &amp; Deploy columns) and the timeline in the card drawer, including Retry.</p>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1040,&quot;height&quot;:1400}}"></script>
+</body>
+</html>
+

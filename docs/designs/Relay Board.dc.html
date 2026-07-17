@@ -22,6 +22,9 @@
   ::-webkit-scrollbar-thumb{background:oklch(0.88 0.01 255);border-radius:6px;}
   ::-webkit-scrollbar-track{background:transparent;}
   @keyframes relaypulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
+  @keyframes relayflash{0%{opacity:0;}12%{opacity:1;}100%{opacity:0;}}
+  @keyframes relaybadgepop{0%{transform:scale(0.3);}60%{transform:scale(1.18);}100%{transform:scale(1);}}
+  @keyframes relaybars{0%,100%{transform:scaleY(0.45);}50%{transform:scaleY(1);}}
 </style>
 </helmet>
 
@@ -54,6 +57,11 @@
 
     <sc-if value="{{ isBoard }}" hint-placeholder-val="{{ true }}">
       <div style="display:flex;align-items:center;gap:14px;">
+        <button onClick="{{ onToggleLog }}" title="Activity log" style="{{ logBtnStyle }}">
+          <span style="display:flex;align-items:flex-end;gap:2px;height:12px;"><span style="{{ logBar1 }}"></span><span style="{{ logBar2 }}"></span><span style="{{ logBar3 }}"></span></span>
+          Activity
+          <sc-if value="{{ logUnreadShow }}" hint-placeholder-val="{{ false }}"><span style="{{ logUnreadStyle }}">{{ logUnread }}</span></sc-if>
+        </button>
         <button onClick="{{ openSettings }}" title="Board settings" style="display:flex;align-items:center;gap:7px;background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);color:oklch(0.40 0.02 255);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;">
           <span style="width:13px;height:13px;border-radius:50%;border:2px solid oklch(0.55 0.02 255);position:relative;display:block;"><span style="position:absolute;top:2.5px;left:2.5px;width:4px;height:4px;border-radius:50%;background:oklch(0.55 0.02 255);"></span></span>Board settings
         </button>
@@ -138,7 +146,7 @@
 
   <!-- ===================== BOARD ===================== -->
   <sc-if value="{{ isBoard }}" hint-placeholder-val="{{ true }}">
-    <div style="flex:1;display:flex;gap:22px;padding:16px 18px 18px 18px;overflow-x:auto;overflow-y:hidden;align-items:stretch;background:oklch(0.952 0.008 255);">
+    <div style="{{ boardAreaStyle }}">
       <sc-for list="{{ groups }}" as="group" hint-placeholder-count="3">
         <div style="display:flex;flex-direction:column;gap:9px;flex:0 0 auto;height:100%;">
           <!-- category band -->
@@ -202,9 +210,23 @@
                           </sc-if>
                           <sc-for list="{{ lane.cards }}" as="card" hint-placeholder-count="2">
                             <div draggable="true" onDragStart="{{ card.onDragStart }}" onDragEnd="{{ onDragEnd }}" onClick="{{ card.onClick }}" style="{{ card.style }}">
+                              {{ card.pulseNode }}
+                              <sc-if value="{{ card.unseenShow }}" hint-placeholder-val="{{ false }}">
+                                <span style="{{ card.unseenStyle }}">{{ card.unseenLabel }}</span>
+                              </sc-if>
                               <span style="font-size:12.5px;font-weight:500;line-height:1.35;letter-spacing:-0.01em;color:oklch(0.28 0.02 255);">{{ card.title }}</span>
                               <sc-if value="{{ card.showProgress }}" hint-placeholder-val="{{ false }}">
                                 <div style="height:5px;border-radius:3px;background:oklch(0.93 0.02 292);overflow:hidden;"><div style="{{ card.progressStyle }}"></div></div>
+                              </sc-if>
+                              <sc-if value="{{ card.showLastLog }}" hint-placeholder-val="{{ false }}">
+                                <div style="{{ card.lastLogWrapStyle }}">
+                                  <span style="{{ card.lastLogDotStyle }}"></span>
+                                  <span style="{{ card.lastLogTextStyle }}">{{ card.lastLogText }}</span>
+                                  <span style="{{ card.lastLogTimeStyle }}">{{ card.lastLogTime }}</span>
+                                  <sc-if value="{{ card.showRetry }}" hint-placeholder-val="{{ false }}">
+                                    <span onClick="{{ card.onRetry }}" style="{{ card.retryStyle }}">Retry</span>
+                                  </sc-if>
+                                </div>
                               </sc-if>
                               <sc-if value="{{ card.blocked }}" hint-placeholder-val="{{ false }}">
                                 <div style="display:flex;align-items:center;gap:6px;background:oklch(0.97 0.03 75);border:1px solid oklch(0.87 0.07 75);border-radius:6px;padding:6px 8px;">
@@ -492,6 +514,33 @@
     </div>
   </sc-if>
 
+  <!-- Activity log console -->
+  <div style="{{ logConsole.wrapStyle }}">
+    <div style="display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:1px solid oklch(0.93 0.006 255);flex:0 0 auto;background:oklch(0.982 0.004 255);">
+      <span style="width:7px;height:7px;border-radius:50%;background:oklch(0.60 0.13 155);box-shadow:0 0 0 3px oklch(0.60 0.13 155/0.18);"></span>
+      <span style="font-size:12px;font-weight:600;letter-spacing:0.02em;color:oklch(0.32 0.02 255);">Activity log</span>
+      <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">{{ logConsole.count }}</span>
+      <span style="flex:1;"></span>
+      <button onClick="{{ logConsole.onClear }}" style="background:transparent;border:none;color:oklch(0.55 0.02 255);font-size:12px;font-weight:600;padding:4px 8px;border-radius:6px;" style-hover="background:oklch(0.95 0.006 255);">Clear</button>
+      <button onClick="{{ logConsole.onToggle }}" title="Hide" style="width:24px;height:24px;border-radius:6px;border:1px solid oklch(0.91 0.006 255);background:oklch(1 0 0);color:oklch(0.50 0.02 255);font-size:13px;line-height:1;">✕</button>
+    </div>
+    <div ref="{{ logConsole.scrollRef }}" style="flex:1;min-height:0;overflow-y:auto;background:oklch(0.992 0.002 255);">
+      <sc-if value="{{ logConsole.empty }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:oklch(0.62 0.02 255);font-size:12.5px;font-family:'JetBrains Mono',ui-monospace,monospace;">Listening for activity…</div>
+      </sc-if>
+      <sc-for list="{{ logConsole.entries }}" as="e" hint-placeholder-count="0">
+        <div onClick="{{ e.onClick }}" style="{{ e.rowStyle }}" style-hover="background:oklch(0.965 0.008 250);">
+          <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);flex:0 0 auto;">{{ e.time }}</span>
+          <span style="{{ e.dotStyle }}"></span>
+          <span style="{{ e.refStyle }}">{{ e.ref }}</span>
+          <span style="color:oklch(0.34 0.02 255);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ e.text }}</span>
+          <span style="flex:1;min-width:8px;"></span>
+          <span style="font-size:11px;color:oklch(0.60 0.02 255);flex:0 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;">{{ e.title }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
   <!-- Scrim + Drawer -->
   <div onClick="{{ closeDrawer }}" style="{{ scrimStyle }}"></div>
   <div style="{{ drawerStyle }}">
@@ -704,6 +753,14 @@
             <!-- comments -->
             <div style="display:flex;flex-direction:column;gap:12px;">
               <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">COMMENTS</span>
+              <!-- composer -->
+              <div style="display:flex;gap:10px;align-items:flex-start;">
+                <div style="{{ drawer.youAvatarStyle }}"><span>{{ drawer.youInitials }}</span></div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:7px;">
+                  <textarea value="{{ commentText }}" onChange="{{ onCommentInput }}" onKeyDown="{{ onCommentKey }}" placeholder="Write a comment…" rows="2" style="width:100%;border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:10px 11px;outline:none;resize:none;font-size:13px;line-height:1.45;color:oklch(0.30 0.02 255);background:oklch(1 0 0);"></textarea>
+                  <button onClick="{{ onPostComment }}" style="align-self:flex-start;background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:7px;padding:7px 14px;font-size:12.5px;font-weight:600;">Comment</button>
+                </div>
+              </div>
               <sc-for list="{{ drawer.comments }}" as="cm" hint-placeholder-count="2">
                 <div style="display:flex;gap:10px;">
                   <div style="{{ cm.avatarStyle }}" title="{{ cm.name }}">
@@ -720,19 +777,23 @@
                   </div>
                 </div>
               </sc-for>
-              <!-- composer -->
-              <div style="display:flex;gap:10px;align-items:flex-start;">
-                <div style="{{ drawer.youAvatarStyle }}"><span>{{ drawer.youInitials }}</span></div>
-                <div style="flex:1;display:flex;flex-direction:column;gap:7px;">
-                  <textarea value="{{ commentText }}" onChange="{{ onCommentInput }}" onKeyDown="{{ onCommentKey }}" placeholder="Write a comment…" rows="2" style="width:100%;border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:10px 11px;outline:none;resize:none;font-size:13px;line-height:1.45;color:oklch(0.30 0.02 255);background:oklch(1 0 0);"></textarea>
-                  <button onClick="{{ onPostComment }}" style="align-self:flex-start;background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:7px;padding:7px 14px;font-size:12.5px;font-weight:600;">Comment</button>
-                </div>
-              </div>
+              <sc-if value="{{ drawer.commentsToggleShow }}" hint-placeholder-val="{{ false }}">
+                <button onClick="{{ drawer.onToggleComments }}" style="align-self:flex-start;background:none;border:none;padding:2px 0;margin:-2px 0 0 38px;font-size:12px;font-weight:600;color:oklch(0.55 0.13 250);cursor:pointer;font-family:'JetBrains Mono',ui-monospace,monospace;">{{ drawer.commentsToggleLabel }}</button>
+              </sc-if>
             </div>
 
             <!-- activity -->
             <div style="display:flex;flex-direction:column;gap:2px;">
               <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;margin-bottom:8px;">ACTIVITY</span>
+              <sc-if value="{{ drawer.activityHealthShow }}" hint-placeholder-val="{{ false }}">
+                <div style="{{ drawer.activityHealthStyle }}">
+                  <span style="{{ drawer.activityHealthDotStyle }}"></span>
+                  <span style="{{ drawer.activityHealthLabelStyle }}">{{ drawer.activityHealthLabel }}</span>
+                  <sc-if value="{{ drawer.activityHealthRetryShow }}" hint-placeholder-val="{{ false }}">
+                    <span onClick="{{ drawer.onRetryDrawer }}" style="{{ drawer.activityHealthRetryStyle }}">Retry</span>
+                  </sc-if>
+                </div>
+              </sc-if>
               <sc-for list="{{ drawer.activity }}" as="log" hint-placeholder-count="2">
                 <div style="display:flex;gap:10px;padding:5px 0;">
                   <span style="{{ log.dotStyle }}"></span>
@@ -742,6 +803,9 @@
                   </div>
                 </div>
               </sc-for>
+              <sc-if value="{{ drawer.activityToggleShow }}" hint-placeholder-val="{{ false }}">
+                <button onClick="{{ drawer.onToggleActivity }}" style="align-self:flex-start;background:none;border:none;padding:2px 0;margin:6px 0 0 17px;font-size:12px;font-weight:600;color:oklch(0.55 0.13 250);cursor:pointer;font-family:'JetBrains Mono',ui-monospace,monospace;">{{ drawer.activityToggleLabel }}</button>
+              </sc-if>
             </div>
           </div>
 
@@ -825,7 +889,7 @@
 
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;100%&quot;,&quot;height&quot;:&quot;100%&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;100%&quot;,&quot;height&quot;:&quot;100%&quot;},&quot;cueStyle&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Ring + dot&quot;,&quot;Pulse ring&quot;,&quot;Corner dot&quot;],&quot;default&quot;:&quot;Ring + dot&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Activity cue&quot;},&quot;cueColor&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Match stage&quot;,&quot;Violet&quot;,&quot;Blue&quot;,&quot;Amber&quot;],&quot;default&quot;:&quot;Match stage&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Activity cue&quot;},&quot;logOnLoad&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Activity cue&quot;}}">
 class Component extends DCLogic {
   constructor(props) {
     super(props);
@@ -873,7 +937,7 @@ class Component extends DCLogic {
     let n = 0;
     const c = (o) => {
       const owners = o.owners || [o.human || 'dk'];
-      return Object.assign({ id: 'c' + (++n), tag: '', sub: 'ongoing', progress: 0, created: 'Mar 2', desc: '', spec: '', plan: '', checklist: [], comments: [], result: null, skipReview: false, skipStages: [], activity: [{ t: 'Created', ts: 'earlier' }] }, o, { owners, activeHuman: o.activeHuman || owners[0] });
+      return Object.assign({ id: 'c' + (++n), ref: 'RLY-' + (99 + n), tag: '', sub: 'ongoing', progress: 0, created: 'Mar 2', desc: '', spec: '', plan: '', checklist: [], comments: [], result: null, skipReview: false, skipStages: [], activity: [{ t: 'Created', ts: 'earlier' }] }, o, { owners, activeHuman: o.activeHuman || owners[0] });
     };
     const cards = [
       c({ title: 'Add SSO for enterprise accounts', tag: 'auth', owners: ['dk'], stageId: 'backlog', desc: 'SAML + OIDC login for enterprise plans, with SCIM provisioning as a fast follow.' }),
@@ -900,8 +964,12 @@ class Component extends DCLogic {
         activity: [{ t: 'AI started working', ts: '18m ago' }, { t: 'Migrated 24 / 40 posts', ts: '3m ago' }] }),
       c({ title: 'Rewrite the onboarding tooltips', tag: 'product', owners: ['ml'], stageId: 'code', sub: 'ongoing', progress: 55, raisesQuestion: true, desc: 'Tighten the 9 onboarding tooltips to match the new brand voice.',
         checklist: [{ t: 'Audit current 9 tooltips', done: true }, { t: 'Draft new copy', done: false }, { t: 'Match brand voice', done: false }],
-        comments: [{ who: 'ai', text: 'Audited all 9. Two of them are much longer than the rest — I\'ll tighten those first. One open question before I rewrite the CTAs:', ts: '20m ago' }, { who: 'ai', kind: 'question', text: Q, ts: '2m ago' }],
-        activity: [{ t: 'AI started working', ts: '22m ago' }, { t: 'AI asked a question', ts: '2m ago' }] }),
+        comments: [{ who: 'dk', text: 'Go ahead and start — flag anything that fights the new brand voice.', ts: '24m ago' }, { who: 'ai', text: 'On it. Pulling the current tooltip copy from the codebase now.', ts: '23m ago' }, { who: 'ml', text: 'Remember the CTAs need to stay under 40 characters so they don\u2019t wrap on mobile.', ts: '21m ago' }, { who: 'ai', text: 'Audited all 9. Two of them are much longer than the rest — I\'ll tighten those first. One open question before I rewrite the CTAs:', ts: '20m ago' }, { who: 'ai', kind: 'question', text: Q, ts: '2m ago' }],
+        activity: [{ t: 'AI started working', ts: '22m ago' }, { t: 'Pulled tooltip copy from repo', ts: '22m ago' }, { t: 'Audited 9 / 9 tooltips', ts: '20m ago' }, { t: 'Drafted 2 of 9 rewrites', ts: '12m ago' }, { t: 'AI asked a question', ts: '2m ago' }] }),
+      c({ title: 'Generate the API client from the OpenAPI spec', tag: 'eng', owners: ['dk'], stageId: 'code', sub: 'ongoing', progress: 38, dead: true, skipReview: true, desc: 'Codegen a typed client from the published OpenAPI 3 spec and wire it into the SDK.',
+        activity: [{ t: 'AI started working', ts: '12m ago' }, { t: 'Generated 6 / 20 endpoints', ts: '9m ago' }, { t: 'Agent stopped — connection lost', ts: '2m ago' }] }),
+      c({ title: 'Deploy the search reindex job', tag: 'eng', owners: ['dk'], stageId: 'deploy', sub: 'ongoing', progress: 70, stalled: true, skipReview: true, desc: 'Run the full reindex over ~12k docs, then flip the alias to the new index.',
+        activity: [{ t: 'AI started working', ts: '15m ago' }, { t: 'Reindexing 12k documents', ts: '9m ago' }] }),
       c({ title: 'Add keyboard shortcuts', tag: 'eng', owners: ['jr'], stageId: 'code', sub: 'done', progress: 100, desc: 'A set of shortcuts for the board plus a help overlay.',
         result: { summary: 'Added 12 keyboard shortcuts and a help overlay triggered by **?**. Bindings match the existing command palette so nothing conflicts.', changes: ['12 shortcuts wired', 'Help overlay on “?”', 'Docs page updated'], deployUrl: 'preview.relay.app/board', screens: ['Board with help overlay open'] },
         checklist: [{ t: 'Define binding map', done: true }, { t: 'Build help overlay', done: true }, { t: 'Update docs', done: true }],
@@ -922,7 +990,7 @@ class Component extends DCLogic {
       c({ title: 'Dark mode polish', tag: 'design', owners: ['jr'], stageId: 'complete', progress: 100, desc: 'Fix the last contrast issues in dark mode.',
         activity: [{ t: 'Verified in prod', ts: 'Mon' }] }),
     ];
-    return { people, stages, cards, view: 'board', settingsSection: 'general', selectedId: null, dragOverKey: null, composeStage: null, composeText: '', answerText: '', commentText: '', rejectText: '', rejectOpen: false, reassignOpen: false, dragging: false, forceOpen: {},
+    return { people, stages, cards, view: 'board', settingsSection: 'general', selectedId: null, dragOverKey: null, composeStage: null, composeText: '', answerText: '', commentText: '', rejectText: '', commentsExpanded: false, activityExpanded: false, rejectOpen: false, reassignOpen: false, dragging: false, forceOpen: {}, logs: [], pulses: {}, unseen: {}, logOpen: false, unseenLog: 0,
       vw: (typeof window !== 'undefined' ? window.innerWidth : 1200),
       sendBackOpen: false, sendBackStage: null, sendBackText: '', longOpen: {}, longEdit: {}, editDesc: false, draft: {}, saveStatus: {}, typeMenuFor: null, titleEditing: false, titleDraft: '',
       boardName: 'Product workspace', slug: 'acme/product', inviteEmail: '', inviteRole: 'Member', copiedKeyId: null,
@@ -954,11 +1022,36 @@ class Component extends DCLogic {
   }
 
   componentDidMount() {
+    this._seen = {};
+    this.state.cards.forEach(c => { this._seen[c.id] = (c.activity || []).length; });
+    if (this.props.logOnLoad) this.setState({ logOpen: true });
     this.tickHandle = setInterval(() => this.tick(), 1600);
     this.onResize = () => { const w = window.innerWidth; if (w !== this.state.vw) this.setState({ vw: w }); };
     window.addEventListener('resize', this.onResize);
   }
+  componentDidUpdate() { this.captureLogs(); if (this._logEl && this.state.logOpen) { this._logEl.scrollTop = this._logEl.scrollHeight; } }
   componentWillUnmount() { clearInterval(this.tickHandle); window.removeEventListener('resize', this.onResize); }
+
+  clock() { const d = new Date(); const p = n => String(n).padStart(2, '0'); return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()); }
+  levelFor(t) { const x = (t || '').toLowerCase(); if (x.includes('asked') || x.includes('needs') || x.includes('question') || x.includes('rejected') || x.includes('requested changes') || x.includes('took over')) return 'warn'; if (x.includes('finished') || x.includes('done') || x.includes('approved') || x.includes('deployed') || x.includes('verified') || x.includes('ready') || x.includes('complete') || x.includes('advanced')) return 'ok'; return 'info'; }
+  cueColorFor(accent) { const c = this.props.cueColor || 'Match stage'; if (c === 'Violet') return 'oklch(0.56 0.16 292)'; if (c === 'Blue') return 'oklch(0.60 0.14 250)'; if (c === 'Amber') return 'oklch(0.70 0.13 65)'; return accent; }
+  captureLogs() {
+    if (!this._seen) this._seen = {};
+    const now = Date.now(); const newLogs = []; const pulseUpd = {}; const unseenUpd = {};
+    this.state.cards.forEach(c => {
+      const prev = this._seen[c.id] || 0; const act = c.activity || [];
+      if (act.length > prev) {
+        for (let i = prev; i < act.length; i++) { const a = act[i]; newLogs.push({ id: c.id + '.' + i + '.' + now, cardId: c.id, ref: c.ref || c.id, title: c.title, text: a.t, stage: (this.state.stages.find(x => x.id === c.stageId) || {}).name || '', time: this.clock(), level: this.levelFor(a.t) }); }
+        this._seen[c.id] = act.length; pulseUpd[c.id] = now;
+        if (this.state.selectedId !== c.id) unseenUpd[c.id] = (this.state.unseen[c.id] || 0) + (act.length - prev);
+      }
+    });
+    if (!newLogs.length) return;
+    this.setState(st => { const logs = [...st.logs, ...newLogs].slice(-250); const pulses = { ...st.pulses, ...pulseUpd }; const unseen = { ...st.unseen }; Object.keys(unseenUpd).forEach(k => { unseen[k] = unseenUpd[k]; }); const unseenLog = st.logOpen ? 0 : st.unseenLog + newLogs.length; return { logs, pulses, unseen, unseenLog }; });
+  }
+  toggleLog() { this.setState(s => ({ logOpen: !s.logOpen, unseenLog: !s.logOpen ? 0 : s.unseenLog })); }
+  clearLogs() { this.setState({ logs: [], unseenLog: 0 }); }
+  openFromLog(id) { this.setState(s => ({ view: 'board', pulses: { ...s.pulses, [id]: Date.now() } }), () => this.selectCard(id)); }
 
   findCard(id) { return this.state.cards.find(c => c.id === id); }
   stageIndex(id) { return this.state.stages.findIndex(s => s.id === id); }
@@ -975,6 +1068,7 @@ class Component extends DCLogic {
         if (st.owner !== 'ai' || st.category === 'completed') return;
         cards.filter(c => c.stageId === st.id && c.sub === 'ongoing' && !c.takenOver).forEach(card => {
           if (card.blocked) return;
+          if (card.stalled || card.dead) return;
           if (card.raisesQuestion && !card.asked && (card.progress || 0) >= 55) {
             card.blocked = true; card.asked = true;
             card.question = card.question || 'Should I keep the original playful CTA wording, or rewrite it to match the more formal new brand voice?';
@@ -1013,8 +1107,9 @@ class Component extends DCLogic {
     });
   }
   patchCard(id, extra) { this.setState(s => ({ cards: s.cards.map(c => c.id === id ? { ...c, ...extra } : c) })); }
+  retryCard(id) { this.setState(s => ({ cards: s.cards.map(c => c.id === id ? { ...c, dead: false, stalled: false, blocked: false, progress: (c.progress && c.progress < 100) ? c.progress : 4, activity: [...c.activity, { t: 'You retried — AI resumed working', ts: 'now' }] } : c) })); }
 
-  selectCard(id) { this.setState({ selectedId: id, answerText: '', commentText: '', rejectText: '', rejectOpen: false, reassignOpen: false, sendBackOpen: false, sendBackStage: null, sendBackText: '', longOpen: {}, longEdit: {}, titleEditing: false, titleDraft: '' }); }
+  selectCard(id) { this.setState(s => ({ selectedId: id, unseen: { ...s.unseen, [id]: 0 }, answerText: '', commentText: '', rejectText: '', rejectOpen: false, reassignOpen: false, sendBackOpen: false, sendBackStage: null, sendBackText: '', longOpen: {}, longEdit: {}, titleEditing: false, titleDraft: '', commentsExpanded: false, activityExpanded: false })); }
   commitTitle() { this.setState(st => { if (!st.titleEditing) return {}; const id = st.selectedId; const v = (st.titleDraft || '').trim() || st.titleDraft; return { titleEditing: false, cards: st.cards.map(c => c.id === id ? { ...c, title: v } : c) }; }); }
   cancelTitle() { this.setState({ titleEditing: false, titleDraft: '' }); }
   closeDrawer() { this.setState({ selectedId: null }); }
@@ -1029,7 +1124,7 @@ class Component extends DCLogic {
     const text = (this.state.composeText || '').trim(); if (!text) return;
     const st = this.state.stages.find(s => s.id === stageId);
     const id = 'n' + Date.now();
-    const card = { id, title: text, tag: '', human: 'dk', stageId, sub: 'ongoing', progress: st.owner === 'ai' ? 3 : 0, activity: [{ t: 'You added this', ts: 'now' }] };
+    const card = { id, ref: 'RLY-' + (Math.floor(Math.random() * 800) + 100), title: text, tag: '', human: 'dk', stageId, sub: 'ongoing', progress: st.owner === 'ai' ? 3 : 0, activity: [{ t: 'You added this', ts: 'now' }] };
     this.setState(s => ({ cards: [card, ...s.cards], composeText: '', composeStage: null }));
   }
 
@@ -1168,7 +1263,7 @@ class Component extends DCLogic {
 
   renderVals() {
     const s = this.state;
-    const VIOLET = 'oklch(0.56 0.16 292)', BLUE = 'oklch(0.60 0.14 250)', GREEN = 'oklch(0.60 0.13 155)', AMBER = 'oklch(0.70 0.13 65)', SLATE = 'oklch(0.55 0.02 255)';
+    const VIOLET = 'oklch(0.56 0.16 292)', BLUE = 'oklch(0.60 0.14 250)', GREEN = 'oklch(0.60 0.13 155)', AMBER = 'oklch(0.70 0.13 65)', ROSE = 'oklch(0.62 0.16 15)', SLATE = 'oklch(0.55 0.02 255)';
     const mono = "'JetBrains Mono',ui-monospace,monospace";
     const ownerColor = o => o === 'ai' ? VIOLET : o === 'human' ? BLUE : SLATE;
     const typeForCat = { unstarted: 'queue', planning: 'planning', started: 'work', completed: 'done' };
@@ -1217,16 +1312,46 @@ class Component extends DCLogic {
       let accent = BLUE;
       if (card.blocked) accent = AMBER; else if (isDoneSub || stCompleted) accent = GREEN; else if (stage.owner === 'ai') accent = VIOLET;
       const cluster = buildCluster(card, stage, 22);
+      const isDead = !!card.dead, isStale = !isDead && !!card.stalled;
+      const health = isDead ? 'stopped' : isStale ? 'stale' : (working ? 'live' : null);
+      if (isDead) accent = ROSE; else if (isStale) accent = AMBER;
+      const showProgress = working && health === 'live';
       let showStatus = false, statusLabel = '', statusColor = SLATE;
-      if (working) { showStatus = true; statusLabel = 'working · ' + (card.progress || 0) + '%'; statusColor = 'oklch(0.52 0.10 292)'; }
-      else if (isDoneSub) { showStatus = true; statusLabel = 'ready'; statusColor = 'oklch(0.50 0.10 155)'; }
+      if (isDoneSub) { showStatus = true; statusLabel = 'ready'; statusColor = 'oklch(0.50 0.10 155)'; }
+      const acts = card.activity || [];
+      const lastLog = acts.length ? acts[acts.length - 1] : null;
+      const showLastLog = !!health && !!lastLog;
+      const hm = ({
+        live:    { bg: 'oklch(0.985 0.012 292)', bd: 'transparent',         txt: 'oklch(0.44 0.08 292)', dot: VIOLET, pulse: true,  time: 'oklch(0.60 0.02 255)' },
+        stale:   { bg: 'oklch(0.97 0.03 75)',    bd: 'oklch(0.88 0.06 75)', txt: 'oklch(0.50 0.10 65)',  dot: AMBER,  pulse: false, time: 'oklch(0.52 0.11 65)' },
+        stopped: { bg: 'oklch(0.97 0.03 20)',    bd: 'oklch(0.88 0.06 20)', txt: 'oklch(0.50 0.14 15)',  dot: ROSE,   pulse: false, time: 'oklch(0.52 0.14 15)' },
+      })[health] || null;
+      const lastLogTime = lastLog ? (lastLog.ts === 'now' ? 'now' : String(lastLog.ts).replace(' ago', '')) : '';
       const skips = [];
       if (card.skipReview) skips.push('review');
       (card.skipStages || []).forEach(sid => { const ss = this.state.stages.find(x => x.id === sid); if (ss) skips.push(ss.name); });
+      const cueMode = this.props.cueStyle || 'Ring + dot';
+      const showRing = cueMode !== 'Corner dot'; const showDot = cueMode !== 'Pulse ring';
+      const cueCol = this.cueColorFor(accent); const cueSoft = cueCol.replace(')', ' / 0.4)');
+      const pulseTs = s.pulses[card.id];
+      const pulseNode = (showRing && pulseTs) ? React.createElement('span', { key: pulseTs, style: { position: 'absolute', inset: '-1px', borderRadius: '10px', pointerEvents: 'none', boxShadow: 'inset 0 0 0 2px ' + cueCol + ', 0 0 0 2px ' + cueCol + ', 0 0 16px 3px ' + cueSoft, animation: 'relayflash 1.5s ease-out forwards' } }) : null;
+      const unseenN = s.unseen[card.id] || 0; const unseenShow = showDot && unseenN > 0;
       return {
+        pulseNode, unseenShow, unseenLabel: unseenN > 1 ? String(unseenN) : '',
+        unseenStyle: { position: 'absolute', top: '-6px', right: '-6px', minWidth: '15px', height: '15px', padding: '0 4px', borderRadius: '8px', background: cueCol, color: 'oklch(1 0 0)', fontSize: '9.5px', fontWeight: 700, fontFamily: mono, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 0 2px oklch(1 0 0)', animation: 'relaybadgepop 0.3s ease-out', zIndex: 2 },
         id: card.id, title: card.title, tag: card.tag, showTag: !!card.tag && !working,
-        style: { background: 'oklch(1 0 0)', border: '1px solid oklch(0.92 0.006 255)', borderLeft: '3px solid ' + accent, borderRadius: '9px', padding: '10px 11px', display: 'flex', flexDirection: 'column', gap: '8px', cursor: 'grab', boxShadow: '0 1px 2px oklch(0.55 0.03 255/0.05)', userSelect: 'none' },
-        showProgress: working, progressStyle: { height: '100%', width: (card.progress || 0) + '%', background: VIOLET, borderRadius: '3px', transition: 'width 0.6s ease' },
+        style: { position: 'relative', background: 'oklch(1 0 0)', border: '1px solid oklch(0.92 0.006 255)', borderLeft: '3px solid ' + accent, borderRadius: '9px', padding: '10px 11px', display: 'flex', flexDirection: 'column', gap: '8px', cursor: 'grab', boxShadow: '0 1px 2px oklch(0.55 0.03 255/0.05)', userSelect: 'none' },
+        showProgress: showProgress, progressStyle: { height: '100%', width: (card.progress || 0) + '%', background: VIOLET, borderRadius: '3px', transition: 'width 0.6s ease' },
+        showLastLog,
+        lastLogWrapStyle: hm ? { display: 'flex', alignItems: 'center', gap: '6px', borderRadius: '6px', padding: '6px 8px', background: hm.bg, border: '1px solid ' + hm.bd } : {},
+        lastLogDotStyle: hm ? { width: '6px', height: '6px', borderRadius: '50%', background: hm.dot, flex: '0 0 auto', animation: hm.pulse ? 'relaypulse 1.4s ease-in-out infinite' : 'none' } : {},
+        lastLogTextStyle: hm ? { fontSize: '10.5px', fontFamily: mono, color: hm.txt, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } : {},
+        lastLogText: lastLog ? lastLog.t : '',
+        lastLogTimeStyle: hm ? { fontSize: '10.5px', fontFamily: mono, color: hm.time, flex: '0 0 auto' } : {},
+        lastLogTime,
+        showRetry: health === 'stopped',
+        retryStyle: { fontSize: '10px', fontWeight: 600, fontFamily: mono, color: 'oklch(0.50 0.14 15)', background: 'oklch(1 0 0)', border: '1px solid oklch(0.84 0.08 20)', borderRadius: '5px', padding: '2px 7px', flex: '0 0 auto', cursor: 'pointer' },
+        onRetry: (e) => { if (e && e.stopPropagation) e.stopPropagation(); this.retryCard(card.id); },
         blocked: !!card.blocked,
         skipShow: skips.length > 0, skipLabel: 'skips ' + skips.join(' · '),
         showStatus, statusLabel, statusStyle: { fontSize: '11px', fontFamily: mono, color: statusColor, display: 'flex', alignItems: 'center', gap: '5px' },
@@ -1456,7 +1581,7 @@ class Component extends DCLogic {
       const rejectTarget = (selStage.rejectTo && s.stages.find(x => x.id === selStage.rejectTo)) || s.stages.find(x => x.owner === 'ai' && x.category === 'started') || s.stages[0];
       const dot = t => (t.indexOf('approv') >= 0 || t.indexOf('finished') >= 0 || t.indexOf('Verified') >= 0 || t.indexOf('ready') >= 0) ? GREEN : (t.indexOf('asked') >= 0 || t.indexOf('changes') >= 0) ? AMBER : (t.indexOf('AI') >= 0) ? VIOLET : BLUE;
       const commentTag = { changes: { label: 'CHANGES REQUESTED', color: 'oklch(0.55 0.13 65)', bg: 'oklch(0.96 0.03 75)' }, question: { label: 'QUESTION', color: 'oklch(0.52 0.11 65)', bg: 'oklch(0.96 0.03 75)' } };
-      const comments = (sel.comments || []).map(cm => {
+      const allComments = (sel.comments || []).slice().reverse().map(cm => {
         const av = mkAvatar(cm.who, { size: 28 });
         const isQ = cm.kind === 'question' || cm.kind === 'changes';
         const meta = commentTag[cm.kind];
@@ -1467,6 +1592,11 @@ class Component extends DCLogic {
           bubbleStyle: { fontSize: '13px', lineHeight: 1.5, color: 'oklch(0.36 0.02 255)', background: isQ ? (meta ? meta.bg : 'oklch(0.97 0.02 75)') : 'oklch(0.985 0.004 250)', border: '1px solid ' + (isQ ? 'oklch(0.88 0.06 75)' : 'oklch(0.94 0.006 255)'), borderRadius: '9px', padding: '9px 11px' },
         };
       });
+      const COMMENT_CAP = 3;
+      const commentsToggleShow = allComments.length > COMMENT_CAP;
+      const commentsCollapsed = commentsToggleShow && !s.commentsExpanded;
+      const comments = commentsCollapsed ? allComments.slice(0, COMMENT_CAP) : allComments;
+      const commentsHiddenCount = allComments.length - COMMENT_CAP;
       const owners = aiActive
         ? [{ av: mkAvatar('ai', { size: 22 }), name: 'Relay AI', nameStyle: { fontSize: '13px', fontWeight: 500, color: 'oklch(0.30 0.02 255)' }, canTakeOver: true }]
         : (sel.owners || []).map(o => ({ av: mkAvatar(o, { size: 22 }), name: (s.people[o] ? s.people[o].name : o), nameStyle: { fontSize: '13px', fontWeight: 500, color: 'oklch(0.30 0.02 255)' }, canTakeOver: false }));
@@ -1525,6 +1655,20 @@ class Component extends DCLogic {
         dotStyle: { width: '7px', height: '7px', borderRadius: '3px', flex: '0 0 auto', background: x.owner === 'ai' ? VIOLET : BLUE } }));
       const sendBackName = ((s.stages.find(x => x.id === s.sendBackStage) || {}).name || '') + (s.sendBackStage === selStage.id ? ' · In progress' : '');
 
+      const dHealth = sel.dead ? 'stopped' : sel.stalled ? 'stale' : (isWorking ? 'live' : null);
+      const dhm = ({
+        live:    { c: 'oklch(0.48 0.12 292)', b: 'oklch(0.985 0.012 292)', d: VIOLET, t: 'Relay AI is live', pulse: true },
+        stale:   { c: 'oklch(0.52 0.11 65)',  b: 'oklch(0.97 0.03 75)',   d: AMBER,  t: 'Quiet for a while — may be stuck', pulse: false },
+        stopped: { c: 'oklch(0.52 0.14 15)',  b: 'oklch(0.97 0.03 20)',   d: ROSE,   t: 'Agent stopped — connection lost', pulse: false },
+      })[dHealth] || null;
+
+      const allActivity = (sel.activity || []).slice().reverse().map(l => ({ t: l.t, ts: l.ts, dotStyle: { width: '7px', height: '7px', borderRadius: '50%', background: dot(l.t), display: 'block', marginTop: '4px', flex: '0 0 auto' } }));
+      const ACT_CAP = 4;
+      const activityToggleShow = allActivity.length > ACT_CAP;
+      const activityCollapsed = activityToggleShow && !s.activityExpanded;
+      const activityView = activityCollapsed ? allActivity.slice(0, ACT_CAP) : allActivity;
+      const activityHiddenCount = allActivity.length - ACT_CAP;
+
       drawer = {
         open: true, title: sel.title, cardRef: 'RLY-' + (100 + this.stageIndex(selStage.id) + sel.id.length),
         stageChip: selStage.name + subLabel,
@@ -1541,6 +1685,9 @@ class Component extends DCLogic {
         hasChecklist: (sel.checklist || []).length > 0, checkProgress: done + '/' + (sel.checklist || []).length,
         checkBarStyle: { height: '100%', width: ((sel.checklist || []).length ? (done / sel.checklist.length * 100) : 0) + '%', background: GREEN, borderRadius: '2px', transition: 'width 0.3s' },
         checklist, comments, owners, assignables,
+        commentsToggleShow, commentsCollapsed,
+        commentsToggleLabel: s.commentsExpanded ? 'Show less' : ('Show all ' + allComments.length + ' comments'),
+        onToggleComments: () => this.setState(st => ({ commentsExpanded: !st.commentsExpanded })),
         youAvatarStyle: Object.assign(mkAvatar('dk', { size: 28 }).wrapStyle, {}), youInitials: 'DK',
         activeAv, activeName: aiActive ? 'Relay AI' : (s.people[active] ? s.people[active].name : 'Someone'), aiActive,
         reassignLabel: s.reassignOpen ? 'Done' : 'Reassign', reassignOpen: s.reassignOpen,
@@ -1561,11 +1708,32 @@ class Component extends DCLogic {
         railStyle: isMobile
           ? { flex: '0 0 auto', borderTop: '1px solid oklch(0.94 0.006 255)', background: 'oklch(0.992 0.002 255)', padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '20px' }
           : { width: '216px', flex: '0 0 auto', borderLeft: '1px solid oklch(0.94 0.006 255)', background: 'oklch(0.992 0.002 255)', overflowY: 'auto', padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '20px' },
-        activity: (sel.activity || []).slice().reverse().map(l => ({ t: l.t, ts: l.ts, dotStyle: { width: '7px', height: '7px', borderRadius: '50%', background: dot(l.t), display: 'block', marginTop: '4px', flex: '0 0 auto' } })),
+        activity: activityView,
+        activityToggleShow, activityCollapsed,
+        activityToggleLabel: s.activityExpanded ? 'Show less' : ('Show all ' + allActivity.length + ' events'),
+        onToggleActivity: () => this.setState(st => ({ activityExpanded: !st.activityExpanded })),
+        activityHealthShow: !!dhm,
+        activityHealthStyle: dhm ? { display: 'flex', alignItems: 'center', gap: '8px', background: dhm.b, borderRadius: '7px', padding: '7px 10px', marginBottom: '10px' } : {},
+        activityHealthDotStyle: dhm ? { width: '7px', height: '7px', borderRadius: '50%', background: dhm.d, flex: '0 0 auto', animation: dhm.pulse ? 'relaypulse 1.4s ease-in-out infinite' : 'none' } : {},
+        activityHealthLabelStyle: dhm ? { fontSize: '11.5px', fontFamily: mono, color: dhm.c } : {},
+        activityHealthLabel: dhm ? dhm.t : '',
+        activityHealthRetryShow: dHealth === 'stopped',
+        activityHealthRetryStyle: { marginLeft: 'auto', fontSize: '10.5px', fontWeight: 600, fontFamily: mono, color: 'oklch(0.50 0.14 15)', background: 'oklch(1 0 0)', border: '1px solid oklch(0.84 0.08 20)', borderRadius: '6px', padding: '4px 11px', cursor: 'pointer' },
+        onRetryDrawer: () => this.retryCard(sel.id),
       };
     }
     const drawerStyle = { position: 'fixed', top: 0, right: 0, bottom: 0, width: isMobile ? '100vw' : 'min(760px, 94vw)', background: 'oklch(1 0 0)', borderLeft: '1px solid oklch(0.92 0.006 255)', boxShadow: '-8px 0 30px oklch(0.5 0.03 255/0.10)', transform: drawer.open ? 'translateX(0)' : 'translateX(103%)', transition: 'transform 0.28s cubic-bezier(.4,0,.2,1)', zIndex: 40, display: 'flex', flexDirection: 'column' };
     const scrimStyle = { position: 'fixed', inset: 0, background: 'oklch(0.30 0.02 255/0.22)', opacity: drawer.open ? 1 : 0, pointerEvents: drawer.open ? 'auto' : 'none', transition: 'opacity 0.28s', zIndex: 35 };
+
+    // ── Activity log console ──
+    const isBoardV = s.view === 'board';
+    const consoleOpen = s.logOpen && isBoardV;
+    const logLive = s.unseenLog > 0;
+    const barBase = (h, delay) => ({ width: '2.5px', height: h + 'px', borderRadius: '1px', background: 'currentColor', transformOrigin: 'bottom', animation: logLive ? ('relaybars 1s ease-in-out ' + delay + 's infinite') : 'none' });
+    const logBtnStyle = { display: 'flex', alignItems: 'center', gap: '7px', background: s.logOpen ? 'oklch(0.96 0.03 250)' : 'oklch(1 0 0)', border: '1px solid ' + (s.logOpen ? 'oklch(0.80 0.08 250)' : 'oklch(0.90 0.006 255)'), color: s.logOpen ? 'oklch(0.45 0.13 250)' : 'oklch(0.40 0.02 255)', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', fontWeight: 600, position: 'relative' };
+    const logRows = s.logs.slice(-80).map(l => { const dotCol = l.level === 'warn' ? AMBER : l.level === 'ok' ? GREEN : VIOLET; return { id: l.id, time: l.time, ref: l.ref, text: l.text, title: l.title, dotStyle: { width: '7px', height: '7px', borderRadius: '50%', background: dotCol, flex: '0 0 auto' }, refStyle: { fontFamily: mono, fontSize: '11px', fontWeight: 600, whiteSpace: 'nowrap', color: 'oklch(0.50 0.02 255)', background: 'oklch(0.955 0.006 255)', border: '1px solid oklch(0.92 0.006 255)', borderRadius: '5px', padding: '1px 6px', flex: '0 0 auto' }, rowStyle: { display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 16px', borderBottom: '1px solid oklch(0.955 0.006 255)', cursor: 'pointer' }, onClick: () => this.openFromLog(l.cardId) }; });
+    const boardAreaStyle = { flex: 1, minHeight: 0, display: 'flex', gap: '22px', padding: '16px 18px 18px 18px', paddingBottom: consoleOpen ? '252px' : '18px', overflowX: 'auto', overflowY: 'hidden', alignItems: 'stretch', background: 'oklch(0.952 0.008 255)', transition: 'padding-bottom 0.28s cubic-bezier(.4,0,.2,1)' };
+    const logConsole = { open: consoleOpen, wrapStyle: { position: 'fixed', left: 0, right: 0, bottom: 0, height: consoleOpen ? '236px' : '0px', overflow: 'hidden', transition: 'height 0.28s cubic-bezier(.4,0,.2,1)', background: 'oklch(0.988 0.003 255)', borderTop: consoleOpen ? '1px solid oklch(0.88 0.01 255)' : 'none', boxShadow: consoleOpen ? '0 -6px 24px oklch(0.4 0.03 255/0.10)' : 'none', zIndex: 34, display: 'flex', flexDirection: 'column' }, count: s.logs.length + (s.logs.length === 1 ? ' event' : ' events'), entries: logRows, empty: logRows.length === 0, onToggle: () => this.toggleLog(), onClear: () => this.clearLogs(), scrollRef: (el) => { this._logEl = el; } };
 
     // Boards home
     const ownerTick = o => o === 'ai' ? VIOLET : o === 'done' ? GREEN : BLUE;
@@ -1657,6 +1825,11 @@ class Component extends DCLogic {
       onSubmitAnswer: () => this.submitAnswer(),
       onApproveSel: () => this.approve(s.selectedId), onRejectSel: () => this.requestChanges(s.selectedId),
       onMarkDone: () => this.markDone(s.selectedId), onPullNext: () => this.pullNext(s.selectedId),
+      onToggleLog: () => this.toggleLog(),
+      logBtnStyle, logBar1: barBase(6, 0), logBar2: barBase(11, 0.15), logBar3: barBase(8, 0.3),
+      logUnread: s.unseenLog > 99 ? '99+' : String(s.unseenLog), logUnreadShow: s.unseenLog > 0 && !s.logOpen,
+      logUnreadStyle: { minWidth: '16px', height: '16px', padding: '0 4px', borderRadius: '8px', background: 'oklch(0.60 0.14 250)', color: 'oklch(1 0 0)', fontSize: '10px', fontWeight: 700, fontFamily: mono, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'relaypulse 1.4s ease-in-out infinite' },
+      logConsole, boardAreaStyle,
       drawer, drawerStyle, scrimStyle,
     };
   }
@@ -1664,3 +1837,4 @@ class Component extends DCLogic {
 </script>
 </body>
 </html>
+

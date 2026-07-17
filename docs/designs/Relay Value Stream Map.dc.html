@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.32 0.02 255);background:oklch(0.955 0.008 255);-webkit-font-smoothing:antialiased;}
+  a{color:oklch(0.50 0.14 250);} a:hover{color:oklch(0.42 0.14 250);}
+  ::-webkit-scrollbar{width:10px;height:10px;}
+  ::-webkit-scrollbar-thumb{background:oklch(0.88 0.01 255);border-radius:6px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:oklch(0.955 0.008 255);">
+<div style="max-width:1040px;margin:0 auto;padding:56px 34px 120px;display:flex;flex-direction:column;">
+
+  <!-- HEADER -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:22px;">
+    <div style="width:24px;height:24px;border-radius:7px;background:oklch(0.60 0.14 250);display:flex;align-items:center;justify-content:center;position:relative;">
+      <div style="width:8px;height:8px;border-radius:50%;background:oklch(1 0 0);"></div>
+      <div style="position:absolute;right:3px;top:3px;width:4px;height:4px;border-radius:50%;background:oklch(0.60 0.14 250);box-shadow:0 0 0 1.5px oklch(1 0 0);"></div>
+    </div>
+    <span style="font-size:11px;font-weight:600;letter-spacing:0.14em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);">RELAY · VALUE STREAM MAP</span>
+  </div>
+  <h1 style="font-size:38px;font-weight:600;letter-spacing:-0.03em;line-height:1.08;margin:0 0 16px;color:oklch(0.22 0.02 255);">The value stream map</h1>
+  <p style="font-size:16.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0;max-width:730px;">The projection worth building first. This page shows <b style="color:oklch(0.28 0.02 255);">how we derive it</b> from data Relay already keeps, and what it looks like at two scopes — <b style="color:oklch(0.28 0.02 255);">one card</b>, and <b style="color:oklch(0.28 0.02 255);">the last 20 averaged.</b> A note on words: this is a Lean tool, but the reader isn't a Lean expert, so every borrowed term gets a plain-English gloss the first time.</p>
+
+  <!-- ===== 01 · HOW WE GET TO IT ===== -->
+  <sc-if value="{{ showDerivation }}" hint-placeholder-val="{{ true }}">
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:46px 0 32px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">01 — How we get to it</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 14px;color:oklch(0.24 0.02 255);">Three steps from the log to the map</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 24px;max-width:730px;">Nothing new gets tracked. Relay already writes an event every time a card moves, changes owner, or an agent runs. We fold those events into per-stage spans, then draw the spans as a map.</p>
+
+  <!-- step 1: the log -->
+  <div style="display:flex;gap:16px;align-items:stretch;margin-bottom:14px;flex-wrap:wrap;">
+    <div style="flex:0 0 auto;width:26px;height:26px;border-radius:8px;background:oklch(0.96 0.03 250);color:oklch(0.44 0.13 250);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;font-family:'JetBrains Mono',monospace;margin-top:2px;">1</div>
+    <div style="flex:1;min-width:280px;">
+      <div style="font-size:15px;font-weight:600;color:oklch(0.28 0.02 255);margin-bottom:3px;">The event log Relay already keeps</div>
+      <p style="font-size:13.5px;line-height:1.55;color:oklch(0.46 0.02 255);margin:0 0 12px;">Every card is a timestamped stream of events, each tagged with who did it and (for agent runs) what it cost.</p>
+      <div style="background:oklch(0.20 0.02 255);border-radius:11px;padding:14px 16px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.85;color:oklch(0.80 0.01 255);overflow-x:auto;">
+        <div><span style="color:oklch(0.60 0.02 255);">09:12</span> &nbsp;RLY-142 created &nbsp;<span style="color:oklch(0.66 0.02 255);">→ Backlog</span></div>
+        <div><span style="color:oklch(0.60 0.02 255);">13:10</span> &nbsp;moved <span style="color:oklch(0.74 0.11 305);">→ Spec</span> &nbsp;<span style="color:oklch(0.66 0.02 255);">claimed by Relay&nbsp;AI</span></div>
+        <div><span style="color:oklch(0.60 0.02 255);">13:10</span> &nbsp;agent run start</div>
+        <div><span style="color:oklch(0.60 0.02 255);">13:55</span> &nbsp;agent run end &nbsp;<span style="color:oklch(0.76 0.10 195);">45m · $1.20</span></div>
+        <div><span style="color:oklch(0.60 0.02 255);">…</span></div>
+        <div><span style="color:oklch(0.60 0.02 255);">Mar 1</span> &nbsp;moved <span style="color:oklch(0.74 0.11 250);">→ Review</span></div>
+        <div><span style="color:oklch(0.60 0.02 255);">Mar 2</span> &nbsp;<span style="color:oklch(0.80 0.11 65);">rejected</span> &nbsp;<span style="color:oklch(0.66 0.02 255);">→ back to Code</span></div>
+        <div><span style="color:oklch(0.60 0.02 255);">Mar 2</span> &nbsp;agent run end &nbsp;<span style="color:oklch(0.76 0.10 195);">1.0h · $3.10</span> &nbsp;<span style="color:oklch(0.72 0.13 25);">(rework)</span></div>
+        <div><span style="color:oklch(0.60 0.02 255);">Mar 3</span> &nbsp;approved &nbsp;moved <span style="color:oklch(0.74 0.10 155);">→ Deploy → Done</span></div>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:center;margin:2px 0;"><span style="color:oklch(0.72 0.02 255);font-size:16px;">↓</span></div>
+
+  <!-- step 2: spans -->
+  <div style="display:flex;gap:16px;align-items:stretch;margin-bottom:14px;flex-wrap:wrap;">
+    <div style="flex:0 0 auto;width:26px;height:26px;border-radius:8px;background:oklch(0.96 0.03 250);color:oklch(0.44 0.13 250);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;font-family:'JetBrains Mono',monospace;margin-top:2px;">2</div>
+    <div style="flex:1;min-width:280px;">
+      <div style="font-size:15px;font-weight:600;color:oklch(0.28 0.02 255);margin-bottom:3px;">Fold events into per-stage spans</div>
+      <p style="font-size:13.5px;line-height:1.55;color:oklch(0.46 0.02 255);margin:0 0 12px;">For each stage we separate the clock into <b style="color:oklch(0.40 0.11 155);">working</b> (an owner actively on it) and <b style="color:oklch(0.50 0.11 65);">waiting</b> (parked, queued, or blocked on a human), and sum the agent spend.</p>
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:11px;overflow:hidden;">
+        <div style="display:flex;padding:9px 14px;background:oklch(0.975 0.004 255);font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.02 255);letter-spacing:0.04em;">
+          <span style="flex:0 0 90px;">STAGE</span><span style="flex:1;">WORKING vs WAITING</span><span style="flex:0 0 64px;text-align:right;">AGENT $</span>
+        </div>
+        <sc-for list="{{ cardMap.boxes }}" as="b" hint-placeholder-count="5">
+          <div style="display:flex;align-items:center;padding:9px 14px;border-top:1px solid oklch(0.96 0.005 255);">
+            <span style="flex:0 0 90px;font-size:12px;font-family:'JetBrains Mono',monospace;font-weight:600;color:{{ b.color }};">{{ b.name }}</span>
+            <div style="flex:1;display:flex;align-items:center;gap:8px;">
+              <div style="flex:1;height:12px;border-radius:4px;overflow:hidden;display:flex;background:oklch(0.965 0.004 255);">
+                <div style="width:{{ b.touchPct }}%;background:oklch(0.60 0.13 155);"></div>
+                <div style="width:{{ b.waitPct }}%;background:repeating-linear-gradient(45deg,oklch(0.86 0.06 65),oklch(0.86 0.06 65) 4px,oklch(0.90 0.05 65) 4px,oklch(0.90 0.05 65) 8px);"></div>
+              </div>
+              <span style="flex:0 0 auto;font-size:10.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);width:110px;">{{ b.touchLabel }} / {{ b.waitLabel }}</span>
+            </div>
+            <span style="flex:0 0 64px;text-align:right;font-size:11.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.14 292);">{{ b.costLabel }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:center;margin:2px 0;"><span style="color:oklch(0.72 0.02 255);font-size:16px;">↓</span></div>
+
+  <!-- step 3 -->
+  <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:8px;">
+    <div style="flex:0 0 auto;width:26px;height:26px;border-radius:8px;background:oklch(0.96 0.03 250);color:oklch(0.44 0.13 250);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;font-family:'JetBrains Mono',monospace;margin-top:2px;">3</div>
+    <div style="flex:1;min-width:280px;">
+      <div style="font-size:15px;font-weight:600;color:oklch(0.28 0.02 255);margin-bottom:3px;">Draw the spans as a map</div>
+      <p style="font-size:13.5px;line-height:1.55;color:oklch(0.46 0.02 255);margin:0;">The spans become process boxes with a data box each; the waiting between them becomes the sawtooth timeline below. That's the map — next.</p>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ===== 02 · THE MAP, ONE CARD ===== -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:46px 0 32px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.44 0.10 155);text-transform:uppercase;margin-bottom:10px;">02 — The map · one card</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 8px;color:oklch(0.24 0.02 255);">RLY-142 — “Add SSO for enterprise”</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 22px;max-width:730px;"><b style="color:oklch(0.52 0.10 65);">Inventory triangles</b> mark cards piling up before a stage (here, one card waiting). The <b style="color:oklch(0.30 0.02 255);">sawtooth</b> reads left-to-right across the full lead time: valleys are working, rises are waiting. The <b style="color:oklch(0.82 0.13 70);">✦ kaizen burst</b> flags the improvement worth chasing.</p>
+
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:22px 24px 20px;margin-bottom:14px;">
+    <!-- endpoints + boxes -->
+    <div style="display:flex;align-items:center;gap:6px;overflow-x:auto;padding-bottom:8px;">
+      <div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:4px;padding-right:2px;">
+        <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:oklch(0.56 0.02 255);">request</span>
+        <span style="width:10px;height:10px;border-radius:50%;background:oklch(0.72 0.02 255);"></span>
+      </div>
+      <span style="color:oklch(0.74 0.02 255);font-size:14px;flex:0 0 auto;">→</span>
+      <sc-for list="{{ cardMap.boxes }}" as="b" hint-placeholder-count="5">
+        <div style="display:flex;align-items:center;gap:6px;flex:0 0 auto;">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:3px;">
+            <div style="width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-top:15px solid oklch(0.82 0.10 70);"></div>
+            <span style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.54 0.09 65);">{{ b.waitLabel }}</span>
+          </div>
+          <span style="color:oklch(0.74 0.02 255);font-size:14px;">→</span>
+          <div style="min-width:136px;border:1px solid {{ b.color }};border-radius:10px;overflow:hidden;">
+            <div style="background:{{ b.headBg }};padding:7px 11px;font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace;color:{{ b.color }};">{{ b.name }}</div>
+            <div style="padding:9px 11px;display:flex;flex-direction:column;gap:4px;">
+              <div style="display:flex;justify-content:space-between;font-size:11px;"><span style="color:oklch(0.58 0.02 255);">Working</span><span style="font-family:'JetBrains Mono',monospace;color:oklch(0.40 0.10 155);font-weight:600;">{{ b.touchLabel }}</span></div>
+              <div style="display:flex;justify-content:space-between;font-size:11px;"><span style="color:oklch(0.58 0.02 255);">Waited</span><span style="font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.10 65);">{{ b.waitLabel }}</span></div>
+              <div style="display:flex;justify-content:space-between;font-size:11px;"><span style="color:oklch(0.58 0.02 255);">Agent $</span><span style="font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.14 292);">{{ b.costLabel }}</span></div>
+              <div style="display:flex;justify-content:space-between;font-size:11px;border-top:1px solid oklch(0.95 0.006 255);padding-top:4px;"><span style="color:oklch(0.58 0.02 255);">Owner</span><span style="font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.02 255);">{{ b.ownerLabel }}</span></div>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+      <span style="color:oklch(0.74 0.02 255);font-size:14px;flex:0 0 auto;">→</span>
+      <div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:4px;padding-left:2px;">
+        <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:oklch(0.44 0.10 155);">shipped</span>
+        <span style="width:10px;height:10px;border-radius:50%;background:oklch(0.60 0.13 155);"></span>
+      </div>
+    </div>
+
+    <!-- sawtooth -->
+    <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin:18px 0 4px;">TIMELINE — rises = waiting, valleys = working</div>
+    <div style="position:relative;height:132px;">
+      <div style="position:absolute;inset:0;">{{ cardMap.svg }}</div>
+      <sc-for list="{{ cardMap.labels }}" as="l" hint-placeholder-count="10"><span style="{{ l.style }}">{{ l.text }}</span></sc-for>
+      <sc-for list="{{ cardMap.bursts }}" as="bu" hint-placeholder-count="1">
+        <div style="{{ bu.style }}">
+          <span style="width:16px;height:16px;flex:0 0 auto;background:oklch(0.82 0.13 70);clip-path:polygon(50% 0,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%);"></span>
+          <span style="font-size:9.5px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.48 0.10 65);white-space:nowrap;">{{ bu.text }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <!-- tally -->
+    <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;border-top:1px solid oklch(0.94 0.006 255);padding-top:14px;">
+      <div style="border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:9px 13px;"><div style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">LEAD TIME</div><div style="font-size:16px;font-weight:600;color:oklch(0.26 0.02 255);">{{ cardMap.lead }}</div></div>
+      <div style="border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:9px 13px;"><div style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">WORKING TIME</div><div style="font-size:16px;font-weight:600;color:oklch(0.40 0.11 155);">{{ cardMap.touch }}</div></div>
+      <div style="border:1px solid oklch(0.89 0.04 155);background:oklch(0.98 0.02 155);border-radius:9px;padding:9px 13px;"><div style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.44 0.09 155);">FLOW EFFICIENCY</div><div style="font-size:16px;font-weight:600;color:oklch(0.40 0.11 155);">{{ cardMap.flow }}</div></div>
+      <div style="border:1px solid oklch(0.90 0.04 292);background:oklch(0.98 0.02 292);border-radius:9px;padding:9px 13px;"><div style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.14 292);">AGENT SPEND</div><div style="font-size:16px;font-weight:600;color:oklch(0.48 0.14 292);">{{ cardMap.cost }}</div></div>
+    </div>
+  </div>
+  <p style="font-size:13px;line-height:1.55;color:oklch(0.52 0.02 255);margin:0 0 4px;max-width:730px;"><b style="color:oklch(0.44 0.09 155);">Flow efficiency</b> = working time ÷ lead time. At <b style="color:oklch(0.40 0.11 155);">18%</b>, this card spent five hours waiting for every hour of work — almost all of it parked in Review.</p>
+
+  <!-- ===== 03 · THE MAP, LAST 20 ===== -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:46px 0 32px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.13 250);text-transform:uppercase;margin-bottom:10px;">03 — The map · {{ scopeUpper }}, averaged</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 8px;color:oklch(0.24 0.02 255);">The same map, for the whole batch</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 22px;max-width:730px;">Average every stage across the batch and the map stops being a debugging tool and becomes a system diagnosis. The shape is the same, and it points at the same two things every time: a long <b style="color:oklch(0.52 0.10 65);">Review wait</b>, and a <b style="color:oklch(0.48 0.14 292);">Code</b> stage that dominates spend. This is the view I'd put on the wall.</p>
+
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:22px 24px 20px;margin-bottom:14px;">
+    <div style="display:flex;align-items:center;gap:6px;overflow-x:auto;padding-bottom:8px;">
+      <sc-for list="{{ avgMap.boxes }}" as="b" hint-placeholder-count="5">
+        <div style="display:flex;align-items:center;gap:6px;flex:0 0 auto;">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:3px;">
+            <div style="width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-top:15px solid oklch(0.82 0.10 70);"></div>
+            <span style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.54 0.09 65);">{{ b.waitLabel }}</span>
+          </div>
+          <span style="color:oklch(0.74 0.02 255);font-size:14px;">→</span>
+          <div style="min-width:136px;border:1px solid {{ b.color }};border-radius:10px;overflow:hidden;">
+            <div style="background:{{ b.headBg }};padding:7px 11px;font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace;color:{{ b.color }};">{{ b.name }}</div>
+            <div style="padding:9px 11px;display:flex;flex-direction:column;gap:4px;">
+              <div style="display:flex;justify-content:space-between;font-size:11px;"><span style="color:oklch(0.58 0.02 255);">Working</span><span style="font-family:'JetBrains Mono',monospace;color:oklch(0.40 0.10 155);font-weight:600;">{{ b.touchLabel }}</span></div>
+              <div style="display:flex;justify-content:space-between;font-size:11px;"><span style="color:oklch(0.58 0.02 255);">Waited</span><span style="font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.10 65);">{{ b.waitLabel }}</span></div>
+              <div style="display:flex;justify-content:space-between;font-size:11px;"><span style="color:oklch(0.58 0.02 255);">Agent $</span><span style="font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.14 292);">{{ b.costLabel }}</span></div>
+              <div style="display:flex;justify-content:space-between;font-size:11px;border-top:1px solid oklch(0.95 0.006 255);padding-top:4px;"><span style="color:oklch(0.58 0.02 255);">{{ b.noteKey }}</span><span style="font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.02 255);">{{ b.note }}</span></div>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin:18px 0 4px;">TIMELINE — average card, {{ scopeUpper }}</div>
+    <div style="position:relative;height:132px;">
+      <div style="position:absolute;inset:0;">{{ avgMap.svg }}</div>
+      <sc-for list="{{ avgMap.labels }}" as="l" hint-placeholder-count="10"><span style="{{ l.style }}">{{ l.text }}</span></sc-for>
+      <sc-for list="{{ avgMap.bursts }}" as="bu" hint-placeholder-count="1">
+        <div style="{{ bu.style }}">
+          <span style="width:16px;height:16px;flex:0 0 auto;background:oklch(0.82 0.13 70);clip-path:polygon(50% 0,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%);"></span>
+          <span style="font-size:9.5px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.48 0.10 65);white-space:nowrap;">{{ bu.text }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;border-top:1px solid oklch(0.94 0.006 255);padding-top:14px;">
+      <div style="border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:9px 13px;"><div style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">AVG LEAD TIME</div><div style="font-size:16px;font-weight:600;color:oklch(0.26 0.02 255);">{{ avgMap.lead }}</div></div>
+      <div style="border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:9px 13px;"><div style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">AVG WORKING</div><div style="font-size:16px;font-weight:600;color:oklch(0.40 0.11 155);">{{ avgMap.touch }}</div></div>
+      <div style="border:1px solid oklch(0.89 0.04 155);background:oklch(0.98 0.02 155);border-radius:9px;padding:9px 13px;"><div style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.44 0.09 155);">FLOW EFFICIENCY</div><div style="font-size:16px;font-weight:600;color:oklch(0.40 0.11 155);">{{ avgMap.flow }}</div></div>
+      <div style="border:1px solid oklch(0.90 0.04 292);background:oklch(0.98 0.02 292);border-radius:9px;padding:9px 13px;"><div style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.14 292);">AVG SPEND</div><div style="font-size:16px;font-weight:600;color:oklch(0.48 0.14 292);">{{ avgMap.cost }}</div></div>
+    </div>
+  </div>
+
+  <!-- ===== 04 · READING IT ===== -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:46px 0 32px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">04 — Reading it</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 18px;color:oklch(0.24 0.02 255);">What the map tells you, and the lever</h2>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:13px;">
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px 17px;">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 65);margin-bottom:8px;">THE LONGEST RISE</div>
+      <p style="font-size:13px;line-height:1.5;color:oklch(0.44 0.02 255);margin:0;">The tallest waiting rung is your biggest time sink — here, cards parked in Review. <b style="color:oklch(0.30 0.02 255);">Lever:</b> auto-approve low-risk gates, add an SLA nudge.</p>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px 17px;">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.14 292);margin-bottom:8px;">THE FATTEST $ BOX</div>
+      <p style="font-size:13px;line-height:1.5;color:oklch(0.44 0.02 255);margin:0;">The data box with the most spend is your money sink — Code. <b style="color:oklch(0.30 0.02 255);">Lever:</b> cap context, route routine work to a cheaper, faster model.</p>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px 17px;">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.44 0.10 155);margin-bottom:8px;">FLOW EFFICIENCY</div>
+      <p style="font-size:13px;line-height:1.5;color:oklch(0.44 0.02 255);margin:0;">The one number to trend. Rising means work flows; falling means waiting is creeping back in. <b style="color:oklch(0.30 0.02 255);">Set a target and watch it weekly.</b></p>
+    </div>
+  </div>
+
+  <!-- ===== 05 · THE OVER-TOUCH LENS (exploratory) ===== -->
+  <sc-if value="{{ showOverTouchLens }}" hint-placeholder-val="{{ true }}">
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:46px 0 32px;"></div>
+  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+    <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.14 292);text-transform:uppercase;">05 — A lens we're weighing</span>
+    <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);">not decided</span>
+  </div>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 8px;color:oklch(0.24 0.02 255);">Splitting the valleys: needed vs over-work</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 16px;max-width:730px;">The idea you liked but weren't sure about. A canonical VSM treats all working time as value. This overlay questions that — it floors each valley with <b style="color:oklch(0.40 0.11 155);">necessary</b> vs <b style="color:oklch(0.52 0.13 25);">over-work</b> (the agent grinding an hour where ten minutes would do). It targets our real #1 waste, but it's a <b style="color:oklch(0.30 0.02 255);">departure from the standard map</b>, so treat it as a toggle, not the default.</p>
+
+  <div style="display:flex;gap:10px;background:oklch(0.99 0.01 65);border:1px solid oklch(0.89 0.04 65);border-radius:11px;padding:13px 15px;margin-bottom:18px;max-width:730px;">
+    <span style="font-size:13px;color:oklch(0.52 0.11 65);margin-top:1px;">⚠</span>
+    <span style="font-size:13px;line-height:1.5;color:oklch(0.44 0.03 65);"><b style="color:oklch(0.44 0.10 65);">The open question:</b> "needed" requires a baseline for what a task type should cost — a median per tag, or a human expectation. Without that, over-work is a guess. Worth prototyping the baseline before we commit to this lens.</span>
+  </div>
+
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:22px 24px 20px;margin-bottom:14px;">
+    <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin-bottom:4px;">SAME TIMELINE — <span style="color:oklch(0.42 0.10 155);">green = needed</span>, <span style="color:oklch(0.52 0.13 25);">red = over-work</span></div>
+    <div style="position:relative;height:132px;">
+      <div style="position:absolute;inset:0;">{{ lens.svg }}</div>
+      <sc-for list="{{ lens.labels }}" as="l" hint-placeholder-count="5"><span style="{{ l.style }}">{{ l.text }}</span></sc-for>
+      <sc-for list="{{ lens.bursts }}" as="bu" hint-placeholder-count="1">
+        <div style="{{ bu.style }}">
+          <span style="width:16px;height:16px;flex:0 0 auto;background:oklch(0.66 0.18 25);clip-path:polygon(50% 0,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%);"></span>
+          <span style="font-size:9.5px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.15 25);white-space:nowrap;">{{ bu.text }}</span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;border-top:1px solid oklch(0.94 0.006 255);padding-top:14px;">
+      <div style="border:1px solid oklch(0.89 0.04 155);background:oklch(0.98 0.02 155);border-radius:9px;padding:9px 13px;"><div style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.44 0.09 155);">NEEDED TOUCH</div><div style="font-size:16px;font-weight:600;color:oklch(0.40 0.11 155);">{{ lens.value }}</div></div>
+      <div style="border:1px solid oklch(0.88 0.06 25);background:oklch(0.98 0.02 25);border-radius:9px;padding:9px 13px;"><div style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.13 25);">OVER-WORK</div><div style="font-size:16px;font-weight:600;color:oklch(0.52 0.15 25);">{{ lens.over }}</div></div>
+      <div style="border:1px solid oklch(0.90 0.04 292);background:oklch(0.98 0.02 292);border-radius:9px;padding:9px 13px;"><div style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.14 292);">OVER-PROCESSING</div><div style="font-size:16px;font-weight:600;color:oklch(0.48 0.14 292);">{{ lens.overPct }}</div></div>
+    </div>
+  </div>
+  </sc-if>
+
+</div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1040,&quot;height&quot;:900},&quot;scopeWindow&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Last 20 cards&quot;,&quot;Last 2 weeks&quot;],&quot;default&quot;:&quot;Last 20 cards&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;View&quot;},&quot;showDerivation&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Sections&quot;},&quot;showOverTouchLens&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Sections&quot;}}">
+class Component extends DCLogic {
+  fmtDur(min) { if (min < 60) return Math.round(min) + 'm'; return (min / 60).toFixed(1) + 'h'; }
+
+  heads(name) {
+    const h = {
+      Spec: ['oklch(0.52 0.15 305)', 'oklch(0.97 0.02 305)'],
+      Plan: ['oklch(0.48 0.14 292)', 'oklch(0.97 0.02 292)'],
+      Code: ['oklch(0.46 0.15 250)', 'oklch(0.97 0.02 250)'],
+      Review: ['oklch(0.52 0.11 65)', 'oklch(0.98 0.02 75)'],
+      Deploy: ['oklch(0.44 0.13 155)', 'oklch(0.97 0.02 155)'],
+    };
+    return h[name];
+  }
+
+  // shared sawtooth: rises = wait, valleys = touch. returns {svg, labelEls, waitMids}
+  sawtooth(stages) {
+    const lead = stages.reduce((a, s) => a + s.touch + s.wait, 0);
+    const yT = 22, yB = 80;
+    let x = 0;
+    const pts = [[0, yT]];
+    const labels = [];
+    const waitMids = [];
+    stages.forEach((s, i) => {
+      const ww = (s.wait / lead) * 100, tw = (s.touch / lead) * 100;
+      const w0 = x; x += ww; pts.push([x, yT]);
+      waitMids.push((w0 + x) / 2);
+      labels.push({ mid: (w0 + x) / 2, pos: 'top', text: this.fmtDur(s.wait), color: 'oklch(0.50 0.10 65)' });
+      pts.push([x, yB]);
+      const t0 = x; x += tw; pts.push([x, yB]);
+      labels.push({ mid: (t0 + x) / 2, pos: 'bot', text: this.fmtDur(s.touch), color: 'oklch(0.40 0.10 155)' });
+      if (i < stages.length - 1) pts.push([x, yT]);
+    });
+    const line = 'M ' + pts.map((p) => p[0].toFixed(2) + ',' + p[1]).join(' L ');
+    const svg = React.createElement('svg', {
+      viewBox: '0 0 100 100', preserveAspectRatio: 'none',
+      style: { width: '100%', height: '100%', display: 'block' },
+    }, [React.createElement('path', { key: 'l', d: line, fill: 'none', stroke: 'oklch(0.42 0.02 255)', strokeWidth: 1.4, vectorEffect: 'non-scaling-stroke', strokeLinejoin: 'round' })]);
+    const labelEls = labels.map((l) => ({
+      text: l.text,
+      style: 'position:absolute;left:' + l.mid.toFixed(2) + '%;transform:translateX(-50%);'
+        + (l.pos === 'top' ? 'top:2px;' : 'bottom:2px;')
+        + 'font-size:10px;font-family:JetBrains Mono,monospace;white-space:nowrap;color:' + l.color + ';',
+    }));
+    return { svg, labelEls, waitMids, lead };
+  }
+
+  timeMap(stages, mode, burstText) {
+    const { svg, labelEls, waitMids, lead } = this.sawtooth(stages);
+    // kaizen over the Review wait (index 3)
+    const kmid = waitMids[3];
+    const bursts = [{
+      text: burstText,
+      style: 'position:absolute;left:' + kmid.toFixed(2) + '%;top:18px;transform:translateX(-50%);display:flex;align-items:center;gap:5px;',
+    }];
+    const touch = stages.reduce((a, s) => a + s.touch, 0);
+    const cost = stages.reduce((a, s) => a + s.cost, 0);
+    const boxes = stages.map((s) => ({
+      name: s.name, color: this.heads(s.name)[0], headBg: this.heads(s.name)[1],
+      touchLabel: this.fmtDur(s.touch), waitLabel: this.fmtDur(s.wait),
+      costLabel: '$' + s.cost.toFixed(2),
+      touchPct: Math.round((s.touch / (s.touch + s.wait)) * 100),
+      waitPct: Math.round((s.wait / (s.touch + s.wait)) * 100),
+      ownerLabel: s.owner === 'ai' ? 'Relay AI' : 'You',
+      noteKey: mode === 'avg' ? 'Passes' : 'Owner',
+      note: s.note,
+    }));
+    return {
+      svg, labels: labelEls, bursts, boxes,
+      lead: (lead / 60).toFixed(1) + 'h',
+      touch: (touch / 60).toFixed(1) + 'h',
+      flow: Math.round((touch / lead) * 100) + '%',
+      cost: '$' + cost.toFixed(2),
+    };
+  }
+
+  // over-touch lens: valleys split needed vs over-work
+  touchLens() {
+    const t = [
+      { name: 'Spec', needed: 45, actual: 60 },
+      { name: 'Plan', needed: 40, actual: 45 },
+      { name: 'Code', needed: 90, actual: 195 },
+      { name: 'Review', needed: 40, actual: 40 },
+      { name: 'Deploy', needed: 15, actual: 20 },
+    ];
+    const riser = 18;
+    const totalU = t.reduce((a, s) => a + s.actual, 0) + riser * t.length;
+    const f = 100 / totalU;
+    const yT = 22, yB = 80;
+    let x = 0;
+    const pts = [[0, yT]];
+    const rects = [];
+    const labels = [];
+    let codeMid = 0;
+    t.forEach((s) => {
+      x += riser; pts.push([x, yT]); pts.push([x, yB]);
+      const n0 = x; x += s.needed;
+      const excess = s.actual - s.needed;
+      const e0 = x; x += excess; pts.push([x, yB]); pts.push([x, yT]);
+      rects.push({ x0: n0, w: s.needed, fill: 'oklch(0.60 0.13 155 / 0.20)' });
+      if (excess > 0) rects.push({ x0: e0, w: excess, fill: 'oklch(0.58 0.16 25 / 0.24)' });
+      labels.push({ mid: (n0 + x) / 2, text: this.fmtDur(s.actual), color: 'oklch(0.40 0.02 255)' });
+      if (s.name === 'Code') codeMid = (n0 + x) / 2;
+    });
+    const P = pts.map((p) => [p[0] * f, p[1]]);
+    const line = 'M ' + P.map((p) => p[0].toFixed(2) + ',' + p[1]).join(' L ');
+    const rectEls = rects.map((r, i) => React.createElement('rect', { key: 'r' + i, x: r.x0 * f, y: yB, width: r.w * f, height: 100 - yB, fill: r.fill }));
+    const svg = React.createElement('svg', {
+      viewBox: '0 0 100 100', preserveAspectRatio: 'none',
+      style: { width: '100%', height: '100%', display: 'block' },
+    }, [...rectEls, React.createElement('path', { key: 'l', d: line, fill: 'none', stroke: 'oklch(0.42 0.02 255)', strokeWidth: 1.4, vectorEffect: 'non-scaling-stroke', strokeLinejoin: 'round' })]);
+    const labelEls = labels.map((l) => ({
+      text: l.text,
+      style: 'position:absolute;left:' + (l.mid * f).toFixed(2) + '%;transform:translateX(-50%);bottom:2px;font-size:10px;font-family:JetBrains Mono,monospace;white-space:nowrap;color:' + l.color + ';',
+    }));
+    const bursts = [{
+      text: '1h where 10 min would do',
+      style: 'position:absolute;left:' + (codeMid * f).toFixed(2) + '%;top:18px;transform:translateX(-50%);display:flex;align-items:center;gap:5px;',
+    }];
+    return { svg, labels: labelEls, bursts, value: '3.8h', over: '2.2h', overPct: '36%' };
+  }
+
+  renderVals() {
+    const scope = this.props.scopeWindow ?? 'Last 20 cards';
+    const cardStages = [
+      { name: 'Spec', owner: 'ai', touch: 60, wait: 240, cost: 1.20, note: 'Relay AI' },
+      { name: 'Plan', owner: 'ai', touch: 45, wait: 90, cost: 0.90, note: 'Relay AI' },
+      { name: 'Code', owner: 'ai', touch: 195, wait: 45, cost: 9.00, note: 'Relay AI' },
+      { name: 'Review', owner: 'human', touch: 40, wait: 1275, cost: 0, note: 'You' },
+      { name: 'Deploy', owner: 'ai', touch: 20, wait: 15, cost: 0.40, note: 'Relay AI' },
+    ];
+    const avgStages = [
+      { name: 'Spec', owner: 'ai', touch: 40, wait: 180, cost: 1.20, note: 'first-pass' },
+      { name: 'Plan', owner: 'ai', touch: 35, wait: 90, cost: 0.90, note: 'first-pass' },
+      { name: 'Code', owner: 'ai', touch: 150, wait: 60, cost: 7.00, note: '1.4 loops' },
+      { name: 'Review', owner: 'human', touch: 25, wait: 900, cost: 0, note: '1 gate' },
+      { name: 'Deploy', owner: 'ai', touch: 15, wait: 30, cost: 0.35, note: 'first-pass' },
+    ];
+    return {
+      cardMap: this.timeMap(cardStages, 'card', 'cut the 21h wait'),
+      avgMap: this.timeMap(avgStages, 'avg', '15h avg — biggest waste'),
+      lens: this.touchLens(),
+      scopeUpper: scope.toUpperCase(),
+      showDerivation: this.props.showDerivation ?? true,
+      showOverTouchLens: this.props.showOverTouchLens ?? true,
+    };
+  }
+}
+</script>
+</body>
+</html>
+

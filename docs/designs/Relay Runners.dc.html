@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.32 0.02 255);background:oklch(0.955 0.008 255);-webkit-font-smoothing:antialiased;}
+  button{font-family:inherit;cursor:pointer;}
+  ::-webkit-scrollbar{width:9px;height:9px;}
+  ::-webkit-scrollbar-thumb{background:oklch(0.86 0.01 255);border-radius:6px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  @keyframes rnpulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
+  @keyframes rnblink{0%,49%{opacity:1;}50%,100%{opacity:0;}}
+  @keyframes rnspin{to{transform:rotate(360deg);}}
+</style>
+</helmet>
+
+<div style="height:100vh;display:flex;flex-direction:column;overflow:hidden;">
+
+  <!-- Top bar -->
+  <div style="display:flex;align-items:center;gap:14px;height:53px;padding:0 18px;border-bottom:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);flex:0 0 auto;">
+    <div style="display:flex;align-items:center;gap:9px;">
+      <div style="width:23px;height:23px;border-radius:7px;background:oklch(0.60 0.14 250);display:flex;align-items:center;justify-content:center;position:relative;">
+        <div style="width:8px;height:8px;border-radius:50%;background:oklch(1 0 0);"></div>
+        <div style="position:absolute;right:3px;top:3px;width:4px;height:4px;border-radius:50%;background:oklch(0.60 0.14 250);box-shadow:0 0 0 1.5px oklch(1 0 0);"></div>
+      </div>
+      <span style="font-weight:600;font-size:15px;letter-spacing:-0.02em;">Relay</span>
+    </div>
+    <div style="width:1px;height:18px;background:oklch(0.90 0.006 255);"></div>
+    <div style="display:flex;align-items:center;gap:7px;">
+      <span style="font-size:13px;color:oklch(0.30 0.02 255);font-weight:500;">Runners</span>
+      <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">/runners</span>
+    </div>
+    <span style="flex:1;"></span>
+    <div style="display:flex;gap:4px;background:oklch(0.96 0.004 255);border:1px solid oklch(0.91 0.006 255);border-radius:9px;padding:3px;">
+      <button onClick="{{ onConnected }}" style="{{ sw.connected }}">Connected</button>
+      <button onClick="{{ onEmpty }}" style="{{ sw.empty }}">No runners</button>
+    </div>
+    <div title="Dana Kim" style="width:27px;height:27px;border-radius:50%;background:oklch(0.62 0.13 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;">DK</div>
+  </div>
+
+  <div style="flex:1;overflow-y:auto;background:oklch(0.955 0.008 255);">
+    <div style="max-width:1120px;margin:0 auto;padding:30px 28px 72px 28px;">
+
+      <!-- CONNECTED -->
+      <sc-if value="{{ isConnected }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:6px;">
+          <div>
+            <h1 style="font-size:24px;font-weight:600;letter-spacing:-0.025em;margin:0 0 6px 0;color:oklch(0.24 0.02 255);">Runners</h1>
+            <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0;max-width:600px;">Executors are the machines that actually run node-jobs. Relay hands each job to a runner with a free slot in the right isolation class. This is the instrument you open when a run is stuck.</p>
+          </div>
+          <div style="display:flex;gap:8px;flex:0 0 auto;padding-top:4px;">
+            <span style="display:flex;align-items:center;gap:6px;font-size:11.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.46 0.10 155);background:oklch(0.97 0.03 155);border-radius:6px;padding:5px 10px;"><span style="width:7px;height:7px;border-radius:50%;background:oklch(0.60 0.13 155);"></span>1 online</span>
+            <span style="display:flex;align-items:center;gap:6px;font-size:11.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.10 65);background:oklch(0.98 0.03 75);border-radius:6px;padding:5px 10px;"><span style="width:7px;height:7px;border-radius:50%;background:oklch(0.70 0.13 65);"></span>1 stale</span>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:16px;margin-top:24px;">
+          <sc-for list="{{ runners }}" as="e" hint-placeholder-count="3">
+            <div style="{{ e.panelStyle }}">
+              <!-- header -->
+              <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid oklch(0.94 0.005 255);">
+                <span style="{{ e.freshDot }}"></span>
+                <span style="font-size:15px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:{{ e.nameColor }};letter-spacing:-0.01em;">{{ e.name }}</span>
+                <span style="{{ e.statusStyle }}">{{ e.status }}</span>
+                <span style="flex:1;"></span>
+                <span style="font-size:11.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">{{ e.host }}</span>
+                <span style="font-size:11.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">{{ e.uptime }}</span>
+              </div>
+              <!-- body: left info + right log -->
+              <div style="{{ e.bodyStyle }}">
+                <!-- left -->
+                <div style="flex:1;min-width:0;padding:15px 18px;display:flex;flex-direction:column;gap:16px;">
+                  <div style="display:flex;flex-direction:column;gap:8px;">
+                    <span style="font-size:9.5px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">CAPACITY</span>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                      <sc-for list="{{ e.capacity }}" as="c" hint-placeholder-count="2">
+                        <div style="{{ c.style }}">
+                          <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;">{{ c.name }}</span>
+                          <span style="{{ c.pipStyle }}">
+                            <sc-for list="{{ c.pips }}" as="p" hint-placeholder-count="3"><span style="{{ p }}"></span></sc-for>
+                          </span>
+                          <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;">{{ c.count }}</span>
+                        </div>
+                      </sc-for>
+                    </div>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:8px;">
+                    <span style="font-size:9.5px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">{{ e.workingLabel }}</span>
+                    <sc-for list="{{ e.cards }}" as="w" hint-placeholder-count="2">
+                      <div style="{{ w.rowStyle }}">
+                        <span style="{{ w.dotStyle }}"></span>
+                        <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;color:{{ w.refColor }};">{{ w.ref }}</span>
+                        <span style="font-size:12px;color:oklch(0.46 0.02 255);flex:1;min-width:0;">{{ w.node }}</span>
+                        <span style="{{ w.isoStyle }}">{{ w.iso }}</span>
+                        <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:{{ w.elapColor }};">{{ w.elapsed }}</span>
+                      </div>
+                    </sc-for>
+                    <sc-if value="{{ e.orphanNote }}" hint-placeholder-val="{{ false }}">
+                      <div style="display:flex;align-items:center;gap:8px;background:oklch(0.98 0.03 75);border:1px solid oklch(0.90 0.05 75);border-radius:8px;padding:9px 11px;margin-top:2px;">
+                        <span style="font-size:12px;color:oklch(0.55 0.13 65);">⚠</span>
+                        <span style="font-size:12px;line-height:1.45;color:oklch(0.48 0.10 65);">No heartbeat for <b style="font-family:'JetBrains Mono',ui-monospace,monospace;">4m 08s</b> — going stale. If it doesn't check in within 1m, its job on <b style="font-family:'JetBrains Mono',ui-monospace,monospace;">RLY-149</b> is requeued to another runner.</span>
+                      </div>
+                    </sc-if>
+                  </div>
+                </div>
+                <!-- right: log -->
+                <div style="{{ e.logWrapStyle }}">
+                  <div style="display:flex;align-items:center;gap:7px;padding:9px 13px;border-bottom:1px solid oklch(0.30 0.02 255);">
+                    <span style="{{ e.logDot }}"></span>
+                    <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.70 0.02 255);">{{ e.logTitle }}</span>
+                  </div>
+                  <div style="flex:1;padding:11px 13px;font-family:ui-monospace,'JetBrains Mono',monospace;font-size:11px;line-height:1.7;overflow:hidden;">
+                    <sc-for list="{{ e.log }}" as="l" hint-placeholder-count="6">
+                      <div style="white-space:pre-wrap;"><span style="color:oklch(0.55 0.02 255);">{{ l.time }}</span> <span style="color:{{ l.color }};">{{ l.text }}</span></div>
+                    </sc-for>
+                    <sc-if value="{{ e.live }}" hint-placeholder-val="{{ false }}">
+                      <div><span style="color:oklch(0.55 0.02 255);">{{ e.liveTime }}</span> <span style="color:oklch(0.75 0.14 155);">{{ e.liveText }}</span><span style="display:inline-block;width:7px;height:13px;background:oklch(0.75 0.14 155);margin-left:2px;vertical-align:-2px;animation:rnblink 1s step-end infinite;"></span></div>
+                    </sc-if>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- EMPTY -->
+      <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:62vh;text-align:center;">
+          <div style="width:56px;height:56px;border-radius:16px;background:oklch(0.97 0.004 255);border:1px solid oklch(0.92 0.006 255);display:flex;align-items:center;justify-content:center;margin-bottom:20px;position:relative;">
+            <div style="width:20px;height:20px;border-radius:50%;border:2px dashed oklch(0.72 0.02 255);"></div>
+            <div style="position:absolute;bottom:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:oklch(0.98 0.03 22);border:1px solid oklch(0.90 0.05 22);display:flex;align-items:center;justify-content:center;font-size:11px;color:oklch(0.55 0.16 22);">!</div>
+          </div>
+          <h2 style="font-size:21px;font-weight:600;letter-spacing:-0.02em;margin:0 0 8px 0;color:oklch(0.26 0.02 255);">No runners connected</h2>
+          <p style="font-size:14px;line-height:1.6;color:oklch(0.50 0.02 255);margin:0 0 26px 0;max-width:440px;">Flows are enabled, but there's no machine to run their node-jobs. Cards will queue until a runner checks in. Start one on any dev machine:</p>
+
+          <div style="display:flex;align-items:center;gap:10px;background:oklch(0.20 0.02 255);border-radius:11px;padding:13px 15px;box-shadow:0 8px 24px oklch(0.4 0.03 255/0.12);">
+            <span style="font-size:12.5px;font-family:ui-monospace,'JetBrains Mono',monospace;color:oklch(0.85 0.02 255);"><span style="color:oklch(0.60 0.10 155);">$</span> npx relay-runner --board payments --token <span style="color:oklch(0.70 0.13 65);">rly_live_••••</span></span>
+            <button style="background:oklch(0.30 0.02 255);border:1px solid oklch(0.40 0.02 255);color:oklch(0.82 0.02 255);border-radius:7px;padding:6px 11px;font-size:11.5px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;">Copy</button>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:9px;margin-top:22px;">
+            <span style="width:15px;height:15px;border-radius:50%;border:2px solid oklch(0.85 0.02 255);border-top-color:oklch(0.60 0.14 250);animation:rnspin 0.8s linear infinite;"></span>
+            <span style="font-size:12.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.56 0.02 255);">Waiting for a heartbeat…</span>
+          </div>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1180,&quot;height&quot;:820}}">
+class Component extends DCLogic {
+  state = { view: 'connected' };
+
+  renderVals() {
+    const mono = "'JetBrains Mono',ui-monospace,monospace";
+    const VIOLET='oklch(0.56 0.16 292)', BLUE='oklch(0.60 0.14 250)', GREEN='oklch(0.60 0.13 155)', AMBER='oklch(0.70 0.13 65)', ROSE='oklch(0.62 0.16 22)', GRAY='oklch(0.72 0.02 255)';
+    const v = this.state.view;
+
+    const sw = (k) => `font-size:12px;font-weight:600;padding:6px 12px;border-radius:6px;border:none;` +
+      (v===k ? 'background:oklch(1 0 0);color:oklch(0.28 0.02 255);box-shadow:0 1px 2px oklch(0.5 0.03 255/0.14);' : 'background:transparent;color:oklch(0.52 0.02 255);');
+
+    const capChip = (name, used, total, gone) => {
+      const full = used >= total;
+      const c = gone ? GRAY : (full ? AMBER : GREEN);
+      const pips = [];
+      for (let i=0;i<total;i++) pips.push(`width:8px;height:8px;border-radius:2px;background:${i<used ? (gone?GRAY:c) : 'oklch(0.90 0.01 255)'};`);
+      return {
+        name, count: `${used}/${total}`,
+        style: `display:flex;align-items:center;gap:8px;border:1px solid ${gone?'oklch(0.92 0.006 255)':(full?'oklch(0.89 0.05 65)':'oklch(0.90 0.04 155)')};background:${gone?'oklch(0.98 0.003 255)':(full?'oklch(0.99 0.02 75)':'oklch(0.99 0.015 155)')};border-radius:8px;padding:7px 11px;color:${gone?'oklch(0.58 0.02 255)':'oklch(0.38 0.02 255)'};${gone?'opacity:0.7;':''}`,
+        pipStyle: 'display:flex;gap:3px;',
+        pips,
+      };
+    };
+
+    const RD = [
+      {
+        name:'jeremy-mbp', status:'fresh', host:'jeremy@10.0.4.12', uptime:'up 6d 2h', live:true,
+        cap:[['shared_clean',2,3],['exclusive',1,1]],
+        cards:[
+          { ref:'RLY-150', node:'implement · agent', iso:'exclusive', elapsed:'12:04', active:true },
+          { ref:'RLY-152', node:'brainstorm · agent', iso:'shared_clean#2', elapsed:'2:41', active:true },
+        ],
+        log:[
+          ['14:31:52','[RLY-150] 🔧 Bash  mix test test/relay/export_test.exs', 'cmd'],
+          ['14:32:07','[RLY-150] 🤖 Red test written for task 2 — running it before implementing', 'sys'],
+          ['14:32:40','[RLY-150] ✓ claude finished (34 turns)', 'ok'],
+        ],
+        liveTime:'14:32:41', liveText:'[RLY-150] 🤖 implementing task 2 — streaming CSV writer',
+      },
+      {
+        name:'ci-runner-1', status:'stale', host:'ci@fleet-eu-3', uptime:'last beat 4m 08s ago', live:false, stale:true, staleNote:true,
+        cap:[['shared_clean',1,3],['exclusive',0,1]],
+        cards:[
+          { ref:'RLY-149', node:'smoke · agent', iso:'shared_clean#1', elapsed:'stalled', active:false, dead:true },
+        ],
+        log:[
+          ['14:27:41','[RLY-149] 🔧 Bash  mix phx.server &', 'cmd'],
+          ['14:27:55','[RLY-149] 🤖 booting app to smoke the search endpoint', 'sys'],
+          ['14:28:00','heartbeat sent', 'info'],
+          ['14:28:—','— no heartbeat since — going stale', 'warn'],
+        ],
+      },
+    ];
+
+    const logColor = { sys:'oklch(0.66 0.12 292)', cmd:'oklch(0.72 0.02 255)', info:'oklch(0.78 0.02 255)', warn:'oklch(0.75 0.13 65)', ok:'oklch(0.72 0.13 155)' };
+
+    const runners = RD.map(e => {
+      const gone = e.status !== 'fresh';
+      const freshColor = e.status==='fresh' ? GREEN : (e.status==='stale' ? AMBER : ROSE);
+      return {
+        panelStyle: `background:oklch(1 0 0);border:1px solid ${e.status==='stale'?'oklch(0.90 0.05 75)':(e.status==='gone'?'oklch(0.90 0.03 22)':'oklch(0.92 0.006 255)')};border-radius:13px;overflow:hidden;box-shadow:0 1px 3px oklch(0.55 0.03 255/0.05);`,
+        freshDot: `width:10px;height:10px;border-radius:50%;background:${freshColor};flex:0 0 auto;${e.status==='fresh'?'box-shadow:0 0 0 3px '+freshColor.replace(')','/0.2)')+';':''}`,
+        name: e.name, nameColor: gone?'oklch(0.50 0.02 255)':'oklch(0.24 0.02 255)',
+        status: e.status==='fresh'?'FRESH':(e.status==='stale'?'STALE':'GONE'),
+        statusStyle: `font-size:9.5px;font-weight:700;letter-spacing:0.06em;font-family:${mono};color:${e.status==='fresh'?'oklch(0.44 0.11 155)':(e.status==='stale'?'oklch(0.48 0.11 65)':'oklch(0.52 0.16 22)')};background:${e.status==='fresh'?'oklch(0.96 0.03 155)':(e.status==='stale'?'oklch(0.97 0.03 75)':'oklch(0.97 0.03 22)')};padding:3px 8px;border-radius:5px;`,
+        host: e.host, uptime: e.uptime,
+        bodyStyle: `display:flex;align-items:stretch;${gone?'opacity:0.92;':''}`,
+        capacity: e.cap.map(c => capChip(c[0], c[1], c[2], gone)),
+        workingLabel: e.status==='stale' ? 'AT-RISK JOB' : (gone ? 'ORPHANED JOB' : `WORKING NOW · ${e.cards.length}`),
+        cards: e.cards.map(w => ({
+          rowStyle: `display:flex;align-items:center;gap:10px;border:1px solid ${w.dead?'oklch(0.92 0.03 22)':'oklch(0.94 0.005 255)'};background:${w.dead?'oklch(0.99 0.01 22)':'oklch(0.994 0.002 255)'};border-radius:8px;padding:8px 11px;`,
+          dotStyle: `width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:${w.dead?ROSE:VIOLET};${w.active?'animation:rnpulse 1.1s ease-in-out infinite;':''}`,
+          ref: w.ref, refColor: w.dead?'oklch(0.52 0.12 22)':'oklch(0.30 0.02 255)',
+          node: w.node,
+          iso: w.iso, isoStyle:`font-size:9.5px;font-weight:600;font-family:${mono};color:oklch(0.50 0.02 255);background:oklch(0.96 0.004 255);border-radius:4px;padding:2px 6px;white-space:nowrap;`,
+          elapsed: w.elapsed, elapColor: w.dead?'oklch(0.55 0.14 22)':'oklch(0.52 0.02 255)',
+        })),
+        orphanNote: !!e.staleNote,
+        logWrapStyle: `flex:1.15;min-width:0;background:oklch(0.19 0.02 255);display:flex;flex-direction:column;${gone?'opacity:0.75;':''}`,
+        logDot: `width:7px;height:7px;border-radius:50%;background:${e.live?GREEN:(e.status==='stale'?AMBER:ROSE)};${e.live?'animation:rnpulse 1.1s ease-in-out infinite;':''}`,
+        logTitle: e.live ? 'LOG TAIL · streaming' : (e.status==='stale'?'LOG TAIL · stalled':'LOG TAIL · stopped'),
+        log: e.log.map(l => ({ time:l[0], text:l[1], color: logColor[l[2]] })),
+        live: e.live, liveTime: e.liveTime||'', liveText: e.liveText||'',
+      };
+    });
+
+    return {
+      sw:{ connected:sw('connected'), empty:sw('empty') },
+      onConnected:()=>this.setState({view:'connected'}), onEmpty:()=>this.setState({view:'empty'}),
+      isConnected: v==='connected', isEmpty: v==='empty',
+      runners,
+    };
+  }
+}
+</script>
+</body>
+</html>
+

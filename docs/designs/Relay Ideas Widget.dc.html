@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.30 0.02 255);background:oklch(0.955 0.008 255);-webkit-font-smoothing:antialiased;}
+  a{color:oklch(0.60 0.14 250);text-decoration:none;} a:hover{text-decoration:underline;}
+  button{font-family:inherit;cursor:pointer;}
+  input,textarea{font-family:inherit;}
+  textarea{resize:none;}
+  @keyframes riflash{0%{background:oklch(0.95 0.05 155);}100%{background:oklch(1 0 0);}}
+  @keyframes ripulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+  @keyframes ririse{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+</style>
+</helmet>
+
+<section style="min-width:2340px;padding:56px 60px 40px 60px;">
+
+  <!-- Intro turn 2 -->
+  <div style="max-width:820px;margin-bottom:44px;">
+    <div style="display:inline-flex;align-items:center;gap:8px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.46 0.13 292);background:oklch(0.97 0.02 292);border:1px solid oklch(0.90 0.04 292);border-radius:999px;padding:5px 12px;margin-bottom:20px;">TURN 2 · IDEAS AT SCALE</div>
+    <h1 style="font-size:40px;line-height:1.06;letter-spacing:-0.03em;font-weight:600;color:oklch(0.22 0.02 255);margin:0 0 16px 0;">When there are hundreds of ideas.</h1>
+    <p style="font-size:16px;line-height:1.65;color:oklch(0.46 0.02 255);margin:0 0 10px 0;">Taking <a href="#1b">1b</a> further. A static roadmap peek breaks at scale, so three ways to stay legible and kill duplicates — the UserVoice move. <b style="color:oklch(0.30 0.02 255);">Search-first</b> (<a href="#2a">2a</a>) finds the dup before you post; <b style="color:oklch(0.30 0.02 255);">post-then-merge</b> (<a href="#2b">2b</a>) is your "post, then see similar" idea; <b style="color:oklch(0.30 0.02 255);">the board at scale</b> (<a href="#2c">2c</a>) is what the roadmap grows into.</p>
+    <p style="font-size:13px;line-height:1.6;color:oklch(0.58 0.02 255);margin:0;">Every card here votes for real — type in the search fields and watch the board respond. Turn 1 is still below for reference.</p>
+  </div>
+
+  <!-- Options row turn 2 -->
+  <div style="display:flex;gap:56px;align-items:flex-start;flex-wrap:nowrap;margin-bottom:24px;">
+
+    <!-- ============ 2a ============ -->
+    <div id="2a" style="flex:0 0 auto;width:820px;">
+      <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px;">
+        <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;font-weight:600;color:oklch(1 0 0);background:oklch(0.60 0.14 250);border-radius:6px;padding:3px 9px;">2a</span>
+        <span style="font-size:19px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.24 0.02 255);">Search-first submit</span>
+      </div>
+      <p style="font-size:13.5px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 6px 0;max-width:600px;">1b's right pane stops being a fixed roadmap and becomes a live search of the whole board as you type your title — so you meet the duplicate <i>before</i> posting and add your +1 instead.</p>
+      <div style="display:inline-flex;align-items:center;gap:6px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;font-weight:600;letter-spacing:0.04em;color:oklch(0.50 0.02 255);background:oklch(0.96 0.006 255);border:1px solid oklch(0.91 0.006 255);border-radius:5px;padding:3px 8px;margin-bottom:18px;">SEARCHES EVERY IDEA · DEDUPES AS YOU TYPE</div>
+
+      <div style="position:relative;height:452px;border-radius:13px;border:1px solid oklch(0.88 0.008 255);background:oklch(0.955 0.008 255);overflow:hidden;box-shadow:0 18px 40px -20px oklch(0.4 0.03 255/0.4);">
+        <div style="position:absolute;inset:0;background:oklch(0.30 0.03 255/0.28);"></div>
+        <div style="position:absolute;inset:22px;background:oklch(1 0 0);border-radius:13px;box-shadow:0 24px 60px -18px oklch(0.3 0.05 255/0.5);overflow:hidden;display:flex;">
+
+          <!-- LEFT form -->
+          <div style="flex:0 0 45%;border-right:1px solid oklch(0.93 0.006 255);padding:20px 22px;display:flex;flex-direction:column;">
+            <sc-if value="{{ dCompose }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;height:100%;">
+                <div style="font-size:17px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.22 0.02 255);">What do you need?</div>
+                <div style="font-size:12px;color:oklch(0.56 0.02 255);margin-top:3px;">We check every idea on the board as you type</div>
+
+                <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);margin:18px 0 6px 0;">THE IDEA</div>
+                <div style="position:relative;">
+                  <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);width:13px;height:13px;border:2px solid oklch(0.66 0.02 255);border-radius:50%;"></span>
+                  <span style="position:absolute;left:20px;top:calc(50% + 4px);width:6px;height:2px;background:oklch(0.66 0.02 255);transform:rotate(45deg);"></span>
+                  <input value="{{ dQ }}" onInput="{{ dOnType }}" placeholder="e.g. Schedule reports to my email" style="width:100%;border:1px solid oklch(0.89 0.008 255);border-radius:8px;padding:9px 11px 9px 32px;font-size:13px;color:oklch(0.28 0.02 255);outline:none;background:oklch(0.995 0.002 255);" style-focus="border-color:oklch(0.60 0.14 250);box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);background:oklch(1 0 0);" />
+                </div>
+
+                <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);margin:14px 0 6px 0;">DETAILS <span style="font-weight:400;color:oklch(0.68 0.02 255);">· optional</span></div>
+                <textarea value="{{ dDetail }}" onInput="{{ dOnDetail }}" placeholder="What are you trying to do?" style="width:100%;flex:1;min-height:70px;border:1px solid oklch(0.89 0.008 255);border-radius:8px;padding:9px 11px;font-size:13px;line-height:1.5;color:oklch(0.28 0.02 255);outline:none;background:oklch(0.995 0.002 255);" style-focus="border-color:oklch(0.60 0.14 250);box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);background:oklch(1 0 0);"></textarea>
+
+                <button onClick="{{ dPost }}" style="width:100%;background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:9px;padding:11px;font-size:14px;font-weight:600;margin-top:16px;">Post as a new idea →</button>
+                <div style="display:flex;align-items:center;gap:6px;margin-top:10px;">
+                  <div style="width:16px;height:16px;border-radius:50%;background:oklch(0.62 0.13 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:600;flex:0 0 auto;">JR</div>
+                  <span style="font-size:10.5px;color:oklch(0.58 0.02 255);">Only if nothing on the right already covers it</span>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ dDone }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;height:100%;">
+                <div style="width:46px;height:46px;border-radius:50%;background:oklch(0.60 0.13 155);display:flex;align-items:center;justify-content:center;color:oklch(1 0 0);font-size:23px;animation:ririse 0.3s ease;">✓</div>
+                <div style="font-size:18px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.24 0.02 255);margin-top:14px;">Posted — and it's not a dup.</div>
+                <div style="font-size:13px;line-height:1.55;color:oklch(0.52 0.02 255);margin-top:7px;max-width:280px;">You already saw everything similar, so this one's genuinely new. It's under review now.</div>
+                <button onClick="{{ dReset }}" style="background:transparent;border:none;color:oklch(0.55 0.02 255);border-radius:9px;padding:9px 12px;font-size:13px;font-weight:600;margin-top:18px;">Add another</button>
+              </div>
+            </sc-if>
+          </div>
+
+          <!-- RIGHT live search -->
+          <div style="flex:1;background:oklch(0.985 0.004 255);padding:18px 18px 0 18px;overflow:hidden;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;font-weight:600;letter-spacing:0.05em;color:oklch(0.48 0.02 255);">{{ dHeader }}</span>
+              <span style="width:6px;height:6px;border-radius:50%;background:oklch(0.60 0.14 250);animation:ripulse 1.6s ease-in-out infinite;"></span>
+            </div>
+            <div style="font-size:11px;color:oklch(0.60 0.02 255);margin:3px 0 12px 0;">{{ dSub }}</div>
+
+            <sc-if value="{{ dShowBanner }}" hint-placeholder-val="{{ false }}">
+              <div style="border:1px solid oklch(0.86 0.05 65);background:oklch(0.98 0.03 75);border-radius:10px;padding:10px 11px;margin-bottom:12px;animation:ririse 0.28s ease;">
+                <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.05em;color:oklch(0.52 0.12 65);margin-bottom:7px;">⚠ THIS LOOKS LIKE A DUPLICATE</div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <div style="flex:1;min-width:0;font-size:13px;font-weight:600;color:oklch(0.28 0.02 255);line-height:1.3;">{{ dBest.title }}</div>
+                  <button onClick="{{ dBest.onVote }}" style="{{ dBest.voteStyle }}">{{ dBest.voteLabel }}</button>
+                </div>
+                <div style="font-size:11px;color:oklch(0.50 0.06 65);margin-top:6px;">Upvote it and skip posting a copy.</div>
+              </div>
+            </sc-if>
+
+            <div style="display:flex;flex-direction:column;gap:8px;overflow-y:auto;padding-bottom:16px;">
+              <sc-for list="{{ dResults }}" as="item" hint-placeholder-count="4">
+                <div style="display:flex;align-items:center;gap:11px;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:9px 11px;">
+                  <div style="flex:1;min-width:0;">
+                    <div style="font-size:12.5px;font-weight:500;color:oklch(0.28 0.02 255);line-height:1.3;">{{ item.title }}</div>
+                    <div style="display:flex;align-items:center;gap:9px;margin-top:5px;">
+                      <span style="display:flex;align-items:center;gap:5px;"><span style="{{ item.statusDot }}"></span><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;color:oklch(0.55 0.02 255);">{{ item.statusLabel }}</span></span>
+                      <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;color:oklch(0.62 0.02 255);">{{ item.tag }}</span>
+                    </div>
+                  </div>
+                  <button onClick="{{ item.onVote }}" style="{{ item.voteStyle }}">{{ item.voteLabel }}</button>
+                </div>
+              </sc-for>
+              <sc-if value="{{ dEmpty }}" hint-placeholder-val="{{ false }}">
+                <div style="text-align:center;padding:26px 12px;">
+                  <div style="font-size:13px;font-weight:600;color:oklch(0.34 0.02 255);">No similar ideas.</div>
+                  <div style="font-size:12px;color:oklch(0.58 0.02 255);margin-top:4px;">You'd be the first to raise this — post it on the left.</div>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 2b ============ -->
+    <div id="2b" style="flex:0 0 auto;width:560px;">
+      <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px;">
+        <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;font-weight:600;color:oklch(1 0 0);background:oklch(0.60 0.14 250);border-radius:6px;padding:3px 9px;">2b</span>
+        <span style="font-size:19px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.24 0.02 255);">Post, then merge</span>
+      </div>
+      <p style="font-size:13.5px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 6px 0;max-width:520px;">Your other idea: post first, dedupe second. Zero friction to submit; the moment you do, Relay surfaces the closest matches and lets you merge your vote in — a clean board without slowing you down.</p>
+      <div style="display:inline-flex;align-items:center;gap:6px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;font-weight:600;letter-spacing:0.04em;color:oklch(0.50 0.02 255);background:oklch(0.96 0.006 255);border:1px solid oklch(0.91 0.006 255);border-radius:5px;padding:3px 8px;margin-bottom:18px;">QUICK POST · SERVER-SIDE MATCH · MERGE</div>
+
+      <div style="position:relative;height:452px;border-radius:13px;border:1px solid oklch(0.88 0.008 255);background:oklch(1 0 0);overflow:hidden;box-shadow:0 18px 40px -20px oklch(0.4 0.03 255/0.4);display:flex;flex-direction:column;">
+
+        <sc-if value="{{ ePostStep }}" hint-placeholder-val="{{ true }}">
+          <div style="padding:22px 22px;display:flex;flex-direction:column;height:100%;">
+            <div style="font-size:17px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.22 0.02 255);">Post an idea</div>
+            <div style="font-size:12px;color:oklch(0.56 0.02 255);margin-top:3px;">Acme Analytics · takes a few seconds</div>
+            <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);margin:20px 0 6px 0;">IDEA</div>
+            <input value="{{ eTitle }}" onInput="{{ eOnTitle }}" placeholder="One line — what should change?" style="width:100%;border:1px solid oklch(0.89 0.008 255);border-radius:8px;padding:9px 11px;font-size:13px;color:oklch(0.28 0.02 255);outline:none;background:oklch(0.995 0.002 255);" style-focus="border-color:oklch(0.60 0.14 250);box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);background:oklch(1 0 0);" />
+            <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);margin:14px 0 6px 0;">DETAILS <span style="font-weight:400;color:oklch(0.68 0.02 255);">· optional</span></div>
+            <textarea value="{{ eDetail }}" onInput="{{ eOnDetail }}" placeholder="Any context that helps." style="width:100%;flex:1;min-height:90px;border:1px solid oklch(0.89 0.008 255);border-radius:8px;padding:9px 11px;font-size:13px;line-height:1.5;color:oklch(0.28 0.02 255);outline:none;background:oklch(0.995 0.002 255);" style-focus="border-color:oklch(0.60 0.14 250);box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);background:oklch(1 0 0);"></textarea>
+            <button onClick="{{ ePost }}" style="width:100%;background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:9px;padding:11px;font-size:14px;font-weight:600;margin-top:16px;">Post idea →</button>
+            <div style="text-align:center;font-size:10.5px;color:oklch(0.60 0.02 255);margin-top:9px;">We'll check for near-duplicates right after.</div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ eMergeStep }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;height:100%;">
+            <div style="flex:0 0 auto;padding:18px 20px 12px 20px;border-bottom:1px solid oklch(0.93 0.006 255);">
+              <div style="font-size:16px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.22 0.02 255);">Before this goes live…</div>
+              <div style="font-size:12.5px;color:oklch(0.54 0.02 255);margin-top:3px;">We found <b style="color:oklch(0.34 0.02 255);">{{ eCount }}</b> that look similar. Add your weight to one, or keep yours.</div>
+            </div>
+            <div style="flex:1;overflow-y:auto;padding:14px 20px;">
+              <div style="border:1px solid oklch(0.86 0.06 250);background:oklch(0.985 0.02 250);border-radius:9px;padding:10px 12px;margin-bottom:16px;">
+                <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:8.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.50 0.13 250);margin-bottom:5px;">YOUR NEW IDEA</div>
+                <div style="font-size:13.5px;font-weight:600;color:oklch(0.26 0.02 255);line-height:1.3;">{{ eYourTitle }}</div>
+              </div>
+              <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);margin-bottom:9px;">ALREADY ON THE BOARD</div>
+              <div style="display:flex;flex-direction:column;gap:9px;">
+                <sc-for list="{{ eCandidates }}" as="item" hint-placeholder-count="3">
+                  <div style="border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:10px 11px;">
+                    <div style="display:flex;align-items:center;gap:10px;">
+                      <div style="flex:1;min-width:0;">
+                        <div style="font-size:12.5px;font-weight:500;color:oklch(0.28 0.02 255);line-height:1.3;">{{ item.title }}</div>
+                        <div style="display:flex;align-items:center;gap:9px;margin-top:5px;">
+                          <span style="display:flex;align-items:center;gap:5px;"><span style="{{ item.statusDot }}"></span><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;color:oklch(0.55 0.02 255);">{{ item.statusLabel }}</span></span>
+                          <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;color:oklch(0.62 0.02 255);">{{ item.voteLabel }} votes</span>
+                        </div>
+                      </div>
+                      <button onClick="{{ item.onMerge }}" style="font-size:11.5px;font-weight:600;color:oklch(0.50 0.13 250);background:oklch(1 0 0);border:1px solid oklch(0.80 0.06 250);border-radius:8px;padding:7px 11px;flex:0 0 auto;white-space:nowrap;">Merge my +1</button>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <div style="flex:0 0 auto;padding:13px 20px;border-top:1px solid oklch(0.93 0.006 255);background:oklch(0.99 0.002 255);">
+              <button onClick="{{ eKeep }}" style="width:100%;background:oklch(1 0 0);border:1px solid oklch(0.88 0.01 255);color:oklch(0.38 0.02 255);border-radius:9px;padding:10px;font-size:13px;font-weight:600;">None match — post mine as new</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ eDoneStep }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;height:100%;padding:28px;">
+            <div style="width:46px;height:46px;border-radius:50%;background:oklch(0.60 0.13 155);display:flex;align-items:center;justify-content:center;color:oklch(1 0 0);font-size:23px;animation:ririse 0.3s ease;">✓</div>
+            <sc-if value="{{ eResultMerged }}" hint-placeholder-val="{{ false }}">
+              <div>
+                <div style="font-size:18px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.24 0.02 255);margin-top:14px;">Merged. Nice — no dup.</div>
+                <div style="font-size:13px;line-height:1.55;color:oklch(0.52 0.02 255);margin-top:7px;max-width:320px;">You backed <b style="color:oklch(0.34 0.02 255);">{{ eResultTitle }}</b> — now <b style="color:oklch(0.34 0.02 255);">{{ eResultVotes }}</b> votes. Your details rode along as a comment.</div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ eDoneNew }}" hint-placeholder-val="{{ false }}">
+              <div>
+                <div style="font-size:18px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.24 0.02 255);margin-top:14px;">Posted as new. That was easy.</div>
+                <div style="font-size:13px;line-height:1.55;color:oklch(0.52 0.02 255);margin-top:7px;max-width:300px;">It's under review and on the public board — we'll keep watching for dups.</div>
+              </div>
+            </sc-if>
+            <button onClick="{{ eReset }}" style="background:transparent;border:none;color:oklch(0.55 0.02 255);border-radius:9px;padding:9px 12px;font-size:13px;font-weight:600;margin-top:18px;">Post another</button>
+          </div>
+        </sc-if>
+
+      </div>
+    </div>
+
+    <!-- ============ 2c ============ -->
+    <div id="2c" style="flex:0 0 auto;width:620px;">
+      <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px;">
+        <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;font-weight:600;color:oklch(1 0 0);background:oklch(0.60 0.14 250);border-radius:6px;padding:3px 9px;">2c</span>
+        <span style="font-size:19px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.24 0.02 255);">The board at scale</span>
+      </div>
+      <p style="font-size:13.5px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 6px 0;max-width:560px;">What the roadmap peek grows into: a searchable, sortable, filterable public board. Hundreds of ideas stay legible — search, filter by status, sort by what's trending, vote inline.</p>
+      <div style="display:inline-flex;align-items:center;gap:6px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;font-weight:600;letter-spacing:0.04em;color:oklch(0.50 0.02 255);background:oklch(0.96 0.006 255);border:1px solid oklch(0.91 0.006 255);border-radius:5px;padding:3px 8px;margin-bottom:18px;">PUBLIC · SEARCH · SORT · FILTER</div>
+
+      <div style="height:452px;border-radius:13px;border:1px solid oklch(0.88 0.008 255);background:oklch(1 0 0);overflow:hidden;box-shadow:0 18px 40px -20px oklch(0.4 0.03 255/0.4);display:flex;flex-direction:column;">
+        <!-- header -->
+        <div style="flex:0 0 auto;padding:15px 16px 12px 16px;border-bottom:1px solid oklch(0.93 0.006 255);">
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:11px;">
+            <div style="flex:1;position:relative;">
+              <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);width:12px;height:12px;border:2px solid oklch(0.66 0.02 255);border-radius:50%;"></span>
+              <span style="position:absolute;left:19px;top:calc(50% + 4px);width:5px;height:2px;background:oklch(0.66 0.02 255);transform:rotate(45deg);"></span>
+              <input value="{{ fQ }}" onInput="{{ fOnType }}" placeholder="Search ideas…" style="width:100%;border:1px solid oklch(0.89 0.008 255);border-radius:8px;padding:8px 11px 8px 31px;font-size:13px;color:oklch(0.28 0.02 255);outline:none;background:oklch(0.995 0.002 255);" style-focus="border-color:oklch(0.60 0.14 250);box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);background:oklch(1 0 0);" />
+            </div>
+            <button style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:8px;padding:8px 13px;font-size:12.5px;font-weight:600;flex:0 0 auto;white-space:nowrap;">＋ New idea</button>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <div style="display:inline-flex;background:oklch(0.96 0.004 255);border:1px solid oklch(0.91 0.006 255);border-radius:9px;padding:3px;gap:2px;">
+              <sc-for list="{{ fSortTabs }}" as="t" hint-placeholder-count="3">
+                <button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.label }}</button>
+              </sc-for>
+            </div>
+            <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:oklch(0.58 0.02 255);white-space:nowrap;">{{ fShowing }} of {{ fTotal }}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:10px;overflow-x:auto;padding-bottom:2px;">
+            <sc-for list="{{ fStatusChips }}" as="chip" hint-placeholder-count="5">
+              <button onClick="{{ chip.onClick }}" style="{{ chip.style }}">{{ chip.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+        <!-- list -->
+        <div style="flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:8px;background:oklch(0.985 0.004 255);">
+          <sc-for list="{{ fList }}" as="item" hint-placeholder-count="7">
+            <div style="display:flex;align-items:center;gap:11px;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:10px 12px;">
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:13px;font-weight:500;color:oklch(0.28 0.02 255);line-height:1.3;">{{ item.title }}</div>
+                <div style="display:flex;align-items:center;gap:10px;margin-top:5px;">
+                  <span style="display:flex;align-items:center;gap:5px;"><span style="{{ item.statusDot }}"></span><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;color:oklch(0.55 0.02 255);">{{ item.statusLabel }}</span></span>
+                  <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;color:oklch(0.62 0.02 255);">{{ item.tag }}</span>
+                </div>
+              </div>
+              <button onClick="{{ item.onVote }}" style="{{ item.voteStyle }}">{{ item.voteLabel }}</button>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Turn 1 divider -->
+  <div style="display:flex;align-items:center;gap:14px;margin:44px 0 8px 0;max-width:900px;">
+    <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:600;letter-spacing:0.06em;color:oklch(0.62 0.02 255);">↓ TURN 1 · ORIGINAL SUBMIT WIDGETS</span>
+    <span style="flex:1;height:1px;background:oklch(0.90 0.006 255);"></span>
+  </div>
+</section>
+
+<section style="min-width:2280px;padding:24px 60px 120px 60px;">
+
+  <!-- Intro -->
+  <div style="max-width:760px;margin-bottom:44px;">
+    <div style="display:inline-flex;align-items:center;gap:8px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:600;letter-spacing:0.08em;color:oklch(0.46 0.13 292);background:oklch(0.97 0.02 292);border:1px solid oklch(0.90 0.04 292);border-radius:999px;padding:5px 12px;margin-bottom:20px;">TURN 1 · SUBMIT-AN-IDEA WIDGET</div>
+    <h1 style="font-size:40px;line-height:1.06;letter-spacing:-0.03em;font-weight:600;color:oklch(0.22 0.02 255);margin:0 0 16px 0;">Three ways to open Relay from inside your product.</h1>
+    <p style="font-size:16px;line-height:1.65;color:oklch(0.46 0.02 255);margin:0;">Each one is <b style="color:oklch(0.30 0.02 255);">embedded</b> — the user never leaves your app, never sees a terminal, never has to be a developer. All three feed the same Relay board. Try each, then tell me which direction (<a href="#1a">1a</a> / <a href="#1b">1b</a> / <a href="#1c">1c</a>).</p>
+  </div>
+
+  <!-- Options row -->
+  <div style="display:flex;gap:56px;align-items:flex-start;flex-wrap:nowrap;">
+
+    <!-- ============ 1a ============ -->
+    <div id="1a" style="flex:0 0 auto;width:560px;">
+      <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px;">
+        <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;font-weight:600;color:oklch(1 0 0);background:oklch(0.60 0.14 250);border-radius:6px;padding:3px 9px;">1a</span>
+        <span style="font-size:19px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.24 0.02 255);">Corner composer</span>
+      </div>
+      <p style="font-size:13.5px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 6px 0;max-width:520px;">The lowest-friction path. One box, ten seconds. As you type, Relay quietly surfaces matching ideas so you can pile on instead of duplicating.</p>
+      <div style="display:inline-flex;align-items:center;gap:6px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;font-weight:600;letter-spacing:0.04em;color:oklch(0.50 0.02 255);background:oklch(0.96 0.006 255);border:1px solid oklch(0.91 0.006 255);border-radius:5px;padding:3px 8px;margin-bottom:18px;">ACCESS · ANYONE SIGNED IN</div>
+
+      <!-- host frame -->
+      <div style="position:relative;height:440px;border-radius:13px;border:1px solid oklch(0.88 0.008 255);background:oklch(1 0 0);overflow:hidden;box-shadow:0 18px 40px -20px oklch(0.4 0.03 255/0.4);">
+        <!-- host topbar -->
+        <div style="display:flex;align-items:center;gap:8px;height:38px;padding:0 13px;border-bottom:1px solid oklch(0.93 0.006 255);background:oklch(0.985 0.004 255);">
+          <span style="width:9px;height:9px;border-radius:50%;background:oklch(0.86 0.02 30);"></span>
+          <span style="width:9px;height:9px;border-radius:50%;background:oklch(0.90 0.03 90);"></span>
+          <span style="width:9px;height:9px;border-radius:50%;background:oklch(0.88 0.03 150);"></span>
+          <span style="flex:1;"></span>
+          <span style="font-size:11px;color:oklch(0.60 0.02 255);">app.acme-analytics.com</span>
+          <span style="flex:1;"></span>
+          <span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:oklch(0.46 0.13 292);background:oklch(0.97 0.02 292);border:1px solid oklch(0.90 0.04 292);border-radius:6px;padding:3px 8px;"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.56 0.16 292);"></span>Ideas</span>
+        </div>
+        <!-- faint host content -->
+        <div style="position:absolute;inset:38px 0 0 0;padding:16px;opacity:0.4;filter:blur(0.4px);pointer-events:none;">
+          <div style="width:140px;height:11px;border-radius:4px;background:oklch(0.90 0.01 255);margin-bottom:14px;"></div>
+          <div style="display:flex;gap:10px;margin-bottom:14px;">
+            <div style="flex:1;height:58px;border-radius:9px;background:oklch(0.96 0.006 255);border:1px solid oklch(0.93 0.006 255);"></div>
+            <div style="flex:1;height:58px;border-radius:9px;background:oklch(0.96 0.006 255);border:1px solid oklch(0.93 0.006 255);"></div>
+            <div style="flex:1;height:58px;border-radius:9px;background:oklch(0.96 0.006 255);border:1px solid oklch(0.93 0.006 255);"></div>
+          </div>
+          <div style="height:150px;border-radius:10px;background:oklch(0.97 0.005 255);border:1px solid oklch(0.93 0.006 255);"></div>
+        </div>
+
+        <!-- composer panel -->
+        <div style="position:absolute;right:16px;bottom:16px;width:328px;background:oklch(1 0 0);border:1px solid oklch(0.90 0.008 255);border-radius:13px;box-shadow:0 20px 44px -14px oklch(0.35 0.04 255/0.42);overflow:hidden;">
+
+          <sc-if value="{{ aCompose }}" hint-placeholder-val="{{ true }}">
+            <div style="padding:15px 15px 13px 15px;">
+              <div style="display:flex;align-items:center;gap:9px;margin-bottom:3px;">
+                <div style="width:24px;height:24px;border-radius:7px;background:oklch(0.60 0.14 250);display:flex;align-items:center;justify-content:center;position:relative;flex:0 0 auto;">
+                  <div style="width:8px;height:8px;border-radius:50%;background:oklch(1 0 0);"></div>
+                  <div style="position:absolute;right:3px;top:3px;width:4px;height:4px;border-radius:50%;background:oklch(0.60 0.14 250);box-shadow:0 0 0 1.5px oklch(1 0 0);"></div>
+                </div>
+                <div>
+                  <div style="font-size:14px;font-weight:600;letter-spacing:-0.01em;color:oklch(0.24 0.02 255);">Have an idea?</div>
+                  <div style="font-size:11px;color:oklch(0.58 0.02 255);">For Acme Analytics · takes 10 seconds</div>
+                </div>
+              </div>
+              <textarea value="{{ aText }}" onInput="{{ aOnType }}" placeholder="e.g. Let me export charts as PNG, not just CSV" style="width:100%;height:74px;margin-top:11px;border:1px solid oklch(0.89 0.008 255);border-radius:9px;padding:10px 11px;font-size:13px;line-height:1.5;color:oklch(0.28 0.02 255);outline:none;background:oklch(0.995 0.002 255);" style-focus="border-color:oklch(0.60 0.14 250);box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);background:oklch(1 0 0);"></textarea>
+
+              <sc-if value="{{ aShowMatch }}" hint-placeholder-val="{{ false }}">
+                <div style="margin-top:11px;animation:ririse 0.28s ease;">
+                  <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);margin-bottom:7px;">SIMILAR — ALREADY ON THE BOARD</div>
+                  <div style="display:flex;align-items:center;gap:10px;border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:9px 10px;background:oklch(0.99 0.002 255);">
+                    <div style="flex:1;">
+                      <div style="font-size:12.5px;font-weight:500;color:oklch(0.28 0.02 255);line-height:1.3;">PNG / SVG chart export</div>
+                      <div style="display:flex;align-items:center;gap:5px;margin-top:3px;"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.60 0.14 250);"></span><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;color:oklch(0.52 0.10 250);">in progress · 128 votes</span></div>
+                    </div>
+                    <button onClick="{{ aUpvote }}" style="{{ aVoteStyle }}">{{ aVoteLabel }}</button>
+                  </div>
+                </div>
+              </sc-if>
+
+              <div style="display:flex;align-items:center;gap:9px;margin-top:13px;">
+                <button onClick="{{ aSend }}" style="flex:1;background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:9px;padding:10px;font-size:13.5px;font-weight:600;">Send idea →</button>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:10px;">
+                <div style="width:16px;height:16px;border-radius:50%;background:oklch(0.62 0.13 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:600;flex:0 0 auto;">JR</div>
+                <span style="font-size:10.5px;color:oklch(0.58 0.02 255);">Posting as jordan@acme.com · you can watch it after</span>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ aDone }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:20px 16px 16px 16px;">
+              <div style="display:flex;flex-direction:column;align-items:center;text-align:center;">
+                <div style="width:42px;height:42px;border-radius:50%;background:oklch(0.60 0.13 155);display:flex;align-items:center;justify-content:center;color:oklch(1 0 0);font-size:21px;animation:ririse 0.3s ease;">✓</div>
+                <div style="font-size:17px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.24 0.02 255);margin-top:12px;">Sent. That was easy.</div>
+                <div style="font-size:12.5px;line-height:1.5;color:oklch(0.52 0.02 255);margin-top:5px;max-width:250px;">It's on the Acme roadmap. We'll email you when it moves.</div>
+              </div>
+              <div style="margin-top:15px;border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:10px 11px;background:oklch(0.994 0.002 255);">
+                <div style="font-size:12.5px;font-weight:500;color:oklch(0.30 0.02 255);line-height:1.4;">{{ aReceipt }}</div>
+                <div style="display:flex;align-items:center;gap:6px;margin-top:7px;"><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;background:oklch(0.96 0.006 255);color:oklch(0.50 0.02 255);padding:2px 7px;border-radius:5px;">UNDER REVIEW</span><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;color:oklch(0.62 0.02 255);">just now</span></div>
+              </div>
+              <div style="display:flex;gap:9px;margin-top:14px;">
+                <button style="flex:1;background:oklch(1 0 0);border:1px solid oklch(0.88 0.01 255);color:oklch(0.36 0.02 255);border-radius:9px;padding:9px;font-size:12.5px;font-weight:600;">Watch on the board</button>
+                <button onClick="{{ aReset }}" style="background:transparent;border:none;color:oklch(0.55 0.02 255);border-radius:9px;padding:9px 12px;font-size:12.5px;font-weight:600;">Add another</button>
+              </div>
+            </div>
+          </sc-if>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1b ============ -->
+    <div id="1b" style="flex:0 0 auto;width:820px;">
+      <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px;">
+        <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;font-weight:600;color:oklch(1 0 0);background:oklch(0.60 0.14 250);border-radius:6px;padding:3px 9px;">1b</span>
+        <span style="font-size:19px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.24 0.02 255);">Sheet + live roadmap</span>
+      </div>
+      <p style="font-size:13.5px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 6px 0;max-width:600px;">You submit on the left while the real roadmap breathes on the right. Transparency is the whole point — you see exactly what's shipped, planned, and in flight before you ask.</p>
+      <div style="display:inline-flex;align-items:center;gap:6px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;font-weight:600;letter-spacing:0.04em;color:oklch(0.50 0.02 255);background:oklch(0.96 0.006 255);border:1px solid oklch(0.91 0.006 255);border-radius:5px;padding:3px 8px;margin-bottom:18px;">ACCESS · PUBLIC BOARD · SIGNED-IN SUBMIT</div>
+
+      <!-- host frame -->
+      <div style="position:relative;height:440px;border-radius:13px;border:1px solid oklch(0.88 0.008 255);background:oklch(0.955 0.008 255);overflow:hidden;box-shadow:0 18px 40px -20px oklch(0.4 0.03 255/0.4);">
+        <!-- scrim -->
+        <div style="position:absolute;inset:0;background:oklch(0.30 0.03 255/0.28);"></div>
+        <!-- modal -->
+        <div style="position:absolute;inset:24px;background:oklch(1 0 0);border-radius:13px;box-shadow:0 24px 60px -18px oklch(0.3 0.05 255/0.5);overflow:hidden;display:flex;">
+
+          <!-- LEFT: form -->
+          <div style="flex:0 0 46%;border-right:1px solid oklch(0.93 0.006 255);padding:20px 22px;display:flex;flex-direction:column;">
+            <sc-if value="{{ bCompose }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;height:100%;">
+                <div style="font-size:17px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.22 0.02 255);">Tell us what you need</div>
+                <div style="font-size:12px;color:oklch(0.56 0.02 255);margin-top:3px;">Acme Analytics · goes straight to the team's board</div>
+
+                <div style="display:inline-flex;background:oklch(0.96 0.004 255);border:1px solid oklch(0.91 0.006 255);border-radius:9px;padding:3px;gap:2px;margin-top:16px;align-self:flex-start;">
+                  <button onClick="{{ bSetIdea }}" style="{{ bTabIdea }}">Idea</button>
+                  <button onClick="{{ bSetProblem }}" style="{{ bTabProblem }}">Problem</button>
+                  <button onClick="{{ bSetRequest }}" style="{{ bTabRequest }}">Request</button>
+                </div>
+
+                <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);margin:16px 0 6px 0;">TITLE</div>
+                <input value="{{ bTitle }}" onInput="{{ bOnTitle }}" placeholder="One line — what should change?" style="width:100%;border:1px solid oklch(0.89 0.008 255);border-radius:8px;padding:9px 11px;font-size:13px;color:oklch(0.28 0.02 255);outline:none;background:oklch(0.995 0.002 255);" style-focus="border-color:oklch(0.60 0.14 250);box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);background:oklch(1 0 0);" />
+
+                <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);margin:14px 0 6px 0;">DETAILS <span style="font-weight:400;color:oklch(0.68 0.02 255);">· optional</span></div>
+                <textarea value="{{ bDetails }}" onInput="{{ bOnDetails }}" placeholder="What are you trying to do? What gets in the way today?" style="width:100%;flex:1;min-height:80px;border:1px solid oklch(0.89 0.008 255);border-radius:8px;padding:9px 11px;font-size:13px;line-height:1.5;color:oklch(0.28 0.02 255);outline:none;background:oklch(0.995 0.002 255);" style-focus="border-color:oklch(0.60 0.14 250);box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);background:oklch(1 0 0);"></textarea>
+
+                <button onClick="{{ bSubmit }}" style="width:100%;background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:9px;padding:11px;font-size:14px;font-weight:600;margin-top:16px;">Post to the board →</button>
+                <div style="display:flex;align-items:center;gap:6px;margin-top:10px;">
+                  <div style="width:16px;height:16px;border-radius:50%;background:oklch(0.62 0.13 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:600;flex:0 0 auto;">JR</div>
+                  <span style="font-size:10.5px;color:oklch(0.58 0.02 255);">Posting publicly as jordan@acme.com</span>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ bDone }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;height:100%;">
+                <div style="width:46px;height:46px;border-radius:50%;background:oklch(0.60 0.13 155);display:flex;align-items:center;justify-content:center;color:oklch(1 0 0);font-size:23px;animation:ririse 0.3s ease;">✓</div>
+                <div style="font-size:19px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.24 0.02 255);margin-top:14px;">Posted. That was easy.</div>
+                <div style="font-size:13px;line-height:1.55;color:oklch(0.52 0.02 255);margin-top:7px;max-width:280px;">It's live on the board now — top of <b style="color:oklch(0.34 0.02 255);">Under review</b>, right where you can watch it move. See it on the right →</div>
+                <div style="display:flex;gap:9px;margin-top:20px;">
+                  <button style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:9px;padding:9px 16px;font-size:13px;font-weight:600;">Open full board</button>
+                  <button onClick="{{ bReset }}" style="background:transparent;border:none;color:oklch(0.55 0.02 255);border-radius:9px;padding:9px 12px;font-size:13px;font-weight:600;">Add another</button>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+
+          <!-- RIGHT: roadmap peek -->
+          <div style="flex:1;background:oklch(0.985 0.004 255);padding:18px 18px 0 18px;overflow:hidden;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.50 0.02 255);">WHAT'S HAPPENING NOW</span>
+              <span style="width:6px;height:6px;border-radius:50%;background:oklch(0.60 0.13 155);animation:ripulse 1.6s ease-in-out infinite;"></span>
+              <span style="font-size:10.5px;color:oklch(0.60 0.02 255);">live</span>
+            </div>
+            <div style="font-size:11px;color:oklch(0.60 0.02 255);margin-bottom:14px;">Everything below is public. No surprises.</div>
+
+            <div style="display:flex;flex-direction:column;gap:14px;overflow-y:auto;padding-bottom:16px;">
+              <!-- Under review -->
+              <div>
+                <div style="display:flex;align-items:center;gap:7px;margin-bottom:7px;"><span style="width:9px;height:9px;border-radius:50%;border:2px solid oklch(0.68 0.02 255);box-sizing:border-box;"></span><span style="font-size:11.5px;font-weight:600;color:oklch(0.42 0.02 255);">Under review</span></div>
+                <div style="display:flex;flex-direction:column;gap:7px;">
+                  <sc-if value="{{ bDone }}" hint-placeholder-val="{{ false }}">
+                    <div style="background:oklch(1 0 0);border:1px solid oklch(0.86 0.06 155);border-radius:8px;padding:9px 10px;box-shadow:0 1px 2px oklch(0.55 0.03 255/0.05);animation:riflash 1.4s ease;">
+                      <div style="display:flex;align-items:center;gap:6px;"><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:8.5px;font-weight:600;letter-spacing:0.05em;color:oklch(0.48 0.11 155);background:oklch(0.94 0.05 155);padding:1px 5px;border-radius:4px;">NEW · YOURS</span></div>
+                      <div style="font-size:12px;font-weight:500;color:oklch(0.28 0.02 255);line-height:1.35;margin-top:5px;">{{ bReceipt }}</div>
+                    </div>
+                  </sc-if>
+                  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:8px;padding:9px 10px;">
+                    <div style="font-size:12px;font-weight:500;color:oklch(0.28 0.02 255);line-height:1.35;">Bulk-edit tags across dashboards</div>
+                    <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;color:oklch(0.60 0.02 255);margin-top:4px;">17 votes</div>
+                  </div>
+                </div>
+              </div>
+              <!-- Planned -->
+              <div>
+                <div style="display:flex;align-items:center;gap:7px;margin-bottom:7px;"><span style="width:9px;height:9px;border-radius:50%;background:conic-gradient(oklch(0.55 0.15 305) 0 50%, oklch(0.88 0.05 305) 50% 100%);"></span><span style="font-size:11.5px;font-weight:600;color:oklch(0.42 0.02 255);">Planned</span></div>
+                <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:8px;padding:9px 10px;">
+                  <div style="font-size:12px;font-weight:500;color:oklch(0.28 0.02 255);line-height:1.35;">Scheduled email digests</div>
+                  <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;color:oklch(0.60 0.02 255);margin-top:4px;">63 votes · this quarter</div>
+                </div>
+              </div>
+              <!-- In progress -->
+              <div>
+                <div style="display:flex;align-items:center;gap:7px;margin-bottom:7px;"><span style="width:9px;height:9px;border-radius:50%;background:conic-gradient(oklch(0.60 0.14 250) 0 50%, oklch(0.86 0.03 250) 50% 100%);"></span><span style="font-size:11.5px;font-weight:600;color:oklch(0.42 0.02 255);">In progress</span></div>
+                <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-left:3px solid oklch(0.56 0.16 292);border-radius:8px;padding:9px 10px;">
+                  <div style="font-size:12px;font-weight:500;color:oklch(0.28 0.02 255);line-height:1.35;">PNG / SVG chart export</div>
+                  <div style="height:4px;border-radius:2px;background:oklch(0.93 0.02 292);overflow:hidden;margin-top:7px;"><div style="height:100%;width:62%;background:oklch(0.56 0.16 292);border-radius:2px;"></div></div>
+                  <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;color:oklch(0.52 0.10 292);margin-top:5px;">AI working · 62% · 128 votes</div>
+                </div>
+              </div>
+              <!-- Shipped -->
+              <div>
+                <div style="display:flex;align-items:center;gap:7px;margin-bottom:7px;"><span style="width:9px;height:9px;border-radius:50%;background:oklch(0.60 0.13 155);"></span><span style="font-size:11.5px;font-weight:600;color:oklch(0.42 0.02 255);">Shipped</span></div>
+                <div style="background:oklch(0.995 0.003 155);border:1px solid oklch(0.92 0.006 255);border-radius:8px;padding:9px 10px;opacity:0.85;">
+                  <div style="font-size:12px;font-weight:500;color:oklch(0.34 0.02 255);line-height:1.35;">Dark mode</div>
+                  <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;color:oklch(0.52 0.10 155);margin-top:4px;">shipped Jun 24</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1c ============ -->
+    <div id="1c" style="flex:0 0 auto;width:560px;">
+      <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px;">
+        <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;font-weight:600;color:oklch(1 0 0);background:oklch(0.56 0.16 292);border-radius:6px;padding:3px 9px;">1c</span>
+        <span style="font-size:19px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.24 0.02 255);">AI-guided spec</span>
+      </div>
+      <p style="font-size:13.5px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 6px 0;max-width:520px;">For trusted users your product vouches for. Relay asks a few plain questions and turns the answer into a real story with acceptance criteria — no terminal, no jargon.</p>
+      <div style="display:inline-flex;align-items:center;gap:6px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;font-weight:600;letter-spacing:0.04em;color:oklch(0.46 0.13 292);background:oklch(0.97 0.02 292);border:1px solid oklch(0.90 0.04 292);border-radius:5px;padding:3px 8px;margin-bottom:18px;">ACCESS · SSO-VERIFIED · UNLOCKS SPECCING</div>
+
+      <!-- host frame -->
+      <div style="position:relative;height:440px;border-radius:13px;border:1px solid oklch(0.88 0.008 255);background:oklch(1 0 0);overflow:hidden;box-shadow:0 18px 40px -20px oklch(0.4 0.03 255/0.4);display:flex;flex-direction:column;">
+        <!-- header -->
+        <div style="flex:0 0 auto;padding:13px 16px;border-bottom:1px solid oklch(0.93 0.006 255);background:oklch(0.985 0.004 292);">
+          <div style="display:flex;align-items:center;gap:9px;">
+            <div style="width:26px;height:26px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;position:relative;flex:0 0 auto;"><div style="width:10px;height:10px;border-radius:50%;border:2px solid oklch(1 0 0);"></div></div>
+            <div style="flex:1;">
+              <div style="font-size:13.5px;font-weight:600;color:oklch(0.24 0.02 255);">Spec it with Relay</div>
+              <div style="font-size:11px;color:oklch(0.50 0.10 292);display:flex;align-items:center;gap:5px;"><span style="color:oklch(0.55 0.14 155);">✔</span>Verified via Acme SSO — you can shape work here</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- chat scroll -->
+        <div style="flex:1;overflow-y:auto;padding:16px 16px 8px 16px;display:flex;flex-direction:column;gap:12px;">
+          <sc-for list="{{ cMessages }}" as="m" hint-placeholder-count="1">
+            <div style="{{ m.rowStyle }}">
+              <div style="{{ m.bubbleStyle }}">{{ m.text }}</div>
+            </div>
+          </sc-for>
+
+          <!-- SPEC CARD -->
+          <sc-if value="{{ cShowSpec }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px solid oklch(0.90 0.04 292);border-radius:11px;background:oklch(0.995 0.004 292);overflow:hidden;animation:ririse 0.35s ease;">
+              <div style="display:flex;align-items:center;gap:7px;padding:9px 12px;background:oklch(0.97 0.02 292);border-bottom:1px solid oklch(0.92 0.03 292);">
+                <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.46 0.13 292);">DRAFT SPEC</span>
+                <span style="flex:1;"></span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;color:oklch(0.55 0.10 292);">from your answers</span>
+              </div>
+              <div style="padding:13px 14px;display:flex;flex-direction:column;gap:12px;">
+                <div>
+                  <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);margin-bottom:4px;">TITLE</div>
+                  <div style="font-size:14px;font-weight:600;color:oklch(0.24 0.02 255);line-height:1.3;">{{ cTitle }}</div>
+                </div>
+                <div>
+                  <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);margin-bottom:4px;">USER STORY</div>
+                  <div style="font-size:12.5px;line-height:1.5;color:oklch(0.38 0.02 255);">{{ cStory }}</div>
+                </div>
+                <div>
+                  <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);margin-bottom:6px;">ACCEPTANCE CRITERIA</div>
+                  <div style="display:flex;flex-direction:column;gap:5px;">
+                    <sc-for list="{{ cCriteria }}" as="c" hint-placeholder-count="3">
+                      <div style="display:flex;gap:8px;font-size:12.5px;line-height:1.45;color:oklch(0.38 0.02 255);"><span style="width:14px;height:14px;border-radius:4px;border:1.5px solid oklch(0.75 0.03 155);flex:0 0 auto;margin-top:1px;"></span><span>{{ c }}</span></div>
+                    </sc-for>
+                  </div>
+                </div>
+                <div>
+                  <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);margin-bottom:4px;">NOTES</div>
+                  <div style="font-size:12px;line-height:1.45;color:oklch(0.48 0.02 255);">{{ cNotes }}</div>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ cDone }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px solid oklch(0.86 0.06 155);background:oklch(0.98 0.03 155);border-radius:11px;padding:13px 14px;animation:ririse 0.3s ease;">
+              <div style="display:flex;align-items:center;gap:9px;">
+                <div style="width:30px;height:30px;border-radius:50%;background:oklch(0.60 0.13 155);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:16px;flex:0 0 auto;">✓</div>
+                <div>
+                  <div style="font-size:14px;font-weight:600;color:oklch(0.24 0.02 255);">Spec'd and sent. Nice work.</div>
+                  <div style="font-size:11.5px;color:oklch(0.44 0.08 155);margin-top:2px;">On the board · Relay AI is picking it up now</div>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+
+        <!-- input dock -->
+        <div style="flex:0 0 auto;border-top:1px solid oklch(0.93 0.006 255);padding:11px 13px;background:oklch(0.99 0.002 255);">
+          <sc-if value="{{ cShowChips }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px;">
+              <sc-for list="{{ cChips }}" as="chip" hint-placeholder-count="3">
+                <button onClick="{{ chip.onClick }}" style="font-size:11.5px;font-weight:500;color:oklch(0.40 0.06 292);background:oklch(0.97 0.02 292);border:1px solid oklch(0.90 0.04 292);border-radius:999px;padding:5px 11px;">{{ chip.label }}</button>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ cShowInput }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;align-items:flex-end;gap:8px;">
+              <textarea value="{{ cInput }}" onInput="{{ cOnType }}" placeholder="{{ cPlaceholder }}" style="flex:1;height:38px;border:1px solid oklch(0.89 0.008 255);border-radius:9px;padding:9px 11px;font-size:13px;line-height:1.4;color:oklch(0.28 0.02 255);outline:none;background:oklch(1 0 0);" style-focus="border-color:oklch(0.56 0.16 292);box-shadow:0 0 0 3px oklch(0.56 0.16 292/0.14);"></textarea>
+              <button onClick="{{ cSend }}" style="background:oklch(0.56 0.16 292);color:oklch(1 0 0);border:none;border-radius:9px;padding:10px 14px;font-size:13px;font-weight:600;flex:0 0 auto;">Send</button>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ cShowConfirm }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;gap:9px;">
+              <button onClick="{{ cConfirm }}" style="flex:1;background:oklch(0.60 0.13 155);color:oklch(1 0 0);border:none;border-radius:9px;padding:11px;font-size:13.5px;font-weight:600;">Looks right — send to board</button>
+              <button onClick="{{ cReset }}" style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.01 255);color:oklch(0.42 0.02 255);border-radius:9px;padding:11px 14px;font-size:13px;font-weight:600;">Start over</button>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ cDone }}" hint-placeholder-val="{{ false }}">
+            <button onClick="{{ cReset }}" style="width:100%;background:transparent;border:none;color:oklch(0.55 0.02 255);border-radius:9px;padding:9px;font-size:12.5px;font-weight:600;">Spec another idea</button>
+          </sc-if>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    a: { step: 'compose', text: '', voted: false },
+    b: { step: 'compose', cat: 'idea', title: '', details: '' },
+    c: {
+      stage: 'idea',
+      input: '',
+      idea: '', who: '', today: '', done: '',
+      log: [{ who: 'ai', text: "Hi Jordan. I can help turn a rough idea into something the team can actually build \u2014 no jargon. In a sentence, what do you want to change in Acme Analytics?" }]
+    },
+    feed: [
+      { id: 1, title: 'PNG / SVG chart export', votes: 128, status: 'progress', tag: 'export', voted: false },
+      { id: 2, title: 'Scheduled email digests', votes: 63, status: 'planned', tag: 'reports', voted: false },
+      { id: 3, title: 'Bulk-edit tags across dashboards', votes: 17, status: 'review', tag: 'dashboards', voted: false },
+      { id: 4, title: 'Dark mode', votes: 210, status: 'shipped', tag: 'ui', voted: false },
+      { id: 5, title: 'Export raw data to Google Sheets', votes: 41, status: 'review', tag: 'export', voted: false },
+      { id: 6, title: 'Slack alerts for anomalies', votes: 88, status: 'planned', tag: 'alerts', voted: false },
+      { id: 7, title: 'Custom date-range presets', votes: 54, status: 'progress', tag: 'filters', voted: false },
+      { id: 8, title: 'Embed dashboards in Notion', votes: 33, status: 'review', tag: 'sharing', voted: false },
+      { id: 9, title: 'Role-based sharing permissions', votes: 72, status: 'planned', tag: 'admin', voted: false },
+      { id: 10, title: 'Downloadable PDF reports', votes: 96, status: 'review', tag: 'reports', voted: false },
+      { id: 11, title: 'Weekly summary emailed to me', votes: 24, status: 'review', tag: 'reports', voted: false },
+      { id: 12, title: 'Filter by UTM campaign', votes: 12, status: 'review', tag: 'filters', voted: false },
+      { id: 13, title: 'Mobile app', votes: 156, status: 'review', tag: 'mobile', voted: false },
+      { id: 14, title: 'Scheduled report exports to email', votes: 19, status: 'review', tag: 'reports', voted: false }
+    ],
+    d: { q: '', posted: false, detail: '' },
+    e: { step: 'post', title: '', detail: '', result: null },
+    f: { q: '', sort: 'trending', status: 'all' }
+  };
+
+  // ===== shared feed helpers (turn 2) =====
+  STOP = new Set(['the','and','for','let','me','can','you','your','i','to','a','an','my','our','with','in','on','of','it','be','is','as','so','that','this','we','us','are','not','but','or','if','no','give']);
+  _tokens(q) { return (q || '').toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length > 2 && !this.STOP.has(t)); }
+  _search(q) {
+    const list = this.state.feed;
+    const toks = this._tokens(q);
+    if (!toks.length) return list.slice().sort((x, y) => y.votes - x.votes);
+    return list.map(it => {
+      const t = it.title.toLowerCase();
+      const score = toks.reduce((n, k) => t.includes(k) ? n + 1 : n, 0);
+      return { it, score };
+    }).filter(o => o.score > 0).sort((x, y) => y.score - x.score || y.it.votes - x.it.votes).map(o => o.it);
+  }
+  _statusMeta(s) {
+    if (s === 'progress') return { label: 'In progress', dot: 'width:9px;height:9px;border-radius:50%;background:conic-gradient(oklch(0.60 0.14 250) 0 50%, oklch(0.86 0.03 250) 50% 100%);flex:0 0 auto;' };
+    if (s === 'planned') return { label: 'Planned', dot: 'width:9px;height:9px;border-radius:50%;background:conic-gradient(oklch(0.55 0.15 305) 0 50%, oklch(0.88 0.05 305) 50% 100%);flex:0 0 auto;' };
+    if (s === 'shipped') return { label: 'Shipped', dot: 'width:9px;height:9px;border-radius:50%;background:oklch(0.60 0.13 155);flex:0 0 auto;' };
+    return { label: 'Under review', dot: 'width:9px;height:9px;border-radius:50%;border:2px solid oklch(0.68 0.02 255);box-sizing:border-box;flex:0 0 auto;' };
+  }
+  _mapIdea(it) {
+    const m = this._statusMeta(it.status);
+    return {
+      id: it.id, title: it.title, tag: '#' + it.tag, statusLabel: m.label, statusDot: m.dot,
+      voteLabel: (it.voted ? '\u2713 ' : '\u2191 ') + it.votes,
+      voteStyle: it.voted
+        ? 'font-family:\'JetBrains Mono\',ui-monospace,monospace;font-size:11px;font-weight:600;color:oklch(1 0 0);background:oklch(0.60 0.14 250);border:1px solid oklch(0.60 0.14 250);border-radius:8px;padding:6px 8px;flex:0 0 auto;min-width:46px;text-align:center;'
+        : 'font-family:\'JetBrains Mono\',ui-monospace,monospace;font-size:11px;font-weight:600;color:oklch(0.50 0.10 250);background:oklch(1 0 0);border:1px solid oklch(0.86 0.04 250);border-radius:8px;padding:6px 8px;flex:0 0 auto;min-width:46px;text-align:center;',
+      onVote: () => this.vote(it.id)
+    };
+  }
+  vote = (id) => this.setState(st => ({ feed: st.feed.map(fi => fi.id === id ? { ...fi, voted: !fi.voted, votes: fi.votes + (fi.voted ? -1 : 1) } : fi) }));
+
+  // 2a
+  dOnType = (e) => { const v = e.target.value; this.setState(s => ({ d: { ...s.d, q: v } })); };
+  dOnDetail = (e) => { const v = e.target.value; this.setState(s => ({ d: { ...s.d, detail: v } })); };
+  dPost = () => { if (!this.state.d.q.trim()) return; this.setState(s => ({ d: { ...s.d, posted: true } })); };
+  dReset = () => this.setState({ d: { q: '', posted: false, detail: '' } });
+  // 2b
+  eOnTitle = (e) => { const v = e.target.value; this.setState(s => ({ e: { ...s.e, title: v } })); };
+  eOnDetail = (e) => { const v = e.target.value; this.setState(s => ({ e: { ...s.e, detail: v } })); };
+  ePost = () => { if (!this.state.e.title.trim()) return; this.setState(s => ({ e: { ...s.e, step: 'merge' } })); };
+  eMerge = (it) => this.setState(s => ({ feed: s.feed.map(fi => fi.id === it.id ? { ...fi, votes: fi.votes + 1, voted: true } : fi), e: { ...s.e, step: 'done', result: { type: 'merged', title: it.title, votes: it.votes + 1 } } }));
+  eKeep = () => this.setState(s => ({ e: { ...s.e, step: 'done', result: { type: 'new' } } }));
+  eReset = () => this.setState({ e: { step: 'post', title: '', detail: '', result: null } });
+  // 2c
+  fOnType = (e) => { const v = e.target.value; this.setState(s => ({ f: { ...s.f, q: v } })); };
+
+  // ---------- 1a ----------
+  aOnType = (e) => { const v = e.target.value; this.setState(s => ({ a: { ...s.a, text: v } })); };
+  aSend = () => { if (!this.state.a.text.trim()) return; this.setState(s => ({ a: { ...s.a, step: 'done' } })); };
+  aReset = () => this.setState({ a: { step: 'compose', text: '', voted: false } });
+  aUpvote = () => this.setState(s => ({ a: { ...s.a, voted: !s.a.voted } }));
+
+  // ---------- 1b ----------
+  bOnTitle = (e) => { const v = e.target.value; this.setState(s => ({ b: { ...s.b, title: v } })); };
+  bOnDetails = (e) => { const v = e.target.value; this.setState(s => ({ b: { ...s.b, details: v } })); };
+  bSetCat = (cat) => this.setState(s => ({ b: { ...s.b, cat } }));
+  bSubmit = () => { if (!this.state.b.title.trim()) return; this.setState(s => ({ b: { ...s.b, step: 'done' } })); };
+  bReset = () => this.setState({ b: { step: 'compose', cat: 'idea', title: '', details: '' } });
+
+  // ---------- 1c ----------
+  cOnType = (e) => { const v = e.target.value; this.setState(s => ({ c: { ...s.c, input: v } })); };
+  cSubmitValue = (val) => {
+    const text = (val || '').trim();
+    if (!text) return;
+    this.setState(s => {
+      const c = { ...s.c, log: [...s.c.log, { who: 'user', text }], input: '' };
+      if (c.stage === 'idea') {
+        c.idea = text; c.stage = 'q1';
+        c.log.push({ who: 'ai', text: "Got it. Who runs into this most?" });
+      } else if (c.stage === 'q1') {
+        c.who = text; c.stage = 'q2';
+        c.log.push({ who: 'ai', text: "And what happens today that shouldn't \u2014 what's the friction?" });
+      } else if (c.stage === 'q2') {
+        c.today = text; c.stage = 'q3';
+        c.log.push({ who: 'ai', text: "Last one: how will we know it's fixed? What should be true when it's done?" });
+      } else if (c.stage === 'q3') {
+        c.done = text; c.stage = 'spec';
+        c.log.push({ who: 'ai', text: "Here's the spec I'd hand the team \u2014 have a look:" });
+      }
+      return { c };
+    });
+  };
+  cSend = () => this.cSubmitValue(this.state.c.input);
+  cConfirm = () => this.setState(s => ({ c: { ...s.c, stage: 'done' } }));
+  cReset = () => this.setState({ c: {
+    stage: 'idea', input: '', idea: '', who: '', today: '', done: '',
+    log: [{ who: 'ai', text: "Fresh start. In a sentence, what do you want to change in Acme Analytics?" }]
+  } });
+
+  _cap(str) { str = (str || '').trim(); return str ? str.charAt(0).toUpperCase() + str.slice(1) : str; }
+  _clean(str) { str = (str || '').trim(); return str.replace(/[.!?]+$/, ''); }
+
+  renderVals() {
+    const { a, b, c, feed, d, e, f } = this.state;
+
+    // 1a
+    const aText = a.text;
+    const aShowMatch = a.step === 'compose' && a.text.trim().length > 8;
+
+    // 1b tab styles
+    const tab = (on) => on
+      ? 'font-size:12px;font-weight:600;padding:6px 13px;border:none;border-radius:6px;background:oklch(1 0 0);color:oklch(0.30 0.02 255);box-shadow:0 1px 2px oklch(0.5 0.03 255/0.12);'
+      : 'font-size:12px;font-weight:600;padding:6px 13px;border:none;border-radius:6px;background:transparent;color:oklch(0.52 0.02 255);';
+    const bReceipt = b.title.trim() || 'Your idea';
+
+    // 1c messages
+    const cMessages = c.log.map(m => {
+      const isAI = m.who === 'ai';
+      return {
+        text: m.text,
+        rowStyle: `display:flex;${isAI ? 'justify-content:flex-start' : 'justify-content:flex-end'};`,
+        bubbleStyle: isAI
+          ? 'max-width:82%;background:oklch(0.97 0.015 292);border:1px solid oklch(0.92 0.03 292);color:oklch(0.32 0.03 292);border-radius:13px 13px 13px 4px;padding:9px 12px;font-size:12.5px;line-height:1.5;'
+          : 'max-width:82%;background:oklch(0.60 0.14 250);color:oklch(1 0 0);border-radius:13px 13px 4px 13px;padding:9px 12px;font-size:12.5px;line-height:1.5;'
+      };
+    });
+
+    // 1c chips only on q1
+    const cChips = c.stage === 'q1'
+      ? ['Admins', 'Daily analysts', 'New users', 'Everyone'].map(label => ({
+          label, onClick: () => this.cSubmitValue(label)
+        }))
+      : [];
+
+    const cShowChips = c.stage === 'q1';
+    const cShowInput = ['idea', 'q1', 'q2', 'q3'].includes(c.stage);
+    const cShowSpec = c.stage === 'spec' || c.stage === 'done';
+    const cShowConfirm = c.stage === 'spec';
+    const cDone = c.stage === 'done';
+
+    const placeholders = {
+      idea: 'e.g. Let me schedule reports to email',
+      q1: 'Type, or pick one above',
+      q2: "What's clumsy about it today?",
+      q3: 'What should be true when it works?'
+    };
+
+    // derived spec
+    const ideaClean = this._clean(c.idea);
+    const cTitle = this._cap(ideaClean) || 'Untitled idea';
+    const whoPhrase = (c.who || 'a user').trim().toLowerCase();
+    const cStory = `As ${whoPhrase}, I want ${ideaClean || 'this capability'}, so that ${this._clean(c.done).toLowerCase() || 'the workflow is smoother'}.`;
+    const cCriteria = [
+      `The friction is resolved: ${this._clean(c.today).toLowerCase() || 'the current workaround'} is no longer required.`,
+      `${this._cap(this._clean(c.done)) || 'The desired outcome'} is verifiable in the product.`,
+      'Available to the audience above without extra setup or dev involvement.'
+    ];
+    const cNotes = `Raised by a verified Acme SSO user. Affects: ${whoPhrase}. Relay AI drafts the approach and asks before shipping anything ambiguous.`;
+
+    // ===== turn 2 computed =====
+    const schip = (on) => on
+      ? 'font-size:11px;font-weight:600;padding:5px 11px;border-radius:999px;border:1px solid oklch(0.60 0.14 250);background:oklch(0.60 0.14 250);color:oklch(1 0 0);cursor:pointer;white-space:nowrap;'
+      : 'font-size:11px;font-weight:600;padding:5px 11px;border-radius:999px;border:1px solid oklch(0.90 0.008 255);background:oklch(1 0 0);color:oklch(0.48 0.02 255);cursor:pointer;white-space:nowrap;';
+    // 2a
+    const dAll = this._search(d.q);
+    const dSearching = d.q.trim().length > 0;
+    const dResults = dAll.slice(0, 6).map(it => this._mapIdea(it));
+    const dCount = dAll.length;
+    const dBest = (d.q.trim().length > 4 && dResults[0]) ? dResults[0] : null;
+    const dShowBanner = !!dBest && !d.posted;
+    const dEmpty = dSearching && dCount === 0;
+    // 2b
+    const eCandidates = this._search(e.title).slice(0, 3).map(it => ({ ...this._mapIdea(it), onMerge: () => this.eMerge(it) }));
+    const eResult = e.result || {};
+    // 2c
+    let fList = this._search(f.q);
+    if (f.status !== 'all') fList = fList.filter(x => x.status === f.status);
+    if (f.sort === 'new') fList = fList.slice().sort((x, y) => y.id - x.id);
+    else fList = fList.slice().sort((x, y) => y.votes - x.votes);
+    const fMapped = fList.map(it => this._mapIdea(it));
+    const fSortTabs = ['trending', 'top', 'new'].map(k => ({ label: k.charAt(0).toUpperCase() + k.slice(1), style: tab(f.sort === k), onClick: () => this.setState(s => ({ f: { ...s.f, sort: k } })) }));
+    const fStatusChips = [['all', 'All'], ['review', 'Under review'], ['planned', 'Planned'], ['progress', 'In progress'], ['shipped', 'Shipped']].map(([k, l]) => ({ label: l, style: schip(f.status === k), onClick: () => this.setState(s => ({ f: { ...s.f, status: k } })) }));
+
+    return {
+      // 1a
+      aCompose: a.step === 'compose', aDone: a.step === 'done',
+      aText, aShowMatch,
+      aOnType: this.aOnType, aSend: this.aSend, aReset: this.aReset, aUpvote: this.aUpvote,
+      aVoteLabel: a.voted ? '\u2713 128' : '\u2191 127',
+      aVoteStyle: a.voted
+        ? 'font-family:\'JetBrains Mono\',ui-monospace,monospace;font-size:11px;font-weight:600;color:oklch(1 0 0);background:oklch(0.60 0.14 250);border:1px solid oklch(0.60 0.14 250);border-radius:7px;padding:5px 9px;flex:0 0 auto;'
+        : 'font-family:\'JetBrains Mono\',ui-monospace,monospace;font-size:11px;font-weight:600;color:oklch(0.50 0.10 250);background:oklch(1 0 0);border:1px solid oklch(0.86 0.04 250);border-radius:7px;padding:5px 9px;flex:0 0 auto;',
+      aReceipt: a.text.trim() || 'Your idea',
+
+      // 1b
+      bCompose: b.step === 'compose', bDone: b.step === 'done',
+      bTitle: b.title, bDetails: b.details,
+      bOnTitle: this.bOnTitle, bOnDetails: this.bOnDetails,
+      bSetIdea: () => this.bSetCat('idea'), bSetProblem: () => this.bSetCat('problem'), bSetRequest: () => this.bSetCat('request'),
+      bTabIdea: tab(b.cat === 'idea'), bTabProblem: tab(b.cat === 'problem'), bTabRequest: tab(b.cat === 'request'),
+      bSubmit: this.bSubmit, bReset: this.bReset, bReceipt,
+
+      // 1c
+      cMessages, cChips, cShowChips, cShowInput, cShowSpec, cShowConfirm, cDone,
+      cInput: c.input, cOnType: this.cOnType, cSend: this.cSend, cConfirm: this.cConfirm, cReset: this.cReset,
+      cPlaceholder: placeholders[c.stage] || 'Type a reply',
+      cTitle, cStory, cCriteria, cNotes,
+
+      // 2a
+      dCompose: !d.posted, dDone: d.posted, dQ: d.q, dDetail: d.detail,
+      dOnType: this.dOnType, dOnDetail: this.dOnDetail, dPost: this.dPost, dReset: this.dReset,
+      dResults, dCount, dShowBanner, dBest, dEmpty,
+      dHeader: dSearching ? ('Similar ideas \u00b7 ' + dCount) : ('Trending right now \u00b7 ' + dCount),
+      dSub: dSearching ? 'Before you post \u2014 +1 one of these instead.' : 'Start typing your idea; we search all of them.',
+      dReceipt: d.q.trim() || 'Your idea',
+      // 2b
+      ePostStep: e.step === 'post', eMergeStep: e.step === 'merge', eDoneStep: e.step === 'done',
+      eTitle: e.title, eDetail: e.detail, eOnTitle: this.eOnTitle, eOnDetail: this.eOnDetail,
+      ePost: this.ePost, eKeep: this.eKeep, eReset: this.eReset, eCandidates,
+      eYourTitle: e.title.trim() || 'Your idea',
+      eCount: eCandidates.length,
+      eResultMerged: eResult.type === 'merged', eDoneNew: eResult.type === 'new', eResultTitle: eResult.title || '', eResultVotes: eResult.votes || 0,
+      // 2c
+      fQ: f.q, fOnType: this.fOnType, fSortTabs, fStatusChips, fList: fMapped,
+      fShowing: fMapped.length, fTotal: feed.length
+    };
+  }
+}
+</script>
+</body>
+</html>
+

@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.32 0.02 255);background:oklch(0.955 0.008 255);-webkit-font-smoothing:antialiased;}
+  a{color:oklch(0.60 0.14 250);text-decoration:none;} a:hover{text-decoration:underline;}
+  button{font-family:inherit;cursor:pointer;}
+  textarea{font-family:inherit;}
+  ::-webkit-scrollbar{width:9px;height:9px;}
+  ::-webkit-scrollbar-thumb{background:oklch(0.86 0.01 255);border-radius:6px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  @keyframes fepulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+</style>
+</helmet>
+
+<div style="height:100vh;display:flex;flex-direction:column;overflow:hidden;">
+
+  <!-- Top bar -->
+  <div style="display:flex;align-items:center;gap:12px;height:52px;padding:0 18px;border-bottom:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);flex:0 0 auto;z-index:30;">
+    <div style="display:flex;align-items:center;gap:9px;">
+      <div style="width:23px;height:23px;border-radius:7px;background:oklch(0.60 0.14 250);display:flex;align-items:center;justify-content:center;position:relative;">
+        <div style="width:8px;height:8px;border-radius:50%;background:oklch(1 0 0);"></div>
+        <div style="position:absolute;right:3px;top:3px;width:4px;height:4px;border-radius:50%;background:oklch(0.60 0.14 250);box-shadow:0 0 0 1.5px oklch(1 0 0);"></div>
+      </div>
+      <span style="font-weight:600;font-size:15px;letter-spacing:-0.02em;">Relay</span>
+    </div>
+    <div style="width:1px;height:18px;background:oklch(0.90 0.006 255);"></div>
+    <div style="display:flex;align-items:center;gap:7px;font-size:13px;">
+      <a href="#" style="color:oklch(0.52 0.02 255);font-weight:600;">Payments</a>
+      <span style="color:oklch(0.78 0.02 255);">/</span>
+      <a href="#" style="color:oklch(0.52 0.02 255);font-weight:600;">Flows</a>
+      <span style="color:oklch(0.78 0.02 255);">/</span>
+      <span style="color:oklch(0.28 0.02 255);font-weight:600;">Code</span>
+    </div>
+    <span style="flex:1;"></span>
+    <span style="{{ headerVersionStyle }}">{{ headerVersion }}</span>
+    <div title="Dana Kim" style="width:27px;height:27px;border-radius:50%;background:oklch(0.62 0.13 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;">DK</div>
+  </div>
+
+  <!-- Toolbar -->
+  <div style="display:flex;align-items:center;gap:10px;min-height:50px;padding:7px 16px;border-bottom:1px solid oklch(0.93 0.006 255);background:oklch(0.992 0.002 255);flex:0 0 auto;z-index:20;flex-wrap:wrap;">
+    <span style="font-size:10.5px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">ADD NODE</span>
+    <div style="display:flex;gap:5px;">
+      <sc-for list="{{ palette }}" as="p" hint-placeholder-count="5">
+        <button title="{{ p.title }}" style="{{ p.style }}"><span style="{{ p.swatch }}"></span>{{ p.label }}</button>
+      </sc-for>
+    </div>
+    <div style="width:1px;height:22px;background:oklch(0.90 0.006 255);margin:0 4px;"></div>
+    <button style="display:flex;align-items:center;gap:7px;background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);color:oklch(0.42 0.02 255);border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:600;" style-hover="border-color:oklch(0.80 0.01 255);"><span style="width:14px;height:8px;border:1.5px solid currentColor;border-radius:5px;display:inline-block;"></span>Connect edge</button>
+    <button style="display:flex;align-items:center;gap:7px;background:oklch(0.98 0.015 15);border:1px solid oklch(0.88 0.05 15);color:oklch(0.52 0.16 15);border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:600;" style-hover="background:oklch(0.97 0.03 15);">Delete</button>
+    <span style="flex:1;"></span>
+    <div style="display:flex;gap:4px;background:oklch(0.96 0.004 255);border:1px solid oklch(0.91 0.006 255);border-radius:9px;padding:3px;">
+      <button onClick="{{ onView_edit }}" style="{{ sw.edit }}">Editing</button>
+      <button onClick="{{ onView_unsaved }}" style="{{ sw.unsaved }}">Unsaved</button>
+      <button onClick="{{ onView_save }}" style="{{ sw.save }}">Save</button>
+    </div>
+  </div>
+
+  <!-- Trigger bar -->
+  <div style="display:flex;align-items:center;gap:14px;padding:11px 18px;border-bottom:1px solid oklch(0.93 0.006 255);background:oklch(1 0 0);flex:0 0 auto;z-index:10;">
+    <span style="font-size:10.5px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">TRIGGER</span>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <span style="font-size:9.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">PULLS FROM</span>
+        <div style="display:flex;align-items:center;gap:7px;border:1px solid oklch(0.90 0.006 255);border-radius:8px;padding:6px 10px;background:oklch(0.99 0.002 255);font-size:12.5px;font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:500;color:oklch(0.40 0.02 255);" style-hover="border-color:oklch(0.80 0.01 255);">Plan:Review<span style="color:oklch(0.68 0.02 255);font-size:10px;">▾</span></div>
+      </div>
+      <span style="color:oklch(0.72 0.02 255);margin-top:14px;">→</span>
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <span style="font-size:9.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">WORKS IN</span>
+        <div style="display:flex;align-items:center;gap:7px;border:1px solid oklch(0.91 0.05 292);border-radius:8px;padding:6px 10px;background:oklch(0.98 0.03 292);font-size:12.5px;font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;color:oklch(0.46 0.14 292);">In progress<span style="color:oklch(0.60 0.10 292);font-size:10px;">▾</span></div>
+      </div>
+      <span style="color:oklch(0.72 0.02 255);margin-top:14px;">→</span>
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <span style="font-size:9.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">LANDS ON SUCCESS</span>
+        <div style="display:flex;align-items:center;gap:7px;border:1px solid oklch(0.91 0.03 250);border-radius:8px;padding:6px 10px;background:oklch(0.98 0.012 250);font-size:12.5px;font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;color:oklch(0.44 0.13 250);">Review<span style="color:oklch(0.58 0.10 250);font-size:10px;">▾</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Body: graph + inspector -->
+  <div style="flex:1;display:flex;min-height:0;overflow:hidden;">
+
+    <!-- graph canvas -->
+    <div style="flex:1;min-width:0;overflow:auto;background:oklch(0.975 0.004 250);background-image:radial-gradient(oklch(0.90 0.006 255) 1px, transparent 1px);background-size:22px 22px;position:relative;">
+      <div style="position:relative;width:1160px;height:462px;margin:16px;">
+        {{ edgeSvg }}
+        <!-- edge labels -->
+        <sc-for list="{{ edgeLabels }}" as="el" hint-placeholder-count="10">
+          <div style="{{ el.style }}">{{ el.text }}</div>
+        </sc-for>
+        <!-- nodes -->
+        <sc-for list="{{ nodes }}" as="n" hint-placeholder-count="14">
+          <div onClick="{{ n.onClick }}" style="{{ n.wrapStyle }}">
+            <div style="{{ n.shapeStyle }}">
+              <sc-if value="{{ n.showType }}" hint-placeholder-val="{{ true }}">
+                <span style="{{ n.typeTagStyle }}">{{ n.typeTag }}</span>
+              </sc-if>
+              <span style="{{ n.labelStyle }}">{{ n.label }}</span>
+              <sc-if value="{{ n.showSub }}" hint-placeholder-val="{{ false }}">
+                <span style="font-size:9.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);white-space:nowrap;">{{ n.sub }}</span>
+              </sc-if>
+            </div>
+            <sc-if value="{{ n.diffDot }}" hint-placeholder-val="{{ false }}">
+              <span style="position:absolute;top:-6px;right:-6px;width:15px;height:15px;border-radius:50%;background:oklch(0.60 0.14 250);color:oklch(1 0 0);font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid oklch(1 0 0);z-index:5;">≠</span>
+            </sc-if>
+          </div>
+        </sc-for>
+        <!-- end pill -->
+        <div style="position:absolute;left:2px;top:150px;width:120px;display:flex;flex-direction:column;gap:4px;align-items:center;">
+          <div style="display:flex;align-items:center;gap:6px;background:oklch(0.97 0.02 155);border:1px solid oklch(0.88 0.05 155);border-radius:20px;padding:7px 13px;font-size:11.5px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.42 0.10 155);"><span style="width:7px;height:7px;border-radius:50%;background:oklch(0.60 0.13 155);"></span>lands → Review</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Inspector -->
+    <div style="width:328px;flex:0 0 auto;border-left:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);overflow-y:auto;display:flex;flex-direction:column;">
+      <div style="padding:16px 18px;border-bottom:1px solid oklch(0.94 0.005 255);display:flex;flex-direction:column;gap:10px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="{{ insp.typeBadgeStyle }}">{{ insp.typeBadge }}</span>
+          <span style="flex:1;"></span>
+          <button style="{{ insp.delStyle }}">Delete node</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:3px;">
+          <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">NODE NAME</span>
+          <div style="padding:7px 9px;border:1px solid oklch(0.90 0.006 255);border-radius:7px;font-size:15px;font-weight:600;color:oklch(0.26 0.02 255);background:oklch(0.99 0.002 255);" style-hover="border-color:oklch(0.80 0.01 255);">{{ insp.name }}</div>
+        </div>
+        <sc-if value="{{ insp.guarded }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;gap:7px;background:oklch(0.98 0.015 15);border:1px solid oklch(0.90 0.04 15);border-radius:7px;padding:7px 9px;font-size:11px;color:oklch(0.50 0.10 15);"><span style="font-weight:700;">⚠</span>{{ insp.guardMsg }}</div>
+        </sc-if>
+      </div>
+
+      <div style="padding:16px 18px;display:flex;flex-direction:column;gap:18px;">
+        <!-- prompt / command / condition -->
+        <div style="display:flex;flex-direction:column;gap:7px;">
+          <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">{{ insp.mainLabel }}</span>
+          <div style="border:1px solid oklch(0.60 0.14 250);background:oklch(1 0 0);border-radius:8px;padding:10px 11px;box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.13);font-size:12px;line-height:1.55;color:oklch(0.36 0.02 255);font-family:ui-monospace,'JetBrains Mono',monospace;white-space:pre-wrap;min-height:96px;">{{ insp.mainText }}</div>
+        </div>
+
+        <!-- model (agent only) -->
+        <sc-if value="{{ insp.isAgent }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">MODEL</span>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <sc-for list="{{ insp.models }}" as="m" hint-placeholder-count="4">
+                <button style="{{ m.style }}">{{ m.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">EFFORT</span>
+            <div style="display:inline-flex;background:oklch(0.96 0.004 255);border:1px solid oklch(0.90 0.006 255);border-radius:9px;padding:3px;gap:2px;align-self:flex-start;">
+              <sc-for list="{{ insp.effortOpts }}" as="ef" hint-placeholder-count="3">
+                <span style="{{ ef.style }}">{{ ef.label }}</span>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- retries + timeout -->
+        <div style="display:flex;gap:16px;">
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">MAX RETRIES</span>
+            <div style="display:inline-flex;align-items:center;border:1px solid oklch(0.90 0.006 255);border-radius:8px;overflow:hidden;align-self:flex-start;">
+              <span style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:oklch(0.55 0.02 255);font-size:16px;">−</span>
+              <span style="width:34px;text-align:center;font-size:13px;font-family:'JetBrains Mono',ui-monospace,monospace;">{{ insp.retries }}</span>
+              <span style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:oklch(0.55 0.02 255);font-size:16px;">+</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;flex:1;">
+            <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">TIMEOUT</span>
+            <div style="border:1px solid oklch(0.90 0.006 255);border-radius:8px;padding:8px 11px;font-size:13px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.32 0.02 255);background:oklch(0.99 0.002 255);" style-hover="border-color:oklch(0.80 0.01 255);">{{ insp.timeout }}</div>
+          </div>
+        </div>
+
+        <!-- outgoing edges -->
+        <div style="display:flex;flex-direction:column;gap:9px;">
+          <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">OUTGOING EDGES · routed on outcome</span>
+          <sc-for list="{{ insp.edges }}" as="e" hint-placeholder-count="2">
+            <div style="display:flex;align-items:center;gap:8px;border:1px solid oklch(0.93 0.006 255);border-radius:8px;padding:8px 10px;background:oklch(0.994 0.002 255);">
+              <span style="{{ e.pillStyle }}">{{ e.outcome }}</span>
+              <span style="color:oklch(0.70 0.02 255);font-size:11px;">→</span>
+              <span style="font-size:12px;font-weight:500;color:oklch(0.34 0.02 255);flex:1;">{{ e.target }}</span>
+              <sc-if value="{{ e.hasLoop }}" hint-placeholder-val="{{ false }}">
+                <span style="font-size:9.5px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.52 0.11 65);background:oklch(0.98 0.04 75);border-radius:4px;padding:2px 5px;">{{ e.loop }}</span>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Unsaved bar -->
+  <sc-if value="{{ showUnsaved }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:0 0 auto;display:flex;align-items:center;gap:16px;padding:12px 18px;background:oklch(1 0 0);border-top:1px solid oklch(0.90 0.006 255);box-shadow:0 -6px 20px oklch(0.5 0.03 255/0.06);z-index:25;">
+      <span style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:oklch(0.40 0.02 255);"><span style="width:8px;height:8px;border-radius:50%;background:oklch(0.70 0.13 65);"></span>Unsaved changes</span>
+      <div style="display:flex;align-items:center;gap:8px;background:oklch(0.98 0.02 15);border:1px solid oklch(0.89 0.06 15);border-radius:8px;padding:7px 12px;flex:1;max-width:640px;">
+        <span style="width:18px;height:18px;border-radius:50%;background:oklch(0.62 0.16 15);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:0 0 auto;">!</span>
+        <span style="font-size:12.5px;color:oklch(0.48 0.12 15);line-height:1.4;">Edge <b style="font-family:'JetBrains Mono',ui-monospace,monospace;">failed</b> from <b style="font-family:'JetBrains Mono',ui-monospace,monospace;">precommit</b> points at a deleted node. No node is marked as the start. Fix both before saving.</span>
+      </div>
+      <span style="flex:1;"></span>
+      <button style="background:oklch(0.82 0.05 250);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:not-allowed;opacity:0.7;">Save as v4</button>
+      <button style="background:transparent;border:1px solid oklch(0.90 0.006 255);color:oklch(0.48 0.02 255);border-radius:8px;padding:9px 15px;font-size:13px;font-weight:600;">Discard</button>
+    </div>
+  </sc-if>
+
+  <!-- clean saved bar (edit + diff states) -->
+  <sc-if value="{{ showCleanBar }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:11px 18px;background:oklch(1 0 0);border-top:1px solid oklch(0.93 0.006 255);z-index:25;">
+      <span style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:oklch(0.55 0.02 255);"><span style="width:8px;height:8px;border-radius:50%;background:oklch(0.60 0.13 155);"></span>All changes saved · <span style="font-family:'JetBrains Mono',ui-monospace,monospace;">v3</span></span>
+      <span style="flex:1;"></span>
+      <span style="font-size:11.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">14 nodes · 20 edges · 7 loops</span>
+    </div>
+  </sc-if>
+
+  <!-- Save confirm modal -->
+  <sc-if value="{{ showSave }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ onView_edit }}" style="position:fixed;inset:0;background:oklch(0.30 0.02 255/0.28);display:flex;align-items:center;justify-content:center;z-index:50;"></div>
+    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:51;width:min(480px,92vw);background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);border-radius:16px;box-shadow:0 24px 64px oklch(0.3 0.03 255/0.28);overflow:hidden;">
+      <div style="padding:22px 24px 18px 24px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <span style="width:32px;height:32px;border-radius:9px;background:oklch(0.56 0.16 292);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;">↑</span>
+          <div style="font-size:17px;font-weight:600;letter-spacing:-0.01em;color:oklch(0.24 0.02 255);">Save as v4?</div>
+        </div>
+        <p style="font-size:13.5px;line-height:1.6;color:oklch(0.46 0.02 255);margin:0 0 14px 0;">Saving bumps this flow from <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;color:oklch(0.34 0.02 255);">v3 → v4</span>. Every new run started from now on uses v4.</p>
+        <div style="display:flex;align-items:flex-start;gap:10px;background:oklch(0.98 0.02 292);border:1px solid oklch(0.91 0.04 292);border-radius:10px;padding:12px 14px;">
+          <span style="width:20px;height:20px;border-radius:50%;background:oklch(0.56 0.16 292);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:0 0 auto;margin-top:1px;">2</span>
+          <span style="font-size:12.5px;line-height:1.55;color:oklch(0.42 0.06 292);"><b style="color:oklch(0.42 0.14 292);">2 cards are mid-run on v3.</b> They finish on v3 — this edit won't touch them. Only runs that start after the save use v4.</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:9px;justify-content:flex-end;padding:14px 24px;background:oklch(0.985 0.004 250);border-top:1px solid oklch(0.94 0.005 255);">
+        <button onClick="{{ onView_edit }}" style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.01 255);color:oklch(0.42 0.02 255);border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;">Cancel</button>
+        <button onClick="{{ onView_edit }}" style="background:oklch(0.56 0.16 292);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;">Save as v4</button>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:860}}">
+class Component extends DCLogic {
+  state = { view: 'edit', sel: 'implement' };
+
+  renderVals() {
+    const s = this.state;
+    const mono = "'JetBrains Mono',ui-monospace,monospace";
+    const VIOLET='oklch(0.56 0.16 292)', BLUE='oklch(0.60 0.14 250)', GREEN='oklch(0.60 0.13 155)', AMBER='oklch(0.70 0.13 65)', SLATE='oklch(0.55 0.02 255)';
+
+    // ---- node definitions (x = left, y = top; w/h fixed) ----
+    const W=150, H=56, GW=118, GH=76;
+    const N = {
+      branch:        { x:8,   y:90, w:W, h:H, type:'shell', label:'branch',         sub:'git branch' },
+      implement:     { x:193, y:90, w:W, h:H, type:'agent', label:'implement',      sub:'sonnet · high' },
+      spec_review:   { x:378, y:90, w:W, h:H, type:'agent', label:'spec_review',    sub:'sonnet' },
+      quality_review:{ x:560, y:90, w:W, h:H, type:'agent', label:'quality_review', sub:'opus' },
+      next_task:     { x:756, y:82, w:GW,h:GH,type:'gate',  label:'next_task',      sub:'more tasks?' },
+      precommit:     { x:898, y:82, w:GW,h:GH,type:'gate',  label:'precommit',      sub:'mix precommit' },
+      final_review:  { x:880, y:232,w:W, h:H, type:'agent', label:'final_review',   sub:'opus' },
+      smoke:         { x:672, y:232,w:W, h:H, type:'agent', label:'smoke',          sub:'opus' },
+      acceptance:    { x:464, y:232,w:W, h:H, type:'agent', label:'acceptance',     sub:'opus' },
+      post:          { x:256, y:232,w:W, h:H, type:'agent', label:'post',           sub:'sonnet' },
+      merge:         { x:48,  y:232,w:W, h:H, type:'shell', label:'merge',          sub:'squash + push' },
+      final_fix:     { x:880, y:384,w:W, h:H, type:'agent', label:'final_fix',      sub:'opus' },
+      smoke_fix:     { x:672, y:384,w:W, h:H, type:'agent', label:'smoke_fix',      sub:'opus' },
+      acceptance_fix:{ x:464, y:384,w:W, h:H, type:'agent', label:'acceptance_fix', sub:'opus' },
+    };
+    const cx = n => N[n].x + N[n].w/2, cy = n => N[n].y + N[n].h/2;
+    const rightC = n => [N[n].x+N[n].w, cy(n)], leftC = n => [N[n].x, cy(n)];
+    const topC = n => [cx(n), N[n].y], botC = n => [cx(n), N[n].y+N[n].h];
+
+    // ---- edges ---- kind: ok | pass | fail | fixed | loop
+    const E = [
+      { from:'branch',         to:'implement',      out:'ok',      kind:'ok',   route:'h' },
+      { from:'implement',      to:'spec_review',    out:'ok',      kind:'ok',   route:'h' },
+      { from:'spec_review',    to:'quality_review', out:'passed',  kind:'pass', route:'h' },
+      { from:'quality_review', to:'next_task',      out:'passed',  kind:'pass', route:'h' },
+      { from:'next_task',      to:'precommit',      out:'no more',  kind:'pass', route:'h' },
+      { from:'precommit',      to:'final_review',   out:'passed',  kind:'pass', route:'drop' },
+      { from:'final_review',   to:'smoke',          out:'passed',  kind:'pass', route:'h' },
+      { from:'smoke',          to:'acceptance',     out:'passed',  kind:'pass', route:'h' },
+      { from:'acceptance',     to:'post',           out:'passed',  kind:'pass', route:'h' },
+      { from:'post',           to:'merge',          out:'ok',      kind:'ok',   route:'h' },
+      // fix returns (⇄)
+      { from:'final_fix',      to:'final_review',   out:'fixed',   kind:'fixed', route:'vup' },
+      { from:'smoke_fix',      to:'smoke',          out:'fixed',   kind:'fixed', route:'vup' },
+      { from:'acceptance_fix', to:'acceptance',     out:'fixed',   kind:'fixed', route:'vup' },
+      // fail → fix (dashed, max_loops)
+      { from:'final_review',   to:'final_fix',      out:'failed',  kind:'fail', loop:'max 2', route:'vdown' },
+      { from:'smoke',          to:'smoke_fix',      out:'failed',  kind:'fail', loop:'max 2', route:'vdown' },
+      { from:'acceptance',     to:'acceptance_fix', out:'failed',  kind:'fail', loop:'max 2', route:'vdown' },
+      { from:'precommit',      to:'final_fix',      out:'failed',  kind:'fail', loop:'max 2', route:'long' },
+      // loops back to implement (dashed)
+      { from:'spec_review',    to:'implement',      out:'failed',  kind:'fail', loop:'max 3', route:'arc', arch:46 },
+      { from:'quality_review', to:'implement',      out:'failed',  kind:'fail', loop:'max 3', route:'arc', arch:26 },
+      { from:'next_task',      to:'implement',      out:'next task',kind:'loop', route:'arc', arch:8 },
+    ];
+
+    const kcolor = { ok:'oklch(0.66 0.02 255)', pass:'oklch(0.54 0.12 155)', fail:'oklch(0.64 0.16 22)', fixed:VIOLET, loop:'oklch(0.58 0.13 292)' };
+
+    // build svg paths + label positions
+    const paths = [], labels = [];
+    E.forEach((e, i) => {
+      const color = kcolor[e.kind];
+      const dashed = (e.kind === 'fail' || e.kind === 'loop');
+      let d, lx, ly;
+      if (e.route === 'vdown') {
+        const ox = cx(e.from) - 22, sy = N[e.from].y + N[e.from].h, ty = N[e.to].y;
+        d = `M ${ox} ${sy} L ${ox} ${ty}`;
+        lx = ox - 30; ly = (sy + ty) / 2 - 12;
+      } else if (e.route === 'vup') {
+        const ox = cx(e.from) + 22, sy = N[e.from].y, ty = N[e.to].y + N[e.to].h;
+        d = `M ${ox} ${sy} L ${ox} ${ty}`;
+        lx = ox + 28; ly = (sy + ty) / 2 + 12;
+      } else if (e.route === 'drop') {
+        const [sx, sy] = botC(e.from); const [tx, ty] = topC(e.to);
+        d = `M ${sx} ${sy} C ${sx} ${sy+40}, ${tx} ${ty-40}, ${tx} ${ty}`;
+        lx = (sx + tx) / 2 + 30; ly = (sy + ty) / 2;
+      } else if (e.route === 'arc') {
+        const [sx, sy] = topC(e.from); const [tx, ty] = topC(e.to); const peak = e.arch;
+        d = `M ${sx} ${sy} C ${sx} ${peak}, ${tx} ${peak}, ${tx} ${ty}`;
+        lx = (sx + tx) / 2; ly = peak + 1;
+      } else if (e.route === 'long') {
+        const [sx, sy] = botC(e.from); const tx = cx(e.to) + 22, ty = N[e.to].y;
+        d = `M ${sx} ${sy} C ${sx+150} ${sy+70}, ${tx+150} ${ty-80}, ${tx} ${ty}`;
+        lx = 1096; ly = 312;
+      } else { // h
+        const goingLeft = cx(e.to) < cx(e.from);
+        const [sx, sy] = goingLeft ? leftC(e.from) : rightC(e.from);
+        const [tx, ty] = goingLeft ? rightC(e.to) : leftC(e.to);
+        const mx = (sx + tx) / 2;
+        d = `M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}`;
+        lx = mx; ly = (sy + ty) / 2 - 3;
+      }
+      paths.push(React.createElement('path', { key:'p'+i, d, stroke:color, strokeWidth:2, fill:'none',
+        strokeDasharray: dashed ? '5 4' : 'none', markerEnd:`url(#arw_${e.kind})` }));
+      labels.push({ out:e.out, kind:e.kind, loop:e.loop, lx, ly });
+    });
+
+    const defs = React.createElement('defs', {}, Object.keys(kcolor).map(k =>
+      React.createElement('marker', { key:k, id:'arw_'+k, markerWidth:9, markerHeight:9, refX:7, refY:3, orient:'auto', markerUnits:'userSpaceOnUse' },
+        React.createElement('path', { d:'M0,0 L7,3 L0,6 z', fill:kcolor[k] }))
+    ));
+    const edgeSvg = React.createElement('svg', { width:1160, height:462, style:{ position:'absolute', top:0, left:0, overflow:'visible', pointerEvents:'none' } }, defs, ...paths);
+
+    // edge label chips
+    const edgeLabels = labels.map((l, i) => {
+      const c = { ok:'oklch(0.52 0.02 255)', pass:'oklch(0.42 0.11 155)', fail:'oklch(0.52 0.15 22)', fixed:'oklch(0.46 0.14 292)', loop:'oklch(0.48 0.13 292)' }[l.kind];
+      const bg = { ok:'oklch(0.97 0.004 255)', pass:'oklch(0.97 0.03 155)', fail:'oklch(0.98 0.03 22)', fixed:'oklch(0.98 0.03 292)', loop:'oklch(0.98 0.03 292)' }[l.kind];
+      const txt = l.loop ? `${l.out} · ${l.loop}` : l.out;
+      return { text: txt, style: `position:absolute;left:${l.lx}px;top:${l.ly}px;transform:translate(-50%,-50%);z-index:3;font-size:9.5px;font-weight:600;font-family:${mono};color:${c};background:${bg};border-radius:5px;padding:2px 6px;white-space:nowrap;pointer-events:none;box-shadow:0 0 0 3px oklch(0.975 0.004 250);` };
+    });
+
+    // node visuals
+    const typeMeta = {
+      agent:   { fill:'oklch(0.985 0.022 292)', border:'oklch(0.88 0.05 292)', tagBg:'oklch(0.95 0.04 292)', tagC:'oklch(0.46 0.14 292)', accent:VIOLET, tag:'AGENT' },
+      shell:   { fill:'oklch(0.985 0.003 255)', border:'oklch(0.90 0.006 255)', tagBg:'oklch(0.95 0.004 255)', tagC:'oklch(0.48 0.02 255)', accent:SLATE, tag:'SHELL' },
+      gate:    { fill:'oklch(0.985 0.02 75)', border:'oklch(0.85 0.07 75)', tagBg:'', tagC:'oklch(0.48 0.11 65)', accent:AMBER, tag:'GATE' },
+      parallel:{ fill:'oklch(0.985 0.02 195)', border:'oklch(0.87 0.05 195)', tagBg:'oklch(0.95 0.03 195)', tagC:'oklch(0.42 0.10 195)', accent:'oklch(0.62 0.13 195)', tag:'PARALLEL' },
+      human:   { fill:'oklch(0.985 0.02 250)', border:'oklch(0.86 0.06 250)', tagBg:'oklch(0.95 0.03 250)', tagC:'oklch(0.44 0.13 250)', accent:BLUE, tag:'HUMAN' },
+    };
+    const nodes = Object.keys(N).map(id => {
+      const n = N[id], m = typeMeta[n.type], sel = s.sel === id;
+      const wrapStyle = `position:absolute;left:${n.x}px;top:${n.y}px;width:${n.w}px;height:${n.h}px;z-index:4;cursor:pointer;`;
+      let shape;
+      if (n.type === 'gate') {
+        shape = `width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);background:${sel?'oklch(0.95 0.06 75)':m.fill};border:0;box-shadow:${sel?'inset 0 0 0 2px '+AMBER:'inset 0 0 0 1.5px '+m.border};`;
+      } else if (n.type === 'human') {
+        shape = `width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;clip-path:polygon(14% 0,86% 0,100% 50%,86% 100%,14% 100%,0 50%);background:${sel?'oklch(0.95 0.05 250)':m.fill};box-shadow:${sel?'inset 0 0 0 2px '+BLUE:'inset 0 0 0 1.5px '+m.border};`;
+      } else {
+        shape = `width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:11px;background:${n.type==='parallel'?m.fill:'oklch(1 0 0)'};border:1.5px solid ${sel?m.accent:m.border};border-left:4px solid ${m.accent};box-shadow:${sel?'0 0 0 3px '+m.accent.replace(')','/0.16)')+',0 4px 12px oklch(0.5 0.03 255/0.10)':'0 1px 2px oklch(0.5 0.03 255/0.06)'};`;
+      }
+      return {
+        onClick: () => this.setState({ sel: id }),
+        wrapStyle, shapeStyle: shape,
+        showType: n.type==='gate' || n.type==='human' ? false : true,
+        typeTag: m.tag,
+        typeTagStyle: `font-size:8px;font-weight:700;letter-spacing:0.07em;font-family:${mono};color:${m.tagC};${m.tagBg?'background:'+m.tagBg+';padding:1px 5px;border-radius:4px;':''}`,
+        label: n.label,
+        labelStyle: `font-size:${n.label.length>14?'11.5':'12.5'}px;font-weight:600;color:oklch(0.28 0.02 255);text-align:center;line-height:1.15;padding:0 6px;`,
+        showSub: !!n.sub, sub: n.sub || '',
+        diffDot: false,
+      };
+    });
+
+    // inspector reflects selected node
+    const selType = N[s.sel].type;
+    const modelOf = { implement:'sonnet', spec_review:'sonnet', quality_review:'opus', final_review:'opus', final_fix:'opus', smoke:'opus', smoke_fix:'opus', acceptance:'opus', acceptance_fix:'opus', post:'sonnet' };
+    const effortOf = { implement:'high' };
+    const inspData = {
+      branch: { mainLabel:'COMMAND', mainText:'git fetch origin --prune\ngit checkout -b relay/${CARD_REF} origin/main', timeout:'2m', retries:'1',
+        edges:[{outcome:'succeeded',target:'implement',kind:'ok'}] },
+      implement: { mainLabel:'RUN PROMPT', mainText:'Implement the current task from the plan.\nStay inside the task scope — keep the diff\nminimal and write the test first. Hand off\nfor review when the task is green.', timeout:'25m', retries:'2',
+        edges:[{outcome:'succeeded',target:'spec_review',kind:'ok'}], guarded:true, guardMsg:'Referenced by 4 edges — clear them before deleting' },
+      spec_review: { mainLabel:'RUN PROMPT', mainText:'Check the diff against the task spec. Does\nit do what the plan said — no more, no less?\nReturn failed with notes to loop back.', timeout:'10m', retries:'1',
+        edges:[{outcome:'passed',target:'quality_review',kind:'pass'},{outcome:'failed',target:'implement',kind:'fail',loop:'max 3'}] },
+      quality_review: { mainLabel:'RUN PROMPT', mainText:'Deep quality pass: naming, edge cases, test\nquality, security. Be strict about tests that\nassert on internals instead of behaviour.', timeout:'12m', retries:'1',
+        edges:[{outcome:'passed',target:'next_task',kind:'pass'},{outcome:'failed',target:'implement',kind:'fail',loop:'max 3'}] },
+      next_task: { mainLabel:'CONDITION', mainText:'tasks_remaining > 0', timeout:'—', retries:'0',
+        edges:[{outcome:'no more',target:'precommit',kind:'pass'},{outcome:'next task',target:'implement',kind:'fail'}] },
+      precommit: { mainLabel:'COMMAND', mainText:'mix precommit', timeout:'8m', retries:'1',
+        edges:[{outcome:'passed',target:'final_review',kind:'pass'},{outcome:'failed',target:'final_fix',kind:'fail',loop:'max 2'}] },
+      final_review: { mainLabel:'RUN PROMPT', mainText:'Holistic review across every task in the card.\nDoes the whole change read as one coherent\nfeature? Loop to final_fix if not.', timeout:'15m', retries:'1',
+        edges:[{outcome:'passed',target:'smoke',kind:'pass'},{outcome:'failed',target:'final_fix',kind:'fail',loop:'max 2'}] },
+      final_fix: { mainLabel:'RUN PROMPT', mainText:'Address the findings from final_review only.\nDo not expand scope. Return for re-review.', timeout:'15m', retries:'1',
+        edges:[{outcome:'fixed',target:'final_review',kind:'ok'}] },
+      smoke: { mainLabel:'RUN PROMPT', mainText:'Boot the app and exercise the feature end to\nend against a real environment. Capture logs;\nfail to smoke_fix on any error.', timeout:'12m', retries:'1',
+        edges:[{outcome:'passed',target:'acceptance',kind:'pass'},{outcome:'failed',target:'smoke_fix',kind:'fail',loop:'max 2'}] },
+      smoke_fix: { mainLabel:'RUN PROMPT', mainText:'Fix what smoke surfaced, then re-run smoke.', timeout:'12m', retries:'1',
+        edges:[{outcome:'fixed',target:'smoke',kind:'ok'}] },
+      acceptance: { mainLabel:'RUN PROMPT', mainText:'Verify the card’s acceptance criteria one by\none against the running build. Fail to\nacceptance_fix with the unmet criterion.', timeout:'12m', retries:'1',
+        edges:[{outcome:'passed',target:'post',kind:'pass'},{outcome:'failed',target:'acceptance_fix',kind:'fail',loop:'max 2'}] },
+      acceptance_fix: { mainLabel:'RUN PROMPT', mainText:'Close the unmet acceptance criterion, then\nre-verify against the running build.', timeout:'12m', retries:'1',
+        edges:[{outcome:'fixed',target:'acceptance',kind:'ok'}] },
+      post: { mainLabel:'RUN PROMPT', mainText:'Write the PR summary and post the final SHA\nand test results as a card comment.', timeout:'6m', retries:'1',
+        edges:[{outcome:'succeeded',target:'merge',kind:'ok'}] },
+      merge: { mainLabel:'COMMAND', mainText:'git merge --squash relay/${CARD_REF}\ngit push origin main', timeout:'5m', retries:'1',
+        edges:[{outcome:'succeeded',target:'lands → Review',kind:'ok'}] },
+    };
+    const d = inspData[s.sel] || { mainLabel:'RUN PROMPT', mainText:'—', timeout:'10m', retries:'1', edges:[] };
+    const selModel = modelOf[s.sel] || 'inherit';
+    const models = ['inherit','haiku','sonnet','opus'].map(mn => {
+      const on = mn === selModel;
+      return { label: mn,
+        style: `font-size:12px;font-weight:600;padding:6px 12px;border-radius:7px;border:1px solid ${on?VIOLET:'oklch(0.90 0.006 255)'};background:${on?'oklch(0.97 0.04 292)':'oklch(1 0 0)'};color:${on?'oklch(0.44 0.14 292)':'oklch(0.46 0.02 255)'};font-family:${mono};` };
+    });
+    const selEffort = effortOf[s.sel] || 'medium';
+    const effortOpts = ['low','medium','high'].map(x => {
+      const on = x === selEffort;
+      return { label:x, style:`font-size:12px;font-weight:${on?600:500};padding:6px 14px;border-radius:6px;color:${on?'oklch(0.30 0.02 255)':'oklch(0.52 0.02 255)'};${on?'background:oklch(1 0 0);box-shadow:0 1px 2px oklch(0.5 0.03 255/0.12);':''}` };
+    });
+    const insp = {
+      typeBadge: typeMeta[selType].tag,
+      typeBadgeStyle: `font-size:9px;font-weight:700;letter-spacing:0.06em;font-family:${mono};color:${typeMeta[selType].tagC};background:${typeMeta[selType].tagBg||'oklch(0.96 0.02 75)'};padding:3px 8px;border-radius:5px;`,
+      name: N[s.sel].label,
+      isAgent: selType === 'agent',
+      mainLabel: d.mainLabel, mainText: d.mainText, timeout: d.timeout, retries: d.retries,
+      guarded: !!d.guarded, guardMsg: d.guardMsg || '',
+      delStyle: `background:oklch(0.98 0.015 15);border:1px solid oklch(0.90 0.05 15);color:oklch(0.54 0.14 15);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;${d.guarded?'opacity:0.55;cursor:not-allowed;':''}`,
+      models, effortOpts,
+      edges: d.edges.map(e => ({
+        outcome:e.outcome, target:e.target, hasLoop:!!e.loop, loop:e.loop||'',
+        pillStyle:`font-size:10px;font-weight:600;font-family:${mono};padding:2px 7px;border-radius:5px;` + ({
+          ok:'background:oklch(0.96 0.004 255);color:oklch(0.48 0.02 255);',
+          pass:'background:oklch(0.97 0.03 155);color:oklch(0.42 0.10 155);',
+          fail:'background:oklch(0.98 0.03 22);color:oklch(0.52 0.15 22);',
+        }[e.kind]),
+      })),
+    };
+
+    // view state flags
+    const sw = (k) => `font-size:11.5px;font-weight:600;padding:6px 11px;border-radius:6px;border:none;` +
+      (s.view===k ? 'background:oklch(1 0 0);color:oklch(0.28 0.02 255);box-shadow:0 1px 2px oklch(0.5 0.03 255/0.14);' : 'background:transparent;color:oklch(0.52 0.02 255);');
+
+    const palette = [
+      { key:'agent', label:'Agent', accent:VIOLET },
+      { key:'shell', label:'Shell', accent:SLATE },
+      { key:'gate', label:'Gate', accent:AMBER },
+      { key:'parallel', label:'Parallel', accent:'oklch(0.62 0.13 195)' },
+      { key:'human', label:'Human', accent:BLUE },
+    ].map(p => ({
+      title:'Add '+p.label+' node', label:p.label,
+      style:`display:flex;align-items:center;gap:6px;background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);color:oklch(0.38 0.02 255);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;`,
+      swatch:`width:9px;height:9px;border-radius:${p.key==='gate'?'0;transform:rotate(45deg)':'3px'};background:${p.accent};display:inline-block;`,
+    }));
+
+    return {
+      headerVersion: s.view==='unsaved' ? 'Editing · unsaved' : 'v3',
+      headerVersionStyle: `font-size:11px;font-weight:600;font-family:${mono};padding:4px 10px;border-radius:6px;` +
+        (s.view==='unsaved' ? 'background:oklch(0.97 0.04 75);color:oklch(0.48 0.11 65);' : 'background:oklch(0.96 0.004 255);color:oklch(0.46 0.02 255);'),
+      palette, edgeSvg, edgeLabels, nodes, insp, sw:{ edit:sw('edit'), unsaved:sw('unsaved'), save:sw('save') },
+      showUnsaved: s.view==='unsaved',
+      showSave: s.view==='save',
+      showCleanBar: s.view==='edit',
+      onView_edit: () => this.setState({ view:'edit' }),
+      onView_unsaved: () => this.setState({ view:'unsaved' }),
+      onView_save: () => this.setState({ view:'save' }),
+    };
+  }
+}
+</script>
+</body>
+</html>
+

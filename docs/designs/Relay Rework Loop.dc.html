@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.32 0.02 255);background:oklch(0.955 0.008 255);-webkit-font-smoothing:antialiased;}
+  a{color:oklch(0.50 0.14 250);} a:hover{color:oklch(0.42 0.14 250);}
+  ::-webkit-scrollbar{width:10px;height:10px;}
+  ::-webkit-scrollbar-thumb{background:oklch(0.88 0.01 255);border-radius:6px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  @keyframes relaypulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:oklch(0.955 0.008 255);">
+<div style="max-width:1020px;margin:0 auto;padding:56px 34px 120px;display:flex;flex-direction:column;">
+
+  <!-- HEADER -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:22px;">
+    <div style="width:24px;height:24px;border-radius:7px;background:oklch(0.60 0.14 250);display:flex;align-items:center;justify-content:center;position:relative;">
+      <div style="width:8px;height:8px;border-radius:50%;background:oklch(1 0 0);"></div>
+      <div style="position:absolute;right:3px;top:3px;width:4px;height:4px;border-radius:50%;background:oklch(0.60 0.14 250);box-shadow:0 0 0 1.5px oklch(1 0 0);"></div>
+    </div>
+    <span style="font-size:11px;font-weight:600;letter-spacing:0.14em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);">RELAY · POST-DEPLOY REWORK</span>
+  </div>
+  <h1 style="font-size:38px;font-weight:600;letter-spacing:-0.03em;line-height:1.08;margin:0 0 16px;color:oklch(0.22 0.02 255);">Handling rework after deploy</h1>
+  <p style="font-size:16.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0;max-width:700px;">A card ships. Weeks later a bug turns up and the work has to go around again — another spec, plan, code, deploy. Our pipeline is built to flow <i>forward once</i>. This doc lays out <b style="color:oklch(0.28 0.02 255);">six ways to model the loop</b>, each with a board view and a card view, and rates every one on the thing you actually care about: <b style="color:oklch(0.28 0.02 255);">how little Relay has to know</b>.</p>
+
+  <!-- 00 THE PROBLEM -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:46px 0 32px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">00 — The problem</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 14px;color:oklch(0.24 0.02 255);">The pipeline is a line; work is a loop</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 22px;max-width:700px;">The board reads left to right and stops. But a shipped feature can come back at any time. The tempting fix — teach Relay to detect "went backward" and spin up a new cycle — forces it to understand <i>which</i> backward move means what. That's exactly the knowledge you don't want it to hold.</p>
+
+  <!-- pipeline diagram -->
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:14px;padding:26px 24px 22px;margin-bottom:18px;">
+    <div style="display:flex;align-items:center;gap:0;flex-wrap:wrap;">
+      <span style="font-size:12.5px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.44 0.02 255);background:oklch(0.965 0.004 255);border:1px solid oklch(0.91 0.006 255);border-radius:8px;padding:7px 12px;">Spec</span>
+      <span style="color:oklch(0.72 0.02 255);padding:0 8px;font-size:13px;">→</span>
+      <span style="font-size:12.5px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.46 0.13 305);background:oklch(0.98 0.02 305);border:1px solid oklch(0.91 0.04 305);border-radius:8px;padding:7px 12px;">Plan</span>
+      <span style="color:oklch(0.72 0.02 255);padding:0 8px;font-size:13px;">→</span>
+      <span style="font-size:12.5px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.44 0.13 250);background:oklch(0.98 0.012 250);border:1px solid oklch(0.91 0.03 250);border-radius:8px;padding:7px 12px;">Code</span>
+      <span style="color:oklch(0.72 0.02 255);padding:0 8px;font-size:13px;">→</span>
+      <span style="font-size:12.5px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.44 0.13 250);background:oklch(0.98 0.012 250);border:1px solid oklch(0.91 0.03 250);border-radius:8px;padding:7px 12px;">Deploy</span>
+      <span style="color:oklch(0.72 0.02 255);padding:0 8px;font-size:13px;">→</span>
+      <span style="font-size:12.5px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.44 0.10 155);background:oklch(0.97 0.02 155);border:1px solid oklch(0.90 0.04 155);border-radius:8px;padding:7px 12px;">Complete</span>
+      <span style="flex:1;min-width:20px;"></span>
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.60 0.13 65);display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:oklch(0.70 0.13 65);"></span>bug found</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:16px;padding-top:15px;border-top:1px dashed oklch(0.90 0.03 65);">
+      <span style="font-size:13px;color:oklch(0.52 0.11 65);">↩</span>
+      <span style="font-size:13px;line-height:1.5;color:oklch(0.46 0.03 65);">Now what? It has to travel most of that line <b style="color:oklch(0.42 0.11 65);">again</b> — but the card is already "done," its spec is written, and nobody wants Relay guessing when a rewind is a real re-do.</span>
+    </div>
+  </div>
+
+  <!-- 01 THE PRINCIPLE -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:46px 0 32px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">01 — The principle that dissolves it</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 14px;color:oklch(0.24 0.02 255);">Re-entering the pipeline is a human gesture, never an inference</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 20px;max-width:700px;">This one rule is shared by all six treatments and is the answer to "Relay shouldn't know too much." Relay never watches for backward movement and decides to start a cycle. Instead, <b style="color:oklch(0.30 0.02 255);">a person reopens the work</b> — presses a button, drops a card on a stage, files a bug — and that gesture places something on an active stage. From there Relay does the only thing it ever does: <b style="color:oklch(0.30 0.02 255);">work whatever is sitting on an active stage it's allowed to touch.</b> The six treatments differ only in <i>what</i> that gesture creates and how it reads.</p>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:13px;">
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:15px 16px;">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.13 250);margin-bottom:8px;">RELAY KNOWS</div>
+      <p style="font-size:13px;line-height:1.5;color:oklch(0.44 0.02 255);margin:0;">Stage types, ownership, and "pull the next thing when I have room." Nothing about features, bugs, or versions.</p>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:15px 16px;">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.12 65);margin-bottom:8px;">HUMANS DECIDE</div>
+      <p style="font-size:13px;line-height:1.5;color:oklch(0.44 0.02 255);margin:0;">When something re-opens, where it re-enters, and whether it's a small patch or a full re-do.</p>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:15px 16px;">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.10 155);margin-bottom:8px;">NO NEW RULES</div>
+      <p style="font-size:13px;line-height:1.5;color:oklch(0.44 0.02 255);margin:0;">"Backward from Review" and "backward from Spec" need no special handling — both are just a card landing on a stage.</p>
+    </div>
+  </div>
+
+  <!-- ============ TREATMENT A · REOPEN ============ -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:46px 0 32px;"></div>
+  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+    <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.10 155);text-transform:uppercase;">Treatment A</span>
+    <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);">the human model, literally</span>
+  </div>
+  <h2 style="font-size:26px;font-weight:600;letter-spacing:-0.02em;margin:0 0 8px;color:oklch(0.24 0.02 255);">Reopen</h2>
+  <p style="font-size:15.5px;line-height:1.6;color:oklch(0.42 0.02 255);margin:0 0 20px;max-width:700px;">There are no runs, no children, no versions. A Done card has a <b style="color:oklch(0.30 0.02 255);">Reopen</b> button. Pressing it drops the card back onto Spec (or a stage you pick) and it flows forward again — same card, same artifacts, edited in place. History lives in the append-only activity log. This is exactly what a person means by "open it and do it again."</p>
+
+  <!-- board -->
+  <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin-bottom:9px;">ON THE BOARD — the card leaves Complete and reappears in Spec</div>
+  <div style="display:flex;gap:10px;background:oklch(0.975 0.004 255);border:1px solid oklch(0.93 0.006 255);border-radius:13px;padding:15px;margin-bottom:16px;overflow-x:auto;">
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.55 0.15 305);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Spec</span></div>
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.86 0.06 155);border-radius:9px;padding:9px 10px;box-shadow:0 1px 3px oklch(0.6 0.06 155/0.10);">
+        <div style="font-size:11.5px;font-weight:600;color:oklch(0.30 0.02 255);line-height:1.3;margin-bottom:7px;">Checkout crashes on Safari</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:9px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.10 155);background:oklch(0.96 0.03 155);border:1px solid oklch(0.88 0.05 155);border-radius:4px;padding:2px 5px;">↩ reopened</span><span style="width:18px;height:18px;border-radius:50%;background:oklch(0.62 0.13 250);color:#fff;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:600;">DK</span></div>
+      </div>
+    </div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;opacity:0.55;">
+      <div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.14 250);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Code</span></div>
+    </div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;opacity:0.55;">
+      <div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.14 250);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Deploy</span></div>
+    </div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.13 155);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Complete</span></div>
+      <div style="background:oklch(0.99 0.004 255);border:1px dashed oklch(0.86 0.02 255);border-radius:9px;padding:9px 10px;">
+        <div style="font-size:11.5px;font-weight:600;color:oklch(0.60 0.02 255);line-height:1.3;text-decoration:line-through;">Checkout crashes on Safari</div>
+        <div style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.64 0.02 255);margin-top:6px;">moved out · was here</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- card detail -->
+  <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin-bottom:9px;">IN THE CARD — one set of artifacts; the log carries the past</div>
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:13px;padding:18px 20px;margin-bottom:18px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <span style="font-size:16px;font-weight:600;color:oklch(0.26 0.02 255);letter-spacing:-0.01em;">Checkout crashes on Safari</span>
+      <span style="font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.10 155);background:oklch(0.96 0.03 155);border:1px solid oklch(0.88 0.05 155);border-radius:5px;padding:2px 7px;">REOPENED · IN SPEC</span>
+    </div>
+    <div style="background:oklch(0.985 0.02 155);border:1px solid oklch(0.90 0.04 155);border-radius:10px;padding:12px 14px;margin-bottom:16px;display:flex;gap:10px;align-items:flex-start;">
+      <span style="font-size:13px;color:oklch(0.46 0.10 155);margin-top:1px;">↩</span>
+      <span style="font-size:13px;line-height:1.5;color:oklch(0.38 0.03 155);"><b style="color:oklch(0.32 0.04 155);">You reopened this on Jul 9.</b> The spec below is the one that shipped v1 — edit it in place to cover the Safari case, and it'll flow forward again.</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',monospace;">ACTIVITY</span>
+      <div style="display:flex;flex-direction:column;gap:0;border-left:2px solid oklch(0.92 0.006 255);padding-left:14px;margin-top:4px;">
+        <div style="padding:6px 0;font-size:12.5px;color:oklch(0.46 0.02 255);"><span style="color:oklch(0.46 0.10 155);font-weight:600;">You reopened the card</span> — Safari checkout crash · <span style="font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);">Jul 9</span></div>
+        <div style="padding:6px 0;font-size:12.5px;color:oklch(0.46 0.02 255);">Deployed to production · <span style="font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);">Mar 2</span></div>
+        <div style="padding:6px 0;font-size:12.5px;color:oklch(0.55 0.02 255);">Relay AI finished Code · <span style="font-family:'JetBrains Mono',monospace;color:oklch(0.64 0.02 255);">Mar 1</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- analysis A -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:6px;">
+    <div style="background:oklch(0.99 0.01 155);border:1px solid oklch(0.90 0.03 155);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.10 155);margin-bottom:7px;">STRENGTH</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">Zero new concepts. Matches the human model perfectly. Relay learns nothing.</p></div>
+    <div style="background:oklch(0.99 0.01 65);border:1px solid oklch(0.90 0.04 65);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 65);margin-bottom:7px;">COST</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">The v1 spec gets overwritten. No crisp "what shipped when" without reading the log. Blurs if it loops a lot.</p></div>
+    <div style="background:oklch(0.992 0.002 255);border:1px solid oklch(0.92 0.006 255);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);margin-bottom:7px;">BEST WHEN</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">Rework is rare — a deploy, occasionally a fix. <b style="color:oklch(0.34 0.02 255);">Your stated case.</b></p></div>
+  </div>
+
+  <!-- ============ TREATMENT B · RUNS ============ -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:46px 0 32px;"></div>
+  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+    <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.14 292);text-transform:uppercase;">Treatment B</span>
+    <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);">Claude Code's idea, de-risked</span>
+  </div>
+  <h2 style="font-size:26px;font-weight:600;letter-spacing:-0.02em;margin:0 0 8px;color:oklch(0.24 0.02 255);">Runs inside a card</h2>
+  <p style="font-size:15.5px;line-height:1.6;color:oklch(0.42 0.02 255);margin:0 0 12px;max-width:700px;">The card is the durable feature. A <b style="color:oklch(0.30 0.02 255);">run</b> is one pass through the pipeline, with its own spec / plan / deploy snapshot. The card detail stacks its runs. The fix for the awkwardness you flagged: <b style="color:oklch(0.46 0.14 292);">a new run is only ever started by a human pressing "Start a fix"</b> — Relay never creates one from a backward move. So Relay still only knows "a card has one active run; work it."</p>
+  <div style="background:oklch(0.985 0.02 292);border:1px solid oklch(0.90 0.04 292);border-radius:10px;padding:12px 14px;margin-bottom:18px;display:flex;gap:10px;align-items:flex-start;max-width:700px;">
+    <span style="font-size:13px;color:oklch(0.48 0.14 292);margin-top:1px;">✳</span>
+    <span style="font-size:13px;line-height:1.5;color:oklch(0.40 0.03 292);">This is the difference from the version that felt off: the run/card split stays, but the <b style="color:oklch(0.44 0.12 292);">trigger is explicit and human</b>, so Relay needs no "if it goes back from Review, branch" logic.</span>
+  </div>
+
+  <!-- board -->
+  <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin-bottom:9px;">ON THE BOARD — the card shows its active run; earlier runs are folded away</div>
+  <div style="display:flex;gap:10px;background:oklch(0.975 0.004 255);border:1px solid oklch(0.93 0.006 255);border-radius:13px;padding:15px;margin-bottom:16px;overflow-x:auto;">
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.55 0.15 305);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Spec</span></div>
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.90 0.04 292);border-radius:9px;padding:9px 10px;box-shadow:0 1px 3px oklch(0.5 0.06 292/0.10);">
+        <div style="font-size:11.5px;font-weight:600;color:oklch(0.30 0.02 255);line-height:1.3;margin-bottom:7px;">Checkout crashes on Safari</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:9px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.14 292);background:oklch(0.97 0.03 292);border:1px solid oklch(0.90 0.04 292);border-radius:4px;padding:2px 5px;">RUN 2</span><span style="width:18px;height:18px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;"><span style="width:6px;height:6px;border-radius:50%;border:1.5px solid #fff;"></span></span></div>
+      </div>
+    </div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;opacity:0.55;"><div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.14 250);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Code</span></div></div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;opacity:0.55;"><div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.14 250);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Deploy</span></div></div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;opacity:0.55;"><div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.13 155);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Complete</span></div></div>
+  </div>
+
+  <!-- card detail -->
+  <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin-bottom:9px;">IN THE CARD — a stack of runs, each with its own frozen artifacts</div>
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:13px;padding:18px 20px;margin-bottom:18px;">
+    <div style="font-size:16px;font-weight:600;color:oklch(0.26 0.02 255);letter-spacing:-0.01em;margin-bottom:15px;">Checkout crashes on Safari</div>
+    <!-- run 2 active -->
+    <div style="border:1px solid oklch(0.90 0.04 292);border-radius:11px;overflow:hidden;margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:oklch(0.985 0.02 292);">
+        <span style="width:8px;height:8px;border-radius:50%;background:oklch(0.56 0.16 292);animation:relaypulse 1.4s ease-in-out infinite;"></span>
+        <span style="font-size:13.5px;font-weight:600;color:oklch(0.44 0.12 292);">Run 2 · fix Safari checkout</span>
+        <span style="flex:1;"></span>
+        <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.12 292);">active · in Spec</span>
+      </div>
+      <div style="display:flex;gap:0;padding:11px 14px;font-size:11px;font-family:'JetBrains Mono',monospace;">
+        <span style="color:oklch(0.46 0.13 305);font-weight:600;">Spec</span><span style="color:oklch(0.78 0.02 255);padding:0 6px;">→</span><span style="color:oklch(0.66 0.02 255);">Plan</span><span style="color:oklch(0.78 0.02 255);padding:0 6px;">→</span><span style="color:oklch(0.66 0.02 255);">Code</span><span style="color:oklch(0.78 0.02 255);padding:0 6px;">→</span><span style="color:oklch(0.66 0.02 255);">Deploy</span>
+      </div>
+    </div>
+    <!-- run 1 shipped, collapsed -->
+    <div style="border:1px solid oklch(0.93 0.006 255);border-radius:11px;display:flex;align-items:center;gap:10px;padding:12px 14px;background:oklch(0.992 0.002 255);">
+      <span style="width:8px;height:8px;border-radius:50%;background:oklch(0.60 0.13 155);"></span>
+      <span style="font-size:13.5px;font-weight:600;color:oklch(0.42 0.02 255);">Run 1 · initial build</span>
+      <span style="flex:1;"></span>
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">shipped Mar 2 · v1 spec ↗</span>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px;"><span style="font-size:12px;font-weight:600;color:oklch(0.48 0.14 292);background:oklch(0.97 0.03 292);border:1px solid oklch(0.90 0.04 292);border-radius:7px;padding:7px 13px;">+ Start a fix</span></div>
+  </div>
+
+  <!-- analysis B -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:6px;">
+    <div style="background:oklch(0.99 0.01 155);border:1px solid oklch(0.90 0.03 155);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.10 155);margin-bottom:7px;">STRENGTH</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">Every ship is a discrete, frozen record. Clean audit trail. Relay stays dumb because the trigger is human.</p></div>
+    <div style="background:oklch(0.99 0.01 65);border:1px solid oklch(0.90 0.04 65);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 65);margin-bottom:7px;">COST</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">A new noun to learn — "run" vs "card." The duality is the exact thing that felt confusing to you.</p></div>
+    <div style="background:oklch(0.992 0.002 255);border:1px solid oklch(0.92 0.006 255);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);margin-bottom:7px;">BEST WHEN</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">You need a defensible per-ship record — regulated work, changelogs, incident review.</p></div>
+  </div>
+
+  <!-- ============ TREATMENT C · TWO BOARDS ============ -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:46px 0 32px;"></div>
+  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+    <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.13 250);text-transform:uppercase;">Treatment C</span>
+    <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);">your "run kanban + card kanban" idea, drawn out</span>
+  </div>
+  <h2 style="font-size:26px;font-weight:600;letter-spacing:-0.02em;margin:0 0 8px;color:oklch(0.24 0.02 255);">Two boards: features above, runs below</h2>
+  <p style="font-size:15.5px;line-height:1.6;color:oklch(0.42 0.02 255);margin:0 0 20px;max-width:700px;">Split the levels. A coarse <b style="color:oklch(0.30 0.02 255);">feature board</b> (Inbox → In flight → Shipped) is where humans track outcomes. A detailed <b style="color:oklch(0.46 0.13 250);">run board</b> is the pipeline where <b style="color:oklch(0.46 0.13 250);">Relay lives and only ever sees runs</b>. Activating a feature spawns a run below; when the run deploys, the feature moves to Shipped. A bug spawns another run and the feature slides back to In flight. Relay has <i>no concept of the feature layer at all</i> — it's the purest version of "Relay doesn't know too much."</p>
+
+  <!-- feature board -->
+  <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin-bottom:9px;">FEATURE BOARD — human-facing, coarse</div>
+  <div style="display:flex;gap:10px;background:oklch(0.975 0.004 255);border:1px solid oklch(0.93 0.006 255);border-radius:13px 13px 0 0;border-bottom:none;padding:15px;overflow-x:auto;">
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;opacity:0.55;"><div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.58 0.02 255);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Inbox</span></div></div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.14 250);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">In flight</span></div>
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.90 0.03 250);border-radius:9px;padding:9px 10px;box-shadow:0 1px 3px oklch(0.5 0.06 250/0.10);">
+        <div style="font-size:11.5px;font-weight:600;color:oklch(0.30 0.02 255);line-height:1.3;margin-bottom:7px;">Checkout on Safari</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.13 250);background:oklch(0.97 0.02 250);border-radius:4px;padding:2px 5px;">run 2 active</span><span style="width:18px;height:18px;border-radius:50%;background:oklch(0.62 0.13 250);color:#fff;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:600;">DK</span></div>
+      </div>
+    </div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;opacity:0.6;"><div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.13 155);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Shipped</span></div></div>
+  </div>
+  <!-- link -->
+  <div style="background:oklch(0.975 0.004 255);border-left:1px solid oklch(0.93 0.006 255);border-right:1px solid oklch(0.93 0.006 255);padding:0 15px;">
+    <div style="border-left:2px dashed oklch(0.85 0.03 250);height:22px;margin-left:38%;"></div>
+    <div style="font-size:10px;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 250);margin-left:calc(38% + 8px);margin-top:-14px;margin-bottom:6px;">spawns ↓</div>
+  </div>
+  <!-- run board -->
+  <div style="display:flex;gap:10px;background:oklch(0.98 0.008 250);border:1px solid oklch(0.90 0.03 250);border-radius:0 0 13px 13px;padding:15px;margin-bottom:16px;overflow-x:auto;">
+    <div style="flex:1;min-width:120px;display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.55 0.15 305);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Spec</span></div>
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.90 0.04 292);border-radius:9px;padding:8px 10px;box-shadow:0 1px 3px oklch(0.5 0.06 292/0.10);"><div style="font-size:10.5px;font-weight:600;color:oklch(0.32 0.02 255);line-height:1.3;">run 2 · Safari fix</div><div style="display:flex;justify-content:flex-end;margin-top:6px;"><span style="width:16px;height:16px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;"><span style="width:5px;height:5px;border-radius:50%;border:1.5px solid #fff;"></span></span></div></div>
+    </div>
+    <div style="flex:1;min-width:120px;display:flex;flex-direction:column;gap:8px;opacity:0.55;"><div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.55 0.15 305);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Plan</span></div></div>
+    <div style="flex:1;min-width:120px;display:flex;flex-direction:column;gap:8px;opacity:0.55;"><div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.14 250);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Code</span></div></div>
+    <div style="flex:1;min-width:120px;display:flex;flex-direction:column;gap:8px;opacity:0.55;"><div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.14 250);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Deploy</span></div></div>
+  </div>
+  <p style="font-size:12.5px;line-height:1.55;color:oklch(0.52 0.02 255);margin:0 0 18px;max-width:700px;">A shipped run stays attached to its feature as history — reopening the feature just spawns run 3. The card view is the feature with its list of past runs, much like Treatment B — the difference is that <b style="color:oklch(0.34 0.02 255);">runs get their own board</b>, so you can watch execution across every feature in one place.</p>
+
+  <!-- analysis C -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:6px;">
+    <div style="background:oklch(0.99 0.01 155);border:1px solid oklch(0.90 0.03 155);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.10 155);margin-bottom:7px;">STRENGTH</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">Relay is maximally dumb — it only ever sees the run pipeline. Scales to heavy iteration and many features at once.</p></div>
+    <div style="background:oklch(0.99 0.01 65);border:1px solid oklch(0.90 0.04 65);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 65);margin-bottom:7px;">COST</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">Two boards to hold in your head. Heaviest concept here. Likely overkill when rework is usually one fix.</p></div>
+    <div style="background:oklch(0.992 0.002 255);border:1px solid oklch(0.92 0.006 255);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);margin-bottom:7px;">BEST WHEN</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">A big org runs dozens of features and wants one execution view of everything Relay is doing.</p></div>
+  </div>
+
+  <!-- ============ TREATMENT D · SUB-CARDS ============ -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:46px 0 32px;"></div>
+  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+    <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.14 305);text-transform:uppercase;">Treatment D</span>
+    <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);">one mechanism for decomposition AND rework</span>
+  </div>
+  <h2 style="font-size:26px;font-weight:600;letter-spacing:-0.02em;margin:0 0 8px;color:oklch(0.24 0.02 255);">Sub-cards</h2>
+  <p style="font-size:15.5px;line-height:1.6;color:oklch(0.42 0.02 255);margin:0 0 20px;max-width:700px;">A card can hold child cards, and <b style="color:oklch(0.30 0.02 255);">a child is just a normal card</b> that flows the full pipeline on its own. Splitting a big feature into pieces and filing a post-deploy bug use the <b style="color:oklch(0.46 0.14 305);">exact same move</b> — add a child. The parent is a lightweight container that rolls up its children's status. To Relay every card is identical; parent/child is a link it never has to reason about.</p>
+
+  <!-- board -->
+  <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin-bottom:9px;">ON THE BOARD — the parent sits in Complete; a new child bug flows the pipeline</div>
+  <div style="display:flex;gap:10px;background:oklch(0.975 0.004 255);border:1px solid oklch(0.93 0.006 255);border-radius:13px;padding:15px;margin-bottom:16px;overflow-x:auto;">
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.55 0.15 305);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Spec</span></div>
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.90 0.04 305);border-radius:9px;padding:9px 10px;box-shadow:0 1px 3px oklch(0.5 0.06 305/0.10);">
+        <div style="display:flex;align-items:center;gap:5px;margin-bottom:6px;"><span style="font-size:8.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.10 305);">↳ child of Checkout</span></div>
+        <div style="font-size:11.5px;font-weight:600;color:oklch(0.30 0.02 255);line-height:1.3;margin-bottom:7px;">Fix: Safari crash</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:9px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.11 65);background:oklch(0.97 0.03 75);border-radius:4px;padding:2px 5px;">bug</span><span style="width:18px;height:18px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;"><span style="width:6px;height:6px;border-radius:50%;border:1.5px solid #fff;"></span></span></div>
+      </div>
+    </div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;opacity:0.55;"><div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.14 250);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Code</span></div></div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;opacity:0.55;"><div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.14 250);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Deploy</span></div></div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.13 155);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Complete</span></div>
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:9px 10px;">
+        <div style="font-size:11.5px;font-weight:600;color:oklch(0.34 0.02 255);line-height:1.3;margin-bottom:6px;">Checkout on Safari</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.10 305);background:oklch(0.97 0.02 305);border-radius:4px;padding:2px 5px;">1 open child</span><span style="width:18px;height:18px;border-radius:50%;background:oklch(0.72 0.06 15);color:#fff;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:600;">JR</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- card detail -->
+  <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin-bottom:9px;">IN THE PARENT — children as a checklist of real cards, each with its own state</div>
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:13px;padding:18px 20px;margin-bottom:18px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:15px;">
+      <span style="font-size:16px;font-weight:600;color:oklch(0.26 0.02 255);letter-spacing:-0.01em;">Checkout on Safari</span>
+      <span style="font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.10 155);background:oklch(0.96 0.03 155);border:1px solid oklch(0.88 0.05 155);border-radius:5px;padding:2px 7px;">COMPLETE · 1 OPEN CHILD</span>
+    </div>
+    <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',monospace;">CHILDREN</span>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+      <div style="display:flex;align-items:center;gap:11px;border:1px solid oklch(0.90 0.04 292);background:oklch(0.99 0.01 292);border-radius:9px;padding:10px 13px;">
+        <span style="width:8px;height:8px;border-radius:50%;background:oklch(0.56 0.16 292);flex:0 0 auto;"></span>
+        <span style="font-size:13px;font-weight:600;color:oklch(0.30 0.02 255);">Fix: Safari checkout crash</span>
+        <span style="flex:1;"></span>
+        <span style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.12 292);">in Spec · AI</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:11px;border:1px solid oklch(0.93 0.006 255);background:oklch(0.992 0.002 255);border-radius:9px;padding:10px 13px;">
+        <span style="width:8px;height:8px;border-radius:50%;background:oklch(0.60 0.13 155);flex:0 0 auto;"></span>
+        <span style="font-size:13px;font-weight:600;color:oklch(0.44 0.02 255);text-decoration:line-through;">Build the initial checkout flow</span>
+        <span style="flex:1;"></span>
+        <span style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.56 0.02 255);">shipped Mar 2</span>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px;"><span style="font-size:12px;font-weight:600;color:oklch(0.48 0.14 305);background:oklch(0.97 0.03 305);border:1px solid oklch(0.90 0.04 305);border-radius:7px;padding:7px 13px;">+ Add child card</span></div>
+  </div>
+
+  <!-- analysis D -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:6px;">
+    <div style="background:oklch(0.99 0.01 155);border:1px solid oklch(0.90 0.03 155);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.10 155);margin-bottom:7px;">STRENGTH</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">One primitive covers decomposition <i>and</i> rework — your "both." Fixes are first-class, independently trackable. Relay stays fully dumb.</p></div>
+    <div style="background:oklch(0.99 0.01 65);border:1px solid oklch(0.90 0.04 65);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 65);margin-bottom:7px;">COST</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">Parent state needs a rule ("done with an open child?"). A fix reads as a separate card, slightly detached from the original.</p></div>
+    <div style="background:oklch(0.992 0.002 255);border:1px solid oklch(0.92 0.006 255);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);margin-bottom:7px;">BEST WHEN</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">Work naturally breaks into pieces and you want the same tool to handle follow-up fixes.</p></div>
+  </div>
+
+  <!-- ============ TREATMENT E · REVISION IN PLACE ============ -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:46px 0 32px;"></div>
+  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+    <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 65);text-transform:uppercase;">Treatment E</span>
+    <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);">the counter-option — no board regression</span>
+  </div>
+  <h2 style="font-size:26px;font-weight:600;letter-spacing:-0.02em;margin:0 0 8px;color:oklch(0.24 0.02 255);">Revision in place</h2>
+  <p style="font-size:15.5px;line-height:1.6;color:oklch(0.42 0.02 255);margin:0 0 20px;max-width:700px;">The one option where the card <b style="color:oklch(0.30 0.02 255);">never moves backward.</b> A shipped card stays parked in Complete. Opening it, you "Start a revision," which runs a compact pipeline <i>inside</i> the card while it holds its place with a quiet "revising" ring. Spec and plan become versioned documents (v1 shipped / v2 draft). Shown here as the deliberate contrast to your pick of "jump back to Spec" — worth seeing what you'd be giving up, and what it costs.</p>
+
+  <!-- board -->
+  <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin-bottom:9px;">ON THE BOARD — the card stays put; a ring signals a revision is running</div>
+  <div style="display:flex;gap:10px;background:oklch(0.975 0.004 255);border:1px solid oklch(0.93 0.006 255);border-radius:13px;padding:15px;margin-bottom:16px;overflow-x:auto;">
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;opacity:0.55;"><div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.55 0.15 305);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Spec</span></div></div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;opacity:0.55;"><div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.14 250);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Code</span></div></div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;opacity:0.55;"><div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.14 250);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Deploy</span></div></div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.13 155);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Complete</span></div>
+      <div style="background:oklch(1 0 0);border:2px solid oklch(0.70 0.13 65);border-radius:9px;padding:9px 10px;box-shadow:0 0 0 3px oklch(0.70 0.13 65/0.12);">
+        <div style="font-size:11.5px;font-weight:600;color:oklch(0.30 0.02 255);line-height:1.3;margin-bottom:7px;">Checkout on Safari</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:9px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.11 65);display:flex;align-items:center;gap:4px;"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.70 0.13 65);animation:relaypulse 1.4s ease-in-out infinite;"></span>revising v2</span><span style="width:18px;height:18px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;"><span style="width:6px;height:6px;border-radius:50%;border:1.5px solid #fff;"></span></span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- card detail -->
+  <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin-bottom:9px;">IN THE CARD — version tabs + an inline mini-pipeline</div>
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:13px;padding:18px 20px;margin-bottom:16px;">
+    <div style="font-size:16px;font-weight:600;color:oklch(0.26 0.02 255);letter-spacing:-0.01em;margin-bottom:14px;">Checkout on Safari</div>
+    <div style="display:flex;gap:6px;margin-bottom:15px;">
+      <span style="font-size:11.5px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);background:oklch(0.965 0.004 255);border:1px solid oklch(0.91 0.006 255);border-radius:7px;padding:5px 11px;">v1 · shipped</span>
+      <span style="font-size:11.5px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.11 65);background:oklch(0.97 0.03 75);border:1px solid oklch(0.88 0.06 75);border-radius:7px;padding:5px 11px;">v2 · draft ●</span>
+    </div>
+    <div style="background:oklch(0.985 0.02 75);border:1px solid oklch(0.89 0.05 70);border-radius:10px;padding:14px 15px;">
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.11 65);margin-bottom:11px;">REVISION v2 · IN PROGRESS</div>
+      <div style="display:flex;align-items:center;gap:0;">
+        <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.13 305);font-weight:600;">Spec</span><span style="color:oklch(0.72 0.02 255);padding:0 7px;font-size:11px;">━</span>
+        <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.14 292);font-weight:600;display:flex;align-items:center;gap:4px;"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.56 0.16 292);animation:relaypulse 1.4s ease-in-out infinite;"></span>Code</span><span style="color:oklch(0.82 0.02 255);padding:0 7px;font-size:11px;">┈</span>
+        <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.66 0.02 255);">Deploy</span>
+      </div>
+    </div>
+  </div>
+  <div style="background:oklch(0.99 0.01 65);border:1px solid oklch(0.89 0.04 65);border-radius:11px;padding:13px 15px;margin-bottom:18px;display:flex;gap:10px;align-items:flex-start;max-width:700px;">
+    <span style="font-size:13px;color:oklch(0.52 0.11 65);margin-top:1px;">⚠</span>
+    <span style="font-size:12.5px;line-height:1.5;color:oklch(0.44 0.03 65);"><b style="color:oklch(0.42 0.10 65);">The catch:</b> this creates a <i>second</i> place work happens — a mini-pipeline living inside a card, separate from the real board. Relay now has to run stages in two contexts, which is more knowledge, not less. It buys "shipped stays shipped" at the price of the principle in §01.</span>
+  </div>
+
+  <!-- analysis E -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:6px;">
+    <div style="background:oklch(0.99 0.01 155);border:1px solid oklch(0.90 0.03 155);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.10 155);margin-bottom:7px;">STRENGTH</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">No "regression" feeling — a shipped thing stays visibly shipped. Clean version tabs.</p></div>
+    <div style="background:oklch(0.99 0.01 65);border:1px solid oklch(0.90 0.04 65);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 65);margin-bottom:7px;">COST</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">A parallel in-card pipeline duplicates the board. Relay learns the most here. Fights your §01 principle.</p></div>
+    <div style="background:oklch(0.992 0.002 255);border:1px solid oklch(0.92 0.006 255);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);margin-bottom:7px;">BEST WHEN</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">Shipped state is sacred — a public roadmap or changelog where "done" must never flicker.</p></div>
+  </div>
+
+  <!-- ============ TREATMENT F · BRANCHES ============ -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:46px 0 32px;"></div>
+  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+    <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.11 195);text-transform:uppercase;">Treatment F</span>
+    <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);">runs, but in a metaphor Claude Code users already own</span>
+  </div>
+  <h2 style="font-size:26px;font-weight:600;letter-spacing:-0.02em;margin:0 0 8px;color:oklch(0.24 0.02 255);">Branches</h2>
+  <p style="font-size:15.5px;line-height:1.6;color:oklch(0.42 0.02 255);margin:0 0 20px;max-width:700px;">Treat the card like a repo. <b style="color:oklch(0.30 0.02 255);">Mainline is what's deployed.</b> A bug opens a branch that travels the pipeline and <b style="color:oklch(0.30 0.02 255);">merges</b> (deploys) back to mainline. Card history reads as a branch graph. Mechanically this is Treatment B — the trigger to open a branch is an explicit human act, so Relay just "works the active branch" — but the git framing lands instantly with an engineering audience.</p>
+
+  <!-- board -->
+  <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin-bottom:9px;">ON THE BOARD — the card carries a branch badge and flows the pipeline</div>
+  <div style="display:flex;gap:10px;background:oklch(0.975 0.004 255);border:1px solid oklch(0.93 0.006 255);border-radius:13px;padding:15px;margin-bottom:16px;overflow-x:auto;">
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;opacity:0.55;"><div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.55 0.15 305);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Spec</span></div></div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.14 250);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Code</span></div>
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.89 0.05 195);border-radius:9px;padding:9px 10px;box-shadow:0 1px 3px oklch(0.5 0.06 195/0.10);">
+        <div style="font-size:11.5px;font-weight:600;color:oklch(0.30 0.02 255);line-height:1.3;margin-bottom:7px;">Checkout on Safari</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:9px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.44 0.10 195);background:oklch(0.96 0.03 195);border-radius:4px;padding:2px 5px;">⑂ fix/safari</span><span style="width:18px;height:18px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;"><span style="width:6px;height:6px;border-radius:50%;border:1.5px solid #fff;"></span></span></div>
+      </div>
+    </div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;opacity:0.55;"><div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.14 250);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Deploy</span></div></div>
+    <div style="flex:1;min-width:150px;display:flex;flex-direction:column;gap:8px;opacity:0.55;"><div style="display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.60 0.13 155);"></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.50 0.02 255);">Complete</span></div></div>
+  </div>
+
+  <!-- card detail: branch graph -->
+  <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin-bottom:9px;">IN THE CARD — a branch graph of what shipped and what's in flight</div>
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:13px;padding:18px 20px;margin-bottom:18px;">
+    <div style="font-size:16px;font-weight:600;color:oklch(0.26 0.02 255);letter-spacing:-0.01em;margin-bottom:16px;">Checkout on Safari</div>
+    <div style="display:flex;flex-direction:column;gap:0;font-family:'JetBrains Mono',monospace;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="width:11px;height:11px;border-radius:50%;background:oklch(0.46 0.11 195);flex:0 0 auto;"></span>
+        <span style="font-size:12.5px;color:oklch(0.44 0.10 195);font-weight:600;">fix/safari</span>
+        <span style="font-size:11px;color:oklch(0.60 0.02 255);">opened by Dana · now in Code</span>
+      </div>
+      <div style="display:flex;gap:12px;"><span style="width:11px;display:flex;justify-content:center;flex:0 0 auto;"><span style="width:2px;height:20px;background:oklch(0.85 0.04 195);"></span></span><span></span></div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="width:11px;height:11px;border-radius:50%;background:oklch(0.60 0.13 155);flex:0 0 auto;"></span>
+        <span style="font-size:12.5px;color:oklch(0.42 0.10 155);font-weight:600;">main</span>
+        <span style="font-size:11px;color:oklch(0.60 0.02 255);">deployed Mar 2 · v1</span>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:16px;gap:8px;">
+      <span style="font-size:12px;font-weight:600;color:oklch(0.44 0.11 195);background:oklch(0.96 0.03 195);border:1px solid oklch(0.89 0.04 195);border-radius:7px;padding:7px 13px;">+ Open a fix branch</span>
+    </div>
+  </div>
+
+  <!-- analysis F -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:6px;">
+    <div style="background:oklch(0.99 0.01 155);border:1px solid oklch(0.90 0.03 155);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.10 155);margin-bottom:7px;">STRENGTH</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">Instantly legible to engineers. History is a graph. Explicit branch-open keeps Relay dumb.</p></div>
+    <div style="background:oklch(0.99 0.01 65);border:1px solid oklch(0.90 0.04 65);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 65);margin-bottom:7px;">COST</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">The metaphor alienates PMs, designers, ops. Overkill when there's usually one fix. It's "runs" wearing a costume.</p></div>
+    <div style="background:oklch(0.992 0.002 255);border:1px solid oklch(0.92 0.006 255);border-radius:11px;padding:14px 15px;"><div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);margin-bottom:7px;">BEST WHEN</div><p style="font-size:12.5px;line-height:1.5;color:oklch(0.42 0.02 255);margin:0;">The board is used almost entirely by engineers who already live in git.</p></div>
+  </div>
+
+  <!-- ============ SMARTER REVIEW STAGES ============ -->
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:46px 0 32px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.44 0.11 195);text-transform:uppercase;margin-bottom:10px;">07 — Smarter review stages</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 14px;color:oklch(0.24 0.02 255);">Reviews route rejects — the loop as a board rule</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 12px;max-width:700px;">Every review is a two-outcome gate: <b style="color:oklch(0.42 0.10 155);">pass</b> pulls forward as normal, <b style="color:oklch(0.50 0.11 65);">reject</b> sends the card to one configured stage. The destination is chosen by a human up front, so this stays inside §01 — Relay never infers a route, it just reads the rule. The backend picks up the rejection comment and replans from there.</p>
+  <div style="background:oklch(0.985 0.02 195);border:1px solid oklch(0.90 0.03 195);border-radius:10px;padding:12px 14px;margin-bottom:22px;display:flex;gap:10px;align-items:flex-start;max-width:700px;">
+    <span style="font-size:13px;color:oklch(0.44 0.11 195);margin-top:1px;">◆</span>
+    <span style="font-size:13px;line-height:1.5;color:oklch(0.38 0.04 210);">Two kinds of review, one behavior. <b style="color:oklch(0.36 0.08 210);">Sub-stage reviews</b> reject to their own parent — the destination is implicit in containment. <b style="color:oklch(0.36 0.08 210);">Top-level review stages</b> reject to a stage you pick in board settings (in practice, always Plan).</span>
+  </div>
+
+  <!-- 7a substage reject to parent -->
+  <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin-bottom:9px;">SUB-STAGE REVIEW — rejects to its parent, no config needed</div>
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:13px;padding:18px 20px;margin-bottom:22px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;"><span style="width:7px;height:7px;border-radius:2px;background:oklch(0.55 0.15 305);"></span><span style="font-size:12.5px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.46 0.02 255);">Spec</span><span style="font-size:11px;color:oklch(0.62 0.02 255);">— the stage, with its inner sub-states</span></div>
+    <div style="display:flex;align-items:center;gap:0;flex-wrap:wrap;">
+      <span style="font-size:11.5px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.46 0.02 255);background:oklch(0.965 0.004 255);border:1px solid oklch(0.91 0.006 255);border-radius:8px;padding:7px 12px;">In progress</span>
+      <span style="color:oklch(0.72 0.02 255);padding:0 8px;font-size:12px;">→</span>
+      <span style="font-size:11.5px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.44 0.11 195);background:oklch(0.96 0.03 195);border:1px solid oklch(0.89 0.04 195);border-radius:8px;padding:7px 12px;">In review</span>
+      <span style="color:oklch(0.72 0.02 255);padding:0 8px;font-size:12px;">→</span>
+      <span style="font-size:11.5px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.42 0.10 155);background:oklch(0.96 0.03 155);border:1px solid oklch(0.89 0.04 155);border-radius:8px;padding:7px 12px;">Ready →</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:14px;padding-top:13px;border-top:1px dashed oklch(0.90 0.03 65);">
+      <span style="font-size:13px;color:oklch(0.52 0.11 65);">↩</span>
+      <span style="font-size:13px;line-height:1.5;color:oklch(0.44 0.03 65);"><b style="color:oklch(0.44 0.10 65);">Reject</b> in <span style="font-family:'JetBrains Mono',monospace;">In review</span> drops the card straight back to <span style="font-family:'JetBrains Mono',monospace;color:oklch(0.42 0.02 255);">In progress</span> in the same stage. The parent is the destination — nothing to configure.</span>
+    </div>
+  </div>
+
+  <!-- 7b top-level review + settings -->
+  <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);margin-bottom:9px;">TOP-LEVEL REVIEW — designate a stage as Review, then pick where rejects go</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;align-items:start;">
+    <!-- settings panel -->
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:13px;padding:16px 17px;">
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);margin-bottom:14px;">BOARD SETTINGS · STAGE "REVIEW"</div>
+      <div style="font-size:11.5px;font-weight:600;color:oklch(0.44 0.02 255);margin-bottom:7px;">Stage type</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px;">
+        <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);background:oklch(0.97 0.004 255);border:1px solid oklch(0.92 0.006 255);border-radius:6px;padding:5px 9px;">Queue</span>
+        <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);background:oklch(0.97 0.004 255);border:1px solid oklch(0.92 0.006 255);border-radius:6px;padding:5px 9px;">Work</span>
+        <span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.40 0.10 195);background:oklch(0.95 0.04 195);border:1.5px solid oklch(0.70 0.09 195);border-radius:6px;padding:5px 9px;">Review ✓</span>
+        <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);background:oklch(0.97 0.004 255);border:1px solid oklch(0.92 0.006 255);border-radius:6px;padding:5px 9px;">Done</span>
+      </div>
+      <div style="background:oklch(0.985 0.02 195);border:1px solid oklch(0.90 0.03 195);border-radius:9px;padding:12px 13px;">
+        <div style="font-size:11.5px;font-weight:600;color:oklch(0.38 0.06 210);margin-bottom:4px;">On reject, send to</div>
+        <div style="font-size:10.5px;color:oklch(0.55 0.03 210);margin-bottom:10px;line-height:1.4;">Required for review stages.</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;background:oklch(1 0 0);border:1.5px solid oklch(0.72 0.09 195);border-radius:7px;padding:9px 11px;">
+          <span style="font-size:12.5px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.40 0.10 195);">Plan</span>
+          <span style="font-size:11px;color:oklch(0.60 0.06 210);">▾</span>
+        </div>
+        <div style="font-size:10px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.03 210);margin-top:8px;">Pass → next stage (Deploy) · automatic</div>
+      </div>
+    </div>
+    <!-- resulting board flow -->
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:13px;padding:16px 17px;">
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);margin-bottom:16px;">RESULTING FLOW</div>
+      <div style="display:flex;flex-direction:column;gap:0;">
+        <div style="display:flex;align-items:center;gap:0;flex-wrap:wrap;">
+          <span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.46 0.13 305);background:oklch(0.98 0.02 305);border:1px solid oklch(0.91 0.04 305);border-radius:7px;padding:6px 10px;">Plan</span>
+          <span style="color:oklch(0.72 0.02 255);padding:0 6px;font-size:11px;">→</span>
+          <span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.44 0.13 250);background:oklch(0.98 0.012 250);border:1px solid oklch(0.91 0.03 250);border-radius:7px;padding:6px 10px;">Code</span>
+          <span style="color:oklch(0.72 0.02 255);padding:0 6px;font-size:11px;">→</span>
+          <span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.40 0.10 195);background:oklch(0.95 0.04 195);border:1.5px solid oklch(0.70 0.09 195);border-radius:7px;padding:6px 10px;">Review</span>
+          <span style="color:oklch(0.72 0.02 255);padding:0 6px;font-size:11px;">→</span>
+          <span style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.42 0.10 155);background:oklch(0.96 0.03 155);border:1px solid oklch(0.89 0.04 155);border-radius:7px;padding:6px 10px;">Deploy</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin:14px 0 2px;padding-left:2px;">
+          <span style="font-size:12px;color:oklch(0.42 0.10 155);">✓</span><span style="font-size:11.5px;color:oklch(0.44 0.03 155);"><b style="color:oklch(0.40 0.09 155);">Pass</b> → pulls forward to Deploy</span>
+        </div>
+        <div style="height:1px;background:oklch(0.94 0.006 255);margin:8px 0;"></div>
+        <!-- reject arc -->
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:12px;color:oklch(0.52 0.11 65);">↩</span><span style="font-size:11.5px;color:oklch(0.44 0.03 65);"><b style="color:oklch(0.46 0.10 65);">Reject</b> → back to <span style="font-family:'JetBrains Mono',monospace;font-weight:600;color:oklch(0.46 0.13 305);">Plan</span>, with comments</span>
+        </div>
+        <div style="margin-top:12px;background:oklch(0.985 0.008 65);border:1px dashed oklch(0.88 0.05 65);border-radius:8px;padding:9px 11px;font-size:10.5px;line-height:1.5;color:oklch(0.48 0.04 65);">Backend reads the rejection comments and replans from there — no human re-spec needed.</div>
+      </div>
+    </div>
+  </div>
+  <p style="font-size:13px;line-height:1.6;color:oklch(0.50 0.02 255);margin:0 0 8px;max-width:700px;">Note this handles rework that flows <i>through</i> the gate. A bug found cold weeks after ship never re-enters Review on its own — so the manual reopen / child-card gesture from the treatments above still covers cold re-entry. The two are complementary: review-reject for in-pipeline rejection, the human gesture for waking a shipped card.</p>
+
+  <!-- ============ COMPARISON MATRIX ============ -->
+  <sc-if value="{{ showMatrix }}" hint-placeholder-val="{{ true }}">
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:46px 0 32px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">08 — Side by side</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 8px;color:oklch(0.24 0.02 255);">How they stack up</h2>
+  <p style="font-size:14.5px;line-height:1.6;color:oklch(0.44 0.02 255);margin:0 0 20px;max-width:700px;">More filled dots is more of that quality — except the last column, where <b style="color:oklch(0.50 0.11 65);">fewer is better</b> (fewer new ideas to learn).</p>
+
+  <div style="border:1px solid oklch(0.92 0.006 255);border-radius:13px;overflow:hidden;background:oklch(1 0 0);">
+    <!-- header -->
+    <div style="display:grid;grid-template-columns:1.35fr 1fr 1fr 1fr 1fr 1fr;background:oklch(0.975 0.004 255);border-bottom:1px solid oklch(0.93 0.006 255);">
+      <div style="padding:12px 14px;font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);">TREATMENT</div>
+      <div style="padding:12px 10px;font-size:10px;font-weight:600;letter-spacing:0.04em;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);text-align:center;">RELAY STAYS DUMB</div>
+      <div style="padding:12px 10px;font-size:10px;font-weight:600;letter-spacing:0.04em;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);text-align:center;">FITS "REOPEN"</div>
+      <div style="padding:12px 10px;font-size:10px;font-weight:600;letter-spacing:0.04em;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);text-align:center;">PER-SHIP HISTORY</div>
+      <div style="padding:12px 10px;font-size:10px;font-weight:600;letter-spacing:0.04em;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);text-align:center;">DECOMPOSITION</div>
+      <div style="padding:12px 10px;font-size:10px;font-weight:600;letter-spacing:0.04em;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.09 65);text-align:center;">CONCEPTS TO LEARN</div>
+    </div>
+    <sc-for list="{{ matrix }}" as="row" hint-placeholder-count="6">
+      <div style="{{ row.rowStyle }}">
+        <div style="padding:14px;display:flex;flex-direction:column;gap:2px;">
+          <span style="font-size:13.5px;font-weight:600;color:oklch(0.28 0.02 255);">{{ row.name }}</span>
+          <span style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.60 0.02 255);">{{ row.tag }}</span>
+        </div>
+        <sc-for list="{{ row.cells }}" as="cell" hint-placeholder-count="5">
+          <div style="padding:14px 10px;display:flex;align-items:center;justify-content:center;gap:5px;">
+            <sc-for list="{{ cell.dots }}" as="d" hint-placeholder-count="3">
+              <span style="{{ d.style }}"></span>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+    </sc-for>
+  </div>
+  </sc-if>
+
+  <!-- ============ RECOMMENDATION ============ -->
+  <sc-if value="{{ showRecommendation }}" hint-placeholder-val="{{ true }}">
+  <div style="height:1px;background:oklch(0.90 0.006 255);margin:46px 0 32px;"></div>
+  <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);text-transform:uppercase;margin-bottom:10px;">09 — Where I'd land</span>
+  <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0 0 14px;color:oklch(0.24 0.02 255);">The confusion was never runs vs cards</h2>
+  <p style="font-size:15.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0 0 20px;max-width:700px;">It was letting Relay <i>infer</i> the loop from board movement. Once reopening is an explicit human gesture (§01), that whole problem evaporates — and you're free to pick the <b style="color:oklch(0.30 0.02 255);">lightest</b> representation that fits how often you actually loop. You said: usually one fix, keep Relay dumb, one mechanism for decomposition and rework, and the human model is "open it and do it again." That points somewhere specific.</p>
+
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.90 0.03 155);border-radius:14px;padding:22px 24px;margin-bottom:16px;">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(0.46 0.10 155);margin-bottom:14px;">THE STACK I'D SHIP</div>
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      <div style="display:flex;gap:14px;align-items:flex-start;">
+        <span style="flex:0 0 auto;width:26px;height:26px;border-radius:8px;background:oklch(0.96 0.03 155);color:oklch(0.44 0.10 155);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;font-family:'JetBrains Mono',monospace;">A</span>
+        <div><div style="font-size:14.5px;font-weight:600;color:oklch(0.28 0.02 255);margin-bottom:3px;">Reopen is the default</div><p style="font-size:13.5px;line-height:1.55;color:oklch(0.44 0.02 255);margin:0;">For the common case — a deploy, occasionally a fix — a plain <b style="color:oklch(0.30 0.02 255);">Reopen</b> drops the card back on Spec and it flows again. Nothing new to learn, and it's literally the human model.</p></div>
+      </div>
+      <div style="display:flex;gap:14px;align-items:flex-start;">
+        <span style="flex:0 0 auto;width:26px;height:26px;border-radius:8px;background:oklch(0.97 0.03 305);color:oklch(0.46 0.13 305);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;font-family:'JetBrains Mono',monospace;">D</span>
+        <div><div style="font-size:14.5px;font-weight:600;color:oklch(0.28 0.02 255);margin-bottom:3px;">Sub-cards when it's bigger than a reopen</div><p style="font-size:13.5px;line-height:1.55;color:oklch(0.44 0.02 255);margin:0;">When a fix deserves its own tracking, or the work splits into pieces, add a <b style="color:oklch(0.30 0.02 255);">child card</b>. It's the only option that answers your "both" — decomposition and rework through one primitive — and Relay still treats every card identically.</p></div>
+      </div>
+    </div>
+    <div style="border-top:1px solid oklch(0.94 0.006 255);margin-top:18px;padding-top:15px;">
+      <p style="font-size:13px;line-height:1.55;color:oklch(0.46 0.02 255);margin:0;"><b style="color:oklch(0.30 0.02 255);">Keep in your back pocket:</b> <span style="color:oklch(0.48 0.14 292);font-weight:600;">Runs (B)</span> if you later need a defensible per-ship record — but note A + D already give you most of that history through the activity log and child cards, without the card/run duality that felt off. <span style="color:oklch(0.46 0.13 250);font-weight:600;">Two boards (C)</span>, <span style="color:oklch(0.50 0.11 65);font-weight:600;">revision-in-place (E)</span>, and <span style="color:oklch(0.44 0.11 195);font-weight:600;">branches (F)</span> all solve real problems, but each is heavier than "usually one fix" warrants today.</p>
+    </div>
+  </div>
+
+  <div style="background:oklch(0.99 0.008 250);border:1px solid oklch(0.90 0.03 250);border-radius:12px;padding:15px 17px;">
+    <div style="font-size:13.5px;line-height:1.6;color:oklch(0.40 0.02 255);"><b style="color:oklch(0.30 0.02 255);">One thing to nail down:</b> parent state under Sub-cards. Is a parent "Complete" while a child bug is open, or does an open child pull it back to In progress? My lean — parent stays Complete and just shows an "open children" badge, so a shipped feature reads as shipped while the fix flows on its own. That keeps the board honest without any regression feeling.</div>
+  </div>
+  </sc-if>
+
+</div>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1020,&quot;height&quot;:900},&quot;showMatrix&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Sections&quot;},&quot;showRecommendation&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Sections&quot;}}">
+class Component extends DCLogic {
+  buildMatrix() {
+    const rows = [
+      { name: 'A · Reopen',        tag: 'reopen & redo',   r: [3, 3, 1, 0, 1] },
+      { name: 'B · Runs',          tag: 'card holds runs', r: [2, 2, 3, 0, 2] },
+      { name: 'C · Two boards',    tag: 'feature + run',   r: [3, 1, 3, 2, 3] },
+      { name: 'D · Sub-cards',     tag: 'child cards',     r: [3, 2, 2, 3, 2] },
+      { name: 'E · Revision',      tag: 'in place',        r: [1, 1, 3, 0, 2] },
+      { name: 'F · Branches',      tag: 'git metaphor',    r: [2, 2, 3, 1, 3] },
+    ];
+    const dot = (on, cost) => {
+      const bg = on
+        ? (cost ? 'oklch(0.70 0.13 65)' : 'oklch(0.60 0.13 155)')
+        : 'oklch(0.90 0.02 255)';
+      return { style: 'width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:' + bg + ';' };
+    };
+    return rows.map((row, i) => ({
+      name: row.name,
+      tag: row.tag,
+      rowStyle: 'display:grid;grid-template-columns:1.35fr 1fr 1fr 1fr 1fr 1fr;'
+        + (i < rows.length - 1 ? 'border-bottom:1px solid oklch(0.95 0.006 255);' : ''),
+      cells: row.r.map((n, ci) => ({
+        dots: [0, 1, 2].map((k) => dot(k < n, ci === 4)),
+      })),
+    }));
+  }
+  renderVals() {
+    return {
+      showMatrix: this.props.showMatrix ?? true,
+      showRecommendation: this.props.showRecommendation ?? true,
+      matrix: this.buildMatrix(),
+    };
+  }
+}
+</script>
+</body>
+</html>
+

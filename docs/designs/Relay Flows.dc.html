@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.32 0.02 255);background:oklch(0.955 0.008 255);-webkit-font-smoothing:antialiased;}
+  a{color:oklch(0.60 0.14 250);text-decoration:none;} a:hover{text-decoration:underline;}
+  button{font-family:inherit;cursor:pointer;}
+  ::-webkit-scrollbar{width:9px;height:9px;}
+  ::-webkit-scrollbar-thumb{background:oklch(0.88 0.01 255);border-radius:6px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+</style>
+</helmet>
+
+<div style="height:100vh;display:flex;flex-direction:column;overflow:hidden;">
+
+  <!-- Top bar -->
+  <div style="display:flex;align-items:center;gap:14px;height:53px;padding:0 18px;border-bottom:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);flex:0 0 auto;">
+    <div style="display:flex;align-items:center;gap:9px;">
+      <div style="width:23px;height:23px;border-radius:7px;background:oklch(0.60 0.14 250);display:flex;align-items:center;justify-content:center;position:relative;">
+        <div style="width:8px;height:8px;border-radius:50%;background:oklch(1 0 0);"></div>
+        <div style="position:absolute;right:3px;top:3px;width:4px;height:4px;border-radius:50%;background:oklch(0.60 0.14 250);box-shadow:0 0 0 1.5px oklch(1 0 0);"></div>
+      </div>
+      <span style="font-weight:600;font-size:15px;letter-spacing:-0.02em;">Relay</span>
+    </div>
+    <div style="width:1px;height:18px;background:oklch(0.90 0.006 255);"></div>
+    <div style="display:flex;align-items:center;gap:7px;">
+      <span style="display:flex;align-items:center;gap:6px;color:oklch(0.50 0.02 255);font-size:13px;font-weight:600;"><span style="display:grid;grid-template-columns:1fr 1fr;gap:2px;width:12px;height:12px;"><span style="width:5px;height:5px;border-radius:1.5px;background:currentColor;"></span><span style="width:5px;height:5px;border-radius:1.5px;background:currentColor;"></span><span style="width:5px;height:5px;border-radius:1.5px;background:currentColor;"></span><span style="width:5px;height:5px;border-radius:1.5px;background:currentColor;"></span></span>Boards</span>
+      <span style="color:oklch(0.78 0.02 255);font-size:13px;">/</span>
+      <span style="font-size:13px;color:oklch(0.30 0.02 255);font-weight:500;">Payments · Settings</span>
+    </div>
+    <span style="flex:1;"></span>
+    <button style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;">Done</button>
+  </div>
+
+  <div style="flex:1;display:flex;overflow:hidden;">
+    <!-- left rail -->
+    <div style="width:210px;flex:0 0 auto;border-right:1px solid oklch(0.93 0.006 255);background:oklch(0.992 0.002 255);padding:22px 14px;display:flex;flex-direction:column;gap:3px;overflow-y:auto;">
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);padding:4px 10px 8px 10px;">BOARD</div>
+      <button style="display:block;width:100%;text-align:left;background:transparent;border:none;border-radius:8px;padding:8px 10px;font-size:13px;font-weight:500;color:oklch(0.44 0.02 255);" style-hover="background:oklch(0.96 0.004 255);">General</button>
+      <button style="display:block;width:100%;text-align:left;background:transparent;border:none;border-radius:8px;padding:8px 10px;font-size:13px;font-weight:500;color:oklch(0.44 0.02 255);" style-hover="background:oklch(0.96 0.004 255);">Stages</button>
+      <button style="display:block;width:100%;text-align:left;background:oklch(0.95 0.03 250);border:none;border-radius:8px;padding:8px 10px;font-size:13px;font-weight:600;color:oklch(0.40 0.13 250);">Flows</button>
+      <button style="display:block;width:100%;text-align:left;background:transparent;border:none;border-radius:8px;padding:8px 10px;font-size:13px;font-weight:500;color:oklch(0.44 0.02 255);" style-hover="background:oklch(0.96 0.004 255);">Members</button>
+      <button style="display:block;width:100%;text-align:left;background:transparent;border:none;border-radius:8px;padding:8px 10px;font-size:13px;font-weight:500;color:oklch(0.44 0.02 255);" style-hover="background:oklch(0.96 0.004 255);">API keys</button>
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);padding:16px 10px 8px 10px;">ENGINE</div>
+      <button style="display:block;width:100%;text-align:left;background:transparent;border:none;border-radius:8px;padding:8px 10px;font-size:13px;font-weight:500;color:oklch(0.44 0.02 255);" style-hover="background:oklch(0.96 0.004 255);">Runners</button>
+    </div>
+
+    <!-- content -->
+    <div style="flex:1;overflow-y:auto;background:oklch(0.985 0.004 250);">
+      <div style="max-width:1000px;margin:0 auto;padding:34px 40px 84px 40px;">
+
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:20px;">
+          <div>
+            <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px 0;color:oklch(0.26 0.02 255);">Flows</h1>
+            <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0;max-width:600px;">A flow is the automation attached to a stage transition — it pulls work from one stage, runs a graph of agent and shell steps, and lands the card on the next stage when it succeeds. Flows are <b style="color:oklch(0.36 0.02 255);">versioned</b>: every save bumps the version, and in-flight runs keep the version they started on.</p>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex:0 0 auto;margin-top:4px;">
+            <div style="display:flex;gap:4px;background:oklch(0.96 0.004 255);border:1px solid oklch(0.91 0.006 255);border-radius:9px;padding:3px;">
+              <button onClick="{{ onConfigured }}" style="{{ sw.configured }}">Configured</button>
+              <button onClick="{{ onFirstRun }}" style="{{ sw.first }}">First run</button>
+            </div>
+            <button style="display:flex;align-items:center;gap:6px;background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 15px;font-size:13px;font-weight:600;"><span style="font-size:15px;line-height:1;">+</span>New flow</button>
+          </div>
+        </div>
+
+        <!-- first-run explainer -->
+        <sc-if value="{{ isFirstRun }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:flex-start;gap:12px;background:oklch(0.98 0.02 250);border:1px solid oklch(0.89 0.05 250);border-radius:12px;padding:15px 17px;margin-top:20px;">
+            <span style="width:24px;height:24px;border-radius:7px;background:oklch(0.60 0.14 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">i</span>
+            <div style="flex:1;">
+              <div style="font-size:14px;font-weight:600;color:oklch(0.34 0.10 250);margin-bottom:3px;">Flows are off until you turn them on</div>
+              <p style="font-size:13px;line-height:1.55;color:oklch(0.44 0.04 250);margin:0;max-width:620px;">This board ships with the <b style="color:oklch(0.38 0.10 250);">Spec</b>, <b style="color:oklch(0.38 0.10 250);">Plan</b> and <b style="color:oklch(0.38 0.10 250);">Code</b> defaults, but nothing runs automatically yet — every card waits for a human. Turn a flow on to start handing its stage to the AI. Cut over <b style="color:oklch(0.38 0.10 250);">one flow at a time</b>; you can always turn it back off.</p>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- legend -->
+        <div style="display:flex;gap:18px;flex-wrap:wrap;margin:22px 0 12px 0;font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);">
+          <span style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:2px;background:oklch(0.62 0.13 195);"></span>shared_clean — many runs, fresh checkout each</span>
+          <span style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:2px;background:oklch(0.70 0.13 65);"></span>exclusive — one run per machine, holds the tree</span>
+        </div>
+
+        <!-- table -->
+        <div style="border:1px solid oklch(0.92 0.006 255);border-radius:12px;overflow:hidden;background:oklch(1 0 0);box-shadow:0 1px 2px oklch(0.55 0.03 255/0.04);">
+         <div style="overflow-x:auto;">
+         <div style="min-width:900px;">
+          <!-- head -->
+          <div style="display:flex;align-items:center;gap:14px;padding:11px 18px;background:oklch(0.975 0.004 255);border-bottom:1px solid oklch(0.93 0.006 255);font-size:10.5px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);">
+            <span style="flex:0 0 190px;">FLOW</span>
+            <span style="flex:1;min-width:0;white-space:nowrap;">TRIGGER · pulls / works / lands</span>
+            <span style="flex:0 0 108px;">ISOLATION</span>
+            <span style="flex:0 0 92px;">VERSION</span>
+            <span style="flex:0 0 60px;text-align:center;">ON</span>
+            <span style="flex:0 0 34px;"></span>
+          </div>
+
+          <sc-for list="{{ flows }}" as="f" hint-placeholder-count="4">
+            <div style="border-bottom:1px solid oklch(0.95 0.005 255);">
+              <div style="{{ f.rowStyle }}">
+                <!-- name -->
+                <div style="flex:0 0 190px;display:flex;flex-direction:column;gap:3px;min-width:0;">
+                  <span style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);letter-spacing:-0.01em;">{{ f.name }}</span>
+                  <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">{{ f.nodesLabel }}</span>
+                </div>
+                <!-- trigger -->
+                <div style="flex:1;min-width:0;display:flex;align-items:center;gap:6px;flex-wrap:nowrap;white-space:nowrap;">
+                  <span style="font-size:11.5px;font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:500;color:oklch(0.50 0.02 255);background:oklch(0.965 0.004 255);border:1px solid oklch(0.92 0.006 255);border-radius:6px;padding:4px 9px;white-space:nowrap;">{{ f.from }}</span>
+                  <span style="color:oklch(0.72 0.02 255);font-size:12px;">→</span>
+                  <span style="{{ f.workStyle }}">{{ f.work }}</span>
+                  <span style="color:oklch(0.72 0.02 255);font-size:12px;">→</span>
+                  <span style="font-size:11.5px;font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:500;color:oklch(0.44 0.13 250);background:oklch(0.98 0.012 250);border:1px solid oklch(0.91 0.03 250);border-radius:6px;padding:4px 9px;white-space:nowrap;">{{ f.to }}</span>
+                </div>
+                <!-- isolation -->
+                <div style="flex:0 0 108px;">
+                  <span style="{{ f.isoStyle }}"><span style="{{ f.isoDot }}"></span>{{ f.isolation }}</span>
+                </div>
+                <!-- version + origin -->
+                <div style="flex:0 0 92px;display:flex;align-items:center;">
+                  <span style="font-size:11px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.42 0.02 255);background:oklch(0.96 0.004 255);border:1px solid oklch(0.92 0.006 255);border-radius:5px;padding:2px 7px;">{{ f.version }}</span>
+                </div>
+                <!-- toggle -->
+                <div style="flex:0 0 60px;display:flex;justify-content:center;">
+                  <div onClick="{{ f.onToggle }}" style="{{ f.toggleStyle }}"><div style="{{ f.knobStyle }}"></div></div>
+                </div>
+                <!-- menu -->
+                <div style="flex:0 0 34px;display:flex;justify-content:flex-end;position:relative;">
+                  <button onClick="{{ f.onMenu }}" style="width:28px;height:28px;border-radius:7px;border:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);color:oklch(0.50 0.02 255);display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1;" style-hover="background:oklch(0.965 0.004 255);border-color:oklch(0.85 0.01 255);">⋯</button>
+                  <sc-if value="{{ f.menuOpen }}" hint-placeholder-val="{{ false }}">
+                    <div style="position:absolute;top:34px;right:0;z-index:20;width:184px;background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);border-radius:10px;box-shadow:0 12px 32px oklch(0.4 0.03 255/0.18);padding:5px;display:flex;flex-direction:column;gap:1px;">
+                      <button style="display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:transparent;border:none;border-radius:7px;padding:8px 10px;font-size:13px;font-weight:500;color:oklch(0.34 0.02 255);" style-hover="background:oklch(0.96 0.004 255);"><span style="font-size:12px;">✎</span>Edit flow</button>
+                      <button style="display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:transparent;border:none;border-radius:7px;padding:8px 10px;font-size:13px;font-weight:500;color:oklch(0.34 0.02 255);" style-hover="background:oklch(0.96 0.004 255);"><span style="font-size:12px;">⧉</span>Duplicate</button>
+                    </div>
+                  </sc-if>
+                </div>
+              </div>
+
+              <!-- confirm: enable/disable cutover -->
+              <sc-if value="{{ f.toggleConfirm }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;align-items:flex-start;gap:12px;margin:0 18px 16px 18px;background:oklch(0.985 0.025 75);border:1px solid oklch(0.87 0.07 75);border-radius:10px;padding:14px 16px;">
+                  <span style="width:22px;height:22px;border-radius:50%;background:oklch(0.70 0.13 65);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">!</span>
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px;font-weight:600;color:oklch(0.42 0.10 65);margin-bottom:3px;">{{ f.confirmTitle }}</div>
+                    <p style="font-size:12.5px;line-height:1.5;color:oklch(0.44 0.05 65);margin:0 0 12px 0;max-width:560px;">{{ f.confirmBody }}</p>
+                    <div style="display:flex;gap:8px;">
+                      <button onClick="{{ f.onConfirm }}" style="background:oklch(0.62 0.14 65);color:oklch(1 0 0);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;">{{ f.confirmCta }}</button>
+                      <button onClick="{{ f.onCancel }}" style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.04 65);color:oklch(0.48 0.04 65);border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;">Cancel</button>
+                    </div>
+                  </div>
+                </div>
+              </sc-if>
+
+            </div>
+          </sc-for>
+         </div>
+         </div>
+        </div>
+
+        <p style="font-size:12px;line-height:1.55;color:oklch(0.58 0.02 255);margin:16px 2px 0 2px;max-width:640px;">Disabling a flow is a cutover — cards stop being picked up at that transition and wait for a human. Enabling one starts handing new cards to the AI immediately.</p>
+
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:800}}">
+class Component extends DCLogic {
+  state = {
+    firstRun: false,
+    enabled: { spec: true, plan: true, code: true, deploy: false },
+    menu: null,        // flow id with open menu
+    confirm: null,     // {id, kind:'toggle'|'reset'}
+  };
+
+  renderVals() {
+    const s = this.state;
+    const mono = "'JetBrains Mono',ui-monospace,monospace";
+    const AMBER = 'oklch(0.70 0.13 65)', BLUE = 'oklch(0.60 0.14 250)';
+
+    const defs = [
+      { id:'spec', name:'Spec', nodes:1, from:'Next up', work:'Spec', to:'Spec:Review', iso:'shared_clean', version:'v2', custom:false },
+      { id:'plan', name:'Plan', nodes:1, from:'Spec:Review', work:'Plan', to:'Plan:Review', iso:'shared_clean', version:'v1', custom:false },
+      { id:'code', name:'Code', nodes:14, from:'Plan:Review', work:'In progress', to:'Review', iso:'exclusive', version:'v3', custom:true },
+      { id:'deploy', name:'Deploy', nodes:3, from:'Review', work:'Deploy', to:'Complete', iso:'exclusive', version:'v1', custom:true },
+    ];
+
+    const isoStyle = (iso, on) => {
+      const teal = iso === 'shared_clean';
+      return `display:inline-flex;align-items:center;gap:6px;font-size:10.5px;font-weight:600;font-family:${mono};padding:3px 8px;border-radius:6px;` +
+        (teal
+          ? 'background:oklch(0.97 0.03 195);color:oklch(0.42 0.10 195);'
+          : 'background:oklch(0.98 0.04 75);color:oklch(0.48 0.11 65);') +
+        (on ? '' : 'opacity:0.55;');
+    };
+    const isoDot = (iso) => `width:6px;height:6px;border-radius:2px;background:${iso==='shared_clean'?'oklch(0.62 0.13 195)':AMBER};`;
+
+    const activeDefs = s.firstRun
+      ? [defs[0], defs[1], defs[2]].map(d => ({ ...d, custom:false, version:'v1' }))
+      : defs;
+
+    const flows = activeDefs.map(f => {
+      const on = s.enabled[f.id];
+      const toggleConfirm = s.confirm && s.confirm.id === f.id && s.confirm.kind === 'toggle';
+      const resetConfirm = s.confirm && s.confirm.id === f.id && s.confirm.kind === 'reset';
+      const goingOn = !on; // confirm always flips current state
+      return {
+        name: f.name,
+        nodesLabel: f.nodes + (f.nodes === 1 ? ' node' : ' nodes'),
+        from: f.from, work: f.work, to: f.to,
+        workStyle: `font-size:11.5px;font-family:${mono};font-weight:500;color:oklch(0.46 0.14 292);background:oklch(0.98 0.03 292);border:1px solid oklch(0.91 0.05 292);border-radius:6px;padding:4px 9px;white-space:nowrap;`,
+        isolation: f.iso,
+        isoStyle: isoStyle(f.iso, on),
+        isoDot: isoDot(f.iso),
+        version: f.version,
+        origin: f.custom ? 'CUSTOMIZED' : 'DEFAULT',
+        originStyle: f.custom
+          ? `font-size:9px;font-weight:600;letter-spacing:0.05em;font-family:${mono};color:oklch(0.46 0.12 250);background:oklch(0.96 0.03 250);padding:2px 6px;border-radius:4px;`
+          : `font-size:9px;font-weight:600;letter-spacing:0.05em;font-family:${mono};color:oklch(0.58 0.02 255);background:oklch(0.96 0.004 255);padding:2px 6px;border-radius:4px;`,
+        isCustom: f.custom,
+        rowStyle: `display:flex;align-items:center;gap:14px;padding:14px 18px;${on ? '' : 'background:oklch(0.992 0.002 255);'}`,
+        toggleStyle: `width:38px;height:22px;border-radius:11px;position:relative;transition:background 0.18s;background:${on ? BLUE : 'oklch(0.88 0.01 255)'};`,
+        knobStyle: `position:absolute;top:2px;${on ? 'right:2px' : 'left:2px'};width:18px;height:18px;border-radius:50%;background:oklch(1 0 0);transition:all 0.18s;box-shadow:0 1px 2px oklch(0.4 0.02 255/0.3);`,
+        menuOpen: s.menu === f.id,
+        toggleConfirm, resetConfirm,
+        confirmTitle: goingOn ? `Turn on the ${f.name} flow?` : `Turn off the ${f.name} flow?`,
+        confirmBody: goingOn
+          ? `New cards reaching ${f.from} will be handed to the AI automatically and start a run on ${f.version}. Cards already sitting there won't move until you say so.`
+          : `Cards reaching ${f.from} will stop being picked up and wait for a human instead. Runs already in flight finish normally.`,
+        confirmCta: goingOn ? `Turn on ${f.name}` : `Turn off ${f.name}`,
+        onToggle: () => this.setState({ menu: null, confirm: { id: f.id, kind: 'toggle' } }),
+        onMenu: () => this.setState({ menu: s.menu === f.id ? null : f.id }),
+        onReset: () => this.setState({ menu: null, confirm: { id: f.id, kind: 'reset' } }),
+        onConfirm: () => this.setState(st => ({ enabled: { ...st.enabled, [f.id]: !st.enabled[f.id] }, confirm: null })),
+        onCancel: () => this.setState({ confirm: null }),
+      };
+    });
+
+    const sw = (active) => `font-size:12px;font-weight:600;padding:6px 11px;border-radius:6px;border:none;` +
+      (active ? 'background:oklch(1 0 0);color:oklch(0.28 0.02 255);box-shadow:0 1px 2px oklch(0.5 0.03 255/0.14);' : 'background:transparent;color:oklch(0.52 0.02 255);');
+
+    return {
+      flows,
+      isFirstRun: s.firstRun,
+      sw: { first: sw(s.firstRun), configured: sw(!s.firstRun) },
+      onFirstRun: () => this.setState({ firstRun: true, menu: null, confirm: null, enabled: { spec:false, plan:false, code:false, deploy:false } }),
+      onConfigured: () => this.setState({ firstRun: false, menu: null, confirm: null, enabled: { spec:true, plan:true, code:true, deploy:false } }),
+    };
+  }
+}
+</script>
+</body>
+</html>
+

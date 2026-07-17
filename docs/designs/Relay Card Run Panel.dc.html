@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.32 0.02 255);background:oklch(0.955 0.008 255);-webkit-font-smoothing:antialiased;}
+  button{font-family:inherit;cursor:pointer;}
+  textarea{font-family:inherit;}
+  ::-webkit-scrollbar{width:9px;height:9px;}
+  ::-webkit-scrollbar-thumb{background:oklch(0.86 0.01 255);border-radius:6px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  @keyframes crpulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+  @keyframes crring{0%{box-shadow:0 0 0 0 oklch(0.56 0.16 292/0.4);}70%{box-shadow:0 0 0 7px oklch(0.56 0.16 292/0);}100%{box-shadow:0 0 0 0 oklch(0.56 0.16 292/0);}}
+</style>
+</helmet>
+
+<div style="height:100vh;position:relative;overflow:hidden;background:oklch(0.90 0.006 255);">
+
+  <!-- faint board behind -->
+  <div style="position:absolute;inset:0;display:flex;gap:12px;padding:24px;opacity:0.5;filter:blur(1px);">
+    <div style="flex:1;background:oklch(0.97 0.004 255);border-radius:10px;"></div>
+    <div style="flex:1;background:oklch(0.97 0.004 255);border-radius:10px;"></div>
+    <div style="flex:1;background:oklch(0.97 0.004 255);border-radius:10px;"></div>
+  </div>
+  <div style="position:absolute;inset:0;background:oklch(0.30 0.02 255/0.22);"></div>
+
+  <!-- DRAWER -->
+  <div style="position:absolute;top:0;right:0;bottom:0;width:min(760px,96vw);background:oklch(1 0 0);border-left:1px solid oklch(0.92 0.006 255);box-shadow:-16px 0 48px oklch(0.3 0.03 255/0.16);display:flex;flex-direction:column;">
+
+    <!-- state switcher -->
+    <div style="flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:10px 22px;border-bottom:1px solid oklch(0.94 0.005 255);background:oklch(0.99 0.002 255);flex-wrap:wrap;">
+      <span style="font-size:9.5px;font-weight:600;letter-spacing:0.07em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">RUN STATE</span>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;">
+        <button onClick="{{ onSet_flight }}" style="{{ sw.flight }}">Mid-flight</button>
+        <button onClick="{{ onSet_reentry }}" style="{{ sw.reentry }}">Re-entry</button>
+        <button onClick="{{ onSet_parked }}" style="{{ sw.parked }}">Parked</button>
+        <button onClick="{{ onSet_revoked }}" style="{{ sw.revoked }}">Baton revoked</button>
+        <button onClick="{{ onSet_circuit }}" style="{{ sw.circuit }}">Breaker</button>
+        <button onClick="{{ onSet_history }}" style="{{ sw.history }}">History</button>
+      </div>
+    </div>
+
+    <!-- card header -->
+    <div style="padding:18px 22px 0 22px;flex:0 0 auto;">
+      <div style="display:flex;gap:14px;">
+        <div style="flex:1;display:flex;flex-direction:column;gap:9px;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="{{ hdr.stageChipStyle }}">{{ hdr.stageChip }}</span>
+            <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.64 0.02 255);">{{ hdr.ref }}</span>
+          </div>
+          <div style="font-size:19px;font-weight:600;letter-spacing:-0.015em;color:oklch(0.24 0.02 255);line-height:1.25;">{{ hdr.title }}</div>
+        </div>
+        <button style="width:28px;height:28px;border-radius:8px;border:none;background:oklch(0.96 0.004 255);color:oklch(0.45 0.02 255);font-size:15px;flex:0 0 auto;">✕</button>
+      </div>
+      <!-- drawer sub-tabs (this panel is the Run tab) -->
+      <div style="display:flex;gap:20px;margin-top:14px;border-bottom:1px solid oklch(0.94 0.005 255);">
+        <span style="font-size:13px;font-weight:500;color:oklch(0.55 0.02 255);padding:0 0 10px 0;">Detail</span>
+        <span style="font-size:13px;font-weight:600;color:oklch(0.30 0.02 255);padding:0 0 10px 0;border-bottom:2px solid oklch(0.56 0.16 292);margin-bottom:-1px;">Run</span>
+        <span style="font-size:13px;font-weight:500;color:oklch(0.55 0.02 255);padding:0 0 10px 0;">Activity</span>
+      </div>
+    </div>
+
+    <!-- run status strip -->
+    <div style="{{ strip.wrapStyle }}">
+      <div style="display:flex;align-items:center;gap:11px;min-width:0;">
+        <span style="{{ strip.batonStyle }}"><span style="{{ strip.batonDot }}"></span>{{ strip.baton }}</span>
+        <span style="font-size:13px;font-weight:600;color:{{ strip.titleColor }};">{{ strip.title }}</span>
+      </div>
+      <span style="flex:1;"></span>
+      <span style="font-size:11.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.52 0.02 255);white-space:nowrap;">{{ strip.elapsed }}</span>
+      <a href="Relay Flow Editor.dc.html" style="{{ strip.verChipStyle }}">{{ strip.verChip }}</a>
+    </div>
+
+    <div style="flex:1;overflow-y:auto;">
+      <div style="padding:18px 22px 40px 22px;display:flex;flex-direction:column;gap:18px;">
+
+        <!-- RE-ENTRY banner -->
+        <sc-if value="{{ isReentry }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:10px;background:oklch(0.975 0.02 250);border:1px solid oklch(0.88 0.05 250);border-radius:12px;padding:15px 16px;border-left:3px solid oklch(0.60 0.14 250);">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.44 0.13 250);font-family:'JetBrains Mono',ui-monospace,monospace;">RE-ENTRY · CHANGES REQUESTED BY DANA</span>
+            </div>
+            <div style="background:oklch(1 0 0);border:1px solid oklch(0.91 0.03 250);border-radius:9px;padding:11px 13px;font-size:13.5px;line-height:1.55;color:oklch(0.34 0.03 250);border-left:3px solid oklch(0.72 0.10 250);">“The CSV should <b style="color:oklch(0.30 0.05 250);">stream row by row</b>, not buffer the whole board in memory — this will OOM on large boards. Also add a header row.”</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.06 250);">rejected from Review 3m ago</span>
+              <span style="font-size:9.5px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.44 0.13 250);background:oklch(0.96 0.03 250);border-radius:5px;padding:2px 7px;">the run reads this note before implement</span>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- REVOKED banner + baton -->
+        <sc-if value="{{ isRevoked }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <div style="display:flex;align-items:center;gap:0;background:oklch(0.985 0.008 250);border:1px solid oklch(0.90 0.02 250);border-radius:12px;padding:14px 16px;">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:5px;flex:1;opacity:0.45;">
+                <span style="width:30px;height:30px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;"><span style="width:11px;height:11px;border-radius:50%;border:2px solid oklch(1 0 0);"></span></span>
+                <span style="font-size:10px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.46 0.11 292);">FLOW</span>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:0 0 auto;padding:0 8px;">
+                <span style="font-size:9px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.08 250);">revoked →</span>
+                <span style="font-size:17px;color:oklch(0.55 0.10 250);">⟶</span>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:5px;flex:1;">
+                <span style="width:34px;height:34px;border-radius:50%;background:oklch(0.62 0.13 195);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.35);">JW</span>
+                <span style="font-size:10px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.48 0.02 255);">JEREMY</span>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;background:oklch(0.99 0.004 255);border:1px solid oklch(0.92 0.006 255);border-radius:10px;padding:13px 15px;">
+              <span style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.50 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">CLAIMED BY A HUMAN</span>
+              <span style="font-size:13px;line-height:1.55;color:oklch(0.40 0.02 255);">Jeremy took this card while the run was on <b style="font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.30 0.02 255);">implement (attempt 1)</b>. Relay cancelled the run and released the executor slot. Nothing is lost — the branch <b style="font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.30 0.02 255);">relay/RLY-150</b> keeps the work so far.</span>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- CIRCUIT BREAKER banner + finding -->
+        <sc-if value="{{ isCircuit }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:11px;background:oklch(0.975 0.025 22);border:1px solid oklch(0.87 0.07 22);border-radius:12px;padding:15px 16px;border-left:3px solid oklch(0.62 0.16 22);">
+            <div style="display:flex;align-items:center;gap:9px;">
+              <span style="width:22px;height:22px;border-radius:6px;background:oklch(0.62 0.16 22);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;">⊗</span>
+              <span style="font-size:11px;font-weight:600;letter-spacing:0.05em;color:oklch(0.52 0.16 22);font-family:'JetBrains Mono',ui-monospace,monospace;">CIRCUIT BREAKER TRIPPED</span>
+            </div>
+            <span style="font-size:13.5px;line-height:1.55;color:oklch(0.40 0.06 22);"><b style="font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.42 0.14 22);">quality_review</b> returned <b>failed</b> 3 times on the same finding. Relay stopped the run rather than burn more attempts or money.</span>
+            <div style="background:oklch(0.20 0.02 255);border-radius:9px;padding:11px 13px;font-family:ui-monospace,'JetBrains Mono',monospace;font-size:11px;line-height:1.65;color:oklch(0.82 0.02 255);white-space:pre-wrap;">test/relay/export_test.exs:24 — 3rd identical failure
+  Still asserting on %Board{} private struct
+  internals. The fix keeps regenerating the same
+  brittle test instead of asserting on CSV bytes.</div>
+          </div>
+        </sc-if>
+
+        <!-- PARKED baton + question -->
+        <sc-if value="{{ isParked }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;gap:0;background:oklch(0.985 0.02 75);border:1px solid oklch(0.89 0.06 75);border-radius:12px;padding:14px 16px;">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:5px;flex:1;opacity:0.5;">
+              <span style="width:30px;height:30px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;"><span style="width:11px;height:11px;border-radius:50%;border:2px solid oklch(1 0 0);"></span></span>
+              <span style="font-size:10px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.46 0.11 292);">FLOW</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:0 0 auto;padding:0 8px;">
+              <span style="font-size:9px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.08 65);">baton →</span>
+              <span style="font-size:17px;color:oklch(0.62 0.13 65);">⟶</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:5px;flex:1;">
+              <span style="width:34px;height:34px;border-radius:50%;background:oklch(0.62 0.13 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;box-shadow:0 0 0 3px oklch(0.70 0.13 65/0.4);">DK</span>
+              <span style="font-size:10px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.48 0.02 255);">YOU</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:12px;background:oklch(0.975 0.025 75);border:1px solid oklch(0.87 0.07 75);border-radius:12px;padding:16px;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.52 0.11 65);font-family:'JetBrains Mono',ui-monospace,monospace;">RELAY AI NEEDS YOUR INPUT</span>
+              <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.06 65);">· paused at brainstorm · attempt 1</span>
+            </div>
+            <span style="font-size:14.5px;line-height:1.5;color:oklch(0.32 0.04 65);">Should board search cover card bodies and comments, or just titles? Full-text means we add a search index and a migration; titles-only ships today.</span>
+            <textarea placeholder="Type your answer — the run resumes the paused agent session where it left off…" rows="3" style="width:100%;border:1px solid oklch(0.87 0.05 65);border-radius:9px;padding:11px 12px;font-size:13px;line-height:1.5;color:oklch(0.30 0.02 255);background:oklch(1 0 0);outline:none;resize:none;" style-focus="border-color:oklch(0.70 0.13 65);box-shadow:0 0 0 3px oklch(0.70 0.13 65/0.16);"></textarea>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <button style="background:oklch(0.70 0.13 65);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 17px;font-size:13px;font-weight:600;">Answer &amp; resume run</button>
+              <span style="font-size:11.5px;color:oklch(0.55 0.06 65);">The baton returns to the flow the moment you answer.</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:12px;">
+            <div style="display:flex;flex-direction:column;align-items:center;flex:0 0 auto;width:20px;">
+              <span style="width:18px;height:18px;border-radius:50%;background:oklch(0.70 0.13 65);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;animation:crpulse 1.4s ease-in-out infinite;">?</span>
+            </div>
+            <div style="flex:1;">
+              <div style="font-size:13.5px;font-weight:600;color:oklch(0.42 0.10 65);">brainstorm</div>
+              <div style="font-size:12px;color:oklch(0.56 0.05 65);margin-top:3px;">Parked 12m ago · the agent session is suspended, not killed — answering wakes the same session with full context.</div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- MINI graph -->
+        <sc-if value="{{ showMini }}" hint-placeholder-val="{{ true }}">
+          <div style="background:oklch(0.985 0.004 250);border:1px solid oklch(0.93 0.006 255);border-radius:11px;padding:14px 16px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+              <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">{{ miniHeader }}</span>
+              <span style="font-size:11px;font-weight:600;color:oklch(0.48 0.12 292);">{{ miniActive }}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:3px;flex-wrap:wrap;">
+              <sc-for list="{{ mini }}" as="m" hint-placeholder-count="14">
+                <span style="{{ m.style }}"></span>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- TIMELINE -->
+        <sc-if value="{{ showTimeline }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;flex-direction:column;gap:0;">
+            <sc-for list="{{ timeline }}" as="t" hint-placeholder-count="6">
+              <sc-if value="{{ t.isLoop }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;align-items:center;gap:9px;padding:5px 0 5px 9px;margin:2px 0;">
+                  <span style="font-size:14px;color:oklch(0.60 0.13 65);">↺</span>
+                  <span style="font-size:11.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.52 0.09 65);background:oklch(0.98 0.03 75);border:1px solid oklch(0.90 0.05 75);border-radius:6px;padding:4px 9px;">{{ t.text }}</span>
+                </div>
+              </sc-if>
+              <sc-if value="{{ t.isNode }}" hint-placeholder-val="{{ true }}">
+                <div style="display:flex;gap:12px;">
+                  <div style="display:flex;flex-direction:column;align-items:center;flex:0 0 auto;width:20px;">
+                    <span style="{{ t.iconStyle }}">{{ t.icon }}</span>
+                    <sc-if value="{{ t.showConnector }}" hint-placeholder-val="{{ true }}">
+                      <span style="width:2px;flex:1;min-height:14px;background:{{ t.connectorColor }};"></span>
+                    </sc-if>
+                  </div>
+                  <div style="flex:1;padding-bottom:14px;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;">
+                      <span style="font-size:13.5px;font-weight:600;color:{{ t.nameColor }};font-family:'JetBrains Mono',ui-monospace,monospace;">{{ t.name }}</span>
+                      <span style="{{ t.typeTagStyle }}">{{ t.typeTag }}</span>
+                      <span style="flex:1;"></span>
+                      <sc-if value="{{ t.showCost }}" hint-placeholder-val="{{ false }}"><span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.08 155);">{{ t.cost }}</span></sc-if>
+                      <sc-if value="{{ t.showDur }}" hint-placeholder-val="{{ true }}"><span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">{{ t.dur }}</span></sc-if>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:7px;margin-top:5px;flex-wrap:wrap;">
+                      <sc-for list="{{ t.chips }}" as="c" hint-placeholder-count="1">
+                        <span style="{{ c.style }}">{{ c.text }}</span>
+                      </sc-for>
+                    </div>
+                    <sc-if value="{{ t.failed }}" hint-placeholder-val="{{ false }}">
+                      <div style="margin-top:9px;border:1px solid oklch(0.89 0.05 22);border-radius:9px;overflow:hidden;">
+                        <div style="display:flex;align-items:center;gap:8px;background:oklch(0.98 0.025 22);padding:8px 11px;border-bottom:1px solid oklch(0.92 0.03 22);">
+                          <span style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.52 0.16 22);">OUTCOME: FAILED</span>
+                          <span style="font-size:11px;color:oklch(0.55 0.08 22);">{{ t.failMeta }}</span>
+                        </div>
+                        <div style="background:oklch(0.20 0.02 255);padding:11px 13px;font-family:ui-monospace,'JetBrains Mono',monospace;font-size:11px;line-height:1.65;color:oklch(0.82 0.02 255);white-space:pre-wrap;">{{ t.detail }}</div>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ t.active }}" hint-placeholder-val="{{ false }}">
+                      <div style="margin-top:9px;display:flex;align-items:center;gap:9px;background:oklch(0.98 0.02 292);border:1px solid oklch(0.91 0.04 292);border-radius:9px;padding:9px 12px;">
+                        <span style="width:8px;height:8px;border-radius:50%;background:oklch(0.56 0.16 292);animation:crpulse 1.1s ease-in-out infinite;flex:0 0 auto;"></span>
+                        <span style="font-size:12px;line-height:1.45;color:oklch(0.46 0.11 292);">{{ t.activeText }}</span>
+                      </div>
+                    </sc-if>
+                  </div>
+                </div>
+              </sc-if>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <!-- REVOKED actions -->
+        <sc-if value="{{ isRevoked }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <button style="display:flex;align-items:center;gap:7px;background:oklch(0.56 0.16 292);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;"><span style="width:8px;height:8px;border-radius:2px;background:oklch(1 0 0);"></span>Resume run</button>
+            <button style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.01 255);color:oklch(0.42 0.02 255);border-radius:8px;padding:9px 15px;font-size:13px;font-weight:600;">Keep it — I'll finish by hand</button>
+            <span style="font-size:11.5px;color:oklch(0.56 0.02 255);">Resuming hands the card back to the flow from <span style="font-family:'JetBrains Mono',ui-monospace,monospace;">implement</span>.</span>
+          </div>
+        </sc-if>
+
+        <!-- CIRCUIT actions -->
+        <sc-if value="{{ isCircuit }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div style="display:flex;gap:0;border:1px solid oklch(0.93 0.006 255);border-radius:10px;overflow:hidden;background:oklch(0.994 0.002 255);">
+              <div style="flex:1;padding:11px 14px;border-right:1px solid oklch(0.95 0.005 255);"><div style="font-size:9px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">ATTEMPTS</div><div style="font-size:14px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.52 0.14 22);margin-top:3px;">3 · stopped</div></div>
+              <div style="flex:1;padding:11px 14px;border-right:1px solid oklch(0.95 0.005 255);"><div style="font-size:9px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">DURATION</div><div style="font-size:14px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.30 0.02 255);margin-top:3px;">9m 12s</div></div>
+              <div style="flex:1;padding:11px 14px;"><div style="font-size:9px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">SPENT</div><div style="font-size:14px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.30 0.02 255);margin-top:3px;">$2.28</div></div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <button style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;">Retry from implement</button>
+              <a href="Relay Flow Editor.dc.html" style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.01 255);color:oklch(0.42 0.02 255);border-radius:8px;padding:9px 15px;font-size:13px;font-weight:600;text-decoration:none;">Edit Code flow</a>
+              <button style="background:transparent;border:none;color:oklch(0.55 0.02 255);border-radius:8px;padding:9px 12px;font-size:13px;font-weight:600;">Hand to a human</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- HISTORY -->
+        <sc-if value="{{ isHistory }}" hint-placeholder-val="{{ false }}">
+          <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">PRIOR RUNS · 3</span>
+          <sc-for list="{{ runs }}" as="r" hint-placeholder-count="3">
+            <div style="border:1px solid oklch(0.93 0.006 255);border-radius:11px;background:oklch(0.994 0.002 255);overflow:hidden;">
+              <div style="display:flex;align-items:center;gap:12px;padding:13px 16px;">
+                <span style="{{ r.statusStyle }}"><span style="{{ r.statusDot }}"></span>{{ r.status }}</span>
+                <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
+                  <span style="font-size:13.5px;font-weight:600;color:oklch(0.28 0.02 255);">{{ r.title }}</span>
+                  <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">{{ r.when }}</span>
+                </div>
+                <span style="flex:1;"></span>
+                <span style="font-size:16px;color:oklch(0.72 0.02 255);">{{ r.chev }}</span>
+              </div>
+              <div style="display:flex;gap:0;border-top:1px solid oklch(0.95 0.005 255);background:oklch(0.99 0.002 255);">
+                <sc-for list="{{ r.totals }}" as="tot" hint-placeholder-count="4">
+                  <div style="flex:1;padding:11px 14px;border-right:1px solid oklch(0.95 0.005 255);">
+                    <div style="font-size:9px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">{{ tot.label }}</div>
+                    <div style="font-size:14px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:{{ tot.color }};margin-top:3px;">{{ tot.value }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </sc-if>
+
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:900,&quot;height&quot;:860}}">
+class Component extends DCLogic {
+  state = { run: 'flight' };
+
+  renderVals() {
+    const mono = "'JetBrains Mono',ui-monospace,monospace";
+    const VIOLET='oklch(0.56 0.16 292)', BLUE='oklch(0.60 0.14 250)', GREEN='oklch(0.60 0.13 155)', AMBER='oklch(0.70 0.13 65)', ROSE='oklch(0.62 0.16 22)', GRAY='oklch(0.80 0.01 255)';
+    const r = this.state.run;
+
+    const sw = (k) => `font-size:12px;font-weight:600;padding:6px 11px;border-radius:7px;border:none;` +
+      (r===k ? 'background:oklch(0.95 0.02 250);color:oklch(0.40 0.13 250);' : 'background:transparent;color:oklch(0.50 0.02 255);');
+
+    // ---- per-state header ----
+    const rly150 = { ref:'RLY-150', title:'CSV export of the board' };
+    const hdrs = {
+      flight:  { ...rly150, stage:'In progress', bg:'oklch(0.97 0.03 292)', c:'oklch(0.46 0.14 292)' },
+      reentry: { ...rly150, stage:'In progress', bg:'oklch(0.97 0.03 292)', c:'oklch(0.46 0.14 292)' },
+      revoked: { ...rly150, stage:'In progress', bg:'oklch(0.97 0.02 250)', c:'oklch(0.44 0.13 250)' },
+      circuit: { ...rly150, stage:'In progress', bg:'oklch(0.97 0.03 22)', c:'oklch(0.52 0.15 22)' },
+      parked:  { ref:'RLY-152', title:'Board search', stage:'Planning', bg:'oklch(0.97 0.03 305)', c:'oklch(0.46 0.15 305)' },
+      history: { ref:'RLY-147', title:'Keyboard shortcuts for the card drawer', stage:'Complete', bg:'oklch(0.97 0.03 155)', c:'oklch(0.42 0.11 155)' },
+    };
+    const h = hdrs[r];
+    const hdr = { ref:h.ref, title:h.title, stageChip:h.stage, stageChipStyle:`font-size:11px;font-weight:600;font-family:${mono};background:${h.bg};color:${h.c};padding:3px 9px;border-radius:6px;` };
+
+    // ---- run status strip ----
+    const strips = {
+      flight:  { baton:'BATON · FLOW', dot:VIOLET, batonBg:'oklch(0.97 0.03 292)', batonTc:'oklch(0.46 0.14 292)', title:'Running', titleColor:'oklch(0.44 0.12 292)', elapsed:'elapsed 4m 51s', wrapBg:'oklch(0.985 0.018 292)', wrapBorder:'oklch(0.92 0.03 292)', ver:'running v3', verBg:'oklch(0.96 0.03 292)', verC:'oklch(0.46 0.13 292)', pulse:true },
+      reentry: { baton:'BATON · FLOW', dot:VIOLET, batonBg:'oklch(0.97 0.03 292)', batonTc:'oklch(0.46 0.14 292)', title:'Running — re-entry after changes requested', titleColor:'oklch(0.44 0.12 292)', elapsed:'elapsed 0:14', wrapBg:'oklch(0.985 0.018 292)', wrapBorder:'oklch(0.92 0.03 292)', ver:'running v3', verBg:'oklch(0.96 0.03 292)', verC:'oklch(0.46 0.13 292)', pulse:true },
+      parked:  { baton:'BATON · YOU', dot:AMBER, batonBg:'oklch(0.98 0.04 75)', batonTc:'oklch(0.48 0.11 65)', title:'Parked — waiting on your answer', titleColor:'oklch(0.48 0.11 65)', elapsed:'parked 12m 30s', wrapBg:'oklch(0.985 0.022 75)', wrapBorder:'oklch(0.90 0.05 75)', ver:'Spec · v2', verBg:'oklch(0.97 0.02 75)', verC:'oklch(0.50 0.09 65)' },
+      revoked: { baton:'BATON · JEREMY', dot:'oklch(0.62 0.13 195)', batonBg:'oklch(0.97 0.02 250)', batonTc:'oklch(0.44 0.13 250)', title:'Run cancelled — Jeremy claimed the card', titleColor:'oklch(0.44 0.06 250)', elapsed:'cancelled 2m ago', wrapBg:'oklch(0.985 0.01 250)', wrapBorder:'oklch(0.92 0.02 250)', ver:'was on v3', verBg:'oklch(0.97 0.02 250)', verC:'oklch(0.46 0.10 250)' },
+      circuit: { baton:'BATON · STOPPED', dot:ROSE, batonBg:'oklch(0.97 0.03 22)', batonTc:'oklch(0.52 0.16 22)', title:'Run failed — circuit breaker tripped', titleColor:'oklch(0.50 0.14 22)', elapsed:'stopped 1m ago', wrapBg:'oklch(0.985 0.02 22)', wrapBorder:'oklch(0.91 0.04 22)', ver:'was on v3', verBg:'oklch(0.97 0.02 22)', verC:'oklch(0.52 0.13 22)' },
+      history: { baton:'BATON · DONE', dot:GREEN, batonBg:'oklch(0.97 0.03 155)', batonTc:'oklch(0.42 0.11 155)', title:'Completed — merged to main', titleColor:'oklch(0.42 0.10 155)', elapsed:'merged 2h ago', wrapBg:'oklch(0.985 0.015 155)', wrapBorder:'oklch(0.92 0.03 155)', ver:'ran on v3', verBg:'oklch(0.97 0.02 155)', verC:'oklch(0.42 0.11 155)' },
+    };
+    const st = strips[r];
+    const strip = {
+      wrapStyle: `display:flex;align-items:center;gap:12px;padding:11px 22px;background:${st.wrapBg};border-bottom:1px solid ${st.wrapBorder};flex:0 0 auto;`,
+      baton: st.baton,
+      batonStyle: `display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:${mono};color:${st.batonTc};background:${st.batonBg};padding:4px 8px;border-radius:6px;white-space:nowrap;`,
+      batonDot: `width:7px;height:7px;border-radius:50%;background:${st.dot};` + (st.pulse?'animation:crpulse 1.1s ease-in-out infinite;':''),
+      title: st.title, titleColor: st.titleColor, elapsed: st.elapsed,
+      verChip: st.ver, verChipStyle: `font-size:11px;font-weight:600;font-family:${mono};color:${st.verC};background:${st.verBg};padding:4px 10px;border-radius:6px;text-decoration:none;white-space:nowrap;`,
+    };
+
+    // ---- helpers ----
+    const tag = (t) => ({
+      agent:{txt:'agent',bg:'oklch(0.96 0.03 292)',c:'oklch(0.46 0.13 292)'},
+      shell:{txt:'shell',bg:'oklch(0.96 0.004 255)',c:'oklch(0.50 0.02 255)'},
+      gate:{txt:'gate',bg:'oklch(0.97 0.03 75)',c:'oklch(0.48 0.11 65)'},
+    }[t]);
+    const mkChip = (kind, text) => {
+      const map = {
+        attempt:{bg:'oklch(0.96 0.004 255)',c:'oklch(0.48 0.02 255)'},
+        resumed:{bg:'oklch(0.97 0.03 292)',c:'oklch(0.46 0.12 292)'},
+        note:{bg:'oklch(0.96 0.03 250)',c:'oklch(0.44 0.13 250)'},
+      }[kind];
+      return { text, style:`font-size:9.5px;font-weight:600;font-family:${mono};background:${map.bg};color:${map.c};border-radius:5px;padding:2px 7px;white-space:nowrap;` };
+    };
+    const iconFor = (s2) => {
+      if (s2==='done') return { icon:'✓', style:`width:18px;height:18px;border-radius:50%;background:${GREEN};color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex:0 0 auto;` };
+      if (s2==='failed') return { icon:'✕', style:`width:18px;height:18px;border-radius:50%;background:${ROSE};color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex:0 0 auto;` };
+      if (s2==='active') return { icon:'', style:`width:18px;height:18px;border-radius:50%;background:${VIOLET};flex:0 0 auto;animation:crring 1.6s ease-out infinite;` };
+      if (s2==='cancelled') return { icon:'⊘', style:`width:18px;height:18px;border-radius:50%;background:oklch(0.90 0.006 255);color:oklch(0.52 0.02 255);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:0 0 auto;` };
+      if (s2==='stopped') return { icon:'⊗', style:`width:18px;height:18px;border-radius:5px;background:${ROSE};color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:0 0 auto;` };
+      return { icon:'', style:`width:14px;height:14px;border-radius:50%;border:2px solid ${GRAY};box-sizing:border-box;flex:0 0 auto;margin:2px 0;` };
+    };
+    const buildTL = (raw) => raw.map((it, i) => {
+      if (it.type === 'loop') return { isLoop:true, isNode:false, text:it.text };
+      const ic = iconFor(it.s);
+      const cc = it.s==='pending' ? GRAY : (it.s==='failed'||it.s==='stopped'? ROSE : (it.s==='active'? VIOLET : (it.s==='cancelled'?GRAY:GREEN)));
+      return {
+        isLoop:false, isNode:true,
+        icon: ic.icon, iconStyle: ic.style,
+        showConnector: i < raw.length - 1,
+        connectorColor: it.s==='pending' ? 'oklch(0.90 0.006 255)' : cc.replace(')', '/0.35)'),
+        name: it.name, nameColor: (it.s==='pending') ? 'oklch(0.62 0.02 255)' : 'oklch(0.30 0.02 255)',
+        typeTag: it.t? tag(it.t).txt : '', typeTagStyle: it.t? `font-size:8px;font-weight:700;letter-spacing:0.06em;font-family:${mono};background:${tag(it.t).bg};color:${tag(it.t).c};padding:1px 5px;border-radius:4px;` + (it.s==='pending'?'opacity:0.6;':'') : 'display:none;',
+        showDur: !!it.dur, dur: it.dur||'',
+        showCost: !!it.cost, cost: it.cost||'',
+        chips: (it.chips||[]).map(c => mkChip(c[0], c[1])),
+        failed: it.s==='failed', detail: it.detail || '', failMeta: it.failMeta || '· exit 1 · returned notes',
+        active: it.s==='active', activeText: it.activeText || '',
+      };
+    });
+
+    // ---- mini graph ----
+    const miniColor = { done:GREEN, active:VIOLET, pending:GRAY, failed:ROSE };
+    const buildMini = (arr) => arr.map(s2 => ({
+      style: `flex:1;min-width:34px;height:9px;border-radius:3px;background:${miniColor[s2]};` +
+        (s2==='active' ? 'animation:crpulse 1.1s ease-in-out infinite;box-shadow:0 0 0 2px oklch(0.56 0.16 292/0.25);' : (s2==='pending'?'opacity:0.5;':'')),
+    }));
+
+    // ---- state content ----
+    const qrDetail = 'test/relay/export_test.exs:24\n  Asserts on %Board{} private struct internals\n  (row.__meta__, column ordering). Brittle — assert\n  on the CSV bytes the user downloads instead.\n\n→ returned outcome=failed, routed to implement';
+
+    const flightTL = [
+      { type:'node', s:'done', name:'branch', t:'shell', dur:'0:08', cost:'$0.00' },
+      { type:'node', s:'done', name:'implement', t:'agent', dur:'2:40', cost:'$0.90', chips:[['attempt','attempt 1']] },
+      { type:'node', s:'done', name:'spec_review', t:'agent', dur:'0:31', cost:'$0.20' },
+      { type:'node', s:'failed', name:'quality_review', t:'agent', dur:'0:48', cost:'$0.35', failMeta:'· attempt 1 · returned notes', detail:qrDetail },
+      { type:'loop', text:'quality_review failed → implement · attempt 2 · max 3' },
+      { type:'node', s:'active', name:'implement', t:'agent', chips:[['attempt','attempt 2'],['resumed','session resumed']], activeText:'Re-running implement on jeremy-mbp — the Claude session resumed with the review notes in context.' },
+      { type:'node', s:'pending', name:'quality_review → next_task → precommit', t:'', dur:'' },
+      { type:'node', s:'pending', name:'final_review · smoke · acceptance · post · merge', t:'', dur:'' },
+    ];
+    const reentryTL = [
+      { type:'node', s:'done', name:'branch', t:'shell', dur:'0:08', cost:'$0.00' },
+      { type:'node', s:'active', name:'implement', t:'agent', chips:[['attempt','attempt 1'],['note','carries rejection note']], activeText:'Re-implementing with Dana’s note in context — streaming the CSV row by row instead of buffering the board.' },
+      { type:'node', s:'pending', name:'spec_review → quality_review → next_task', t:'', dur:'' },
+      { type:'node', s:'pending', name:'precommit · final_review · smoke · … · merge', t:'', dur:'' },
+    ];
+    const revokedTL = [
+      { type:'node', s:'done', name:'branch', t:'shell', dur:'0:08', cost:'$0.00' },
+      { type:'node', s:'cancelled', name:'implement', t:'agent', dur:'1:12 so far', cost:'$0.40', chips:[['attempt','attempt 1 · cancelled']] },
+    ];
+    const circuitTL = [
+      { type:'node', s:'done', name:'implement', t:'agent', dur:'2:40', cost:'$0.90', chips:[['attempt','attempt 1']] },
+      { type:'node', s:'failed', name:'quality_review', t:'agent', dur:'0:48', cost:'$0.35', failMeta:'· attempt 1', detail:'test/relay/export_test.exs:24\n  Asserts on %Board{} private struct internals.' },
+      { type:'loop', text:'failed → implement · attempt 2 · max 3' },
+      { type:'node', s:'done', name:'implement', t:'agent', dur:'2:10', cost:'$0.72', chips:[['attempt','attempt 2'],['resumed','session resumed']] },
+      { type:'node', s:'failed', name:'quality_review', t:'agent', dur:'0:41', cost:'$0.30', failMeta:'· attempt 2' },
+      { type:'loop', text:'failed → implement · attempt 3 · max 3' },
+      { type:'node', s:'done', name:'implement', t:'agent', dur:'1:58', cost:'$0.66', chips:[['attempt','attempt 3'],['resumed','session resumed']] },
+      { type:'node', s:'failed', name:'quality_review', t:'agent', dur:'0:44', cost:'$0.31', failMeta:'· attempt 3 · identical', detail:'test/relay/export_test.exs:24 — 3rd identical failure\n  Same brittle assertion regenerated again.' },
+      { type:'node', s:'stopped', name:'circuit breaker — run stopped', t:'', dur:'' },
+    ];
+
+    const tlMap = { flight:flightTL, reentry:reentryTL, revoked:revokedTL, circuit:circuitTL };
+    const timeline = buildTL(tlMap[r] || []);
+
+    const miniFlight = ['done','active','pending','pending'];
+    const miniReentry = ['active','pending','pending','pending'];
+    const mini = buildMini(r==='reentry' ? miniReentry : miniFlight);
+    const miniHeader = r==='reentry' ? 'FLOW · CODE · task 1 of 4 (re-planned)' : 'FLOW · CODE · task 2 of 4';
+    const miniActive = r==='reentry' ? 'implement · re-entry' : 'implement · attempt 2';
+
+    // ---- history ----
+    const runs = [
+      { status:'completed', sc:GREEN, title:'Run #3 · v3', when:'merged 2h ago · landed on Complete', chev:'⌄',
+        totals:[['DURATION','47m','oklch(0.30 0.02 255)'],['NODES','14 · 2 loops','oklch(0.30 0.02 255)'],['ATTEMPTS','21','oklch(0.30 0.02 255)'],['COST','$6.20','oklch(0.30 0.02 255)']] },
+      { status:'failed', sc:ROSE, title:'Run #2 · v3', when:'yesterday · circuit breaker · quality_review ×3', chev:'›',
+        totals:[['DURATION','9m 12s','oklch(0.52 0.14 22)'],['NODES','stopped at 4','oklch(0.30 0.02 255)'],['ATTEMPTS','3','oklch(0.30 0.02 255)'],['COST','$2.28','oklch(0.30 0.02 255)']] },
+      { status:'completed', sc:GREEN, title:'Run #1 · v2', when:'Jul 12 · superseded by re-scope', chev:'›',
+        totals:[['DURATION','31m','oklch(0.30 0.02 255)'],['NODES','12','oklch(0.30 0.02 255)'],['ATTEMPTS','14','oklch(0.30 0.02 255)'],['COST','$4.10','oklch(0.30 0.02 255)']] },
+    ].map(rn => ({
+      status: rn.status,
+      statusStyle: `display:inline-flex;align-items:center;gap:6px;font-size:10.5px;font-weight:600;font-family:${mono};color:${rn.sc};background:${rn.sc===GREEN?'oklch(0.97 0.03 155)':'oklch(0.97 0.03 22)'};padding:4px 9px;border-radius:6px;flex:0 0 auto;`,
+      statusDot: `width:7px;height:7px;border-radius:50%;background:${rn.sc};`,
+      title: rn.title, when: rn.when, chev: rn.chev,
+      totals: rn.totals.map(t => ({ label:t[0], value:t[1], color:t[2] })),
+    }));
+
+    return {
+      sw: { flight:sw('flight'), reentry:sw('reentry'), parked:sw('parked'), revoked:sw('revoked'), circuit:sw('circuit'), history:sw('history') },
+      onSet_flight:()=>this.setState({run:'flight'}), onSet_reentry:()=>this.setState({run:'reentry'}), onSet_parked:()=>this.setState({run:'parked'}),
+      onSet_revoked:()=>this.setState({run:'revoked'}), onSet_circuit:()=>this.setState({run:'circuit'}), onSet_history:()=>this.setState({run:'history'}),
+      isFlight:r==='flight', isReentry:r==='reentry', isParked:r==='parked', isRevoked:r==='revoked', isCircuit:r==='circuit', isHistory:r==='history',
+      showMini: r==='flight'||r==='reentry', showTimeline: r==='flight'||r==='reentry'||r==='revoked'||r==='circuit',
+      hdr, strip, mini, miniHeader, miniActive, timeline, runs,
+    };
+  }
+}
+</script>
+</body>
+</html>
+

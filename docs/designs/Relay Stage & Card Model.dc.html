@@ -32,8 +32,8 @@
       <div style="width:8px;height:8px;border-radius:50%;background:oklch(1 0 0);"></div>
       <div style="position:absolute;right:3px;top:3px;width:4px;height:4px;border-radius:50%;background:oklch(0.60 0.14 250);box-shadow:0 0 0 1.5px oklch(1 0 0);"></div>
     </div>
-    <span style="font-size:11px;font-weight:600;letter-spacing:0.14em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);">RELAY · DESIGN DRAFT</span>
-    <span style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;background:oklch(0.96 0.03 75);color:oklch(0.50 0.11 65);padding:3px 9px;border-radius:20px;">FOR DISCUSSION</span>
+    <span style="font-size:11px;font-weight:600;letter-spacing:0.14em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);">RELAY · STAGE &amp; CARD MODEL</span>
+
   </div>
   <h1 style="font-size:38px;font-weight:600;letter-spacing:-0.03em;line-height:1.08;margin:0 0 16px;color:oklch(0.22 0.02 255);">Stage &amp; card model</h1>
   <p style="font-size:16.5px;line-height:1.62;color:oklch(0.42 0.02 255);margin:0;max-width:672px;">A board is fully customizable — you name your stages, order them, and pick how many. To make card actions predictable across any layout, behavior comes from three fixed ideas: the <b style="color:oklch(0.28 0.02 255);">stage type</b>, whether a work stage is <b style="color:oklch(0.28 0.02 255);">AI-enabled</b>, and who <b style="color:oklch(0.28 0.02 255);">owns</b> the card. This doc defines those, the card's sub-states, and the very few buttons that actually exist.</p>
@@ -104,7 +104,7 @@
           <span style="font-size:17px;font-weight:600;letter-spacing:-0.01em;color:oklch(0.26 0.02 255);">Review</span>
           <span style="font-size:12px;font-family:'JetBrains Mono',monospace;color:oklch(0.60 0.02 255);">gate · a human decides</span>
         </div>
-        <p style="font-size:14px;line-height:1.55;color:oklch(0.44 0.02 255);margin:0 0 7px;">A checkpoint. Work lands here and <i>stops</i> until a human approves it forward or rejects it back. The reviewer acts as a gate — <b style="color:oklch(0.30 0.02 255);">reviewing does not make you the owner.</b> This type is how we know which columns are gates.</p>
+        <p style="font-size:14px;line-height:1.55;color:oklch(0.44 0.02 255);margin:0 0 7px;">A checkpoint. Work lands here and <i>stops</i> until a human approves it forward or rejects it. On reject it goes to a <b style="color:oklch(0.30 0.02 255);">fixed stage set on the gate</b> — the reviewer just approves or rejects, never picks a destination. The reviewer acts as a gate — <b style="color:oklch(0.30 0.02 255);">reviewing does not make you the owner.</b> This type is how we know which columns are gates.</p>
         <span style="font-size:12px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">e.g. Review · QA · Sign-off · Legal</span>
       </div>
     </div>
@@ -351,7 +351,7 @@
       <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.11 65);margin-bottom:8px;">NEEDS YOU · IN REVIEW</div>
       <div style="display:flex;flex-direction:column;gap:12px;background:oklch(0.975 0.02 155);border:1px solid oklch(0.88 0.05 155);border-radius:11px;padding:15px 16px;">
         <span style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.46 0.10 155);font-family:'JetBrains Mono',monospace;">READY FOR YOUR REVIEW</span>
-        <span style="font-size:13px;line-height:1.5;color:oklch(0.36 0.03 155);">Relay AI finished this. Approve to advance it, or reject it back to an earlier stage with a note.</span>
+        <span style="font-size:13px;line-height:1.5;color:oklch(0.36 0.03 155);">Relay AI finished this. Approve to advance it, or reject it — it returns to the stage configured on this gate, with your note.</span>
         <div style="display:flex;gap:8px;">
           <span style="flex:1;text-align:center;background:oklch(0.60 0.13 155);color:oklch(1 0 0);border-radius:8px;padding:10px;font-size:13px;font-weight:600;">Approve →</span>
           <span style="flex:1;text-align:center;background:oklch(1 0 0);border:1px solid oklch(0.84 0.06 65);color:oklch(0.52 0.12 65);border-radius:8px;padding:10px;font-size:13px;font-weight:600;">Reject ↩</span>
@@ -386,3 +386,4 @@
 <script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1000,&quot;height&quot;:900}}"></script>
 </body>
 </html>
+
