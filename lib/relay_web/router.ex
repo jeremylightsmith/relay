@@ -146,10 +146,12 @@ defmodule RelayWeb.Router do
 
   # RLY-80 — the native app's human-authed decision surface. Deliberately separate from the
   # agent-only board-key /api scope below: different credential, different actor, and it must
-  # not collide with the board API's payloads (RLY-67).
+  # not collide with the board API's payloads (RLY-67). RLY-126 extends this same scoped
+  # exception (ADR 0001) with the native New-card sheet's create path.
   scope "/api/all", RelayWeb.Api do
     pipe_through [:api, :api_user_auth]
 
+    post "/cards", AllController, :create
     get "/feed", AllController, :feed
     post "/cards/:ref/approve", AllController, :approve
     post "/cards/:ref/reject", AllController, :reject

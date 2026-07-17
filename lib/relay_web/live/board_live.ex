@@ -130,8 +130,7 @@ defmodule RelayWeb.BoardLive do
           >
             <%!-- RLY-95 · BOARD-01 — `‹ back · board name`: the ‹ is the route back to
                   /boards once embed hides the web top bar. ?from= drives the CURRENT
-                  badge on the list. The updated artboard drops the card count, and the
-                  right side stays empty (the + add-card button is BOARD-04's card). --%>
+                  badge on the list. The updated artboard drops the card count. --%>
             <div id="board-pager-header" class="board-pager-header">
               <.link
                 id="board-pager-back"
@@ -142,6 +141,20 @@ defmodule RelayWeb.BoardLive do
                 ‹
               </.link>
               <span class="board-pager-title">{@board.name}</span>
+              <%!-- RLY-126 · BOARD-04 — embed-only: opens the NATIVE New-card sheet via the
+                    BoardPager hook's relayCreateCard bridge. Plain web has no native handler,
+                    so the button does not render outside embed mode. --%>
+              <button
+                :if={@embed}
+                type="button"
+                id="board-create-card"
+                class="board-pager-create"
+                aria-label="New card"
+                data-board={@board.slug}
+                data-stages={Jason.encode!(for stage <- flat_stages(@stage_groups), do: stage.name)}
+              >
+                +
+              </button>
             </div>
             <div class="board-pager-chips">
               <button
@@ -150,6 +163,7 @@ defmodule RelayWeb.BoardLive do
                 id={"stage-chip-#{stage.id}"}
                 class="board-pager-chip"
                 data-chip-stage-id={stage.id}
+                data-stage-name={stage.name}
                 data-ai={to_string(stage.ai_enabled)}
               >
                 <span class="board-pager-chip-dot"></span>
@@ -222,6 +236,7 @@ defmodule RelayWeb.BoardLive do
                   cards={Map.fetch!(@streams, stream_name(stage.id))}
                   composing={@composing_stage_id == stage.id}
                   compose_form={@compose_form}
+                  composable={not @embed}
                   read_only={@read_only?}
                   sublanes={
                     for sub <- Map.get(@sublanes_by_parent, stage.id, []) do

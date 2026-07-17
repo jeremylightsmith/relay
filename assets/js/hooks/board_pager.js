@@ -41,6 +41,23 @@ const BoardPager = {
         .querySelector(`.stage-column[data-stage-id="${chip.dataset.chipStageId}"]`)
         ?.scrollIntoView({behavior: "smooth", block: "nearest", inline: "start"})
     })
+
+    // RLY-126 · BOARD-04 — the embed-only header "+" opens the native New-card
+    // sheet. The payload is assembled client-side (board + stages off the button's
+    // data attributes, current from the active pager chip) so it always matches
+    // what's on screen — no server round-trip. In a plain browser there is no
+    // native handler: the tap is a no-op.
+    this.el.addEventListener("click", e => {
+      const create = e.target.closest("#board-create-card")
+      if (!create || !window.flutter_inappwebview) return
+      const stages = JSON.parse(create.dataset.stages)
+      const active = this.el.querySelector(`[data-chip-stage-id="${this.activeId}"]`)
+      window.flutter_inappwebview.callHandler("relayCreateCard", {
+        board: create.dataset.board,
+        stages: stages,
+        current: active?.dataset.stageName || stages[0],
+      })
+    })
   },
 
   // LiveView patches to this hook's own element (chip count updates) drop the

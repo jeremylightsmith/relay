@@ -87,6 +87,14 @@ class RelayTheme {
     0xFF0B7643,
   ); // transcribed · green (oklch 0.5 0.12 155)
 
+  // --- New-card sheet chips · BOARD-04 in docs/designs/Relay Mobile.dc.html (RLY-126) ---
+  static const Color relayChipSelectedBg = Color(
+    0xFFE9F1FB,
+  ); //  selected chip bg     (oklch 0.96 0.03 250)
+  static const Color relayChipSelectedBorder = Color(
+    0xFFBCD5F0,
+  ); // selected chip border (oklch 0.86 0.05 250)
+
   /// Convenience aliases used by downstream feature cards (badges, inbox rows).
   static const Color relayHuman = relayHumanLight;
   static const Color relayAI = relayAILight;

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../config.dart';
 import 'board_prefs.dart';
+import 'new_card_sheet.dart';
 
 /// The Board tab: the **embedded chromeless LiveView board** (RLY-94 · BOARD-01),
 /// opening on the remembered board (RLY-95 · BOARDS-00).
@@ -99,6 +100,20 @@ class _BoardScreenState extends ConsumerState<BoardScreen> {
                           : const <dynamic, dynamic>{};
                       final path = BoardScreen.cardPathForTap(payload);
                       if (path != null && context.mounted) context.push(path);
+                    },
+                  );
+                  // RLY-126 · BOARD-04 — the board header "+" bubbles out of the
+                  // webview; the shell opens the native New-card sheet over the tab.
+                  controller.addJavaScriptHandler(
+                    handlerName: 'relayCreateCard',
+                    callback: (args) {
+                      final payload = args.isNotEmpty && args.first is Map
+                          ? args.first as Map
+                          : const <dynamic, dynamic>{};
+                      final request = CreateCardRequest.fromPayload(payload);
+                      if (request != null && context.mounted) {
+                        showNewCardSheet(context, request);
+                      }
                     },
                   );
                 },
