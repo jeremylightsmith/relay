@@ -13,8 +13,10 @@ board-key REST API, not a parallel surface (ADR 0001).
     worktree paths, which are the executor's own business.
   - logs: batched output lines per node-job (converge with the existing
     `POST /api/board/logs` / RLY-112 run-id attribution rather than adding a twin).
-  - outcome: `{outcome, detail}` with `outcome` from the closed set; completes the node-job
-    and wakes the engine.
+  - outcome: `{outcome, detail, git_sha, session_id}` with `outcome` from the closed set;
+    completes the node-job and wakes the engine. `git_sha` anchors the code state;
+    `session_id` (the `claude -p` session) lets a needs-input re-entry resume the agent's
+    session instead of starting cold.
   - heartbeat: per-executor liveness (replaces today's `/api/board/heartbeat` usage);
     node-jobs on a dead executor become reclaimable after a timeout.
 - **Agent-node outcome contract**: how a headless `claude -p` signals its result — an

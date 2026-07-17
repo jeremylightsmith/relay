@@ -14,6 +14,9 @@ in the right worktree, stream output, report a typed outcome. Smaller than today
 - Reads the agent-node outcome contract (04) after each `claude -p`; detects the
   needs-input case exactly as `work()` does today. Honors a cancel signal from the server
   (job revoked mid-run when a human claims the card).
+- Captures the `claude -p` session id and the worktree SHA into each outcome report; a
+  needs-input re-entry job carries the session id back and the executor invokes
+  `claude -p --resume <session>` so the agent continues with its working context intact.
 - Legacy `relay watch` keeps working unchanged — both modes coexist until 08/09 finish the
   migration.
 

@@ -11,6 +11,11 @@ retries, and resume are engine behavior instead of prompt-pleading.
 - Outcome routing on the closed set `succeeded / failed / partial / needs_input`;
   `max_retries` per node; `max_loops` per edge; `gate` failure reroutes or fails the run —
   never silently passes.
+- Runaway protection (adopted from Fabro's engine): a per-node **visit cap**, and a
+  **failure-signature circuit breaker** — the same failure detail repeating N times
+  (default 3) fails the run even when retries/loops technically remain.
+- Each node outcome records the worktree's **git SHA** (reported by the executor) so
+  engine state and code state stay correlated for resume and debugging.
 - `needs_input` checkpoints the run, blocks the card (existing needs-input machinery), and
   re-enters the same node when the answer arrives.
 - Resume: on app restart, unfinished runs restore from Postgres and continue at the next

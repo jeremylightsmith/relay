@@ -5,7 +5,9 @@ board yet — review here first, then create the keepers with `bin/relay create`
 
 Ordering follows the ADR's de-risking sequence: prove the whole architecture end-to-end on
 the trivial Spec flow (01–06), make it visible (07), then migrate Plan (08) and decompose
-Code last (09). 00 stands alone and can go first; 10 can land any time after 06.
+Code last (09). 00 stands alone and can go first; 10 can land any time after 06. 11 is
+deliberately early — it's the debugging instrument for the rest, works against today's
+runner, and upgrades its data source when 04/05 land.
 
 | # | Card | Depends on |
 | --- | --- | --- |
@@ -20,3 +22,4 @@ Code last (09). 00 stands alone and can go first; 10 can land any time after 06.
 | [08](08-plan-flow.md) | Migrate the Plan flow | 06 |
 | [09](09-code-flow.md) | Decompose the Code flow (retire the /exec-plan black box) | 06, 07 |
 | [10](10-project-overrides.md) | Per-project flow overrides | 06 |
+| [11](11-runners-view.md) | Runners view: who's running, and what's on each | — (v0 now; 04/05 upgrade it) |

@@ -55,3 +55,6 @@ npm-debug.log
 # Flutter build run from repo root by mistake / Playwright MCP artifacts
 /build/
 .playwright-mcp/
+
+# Boundary graph intermediate output (mix relay.deps_graph); the committed graph lives in docs/architecture/deps.md
+/boundary/

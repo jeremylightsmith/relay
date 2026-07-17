@@ -35,6 +35,9 @@ or branch state. If you need a different revision, check it out into a temp work
   (no injection / unsafe `String.to_atom` on input / missing authz), migrations safe and
   reversible, backward compatibility considered.
 - **Dead code / scope creep:** anything built that no plan task asked for, or left unused.
+- **Architecture docs current:** if the branch adds/changes a context, PubSub topic, API
+  endpoint, or supervised process, the matching `docs/architecture/` page must be updated in
+  this branch (see `docs/architecture/README.md`). A stale page is a blocking finding.
 
 ## Tests
 Per-task reviews already verified each task's tests and `mix precommit` is green — don't re-run

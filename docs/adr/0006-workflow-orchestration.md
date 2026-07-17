@@ -161,7 +161,7 @@ Everything in this section is **illustrative, not final** — the commitment is 
 | `succeeded` | node completed normally | follow the `succeeded` edge | timeline note |
 | `failed` | error, non-zero exit, review refuted | retry up to `max_retries`, then follow `failed` edge — or fail the run if none | card flagged with the node's actual output |
 | `partial` | retries exhausted but usable output, node opted in | follow `partial` edge | noted on card |
-| `needs_input` | agent asked the human a question | checkpoint + pause the run | card → `needs_input`, drawer stepper; the answer resumes the same node |
+| `needs_input` | agent asked the human a question | checkpoint + park the run | card → `needs_input`, drawer stepper; the answer re-enters the same node with its agent session resumed (`claude -p --resume`) |
 
 **Default flow library** (what Relay ships; each row replaces a `relay_config.json` entry)
 
@@ -241,6 +241,48 @@ before implementation:
   }
 }
 ```
+
+### Convergences and divergences with Fabro (read from its source, 2026-07-16)
+
+We read the Fabro codebase (`../fabro`), not just its docs. Notable correction to the
+marketing picture: Fabro's shipped scheduler dispatches runs to **local subprocess
+workers on the same machine as the server** — it does not solve the distributed
+brain/hands problem we are taking on. What we adopt and where we deliberately diverge:
+
+**Adopt (cheap, addresses real agent-loop pathologies):**
+
+- **Session resume on needs-input re-entry.** Fabro's human-question tool blocks
+  *inside* the agent session, so the agent continues with full working context. We can't
+  hold a process open across days, but we get the same effect: the executor records the
+  `claude -p` session id in the node-job, and re-entry after an answer resumes that
+  session (`claude -p --resume`) instead of starting cold. (Cards 04/05.)
+- **Failure-signature circuit breaker + per-node visit caps.** Fabro tracks failure
+  signatures and trips a breaker when the same failure repeats (default 3), plus caps
+  visits per node — precisely the "agent loops on the same error forever" pathology.
+  `max_retries`/`max_loops` alone don't catch a loop that fails *differently* each lap or
+  the same way across different edges. (Card 02.)
+- **A code-state anchor per node.** Fabro commits the worktree after every node (run
+  branch) with metadata linked (meta branch). We keep run state in Postgres, but each
+  node outcome records the worktree's git SHA so resume/debugging can correlate engine
+  state with code state. (Cards 02/04.)
+
+**Diverge, deliberately:**
+
+- **Blocking vs parking on human input.** Fabro's engine thread awaits the interviewer
+  in-process; a blocked run holds a worker. Our runs must survive laptop sleep and
+  days-long answers, so `needs_input` checkpoints and *parks* the run — nothing is held
+  open. Session resume (above) recovers most of what parking loses.
+- **The card is the context bus.** Fabro passes prior-node output via an ephemeral
+  context KV store and generated "preamble" summaries sized by a fidelity knob. Our
+  equivalent is the card itself: spec, plan, timeline, and node outputs land on the card,
+  and the next node's prompt starts from the card. Less tunable — but durable,
+  human-readable, and identical to what the human sees (requirement 4: the developer can
+  read and edit the agent's working context directly).
+- **Distributed by design.** Fabro is server + subprocess workers on one box; our engine
+  (Fly) and executors (dev machines) are split by necessity, which is why the node-job
+  protocol, heartbeats, and job reclaim exist at all. Accepted cost, already carded.
+- **No `skipped` outcome yet.** Fabro's fourth outcome exists for untaken parallel
+  branches; we defer it with `parallel` fan-out (YAGNI until the Code flow needs it).
 
 ## Consequences
 
