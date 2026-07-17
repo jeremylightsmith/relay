@@ -97,6 +97,13 @@ defmodule RelayWeb.BoardSettingsLive do
           >
             API keys
           </.link>
+          <.link
+            navigate={~p"/board/#{@board.slug}/runners"}
+            id="settings-tab-runners"
+            style={tab_style(false)}
+          >
+            Runners
+          </.link>
         </nav>
 
         <%!-- Left rail — mockup "Relay Board.dc.html" lines ~176-183 --%>
@@ -138,6 +145,20 @@ defmodule RelayWeb.BoardSettingsLive do
             style={nav_style(@section == :keys)}
           >
             API keys
+          </.link>
+
+          <div
+            class="font-mono"
+            style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);padding:18px 10px 8px 10px;"
+          >
+            ENGINE
+          </div>
+          <.link
+            navigate={~p"/board/#{@board.slug}/runners"}
+            id="settings-nav-runners"
+            style={nav_style(false)}
+          >
+            Runners
           </.link>
         </nav>
 
