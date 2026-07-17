@@ -32,10 +32,9 @@ defmodule RelayWeb.BoardLiveEmbedTest do
 
       viewport = view |> element("#board-viewport") |> render()
 
-      assert viewport =~ "min-h-dvh"
-      assert viewport =~ "drawer:h-dvh"
-      refute viewport =~ "min-h-[calc(100dvh_-_53px)]"
-      refute viewport =~ "drawer:h-[calc(100dvh_-_53px)]"
+      assert viewport =~ "h-dvh"
+      refute viewport =~ "min-h-dvh"
+      refute viewport =~ "calc(100dvh_-_53px)"
     end
   end
 
@@ -50,9 +49,9 @@ defmodule RelayWeb.BoardLiveEmbedTest do
 
       viewport = view |> element("#board-viewport") |> render()
 
-      assert viewport =~ "min-h-[calc(100dvh_-_53px)]"
-      assert viewport =~ "drawer:h-[calc(100dvh_-_53px)]"
-      refute viewport =~ "min-h-dvh drawer:h-dvh"
+      assert viewport =~ "h-[calc(100dvh_-_53px)]"
+      refute viewport =~ "min-h-[calc(100dvh_-_53px)]"
+      refute viewport =~ "h-dvh"
     end
   end
 
@@ -114,6 +113,67 @@ defmodule RelayWeb.BoardLiveEmbedTest do
       assert has_element?(view, "#review-request-changes")
       assert has_element?(view, "#card-drawer-scrim")
       assert has_element?(view, "#card-drawer-close")
+    end
+  end
+
+  describe "embed card-tap bridge (RLY-94)" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      {:ok, card} = Cards.create_card(backlog, %{title: "Tap me"})
+      %{board: board, backlog: backlog, card: card}
+    end
+
+    test "selecting a card pushes card-tap to the shell instead of opening the drawer",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?embed=1")
+
+      view |> element(".board-card", "Tap me") |> render_click()
+
+      slug = board.slug
+      assert_push_event(view, "card-tap", %{ref: "RLY-1", board: ^slug, kind: nil})
+      refute has_element?(view, "#card-drawer")
+    end
+
+    test "a review-gated card taps through with kind \"in_review\" for the native bar",
+         %{conn: conn, board: board} do
+      review = Enum.find(board.stages, &(&1.name == "Review"))
+      {:ok, card} = Cards.create_card(review, %{title: "Judge me"})
+      {:ok, _card} = Cards.set_status(card, %{"status" => "in_review"})
+      ref = Cards.ref(board, card)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?embed=1")
+
+      view |> element(".board-card", "Judge me") |> render_click()
+
+      slug = board.slug
+      assert_push_event(view, "card-tap", %{ref: ^ref, board: ^slug, kind: "in_review"})
+    end
+
+    test "an archived-modal row tap bridges too", %{conn: conn, board: board, card: card, user: user} do
+      {:ok, _archived} = Cards.archive_card(card, {:user, user.id})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?embed=1")
+
+      # The embed layout suppresses the top bar (and its Archived menu item), so
+      # drive the handler directly — same pattern as the realtime tests' move_card.
+      render_hook(view, "open_archived_card", %{"ref" => "RLY-1"})
+
+      slug = board.slug
+      assert_push_event(view, "card-tap", %{ref: "RLY-1", board: ^slug, kind: nil})
+      refute has_element?(view, "#card-drawer")
+    end
+
+    test "non-embed select still patches the drawer open (phone-width web keeps the drawer)",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element(".board-card", "Tap me") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=RLY-1")
+      assert has_element?(view, "#card-drawer")
     end
   end
 end

@@ -603,3 +603,138 @@ textarea.commit-field-input { min-height: 64px; }
   content: ""; position: absolute; left: 4px; top: 6px; bottom: 6px;
   width: 1.5px; background: oklch(0.91 0.01 255);
 }
+
+/* --- RLY-94 · BOARD-01 phone-width stage pager ---
+   Matches docs/designs/Relay Mobile.dc.html BOARD-01 (artboard lines ~400–441).
+   Below --breakpoint-drawer (45rem) the board is a one-stage-at-a-time horizontal
+   scroll-snap pager with a chip strip; at ≥45rem the desktop board is untouched
+   (the chip nav is drawer:hidden). !important beats the desktop inline styles
+   still present on the same nodes. */
+
+.board-pager-nav {
+  position: relative;
+  background: var(--color-base-100);
+  border-bottom: 1px solid oklch(0.93 0.006 255);
+}
+.board-pager-header {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 8px 12px 2px;
+}
+.board-pager-title {
+  font-size: 14px; font-weight: 600; letter-spacing: -0.015em;
+  color: oklch(0.26 0.02 255);
+}
+.board-pager-count {
+  font-size: 10px; font-family: var(--font-mono);
+  color: oklch(0.55 0.02 255);
+}
+.board-pager-chips {
+  display: flex; gap: 6px;
+  overflow-x: auto; padding: 0 12px 10px;
+  scrollbar-width: none;
+}
+.board-pager-chips::-webkit-scrollbar { display: none; }
+.board-pager-chip {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 600;
+  color: oklch(0.55 0.02 255);
+  padding: 7px 10px; white-space: nowrap;
+  background: transparent;
+  border: 1px solid transparent; border-radius: 8px;
+  cursor: pointer;
+}
+.board-pager-chip-count {
+  font-size: 9px; font-family: var(--font-mono);
+  color: oklch(0.62 0.02 255);
+}
+.board-pager-chip-dot { display: none; }
+.board-pager-chip[data-active] {
+  color: oklch(0.26 0.02 255);
+  background: oklch(0.96 0.008 255);
+  border-color: oklch(0.9 0.006 255);
+}
+.board-pager-chip[data-active][data-ai="true"] .board-pager-chip-dot {
+  display: block; width: 6px; height: 6px; border-radius: 2px;
+  background: oklch(0.56 0.16 292);
+}
+.board-pager-chip[data-active][data-ai="true"] .board-pager-chip-count {
+  color: oklch(0.5 0.1 292);
+}
+.board-pager-fade {
+  position: absolute; right: 0; top: 0; bottom: 9px; width: 28px;
+  background: linear-gradient(90deg, transparent, var(--color-base-100));
+  pointer-events: none;
+}
+
+@media (width < 45rem) {
+  /* One flat snap track: category wrappers pass through, band headers vanish. */
+  #board-bands {
+    gap: 0 !important;
+    padding: 0 !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+  #board-bands > section[id^="category-"] { display: contents !important; }
+  #board-bands .category-band-header { display: none !important; }
+  #board-bands .category-stages { display: contents !important; }
+
+  /* Each stage column is one full-width snap page (BOARD-01: exactly one visible). */
+  #board-bands .stage-column {
+    flex: 0 0 100% !important;
+    width: 100% !important;
+    border-radius: 0 !important;
+    border-left: none !important;
+    border-right: none !important;
+    box-shadow: none !important;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+  }
+
+  /* Sublanes stack under the main lane inside the page, keeping their labels. */
+  #board-bands .stage-lanes { flex-direction: column !important; }
+  #board-bands .stage-main-lane {
+    flex: 1 1 auto !important;
+    width: auto !important;
+    min-height: 0;
+  }
+  #board-bands .sublane {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    max-height: 45%;
+    border-left: none !important;
+    border-top: 1px solid var(--color-base-300);
+  }
+
+  /* Collapsed lane strips read as slim horizontal rows instead of 34/44px slivers. */
+  #board-bands .main-lane-strip,
+  #board-bands .sublane-strip {
+    flex: 0 0 44px !important;
+    width: 100% !important;
+    flex-direction: row !important;
+    justify-content: flex-start;
+    gap: 10px !important;
+    padding: 0 16px !important;
+    border-left: none !important;
+    border-right: none !important;
+    border-top: 1px solid var(--color-base-300);
+  }
+  #board-bands .main-lane-strip span,
+  #board-bands .sublane-strip-name,
+  #board-bands .stage-strip-name {
+    writing-mode: horizontal-tb !important;
+    transform: none !important;
+  }
+
+  /* A stage the server still renders collapsed (dead render, before the BoardPager
+     hook reports pager mode and the server expands everything) is a full-width
+     tap-to-expand page rather than a 44px sliver. */
+  #board-bands .stage-strip {
+    flex-direction: row !important;
+    justify-content: center;
+    gap: 10px !important;
+  }
+}

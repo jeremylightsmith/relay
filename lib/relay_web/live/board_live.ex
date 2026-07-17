@@ -97,12 +97,8 @@ defmodule RelayWeb.BoardLive do
         :if={@live_action != :card}
         id="board-viewport"
         class={[
-          "flex flex-col",
-          if(@embed,
-            do: "min-h-dvh drawer:h-dvh",
-            else: "min-h-[calc(100dvh_-_53px)] drawer:h-[calc(100dvh_-_53px)]"
-          ),
-          "drawer:min-h-0"
+          "flex min-h-0 flex-col",
+          if(@embed, do: "h-dvh", else: "h-[calc(100dvh_-_53px)]")
         ]}
       >
         <div id="board" phx-hook="BoardDnD" class="flex min-h-0 flex-1 flex-col">
@@ -123,9 +119,40 @@ defmodule RelayWeb.BoardLive do
               Restore
             </button>
           </div>
+          <%!-- RLY-94 · BOARD-01 — phone-width pager nav: compact header + stage chip
+                strip. Hidden at ≥45rem; the BoardPager hook owns the data-active
+                highlight and chip-tap scrolling (see assets/js/hooks/board_pager.js). --%>
+          <nav
+            id="board-pager-nav"
+            phx-hook="BoardPager"
+            class="board-pager-nav drawer:hidden"
+            aria-label="Stages"
+          >
+            <div id="board-pager-header" class="board-pager-header">
+              <span class="board-pager-title">{@board.name}</span>
+              <span class="board-pager-count">{board_card_count_label(@stage_counts)}</span>
+            </div>
+            <div class="board-pager-chips">
+              <button
+                :for={stage <- flat_stages(@stage_groups)}
+                type="button"
+                id={"stage-chip-#{stage.id}"}
+                class="board-pager-chip"
+                data-chip-stage-id={stage.id}
+                data-ai={to_string(stage.ai_enabled)}
+              >
+                <span class="board-pager-chip-dot"></span>
+                {stage.name}
+                <span class="board-pager-chip-count">
+                  {total_count(stage, @stage_counts, @sublanes_by_parent)}
+                </span>
+              </button>
+            </div>
+            <span class="board-pager-fade" aria-hidden="true"></span>
+          </nav>
           <div
             id="board-bands"
-            class="min-w-full w-max overflow-x-visible overflow-y-visible drawer:min-w-0 drawer:w-auto drawer:overflow-x-auto drawer:overflow-y-hidden drawer:[-webkit-overflow-scrolling:touch] drawer:[overscroll-behavior-x:contain]"
+            class="drawer:min-w-0 drawer:w-auto drawer:overflow-x-auto drawer:overflow-y-hidden drawer:[-webkit-overflow-scrolling:touch] drawer:[overscroll-behavior-x:contain]"
             style="display:flex;gap:22px;padding:16px 18px 18px 18px;align-items:stretch;background:oklch(0.952 0.008 255);flex:1 1 auto;min-height:0;"
           >
             <section
@@ -133,7 +160,10 @@ defmodule RelayWeb.BoardLive do
               id={"category-#{category}"}
               style="display:flex;flex-direction:column;gap:9px;flex:0 0 auto;"
             >
-              <div style="display:flex;align-items:center;gap:8px;padding:0 4px;height:20px;flex:0 0 auto;">
+              <div
+                class="category-band-header"
+                style="display:flex;align-items:center;gap:8px;padding:0 4px;height:20px;flex:0 0 auto;"
+              >
                 <span class="category-dot" style={category_dot_style(category)}></span>
                 <h2
                   class="category-band"
@@ -145,7 +175,10 @@ defmodule RelayWeb.BoardLive do
                   {category_card_count(category, stages, @stage_counts, @sublanes_by_parent)}
                 </span>
               </div>
-              <div style="display:flex;gap:9px;align-items:stretch;flex:1;min-height:0;">
+              <div
+                class="category-stages"
+                style="display:flex;gap:9px;align-items:stretch;flex:1;min-height:0;"
+              >
                 <.stage_column
                   :for={stage <- stages}
                   id={"stage-col-#{stage.position}"}
@@ -155,13 +188,14 @@ defmodule RelayWeb.BoardLive do
                   category={category}
                   stage_id={stage.id}
                   collapsed={
-                    stage_collapsed?(
-                      stage,
-                      @stage_counts,
-                      @sublanes_by_parent,
-                      @force_open,
-                      @stage_force_closed
-                    )
+                    not @pager_mode and
+                      stage_collapsed?(
+                        stage,
+                        @stage_counts,
+                        @sublanes_by_parent,
+                        @force_open,
+                        @stage_force_closed
+                      )
                   }
                   collapsible={stage.collapsed_by_default}
                   main_collapsed={
@@ -407,6 +441,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:stage_groups, group_stages(board.stages))
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
+      |> assign(:pager_mode, false)
       |> assign_board_derivations(board)
       |> assign(:health_by_card, health_by_card(cards, board.stages))
       |> assign(:done_revealed, @done_page_size)
@@ -543,6 +578,13 @@ defmodule RelayWeb.BoardLive do
     end
   end
 
+  # RLY-94 — in embed mode a card tap escapes the webview: the shell pushes the
+  # native CardScreen (BOARD-03) instead of the in-webview drawer opening. On web
+  # (non-embed) the drawer keeps working at every width.
+  def handle_event("select_card", %{"ref" => ref}, %{assigns: %{embed: true}} = socket) do
+    {:noreply, push_card_tap(socket, ref)}
+  end
+
   def handle_event("select_card", %{"ref" => ref}, socket) do
     {:noreply, push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}?card=#{ref}")}
   end
@@ -617,7 +659,12 @@ defmodule RelayWeb.BoardLive do
      |> stream(:agent_logs, [], reset: true)}
   end
 
-  # A row click: close the modal and open that card's drawer (URL-driven).
+  # A row click: close the modal and open that card — bridged to the shell in embed
+  # mode (RLY-94), the URL-driven drawer otherwise.
+  def handle_event("open_archived_card", %{"ref" => ref}, %{assigns: %{embed: true}} = socket) do
+    {:noreply, socket |> assign(:archived_open, false) |> push_card_tap(ref)}
+  end
+
   def handle_event("open_archived_card", %{"ref" => ref}, socket) do
     {:noreply,
      socket
@@ -654,6 +701,13 @@ defmodule RelayWeb.BoardLive do
          |> update(:stage_force_closed, &MapSet.delete(&1, id))
          |> update(:force_open, &MapSet.put(&1, id))}
     end
+  end
+
+  # RLY-94 — the BoardPager hook reports whether the phone-width pager is active
+  # (below --breakpoint-drawer). In pager mode every stage renders as a full snap
+  # page: stage collapse (RLY-111) is a desktop-only behavior.
+  def handle_event("pager", %{"active" => active}, socket) when is_boolean(active) do
+    {:noreply, assign(socket, :pager_mode, active)}
   end
 
   # RLY-111 — the header control on a collapsed-by-default stage re-collapses it for
@@ -1322,6 +1376,20 @@ defmodule RelayWeb.BoardLive do
     |> Enum.reject(fn {_category, category_stages} -> category_stages == [] end)
   end
 
+  # RLY-94 — the chip strip flattens category bands into one ordered stage list.
+  defp flat_stages(stage_groups) do
+    for {_category, stages} <- stage_groups, stage <- stages, do: stage
+  end
+
+  # RLY-94 — BOARD-01's compact header count ("Marketing site · 11 cards").
+  # stage_counts keys every lane (main + sublanes), so the sum is the whole board.
+  defp board_card_count_label(stage_counts) do
+    case stage_counts |> Map.values() |> Enum.sum() do
+      1 -> "1 card"
+      n -> "#{n} cards"
+    end
+  end
+
   # Children grouped under their parent's id, each list ordered Review→Done.
   defp sublanes_by_parent(stages) do
     stages
@@ -1406,6 +1474,28 @@ defmodule RelayWeb.BoardLive do
   # Every action taken in this LiveView is attributed to the signed-in
   # human; the :agent default on the Cards mutators is the API's (MMF 09).
   defp current_actor(socket), do: {:user, socket.assigns.current_scope.user.id}
+
+  # RLY-94 — the card-tap bridge payload. `kind` mirrors the push deep-link
+  # convention (Relay.Push.copy/1) so the shell renders the right native action
+  # bar without a fetch: "in_review" at a review gate, "needs_input" when blocked
+  # on a human, nil otherwise. An unknown ref is a silent no-op, like move_card.
+  defp push_card_tap(socket, ref) do
+    case Cards.get_card_by_ref(socket.assigns.board, ref) do
+      %Card{} = card ->
+        push_event(socket, "card-tap", %{
+          ref: ref,
+          board: socket.assigns.board.slug,
+          kind: card_tap_kind(card)
+        })
+
+      nil ->
+        socket
+    end
+  end
+
+  defp card_tap_kind(%Card{status: :in_review}), do: "in_review"
+  defp card_tap_kind(%Card{status: :needs_input}), do: "needs_input"
+  defp card_tap_kind(%Card{}), do: nil
 
   defp find_stage(socket, stage_id) do
     find_stage_by_id(socket, String.to_integer(stage_id))
