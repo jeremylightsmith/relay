@@ -4,15 +4,11 @@
 node-behavior ownership for free (agent nodes run in the checkout); this card adds the
 structural layer — overriding a node's prompt/model or a flow's shape per project.
 
-**Open question to settle first (flagged in the ADR).** Where overrides live:
-
-- **Repo file** (`.relay/flows.json`): versioned with the code, reviewed in PRs,
-  travels with forks — but invisible on the board and needs a sync/upload path.
-- **Board UI**: visible and editable where runs are watched — but not versioned with the
-  code it governs.
-
-Decide via /brainstorm before implementation (a hybrid — repo file as source, board renders
-the resolved flow read-only — is a plausible answer).
+**Half-decided (2026-07-16).** Flows are **edited on the board** — versioned rows with a
+full editor UI (see the flow-editor card). The remaining question for THIS card: does a
+repo file (`.relay/flows.json`) *additionally* layer on top, for customization that
+versions with the code and travels with forks? Decide via /brainstorm; "no repo layer,
+board only" is now a legitimate answer that would shrink this card to near-zero.
 
 **Scope (once decided).**
 

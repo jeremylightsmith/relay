@@ -96,18 +96,25 @@ flowchart LR
    **executor-local**: a flow declares only the *isolation requirement* a node needs
    (`shared_clean` read-only vs `exclusive` writable); each executor maps requirements onto
    its own worktrees and advertises its capacity — the server never knows any machine's
-   filesystem layout. A cloud-sandbox executor later is a second implementation of the same
-   protocol, not a redesign.
+   filesystem layout. **Exclusive runs have executor affinity**: every node-job of a run
+   goes to the machine holding its worktree; if that machine disappears, the run parks
+   until it returns. A cloud-sandbox executor later is a second implementation of the
+   same protocol, not a redesign.
 
 4. **Flows are declarative graph data, not DOT and not code.** Typed nodes (`agent`,
    `shell`, `gate`, `parallel`, `human`), a closed outcome set
    (`succeeded / failed / partial / needs_input`), outcome-routed edges, retry counts, and
    hard gates — stored in Relay with a shipped default library (Spec, Plan, Code flows).
-   The board's stages and the micro-flows become one graph in one place: a stage is a flow,
-   the board's review gate is a `human` node, a deterministic check like `mix precommit` is
-   a `gate` node, and needs-input is an outcome that pauses the run. Flows can be
-   *rendered* as a graph on the card — Fabro's best visibility idea — without DOT as an
-   authoring format.
+   **Stages are places; flows are the AI transitions between them**: an AI-enabled stage
+   *has* (at most) one enabled flow working cards through it, and a flow references
+   exactly three stages by id (pulls-from / works-in / lands-on). At most one enabled
+   flow may pull from a given stage, or two dispatchers race for the same card. The
+   board's review gate stays a human action *between* flows; a deterministic check like
+   `mix precommit` is a `gate` node *inside* one; needs-input is an outcome that parks
+   the run. **Flows are versioned**: every save bumps the version and a run snapshots the
+   version it started on, so editing never mutates in-flight work. Flows are *edited on
+   the board* (decided 2026-07-16) and can be rendered as a graph — Fabro's best
+   visibility idea — without DOT as an authoring format.
 
    A sketch of a Code flow in this model (edges labeled with the outcome that routes them):
 
@@ -226,9 +233,9 @@ flowchart LR
 ```
 
 **Example per-project override** — how a developer owns their process without forking
-Relay. Sketched here as a repo file; whether overrides live in a repo file (versioned with
-the code) or are edited on the board (more visible) is an **open question** to settle
-before implementation:
+Relay. Decided 2026-07-16: flows are **edited on the board** (versioned rows, full
+editor UI). Still open: whether a repo file like the sketch below *additionally* layers
+on top, for customization that versions with the code:
 
 ```jsonc
 // .relay/flows.json — this repo's adjustments to the shipped library
@@ -330,12 +337,27 @@ brain/hands problem we are taking on. What we adopt and where we deliberately di
   equivalent is the card itself: spec, plan, timeline, and node outputs land on the card,
   and the next node's prompt starts from the card. Less tunable — but durable,
   human-readable, and identical to what the human sees (requirement 4: the developer can
-  read and edit the agent's working context directly).
+  read and edit the agent's working context directly). Within a run there are exactly two
+  more channels: the **worktree** (all of a run's nodes share one; the diff is the
+  reviewers' context) and **edge-borne output** — a node's outcome `detail` is its return
+  value, injectable into the next node's prompt as `{prior.detail}` (or
+  `{nodes.<id>.detail}`), which is how a refuted review's findings reach the implement
+  re-entry. Sessions stay fresh per node *on purpose* (a reviewer must judge the diff,
+  not inherit the implementer's rationalizations); `--resume` is used only when a node
+  re-enters itself after needs-input.
 - **Distributed by design.** Fabro is server + subprocess workers on one box; our engine
   (Fly) and executors (dev machines) are split by necessity, which is why the node-job
   protocol, heartbeats, and job reclaim exist at all. Accepted cost, already carded.
-- **No `skipped` outcome yet.** Fabro's fourth outcome exists for untaken parallel
-  branches; we defer it with `parallel` fan-out (YAGNI until the Code flow needs it).
+- **No `skipped` outcome yet — but parallel's design is settled (Fabro's, adopted).**
+  When `parallel` arrives it works by **fork-and-join on git**: commit the run worktree
+  (`parallel_base`), fork N *ephemeral* worktrees at that SHA (scratch, not pool slots;
+  bounded by `max_parallel` and a per-machine scratch budget; all on the run's executor
+  per affinity), each child commits, then join by policy — **map** (disjoint work:
+  merge all; conflicts route to a rebase agent) or **ensemble** (N attempts at one
+  thing: pick a winner, fast-forward to its SHA, losers recorded as `skipped` with
+  their SHAs inspectable). Ensemble (a review judge-panel) is the expected first
+  customer, in or after W10. Until then: YAGNI — cold build caches make ephemeral
+  forks expensive on a laptop, so this waits for proven value.
 
 ## Consequences
 

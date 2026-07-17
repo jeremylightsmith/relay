@@ -10,7 +10,9 @@ features. Expect to split this at planning time; it is deliberately last.
   review (agent) with `failed → implement` loop (`max_loops`) → precommit (`gate`) → smoke
   (agent) → merge (shell), under `exclusive` isolation.
 - Engine features this flushes out: `foreach` over plan tasks (sequential), and — only if
-  the flow genuinely needs it — `parallel` fan-out (deferred from 02).
+  the flow genuinely needs it — `parallel` fan-out (deferred from 02; design settled in
+  the ADR: git fork-and-join, ensemble-winner or map-merge, `skipped` for losers — an
+  ensemble review panel here is its expected first customer).
 - Review/smoke verdicts arrive via the agent-node outcome contract (04), replacing the
   `tmp/exec-plan-status` scratch-file gate.
 - Task check-off mirrors to the card's `sub_tasks` as nodes complete (the old RLY thread,

@@ -24,3 +24,6 @@ runner, and upgrades its data source when 04/05 land.
 | RLY-139 W10 · [09](09-code-flow.md) | Decompose the Code flow (retire the /exec-plan black box) | 06, 07 |
 | RLY-140 W11 · [10](10-project-overrides.md) | Per-project flow overrides | 06 |
 | RLY-141 W1 · [11](11-runners-view.md) | Runners view: who's running, and what's on each | — (v0 now; 04/05 upgrade it) |
+| RLY-142 W12 · [12](12-flows-ui.md) | Flows management UI (board settings tab) | 01 (wants to land near 06's cutover) |
+| RLY-143 W13 · [13](13-flow-editor.md) | Flow editor: edit flows on the board | 01, 02, 12 |
+| RLY-144 W14 · [14](14-phase-lanes.md) | Code column phase lanes (experiment) | 06, 07 |

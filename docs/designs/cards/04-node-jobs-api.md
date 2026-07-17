@@ -25,6 +25,10 @@ board-key REST API, not a parallel surface (ADR 0001).
 - **Agent-node outcome contract**: how a headless `claude -p` signals its result — an
   outcome JSON file the executor reads (plus "card went to needs_input" detection, as the
   runner does today). Documented in `docs/agent-integration.md`.
+- **Edge-borne context**: a node's outcome `detail` is its return value; the job payload's
+  prompt template may reference `{prior.detail}` (the node that routed here) and
+  `{nodes.<id>.detail}` — this is how reviewer findings reach the implement re-entry, with
+  no context store beyond the card.
 
 **Out of scope.** The Python executor itself (05), dispatch decisions (02/03 own those).
 

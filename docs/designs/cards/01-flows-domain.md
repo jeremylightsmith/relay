@@ -11,8 +11,11 @@ or code. This card creates the vocabulary everything else builds on.
   `exclusive` — worktrees and concurrency stay executor-local per ADR 0006), nodes (closed
   type set: `agent`, `shell`, `gate`, `parallel`, `human`), edges (`from`, `to`, `on`
   outcome, `max_loops`).
+- **Versioning**: every save bumps the flow's `version`; a run snapshots the version it
+  started on, so edits never mutate in-flight work.
 - Validation: node types, outcomes, and isolation from the closed sets; edges reference
-  existing nodes; exactly one `start`; trigger stages must exist on the board.
+  existing nodes; exactly one `start`; trigger stages must exist on the board; **at most
+  one enabled flow per pulls-from stage per board** (two would race for the same card).
 - Seed the default library as data. The authored seed definitions live in
   [`docs/designs/flows/`](../flows/README.md) — a faithful translation of today's
   `relay_config.json` + `execute-plan.js` (Spec/Plan single agent node each; Code as the

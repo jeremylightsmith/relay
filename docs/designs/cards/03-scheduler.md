@@ -15,6 +15,9 @@ slice it would silently double that card's size.
   first; resume in-progress before pulling fresh; WIP limits count a column plus its
   sub-lanes; `needs_input` cards skipped; human-owned cards off-limits (ADR 0004); budgets
   consumed as candidates are chosen so one tick never over-dispatches.
+- **Executor affinity**: every node-job of an `exclusive` run is dispatched to the
+  executor holding its worktree; if that executor is gone, the run parks (never
+  reassigned mid-run).
 - Event-driven rather than polled where cheap: card moves / answers / executor
   connections already broadcast on PubSub — the scheduler reacts, with a slow tick as
   backstop.
