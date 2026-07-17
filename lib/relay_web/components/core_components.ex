@@ -2619,6 +2619,12 @@ defmodule RelayWeb.CoreComponents do
   attr :composing, :boolean, default: false
   attr :compose_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[title]; required when composing"
 
+  attr :composable, :boolean,
+    default: true,
+    doc:
+      "RLY-126 — false hides the header compose + (embed mode: the native New-card " <>
+        "sheet is the single create path in the app)"
+
   attr :sublanes, :list,
     default: [],
     doc:
@@ -2760,7 +2766,7 @@ defmodule RelayWeb.CoreComponents do
             <.icon name="hero-chevron-left" class="size-4" />
           </button>
           <button
-            :if={!@composing and !@read_only}
+            :if={@composable and !@composing and !@read_only}
             type="button"
             id={"#{@id}-new-card"}
             class="stage-compose"

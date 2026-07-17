@@ -174,6 +174,20 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         }
       },
       %Variation{
+        id: :embed_no_composer,
+        description:
+          "RLY-126 — embed mode: composable={false} hides the header compose +; " <>
+            "the native New-card sheet is the app's only create path",
+        attributes: %{
+          id: "story-stage-embed",
+          name: "Backlog",
+          type: :queue,
+          stage_id: 906,
+          count: 2,
+          composable: false
+        }
+      },
+      %Variation{
         id: :wip_within_limit,
         description: "A WIP-limited stage within its limit shows the neutral wip chip (MMF 11)",
         attributes: %{
