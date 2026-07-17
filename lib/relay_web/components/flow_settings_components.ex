@@ -194,10 +194,53 @@ defmodule RelayWeb.FlowSettingsComponents do
                 </button>
               </div>
 
-              <span style="flex:0 0 34px;"></span>
+              <div style="flex:0 0 34px;display:flex;justify-content:flex-end;">
+                <details class="dropdown dropdown-end" id={"flow-#{row.flow.id}-menu"}>
+                  <summary
+                    aria-label={"Actions for the #{flow_name(row.flow)} flow"}
+                    style="list-style:none;width:28px;height:28px;border-radius:7px;border:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);color:oklch(0.50 0.02 255);display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1;cursor:pointer;"
+                  >
+                    ⋯
+                  </summary>
+                  <ul class="menu dropdown-content z-10 w-48 rounded-box bg-base-100 p-1 shadow">
+                    <li>
+                      <button
+                        type="button"
+                        id={"flow-#{row.flow.id}-edit"}
+                        phx-click="flow_open_definition"
+                        phx-value-flow-id={row.flow.id}
+                      >
+                        ✎ Edit flow
+                      </button>
+                    </li>
+                    <li>
+                      <button
+                        type="button"
+                        id={"flow-#{row.flow.id}-duplicate"}
+                        phx-click="flow_duplicate"
+                        phx-value-flow-id={row.flow.id}
+                      >
+                        ⧉ Duplicate
+                      </button>
+                    </li>
+                    <li :if={row.resettable?}>
+                      <button
+                        type="button"
+                        id={"flow-#{row.flow.id}-reset"}
+                        phx-click="flow_reset"
+                        phx-value-flow-id={row.flow.id}
+                      >
+                        ↺ Reset to default
+                      </button>
+                    </li>
+                  </ul>
+                </details>
+              </div>
             </div>
 
             <.toggle_confirm :if={@panel == {row.flow.id, :confirm}} flow={row.flow} />
+            <.definition_panel :if={@panel == {row.flow.id, :definition}} flow={row.flow} />
+            <.reset_confirm :if={@panel == {row.flow.id, :reset}} flow={row.flow} />
           </div>
         </div>
       </div>
@@ -347,5 +390,119 @@ defmodule RelayWeb.FlowSettingsComponents do
     "position:absolute;top:2px;" <>
       if(enabled?, do: "right:2px;", else: "left:2px;") <>
       "width:18px;height:18px;border-radius:50%;background:oklch(1 0 0);transition:all 0.18s;box-shadow:0 1px 2px oklch(0.4 0.02 255/0.3);"
+  end
+
+  attr :flow, Flow, required: true
+
+  # Read-only structured text (spec interview #2) — the real editor is RLY-143.
+  defp definition_panel(assigns) do
+    ~H"""
+    <div
+      id={"flow-#{@flow.id}-definition"}
+      style="margin:0 18px 16px 18px;background:oklch(0.985 0.004 255);border:1px solid oklch(0.92 0.006 255);border-radius:10px;padding:14px 16px;"
+    >
+      <div
+        class="font-mono"
+        style="font-size:10.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.55 0.02 255);margin-bottom:8px;"
+      >
+        NODES
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div
+          :for={node <- @flow.nodes}
+          id={"flow-#{@flow.id}-node-#{node.key}"}
+          class="font-mono"
+          style="font-size:12px;line-height:1.5;color:oklch(0.38 0.02 255);"
+        >
+          <span style="font-weight:600;">{node.key}</span>
+          <span style="color:oklch(0.58 0.02 255);"> ·   {node.type}{node_meta(node)}</span>
+          <span :if={node.run} style="color:oklch(0.50 0.02 255);"> —   {node.run}</span>
+        </div>
+      </div>
+      <div
+        class="font-mono"
+        style="font-size:10.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.55 0.02 255);margin:12px 0 8px 0;"
+      >
+        EDGES
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div
+          :for={{edge, index} <- Enum.with_index(@flow.edges)}
+          id={"flow-#{@flow.id}-edge-#{index}"}
+          class="font-mono"
+          style="font-size:12px;line-height:1.5;color:oklch(0.38 0.02 255);"
+        >
+          {edge_line(edge)}
+        </div>
+      </div>
+      <p
+        id={"flow-#{@flow.id}-definition-note"}
+        style="font-size:11.5px;color:oklch(0.58 0.02 255);margin:12px 0 0 0;"
+      >
+        Editing arrives with the flow editor (RLY-143).
+      </p>
+    </div>
+    """
+  end
+
+  attr :flow, Flow, required: true
+
+  defp reset_confirm(assigns) do
+    ~H"""
+    <div
+      id={"flow-#{@flow.id}-reset-confirm"}
+      style="display:flex;align-items:flex-start;gap:12px;margin:0 18px 16px 18px;background:oklch(0.985 0.025 75);border:1px solid oklch(0.87 0.07 75);border-radius:10px;padding:14px 16px;"
+    >
+      <span style="width:22px;height:22px;border-radius:50%;background:oklch(0.70 0.13 65);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">
+        !
+      </span>
+      <div style="flex:1;">
+        <div style="font-size:13.5px;font-weight:600;color:oklch(0.42 0.10 65);margin-bottom:3px;">
+          Reset the {flow_name(@flow)} flow to the shipped default?
+        </div>
+        <p style="font-size:12.5px;line-height:1.5;color:oklch(0.44 0.05 65);margin:0 0 12px 0;max-width:560px;">
+          Replace this flow's definition with the shipped default? Your customizations are
+          overwritten. The flow's triggers and on/off state are untouched.
+        </p>
+        <div style="display:flex;gap:8px;">
+          <button
+            type="button"
+            id={"flow-#{@flow.id}-reset-cta"}
+            phx-click="flow_confirm_reset"
+            phx-value-flow-id={@flow.id}
+            style="background:oklch(0.62 0.14 65);color:oklch(1 0 0);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+          >
+            Reset {flow_name(@flow)}
+          </button>
+          <button
+            type="button"
+            id={"flow-#{@flow.id}-reset-cancel"}
+            phx-click="flow_cancel_panel"
+            style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.04 65);color:oklch(0.48 0.04 65);border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # " · sonnet/high · retries 3" — only the parts that are set.
+  defp node_meta(node) do
+    model_effort =
+      case Enum.reject([node.model, node.effort], &is_nil/1) do
+        [] -> ""
+        parts -> " · " <> Enum.join(parts, "/")
+      end
+
+    retries = if node.max_retries, do: " · retries #{node.max_retries}", else: ""
+    model_effort <> retries
+  end
+
+  defp edge_line(edge) do
+    on = if edge.on, do: " on #{edge.on}", else: ""
+    loops = if edge.max_loops, do: " (max_loops #{edge.max_loops})", else: ""
+    "#{edge.from} → #{edge.to}#{on}#{loops}"
   end
 end

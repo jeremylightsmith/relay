@@ -226,4 +226,125 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       refute has_element?(view, "#flow-#{spec.id}-confirm")
     end
   end
+
+  describe "kebab actions" do
+    test "Edit flow opens the read-only definition panel listing nodes and edges",
+         %{conn: conn, board: board} do
+      code = flow(board, "code")
+      view = open_flows(conn, board)
+
+      view |> element("#flow-#{code.id}-edit") |> render_click()
+
+      assert has_element?(view, "#flow-#{code.id}-definition")
+      assert has_element?(view, "#flow-#{code.id}-node-implement", "implement")
+      assert has_element?(view, "#flow-#{code.id}-node-implement", "agent")
+      assert has_element?(view, "#flow-#{code.id}-node-implement", "sonnet")
+      assert has_element?(view, "#flow-#{code.id}-node-precommit", "mix precommit")
+      assert has_element?(view, "#flow-#{code.id}-definition", "start → branch")
+      assert has_element?(view, "#flow-#{code.id}-definition", "spec_review → implement on failed (max_loops 3)")
+      assert has_element?(view, "#flow-#{code.id}-definition-note", "RLY-143")
+    end
+
+    test "a node's retries render when set", %{conn: conn, board: board} do
+      spec = flow(board, "spec")
+      view = open_flows(conn, board)
+
+      view |> element("#flow-#{spec.id}-edit") |> render_click()
+
+      assert has_element?(view, "#flow-#{spec.id}-node-brainstorm", "/brainstorm {ref}")
+      assert has_element?(view, "#flow-#{spec.id}-node-brainstorm", "retries 1")
+    end
+
+    test "the definition panel and the toggle confirm are mutually exclusive",
+         %{conn: conn, board: board} do
+      spec = flow(board, "spec")
+      view = open_flows(conn, board)
+
+      view |> element("#flow-#{spec.id}-toggle") |> render_click()
+      assert has_element?(view, "#flow-#{spec.id}-confirm")
+
+      view |> element("#flow-#{spec.id}-edit") |> render_click()
+      refute has_element?(view, "#flow-#{spec.id}-confirm")
+      assert has_element?(view, "#flow-#{spec.id}-definition")
+
+      view |> element("#flow-#{spec.id}-toggle") |> render_click()
+      refute has_element?(view, "#flow-#{spec.id}-definition")
+      assert has_element?(view, "#flow-#{spec.id}-confirm")
+    end
+
+    test "Duplicate adds a disabled customized copy with no Reset item",
+         %{conn: conn, board: board} do
+      spec = flow(board, "spec")
+      view = open_flows(conn, board)
+
+      view |> element("#flow-#{spec.id}-duplicate") |> render_click()
+
+      copy = Flows.get_flow!(board, "spec-copy")
+      refute copy.enabled
+      assert has_element?(view, "#flow-row-#{copy.id}", "Spec copy")
+      assert has_element?(view, "#flow-#{copy.id}-customized", "customized")
+      assert has_element?(view, "#flow-#{copy.id}-toggle[aria-pressed='false']")
+      refute has_element?(view, "#flow-#{copy.id}-reset")
+    end
+
+    test "enabling a duplicate that pulls from the same stage surfaces the conflict (AC 3)",
+         %{conn: conn, board: board} do
+      spec = flow(board, "spec")
+      {:ok, _} = Flows.enable_flow(spec)
+      view = open_flows(conn, board)
+
+      view |> element("#flow-#{spec.id}-duplicate") |> render_click()
+      copy = Flows.get_flow!(board, "spec-copy")
+
+      view |> element("#flow-#{copy.id}-toggle") |> render_click()
+      view |> element("#flow-#{copy.id}-confirm-cta") |> render_click()
+
+      assert render(view) =~ "another enabled flow already pulls from this stage"
+      refute Flows.get_flow!(board, "spec-copy").enabled
+    end
+
+    test "Reset to default shows only for customized library flows, confirms, and restores the default",
+         %{conn: conn, board: board} do
+      plan = flow(board, "plan")
+
+      {:ok, plan} =
+        Flows.update_flow(plan, %{
+          nodes: [%{key: "write_plan", type: :agent, run: "custom run", max_retries: 3}],
+          edges: [%{from: "start", to: "write_plan"}, %{from: "write_plan", to: "done", on: :succeeded}]
+        })
+
+      view = open_flows(conn, board)
+
+      spec = flow(board, "spec")
+      refute has_element?(view, "#flow-#{spec.id}-reset")
+      assert has_element?(view, "#flow-#{plan.id}-reset", "Reset to default")
+
+      view |> element("#flow-#{plan.id}-reset") |> render_click()
+      assert has_element?(view, "#flow-#{plan.id}-reset-confirm", "customizations are overwritten")
+      assert Flows.customized?(Flows.get_flow!(board, "plan"))
+
+      view |> element("#flow-#{plan.id}-reset-cancel") |> render_click()
+      refute has_element?(view, "#flow-#{plan.id}-reset-confirm")
+      assert Flows.customized?(Flows.get_flow!(board, "plan"))
+
+      view |> element("#flow-#{plan.id}-reset") |> render_click()
+      view |> element("#flow-#{plan.id}-reset-cta") |> render_click()
+
+      refute Flows.customized?(Flows.get_flow!(board, "plan"))
+      refute has_element?(view, "#flow-#{plan.id}-customized")
+      refute has_element?(view, "#flow-#{plan.id}-reset")
+      refute has_element?(view, "#flow-#{plan.id}-reset-confirm")
+    end
+
+    test "an archived board rejects Duplicate as read-only", %{conn: conn, board: board} do
+      spec = flow(board, "spec")
+      {:ok, _} = Boards.archive_board(board)
+      view = open_flows(conn, board)
+
+      view |> element("#flow-#{spec.id}-duplicate") |> render_click()
+
+      assert render(view) =~ "archived (read-only)"
+      assert Flows.get_flow(board, "spec-copy") == nil
+    end
+  end
 end

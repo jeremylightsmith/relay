@@ -922,6 +922,7 @@ defmodule RelayWeb.BoardSettingsLive do
         save_board_name save_board_slug edit_stage save_stage add_stage delete_stage
         toggle_wip bump_wip reorder_stage toggle_lane set_type toggle_ai set_reject_to
         toggle_collapsed_default invite_member remove_member flow_toggle flow_confirm_toggle
+        flow_duplicate flow_reset flow_confirm_reset
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -1140,6 +1141,35 @@ defmodule RelayWeb.BoardSettingsLive do
       case result do
         {:ok, _flow} -> socket
         {:error, changeset} -> put_flash(socket, :error, "Could not update the flow: #{flow_errors(changeset)}.")
+      end
+
+    {:noreply, socket |> assign(:flow_panel, nil) |> assign_flows()}
+  end
+
+  def handle_event("flow_open_definition", %{"flow-id" => flow_id}, socket) do
+    {:noreply, assign(socket, :flow_panel, {parse_flow_id(flow_id), :definition})}
+  end
+
+  def handle_event("flow_duplicate", %{"flow-id" => flow_id}, socket) do
+    socket =
+      case Flows.duplicate_flow(find_flow(socket, flow_id)) do
+        {:ok, _copy} -> socket
+        {:error, changeset} -> put_flash(socket, :error, "Could not duplicate the flow: #{flow_errors(changeset)}.")
+      end
+
+    {:noreply, socket |> assign(:flow_panel, nil) |> assign_flows()}
+  end
+
+  def handle_event("flow_reset", %{"flow-id" => flow_id}, socket) do
+    {:noreply, assign(socket, :flow_panel, {parse_flow_id(flow_id), :reset})}
+  end
+
+  def handle_event("flow_confirm_reset", %{"flow-id" => flow_id}, socket) do
+    socket =
+      case Flows.reset_to_default(find_flow(socket, flow_id)) do
+        {:ok, _flow} -> socket
+        {:error, :not_a_default} -> put_flash(socket, :error, "Only flows from the default library can be reset.")
+        {:error, changeset} -> put_flash(socket, :error, "Could not reset the flow: #{flow_errors(changeset)}.")
       end
 
     {:noreply, socket |> assign(:flow_panel, nil) |> assign_flows()}
