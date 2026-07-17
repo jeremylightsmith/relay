@@ -48,6 +48,9 @@ dependencies:
   # RLY-86: the session cookie's only correct home is the Keychain
   # (shared_preferences is plaintext). Approved at Spec:Review.
   flutter_secure_storage: ^9.2.4
+  # RLY-98: open the card's PR via iOS universal links → GitHub app, with an
+  # in-app-browser fallback (same package as ../rotation). No Info.plist changes.
+  url_launcher: ^6.3.2
   # Inject the session cookie into embedded webviews (proves the session end-to-end).
   flutter_inappwebview: ^6.1.5
 

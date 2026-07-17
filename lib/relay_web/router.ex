@@ -153,6 +153,7 @@ defmodule RelayWeb.Router do
 
     post "/cards", AllController, :create
     get "/feed", AllController, :feed
+    get "/cards/:ref", AllController, :show
     post "/cards/:ref/approve", AllController, :approve
     post "/cards/:ref/reject", AllController, :reject
     post "/cards/:ref/answer", AllController, :answer

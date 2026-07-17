@@ -95,6 +95,18 @@ class RelayTheme {
     0xFFBCD5F0,
   ); // selected chip border (oklch 0.86 0.05 250)
 
+  // --- Context chips · CORE-03 "Card · review" chip row (RLY-98) ---
+  // The artboard's own oklch values, converted (same method as relayHairline).
+  static const Color relayChipBorder = Color(
+    0xFFDBDEE2,
+  ); // chip border   (oklch 0.9 0.006 255)
+  static const Color relayChipLabel = Color(
+    0xFF272E38,
+  ); //  chip label    (oklch 0.3 0.02 255)
+  static const Color relayPrChipTile = Color(
+    0xFF13161B,
+  ); // PR icon tile  (oklch 0.2 0.01 260)
+
   /// Convenience aliases used by downstream feature cards (badges, inbox rows).
   static const Color relayHuman = relayHumanLight;
   static const Color relayAI = relayAILight;

@@ -5,6 +5,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../config.dart';
 import '../decisions/review_queue.dart';
+import 'card_summary.dart';
+import 'pr_launcher.dart';
+import 'widgets/card_context_chips.dart';
 import 'widgets/card_review_bar.dart';
 
 /// The card-detail host: the native back bar, the **embedded chromeless LiveView card
@@ -144,6 +147,16 @@ class _CardScreenState extends ConsumerState<CardScreen> {
     context.push('/card/${widget.cardRef}/reject?board=${widget.boardSlug}');
   }
 
+  /// Decision 4's chain lives in PrLauncher; total failure is the only user-visible
+  /// error this feature has (supplemental context never blocks the primary action).
+  Future<void> _openPr(Uri uri) async {
+    final opened = await ref.read(prLauncherProvider).open(uri);
+    if (!mounted || opened) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("Couldn't open the PR.")));
+  }
+
   @override
   Widget build(BuildContext context) {
     // A failed decision surfaces here (spec: snackbar + Retry, stay put).
@@ -183,7 +196,41 @@ class _CardScreenState extends ConsumerState<CardScreen> {
               ),
             ),
       ),
-      bottomNavigationBar: _actionBar(),
+      bottomNavigationBar: _bottomBar(),
+    );
+  }
+
+  /// The native bottom chrome: the context-chip strip (RLY-98) stacked over the review
+  /// bar (RLY-87) in one min-size Column, so the chip survives every entry path —
+  /// including needs_input cards, where no review bar renders. The ColoredBox + outer
+  /// SafeArea keep the surface painted under the home indicator whichever children
+  /// render (CardReviewBar's own SafeArea becomes a no-op inside this one). The chip
+  /// hides until the summary fetch lands (value is null while loading and on
+  /// every failure — the spec's failure posture).
+  Widget? _bottomBar() {
+    final prUrl = ref
+        .watch(
+          cardPrUrlProvider((
+            cardRef: widget.cardRef,
+            boardSlug: widget.boardSlug,
+          )),
+        )
+        .value;
+    final reviewBar = _actionBar();
+    if (prUrl == null && reviewBar == null) return null;
+
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surface,
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (prUrl != null) CardContextChips(onOpenPr: () => _openPr(prUrl)),
+            ?reviewBar,
+          ],
+        ),
+      ),
     );
   }
 
