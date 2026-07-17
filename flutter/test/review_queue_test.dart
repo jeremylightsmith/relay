@@ -134,6 +134,23 @@ class FakeFeedRepository implements FeedRepository {
   }
 }
 
+/// First page answers immediately (the inbox's seed); every later call hangs
+/// on [pending] — the only way to observe the optimistic removal before the
+/// background reconcile lands.
+class StagedFeedRepository implements FeedRepository {
+  StagedFeedRepository(this.first);
+
+  final FeedPage first;
+  final pending = Completer<FeedPage>();
+  int calls = 0;
+
+  @override
+  Future<FeedPage> fetchFeed() {
+    calls++;
+    return calls == 1 ? Future.value(first) : pending.future;
+  }
+}
+
 ({ProviderContainer container, FakeAuthController auth}) harness({
   required DecisionApi api,
   FeedRepository? feed,
@@ -315,10 +332,10 @@ void main() {
       expect(dest, '/needs-you');
       expect(
         feed.calls,
-        2,
+        3,
         reason:
-            'the initial load plus the one end-of-snapshot refetch — '
-            'landing on the inbox must not cost a second request',
+            'the initial load, the D2 background reconcile, and the one '
+            'end-of-snapshot refetch — landing on the inbox costs nothing further',
       );
       final inbox = h.container.read(feedControllerProvider).value;
       expect(inbox, isNotNull);
@@ -332,6 +349,9 @@ void main() {
     () async {
       final feed = FakeFeedRepository([
         page([row('RLY-SEED')]),
+        // The D2 reconcile consumes this one…
+        page([row('RLY-D'), row('RLY-E')]),
+        // …and advanceAfter's end-of-snapshot refetch this one.
         page([row('RLY-D'), row('RLY-E')]),
       ]);
       final h = harness(api: FakeDecisionApi(), feed: feed);
@@ -348,7 +368,7 @@ void main() {
       );
 
       expect(dest, '/cards/RLY-D?board=relay&kind=in_review');
-      expect(feed.calls, 2);
+      expect(feed.calls, 3);
       final inbox = h.container.read(feedControllerProvider).value;
       expect(inbox!.rows.map((r) => r.ref), ['RLY-D', 'RLY-E']);
     },
@@ -852,4 +872,140 @@ void main() {
     expect(state.error, isNull);
     expect(state.items.map((i) => i.ref), ['RLY-X']);
   });
+
+  test('a mid-queue approve drops the row from the live inbox immediately and '
+      'fires one background reconcile (RLY-128 D2)', () async {
+    final feed = StagedFeedRepository(page([row('RLY-A'), row('RLY-B')]));
+    final h = harness(api: FakeDecisionApi(), feed: feed);
+    await h.container.read(feedControllerProvider.future);
+    expect(feed.calls, 1);
+
+    final queue = h.container.read(reviewQueueProvider.notifier);
+    queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
+    final dest = await queue.approveCurrent(
+      cardRef: 'RLY-A',
+      boardSlug: 'relay',
+    );
+
+    expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
+    // Optimistic: gone even though the reconcile hasn't answered yet.
+    final inbox = h.container.read(feedControllerProvider).value!;
+    expect(inbox.rows.map((r) => r.ref), ['RLY-B']);
+    expect(inbox.count, 1);
+    expect(feed.calls, 2, reason: 'the background reconcile fired');
+
+    // The reconcile lands and is authoritative.
+    feed.pending.complete(page([row('RLY-B')]));
+    await pumpEventQueue();
+    expect(
+      h.container.read(feedControllerProvider).value!.rows.map((r) => r.ref),
+      ['RLY-B'],
+    );
+  });
+
+  test('an already-handled 422 also drops the row — either way it no longer '
+      'needs you', () async {
+    final feed = StagedFeedRepository(page([row('RLY-A'), row('RLY-B')]));
+    final h = harness(
+      api: FakeDecisionApi(
+        const DecisionFailed(
+          'not_in_review',
+          'This card is not in a review stage',
+        ),
+      ),
+      feed: feed,
+    );
+    await h.container.read(feedControllerProvider.future);
+
+    final queue = h.container.read(reviewQueueProvider.notifier);
+    queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
+    final dest = await queue.approveCurrent(
+      cardRef: 'RLY-A',
+      boardSlug: 'relay',
+    );
+
+    expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
+    expect(
+      h.container.read(feedControllerProvider).value!.rows.map((r) => r.ref),
+      ['RLY-B'],
+    );
+    expect(feed.calls, 2);
+  });
+
+  test(
+    'an answered needs_input row leaves the live inbox the same way',
+    () async {
+      final feed = StagedFeedRepository(
+        page([
+          row('RLY-A', kind: 'needs_input'),
+          row('RLY-B', kind: 'needs_input'),
+        ]),
+      );
+      final h = harness(api: FakeDecisionApi(), feed: feed);
+      await h.container.read(feedControllerProvider.future);
+
+      final queue = h.container.read(reviewQueueProvider.notifier);
+      queue.enter(
+        rows: [
+          row('RLY-A', kind: 'needs_input'),
+          row('RLY-B', kind: 'needs_input'),
+        ],
+        atRef: 'RLY-A',
+      );
+      await queue.answerCurrent(text: 'eu, please');
+
+      expect(
+        h.container.read(feedControllerProvider).value!.rows.map((r) => r.ref),
+        ['RLY-B'],
+      );
+      expect(feed.calls, 2);
+    },
+  );
+
+  test('a real failure touches neither the inbox nor the network', () async {
+    final feed = StagedFeedRepository(page([row('RLY-A'), row('RLY-B')]));
+    final h = harness(
+      api: FakeDecisionApi(
+        const DecisionFailed(
+          'network',
+          'Network error — could not reach Relay.',
+        ),
+      ),
+      feed: feed,
+    );
+    await h.container.read(feedControllerProvider.future);
+
+    final queue = h.container.read(reviewQueueProvider.notifier);
+    queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
+    final dest = await queue.approveCurrent(
+      cardRef: 'RLY-A',
+      boardSlug: 'relay',
+    );
+
+    expect(dest, isNull);
+    expect(
+      h.container.read(feedControllerProvider).value!.rows.map((r) => r.ref),
+      ['RLY-A', 'RLY-B'],
+    );
+    expect(
+      feed.calls,
+      1,
+      reason: 'no reconcile for a decision that did not settle',
+    );
+  });
+
+  test(
+    'a cold container pays nothing — no live inbox means no reconcile fetch',
+    () async {
+      final feed = FakeFeedRepository();
+      final h = harness(api: FakeDecisionApi(), feed: feed);
+      // No feedControllerProvider read anywhere — the inbox was never built.
+
+      final queue = h.container.read(reviewQueueProvider.notifier);
+      queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
+      await queue.approveCurrent(cardRef: 'RLY-A', boardSlug: 'relay');
+
+      expect(feed.calls, 0);
+    },
+  );
 }

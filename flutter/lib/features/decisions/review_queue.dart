@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -231,9 +233,12 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
   }) async {
     switch (result) {
       case DecisionOk():
+        _reconcileFeed(item);
         return advanceAfter(banner: okBanner);
-      // Someone cleared it on the web while we walked. Not a failure.
+      // Someone cleared it on the web while we walked. Not a failure — and
+      // either way the row no longer needs you, so it leaves the inbox too.
       case DecisionFailed(code: 'not_in_review' || 'not_needs_input'):
+        _reconcileFeed(item);
         return advanceAfter(banner: 'Already handled · ${item.ref}');
       // The token expired or was revoked; the router sends a signed-out user to /welcome.
       case DecisionFailed(code: 'unauthorized'):
@@ -243,6 +248,20 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
         state = state.copyWith(error: message);
         return null;
     }
+  }
+
+  /// RLY-128 D2: a settled decision means the row no longer needs you — drop
+  /// it from the live inbox immediately, then reconcile with an unawaited
+  /// background refetch. Runs before [advanceAfter], so the row is gone the
+  /// moment you back out, mid-queue or not. Guarded by [Ref.exists] for the
+  /// same reason as [advanceAfter]'s applyFeed: a cold container must not pay
+  /// for a build-time fetch. The walk itself never reads the feed — snapshot
+  /// semantics (D3 of RLY-88) are untouched.
+  void _reconcileFeed(QueueItem item) {
+    if (!ref.exists(feedControllerProvider)) return;
+    final feed = ref.read(feedControllerProvider.notifier);
+    feed.removeRow(ref: item.ref, boardSlug: item.boardSlug);
+    unawaited(feed.refresh());
   }
 
   /// Record [banner] for the screen we land on, step the snapshot, and return the

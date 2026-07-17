@@ -191,10 +191,11 @@ void main() {
       await tester.tap(find.byKey(const Key('answer_submit')));
       await tester.pumpAndSettle();
 
-      // Auto-advanced into the structured card's first step — no refetch yet,
-      // this is still mid-snapshot.
+      // Auto-advanced into the structured card's first step — mid-snapshot, so
+      // no walk refetch; the answered card's D2 background reconcile (RLY-128)
+      // is the one extra request.
       expect(find.text('Which region?'), findsOneWidget);
-      expect(repo.calls, 1);
+      expect(repo.calls, 2);
       await tester.tap(find.byKey(const Key('answer_option_1'))); // eu
       await tester.pump();
       await tester.tap(find.byKey(const Key('answer_submit')));
@@ -215,9 +216,9 @@ void main() {
       expect(find.text('2 decisions waiting'), findsNothing);
       expect(find.byKey(const Key('inbox_row_RLY-1')), findsNothing);
       expect(find.byKey(const Key('inbox_row_RLY-2')), findsNothing);
-      // The end-of-snapshot refetch is the *only* extra request — landing on
-      // the inbox costs nothing further.
-      expect(repo.calls, 2);
+      // One D2 reconcile per answered card (RLY-128) plus the end-of-snapshot
+      // refetch — landing on the inbox costs nothing further.
+      expect(repo.calls, 4);
     },
   );
 }
