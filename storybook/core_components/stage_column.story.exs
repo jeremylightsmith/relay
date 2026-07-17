@@ -37,16 +37,15 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         }
       },
       %Variation{
-        id: :collapsible_expanded,
+        id: :expanded_name_collapses,
         description:
-          "RLY-111 — a collapsed-by-default stage expanded for the session: header shows the ghost collapse control",
+          "RLY-145 — every expanded stage's name is the collapse control: clicking it collapses the stage to its 44px strip",
         attributes: %{
           id: "story-stage-someday-open",
           name: "Someday",
           type: :queue,
           stage_id: 9,
-          count: 0,
-          collapsible: true
+          count: 0
         }
       },
       %Variation{

@@ -222,7 +222,6 @@ defmodule RelayWeb.BoardLive do
                         @stage_force_closed
                       )
                   }
-                  collapsible={stage.collapsed_by_default}
                   main_collapsed={
                     lane_collapsed?(stage.id, :main, @stage_counts, @force_open, @force_closed)
                   }
@@ -716,16 +715,20 @@ defmodule RelayWeb.BoardLive do
   # MMF 12c — clicking a collapsed stage strip force-opens it for this session only
   # (a MapSet in the socket; not persisted, not broadcast). RLY-111: also clears any
   # session re-collapse, so force_open and stage_force_closed never both hold one id.
+  # RLY-145: restream everything the expand reveals — stream items are consumed at
+  # render time, so cards streamed while the stage was collapsed never reached the
+  # DOM and the revealed containers would otherwise come up empty.
   def handle_event("expand_stage", %{"stage-id" => stage_id}, socket) do
-    case parse_int(stage_id) do
+    case resolve_stage(socket, stage_id) do
       nil ->
         {:noreply, socket}
 
-      id ->
+      %Stage{id: id} ->
         {:noreply,
          socket
          |> update(:stage_force_closed, &MapSet.delete(&1, id))
-         |> update(:force_open, &MapSet.put(&1, id))}
+         |> update(:force_open, &MapSet.put(&1, id))
+         |> restream_lanes([id | sublane_ids(socket, id)])}
     end
   end
 
@@ -736,8 +739,8 @@ defmodule RelayWeb.BoardLive do
     {:noreply, assign(socket, :pager_mode, active)}
   end
 
-  # RLY-111 — the header control on a collapsed-by-default stage re-collapses it for
-  # this session, without a reload. Complementary to expand_stage.
+  # RLY-111/RLY-145 — clicking an expanded stage's name collapses it for this
+  # session, without a reload. Works on every stage; complementary to expand_stage.
   def handle_event("collapse_stage", %{"stage-id" => stage_id}, socket) do
     case parse_int(stage_id) do
       nil ->
@@ -764,9 +767,11 @@ defmodule RelayWeb.BoardLive do
 
         socket =
           if collapsed? do
+            # RLY-145: refetch the lane being revealed — see expand_stage.
             socket
             |> update(:force_closed, &MapSet.delete(&1, id))
             |> update(:force_open, &MapSet.put(&1, id))
+            |> restream_lanes([id])
           else
             socket
             |> update(:force_open, &MapSet.delete(&1, id))
@@ -1777,6 +1782,20 @@ defmodule RelayWeb.BoardLive do
 
   defp restream_stage(socket, stage_id, cards_by_stage) do
     stream_stage(socket, stage_id, cards_by_stage, reset: true)
+  end
+
+  # RLY-145 — refetch all board cards once and stream-reset each given lane.
+  # Every expand gesture routes here: items streamed while a container was
+  # hidden were consumed at render time and dropped, so revealing a lane must
+  # re-send its cards. Goes through stream_stage/4 (via restream_stage/3) so
+  # the RLY-53 Done window still holds.
+  defp restream_lanes(socket, stage_ids) do
+    cards_by_stage = socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
+    Enum.reduce(stage_ids, socket, &restream_stage(&2, &1, cards_by_stage))
+  end
+
+  defp sublane_ids(socket, stage_id) do
+    socket.assigns.sublanes_by_parent |> Map.get(stage_id, []) |> Enum.map(& &1.id)
   end
 
   # RLY-4 — a card was archived (locally or via broadcast): drop it from its
