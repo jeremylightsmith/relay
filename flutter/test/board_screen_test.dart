@@ -1,16 +1,52 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:relay_mobile/features/board/board_prefs.dart';
 import 'package:relay_mobile/features/board/board_screen.dart';
 
 void main() {
   group('boardUrl', () {
-    test('is the slugless default-board redirect in embed mode', () {
-      // RelayWeb.Plugs.Embed promotes ?embed=1 into the session before the
-      // redirect resolves the default board, so the slug URL stays chromeless.
+    test('opens the remembered board when a slug is stored', () {
+      expect(
+        BoardScreen.boardUrl(
+          baseUrl: 'https://relay.example',
+          slug: 'marketing-site',
+        ),
+        'https://relay.example/board/marketing-site?embed=1',
+      );
+    });
+
+    test('falls back to the boards list when nothing is stored', () {
+      // RLY-95 decision 4: no server-picked default — BOARDS-00 precedes BOARD-01,
+      // so a fresh sign-in lands on the list, not /board's redirect.
       expect(
         BoardScreen.boardUrl(baseUrl: 'https://relay.example'),
-        'https://relay.example/board?embed=1',
+        'https://relay.example/boards?embed=1',
       );
+      expect(
+        BoardScreen.boardUrl(baseUrl: 'https://relay.example', slug: ''),
+        'https://relay.example/boards?embed=1',
+      );
+    });
+  });
+
+  group('slugFromPath', () {
+    test('captures the slug from a visited board path', () {
+      expect(
+        BoardScreen.slugFromPath('/board/marketing-site'),
+        'marketing-site',
+      );
+    });
+
+    test('ignores everything that is not exactly /board/<slug>', () {
+      // Visiting /boards must NOT clear or rebind the remembered pick.
+      expect(BoardScreen.slugFromPath('/boards'), isNull);
+      expect(BoardScreen.slugFromPath('/board'), isNull);
+      expect(
+        BoardScreen.slugFromPath('/board/marketing-site/settings'),
+        isNull,
+      );
+      expect(BoardScreen.slugFromPath('/cards/RLY-7'), isNull);
     });
   });
 
@@ -47,13 +83,19 @@ void main() {
     'the Board tab hosts the webview body chromeless (no native AppBar)',
     (tester) async {
       await tester.pumpWidget(
-        MaterialApp(
-          home: BoardScreen(
-            bodyBuilder: (_) =>
-                const Text('board body', key: Key('stub_board_body')),
+        ProviderScope(
+          overrides: [
+            boardPrefsProvider.overrideWithValue(InMemoryBoardPrefs()),
+          ],
+          child: MaterialApp(
+            home: BoardScreen(
+              bodyBuilder: (_) =>
+                  const Text('board body', key: Key('stub_board_body')),
+            ),
           ),
         ),
       );
+      await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('stub_board_body')), findsOneWidget);
       expect(find.byType(AppBar), findsNothing);

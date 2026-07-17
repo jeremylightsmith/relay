@@ -16,6 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../config.dart';
+import '../board/board_prefs.dart';
 import '../push/push_service.dart';
 import 'auth_errors.dart';
 import 'http_providers.dart';
@@ -218,10 +219,12 @@ class AuthController extends Notifier<AuthState> {
   }
 
   /// Forget the session everywhere it is held: dio's jar, the webview store, and
-  /// the Keychain.
+  /// the Keychain — plus the Board tab's remembered pick (RLY-95): the next
+  /// account must cold-start on the boards list, not someone else's board.
   Future<void> _clearSession() async {
     await _jar.deleteAll();
     await _store.clear();
+    await ref.read(boardPrefsProvider).clear();
     try {
       await iaw.CookieManager.instance().deleteAllCookies();
     } catch (e) {
