@@ -18,6 +18,10 @@ sharing behavior.
   `Spec:Review`/`Spec:Done`/`Plan:Done` sub-lanes so every trigger resolves. Flows seed
   disabled; at most one enabled flow may pull from a stage (partial unique index). Nothing
   executes yet — the engine is the Runs card (02); versioning is RLY-152.
+  The Flows settings tab (RLY-142) is backed by `customized?/1` (normalized
+  nodes/edges/isolation comparison against the library — trigger wiring never counts),
+  `default_key?/1`, `duplicate_flow/1` (disabled `<key>-copy` clone), and
+  `reset_to_default/1` (restores the shipped definition; triggers and `enabled` untouched).
 - **Cards** — the card lifecycle: create/edit/move/archive, status (`working`,
   `needs_input`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject, needs-input
   questions. Card state × stage validity is governed by

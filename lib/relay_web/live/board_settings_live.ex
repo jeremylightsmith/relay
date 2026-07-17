@@ -30,7 +30,9 @@ defmodule RelayWeb.BoardSettingsLive do
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Events
+  alias Relay.Flows
   alias Relay.Members
+  alias RelayWeb.FlowSettingsComponents
   alias Schemas.Board
   alias Schemas.Membership
   alias Schemas.Stage
@@ -84,6 +86,13 @@ defmodule RelayWeb.BoardSettingsLive do
             Stages
           </.link>
           <.link
+            patch={~p"/board/#{@board.slug}/settings?section=flows"}
+            id="settings-tab-flows"
+            style={tab_style(@section == :flows)}
+          >
+            Flows
+          </.link>
+          <.link
             patch={~p"/board/#{@board.slug}/settings?section=members"}
             id="settings-tab-members"
             style={tab_style(@section == :members)}
@@ -131,6 +140,13 @@ defmodule RelayWeb.BoardSettingsLive do
             style={nav_style(@section == :stages)}
           >
             Stages
+          </.link>
+          <.link
+            patch={~p"/board/#{@board.slug}/settings?section=flows"}
+            id="settings-nav-flows"
+            style={nav_style(@section == :flows)}
+          >
+            Flows
           </.link>
           <.link
             patch={~p"/board/#{@board.slug}/settings?section=members"}
@@ -570,6 +586,12 @@ defmodule RelayWeb.BoardSettingsLive do
               </div>
             </section>
 
+            <FlowSettingsComponents.flows_pane
+              :if={@section == :flows}
+              rows={@flow_rows}
+              panel={@flow_panel}
+            />
+
             <section :if={@section == :members} id="members-pane">
               <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 4px 0;color:oklch(0.24 0.02 255);">
                 Members
@@ -854,13 +876,17 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:editing_stage, nil)
      |> assign(:stage_form, nil)
      |> assign(:invite_form, to_form(%{"email" => ""}, as: :invite))
+     |> assign(:flow_rows, [])
+     |> assign(:flow_panel, nil)
      |> assign_members()
      |> refresh_stages()}
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
-    {:noreply, assign(socket, :section, section(params))}
+    socket = assign(socket, :section, section(params))
+    socket = if socket.assigns.section == :flows, do: assign_flows(socket), else: socket
+    {:noreply, socket}
   end
 
   @impl true
@@ -895,7 +921,8 @@ defmodule RelayWeb.BoardSettingsLive do
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
         save_board_name save_board_slug edit_stage save_stage add_stage delete_stage
         toggle_wip bump_wip reorder_stage toggle_lane set_type toggle_ai set_reject_to
-        toggle_collapsed_default invite_member remove_member
+        toggle_collapsed_default invite_member remove_member flow_toggle flow_confirm_toggle
+        flow_duplicate flow_reset flow_confirm_reset
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -1096,6 +1123,58 @@ defmodule RelayWeb.BoardSettingsLive do
     end
   end
 
+  # RLY-142 — the toggle never flips directly: it opens the inline cutover
+  # confirm; only the confirm CTA persists.
+  def handle_event("flow_toggle", %{"flow-id" => flow_id}, socket) do
+    {:noreply, assign(socket, :flow_panel, {parse_flow_id(flow_id), :confirm})}
+  end
+
+  def handle_event("flow_cancel_panel", _params, socket) do
+    {:noreply, assign(socket, :flow_panel, nil)}
+  end
+
+  def handle_event("flow_confirm_toggle", %{"flow-id" => flow_id}, socket) do
+    flow = find_flow(socket, flow_id)
+    result = if flow.enabled, do: Flows.disable_flow(flow), else: Flows.enable_flow(flow)
+
+    socket =
+      case result do
+        {:ok, _flow} -> socket
+        {:error, changeset} -> put_flash(socket, :error, "Could not update the flow: #{flow_errors(changeset)}.")
+      end
+
+    {:noreply, socket |> assign(:flow_panel, nil) |> assign_flows()}
+  end
+
+  def handle_event("flow_open_definition", %{"flow-id" => flow_id}, socket) do
+    {:noreply, assign(socket, :flow_panel, {parse_flow_id(flow_id), :definition})}
+  end
+
+  def handle_event("flow_duplicate", %{"flow-id" => flow_id}, socket) do
+    socket =
+      case Flows.duplicate_flow(find_flow(socket, flow_id)) do
+        {:ok, _copy} -> socket
+        {:error, changeset} -> put_flash(socket, :error, "Could not duplicate the flow: #{flow_errors(changeset)}.")
+      end
+
+    {:noreply, socket |> assign(:flow_panel, nil) |> assign_flows()}
+  end
+
+  def handle_event("flow_reset", %{"flow-id" => flow_id}, socket) do
+    {:noreply, assign(socket, :flow_panel, {parse_flow_id(flow_id), :reset})}
+  end
+
+  def handle_event("flow_confirm_reset", %{"flow-id" => flow_id}, socket) do
+    socket =
+      case Flows.reset_to_default(find_flow(socket, flow_id)) do
+        {:ok, _flow} -> socket
+        {:error, :not_a_default} -> put_flash(socket, :error, "Only flows from the default library can be reset.")
+        {:error, changeset} -> put_flash(socket, :error, "Could not reset the flow: #{flow_errors(changeset)}.")
+      end
+
+    {:noreply, socket |> assign(:flow_panel, nil) |> assign_flows()}
+  end
+
   @impl true
   def handle_info({:member_removed, user_id}, socket) do
     if socket.assigns.current_scope.user.id == user_id do
@@ -1108,9 +1187,20 @@ defmodule RelayWeb.BoardSettingsLive do
     end
   end
 
+  # RLY-142: trigger chips render stage names, so track renames/deletes live
+  # while the Flows section is open.
+  def handle_info({:stages_changed, _board_id}, socket) do
+    if socket.assigns.section == :flows do
+      {:noreply, assign_flows(socket)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_info(_message, socket), do: {:noreply, socket}
 
   defp section(%{"section" => "stages"}), do: :stages
+  defp section(%{"section" => "flows"}), do: :flows
   defp section(%{"section" => "keys"}), do: :keys
   defp section(%{"section" => "members"}), do: :members
   defp section(_params), do: :general
@@ -1137,6 +1227,33 @@ defmodule RelayWeb.BoardSettingsLive do
   defp find_stage(socket, stage_id) do
     id = String.to_integer(stage_id)
     Enum.find(socket.assigns.stages, &(&1.id == id))
+  end
+
+  defp assign_flows(socket) do
+    rows =
+      socket.assigns.board
+      |> Flows.list_flows()
+      |> Enum.map(fn flow ->
+        customized? = Flows.customized?(flow)
+        %{flow: flow, customized?: customized?, resettable?: customized? and Flows.default_key?(flow.key)}
+      end)
+
+    assign(socket, :flow_rows, rows)
+  end
+
+  # Ids in the DOM come from this board's own flow rows.
+  defp find_flow(socket, flow_id) do
+    id = parse_flow_id(flow_id)
+    Enum.find(socket.assigns.flow_rows, &(&1.flow.id == id)).flow
+  end
+
+  defp parse_flow_id(flow_id), do: String.to_integer(flow_id)
+
+  defp flow_errors(changeset) do
+    changeset.errors
+    |> Enum.map(fn {_field, {message, _meta}} -> message end)
+    |> Enum.uniq()
+    |> Enum.join("; ")
   end
 
   defp assign_members(socket) do
