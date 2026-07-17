@@ -1,10 +1,12 @@
 defmodule RelayWeb.BoardDrawerActivityTest do
   use RelayWeb.ConnCase, async: true
 
+  import Ecto.Query
   import Phoenix.LiveViewTest
 
   alias Relay.Boards
   alias Relay.Cards
+  alias Relay.Repo
 
   setup :register_and_log_in_user
 
@@ -107,6 +109,25 @@ defmodule RelayWeb.BoardDrawerActivityTest do
     assert has_element?(view, "#card-drawer-activity-health-chip[data-health='live']")
     assert render(view) =~ "Relay AI is live"
     refute render(view) =~ "Retry"
+  end
+
+  test "the health chip goes amber when the agent goes quiet past STALE_AFTER", %{
+    conn: conn,
+    board: board,
+    card: card,
+    ref: ref
+  } do
+    card = claim_ai(card)
+    insert(:activity, card: card, type: :action, text: "reindexing 12k documents")
+    quiet = DateTime.utc_now() |> DateTime.add(-3 * 60, :second) |> DateTime.truncate(:second)
+    Repo.update_all(from(a in Schemas.Activity, where: a.card_id == ^card.id), set: [inserted_at: quiet])
+
+    view = open(conn, board, ref)
+
+    assert has_element?(view, "#card-drawer-activity-health-chip[data-health='stale']")
+    chip = view |> element("#card-drawer-activity-health-chip") |> render()
+    assert chip =~ "Relay AI has gone quiet"
+    assert chip =~ "var(--color-warning)"
   end
 
   test "the health chip goes rose on a failure, still with no Retry", %{

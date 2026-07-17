@@ -468,33 +468,33 @@ defmodule Relay.Cards do
     end
   end
 
-  @stale_after to_timeout(minute: 10)
+  @stale_after to_timeout(second: 90)
 
   @doc """
-  The card's derived agent health (RLY-112) — `:none | :stopped | :stale | :live`.
+  The card's derived agent health (RLY-112; escalation RLY-148) — `:none | :stopped | :stale | :live`.
 
   Pure: takes a plain map (`:newest` — the card's newest `Schemas.Activity` or `nil`;
   `:heartbeat_at`; `:ai_active?`; `:ai_stage?` — whether the card's stage is `ai_enabled`;
   `:now`), touches no DB, and builds no structs, so every branch unit-tests directly.
   Health is derived at render and **never stored**.
 
-  Branch order (the 2026-07-16 rejection layered over the artboard's §03):
+  Branch order (the artboard's §03 decision table):
 
     1. the stage is not AI-enabled → `:none` — "only show the log status in the ai
        enabled columns". Checked before everything, so even a failure goes dark when
        the card leaves an AI column.
-    2. the newest entry is a `:failure` → `:stopped` (rose strip, `!` disc)
+    2. the newest entry is a `:failure` → `:stopped` (rose strip + rose card border, `!` disc, Retry)
     3. no active AI owner → `:none`
-    4. quiet longer than `STALE_AFTER` → `:stale` (muted gray strip — never amber, and
-       never a card border/accent change), age measured from the *later* of the newest
-       entry and the heartbeat
+    4. quiet longer than `STALE_AFTER` → `:stale` (amber strip + amber-tinted card
+       border/shadow — RLY-148, superseding the 2026-07-16 rejection's gray-stale),
+       age measured from the *later* of the newest entry and the heartbeat
     5. otherwise → `:live` (violet, pulsing)
 
   No timestamp at all reads `:live`, not `:stale` — unreachable in practice, and choosing
   `:live` means we never cry wolf on zero evidence.
 
-  `STALE_AFTER` is 10 minutes (Q5→C) and is a module attribute, not config — the 30s
-  heartbeat interval that pairs with it lives in the runner.
+  `STALE_AFTER` is 90 seconds — 3× the runner's 30s heartbeat (RLY-148 Q4, replacing
+  RLY-112's 10 minutes) — and is a module attribute, not config.
   """
   def health(%{newest: newest, heartbeat_at: heartbeat_at, ai_active?: ai_active?, ai_stage?: ai_stage?, now: now}) do
     cond do

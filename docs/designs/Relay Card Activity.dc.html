@@ -76,7 +76,7 @@
     <div style="padding-left:20px;"><span style="color:oklch(0.72 0.11 155);">inserted_at</span>  timestamp — the one source of truth for ordering &amp; health</div>
     <div>}</div>
   </div>
-  <p style="font-size:12.5px;line-height:1.55;color:oklch(0.52 0.02 255);margin:12px 0 0;max-width:680px;"><code>run_id</code> is captured from day one even though runs aren't shown in v1 — so grouping by run later needs no backfill. <code>heartbeat</code> entries are stored but never rendered.</p>
+  <p style="font-size:12.5px;line-height:1.55;color:oklch(0.52 0.02 255);margin:12px 0 0;max-width:680px;"><code>run_id</code> is captured from day one even though runs aren't shown in v1 — so grouping by run later needs no backfill. <b style="color:oklch(0.30 0.02 255);">Amended (RLY-148):</b> <code>heartbeat</code> is not a stored entry kind in the implementation — liveness is the <code>cards.agent_heartbeat_at</code> column, bulk-stamped by the runner every 30s; health reads the later of the newest entry and the heartbeat.</p>
 
   <!-- ===== 02 COLLAPSED CARD ===== -->
   <div style="height:1px;background:oklch(0.90 0.006 255);margin:48px 0 34px;"></div>
