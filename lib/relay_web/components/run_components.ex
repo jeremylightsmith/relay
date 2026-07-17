@@ -656,6 +656,8 @@ defmodule RelayWeb.RunComponents do
   end
 
   def run_state_banner(%{variant: :parked} = assigns) do
+    assigns = assign(assigns, :attempt, parked_attempt(assigns.run, assigns.node_executions))
+
     ~H"""
     <div class="run-banner run-banner-parked" style="display:flex;flex-direction:column;gap:10px;">
       <div style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;color:oklch(0.55 0.02 255);">
@@ -667,7 +669,7 @@ defmodule RelayWeb.RunComponents do
           RELAY AI NEEDS YOUR INPUT
         </div>
         <div style="font-size:12px;color:oklch(0.55 0.06 65);margin-bottom:10px;">
-          · paused at {@run.current_node} · attempt {parked_attempt(@run)}
+          · paused at {@run.current_node} · attempt {@attempt}
         </div>
         {render_slot(@inner_block)}
       </div>
@@ -709,9 +711,20 @@ defmodule RelayWeb.RunComponents do
     |> String.upcase()
   end
 
-  defp parked_attempt(%{current_node: nil}), do: 1
+  # attempt shown on the parked banner = the highest recorded attempt for
+  # the paused node (`run.current_node`); falls back to 1 when there's no
+  # matching execution row on hand (e.g. node_executions not preloaded).
+  defp parked_attempt(%{current_node: nil}, _node_executions), do: 1
 
-  defp parked_attempt(_run), do: 1
+  defp parked_attempt(%{current_node: node_key}, node_executions) do
+    node_executions
+    |> Enum.filter(&(&1.node_key == node_key))
+    |> Enum.map(& &1.attempt)
+    |> case do
+      [] -> 1
+      attempts -> Enum.max(attempts)
+    end
+  end
 
   # circuit helpers: tripped node = the node of the last :failed execution
   # (authoritative — a closed run's `current_node` is nilled by the engine's

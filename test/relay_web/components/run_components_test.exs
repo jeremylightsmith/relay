@@ -220,8 +220,31 @@ defmodule RelayWeb.RunComponentsTest do
 
       assert html =~ "RELAY AI NEEDS YOUR INPUT"
       assert html =~ "paused at brainstorm"
+      assert html =~ "attempt 1"
       assert html =~ ~s(id="embedded-stepper")
       assert html =~ "oklch(0.975 0.025 75)"
+    end
+
+    test "parked variant's attempt count reflects the paused node's actual attempt, not always 1" do
+      assigns = %{
+        run: run(%{status: :parked, flow_key: "spec", current_node: "brainstorm"}),
+        node_executions: [
+          ne("brainstorm", 1, :failed, %{detail: "first try"}),
+          ne("brainstorm", 2, :failed, %{detail: "second try"}),
+          ne("brainstorm", 3, :needs_input, %{detail: nil})
+        ]
+      }
+
+      html =
+        rendered_to_string(~H"""
+        <RunComponents.run_state_banner variant={:parked} run={@run} node_executions={@node_executions}>
+          <div id="embedded-stepper">stepper goes here</div>
+        </RunComponents.run_state_banner>
+        """)
+
+      assert html =~ "paused at brainstorm"
+      assert html =~ "attempt 3"
+      refute html =~ "attempt 1"
     end
 
     test "reentry and revoked variants carry their copy" do
