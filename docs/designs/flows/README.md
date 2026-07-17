@@ -7,6 +7,9 @@ translation of today's pipeline (`relay_config.json` + `execute-plan.js`). Fabro
 dogfood workflows (`../fabro/.fabro/workflows/implement-issue` + `implement-plan`) are the
 third column: same job, their vocabulary.
 
+> The compiled translation the app seeds from lives at
+> `lib/relay/flows/default_library.ex` (RLY-131) — edit the jsonc files first, then mirror there.
+
 ## File inventory — where each piece lives
 
 | What | Today (Relay) | Fabro's version | ADR 0006 |

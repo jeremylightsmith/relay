@@ -17,6 +17,7 @@ defmodule Relay.Flows do
   import Ecto.Query
 
   alias Ecto.Changeset
+  alias Relay.Flows.DefaultLibrary
   alias Relay.Repo
   alias Schemas.Board
   alias Schemas.Flow
@@ -86,6 +87,38 @@ defmodule Relay.Flows do
     flow
     |> Changeset.change(enabled: false)
     |> Repo.update()
+  end
+
+  @doc """
+  Idempotently seeds the default library onto `board`: inserts each default
+  flow whose `key` the board lacks and never touches existing rows, so edits
+  survive re-seeding. The authored trigger stage *names* are resolved
+  against the board's stages at seed time; an unresolvable name seeds as nil
+  (such a flow can't be enabled until its trigger is set — can't happen on
+  boards seeded by `Relay.Boards.create_board/2`, but keeps the function
+  total for arbitrary boards).
+  """
+  def seed_default_flows!(%Board{id: board_id} = board) do
+    existing = MapSet.new(Repo.all(from f in Flow, where: f.board_id == ^board_id, select: f.key))
+    stage_ids = Map.new(Repo.all(from s in Stage, where: s.board_id == ^board_id, select: {s.name, s.id}))
+
+    for %{trigger: trigger} = default <- DefaultLibrary.all(),
+        not MapSet.member?(existing, default.key) do
+      attrs =
+        default
+        |> Map.delete(:trigger)
+        |> Map.merge(%{
+          pulls_from_stage_id: stage_ids[trigger.pulls_from],
+          works_in_stage_id: stage_ids[trigger.works_in],
+          lands_on_stage_id: stage_ids[trigger.lands_on]
+        })
+
+      %Flow{board_id: board.id}
+      |> Flow.changeset(attrs)
+      |> Repo.insert!()
+    end
+
+    :ok
   end
 
   defp validate_trigger_completeness(changeset) do
