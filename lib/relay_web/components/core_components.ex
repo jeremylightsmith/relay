@@ -32,6 +32,7 @@ defmodule RelayWeb.CoreComponents do
   alias Phoenix.HTML.FormField
   alias Phoenix.LiveView.JS
   alias Relay.Cards
+  alias RelayWeb.RunComponents
   alias Schemas.Activity
 
   @doc """
@@ -1415,17 +1416,37 @@ defmodule RelayWeb.CoreComponents do
     doc:
       "RLY-87: hosted inside the native shell — drops the web review buttons (the native action bar is the only actor) and the drawer's own dismissal affordances (scrim + close ✕), which the native back chevron owns. Keeps the review panel's label and hint: the context for the decision is the point of the screen."
 
+  attr :drawer_tab, :atom,
+    values: [:detail, :run, :activity],
+    default: :detail,
+    doc: "RLY-137: which of the drawer's three tab panels is visible"
+
+  attr :runs, :list,
+    default: [],
+    doc:
+      "RLY-137: the selected card's runs, newest-first, node executions preloaded — [] hides the Run tab unless queued_flow is set"
+
+  attr :run_flow, :any,
+    default: nil,
+    doc: "RLY-137: the %Schemas.Flow{} the latest run belongs to (for the mini graph's happy path); nil when unknown"
+
+  attr :queued_flow, :any,
+    default: nil,
+    doc: "RLY-137: the enabled %Schemas.Flow{} that will pick this card up next, or nil"
+
   def card_drawer(assigns) do
+    latest = List.first(assigns.runs)
+    # The card-status guard clears the parked banner the moment an answer flips the
+    # baton, before the engine's own run row update lands.
+    parked_run = latest && latest.status == :parked && assigns.card.status == :needs_input && latest
+
     assigns =
       assigns
       |> assign(:sub_task_progress, Cards.sub_task_progress(assigns.card))
       |> assign(:working_progress, board_card_progress(assigns.card))
-      |> assign(
-        :stepper_question,
-        if(is_list(assigns[:answer_questions]),
-          do: Enum.at(assigns.answer_questions, assigns[:answer_step] || 0)
-        )
-      )
+      |> assign(:latest_run, latest)
+      |> assign(:parked_run, parked_run)
+      |> assign(:show_run_tab?, assigns.runs != [] or assigns.queued_flow != nil)
 
     ~H"""
     <div id={@id} class="drawer drawer-end" phx-window-keydown="close_drawer" phx-key="escape">
@@ -1492,6 +1513,30 @@ defmodule RelayWeb.CoreComponents do
             </.link>
           </header>
 
+          <nav
+            id="card-drawer-tabs"
+            style="display:flex;gap:20px;padding:0 22px;border-bottom:1px solid oklch(0.94 0.005 255);"
+          >
+            <button
+              :for={
+                {tab, label, show} <- [
+                  {:detail, "Detail", true},
+                  {:run, "Run", @show_run_tab?},
+                  {:activity, "Activity", true}
+                ]
+              }
+              :if={show}
+              type="button"
+              id={"card-drawer-tab-#{tab}"}
+              phx-click="drawer_tab"
+              phx-value-tab={tab}
+              data-active={to_string(@drawer_tab == tab)}
+              style={drawer_tab_style(@drawer_tab == tab)}
+            >
+              {label}
+            </button>
+          </nav>
+
           <div class="flex min-h-0 flex-none flex-col drawer:flex-1 drawer:flex-row drawer:overflow-hidden">
             <div
               id={"#{@id}-main"}
@@ -1515,764 +1560,667 @@ defmodule RelayWeb.CoreComponents do
                   Restore
                 </button>
               </section>
-              <section
-                :if={@card.rejection}
-                id="rejection-banner"
-                class="flex flex-col gap-1.5 rounded-[10px] border border-warning/40 bg-warning/10 p-3.5"
-              >
-                <span class="font-mono text-[10px] font-semibold uppercase tracking-[0.05em] text-warning">
-                  Changes requested — sent back to {@card.rejection.to_stage_name} by {@card.rejection.rejected_by}
-                </span>
-                <div class="md text-[13.5px] leading-normal text-base-content/80">
-                  {Relay.Markdown.to_html(@card.rejection.note)}
-                </div>
-              </section>
-              <section
-                :if={@card.status == :working and !@archived}
-                id="working-strip"
-                class="flex items-center gap-2.5 rounded-[10px] px-4 py-3"
-                style="background:oklch(0.97 0.03 292);border:1px solid oklch(0.90 0.05 292);"
-              >
-                <span
-                  class="working-pulse"
-                  style="width:7px;height:7px;border-radius:50%;background:oklch(0.56 0.16 292);animation:relaypulse 1.4s ease-in-out infinite;flex:0 0 auto;"
+              <div id="card-drawer-tab-panel-detail" class={[@drawer_tab != :detail && "hidden"]}>
+                <section
+                  :if={@card.rejection}
+                  id="rejection-banner"
+                  class="flex flex-col gap-1.5 rounded-[10px] border border-warning/40 bg-warning/10 p-3.5"
                 >
-                </span>
-                <span class="text-[12.5px] font-semibold" style="color:oklch(0.48 0.12 292);">
-                  Relay AI is working
-                </span>
-                <span
-                  :if={@working_progress}
-                  id="working-strip-pct"
-                  class="font-mono text-[11px]"
-                  style="color:oklch(0.52 0.10 292);"
-                >
-                  {@working_progress}%
-                </span>
-                <span style="flex:1;"></span>
-                <div
-                  class="h-[5px] w-24 overflow-hidden rounded-[3px]"
-                  style="background:oklch(0.93 0.02 292);"
-                >
-                  <div
-                    class="h-full rounded-[3px]"
-                    style={"width:#{@working_progress || 0}%;background:var(--color-secondary);"}
-                  >
+                  <span class="font-mono text-[10px] font-semibold uppercase tracking-[0.05em] text-warning">
+                    Changes requested — sent back to {@card.rejection.to_stage_name} by {@card.rejection.rejected_by}
+                  </span>
+                  <div class="md text-[13.5px] leading-normal text-base-content/80">
+                    {Relay.Markdown.to_html(@card.rejection.note)}
                   </div>
-                </div>
-              </section>
-              <section
-                :if={@card.status == :needs_input and !@archived}
-                id="needs-input-panel"
-                class="flex flex-col gap-4 rounded-[10px] p-5"
-                style="background:oklch(0.975 0.025 75);border:1px solid oklch(0.87 0.07 75);"
-              >
-                <div class="flex items-center justify-between">
+                </section>
+                <section
+                  :if={@card.status == :working and !@archived}
+                  id="working-strip"
+                  class="flex items-center gap-2.5 rounded-[10px] px-4 py-3"
+                  style="background:oklch(0.97 0.03 292);border:1px solid oklch(0.90 0.05 292);"
+                >
+                  <span
+                    class="working-pulse"
+                    style="width:7px;height:7px;border-radius:50%;background:oklch(0.56 0.16 292);animation:relaypulse 1.4s ease-in-out infinite;flex:0 0 auto;"
+                  >
+                  </span>
+                  <span class="text-[12.5px] font-semibold" style="color:oklch(0.48 0.12 292);">
+                    Relay AI is working
+                  </span>
+                  <span
+                    :if={@working_progress}
+                    id="working-strip-pct"
+                    class="font-mono text-[11px]"
+                    style="color:oklch(0.52 0.10 292);"
+                  >
+                    {@working_progress}%
+                  </span>
+                  <span style="flex:1;"></span>
+                  <div
+                    class="h-[5px] w-24 overflow-hidden rounded-[3px]"
+                    style="background:oklch(0.93 0.02 292);"
+                  >
+                    <div
+                      class="h-full rounded-[3px]"
+                      style={"width:#{@working_progress || 0}%;background:var(--color-secondary);"}
+                    >
+                    </div>
+                  </div>
+                </section>
+                <.needs_input_panel
+                  :if={@card.status == :needs_input and !@archived and !@parked_run}
+                  card={@card}
+                  question={@question}
+                  answer_questions={@answer_questions}
+                  answer_step={@answer_step}
+                  answer_values={@answer_values}
+                  answer_form={@answer_form}
+                  body_loading={@body_loading}
+                />
+                <section
+                  :if={@card.status == :in_review and !@archived}
+                  id="review-panel"
+                  class="flex flex-col gap-3 rounded-[10px] p-3.5"
+                  style="background:oklch(0.975 0.02 155);border:1px solid oklch(0.88 0.05 155);"
+                >
                   <span
                     class="font-mono text-[10px] font-semibold tracking-[0.05em]"
-                    style="color:oklch(0.52 0.11 65);"
+                    style="color:oklch(0.46 0.10 155);"
                   >
-                    RELAY AI NEEDS YOUR INPUT
+                    READY FOR YOUR REVIEW
                   </span>
-                  <span
-                    :if={@card.blocked_since}
-                    id="needs-input-waiting"
-                    class="font-mono text-[10px]"
-                    style="color:oklch(0.52 0.11 65);"
-                  >
-                    {waiting_label(@card.blocked_since)}
-                  </span>
-                </div>
-                <%!-- RLY-71 stepper: one structured question at a time --%>
-                <div :if={@answer_questions} id="needs-input-stepper" class="flex flex-col gap-4">
-                  <div
-                    id="needs-input-progress"
-                    class="font-mono text-[10px]"
-                    style="color:oklch(0.52 0.11 65);"
-                  >
-                    Question {@answer_step + 1} of {length(@answer_questions)}
-                  </div>
-                  <div
-                    id="needs-input-question"
-                    class="md text-[13.5px] leading-normal break-words"
-                    style="color:oklch(0.33 0.03 65);"
-                  >
-                    {Relay.Markdown.to_html(@stepper_question["prompt"])}
-                  </div>
-                  <div :if={@stepper_question["options"] != []} class="flex flex-col gap-2">
-                    <%!-- phx-value-option, not phx-value-value: "value" collides with the
-                    button's intrinsic DOM .value property (empty for a value-less <button>),
-                    which wins over the phx-value-* attribute when a real browser serializes
-                    the click — silently sending "" instead of the picked option. --%>
+                  <p class="text-[13px] leading-normal" style="color:oklch(0.36 0.03 155);">
+                    {review_hint(@review_gate)}
+                  </p>
+                  <div :if={@review_gate && !@reject_open && !@embed} class="flex gap-2">
                     <button
-                      :for={{option, index} <- Enum.with_index(@stepper_question["options"])}
+                      id="review-approve"
                       type="button"
-                      id={"needs-input-option-#{index}"}
-                      phx-click="answer_select"
-                      phx-value-index={@answer_step}
-                      phx-value-option={option}
-                      class={
-                        [
-                          "btn btn-sm justify-start rounded-[7px] font-normal",
-                          # daisyUI's .btn is a fixed-height (`height: var(--size)`)
-                          # nowrap flex row, which clips a long option. Real agent
-                          # options are sentences, so let them grow to as many lines
-                          # as they need while a short one keeps the compact height.
-                          "h-auto min-h-8 whitespace-normal px-3 py-2 text-left leading-snug",
-                          Map.get(@answer_values, @answer_step) == option &&
-                            "needs-input-option-selected text-white"
-                        ]
-                      }
-                      style={
-                        if(Map.get(@answer_values, @answer_step) == option,
-                          do: "background:oklch(0.70 0.13 65);border-color:oklch(0.70 0.13 65);",
-                          else:
-                            "background:transparent;border:1px solid oklch(0.87 0.07 75);color:oklch(0.33 0.03 65);"
-                        )
-                      }
+                      phx-click="review_approve"
+                      class="btn btn-sm flex-1 rounded-lg border-none font-semibold text-white"
+                      style="background:oklch(0.60 0.13 155);"
                     >
-                      {option}
-                    </button>
-                  </div>
-                  <form
-                    :if={@stepper_question["allow_text"]}
-                    id="needs-input-text-form"
-                    phx-change="answer_custom"
-                  >
-                    <input type="hidden" name="answer[index]" value={@answer_step} />
-                    <textarea
-                      id="needs-input-text"
-                      name="answer[text]"
-                      rows="3"
-                      autocomplete="off"
-                      placeholder={
-                        if(@stepper_question["options"] == [],
-                          do: "Type your answer…",
-                          else: "Or type your own…"
-                        )
-                      }
-                      class="w-full resize-none rounded-[7px] p-[9px] text-[13px] leading-[1.45] outline-none"
-                      style="border:1px solid oklch(0.86 0.05 75);background:oklch(1 0 0);color:oklch(0.30 0.02 255);"
-                    ><%= stepper_custom_text(
-                      @answer_values,
-                      @answer_step,
-                      @stepper_question["options"]
-                    ) %></textarea>
-                  </form>
-                  <div class="flex items-center justify-between">
-                    <button
-                      :if={@answer_step > 0}
-                      id="needs-input-back"
-                      type="button"
-                      phx-click="answer_back"
-                      class="btn btn-sm btn-ghost rounded-[7px]"
-                    >
-                      ← Back
-                    </button>
-                    <span :if={@answer_step == 0}></span>
-                    <button
-                      :if={@answer_step < length(@answer_questions) - 1}
-                      id="needs-input-next"
-                      type="button"
-                      phx-click="answer_next"
-                      disabled={not Map.has_key?(@answer_values, @answer_step)}
-                      class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
-                      style="background:oklch(0.70 0.13 65);"
-                    >
-                      Next →
+                      {@review_gate.approve_label}
                     </button>
                     <button
-                      :if={@answer_step == length(@answer_questions) - 1}
-                      id="needs-input-send"
+                      :if={@review_gate.can_reject}
+                      id="review-request-changes"
                       type="button"
-                      phx-click="answer_submit"
-                      disabled={not Map.has_key?(@answer_values, @answer_step)}
-                      class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
-                      style="background:oklch(0.70 0.13 65);"
+                      phx-click="review_open_reject"
+                      class="btn btn-sm flex-1 rounded-lg bg-white font-semibold"
+                      style="border:1px solid oklch(0.88 0.01 255);color:oklch(0.38 0.02 255);"
                     >
-                      Send to AI →
+                      Request changes
                     </button>
                   </div>
-                </div>
-                <%!-- fallback: today's single-textarea composer for plain-string / human blocks --%>
-                <div :if={is_nil(@answer_questions)}>
                   <div
-                    :if={@body_loading}
-                    id="needs-input-question-skeleton"
-                    class="skeleton h-5 w-3/4 rounded"
+                    :if={@review_gate && @reject_open && !@embed}
+                    id="review-reject-panel"
+                    class="flex flex-col gap-2 rounded-lg bg-white p-3"
+                    style="border:1px solid oklch(0.90 0.02 255);"
                   >
-                  </div>
-                  <div
-                    :if={!@body_loading and @question}
-                    id="needs-input-question"
-                    class="md text-[13.5px] leading-normal"
-                    style="color:oklch(0.33 0.03 65);"
-                  >
-                    {Relay.Markdown.to_html(@question)}
-                  </div>
-                  <.form
-                    for={@answer_form}
-                    id="needs-input-form"
-                    class="flex flex-col items-start gap-[11px]"
-                    phx-submit="answer_input"
-                  >
-                    <div class="w-full">
+                    <div
+                      class="flex items-center gap-2 rounded-lg px-3 py-2"
+                      style="background:oklch(0.985 0.02 195);border:1px solid oklch(0.90 0.03 195);"
+                    >
+                      <span class="text-[13px] leading-none" style="color:oklch(0.44 0.11 195);">
+                        ↩
+                      </span>
+                      <span class="text-[12.5px] leading-normal" style="color:oklch(0.38 0.04 210);">
+                        Returns to
+                        <b style="color:oklch(0.34 0.09 205);">{@review_gate.reject_target_name}</b>
+                        — the reject target set on this stage.
+                      </span>
+                    </div>
+                    <.form
+                      for={@reject_form}
+                      id="review-reject-form"
+                      class="flex flex-col gap-2"
+                      phx-submit="review_reject"
+                    >
                       <.boxed_field
-                        id="needs-input-answer"
+                        id="review-request-note"
                         commit={:form}
                         multiline
                         rows="3"
-                        form={@answer_form}
-                        field={:body}
-                        input_class="w-full"
-                        placeholder="Type your answer — the AI picks up where it left off…"
+                        form={@reject_form}
+                        field={:note}
+                        placeholder="What needs to change? This note goes to the AI…"
                         phx-hook="SubmitOnCmdEnter"
                       />
-                    </div>
-                    <button
-                      id="needs-input-send"
-                      type="submit"
-                      class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
-                      style="background:oklch(0.70 0.13 65);"
-                    >
-                      Send to AI →
-                    </button>
-                  </.form>
-                </div>
-              </section>
-              <section
-                :if={@card.status == :in_review and !@archived}
-                id="review-panel"
-                class="flex flex-col gap-3 rounded-[10px] p-3.5"
-                style="background:oklch(0.975 0.02 155);border:1px solid oklch(0.88 0.05 155);"
-              >
-                <span
-                  class="font-mono text-[10px] font-semibold tracking-[0.05em]"
-                  style="color:oklch(0.46 0.10 155);"
-                >
-                  READY FOR YOUR REVIEW
-                </span>
-                <p class="text-[13px] leading-normal" style="color:oklch(0.36 0.03 155);">
-                  {review_hint(@review_gate)}
-                </p>
-                <div :if={@review_gate && !@reject_open && !@embed} class="flex gap-2">
-                  <button
-                    id="review-approve"
-                    type="button"
-                    phx-click="review_approve"
-                    class="btn btn-sm flex-1 rounded-lg border-none font-semibold text-white"
-                    style="background:oklch(0.60 0.13 155);"
-                  >
-                    {@review_gate.approve_label}
-                  </button>
-                  <button
-                    :if={@review_gate.can_reject}
-                    id="review-request-changes"
-                    type="button"
-                    phx-click="review_open_reject"
-                    class="btn btn-sm flex-1 rounded-lg bg-white font-semibold"
-                    style="border:1px solid oklch(0.88 0.01 255);color:oklch(0.38 0.02 255);"
-                  >
-                    Request changes
-                  </button>
-                </div>
-                <div
-                  :if={@review_gate && @reject_open && !@embed}
-                  id="review-reject-panel"
-                  class="flex flex-col gap-2 rounded-lg bg-white p-3"
-                  style="border:1px solid oklch(0.90 0.02 255);"
-                >
-                  <div
-                    class="flex items-center gap-2 rounded-lg px-3 py-2"
-                    style="background:oklch(0.985 0.02 195);border:1px solid oklch(0.90 0.03 195);"
-                  >
-                    <span class="text-[13px] leading-none" style="color:oklch(0.44 0.11 195);">
-                      ↩
-                    </span>
-                    <span class="text-[12.5px] leading-normal" style="color:oklch(0.38 0.04 210);">
-                      Returns to
-                      <b style="color:oklch(0.34 0.09 205);">{@review_gate.reject_target_name}</b>
-                      — the reject target set on this stage.
-                    </span>
-                  </div>
-                  <.form
-                    for={@reject_form}
-                    id="review-reject-form"
-                    class="flex flex-col gap-2"
-                    phx-submit="review_reject"
-                  >
-                    <.boxed_field
-                      id="review-request-note"
-                      commit={:form}
-                      multiline
-                      rows="3"
-                      form={@reject_form}
-                      field={:note}
-                      placeholder="What needs to change? This note goes to the AI…"
-                      phx-hook="SubmitOnCmdEnter"
-                    />
-                    <p
-                      :if={@reject_error}
-                      id="review-note-error"
-                      class="text-xs text-error"
-                    >
-                      {@reject_error}
-                    </p>
-                    <div class="flex items-center gap-2">
-                      <button
-                        id="review-send-back"
-                        type="submit"
-                        class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
-                        style="background:oklch(0.62 0.14 65);"
+                      <p
+                        :if={@reject_error}
+                        id="review-note-error"
+                        class="text-xs text-error"
                       >
-                        Reject → {@review_gate.reject_target_name}
-                      </button>
-                      <button
-                        id="review-cancel-reject"
-                        type="button"
-                        phx-click="review_cancel_reject"
-                        class="btn btn-ghost btn-sm text-xs"
-                        style="color:oklch(0.55 0.02 255);"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </.form>
-                </div>
-              </section>
-              <section id={"#{@id}-description"} class="space-y-2">
-                <.section_label>Description</.section_label>
-                <div
-                  :if={@body_loading}
-                  id={"#{@id}-description-skeleton"}
-                  class="skeleton h-28 w-full rounded-lg"
-                >
-                </div>
-                <.boxed_field
-                  :if={!@body_loading and !@archived}
-                  id={"#{@id}-description"}
-                  value={@card.description}
-                  editing={@editing_description}
-                  form={@description_form}
-                  field={:description}
-                  edit_event="edit_description"
-                  save_event="save_card_description"
-                  cancel_event="cancel_description"
-                  placeholder="Add a description…"
-                  markdown
-                  multiline
-                  rows="12"
-                />
-                <div
-                  :if={!@body_loading and @archived}
-                  id={"#{@id}-description-archived"}
-                  class="md min-h-16 p-1 text-sm leading-relaxed"
-                >
-                  {Relay.Markdown.to_html(@card.description || "_No description._")}
-                </div>
-              </section>
-
-              <section
-                :if={@body_loading}
-                id={"#{@id}-acceptance-criteria-skeleton-section"}
-                class="space-y-2"
-              >
-                <.section_label>Acceptance Criteria</.section_label>
-                <div
-                  id={"#{@id}-acceptance-criteria-skeleton"}
-                  class="skeleton h-32 w-full rounded-lg"
-                >
-                </div>
-              </section>
-              <section
-                :if={!@body_loading and !@archived}
-                id={"#{@id}-acceptance-criteria"}
-                class="space-y-2"
-              >
-                <.boxed_field
-                  id={"#{@id}-acceptance-criteria"}
-                  value={@card.acceptance_criteria}
-                  editing={@editing_acceptance_criteria}
-                  form={@acceptance_criteria_form}
-                  field={:acceptance_criteria}
-                  edit_event="edit_acceptance_criteria"
-                  save_event="save_card_acceptance_criteria"
-                  cancel_event="cancel_acceptance_criteria"
-                  placeholder="Add acceptance criteria…"
-                  label="Acceptance Criteria"
-                  accent={:accent}
-                  collapsible
-                  expanded={@expanded_acceptance_criteria}
-                  toggle_event="toggle_acceptance_criteria"
-                  markdown
-                  multiline
-                  rows="12"
-                />
-              </section>
-              <section
-                :if={(!@body_loading and @archived) && @card.acceptance_criteria}
-                id={"#{@id}-acceptance-criteria-archived"}
-                class="space-y-2"
-              >
-                <.section_label>Acceptance Criteria</.section_label>
-                <div id={"#{@id}-acceptance-criteria-view"} class="md text-sm leading-relaxed">
-                  {Relay.Markdown.to_html(@card.acceptance_criteria)}
-                </div>
-              </section>
-
-              <section :if={@body_loading} id={"#{@id}-spec-skeleton-section"} class="space-y-2">
-                <.section_label>Spec</.section_label>
-                <div id={"#{@id}-spec-skeleton"} class="skeleton h-32 w-full rounded-lg"></div>
-              </section>
-              <section :if={!@body_loading and !@archived} id={"#{@id}-spec"} class="space-y-2">
-                <.boxed_field
-                  id={"#{@id}-spec"}
-                  value={@card.spec}
-                  editing={@editing_spec}
-                  form={@spec_form}
-                  field={:spec}
-                  edit_event="edit_spec"
-                  save_event="save_card_spec"
-                  cancel_event="cancel_spec"
-                  placeholder="Add a spec…"
-                  label="Spec"
-                  accent={:primary}
-                  collapsible
-                  expanded={@expanded_spec}
-                  toggle_event="toggle_spec"
-                  markdown
-                  multiline
-                  rows="14"
-                />
-              </section>
-              <section
-                :if={(!@body_loading and @archived) && @card.spec}
-                id={"#{@id}-spec-archived"}
-                class="space-y-2"
-              >
-                <.section_label>Spec</.section_label>
-                <div id={"#{@id}-spec-view"} class="md text-sm leading-relaxed">
-                  {Relay.Markdown.to_html(@card.spec)}
-                </div>
-              </section>
-
-              <section :if={@body_loading} id="card-plan-skeleton-section" class="space-y-2">
-                <.section_label>Plan</.section_label>
-                <div id="card-plan-skeleton" class="skeleton h-40 w-full rounded-lg"></div>
-              </section>
-              <section :if={!@body_loading and !@archived} id="card-plan" class="space-y-2">
-                <.boxed_field
-                  id="card-plan"
-                  value={@card.plan}
-                  editing={@editing_plan}
-                  form={@plan_form}
-                  field={:plan}
-                  edit_event="edit_plan"
-                  save_event="save_card_plan"
-                  cancel_event="cancel_plan"
-                  placeholder="Add a plan…"
-                  label="Plan"
-                  accent={:secondary}
-                  collapsible
-                  expanded={@expanded_plan}
-                  toggle_event="toggle_plan"
-                  markdown
-                  multiline
-                  rows="16"
-                />
-              </section>
-              <section
-                :if={(!@body_loading and @archived) && @card.plan}
-                id="card-plan-archived"
-                class="space-y-2"
-              >
-                <.section_label>Plan</.section_label>
-                <div
-                  id="card-plan-body"
-                  class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
-                >
-                  {Relay.Markdown.to_html(@card.plan)}
-                </div>
-              </section>
-
-              <section :if={@body_loading} id="ai-result-skeleton-section" class="space-y-2">
-                <.section_label accent="text-secondary">AI Result</.section_label>
-                <div id="ai-result-skeleton" class="skeleton h-24 w-full rounded-lg"></div>
-              </section>
-              <section :if={!@body_loading and @card.ai_result} id="ai-result" class="space-y-2">
-                <.section_label accent="text-secondary">AI Result</.section_label>
-                <div
-                  class="space-y-3 rounded-[10px] border p-3.5"
-                  style="border-color:oklch(0.88 0.05 295);background:oklch(0.985 0.01 295);"
-                >
-                  <div
-                    :if={@card.ai_result["summary"]}
-                    id="ai-result-summary"
-                    class="md text-sm leading-relaxed"
-                  >
-                    {Relay.Markdown.to_html(@card.ai_result["summary"])}
-                  </div>
-                  <ul
-                    :if={@card.ai_result["changes"] not in [nil, []]}
-                    id="ai-result-changes"
-                    class="space-y-1"
-                  >
-                    <li
-                      :for={change <- @card.ai_result["changes"]}
-                      class="flex items-start gap-2 text-sm"
-                    >
-                      <.icon name="hero-check" class="mt-0.5 size-4 shrink-0 text-success" />
-                      <span>{change}</span>
-                    </li>
-                  </ul>
-                  <div
-                    :if={@card.ai_result["screens"] not in [nil, []]}
-                    id="ai-result-screens"
-                    class="flex flex-wrap gap-2"
-                  >
-                    <figure :for={screen <- @card.ai_result["screens"]} class="w-32 space-y-1">
-                      <img
-                        :if={screen["url"]}
-                        src={screen["url"]}
-                        alt={screen["caption"] || "Screenshot"}
-                        class="w-full rounded border border-base-300"
-                      />
-                      <div
-                        :if={!screen["url"]}
-                        class="aspect-video w-full rounded bg-gradient-to-br from-primary/30 to-secondary/30"
-                      />
-                      <figcaption
-                        :if={screen["caption"]}
-                        class="text-[11px] leading-tight text-base-content/60"
-                      >
-                        {screen["caption"]}
-                      </figcaption>
-                    </figure>
-                  </div>
-                  <a
-                    :if={@card.ai_result["deploy_url"]}
-                    id="ai-result-deploy"
-                    href={@card.ai_result["deploy_url"]}
-                    target="_blank"
-                    rel="noopener"
-                    class="inline-flex items-center gap-1 text-xs font-medium text-secondary"
-                  >
-                    View deployment ↗
-                  </a>
-                </div>
-              </section>
-              <section :if={@card.sub_tasks != []} id="sub-tasks" class="space-y-2">
-                <div class="flex items-center gap-2">
-                  <.section_label>Sub-tasks</.section_label>
-                  <span id="sub-tasks-count" class="font-mono text-[10px] text-base-content/60">
-                    {@sub_task_progress.done}/{@sub_task_progress.total}
-                  </span>
-                  <div class="h-1 max-w-[120px] flex-1 overflow-hidden rounded-full bg-base-300">
-                    <div
-                      class="h-full rounded-full bg-success transition-all"
-                      style={"width:#{sub_task_pct(@sub_task_progress)}%"}
-                    />
-                  </div>
-                </div>
-                <ul class="space-y-1.5">
-                  <li :for={st <- @card.sub_tasks} id={"sub-task-#{st.id}"}>
-                    <button
-                      type="button"
-                      phx-click="toggle_sub_task"
-                      phx-value-id={st.id}
-                      aria-label={if(st.done, do: "Mark incomplete", else: "Mark complete")}
-                      class="flex w-full items-center gap-2 rounded-lg border border-base-300 bg-base-200 px-2 py-1.5 text-left transition-colors hover:border-base-content/20"
-                    >
-                      <span class={[
-                        "flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
-                        if(st.done,
-                          do: "border-success bg-success text-white",
-                          else: "border-base-300"
-                        )
-                      ]}>
-                        <.icon :if={st.done} name="hero-check" class="size-3" />
-                      </span>
-                      <span class={[
-                        "text-sm leading-snug",
-                        st.done && "text-base-content/50 line-through"
-                      ]}>
-                        {st.title}
-                      </span>
-                    </button>
-                  </li>
-                </ul>
-              </section>
-              <section class="space-y-3 border-t border-base-300 pt-4">
-                <.section_label>Conversation</.section_label>
-                <div
-                  :if={@body_loading}
-                  id={"#{@id}-conversation-loading"}
-                  class="flex justify-center py-4"
-                >
-                  <span class="loading loading-spinner loading-sm text-base-content/40"></span>
-                </div>
-                <ol
-                  :if={!@body_loading}
-                  id={"#{@id}-conversation"}
-                  phx-update="stream"
-                  class="space-y-4"
-                >
-                  <li
-                    id={"#{@id}-conversation-empty"}
-                    class="hidden text-sm text-base-content/50 only:block"
-                  >
-                    No comments yet
-                  </li>
-                  <li
-                    :for={{dom_id, comment} <- @conversation}
-                    id={dom_id}
-                    class="timeline-entry flex items-start gap-3"
-                    data-actor-type={comment.actor_type}
-                  >
-                    <.avatar
-                      class="timeline-avatar shrink-0"
-                      size={28}
-                      tint={:role}
-                      actor={if(comment.actor_type == :agent, do: :ai, else: :human)}
-                      src={comment.user && comment.user.avatar_url}
-                      name={comment.user && comment.user.name}
-                      email={comment.user && comment.user.email}
-                    />
-                    <div class="min-w-0 flex-1 space-y-1">
-                      <div class="flex items-baseline gap-2">
-                        <span class="timeline-author text-[13px] font-semibold">
-                          {timeline_author(comment)}
-                        </span>
-                        <time class="timeline-time font-mono text-[11px] text-base-content/50">
-                          {Calendar.strftime(comment.inserted_at, "%b %d, %H:%M")}
-                        </time>
-                        <span
-                          :if={comment.kind in [:question, :changes_requested]}
-                          class="font-mono"
-                          style={"font-size:9.5px;font-weight:600;letter-spacing:0.04em;color:#{comment_tag_color(comment.kind)};background:oklch(0.96 0.03 75);padding:1px 6px;border-radius:4px;"}
+                        {@reject_error}
+                      </p>
+                      <div class="flex items-center gap-2">
+                        <button
+                          id="review-send-back"
+                          type="submit"
+                          class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
+                          style="background:oklch(0.62 0.14 65);"
                         >
-                          {comment_tag_label(comment.kind)}
-                        </span>
+                          Reject → {@review_gate.reject_target_name}
+                        </button>
+                        <button
+                          id="review-cancel-reject"
+                          type="button"
+                          phx-click="review_cancel_reject"
+                          class="btn btn-ghost btn-sm text-xs"
+                          style="color:oklch(0.55 0.02 255);"
+                        >
+                          Cancel
+                        </button>
                       </div>
-                      <div
-                        class={[
-                          "timeline-comment-body md rounded-lg px-3 py-2 text-sm leading-relaxed",
-                          comment.kind not in [:question, :changes_requested] && "bg-base-200/60"
-                        ]}
-                        style={
-                          comment.kind in [:question, :changes_requested] &&
-                            "background:oklch(0.96 0.03 75);border:1px solid oklch(0.88 0.06 75);"
-                        }
-                      >
-                        {Relay.Markdown.to_html(comment.body)}
-                      </div>
-                    </div>
-                  </li>
-                </ol>
-                <.form
-                  :if={!@archived}
-                  for={@comment_form}
-                  id={"#{@id}-comment-form"}
-                  phx-change="validate_comment"
-                  phx-submit="post_comment"
+                    </.form>
+                  </div>
+                </section>
+                <section id={"#{@id}-description"} class="space-y-2">
+                  <.section_label>Description</.section_label>
+                  <div
+                    :if={@body_loading}
+                    id={"#{@id}-description-skeleton"}
+                    class="skeleton h-28 w-full rounded-lg"
+                  >
+                  </div>
+                  <.boxed_field
+                    :if={!@body_loading and !@archived}
+                    id={"#{@id}-description"}
+                    value={@card.description}
+                    editing={@editing_description}
+                    form={@description_form}
+                    field={:description}
+                    edit_event="edit_description"
+                    save_event="save_card_description"
+                    cancel_event="cancel_description"
+                    placeholder="Add a description…"
+                    markdown
+                    multiline
+                    rows="12"
+                  />
+                  <div
+                    :if={!@body_loading and @archived}
+                    id={"#{@id}-description-archived"}
+                    class="md min-h-16 p-1 text-sm leading-relaxed"
+                  >
+                    {Relay.Markdown.to_html(@card.description || "_No description._")}
+                  </div>
+                </section>
+
+                <section
+                  :if={@body_loading}
+                  id={"#{@id}-acceptance-criteria-skeleton-section"}
+                  class="space-y-2"
+                >
+                  <.section_label>Acceptance Criteria</.section_label>
+                  <div
+                    id={"#{@id}-acceptance-criteria-skeleton"}
+                    class="skeleton h-32 w-full rounded-lg"
+                  >
+                  </div>
+                </section>
+                <section
+                  :if={!@body_loading and !@archived}
+                  id={"#{@id}-acceptance-criteria"}
+                  class="space-y-2"
                 >
                   <.boxed_field
-                    id={"#{@id}-comment-input"}
-                    commit={:form}
+                    id={"#{@id}-acceptance-criteria"}
+                    value={@card.acceptance_criteria}
+                    editing={@editing_acceptance_criteria}
+                    form={@acceptance_criteria_form}
+                    field={:acceptance_criteria}
+                    edit_event="edit_acceptance_criteria"
+                    save_event="save_card_acceptance_criteria"
+                    cancel_event="cancel_acceptance_criteria"
+                    placeholder="Add acceptance criteria…"
+                    label="Acceptance Criteria"
+                    accent={:accent}
+                    collapsible
+                    expanded={@expanded_acceptance_criteria}
+                    toggle_event="toggle_acceptance_criteria"
+                    markdown
                     multiline
-                    rows="2"
-                    form={@comment_form}
-                    field={:body}
-                    placeholder="Write a comment…"
-                    phx-hook="SubmitOnCmdEnter"
+                    rows="12"
                   />
-                  <.button variant="primary" class="btn btn-primary btn-sm">Comment</.button>
-                </.form>
-              </section>
+                </section>
+                <section
+                  :if={(!@body_loading and @archived) && @card.acceptance_criteria}
+                  id={"#{@id}-acceptance-criteria-archived"}
+                  class="space-y-2"
+                >
+                  <.section_label>Acceptance Criteria</.section_label>
+                  <div id={"#{@id}-acceptance-criteria-view"} class="md text-sm leading-relaxed">
+                    {Relay.Markdown.to_html(@card.acceptance_criteria)}
+                  </div>
+                </section>
 
-              <section class="space-y-2 border-t border-base-300 pt-4">
-                <.section_label>Activity</.section_label>
-                <div
-                  :if={@health != :none}
-                  id={"#{@id}-activity-health-chip"}
-                  class="activity-health-chip flex items-center gap-2"
-                  style={"border-radius:7px;padding:7px 10px;#{strip_box_style(@health)}"}
-                  data-health={@health}
+                <section :if={@body_loading} id={"#{@id}-spec-skeleton-section"} class="space-y-2">
+                  <.section_label>Spec</.section_label>
+                  <div id={"#{@id}-spec-skeleton"} class="skeleton h-32 w-full rounded-lg"></div>
+                </section>
+                <section :if={!@body_loading and !@archived} id={"#{@id}-spec"} class="space-y-2">
+                  <.boxed_field
+                    id={"#{@id}-spec"}
+                    value={@card.spec}
+                    editing={@editing_spec}
+                    form={@spec_form}
+                    field={:spec}
+                    edit_event="edit_spec"
+                    save_event="save_card_spec"
+                    cancel_event="cancel_spec"
+                    placeholder="Add a spec…"
+                    label="Spec"
+                    accent={:primary}
+                    collapsible
+                    expanded={@expanded_spec}
+                    toggle_event="toggle_spec"
+                    markdown
+                    multiline
+                    rows="14"
+                  />
+                </section>
+                <section
+                  :if={(!@body_loading and @archived) && @card.spec}
+                  id={"#{@id}-spec-archived"}
+                  class="space-y-2"
                 >
-                  <span style={"width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:#{health_chip_color(@health)};#{if(@health == :live, do: "animation:relaypulse 1.4s ease-in-out infinite;")}"}>
-                  </span>
-                  <span
-                    class="text-[11.5px]"
-                    style={"font-family:var(--font-mono);color:#{strip_text_color(@health)};"}
-                  >
-                    {health_chip_label(@health)}
-                  </span>
-                  <button
-                    :if={@health == :stopped and !@archived}
-                    id={"#{@id}-activity-retry"}
-                    class="activity-retry-chip"
-                    phx-click="retry_card"
-                    phx-value-ref={@ref}
-                    style="margin-left:auto;font-size:10px;font-weight:600;font-family:var(--font-mono);color:oklch(0.50 0.14 15);background:oklch(1 0 0);border:1px solid oklch(0.84 0.08 20);border-radius:5px;padding:2px 7px;flex:0 0 auto;cursor:pointer;"
-                  >
-                    Retry
-                  </button>
-                </div>
-                <div
-                  :if={@body_loading}
-                  id={"#{@id}-activity-loading"}
-                  class="flex justify-center py-3"
+                  <.section_label>Spec</.section_label>
+                  <div id={"#{@id}-spec-view"} class="md text-sm leading-relaxed">
+                    {Relay.Markdown.to_html(@card.spec)}
+                  </div>
+                </section>
+
+                <section :if={@body_loading} id="card-plan-skeleton-section" class="space-y-2">
+                  <.section_label>Plan</.section_label>
+                  <div id="card-plan-skeleton" class="skeleton h-40 w-full rounded-lg"></div>
+                </section>
+                <section :if={!@body_loading and !@archived} id="card-plan" class="space-y-2">
+                  <.boxed_field
+                    id="card-plan"
+                    value={@card.plan}
+                    editing={@editing_plan}
+                    form={@plan_form}
+                    field={:plan}
+                    edit_event="edit_plan"
+                    save_event="save_card_plan"
+                    cancel_event="cancel_plan"
+                    placeholder="Add a plan…"
+                    label="Plan"
+                    accent={:secondary}
+                    collapsible
+                    expanded={@expanded_plan}
+                    toggle_event="toggle_plan"
+                    markdown
+                    multiline
+                    rows="16"
+                  />
+                </section>
+                <section
+                  :if={(!@body_loading and @archived) && @card.plan}
+                  id="card-plan-archived"
+                  class="space-y-2"
                 >
-                  <span class="loading loading-spinner loading-sm text-base-content/40"></span>
-                </div>
-                <ol
-                  :if={!@body_loading}
-                  id={"#{@id}-activity"}
-                  phx-update="stream"
-                  class="relative space-y-1 pl-[18px]"
-                >
-                  <li
-                    id={"#{@id}-activity-empty"}
-                    class="hidden text-sm text-base-content/50 only:block"
+                  <.section_label>Plan</.section_label>
+                  <div
+                    id="card-plan-body"
+                    class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
                   >
-                    No activity yet
-                  </li>
-                  <li
-                    :for={{dom_id, entry} <- @activity}
-                    id={dom_id}
-                    class="activity-entry relative py-1"
-                    data-kind={Relay.Activity.kind(entry)}
-                    data-actor-type={entry.actor_type}
+                    {Relay.Markdown.to_html(@card.plan)}
+                  </div>
+                </section>
+
+                <section :if={@body_loading} id="ai-result-skeleton-section" class="space-y-2">
+                  <.section_label accent="text-secondary">AI Result</.section_label>
+                  <div id="ai-result-skeleton" class="skeleton h-24 w-full rounded-lg"></div>
+                </section>
+                <section :if={!@body_loading and @card.ai_result} id="ai-result" class="space-y-2">
+                  <.section_label accent="text-secondary">AI Result</.section_label>
+                  <div
+                    class="space-y-3 rounded-[10px] border p-3.5"
+                    style="border-color:oklch(0.88 0.05 295);background:oklch(0.985 0.01 295);"
                   >
-                    <%= if Relay.Activity.kind(entry) == :move do %>
-                      <span
-                        class="activity-move-chip inline-flex items-center gap-2"
-                        style="background:oklch(0.965 0.006 255);border:1px solid oklch(0.90 0.006 255);border-radius:20px;padding:4px 12px;font-size:11.5px;font-family:var(--font-mono);color:oklch(0.50 0.02 255);"
+                    <div
+                      :if={@card.ai_result["summary"]}
+                      id="ai-result-summary"
+                      class="md text-sm leading-relaxed"
+                    >
+                      {Relay.Markdown.to_html(@card.ai_result["summary"])}
+                    </div>
+                    <ul
+                      :if={@card.ai_result["changes"] not in [nil, []]}
+                      id="ai-result-changes"
+                      class="space-y-1"
+                    >
+                      <li
+                        :for={change <- @card.ai_result["changes"]}
+                        class="flex items-start gap-2 text-sm"
                       >
-                        moved
-                        <span class="font-semibold" style="color:oklch(0.40 0.02 255);">
-                          {entry.meta["from_stage"]} → {entry.meta["to_stage"]}
-                        </span>
-                        · {relative_time(entry.inserted_at)}
-                      </span>
-                    <% else %>
-                      <span
-                        class="activity-entry-dot absolute"
-                        style={"left:-16.5px;top:7px;width:7px;height:7px;border-radius:50%;background:#{entry_dot_color(entry)};box-shadow:0 0 0 2.5px var(--color-base-100);"}
+                        <.icon name="hero-check" class="mt-0.5 size-4 shrink-0 text-success" />
+                        <span>{change}</span>
+                      </li>
+                    </ul>
+                    <div
+                      :if={@card.ai_result["screens"] not in [nil, []]}
+                      id="ai-result-screens"
+                      class="flex flex-wrap gap-2"
+                    >
+                      <figure :for={screen <- @card.ai_result["screens"]} class="w-32 space-y-1">
+                        <img
+                          :if={screen["url"]}
+                          src={screen["url"]}
+                          alt={screen["caption"] || "Screenshot"}
+                          class="w-full rounded border border-base-300"
+                        />
+                        <div
+                          :if={!screen["url"]}
+                          class="aspect-video w-full rounded bg-gradient-to-br from-primary/30 to-secondary/30"
+                        />
+                        <figcaption
+                          :if={screen["caption"]}
+                          class="text-[11px] leading-tight text-base-content/60"
+                        >
+                          {screen["caption"]}
+                        </figcaption>
+                      </figure>
+                    </div>
+                    <a
+                      :if={@card.ai_result["deploy_url"]}
+                      id="ai-result-deploy"
+                      href={@card.ai_result["deploy_url"]}
+                      target="_blank"
+                      rel="noopener"
+                      class="inline-flex items-center gap-1 text-xs font-medium text-secondary"
+                    >
+                      View deployment ↗
+                    </a>
+                  </div>
+                </section>
+                <section :if={@card.sub_tasks != []} id="sub-tasks" class="space-y-2">
+                  <div class="flex items-center gap-2">
+                    <.section_label>Sub-tasks</.section_label>
+                    <span id="sub-tasks-count" class="font-mono text-[10px] text-base-content/60">
+                      {@sub_task_progress.done}/{@sub_task_progress.total}
+                    </span>
+                    <div class="h-1 max-w-[120px] flex-1 overflow-hidden rounded-full bg-base-300">
+                      <div
+                        class="h-full rounded-full bg-success transition-all"
+                        style={"width:#{sub_task_pct(@sub_task_progress)}%"}
+                      />
+                    </div>
+                  </div>
+                  <ul class="space-y-1.5">
+                    <li :for={st <- @card.sub_tasks} id={"sub-task-#{st.id}"}>
+                      <button
+                        type="button"
+                        phx-click="toggle_sub_task"
+                        phx-value-id={st.id}
+                        aria-label={if(st.done, do: "Mark incomplete", else: "Mark complete")}
+                        class="flex w-full items-center gap-2 rounded-lg border border-base-300 bg-base-200 px-2 py-1.5 text-left transition-colors hover:border-base-content/20"
                       >
-                      </span>
-                      <div class="flex items-baseline gap-1.5">
-                        <span class="timeline-activity-phrase min-w-0 text-[13px] leading-snug text-base-content/70">
-                          {entry_text(entry)}
+                        <span class={[
+                          "flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
+                          if(st.done,
+                            do: "border-success bg-success text-white",
+                            else: "border-base-300"
+                          )
+                        ]}>
+                          <.icon :if={st.done} name="hero-check" class="size-3" />
                         </span>
-                        <time class="timeline-time ml-auto shrink-0 font-mono text-[11px] text-base-content/45">
-                          {relative_time(entry.inserted_at)}
-                        </time>
+                        <span class={[
+                          "text-sm leading-snug",
+                          st.done && "text-base-content/50 line-through"
+                        ]}>
+                          {st.title}
+                        </span>
+                      </button>
+                    </li>
+                  </ul>
+                </section>
+                <section class="space-y-3 border-t border-base-300 pt-4">
+                  <.section_label>Conversation</.section_label>
+                  <div
+                    :if={@body_loading}
+                    id={"#{@id}-conversation-loading"}
+                    class="flex justify-center py-4"
+                  >
+                    <span class="loading loading-spinner loading-sm text-base-content/40"></span>
+                  </div>
+                  <ol
+                    :if={!@body_loading}
+                    id={"#{@id}-conversation"}
+                    phx-update="stream"
+                    class="space-y-4"
+                  >
+                    <li
+                      id={"#{@id}-conversation-empty"}
+                      class="hidden text-sm text-base-content/50 only:block"
+                    >
+                      No comments yet
+                    </li>
+                    <li
+                      :for={{dom_id, comment} <- @conversation}
+                      id={dom_id}
+                      class="timeline-entry flex items-start gap-3"
+                      data-actor-type={comment.actor_type}
+                    >
+                      <.avatar
+                        class="timeline-avatar shrink-0"
+                        size={28}
+                        tint={:role}
+                        actor={if(comment.actor_type == :agent, do: :ai, else: :human)}
+                        src={comment.user && comment.user.avatar_url}
+                        name={comment.user && comment.user.name}
+                        email={comment.user && comment.user.email}
+                      />
+                      <div class="min-w-0 flex-1 space-y-1">
+                        <div class="flex items-baseline gap-2">
+                          <span class="timeline-author text-[13px] font-semibold">
+                            {timeline_author(comment)}
+                          </span>
+                          <time class="timeline-time font-mono text-[11px] text-base-content/50">
+                            {Calendar.strftime(comment.inserted_at, "%b %d, %H:%M")}
+                          </time>
+                          <span
+                            :if={comment.kind in [:question, :changes_requested]}
+                            class="font-mono"
+                            style={"font-size:9.5px;font-weight:600;letter-spacing:0.04em;color:#{comment_tag_color(comment.kind)};background:oklch(0.96 0.03 75);padding:1px 6px;border-radius:4px;"}
+                          >
+                            {comment_tag_label(comment.kind)}
+                          </span>
+                        </div>
+                        <div
+                          class={[
+                            "timeline-comment-body md rounded-lg px-3 py-2 text-sm leading-relaxed",
+                            comment.kind not in [:question, :changes_requested] && "bg-base-200/60"
+                          ]}
+                          style={
+                            comment.kind in [:question, :changes_requested] &&
+                              "background:oklch(0.96 0.03 75);border:1px solid oklch(0.88 0.06 75);"
+                          }
+                        >
+                          {Relay.Markdown.to_html(comment.body)}
+                        </div>
                       </div>
-                    <% end %>
-                  </li>
-                </ol>
-              </section>
+                    </li>
+                  </ol>
+                  <.form
+                    :if={!@archived}
+                    for={@comment_form}
+                    id={"#{@id}-comment-form"}
+                    phx-change="validate_comment"
+                    phx-submit="post_comment"
+                  >
+                    <.boxed_field
+                      id={"#{@id}-comment-input"}
+                      commit={:form}
+                      multiline
+                      rows="2"
+                      form={@comment_form}
+                      field={:body}
+                      placeholder="Write a comment…"
+                      phx-hook="SubmitOnCmdEnter"
+                    />
+                    <.button variant="primary" class="btn btn-primary btn-sm">Comment</.button>
+                  </.form>
+                </section>
+              </div>
+
+              <div id="card-drawer-tab-panel-run" class={[@drawer_tab != :run && "hidden"]}>
+                <%= if @latest_run do %>
+                  <RunComponents.run_status_strip
+                    run={run_map(@latest_run)}
+                    baton={baton_label(@latest_run, @card)}
+                  />
+                  <div style="padding:18px 22px 40px 22px;display:flex;flex-direction:column;gap:18px;">
+                    <RunComponents.run_state_banner
+                      :if={@card.rejection && @latest_run.status == :running}
+                      variant={:reentry}
+                      card={@card}
+                    />
+                    <RunComponents.run_state_banner
+                      :if={@latest_run.status == :cancelled}
+                      variant={:revoked}
+                      run={run_map(@latest_run)}
+                      card={@card}
+                      claimer={human_owner_name(@card)}
+                    />
+                    <RunComponents.run_state_banner
+                      :if={@latest_run.status == :failed}
+                      variant={:circuit}
+                      run={run_map(@latest_run)}
+                      node_executions={@latest_run.node_executions}
+                      totals={run_totals(@latest_run)}
+                    />
+                    <RunComponents.run_state_banner
+                      :if={@parked_run}
+                      variant={:parked}
+                      run={run_map(@latest_run)}
+                      node_executions={@latest_run.node_executions}
+                    >
+                      <.needs_input_panel
+                        card={@card}
+                        question={@question}
+                        answer_questions={@answer_questions}
+                        answer_step={@answer_step}
+                        answer_values={@answer_values}
+                        answer_form={@answer_form}
+                        body_loading={@body_loading}
+                      />
+                    </RunComponents.run_state_banner>
+                    <RunComponents.run_mini_graph
+                      :if={@latest_run.status == :running and @run_flow}
+                      path={Relay.Runs.happy_path(@run_flow)}
+                      run={run_map(@latest_run)}
+                      task_progress={drawer_task_progress(@card)}
+                    />
+                    <RunComponents.run_node_timeline
+                      :if={@latest_run.status in [:running, :failed, :cancelled]}
+                      run={run_map(@latest_run)}
+                      node_executions={@latest_run.node_executions}
+                      flow={@run_flow}
+                      task_progress={drawer_task_progress(@card)}
+                    />
+                    <RunComponents.run_history :if={length(@runs) > 1} runs={history_entries(@runs)} />
+                  </div>
+                <% else %>
+                  <div id="run-tab-queued" style="padding:18px 22px;">
+                    <RunComponents.run_face
+                      :if={@queued_flow}
+                      ref="drawer"
+                      run={{:queued, %{key: @queued_flow.key}}}
+                    />
+                  </div>
+                <% end %>
+              </div>
+
+              <div id="card-drawer-tab-panel-activity" class={[@drawer_tab != :activity && "hidden"]}>
+                <section class="space-y-2 border-t border-base-300 pt-4">
+                  <.section_label>Activity</.section_label>
+                  <div
+                    :if={@health != :none}
+                    id={"#{@id}-activity-health-chip"}
+                    class="activity-health-chip flex items-center gap-2"
+                    style={"border-radius:7px;padding:7px 10px;#{strip_box_style(@health)}"}
+                    data-health={@health}
+                  >
+                    <span style={"width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:#{health_chip_color(@health)};#{if(@health == :live, do: "animation:relaypulse 1.4s ease-in-out infinite;")}"}>
+                    </span>
+                    <span
+                      class="text-[11.5px]"
+                      style={"font-family:var(--font-mono);color:#{strip_text_color(@health)};"}
+                    >
+                      {health_chip_label(@health)}
+                    </span>
+                    <button
+                      :if={@health == :stopped and !@archived}
+                      id={"#{@id}-activity-retry"}
+                      class="activity-retry-chip"
+                      phx-click="retry_card"
+                      phx-value-ref={@ref}
+                      style="margin-left:auto;font-size:10px;font-weight:600;font-family:var(--font-mono);color:oklch(0.50 0.14 15);background:oklch(1 0 0);border:1px solid oklch(0.84 0.08 20);border-radius:5px;padding:2px 7px;flex:0 0 auto;cursor:pointer;"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                  <div
+                    :if={@body_loading}
+                    id={"#{@id}-activity-loading"}
+                    class="flex justify-center py-3"
+                  >
+                    <span class="loading loading-spinner loading-sm text-base-content/40"></span>
+                  </div>
+                  <ol
+                    :if={!@body_loading}
+                    id={"#{@id}-activity"}
+                    phx-update="stream"
+                    class="relative space-y-1 pl-[18px]"
+                  >
+                    <li
+                      id={"#{@id}-activity-empty"}
+                      class="hidden text-sm text-base-content/50 only:block"
+                    >
+                      No activity yet
+                    </li>
+                    <li
+                      :for={{dom_id, entry} <- @activity}
+                      id={dom_id}
+                      class="activity-entry relative py-1"
+                      data-kind={Relay.Activity.kind(entry)}
+                      data-actor-type={entry.actor_type}
+                    >
+                      <%= if Relay.Activity.kind(entry) == :move do %>
+                        <span
+                          class="activity-move-chip inline-flex items-center gap-2"
+                          style="background:oklch(0.965 0.006 255);border:1px solid oklch(0.90 0.006 255);border-radius:20px;padding:4px 12px;font-size:11.5px;font-family:var(--font-mono);color:oklch(0.50 0.02 255);"
+                        >
+                          moved
+                          <span class="font-semibold" style="color:oklch(0.40 0.02 255);">
+                            {entry.meta["from_stage"]} → {entry.meta["to_stage"]}
+                          </span>
+                          · {relative_time(entry.inserted_at)}
+                        </span>
+                      <% else %>
+                        <span
+                          class="activity-entry-dot absolute"
+                          style={"left:-16.5px;top:7px;width:7px;height:7px;border-radius:50%;background:#{entry_dot_color(entry)};box-shadow:0 0 0 2.5px var(--color-base-100);"}
+                        >
+                        </span>
+                        <div class="flex items-baseline gap-1.5">
+                          <span class="timeline-activity-phrase min-w-0 text-[13px] leading-snug text-base-content/70">
+                            {entry_text(entry)}
+                          </span>
+                          <time class="timeline-time ml-auto shrink-0 font-mono text-[11px] text-base-content/45">
+                            {relative_time(entry.inserted_at)}
+                          </time>
+                        </div>
+                      <% end %>
+                    </li>
+                  </ol>
+                </section>
+              </div>
             </div>
 
             <div
@@ -2507,6 +2455,210 @@ defmodule RelayWeb.CoreComponents do
     """
   end
 
+  attr :card, :any, required: true
+  attr :question, :string, default: nil
+  attr :answer_questions, :list, default: nil
+  attr :answer_step, :integer, default: 0
+  attr :answer_values, :map, default: %{}
+  attr :answer_form, :any, default: nil
+  attr :body_loading, :boolean, default: false
+
+  @doc """
+  The needs-input answer panel (RLY-71/RLY-109): structured stepper when
+  questions exist, single composer otherwise. Rendered in exactly ONE place
+  per state — the Run tab's parked banner when a parked run exists, the
+  Detail tab otherwise — because its DOM ids are static.
+  """
+  def needs_input_panel(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :stepper_question,
+        assigns.answer_questions && Enum.at(assigns.answer_questions, assigns.answer_step)
+      )
+
+    ~H"""
+    <section
+      id="needs-input-panel"
+      class="flex flex-col gap-4 rounded-[10px] p-5"
+      style="background:oklch(0.975 0.025 75);border:1px solid oklch(0.87 0.07 75);"
+    >
+      <div class="flex items-center justify-between">
+        <span
+          class="font-mono text-[10px] font-semibold tracking-[0.05em]"
+          style="color:oklch(0.52 0.11 65);"
+        >
+          RELAY AI NEEDS YOUR INPUT
+        </span>
+        <span
+          :if={@card.blocked_since}
+          id="needs-input-waiting"
+          class="font-mono text-[10px]"
+          style="color:oklch(0.52 0.11 65);"
+        >
+          {waiting_label(@card.blocked_since)}
+        </span>
+      </div>
+      <%!-- RLY-71 stepper: one structured question at a time --%>
+      <div :if={@answer_questions} id="needs-input-stepper" class="flex flex-col gap-4">
+        <div
+          id="needs-input-progress"
+          class="font-mono text-[10px]"
+          style="color:oklch(0.52 0.11 65);"
+        >
+          Question {@answer_step + 1} of {length(@answer_questions)}
+        </div>
+        <div
+          id="needs-input-question"
+          class="md text-[13.5px] leading-normal break-words"
+          style="color:oklch(0.33 0.03 65);"
+        >
+          {Relay.Markdown.to_html(@stepper_question["prompt"])}
+        </div>
+        <div :if={@stepper_question["options"] != []} class="flex flex-col gap-2">
+          <%!-- phx-value-option, not phx-value-value: "value" collides with the
+          button's intrinsic DOM .value property (empty for a value-less <button>),
+          which wins over the phx-value-* attribute when a real browser serializes
+          the click — silently sending "" instead of the picked option. --%>
+          <button
+            :for={{option, index} <- Enum.with_index(@stepper_question["options"])}
+            type="button"
+            id={"needs-input-option-#{index}"}
+            phx-click="answer_select"
+            phx-value-index={@answer_step}
+            phx-value-option={option}
+            class={
+              [
+                "btn btn-sm justify-start rounded-[7px] font-normal",
+                # daisyUI's .btn is a fixed-height (`height: var(--size)`)
+                # nowrap flex row, which clips a long option. Real agent
+                # options are sentences, so let them grow to as many lines
+                # as they need while a short one keeps the compact height.
+                "h-auto min-h-8 whitespace-normal px-3 py-2 text-left leading-snug",
+                Map.get(@answer_values, @answer_step) == option &&
+                  "needs-input-option-selected text-white"
+              ]
+            }
+            style={
+              if(Map.get(@answer_values, @answer_step) == option,
+                do: "background:oklch(0.70 0.13 65);border-color:oklch(0.70 0.13 65);",
+                else:
+                  "background:transparent;border:1px solid oklch(0.87 0.07 75);color:oklch(0.33 0.03 65);"
+              )
+            }
+          >
+            {option}
+          </button>
+        </div>
+        <form
+          :if={@stepper_question["allow_text"]}
+          id="needs-input-text-form"
+          phx-change="answer_custom"
+        >
+          <input type="hidden" name="answer[index]" value={@answer_step} />
+          <textarea
+            id="needs-input-text"
+            name="answer[text]"
+            rows="3"
+            autocomplete="off"
+            placeholder={
+              if(@stepper_question["options"] == [],
+                do: "Type your answer…",
+                else: "Or type your own…"
+              )
+            }
+            class="w-full resize-none rounded-[7px] p-[9px] text-[13px] leading-[1.45] outline-none"
+            style="border:1px solid oklch(0.86 0.05 75);background:oklch(1 0 0);color:oklch(0.30 0.02 255);"
+          ><%= stepper_custom_text(
+            @answer_values,
+            @answer_step,
+            @stepper_question["options"]
+          ) %></textarea>
+        </form>
+        <div class="flex items-center justify-between">
+          <button
+            :if={@answer_step > 0}
+            id="needs-input-back"
+            type="button"
+            phx-click="answer_back"
+            class="btn btn-sm btn-ghost rounded-[7px]"
+          >
+            ← Back
+          </button>
+          <span :if={@answer_step == 0}></span>
+          <button
+            :if={@answer_step < length(@answer_questions) - 1}
+            id="needs-input-next"
+            type="button"
+            phx-click="answer_next"
+            disabled={not Map.has_key?(@answer_values, @answer_step)}
+            class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
+            style="background:oklch(0.70 0.13 65);"
+          >
+            Next →
+          </button>
+          <button
+            :if={@answer_step == length(@answer_questions) - 1}
+            id="needs-input-send"
+            type="button"
+            phx-click="answer_submit"
+            disabled={not Map.has_key?(@answer_values, @answer_step)}
+            class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
+            style="background:oklch(0.70 0.13 65);"
+          >
+            Send to AI →
+          </button>
+        </div>
+      </div>
+      <%!-- fallback: today's single-textarea composer for plain-string / human blocks --%>
+      <div :if={is_nil(@answer_questions)}>
+        <div
+          :if={@body_loading}
+          id="needs-input-question-skeleton"
+          class="skeleton h-5 w-3/4 rounded"
+        >
+        </div>
+        <div
+          :if={!@body_loading and @question}
+          id="needs-input-question"
+          class="md text-[13.5px] leading-normal"
+          style="color:oklch(0.33 0.03 65);"
+        >
+          {Relay.Markdown.to_html(@question)}
+        </div>
+        <.form
+          for={@answer_form}
+          id="needs-input-form"
+          class="flex flex-col items-start gap-[11px]"
+          phx-submit="answer_input"
+        >
+          <div class="w-full">
+            <.boxed_field
+              id="needs-input-answer"
+              commit={:form}
+              multiline
+              rows="3"
+              form={@answer_form}
+              field={:body}
+              input_class="w-full"
+              placeholder="Type your answer — the AI picks up where it left off…"
+              phx-hook="SubmitOnCmdEnter"
+            />
+          </div>
+          <button
+            id="needs-input-send"
+            type="submit"
+            class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
+            style="background:oklch(0.70 0.13 65);"
+          >
+            Send to AI →
+          </button>
+        </.form>
+      </div>
+    </section>
+    """
+  end
+
   # SUB-TASKS progress bar width; an empty list is 0% (never divides by zero).
   defp sub_task_pct(%{total: 0}), do: 0
   defp sub_task_pct(%{done: done, total: total}), do: round(done * 100 / total)
@@ -2523,6 +2675,96 @@ defmodule RelayWeb.CoreComponents do
   end
 
   defp board_card_progress(_card), do: nil
+
+  # ---------- RLY-137: Run tab helpers ----------
+
+  # `RunComponents` reads plain field access — a map, not the raw `%Schemas.Run{}`,
+  # decouples it from the engine's schema. `flow_version` is nil: the run points at
+  # the live flow row and carries no version column yet (RLY-152), mirroring
+  # `Relay.Runs.run_summaries_for_board/1`.
+  defp run_map(run) do
+    %{
+      status: run.status,
+      flow_key: run.flow_key,
+      flow_version: nil,
+      current_node: run.current_node,
+      started_at: run.started_at,
+      finished_at: run.finished_at
+    }
+  end
+
+  defp run_totals(run) do
+    executions = run.node_executions || []
+
+    %{
+      duration_s: executions |> Enum.map(&execution_duration_s/1) |> Enum.reject(&is_nil/1) |> Enum.sum(),
+      cost: sum_costs(Enum.map(executions, & &1.cost)),
+      nodes: executions |> Enum.map(& &1.node_key) |> Enum.uniq() |> length(),
+      attempts: length(executions)
+    }
+  end
+
+  # The schema stores no duration column — duration is the started_at/finished_at gap;
+  # an in-flight execution (`finished_at: nil`) contributes nothing.
+  defp execution_duration_s(%{started_at: s, finished_at: f}) when not is_nil(s) and not is_nil(f),
+    do: DateTime.diff(f, s)
+
+  defp execution_duration_s(_execution), do: nil
+
+  defp sum_costs(costs) do
+    case Enum.reject(costs, &is_nil/1) do
+      [] -> nil
+      present -> Enum.reduce(present, Decimal.new(0), &Decimal.add/2)
+    end
+  end
+
+  defp history_entries([_latest | prior]) do
+    count = length(prior)
+
+    prior
+    |> Enum.with_index()
+    |> Enum.map(fn {run, index} ->
+      %{
+        run: run_map(run),
+        number: count - index,
+        node_executions: run.node_executions,
+        totals: run_totals(run)
+      }
+    end)
+  end
+
+  defp baton_label(%{status: :running}, _card), do: "BATON · FLOW"
+  defp baton_label(%{status: :parked}, _card), do: "BATON · YOU"
+  defp baton_label(%{status: :done}, _card), do: "BATON · DONE"
+  defp baton_label(%{status: :failed}, _card), do: "BATON · STOPPED"
+
+  defp baton_label(%{status: :cancelled}, card), do: "BATON · " <> String.upcase(human_owner_name(card) || "CLAIMED")
+
+  defp human_owner_name(%{owners: owners}) when is_list(owners) do
+    Enum.find_value(owners, fn
+      %{actor_type: :user, user: %{name: name}} when is_binary(name) -> name
+      _owner -> nil
+    end)
+  end
+
+  defp human_owner_name(_card), do: nil
+
+  defp drawer_task_progress(card) do
+    case Cards.sub_task_progress(card) do
+      %{total: 0} -> nil
+      progress -> progress
+    end
+  end
+
+  defp drawer_tab_style(true) do
+    "font-size:13px;padding:0 0 10px 0;font-weight:600;color:oklch(0.30 0.02 255);" <>
+      "border-bottom:2px solid var(--color-secondary);margin-bottom:-1px;background:transparent;border-left:none;border-right:none;border-top:none;cursor:pointer;"
+  end
+
+  defp drawer_tab_style(false) do
+    "font-size:13px;padding:0 0 10px 0;font-weight:500;color:oklch(0.55 0.02 255);" <>
+      "background:transparent;border:none;cursor:pointer;"
+  end
 
   defp owner_name(%{actor_type: :agent}), do: "Relay AI"
   defp owner_name(%{actor_type: :user, user: user}), do: user.name || user.email

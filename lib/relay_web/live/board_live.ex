@@ -26,7 +26,9 @@ defmodule RelayWeb.BoardLive do
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Events
+  alias Relay.Flows
   alias Relay.Members
+  alias Relay.Runs
   alias Schemas.Board
   alias Schemas.Card
   alias Schemas.Stage
@@ -348,6 +350,17 @@ defmodule RelayWeb.BoardLive do
         reject_error={@reject_error}
         archived={Card.archived?(@selected_card)}
         body_loading={@body_loading?}
+        drawer_tab={@drawer_tab}
+        runs={@card_runs}
+        run_flow={@card_runs != [] && Enum.find(@flows, &(&1.key == hd(@card_runs).flow_key))}
+        queued_flow={
+          Runs.queued_flow(
+            @selected_card,
+            Cards.active_owner_type(@selected_card),
+            @flows,
+            Map.get(@run_summaries, @selected_card.id)
+          )
+        }
       />
       <div
         :if={@archived_open}
@@ -449,6 +462,7 @@ defmodule RelayWeb.BoardLive do
 
     if connected?(socket) do
       Events.subscribe(board.id)
+      Runs.subscribe(board.id)
       :timer.send_interval(@health_tick_ms, self(), :health_tick)
     end
 
@@ -481,6 +495,8 @@ defmodule RelayWeb.BoardLive do
       |> assign(:members, Members.list_members(board))
       |> assign(:reassign_open, false)
       |> assign(:body_loading?, false)
+      |> assign(:flows, Flows.list_flows(board))
+      |> assign(:run_summaries, Runs.run_summaries_for_board(board))
       |> stream_configure(:conversation, dom_id: &conversation_dom_id/1)
       |> stream_configure(:activity, dom_id: &activity_dom_id/1)
 
@@ -513,6 +529,10 @@ defmodule RelayWeb.BoardLive do
 
     case socket.assigns.selected_card do
       %Card{id: ^card_id} ->
+        runs = Runs.list_runs_for_card(card)
+        latest = List.first(runs)
+        default_tab = if latest && latest.status in [:running, :parked], do: :run, else: :detail
+
         {:noreply,
          socket
          |> assign(:selected_card, card)
@@ -522,6 +542,8 @@ defmodule RelayWeb.BoardLive do
          |> assign(:answer_step, 0)
          |> assign(:answer_values, %{})
          |> assign_review(card)
+         |> assign(:card_runs, runs)
+         |> assign(:drawer_tab, default_tab)
          |> stream(:conversation, conversation, reset: true)
          |> stream(:activity, activity, reset: true)}
 
@@ -1224,6 +1246,12 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("take_over", _params, socket), do: {:noreply, socket}
 
+  # RLY-137 — the drawer's Detail | Run | Activity tab bar: a local assign, no server
+  # round trip beyond the click itself.
+  def handle_event("drawer_tab", %{"tab" => tab}, socket) when tab in ~w(detail run activity) do
+    {:noreply, assign(socket, :drawer_tab, String.to_existing_atom(tab))}
+  end
+
   # MMF 18 — realtime application of Relay.Events broadcasts. Every open
   # session applies every event for its board, including the acting
   # session's own echo: streams upsert by DOM id and counts/stages are
@@ -1279,6 +1307,21 @@ defmodule RelayWeb.BoardLive do
 
   def handle_info({:stages_changed, _board_id}, socket) do
     {:noreply, reload_board(socket)}
+  end
+
+  # RLY-137 — coarse run-progress signal: refetch rather than patch state from the
+  # payload. Refreshes every card face's summary, and — when the changed run belongs
+  # to the open drawer's card — that card's own run timeline.
+  def handle_info({:run_changed, card_id}, socket) do
+    socket = assign(socket, :run_summaries, Runs.run_summaries_for_board(socket.assigns.board))
+
+    socket =
+      case socket.assigns.selected_card do
+        %Card{id: ^card_id} = card -> assign(socket, :card_runs, Runs.list_runs_for_card(card))
+        _other -> socket
+      end
+
+    {:noreply, socket}
   end
 
   # RLY-10 — a board rename (this or another session): retitle live. The
@@ -1657,6 +1700,8 @@ defmodule RelayWeb.BoardLive do
     |> assign(:answer_values, %{})
     |> assign(:answer_form, empty_answer_form())
     |> assign_review(card)
+    # the card may have parked/resumed a run since the last refresh
+    |> assign(:card_runs, Runs.list_runs_for_card(card))
     |> stream(:conversation, Activity.list_conversation(card), reset: true)
     |> stream(:activity, activity, reset: true)
     |> stream_insert(stream_name(card.stage_id), card)
@@ -2047,6 +2092,8 @@ defmodule RelayWeb.BoardLive do
           |> assign(:reject_open, false)
           |> assign(:reject_form, empty_reject_form())
           |> assign(:reject_error, nil)
+          |> assign(:card_runs, [])
+          |> assign(:drawer_tab, :detail)
           |> stream(:conversation, [], reset: true)
           |> stream(:activity, [], reset: true)
 
