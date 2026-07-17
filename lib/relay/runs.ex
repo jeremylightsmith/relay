@@ -79,11 +79,15 @@ defmodule Relay.Runs do
   must target a real node, and the card must have no active run (the
   partial unique index backs this against races). Creates the run + first
   execution + queued job in one transaction, moves the card to the flow's
-  works-in stage as `:agent` (the snap sets `:working`; the claim rule
-  assigns Relay AI on an unowned card), broadcasts, starts a `RunServer`,
-  and dispatches. A card already sitting in the works-in stage is NOT
-  re-moved (rejection re-entry: a gratuitous append-move would clear the
-  CHANGES REQUESTED banner via `move_card`'s rejection-clearing rule).
+  works-in stage as `:agent` (the claim rule assigns Relay AI on an
+  unowned card), then explicitly sets the card `:working` via
+  `set_status/3` — ADR 0003's move-time snap only overrides an INVALID
+  status, and `:ready` is already valid on a work-type stage, so the
+  hand-over to the AI needs its own explicit status set. Broadcasts,
+  starts a `RunServer`, and dispatches. A card already sitting in the
+  works-in stage is NOT re-moved (rejection re-entry: a gratuitous
+  append-move would clear the CHANGES REQUESTED banner via
+  `move_card`'s rejection-clearing rule) but is still set `:working`.
   `opts[:context]` is a STRING-keyed map (e.g.
   `%{"changes_requested" => note}`) merged into every job payload's vars.
   """
