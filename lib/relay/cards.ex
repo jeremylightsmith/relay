@@ -596,22 +596,44 @@ defmodule Relay.Cards do
   end
 
   @doc """
-  The board's three-way needs-you rollup: `%{needs_input: n, in_review: n, awaiting_human: n}`
-  (total needs-you = their sum). Loads the board's active cards + stages once and folds the
+  The board's four-way needs-you rollup:
+  `%{needs_input: n, in_review: n, awaiting_human: n, agent_stalled: n}` (total
+  needs-you = their sum). `:agent_stalled` (RLY-148) counts active cards whose derived
+  agent health is `:stale` or `:stopped` and that no earlier bucket already counted —
+  dead agents float up in triage alongside questions and reviews. Health is derived
+  exactly as `RelayWeb.BoardLive` renders it: newest entry vs heartbeat, active AI
+  owner, AI-enabled stage. Loads the board's active cards + stages once and folds the
   derivations. Used by the board API payload (§6.1) and the boards-home tiles (§6.3).
   """
   def needs_you_rollup(%Board{} = board) do
     stages = Boards.list_stages(board)
     cards = list_cards(board)
+    newest = Activity.newest_per_card(Enum.map(cards, & &1.id))
+    ai_stage_ids = MapSet.new(for stage <- stages, stage.ai_enabled, do: stage.id)
+    now = DateTime.utc_now()
 
-    Enum.reduce(cards, %{needs_input: 0, in_review: 0, awaiting_human: 0}, fn card, acc ->
+    acc = %{needs_input: 0, in_review: 0, awaiting_human: 0, agent_stalled: 0}
+
+    Enum.reduce(cards, acc, fn card, acc ->
       cond do
         card.status == :needs_input -> Map.update!(acc, :needs_input, &(&1 + 1))
         card.status == :in_review -> Map.update!(acc, :in_review, &(&1 + 1))
         ready_awaiting_human?(card, stages) -> Map.update!(acc, :awaiting_human, &(&1 + 1))
+        agent_stalled?(card, newest, ai_stage_ids, now) -> Map.update!(acc, :agent_stalled, &(&1 + 1))
         true -> acc
       end
     end)
+  end
+
+  # RLY-148: the same health/1 inputs BoardLive.health_by_card/2 assembles.
+  defp agent_stalled?(card, newest, ai_stage_ids, now) do
+    health(%{
+      newest: Map.get(newest, card.id),
+      heartbeat_at: card.agent_heartbeat_at,
+      ai_active?: active_owner_type(card) == :ai,
+      ai_stage?: MapSet.member?(ai_stage_ids, card.stage_id),
+      now: now
+    }) in [:stale, :stopped]
   end
 
   @feed_statuses [:needs_input, :in_review]

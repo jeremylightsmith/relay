@@ -58,7 +58,8 @@ Text args accept `-` (stdin) or `@path` (file) for long content (specs, plans).
 `ready | working | needs_input | in_review` — there is no `done` status to set. A card
 payload instead carries `done: true` once a `ready` card is parked at the board's terminal
 (rightmost) stage, plus a `needs_you: true/false` fact (and the board payload carries a
-`needs_you` rollup). This means "ready" is used two ways below: **positionally**, a card is
+`needs_you` rollup — `needs_input` / `in_review` / `awaiting_human` / `agent_stalled`). This
+means "ready" is used two ways below: **positionally**, a card is
 "ready to pull" when the column to its right is an AI column (invariant 5); as a **status**,
 `ready` means the card isn't actively `working`/blocked — it's just sitting wherever it is.
 Don't set a `done` status; move the card to its terminal stage instead and Done follows.

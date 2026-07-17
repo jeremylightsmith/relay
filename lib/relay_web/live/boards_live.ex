@@ -204,8 +204,8 @@ defmodule RelayWeb.BoardsLive do
         card_count: length(cards),
         stage_count: Enum.count(stages, &is_nil(&1.parent_id)),
         ai_active?: Enum.any?(cards, &(&1.status == :working and Cards.active_owner_type(&1) == :ai)),
-        needs_you_count: rollup.needs_input + rollup.in_review + rollup.awaiting_human,
-        needs_you_two_type: rollup.needs_input + rollup.in_review,
+        needs_you_count: rollup.needs_input + rollup.in_review + rollup.awaiting_human + rollup.agent_stalled,
+        needs_you_two_type: rollup.needs_input + rollup.in_review + rollup.agent_stalled,
         members: Members.list_members(board)
       }
     end
@@ -213,6 +213,9 @@ defmodule RelayWeb.BoardsLive do
 
   # Which needs-you flavor the badge shows (decision 5 / ADR 0005): embedded, the
   # two-type count that matches the Needs-you tab; on the web, the three-type sum.
+  # RLY-148 adds `agent_stalled` to BOTH flavors — a dead agent needs a human wherever
+  # the badge renders (the mobile Needs-you tab/feed deliberately stays status-based;
+  # revisit with RLY-137).
   defp badge_count(board_row, true = _embed), do: board_row.needs_you_two_type
   defp badge_count(board_row, false = _embed), do: board_row.needs_you_count
 
