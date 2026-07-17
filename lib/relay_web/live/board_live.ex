@@ -222,7 +222,6 @@ defmodule RelayWeb.BoardLive do
                         @stage_force_closed
                       )
                   }
-                  collapsible={stage.collapsed_by_default}
                   main_collapsed={
                     lane_collapsed?(stage.id, :main, @stage_counts, @force_open, @force_closed)
                   }
@@ -736,8 +735,8 @@ defmodule RelayWeb.BoardLive do
     {:noreply, assign(socket, :pager_mode, active)}
   end
 
-  # RLY-111 — the header control on a collapsed-by-default stage re-collapses it for
-  # this session, without a reload. Complementary to expand_stage.
+  # RLY-111/RLY-145 — clicking an expanded stage's name collapses it for this
+  # session, without a reload. Works on every stage; complementary to expand_stage.
   def handle_event("collapse_stage", %{"stage-id" => stage_id}, socket) do
     case parse_int(stage_id) do
       nil ->

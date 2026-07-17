@@ -71,7 +71,7 @@ defmodule RelayWeb.BoardLiveCollapseTest do
       refute has_element?(view, "#stage-col-5")
     end
 
-    test "clicking the strip expands it, and the header control re-collapses it",
+    test "clicking the strip expands it, and the stage name re-collapses it",
          %{conn: conn, code: code, user: user} do
       {:ok, _} = Boards.update_stage(code, %{collapsed_by_default: true})
       {:ok, _} = Cards.create_card(code, %{title: "Held"})
@@ -81,10 +81,10 @@ defmodule RelayWeb.BoardLiveCollapseTest do
 
       view |> element("#stage-strip-#{code.id}") |> render_click()
       assert has_element?(view, "#stage-col-5")
-      assert has_element?(view, "#stage-col-5-collapse")
+      assert has_element?(view, "#stage-col-5-name")
       refute has_element?(view, "#stage-strip-#{code.id}")
 
-      view |> element("#stage-col-5-collapse") |> render_click()
+      view |> element("#stage-col-5-name") |> render_click()
       assert has_element?(view, "#stage-strip-#{code.id} .stage-count", "1")
       refute has_element?(view, "#stage-col-5")
     end
@@ -104,7 +104,7 @@ defmodule RelayWeb.BoardLiveCollapseTest do
       refute has_element?(fresh, "#stage-col-5")
     end
 
-    test "the collapse control does not render on a normal stage",
+    test "clicking any stage's name collapses it to the strip (RLY-145)",
          %{conn: conn, code: code, user: user} do
       {:ok, _} = Cards.create_card(code, %{title: "Plain"})
 
@@ -112,7 +112,26 @@ defmodule RelayWeb.BoardLiveCollapseTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, "#stage-col-5")
-      refute has_element?(view, "#stage-col-5-collapse")
+      refute has_element?(view, "#stage-strip-#{code.id}")
+
+      view |> element("#stage-col-5-name") |> render_click()
+      assert has_element?(view, "#stage-strip-#{code.id} .stage-count", "1")
+      refute has_element?(view, "#stage-col-5")
+    end
+
+    test "a name-click collapse is session-only — reload restores the expanded stage with its cards",
+         %{conn: conn, code: code, user: user} do
+      {:ok, _} = Cards.create_card(code, %{title: "Sticky"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      view |> element("#stage-col-5-name") |> render_click()
+      assert has_element?(view, "#stage-strip-#{code.id}")
+
+      {:ok, fresh, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert has_element?(fresh, "#stage-col-5")
+      assert has_element?(fresh, "#stage-col-5-cards .board-card .card-title", "Sticky")
+      refute has_element?(fresh, "#stage-strip-#{code.id}")
     end
 
     test "dropping a card onto the strip moves it in without expanding the stage",

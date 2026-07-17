@@ -2590,9 +2590,9 @@ defmodule RelayWeb.CoreComponents do
   When `collapsed` (MMF 12c), the stage renders instead as the mockup's 44px dashed
   vertical strip — owner swatch, rotated name, total count — which remains a
   `.stage-drop[data-stage-id]` drop zone and emits `"expand_stage"`
-  (`phx-value-stage-id`) on click. When `collapsible` (RLY-111 — the stage is
-  collapsed-by-default), the expanded header shows a ghost collapse button that emits
-  `"collapse_stage"` (`phx-value-stage-id`).
+  (`phx-value-stage-id`) on click. The expanded header's stage name is itself the
+  collapse control (RLY-145): clicking it emits `"collapse_stage"`
+  (`phx-value-stage-id`), completing the strip's expand/collapse toggle on every stage.
 
   ## Examples
 
@@ -2638,12 +2638,6 @@ defmodule RelayWeb.CoreComponents do
   attr :main_collapsed, :boolean,
     default: false,
     doc: "render the main 'In progress' lane as a 44px strip (RLY-1 item 3)"
-
-  attr :collapsible, :boolean,
-    default: false,
-    doc:
-      "RLY-111 — the stage is collapsed-by-default, so its expanded header offers a " <>
-        "re-collapse control (emits \"collapse_stage\" with phx-value-stage-id)"
 
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
 
@@ -2722,7 +2716,14 @@ defmodule RelayWeb.CoreComponents do
       >
         <header style="display:flex;align-items:center;gap:8px;padding:15px 15px 12px 15px;flex:0 0 auto;border-bottom:1px solid var(--color-base-300);">
           <.stage_type_icon type={@type} />
-          <h3 style="font-size:13px;font-weight:600;letter-spacing:-0.01em;color:var(--color-base-content);">
+          <h3
+            id={"#{@id}-name"}
+            class="stage-name"
+            phx-click="collapse_stage"
+            phx-value-stage-id={@stage_id}
+            aria-label={"Collapse stage #{@name}"}
+            style="font-size:13px;font-weight:600;letter-spacing:-0.01em;color:var(--color-base-content);cursor:pointer;"
+          >
             {@name}
           </h3>
           <span
@@ -2752,19 +2753,6 @@ defmodule RelayWeb.CoreComponents do
             wip {@total_count}/{@wip_limit}
           </span>
           <span style="flex:1;"></span>
-          <button
-            :if={@collapsible}
-            type="button"
-            id={"#{@id}-collapse"}
-            class="stage-collapse btn btn-ghost btn-xs btn-circle"
-            phx-click="collapse_stage"
-            phx-value-stage-id={@stage_id}
-            title="Collapse stage"
-            aria-label={"Collapse stage #{@name}"}
-            style="color:oklch(0.52 0.02 255);flex:0 0 auto;"
-          >
-            <.icon name="hero-chevron-left" class="size-4" />
-          </button>
           <button
             :if={@composable and !@composing and !@read_only}
             type="button"
