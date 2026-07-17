@@ -18,7 +18,11 @@ in the right worktree, stream output, report a typed outcome. Smaller than today
   needs-input re-entry job carries the session id back and the executor invokes
   `claude -p --resume <session>` so the agent continues with its working context intact.
 - Legacy `relay watch` keeps working unchanged — both modes coexist until 08/09 finish the
-  migration.
+  migration. **Executor worktrees get their own namespace** (e.g.
+  `.claude/worktrees/exec-*`), never the watcher's `clean`/`work` pools: both processes
+  run simultaneously during the migration, and the watcher refreshes its shared worktree
+  whenever *its own* slots are idle — it can't see executor jobs, so a shared directory
+  would be clobbered mid-run.
 
 **Out of scope.** Any dispatch/WIP logic (server-side now), removing legacy watch.
 

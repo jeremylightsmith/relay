@@ -16,7 +16,10 @@ features. Expect to split this at planning time; it is deliberately last.
 - Task check-off mirrors to the card's `sub_tasks` as nodes complete (the old RLY thread,
   now native).
 - Retire the Code entry from `relay_config.json` and the legacy watch path once the flow
-  survives dogfooding on real cards.
+  survives dogfooding on real cards. **Keep the legacy path revivable until then** (config
+  entry restorable, watch code not deleted in the cutover PR): after this cutover the
+  pipeline that ships fixes IS the new engine — if it breaks, fixes get hand-played, so
+  the rollback lever must outlive the celebration.
 
 **Known losses to reckon with (from the ADR).** The Claude Workflow engine's internal
 journal/caching/StructuredOutput retries don't come along; per-node structured output is

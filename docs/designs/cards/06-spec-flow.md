@@ -12,6 +12,12 @@ in play. Everything before this card is testable in isolation; this is where it 
   its questions flow through needs-input; the answer resumes the node; success moves the
   card to `Spec:Review`.
 - Retire the Spec entry from `relay_config.json` (Plan/Code entries stay on legacy watch).
+- **Flows are disabled by default** (per-flow enable flag). The cutover is a deliberate
+  ritual, in order: merge + deploy → pull ROOT and restart the watcher with Spec removed
+  from `relay_config.json` → enable the Spec flow's trigger server-side → watch the
+  runners view. The watcher loads its config once at startup, so skipping the restart
+  leaves BOTH dispatchers pulling Spec cards — double dispatch is the failure mode this
+  ritual exists to prevent. (Same ritual repeats for 08 and 09.)
 
 **Out of scope.** Plan/Code migration (08/09), run UI (07 — the timeline note + logs are
 enough here).
