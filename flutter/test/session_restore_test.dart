@@ -8,6 +8,7 @@ import 'package:relay_mobile/config.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
 import 'package:relay_mobile/features/auth/http_providers.dart';
 import 'package:relay_mobile/features/auth/session_store.dart';
+import 'package:relay_mobile/features/board/board_prefs.dart';
 import 'package:relay_mobile/features/push/push_service.dart';
 
 import 'support/fake_push_platform.dart';
@@ -18,10 +19,12 @@ const _user = {'id': 1, 'name': 'Dana', 'email': 'dana@acme.co'};
 ProviderContainer containerWith({
   required SessionStore store,
   required StubAdapter adapter,
+  BoardPrefs? boardPrefs,
 }) {
   final container = ProviderContainer(
     overrides: [
       sessionStoreProvider.overrideWithValue(store),
+      boardPrefsProvider.overrideWithValue(boardPrefs ?? InMemoryBoardPrefs()),
       pushPlatformProvider.overrideWithValue(FakePushPlatform()),
       // The real dio, minus the socket: same jar + interceptor, stubbed adapter.
       dioProvider.overrideWith(
@@ -151,6 +154,23 @@ void main() {
     await container.read(authProvider.notifier).signOut();
 
     expect(store.value, isNull);
+    expect(container.read(authProvider).status, AuthStatus.signedOut);
+  });
+
+  test('signing out forgets the last-viewed board (RLY-95)', () async {
+    final store = InMemorySessionStore('cookie-value');
+    final boardPrefs = InMemoryBoardPrefs('marketing-site');
+    final adapter = StubAdapter(body: {'success': true, 'user': _user});
+    final container = containerWith(
+      store: store,
+      adapter: adapter,
+      boardPrefs: boardPrefs,
+    );
+    await restore(container);
+
+    await container.read(authProvider.notifier).signOut();
+
+    expect(boardPrefs.slug, isNull);
     expect(container.read(authProvider).status, AuthStatus.signedOut);
   });
 }

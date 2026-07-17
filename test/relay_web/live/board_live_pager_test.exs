@@ -54,7 +54,7 @@ defmodule RelayWeb.BoardLivePagerTest do
       assert chip_ids == expected
     end
 
-    test "chips carry counts (main lane + sublanes) and the header shows board name + total",
+    test "chips carry counts (main lane + sublanes) and the header shows the board name",
          %{conn: conn, board: board, spec: spec} do
       {:ok, _card} = Cards.create_card(spec, %{title: "Counted"})
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
@@ -63,7 +63,7 @@ defmodule RelayWeb.BoardLivePagerTest do
 
       header = view |> element("#board-pager-header") |> render()
       assert header =~ board.name
-      assert header =~ "1 card"
+      refute header =~ "1 card"
     end
 
     test "chip counts update live when a card is created elsewhere",
