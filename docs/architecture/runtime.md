@@ -12,6 +12,7 @@ One flat `one_for_one` supervisor (`Relay.Supervisor`, started by `Relay.Applica
 | `Phoenix.PubSub` (`Relay.PubSub`) | all topics below |
 | `RelayWeb.ApiLog` | in-memory recent API request log for the admin page |
 | `Relay.BoardWatch` | ETS owner for per-board version counters (RLY-12) |
+| `Relay.RunnerPresence` | ETS owner for per-board runner heartbeat snapshots (RLY-141); 10-min sweep prunes runners silent >24h |
 | `Relay.Activity.LogSink` | debounces runner log lines into one `insert_all` per burst (RLY-112) |
 | `Relay.Activity.Pruner` | ages `:action` chatter out after 14 days; first sweep one interval after boot |
 | `Task.Supervisor` (`Relay.Push.TaskSupervisor`) | push dispatch off the caller's process (RLY-81) |
@@ -24,6 +25,7 @@ One flat `one_for_one` supervisor (`Relay.Supervisor`, started by `Relay.Applica
 | --- | --- | --- | --- |
 | `board:<board_id>` | `Relay.Events` — contexts only, after successful mutations | `{:card_upserted, card}`, `{:card_moved, card, from_stage_id}`, `{:card_archived, card}`, `{:timeline_appended, card_id, entry}`, `{:card_log_appended, card_id, entries}`, `{:stages_changed, board_id}`, `{:board_updated, board}` | every open `BoardLive` for that board |
 | `board:<board_id>:logs` | `Relay.AgentLog` | `{:agent_log, entry}` — live runner feed lines | the board's log sheet, only while open (no backfill by design) |
+| `board:<board_id>:runners` | `Relay.RunnerPresence` | `{:runner_beat, runner}` — a runner's latest heartbeat snapshot | `BoardRunnersLive` (which also refetches on its own ~10s tick, since a dead runner emits no events) |
 | `api_log` | `RelayWeb.ApiLog` | `{:api_log, entry}` | `Admin.ApiLive` |
 
 Two invariants make the seam trustworthy: **only contexts broadcast** domain events (so
@@ -68,4 +70,5 @@ sequenceDiagram
 
 ---
 *Sources of truth: `lib/relay/application.ex`, `lib/relay/events.ex`,
-`lib/relay/agent_log.ex`, `lib/relay/board_watch.ex`, `lib/relay_web/api_log.ex`.*
+`lib/relay/agent_log.ex`, `lib/relay/board_watch.ex`, `lib/relay/runner_presence.ex`,
+`lib/relay_web/api_log.ex`.*

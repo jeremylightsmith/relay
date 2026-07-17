@@ -5,6 +5,7 @@ defmodule RelayWeb.Api.BoardController do
   alias Relay.Boards
   alias Relay.BoardWatch
   alias Relay.Cards
+  alias Relay.RunnerPresence
 
   action_fallback RelayWeb.Api.FallbackController
 
@@ -29,9 +30,22 @@ defmodule RelayWeb.Api.BoardController do
   end
 
   def heartbeat(conn, params) do
+    board = conn.assigns.current_board
     refs = Map.get(params, "refs", [])
     refs = if is_list(refs), do: refs, else: []
-    {stamped, _} = Cards.touch_heartbeats(conn.assigns.current_board, refs)
+    {stamped, _} = Cards.touch_heartbeats(board, refs)
+
+    # RLY-141: a runner_id marks the presence-carrying payload; a legacy refs-only
+    # beat (an old runner binary) still stamps cards above and never appears in
+    # presence.
+    case params do
+      %{"runner_id" => runner_id} when is_binary(runner_id) and runner_id != "" ->
+        :ok = RunnerPresence.beat(board.id, params)
+
+      _ ->
+        :ok
+    end
+
     json(conn, %{stamped: stamped})
   end
 

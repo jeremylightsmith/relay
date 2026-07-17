@@ -30,6 +30,7 @@ defmodule Relay do
       Events,
       Markdown,
       Members,
-      Push
+      Push,
+      RunnerPresence
     ]
 end
