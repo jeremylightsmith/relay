@@ -257,11 +257,17 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
   /// same reason as [advanceAfter]'s applyFeed: a cold container must not pay
   /// for a build-time fetch. The walk itself never reads the feed — snapshot
   /// semantics (D3 of RLY-88) are untouched.
+  ///
+  /// Uses [FeedController.reconcile], not [FeedController.refresh]: this is an
+  /// automatic background fetch, not a user-initiated one, so a transient
+  /// failure must not flip the optimistically-cleared inbox to the full-screen
+  /// error state — especially since this races [advanceAfter]'s own
+  /// authoritative `applyFeed` at the end of the snapshot.
   void _reconcileFeed(QueueItem item) {
     if (!ref.exists(feedControllerProvider)) return;
     final feed = ref.read(feedControllerProvider.notifier);
     feed.removeRow(ref: item.ref, boardSlug: item.boardSlug);
-    unawaited(feed.refresh());
+    unawaited(feed.reconcile());
   }
 
   /// Record [banner] for the screen we land on, step the snapshot, and return the

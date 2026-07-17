@@ -104,6 +104,25 @@ class FeedController extends AsyncNotifier<FeedState> {
     );
   }
 
+  /// RLY-128 D2: the background reconcile fired after an optimistic [removeRow].
+  /// Unlike [refresh] — reserved for *user-initiated* fetches (pull-to-refresh,
+  /// Retry, app-resume) where an [AsyncError] is the right way to surface a real
+  /// failure — this is an automatic fetch the human never asked for. Flipping a
+  /// good [AsyncData] to [AsyncError] here would replace the optimistically
+  /// cleared inbox with the full-screen error state over a transient blip, and
+  /// it races [ReviewQueue.advanceAfter]'s own authoritative `applyFeed`. So on
+  /// failure this leaves the current state (and [lastFetchedAt]) exactly as
+  /// [removeRow] left it; on success it adopts the fresh page like [refresh]
+  /// does.
+  Future<void> reconcile() async {
+    try {
+      state = AsyncValue.data(await _load());
+    } catch (_) {
+      // Swallow — an optimistic removal must stand until the next fetch that
+      // actually succeeds, not be undone by a flaky background blip.
+    }
+  }
+
   /// Adopt a page the caller already fetched. RLY-89: the review-queue walk's own
   /// end-of-snapshot refetch (`ReviewQueue.advanceAfter`) lands exactly the rows
   /// this inbox needs at exactly the moment it needs them — this is the seam that

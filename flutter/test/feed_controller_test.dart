@@ -193,6 +193,62 @@ void main() {
     expect(container.read(feedControllerProvider).hasError, isTrue);
   });
 
+  test('reconcile adopts a fresh page on success, same as refresh', () async {
+    var now = DateTime.utc(2026, 7, 16, 12);
+    final repo = FakeFeedRepository(page: feedPage([makeRow(ref: 'RLY-1')]));
+    final container = harness(repo: repo, clock: () => now);
+    await container.read(feedControllerProvider.future);
+
+    now = now.add(const Duration(seconds: 60));
+    repo.page = feedPage([makeRow(ref: 'RLY-9')]);
+    await container.read(feedControllerProvider.notifier).reconcile();
+
+    expect(
+      container.read(feedControllerProvider).value!.rows.single.ref,
+      'RLY-9',
+    );
+    expect(repo.calls, 2);
+
+    // The fresh page also reset the staleness clock, same as applyFeed/refresh.
+    await container.read(feedControllerProvider.notifier).refreshIfStale();
+    expect(repo.calls, 2, reason: 'reconcile stamped lastFetchedAt too');
+  });
+
+  test(
+    'reconcile swallows a failure and leaves the optimistic state untouched '
+    '(RLY-128: it is an automatic background fetch, not user-initiated)',
+    () async {
+      final repo = FakeFeedRepository(
+        page: feedPage([makeRow(ref: 'RLY-1'), makeRow(ref: 'RLY-2')]),
+      );
+      final container = harness(repo: repo);
+      await container.read(feedControllerProvider.future);
+
+      final notifier = container.read(feedControllerProvider.notifier);
+      notifier.removeRow(ref: 'RLY-1', boardSlug: 'rly');
+      expect(
+        container.read(feedControllerProvider).value!.rows.map((r) => r.ref),
+        ['RLY-2'],
+      );
+
+      repo.error = const ApiException('down');
+      await notifier.reconcile();
+
+      expect(
+        container.read(feedControllerProvider).hasError,
+        isFalse,
+        reason:
+            'a flaky background reconcile must not replace the '
+            'optimistically-cleared inbox with the error screen',
+      );
+      expect(
+        container.read(feedControllerProvider).value!.rows.map((r) => r.ref),
+        ['RLY-2'],
+        reason: 'the optimistic removal from removeRow stands',
+      );
+    },
+  );
+
   test(
     'applyFeed counts as fresh — a focus refresh right after is skipped',
     () async {

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
 import 'package:relay_mobile/features/decisions/decision_api.dart';
 import 'package:relay_mobile/features/decisions/review_queue.dart';
@@ -901,6 +902,36 @@ void main() {
       h.container.read(feedControllerProvider).value!.rows.map((r) => r.ref),
       ['RLY-B'],
     );
+  });
+
+  test('a background reconcile that fails leaves the optimistic removal intact '
+      'instead of flipping the inbox to the error screen', () async {
+    final feed = StagedFeedRepository(page([row('RLY-A'), row('RLY-B')]));
+    final h = harness(api: FakeDecisionApi(), feed: feed);
+    await h.container.read(feedControllerProvider.future);
+
+    final queue = h.container.read(reviewQueueProvider.notifier);
+    queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
+    final dest = await queue.approveCurrent(
+      cardRef: 'RLY-A',
+      boardSlug: 'relay',
+    );
+    expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
+
+    // The background reconcile fails (a transient blip) — mid-queue, so a
+    // real screen (the next card) is already showing, not the inbox.
+    feed.pending.completeError(const ApiException('down'));
+    await pumpEventQueue();
+
+    final inbox = h.container.read(feedControllerProvider);
+    expect(
+      inbox.hasError,
+      isFalse,
+      reason:
+          'a flaky automatic reconcile must not undo the optimistic '
+          'removeRow and replace it with the full-screen error state',
+    );
+    expect(inbox.value!.rows.map((r) => r.ref), ['RLY-B']);
   });
 
   test('an already-handled 422 also drops the row — either way it no longer '
