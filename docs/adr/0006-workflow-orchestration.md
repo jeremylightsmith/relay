@@ -244,14 +244,17 @@ before implementation:
 
 ### Setup & maintenance inventory — everything a board flow is made of
 
-The complete parts list for standing up and maintaining the board flow, today vs. under
-this ADR. The authored default flow definitions live in
-[`docs/designs/flows/`](../designs/flows/README.md).
+The complete parts list for standing up and maintaining the board flow. In every table:
+**Today** = the system running right now; **Tomorrow** = after W1–W11. The authored
+default flow definitions live in [`docs/designs/flows/`](../designs/flows/README.md), and
+the **literal contents of every file and database row — plus the domain-object ER diagram
+and a mid-flight snapshot — are in
+[`docs/designs/flows/worked-example.md`](../designs/flows/worked-example.md)**.
 
 **1. Files in the project repo** (downloaded/scaffolded once, hand-customizable forever —
 this is the developer-owned layer):
 
-| Artifact | Today | Under ADR 0006 | Who customizes it |
+| Artifact | Today | Tomorrow | Who customizes it |
 | --- | --- | --- | --- |
 | `bin/relay` | 995-line CLI + watcher, copied by hand | same file, smaller: CLI + executor (`relay execute`); `relay init` scaffolds a new project (lands with W6) | nobody — it's generic |
 | `relay_config.json` | 42 lines: pipeline (stages/prompts) + pools + poll interval | **gone** — pipeline moves into server-side flows; executor keeps a small local config (worktree namespace, capacity per isolation class) | developer (capacity only) |
@@ -262,8 +265,10 @@ this is the developer-owned layer):
 | `.relay/flows.json` | n/a | per-project flow overrides (W11) | developer |
 | `CLAUDE.md` / `AGENTS.md` | project instructions every agent reads | unchanged | developer |
 
-**2. Domain objects on the server** (new contexts `Relay.Flows` / `Relay.Runs`), with the
-values that represent the current board flow:
+**2. Domain objects on the server — all Tomorrow** (new contexts `Relay.Flows` /
+`Relay.Runs`; nothing corresponds today — this is where the weight moves). Relationships
+and literal example rows: see the
+[worked example](../designs/flows/worked-example.md)'s ER diagram and mid-flight snapshot.
 
 | Object | Key fields | Values for today's flow |
 | --- | --- | --- |
@@ -277,7 +282,7 @@ values that represent the current board flow:
 
 **3. Everything else** (one-time or per-machine setup):
 
-| Item | Today | Under ADR 0006 |
+| Item | Today | Tomorrow |
 | --- | --- | --- |
 | Board stages (Next up, Spec ± Review/Done, Plan ± Done, Code, Review, Done; `ai_enabled`, WIP limits, reject-to) | configured in board settings | unchanged — triggers validate against them |
 | Board API key + `RELAY_URL` env | required for CLI + runner | unchanged (executor uses the same credential) |
