@@ -65,6 +65,13 @@ defmodule RelayWeb.BoardLiveCreateCardTest do
     } do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?embed=1")
 
+      # A fresh board's empty stages render collapsed (MMF 12c) — the header compose
+      # control (`.stage-compose`) only exists once a stage is expanded. Expand one so
+      # this refute actually exercises the `composable={not @embed}` gate instead of
+      # passing vacuously because the header never rendered at all.
+      [backlog | _] = board.stages
+      view |> element("#stage-strip-#{backlog.id}") |> render_click()
+
       refute has_element?(view, ".stage-compose")
       assert has_element?(view, "#board-create-card")
     end
