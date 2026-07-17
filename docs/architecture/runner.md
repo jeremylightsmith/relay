@@ -43,8 +43,13 @@ Each tick (`poll_interval`, default 45s, plus a wake on any job finishing):
 - **Log mirror**: every feed line is queued to a background `LogForwarder` thread that
   batches `POST /api/board/logs` (best-effort: drops on full queue, swallows all errors) —
   landing in `Activity.LogSink` → the card timeline, and `AgentLog` → the live log sheet.
-- **Heartbeat**: a background thread posts the in-flight refs to
-  `POST /api/board/heartbeat` every 30s so the board knows what's actively being worked.
+- **Heartbeat**: a background thread posts to `POST /api/board/heartbeat` every 30s
+  (`interval`) — always, including when idle, so an idle-but-connected runner is
+  distinguishable from no runner at all. The payload carries this runner's identity
+  (`runner_id`, `host`, `started_at`, `interval`) plus a live manifest (`pools`, `jobs`,
+  `refs`) built straight from the watch loop's `pools`/`in_flight` state (RLY-141). It
+  feeds `Relay.RunnerPresence`, which the Runners view reads to show who's running and
+  what's in flight.
 - **Run ids**: each `work()` gets a UUID attached to its log lines (RLY-112) so a card's
   timeline can group lines by run.
 
