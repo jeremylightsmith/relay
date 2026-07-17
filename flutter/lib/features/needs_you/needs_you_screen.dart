@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -24,19 +26,68 @@ class NeedsYouScreen extends ConsumerStatefulWidget {
 
 class _NeedsYouScreenState extends ConsumerState<NeedsYouScreen>
     with WidgetsBindingObserver {
+  GoRouter? _router;
+  bool _atNeedsYou = true;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
   }
 
+  /// RLY-128 D1: refresh when the inbox regains focus. One router listener
+  /// covers both staleness gaps — tab switches AND pop-backs from any pushed
+  /// screen (card host, reject, answer, including webview-driven card edits
+  /// made on the card screen) — throttled by refreshIfStale's 15s guard.
+  /// Subscribed here, not initState: GoRouter.of needs an inherited lookup.
+  /// maybeOf, because the bare-widget tests pump this screen with no router.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_router != null) return;
+    final router = GoRouter.maybeOf(context);
+    if (router == null) return;
+    _router = router;
+    router.routerDelegate.addListener(_onRouteChanged);
+    _atNeedsYou = _location(router) == '/needs-you';
+    // A fresh mount already sitting on /needs-you is itself a focus gain
+    // (the shell rebuilds tab pages). On the very first mount the provider's
+    // own build() is the in-flight fetch, so the guard makes this call free.
+    if (_atNeedsYou) {
+      unawaited(ref.read(feedControllerProvider.notifier).refreshIfStale());
+    }
+  }
+
   @override
   void dispose() {
+    _router?.routerDelegate.removeListener(_onRouteChanged);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
-  /// D2: returning to the app never shows a stale queue.
+  /// The topmost matched location. Deliberately reads `matches.last`, not
+  /// `currentConfiguration.uri` — the latter only reflects *declarative*
+  /// matches (`go`) and is frozen at the underlying tab's location for the
+  /// whole time an *imperative* `push` (card host, reject, answer) sits on
+  /// top of it, so it would never see a pop-back as a location change.
+  String _location(GoRouter router) {
+    final matches = router.routerDelegate.currentConfiguration.matches;
+    return matches.isEmpty ? '' : matches.last.matchedLocation;
+  }
+
+  void _onRouteChanged() {
+    final router = _router;
+    if (router == null || !mounted) return;
+    final here = _location(router) == '/needs-you';
+    if (here && !_atNeedsYou) {
+      unawaited(ref.read(feedControllerProvider.notifier).refreshIfStale());
+    }
+    _atNeedsYou = here;
+  }
+
+  /// D2: returning to the app never shows a stale queue. Deliberately the
+  /// unconditional refresh (RLY-85) — the 15s guard applies only to
+  /// focus-triggered refreshes.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
@@ -44,19 +95,21 @@ class _NeedsYouScreenState extends ConsumerState<NeedsYouScreen>
     }
   }
 
-  /// D4: rows push the card's screen — a needs_input row opens RLY-89's answer screen,
-  /// an in_review row the card host (carrying `kind` so it picks its bottom bar).
-  /// D2: acting on a card refetches.
+  /// D4: rows push the card's screen — a needs_input row opens RLY-89's answer
+  /// screen, an in_review row the card host (carrying `kind` so it picks its
+  /// bottom bar).
   ///
-  /// RLY-88: the tap is also where the review queue is snapshotted — the rows the human
-  /// can see are exactly the queue they will clear, in that order.
-  Future<void> _openCard(FeedRow row) async {
+  /// RLY-88: the tap is also where the review queue is snapshotted — the rows
+  /// the human can see are exactly the queue they will clear, in that order.
+  /// RLY-128: no post-pop refresh here — the focus listener covers the way
+  /// back (and a queue-walk exit via `router.go` never completed this
+  /// method's awaited push anyway), and D2's per-decision reconcile already
+  /// updated the feed.
+  void _openCard(FeedRow row) {
     final rows =
         ref.read(feedControllerProvider).value?.rows ?? const <FeedRow>[];
     ref.read(reviewQueueProvider.notifier).enter(rows: rows, atRef: row.ref);
-    await context.push(routeFor(QueueItem.fromRow(row)));
-    if (!mounted) return;
-    await ref.read(feedControllerProvider.notifier).refresh();
+    unawaited(context.push(routeFor(QueueItem.fromRow(row))));
   }
 
   @override

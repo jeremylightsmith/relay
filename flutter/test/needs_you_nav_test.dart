@@ -114,25 +114,29 @@ void main() {
     },
   );
 
-  testWidgets('returning from a card refetches the feed', (tester) async {
-    final repo = FakeFeedRepository(
-      page: FeedPage(
-        rows: [makeRow(ref: 'RLY-1')],
-        meta: const FeedMeta(count: 1),
-      ),
-    );
-    await pumpShell(tester, repo);
-    expect(repo.calls, 1);
+  testWidgets(
+    'returning from a card inside the 15s guard does not refetch — the focus '
+    'listener is throttled (RLY-128 D1)',
+    (tester) async {
+      final repo = FakeFeedRepository(
+        page: FeedPage(
+          rows: [makeRow(ref: 'RLY-1')],
+          meta: const FeedMeta(count: 1),
+        ),
+      );
+      await pumpShell(tester, repo);
+      expect(repo.calls, 1);
 
-    await tester.tap(find.byKey(const Key('inbox_row_RLY-1')));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('inbox_row_RLY-1')));
+      await tester.pumpAndSettle();
 
-    // Pop back to the inbox via the card host's AppBar back button.
-    await tester.pageBack();
-    await tester.pumpAndSettle();
+      // Pop back to the inbox via the card host's AppBar back button.
+      await tester.pageBack();
+      await tester.pumpAndSettle();
 
-    expect(repo.calls, 2);
-  });
+      expect(repo.calls, 1, reason: 'fetched moments ago — the guard skips');
+    },
+  );
 
   testWidgets(
     'clearing the queue (a legacy row, then a structured one) auto-advances '
