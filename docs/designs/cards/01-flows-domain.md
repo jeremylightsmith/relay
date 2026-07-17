@@ -13,8 +13,11 @@ or code. This card creates the vocabulary everything else builds on.
   outcome, `max_loops`).
 - Validation: node types, outcomes, and isolation from the closed sets; edges reference
   existing nodes; exactly one `start`; trigger stages must exist on the board.
-- Seed the default library as data: Spec and Plan flows (single agent node each), Code flow
-  (branch → implement ⇄ review → precommit gate → smoke → merge, per the ADR sketch).
+- Seed the default library as data. The authored seed definitions live in
+  [`docs/designs/flows/`](../flows/README.md) — a faithful translation of today's
+  `relay_config.json` + `execute-plan.js` (Spec/Plan single agent node each; Code as the
+  full nine-phase graph), with the open modeling questions listed in its README
+  (per-task loops, findings re-entry, mid-run rebase).
 
 **Out of scope.** Executing anything (02), per-project overrides (09), UI.
 

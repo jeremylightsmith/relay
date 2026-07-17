@@ -1,0 +1,18 @@
+// Default flow: Plan — replaces relay_config.json's "Plan" pipeline entry.
+// Seed data for W2 (RLY-131). Illustrative field names per ADR 0006.
+{
+  "key": "plan",
+  "trigger": { "from": "Spec:Done", "stage": "Plan", "done": "Plan:Done" },
+  "isolation": "shared_clean",
+  "nodes": {
+    "write_plan": {
+      "type": "agent",
+      "run": "/write-plan {ref}",
+      "max_retries": 1
+    }
+  },
+  "edges": [
+    { "from": "start", "to": "write_plan" },
+    { "from": "write_plan", "to": "done", "on": "succeeded" }
+  ]
+}

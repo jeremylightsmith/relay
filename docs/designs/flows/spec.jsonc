@@ -1,0 +1,22 @@
+// Default flow: Spec — replaces relay_config.json's "Spec" pipeline entry.
+// Seed data for W2 (RLY-131). Illustrative field names per ADR 0006.
+{
+  "key": "spec",
+  "trigger": { "from": "Next up", "stage": "Spec", "done": "Spec:Review" },
+  "isolation": "shared_clean",
+  "nodes": {
+    // Runs the repo's own skill — developer-owned node behavior (ADR 0006 §5).
+    // No model override: inherits the executor's default, as `claude -p` does today.
+    "brainstorm": {
+      "type": "agent",
+      "run": "/brainstorm {ref}",
+      "max_retries": 1
+    }
+  },
+  "edges": [
+    { "from": "start", "to": "brainstorm" },
+    { "from": "brainstorm", "to": "done", "on": "succeeded" }
+    // needs_input has no edge: the engine parks the run, blocks the card, and
+    // re-enters brainstorm with its session resumed when the human answers.
+  ]
+}

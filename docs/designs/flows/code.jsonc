@@ -1,0 +1,90 @@
+// Default flow: Code — replaces relay_config.json's "Code" entry AND the inside
+// of execute-plan.js (its 9 phases become nodes here). Seed data for W2 (RLY-131).
+// Model tiers preserved from execute-plan.js meta. Illustrative per ADR 0006.
+{
+  "key": "code",
+  "trigger": { "from": "Plan:Done", "stage": "Code", "done": "Review" },
+  "isolation": "exclusive",
+  "nodes": {
+    "branch": {
+      "type": "shell",
+      "run": "git fetch origin --prune && git checkout -B {branch} origin/main"
+    },
+    // execute-plan's per-task loop. The haiku "pick next task" agent is GONE —
+    // "next unchecked task" is the prompt; the loop is the next_task gate below.
+    "implement": {
+      "type": "agent", "model": "sonnet", "effort": "high",
+      "run": "Implement the NEXT unchecked task in the card's plan with strict red/green TDD, then check it off. One task only. If reviewer findings are attached, address them."
+    },
+    "spec_review": {
+      "type": "agent", "model": "sonnet",
+      "run": "Review the just-implemented task against its spec in the plan: nothing missing, nothing extra."
+    },
+    "quality_review": {
+      "type": "agent", "model": "opus",
+      "run": "Judge whether the change is well-built: clean, conventional, meaningfully tested."
+    },
+    // Loop condition as a deterministic gate: succeeded = no unchecked tasks left.
+    "next_task": { "type": "gate", "run": "! grep -q -- '- \\[ \\]' plan.md" },
+    // Today this is a haiku agent (execute-plan's "Final check"); a gate needs no agent.
+    "precommit": { "type": "gate", "run": "mix precommit" },
+    "final_review": {
+      "type": "agent", "model": "opus",
+      "run": "Whole-branch cross-cutting review — issues only visible across the whole diff. Includes the docs/architecture freshness check."
+    },
+    "final_fix": {
+      "type": "agent", "model": "opus",
+      "run": "Fix every blocking finding from the review in one consolidated pass; keep the suite green."
+    },
+    "smoke": {
+      "type": "agent", "model": "opus",
+      "run": "Drive the new behavior end-to-end through the running app; screenshot each new/changed state against its docs/designs artboard."
+    },
+    "smoke_fix": {
+      "type": "agent", "model": "opus",
+      "run": "Fix what the smoke run proved broken; keep the suite green."
+    },
+    "acceptance": {
+      "type": "agent", "model": "opus",
+      "run": "Run the card's acceptance criteria verbatim; return a per-criterion verdict (human-verify criteria don't block)."
+    },
+    "acceptance_fix": {
+      "type": "agent", "model": "opus",
+      "run": "Fix the failing acceptance criteria; keep the suite green."
+    },
+    "post": {
+      "type": "agent", "model": "sonnet",
+      "run": "Post the acceptance checklist and smoke screenshots to card {ref} as one comment."
+    },
+    // Replaces relay_config's four trailing shell steps AND tmp/exec-plan-status:
+    // this node is simply unreachable unless every gate above routed `succeeded`.
+    "merge": {
+      "type": "shell",
+      "run": "git push -u origin {branch} && url=$(gh pr create --fill --head {branch} --base main) && {relay} pr {ref} \"$url\" && gh pr merge {branch} --squash"
+    }
+  },
+  "edges": [
+    { "from": "start",          "to": "branch" },
+    { "from": "branch",         "to": "implement",      "on": "succeeded" },
+    { "from": "implement",      "to": "spec_review",    "on": "succeeded" },
+    { "from": "spec_review",    "to": "implement",      "on": "failed", "max_loops": 3 },
+    { "from": "spec_review",    "to": "quality_review", "on": "succeeded" },
+    { "from": "quality_review", "to": "implement",      "on": "failed", "max_loops": 3 },
+    { "from": "quality_review", "to": "next_task",      "on": "succeeded" },
+    { "from": "next_task",      "to": "implement",      "on": "failed" },
+    { "from": "next_task",      "to": "precommit",      "on": "succeeded" },
+    { "from": "precommit",      "to": "final_fix",      "on": "failed", "max_loops": 2 },
+    { "from": "precommit",      "to": "final_review",   "on": "succeeded" },
+    { "from": "final_review",   "to": "final_fix",      "on": "failed", "max_loops": 2 },
+    { "from": "final_review",   "to": "smoke",          "on": "succeeded" },
+    { "from": "final_fix",      "to": "precommit",      "on": "succeeded" },
+    { "from": "smoke",          "to": "smoke_fix",      "on": "failed", "max_loops": 2 },
+    { "from": "smoke_fix",      "to": "smoke",          "on": "succeeded" },
+    { "from": "smoke",          "to": "acceptance",     "on": "succeeded" },
+    { "from": "acceptance",     "to": "acceptance_fix", "on": "failed", "max_loops": 2 },
+    { "from": "acceptance_fix", "to": "acceptance",     "on": "succeeded" },
+    { "from": "acceptance",     "to": "post",           "on": "succeeded" },
+    { "from": "post",           "to": "merge",          "on": "succeeded" },
+    { "from": "merge",          "to": "done",           "on": "succeeded" }
+  ]
+}
