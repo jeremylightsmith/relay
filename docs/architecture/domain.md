@@ -9,6 +9,15 @@ sharing behavior.
 
 - **Boards** — boards and their stage tree (stages, sub-lanes, review gates, WIP limits,
   `ai_enabled`). Stage/config semantics: [ADR 0003](../adr/0003-card-state-stage-type-validity.md).
+- **Flows** — workflow definitions as declarative graph data (ADR 0006 / RLY-131): per-board
+  rows in the `flows` table (`key`, `enabled`, `isolation`, three trigger stage FKs stored as
+  ids with nilify-on-delete) with the node/edge graph embedded as jsonb; `"start"`/`"done"`
+  are edge sentinels. `Relay.Flows.seed_default_flows!/1` idempotently seeds the default
+  spec/plan/code library (from `Relay.Flows.DefaultLibrary`, the compiled translation of
+  `docs/designs/flows/*.jsonc`) — `Boards.create_board/2` calls it after enabling the
+  `Spec:Review`/`Spec:Done`/`Plan:Done` sub-lanes so every trigger resolves. Flows seed
+  disabled; at most one enabled flow may pull from a stage (partial unique index). Nothing
+  executes yet — the engine is the Runs card (02); versioning is RLY-152.
 - **Cards** — the card lifecycle: create/edit/move/archive, status (`working`,
   `needs_input`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject, needs-input
   questions. Card state × stage validity is governed by
@@ -36,8 +45,8 @@ sharing behavior.
   change never waits on Apple (RLY-81).
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
 
-Planned by [ADR 0006](../adr/0006-workflow-orchestration.md): **Flows** (workflow
-definitions as data) and **Runs** (the execution engine + scheduler).
+Planned by [ADR 0006](../adr/0006-workflow-orchestration.md): **Runs** (the execution engine +
+scheduler).
 
 ## Core schemas
 
@@ -48,6 +57,8 @@ erDiagram
     Stage |o--o{ Stage : "parent / sublanes"
     Stage ||--o{ Card : holds
     Board ||--o{ Card : has
+    Board ||--o{ Flow : "flow definitions"
+    Stage |o--o{ Flow : "trigger (pulls-from / works-in / lands-on)"
     Card ||--o{ SubTask : has
     Card ||--o{ CardOwner : "owners (user or agent)"
     Card ||--o{ Comment : timeline

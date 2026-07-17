@@ -22,13 +22,13 @@ defmodule RelayWeb.BoardLiveTest do
   describe "when logged in" do
     setup :register_and_log_in_user
 
-    test "provisions the default board with 8 stages on first visit", %{conn: conn, user: user} do
+    test "provisions the default board with 11 stages on first visit", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, _view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert [%Board{} = board] = Repo.all(Board)
       assert board.owner_id == user.id
-      assert Repo.aggregate(Stage, :count) == 8
+      assert Repo.aggregate(Stage, :count) == 11
     end
 
     test "titles the board tab with the board name and the · Relay suffix", %{conn: conn, user: user} do
@@ -56,7 +56,7 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, _view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert Repo.aggregate(Board, :count) == 1
-      assert Repo.aggregate(Stage, :count) == 8
+      assert Repo.aggregate(Stage, :count) == 11
     end
 
     test "renders the stage columns in position order", %{conn: conn, user: user} do
@@ -135,7 +135,9 @@ defmodule RelayWeb.BoardLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      for stage <- board.stages do
+      # Top-level (main) stages only — sub-lanes render inside their parent's
+      # expanded column, not as their own top-level strip on a fresh board.
+      for stage <- Enum.filter(board.stages, &is_nil(&1.parent_id)) do
         assert has_element?(
                  view,
                  ~s(#stage-strip-#{stage.id} .stage-type-icon[data-type="#{stage.type}"])
@@ -347,7 +349,9 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(view, "#stage-col-1 .stage-count", "2")
 
-      for stage <- tl(board.stages) do
+      # Top-level (main) stages only — sub-lanes render inside their parent's
+      # expanded column, not as their own top-level strip on a fresh board.
+      for stage <- board.stages |> Enum.filter(&is_nil(&1.parent_id)) |> tl() do
         assert has_element?(view, "#stage-strip-#{stage.id} .stage-count", "0")
       end
     end

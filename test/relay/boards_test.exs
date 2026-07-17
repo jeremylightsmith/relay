@@ -2,12 +2,13 @@ defmodule Relay.BoardsTest do
   use Relay.DataCase, async: true
 
   alias Relay.Boards
+  alias Relay.Flows
   alias Relay.Repo
   alias Schemas.Board
   alias Schemas.Stage
 
   describe "get_or_create_default_board/1" do
-    test "creates a board with defaults and the 8 seeded stages, in position order" do
+    test "creates a board with defaults and the seeded stage tree, in position order" do
       user = insert(:user, name: "Ada Lovelace")
 
       board = Boards.get_or_create_default_board(user)
@@ -25,7 +26,10 @@ defmodule Relay.BoardsTest do
                %Stage{name: "Code", position: 5, type: :work, ai_enabled: true, category: :in_progress},
                %Stage{name: "Review", position: 6, type: :review, ai_enabled: false, category: :in_progress},
                %Stage{name: "Deploy", position: 7, type: :work, ai_enabled: true, category: :in_progress},
-               %Stage{name: "Done", position: 8, type: :done, ai_enabled: false, category: :complete}
+               %Stage{name: "Done", position: 8, type: :done, ai_enabled: false, category: :complete},
+               %Stage{name: "Spec:Review", position: 9, type: :review, ai_enabled: false, category: :planning},
+               %Stage{name: "Spec:Done", position: 10, type: :done, ai_enabled: false, category: :planning},
+               %Stage{name: "Plan:Done", position: 11, type: :done, ai_enabled: false, category: :planning}
              ] = board.stages
     end
 
@@ -37,7 +41,7 @@ defmodule Relay.BoardsTest do
 
       assert board1.id == board2.id
       assert Repo.aggregate(Board, :count) == 1
-      assert Repo.aggregate(Stage, :count) == 8
+      assert Repo.aggregate(Stage, :count) == 11
     end
 
     test "derives the slug from the email local part when the user has no name" do
@@ -143,7 +147,7 @@ defmodule Relay.BoardsTest do
       assert Relay.Members.member?(board, user)
     end
 
-    test "creates a named board, derives slug + key, seeds 8 stages" do
+    test "creates a named board, derives slug + key, seeds 11 stages (8 mains + 3 sub-lanes)" do
       user = insert(:user)
 
       assert {:ok, board} = Boards.create_board(user, %{name: "Launch Board"})
@@ -151,10 +155,22 @@ defmodule Relay.BoardsTest do
       assert board.name == "Launch Board"
       assert board.slug == "launch-board"
       assert board.key == "LAUNC"
-      assert length(board.stages) == 8
+      assert length(board.stages) == 11
 
       assert Enum.map(board.stages, & &1.name) ==
-               ["Backlog", "Next up", "Spec", "Plan", "Code", "Review", "Deploy", "Done"]
+               [
+                 "Backlog",
+                 "Next up",
+                 "Spec",
+                 "Plan",
+                 "Code",
+                 "Review",
+                 "Deploy",
+                 "Done",
+                 "Spec:Review",
+                 "Spec:Done",
+                 "Plan:Done"
+               ]
     end
 
     test "accepts string-keyed params (the create form)" do
@@ -185,6 +201,34 @@ defmodule Relay.BoardsTest do
       assert {:error, changeset} = Boards.create_board(user, %{name: "   "})
       refute changeset.valid?
       assert Repo.aggregate(Board, :count) == before
+    end
+
+    test "seeds the three default flows, disabled, with fully-resolved triggers" do
+      user = insert(:user)
+      {:ok, board} = Boards.create_board(user, %{name: "Flows AC"})
+
+      stage_ids = MapSet.new(board.stages, & &1.id)
+      stage_id = fn name -> Enum.find(board.stages, &(&1.name == name)).id end
+
+      assert [%{key: "code"} = code, %{key: "plan"} = plan, %{key: "spec"} = spec] =
+               Flows.list_flows(board)
+
+      refute Enum.any?([code, plan, spec], & &1.enabled)
+
+      for flow <- [code, plan, spec],
+          trigger_id <- [flow.pulls_from_stage_id, flow.works_in_stage_id, flow.lands_on_stage_id] do
+        assert trigger_id in stage_ids
+      end
+
+      assert spec.pulls_from_stage_id == stage_id.("Next up")
+      assert spec.works_in_stage_id == stage_id.("Spec")
+      assert spec.lands_on_stage_id == stage_id.("Spec:Review")
+      assert plan.pulls_from_stage_id == stage_id.("Spec:Done")
+      assert plan.works_in_stage_id == stage_id.("Plan")
+      assert plan.lands_on_stage_id == stage_id.("Plan:Done")
+      assert code.pulls_from_stage_id == stage_id.("Plan:Done")
+      assert code.works_in_stage_id == stage_id.("Code")
+      assert code.lands_on_stage_id == stage_id.("Review")
     end
   end
 
@@ -224,7 +268,7 @@ defmodule Relay.BoardsTest do
 
       found = Boards.get_board(user, "ops")
       assert found.id == board.id
-      assert length(found.stages) == 8
+      assert length(found.stages) == 11
     end
 
     test "returns an archived board (still loadable)" do

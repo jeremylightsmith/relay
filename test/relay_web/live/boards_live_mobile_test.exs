@@ -36,13 +36,15 @@ defmodule RelayWeb.BoardsLiveMobileTest do
     test "meta line counts top-level stages and non-archived cards, idle with no working AI card",
          %{conn: conn, board: board} do
       spec = Enum.find(board.stages, &(&1.name == "Spec"))
+      code = Enum.find(board.stages, &(&1.name == "Code"))
 
       # A substage must not count toward "N stages" — only parent_id == nil does.
+      # Code seeds no sub-lanes, so this doesn't collide with the seeded ones.
       insert(:stage,
         board: board,
-        parent_id: spec.id,
+        parent_id: code.id,
         position: 99,
-        category: :planning,
+        category: :in_progress,
         type: :done,
         ai_enabled: false
       )

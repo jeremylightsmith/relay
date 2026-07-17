@@ -4,12 +4,13 @@ defmodule Relay.Boards do
   Cards arrive in MMF 03 (`Relay.Cards`).
   """
 
-  use Boundary, deps: [Relay.Events, Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Events, Relay.Flows, Relay.Repo, Schemas]
 
   import Ecto.Query
 
   alias Ecto.Changeset
   alias Relay.Events
+  alias Relay.Flows
   alias Relay.Repo
   alias Schemas.Board
   alias Schemas.Card
@@ -56,8 +57,9 @@ defmodule Relay.Boards do
   @doc """
   Returns the user's board with `stages` preloaded in `position` order,
   creating the board (unique slug derived from the user) and seeding the
-  default 8-stage pipeline on first call. Idempotent per user. Prefers the
-  user's first active (non-archived) board.
+  default 8-stage pipeline, the `Spec:Review`/`Spec:Done`/`Plan:Done`
+  sub-lanes, and the three disabled default flows on first call. Idempotent
+  per user. Prefers the user's first active (non-archived) board.
   """
   def get_or_create_default_board(%User{} = user) do
     board =
@@ -109,9 +111,10 @@ defmodule Relay.Boards do
   @doc """
   Creates a board for `user`: validates `name`, derives a unique `slug` and a
   `key` from the name, sets `owner_id` programmatically, and seeds the
-  default 8-stage pipeline — all in one transaction. External callers pass
-  only a name (`%{name: ...}` / `%{"name" => ...}`). Returns the board with
-  stages preloaded.
+  default 8-stage pipeline, the `Spec:Review`/`Spec:Done`/`Plan:Done`
+  sub-lanes, and the three disabled default flows — all in one transaction.
+  External callers pass only a name (`%{name: ...}` / `%{"name" => ...}`).
+  Returns the board with stages preloaded.
   """
   def create_board(%User{} = user, attrs) do
     name = fetch_name(attrs)
@@ -127,6 +130,7 @@ defmodule Relay.Boards do
       case Repo.insert(changeset) do
         {:ok, board} ->
           seed_stages!(board)
+          seed_lanes_and_flows!(board)
           insert_owner_membership!(board, user)
           Repo.preload(board, stages: from(s in Stage, order_by: s.position))
 
@@ -510,6 +514,19 @@ defmodule Relay.Boards do
       |> Stage.changeset(%{name: name, position: position, category: category, type: type, ai_enabled: ai_enabled})
       |> Repo.insert!()
     end)
+  end
+
+  # RLY-131: the default flow library's triggers land on the Spec:Review,
+  # Spec:Done, and Plan:Done sub-lanes, so every new board enables them
+  # (in this order — they take positions 9–11) before seeding the disabled
+  # default flows, which then resolve every trigger name.
+  defp seed_lanes_and_flows!(board) do
+    spec = Repo.get_by!(Stage, board_id: board.id, name: "Spec")
+    plan = Repo.get_by!(Stage, board_id: board.id, name: "Plan")
+    {:ok, _} = enable_lane(spec, :review)
+    {:ok, _} = enable_lane(spec, :done)
+    {:ok, _} = enable_lane(plan, :done)
+    Flows.seed_default_flows!(board)
   end
 
   defp fetch_name(attrs), do: attrs[:name] || attrs["name"] || ""

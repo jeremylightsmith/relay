@@ -28,6 +28,7 @@ defmodule Relay do
       Boards,
       Cards,
       Events,
+      Flows,
       Markdown,
       Members,
       Push,
