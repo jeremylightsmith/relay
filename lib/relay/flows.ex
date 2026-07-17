@@ -121,6 +121,86 @@ defmodule Relay.Flows do
     :ok
   end
 
+  @node_fields [:key, :type, :run, :model, :effort, :max_retries]
+  @edge_fields [:from, :to, :on, :max_loops]
+
+  @doc """
+  Whether the flow's definition (nodes, edges, isolation) differs from the
+  default library's definition for its key — normalized comparison, so the
+  library's sparse attr maps and the embedded structs compare field-by-field.
+  A flow whose key isn't a library key at all (e.g. a duplicate) is always
+  customized. Trigger wiring never counts: triggers are per-board and a
+  stage rename must not flag a flow.
+  """
+  def customized?(%Flow{} = flow) do
+    case default_for(flow.key) do
+      nil ->
+        true
+
+      default ->
+        flow.isolation != default.isolation or
+          normalize(flow.nodes, @node_fields) != normalize(default.nodes, @node_fields) or
+          normalize(flow.edges, @edge_fields) != normalize(default.edges, @edge_fields)
+    end
+  end
+
+  @doc "Whether `key` names one of the shipped default library flows."
+  def default_key?(key) when is_binary(key), do: default_for(key) != nil
+
+  @doc """
+  Creates a disabled copy of `flow` on the same board — same nodes, edges,
+  isolation, and trigger stages — under key `"<key>-copy"` (then `-copy-2`,
+  `-copy-3`, … until unique). Returns `{:ok, flow} | {:error, changeset}`.
+  """
+  def duplicate_flow(%Flow{} = flow) do
+    attrs = %{
+      key: unique_copy_key(flow),
+      isolation: flow.isolation,
+      pulls_from_stage_id: flow.pulls_from_stage_id,
+      works_in_stage_id: flow.works_in_stage_id,
+      lands_on_stage_id: flow.lands_on_stage_id,
+      nodes: Enum.map(flow.nodes, &Map.take(&1, @node_fields)),
+      edges: Enum.map(flow.edges, &Map.take(&1, @edge_fields))
+    }
+
+    %Flow{board_id: flow.board_id}
+    |> Flow.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Replaces the flow's nodes, edges, and isolation with the default library
+  definition for its key. Triggers and `enabled` are untouched, so a reset
+  can never trip the one-enabled-per-pulls-from rule. Returns
+  `{:error, :not_a_default}` for a non-library key. No version history yet
+  (RLY-152).
+  """
+  def reset_to_default(%Flow{} = flow) do
+    case default_for(flow.key) do
+      nil -> {:error, :not_a_default}
+      default -> update_flow(flow, Map.take(default, [:isolation, :nodes, :edges]))
+    end
+  end
+
+  defp default_for(key), do: Enum.find(DefaultLibrary.all(), &(&1.key == key))
+
+  # Embedded structs and the library's plain attr maps normalize to the same
+  # shape: every field present, nil when unset.
+  defp normalize(items, fields) do
+    Enum.map(items || [], fn item -> Map.new(fields, &{&1, Map.get(item, &1)}) end)
+  end
+
+  defp unique_copy_key(%Flow{board_id: board_id, key: key}) do
+    taken = MapSet.new(Repo.all(from f in Flow, where: f.board_id == ^board_id, select: f.key))
+    base = "#{key}-copy"
+
+    if MapSet.member?(taken, base) do
+      Enum.find(Stream.map(2..10_000, &"#{base}-#{&1}"), &(not MapSet.member?(taken, &1)))
+    else
+      base
+    end
+  end
+
   defp validate_trigger_completeness(changeset) do
     Enum.reduce(@trigger_fields, changeset, fn field, cs ->
       if Changeset.get_field(cs, field) do
