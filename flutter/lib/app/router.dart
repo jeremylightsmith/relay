@@ -23,11 +23,13 @@ import 'pending_deep_link.dart';
 ///
 /// [cardBodyBuilder] overrides the card screen's webview body — tests pass a stub,
 /// because flutter_inappwebview has no host-platform implementation (RLY-81).
+/// [boardBodyBuilder] is the same seam for the Board tab's webview (RLY-94).
 GoRouter buildRouter({
   GoRouterRedirect? redirect,
   Listenable? refreshListenable,
   List<RouteBase> extraRoutes = const [],
   WidgetBuilder? cardBodyBuilder,
+  WidgetBuilder? boardBodyBuilder,
 }) {
   return GoRouter(
     initialLocation: '/needs-you',
@@ -115,7 +117,7 @@ GoRouter buildRouter({
             path: '/board',
             pageBuilder: (context, state) => NoTransitionPage(
               key: state.pageKey,
-              child: const BoardScreen(),
+              child: BoardScreen(bodyBuilder: boardBodyBuilder),
             ),
           ),
           GoRoute(
@@ -135,6 +137,10 @@ GoRouter buildRouter({
 /// because flutter_inappwebview has no host-platform implementation (RLY-81), so
 /// the gated router cannot otherwise be pumped through a card route.
 final cardBodyBuilderProvider = Provider<WidgetBuilder?>((ref) => null);
+
+/// Overrides the board screen's webview body. Null in production; tests override
+/// it for the same reason as [cardBodyBuilderProvider] (RLY-81).
+final boardBodyBuilderProvider = Provider<WidgetBuilder?>((ref) => null);
 
 /// The app's single GoRouter instance, **auth-gated**: a signed-out user is sent to
 /// `/welcome`, and Sign in lives *under* it at `/welcome/sign-in` so go_router builds
@@ -177,6 +183,7 @@ final routerProvider = Provider<GoRouter>((ref) {
   return buildRouter(
     refreshListenable: refresh,
     cardBodyBuilder: ref.watch(cardBodyBuilderProvider),
+    boardBodyBuilder: ref.watch(boardBodyBuilderProvider),
     extraRoutes: [
       GoRoute(
         path: '/splash',

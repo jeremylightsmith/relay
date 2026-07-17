@@ -22,7 +22,10 @@ Future<void> pumpApp(WidgetTester tester, {FakeFeedRepository? repo}) async {
       ],
       child: MaterialApp.router(
         theme: RelayTheme.light,
-        routerConfig: buildRouter(),
+        routerConfig: buildRouter(
+          boardBodyBuilder: (_) =>
+              const Text('board body', key: Key('stub_board_body')),
+        ),
       ),
     ),
   );
@@ -109,7 +112,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('nav_board')));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(AppBar, 'Board'), findsOneWidget);
+    expect(find.byKey(const Key('stub_board_body')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('nav_settings')));
     await tester.pumpAndSettle();
