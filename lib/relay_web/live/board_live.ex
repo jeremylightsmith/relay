@@ -578,6 +578,13 @@ defmodule RelayWeb.BoardLive do
     end
   end
 
+  # RLY-94 — in embed mode a card tap escapes the webview: the shell pushes the
+  # native CardScreen (BOARD-03) instead of the in-webview drawer opening. On web
+  # (non-embed) the drawer keeps working at every width.
+  def handle_event("select_card", %{"ref" => ref}, %{assigns: %{embed: true}} = socket) do
+    {:noreply, push_card_tap(socket, ref)}
+  end
+
   def handle_event("select_card", %{"ref" => ref}, socket) do
     {:noreply, push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}?card=#{ref}")}
   end
@@ -652,7 +659,12 @@ defmodule RelayWeb.BoardLive do
      |> stream(:agent_logs, [], reset: true)}
   end
 
-  # A row click: close the modal and open that card's drawer (URL-driven).
+  # A row click: close the modal and open that card — bridged to the shell in embed
+  # mode (RLY-94), the URL-driven drawer otherwise.
+  def handle_event("open_archived_card", %{"ref" => ref}, %{assigns: %{embed: true}} = socket) do
+    {:noreply, socket |> assign(:archived_open, false) |> push_card_tap(ref)}
+  end
+
   def handle_event("open_archived_card", %{"ref" => ref}, socket) do
     {:noreply,
      socket
@@ -1462,6 +1474,28 @@ defmodule RelayWeb.BoardLive do
   # Every action taken in this LiveView is attributed to the signed-in
   # human; the :agent default on the Cards mutators is the API's (MMF 09).
   defp current_actor(socket), do: {:user, socket.assigns.current_scope.user.id}
+
+  # RLY-94 — the card-tap bridge payload. `kind` mirrors the push deep-link
+  # convention (Relay.Push.copy/1) so the shell renders the right native action
+  # bar without a fetch: "in_review" at a review gate, "needs_input" when blocked
+  # on a human, nil otherwise. An unknown ref is a silent no-op, like move_card.
+  defp push_card_tap(socket, ref) do
+    case Cards.get_card_by_ref(socket.assigns.board, ref) do
+      %Card{} = card ->
+        push_event(socket, "card-tap", %{
+          ref: ref,
+          board: socket.assigns.board.slug,
+          kind: card_tap_kind(card)
+        })
+
+      nil ->
+        socket
+    end
+  end
+
+  defp card_tap_kind(%Card{status: :in_review}), do: "in_review"
+  defp card_tap_kind(%Card{status: :needs_input}), do: "needs_input"
+  defp card_tap_kind(%Card{}), do: nil
 
   defp find_stage(socket, stage_id) do
     find_stage_by_id(socket, String.to_integer(stage_id))
