@@ -25,6 +25,14 @@ const BoardPager = {
     )
     this.observePages()
 
+    // The pager round-trip (reportMode → server sets @pager_mode → collapsed
+    // strips re-render as .stage-column pages) patches #board-bands, not this
+    // hook's own element (#board-pager-nav) — so `updated()` below never fires
+    // for it. Watch the pages container directly so newly-expanded pages get
+    // observed as soon as LiveView patches them in.
+    this.pagerObserver = new MutationObserver(() => this.observePages())
+    this.pagerObserver.observe(this.pager, {childList: true, subtree: true})
+
     // Chip tap → smooth-scroll that stage's page into view.
     this.el.addEventListener("click", e => {
       const chip = e.target.closest("[data-chip-stage-id]")
@@ -35,15 +43,16 @@ const BoardPager = {
     })
   },
 
-  // LiveView patches (count updates, expand/collapse) re-render chips and pages,
-  // dropping the client-owned data-active attribute: re-observe and re-apply.
+  // LiveView patches to this hook's own element (chip count updates) drop the
+  // client-owned data-active attribute: re-apply it. (Page changes are handled
+  // by the #board-bands MutationObserver above, not this callback.)
   updated() {
-    this.observePages()
     this.markActive()
   },
 
   destroyed() {
     this.observer.disconnect()
+    this.pagerObserver.disconnect()
     this.mq.removeEventListener("change", this.reportMode)
   },
 
