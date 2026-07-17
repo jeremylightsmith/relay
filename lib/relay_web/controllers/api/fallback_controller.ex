@@ -56,6 +56,20 @@ defmodule RelayWeb.Api.FallbackController do
     |> render(:error, code: "missing_note", message: "note is required")
   end
 
+  def call(conn, {:error, :missing_title}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "missing_title", message: "title is required")
+  end
+
+  def call(conn, {:error, :invalid_stage}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid_stage", message: "stage must be one of the board's top-level stages")
+  end
+
   def call(conn, {:error, :invalid_target}) do
     conn
     |> put_status(:unprocessable_entity)
