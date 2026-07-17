@@ -38,6 +38,20 @@ defmodule RelayWeb.Api.AllController do
     |> render(:feed, rows: rows)
   end
 
+  # RLY-98: the native card screen's mount fetch — the light card shape (incl. pr_url),
+  # not show/1's heavy timeline/spec/plan. RLY-91 extends this when the spec sheet lands.
+  def show(conn, %{"ref" => ref} = params) do
+    case Cards.resolve_ref(conn.assigns.current_user, ref, params["board"]) do
+      {:ok, board, card} ->
+        conn
+        |> put_view(json: CardJSON)
+        |> render(:summary, board: board, card: card, stages: Boards.list_stages(board))
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
   def approve(conn, %{"ref" => ref} = params) do
     with {:ok, board, card} <- Cards.resolve_ref(conn.assigns.current_user, ref, params["board"]),
          {:ok, card} <- Cards.approve(card, conn.assigns.actor) do

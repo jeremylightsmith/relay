@@ -44,6 +44,11 @@ defmodule RelayWeb.Api.CardJSON do
     %{data: Enum.map(cards, &data(board, &1, stages))}
   end
 
+  @doc "The light single-card shape (RLY-98): data/3 alone, none of show/1's heavy fields."
+  def summary(%{board: board, card: card, stages: stages}) do
+    %{data: data(board, card, stages)}
+  end
+
   def show(%{board: board, card: card, stages: stages, timeline: timeline}) do
     %{
       data:
