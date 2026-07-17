@@ -32,6 +32,7 @@ import os
 import queue
 import re
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -201,18 +202,32 @@ class LogForwarder:
 
 
 class Heartbeat:
-    """Background thread posting the refs currently being worked to /api/board/heartbeat.
+    """Background thread posting this runner's identity + manifest to
+    /api/board/heartbeat every `interval` seconds (RLY-141).
 
     Best-effort by construction, exactly like LogForwarder._send: swallows api()'s
     die() (SystemExit) and every other exception, so a heartbeat can never stall or
     raise into work(). One request per tick regardless of card count.
 
-    `refs_fn` returns the live in-flight ref list; the watch loop's `in_flight` dict
-    IS the exact set of cards being worked, so there is nothing else to track."""
+    Beats ALWAYS, including when idle — an idle-but-connected runner must be
+    distinguishable from no runner at all, which is the exact question the Runners
+    view exists to answer. `manifest_fn` returns the live
+    {"pools": [...], "jobs": [...], "refs": [...]} snapshot; the watch loop's
+    `pools`/`in_flight` dicts ARE the exact truth, so there is nothing else to
+    track. `runner_id` is minted once and stable for this process's lifetime;
+    `interval` is sent so the server derives freshness from what this runner
+    actually promised."""
 
-    def __init__(self, refs_fn, interval=30):
-        self.refs_fn = refs_fn
+    def __init__(self, manifest_fn, interval=30):
+        self.manifest_fn = manifest_fn
         self.interval = interval
+        host = socket.gethostname()
+        self.identity = {
+            "runner_id": f"{host}-{os.getpid()}-{uuid.uuid4().hex[:4]}",
+            "host": host,
+            "started_at": utc_now_iso(),
+            "interval": interval,
+        }
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
@@ -223,11 +238,8 @@ class Heartbeat:
         self._stop.set()
 
     def _beat(self):
-        refs = list(self.refs_fn())
-        if not refs:
-            return
         try:
-            api("POST", "/api/board/heartbeat", {"refs": refs})
+            api("POST", "/api/board/heartbeat", {**self.identity, **self.manifest_fn()})
         except SystemExit:  # api() die()s on HTTP/network error
             pass
         except Exception:
@@ -236,6 +248,10 @@ class Heartbeat:
     def _run(self):
         while not self._stop.wait(self.interval):
             self._beat()
+
+
+def utc_now_iso():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 def read_arg(text):
@@ -841,10 +857,28 @@ def cmd_watch(args):
     lock = threading.Lock()
     wake = threading.Event()
     stop = threading.Event()
-    in_flight = {}   # ref -> worker thread
+    in_flight = {}   # ref -> {"thread", "stage", "pool", "started_at"}
+
+    def manifest():
+        with lock:
+            return {
+                "pools": [
+                    {"name": name,
+                     "mode": "shared" if p["spec"].get("mode") == "shared" else "exclusive",
+                     "used": len(p["slots"]) - len(p["free"]),
+                     "total": len(p["slots"])}
+                    for name, p in pools.items()
+                ],
+                "jobs": [
+                    {"ref": ref, "stage": e["stage"], "pool": e["pool"],
+                     "started_at": e["started_at"]}
+                    for ref, e in in_flight.items()
+                ],
+                "refs": list(in_flight),
+            }
 
     if not DRY:
-        HEARTBEAT = Heartbeat(lambda: list(in_flight))
+        HEARTBEAT = Heartbeat(manifest)
         HEARTBEAT.start()
 
     if not DRY:
@@ -893,7 +927,9 @@ def cmd_watch(args):
                 t = threading.Thread(target=run_job,
                                      args=(card, entry, mode, pool_name, slot),
                                      daemon=True)
-                in_flight[card["ref"]] = t
+                in_flight[card["ref"]] = {"thread": t, "stage": entry["stage"],
+                                          "pool": pool_name,
+                                          "started_at": utc_now_iso()}
                 t.start()
 
     def _shutdown(*_):
@@ -915,8 +951,8 @@ def cmd_watch(args):
         wake.wait(interval)
         wake.clear()
 
-    for t in list(in_flight.values()):             # join outstanding workers
-        t.join()
+    for e in list(in_flight.values()):             # join outstanding workers
+        e["thread"].join()
 
 
 # ============================ argparse ============================

@@ -15,6 +15,8 @@ defmodule Relay.Application do
       {Phoenix.PubSub, name: Relay.PubSub},
       RelayWeb.ApiLog,
       Relay.BoardWatch,
+      # RLY-141: ETS presence for connected runners; prunes runners silent >24h.
+      Relay.RunnerPresence,
       # RLY-112: debounces ref-tagged runner log lines into one insert_all per burst.
       Relay.Activity.LogSink,
       # RLY-112: ages :action chatter out after 14 days. Its first sweep is one
