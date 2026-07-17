@@ -617,16 +617,22 @@ textarea.commit-field-input { min-height: 64px; }
   border-bottom: 1px solid oklch(0.93 0.006 255);
 }
 .board-pager-header {
-  display: flex; align-items: baseline; gap: 8px;
+  display: flex; align-items: center; gap: 8px;
   padding: 8px 12px 2px;
 }
 .board-pager-title {
   font-size: 14px; font-weight: 600; letter-spacing: -0.015em;
   color: oklch(0.26 0.02 255);
 }
-.board-pager-count {
-  font-size: 10px; font-family: var(--font-mono);
-  color: oklch(0.55 0.02 255);
+/* RLY-95 · BOARD-01: the ‹ back-to-boards button — 24px square, radius 8. */
+.board-pager-back {
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 8px;
+  background: oklch(0.96 0.006 255);
+  color: oklch(0.4 0.02 255);
+  font-size: 15px; line-height: 1;
+  text-decoration: none;
 }
 .board-pager-chips {
   display: flex; gap: 6px;

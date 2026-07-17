@@ -128,9 +128,20 @@ defmodule RelayWeb.BoardLive do
             class="board-pager-nav drawer:hidden"
             aria-label="Stages"
           >
+            <%!-- RLY-95 · BOARD-01 — `‹ back · board name`: the ‹ is the route back to
+                  /boards once embed hides the web top bar. ?from= drives the CURRENT
+                  badge on the list. The updated artboard drops the card count, and the
+                  right side stays empty (the + add-card button is BOARD-04's card). --%>
             <div id="board-pager-header" class="board-pager-header">
+              <.link
+                id="board-pager-back"
+                navigate={~p"/boards?from=#{@board.slug}"}
+                class="board-pager-back"
+                aria-label="All boards"
+              >
+                ‹
+              </.link>
               <span class="board-pager-title">{@board.name}</span>
-              <span class="board-pager-count">{board_card_count_label(@stage_counts)}</span>
             </div>
             <div class="board-pager-chips">
               <button
@@ -1379,15 +1390,6 @@ defmodule RelayWeb.BoardLive do
   # RLY-94 — the chip strip flattens category bands into one ordered stage list.
   defp flat_stages(stage_groups) do
     for {_category, stages} <- stage_groups, stage <- stages, do: stage
-  end
-
-  # RLY-94 — BOARD-01's compact header count ("Marketing site · 11 cards").
-  # stage_counts keys every lane (main + sublanes), so the sum is the whole board.
-  defp board_card_count_label(stage_counts) do
-    case stage_counts |> Map.values() |> Enum.sum() do
-      1 -> "1 card"
-      n -> "#{n} cards"
-    end
   end
 
   # Children grouped under their parent's id, each list ordered Review→Done.
