@@ -6,8 +6,14 @@ visible (runs snapshot the version they started on).
 
 **Scope.**
 
-- Full-page editor from a Flows-tab row, matching the "Relay Flow Editor" artboard,
-  stress-tested against the Code flow (14 nodes):
+- Full-page editor from a Flows-tab row, matching `docs/designs/Relay Flow Editor.dc.html`
+  (drawn against the real Code flow: 14 nodes · 20 edges · 7 loops, serpentine layout,
+  Editing/Unsaved/Save states, delete guard "Referenced by N edges"). One vocabulary
+  decision vs the artboard: its edge labels read `ok/passed/fixed` — treat those as
+  optional *display labels*; the data and the inspector always carry the canonical
+  outcome (`succeeded/failed/…`), never two vocabularies in the schema. Still to design
+  or settle in-build (asked for, not drawn): the inline validation-error state, the
+  save-confirm with the mid-run version note, and the diff-vs-default affordance:
   - the flow rendered as a graph — node shapes/colors by type, edges labeled with
     outcomes, failed-edges dashed, `max_loops` badges;
   - node inspector as an edit form: `run` prompt (monospace), model chips

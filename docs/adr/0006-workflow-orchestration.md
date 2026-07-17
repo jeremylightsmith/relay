@@ -359,6 +359,35 @@ brain/hands problem we are taking on. What we adopt and where we deliberately di
   customer, in or after W10. Until then: YAGNI — cold build caches make ephemeral
   forks expensive on a laptop, so this waits for proven value.
 
+### Design pass (2026-07-17) — what the artboards decided
+
+Hi-fi artboards for this work now live in `docs/designs/` and are the UI source of truth:
+**Relay Flows** (W12), **Relay Flow Editor** (W13), **Relay Card Run Panel** +
+**Relay Board Run Affordances** (W8), **Relay Runners** (W1) — plus three companion
+explorations: **Relay Value Stream Map** (per-stage working-vs-waiting analytics, W15),
+**Relay Rework Loop** (the rework model, W16/W18), **Relay Card Activity** (committed
+activity/health spec, W17). Decisions and corrections out of the pass:
+
+- **Placement**: Runners lives under board settings › *Engine*, not the board header.
+  The run panel is a drawer tab (*Detail | Run | Activity*).
+- **New card state**: *queued* — flow enabled, waiting for executor capacity.
+- **Session-resume discrepancy**: the run panel shows the implement session resumed on a
+  review-failed loop; the ADR rule stands — fresh session per attempt, `--resume` only
+  for needs-input re-entry (a refuted implementation shouldn't re-inherit its own
+  rationalizations). Mockup copy to fix, not the rule.
+- **Requeue nuance** (Runners artboard copy to sharpen): a stale executor's
+  `shared_clean` jobs requeue elsewhere; `exclusive` runs park — affinity is absolute.
+- **Mockup stage names are exemplary, not canonical** ("In progress", "Deploy",
+  "Complete"). On a real board, triggers pull from *Done* substages — a flow pulling
+  from a *Review* substage would race the approve gate.
+- **Rework model** (from the Rework Loop exploration): *re-entering the pipeline is a
+  human gesture, never an inference*. The engine never interprets backward movement; a
+  **Reopen** action (the default) or a **sub-card** (when the fix warrants its own
+  tracking) simply places a card where an enabled flow's trigger sees it, and the
+  scheduler does what it always does. Review stages route rejects declaratively:
+  substage reviews reject to their parent; top-level review stages reject to a
+  configured stage. No new engine knowledge in any of this — which is the point.
+
 ## Consequences
 
 **Positive**

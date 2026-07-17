@@ -20,10 +20,14 @@ without changing the page's shape.
 - **Presence table server-side**: heartbeats land in an ETS-backed process (the
   `BoardWatch` pattern — no DB), broadcast on a new `board:<id>:runners` PubSub topic
   (add it to `docs/architecture/runtime.md` — the freshness gate applies).
-- **`/board/:slug/runners` LiveView**, linked from the board header: one panel per
-  runner — host, uptime, last-beat age (fresh / stale / gone thresholds), and its
-  in-flight cards as ref links into the card drawer. Live feed lines under each runner via
-  the existing `AgentLog` stream, grouped by the refs that runner reported.
+- **Runners LiveView under board settings › Engine** (placement per the
+  `docs/designs/Relay Runners.dc.html` artboard — match its elements/states: freshness
+  dot, capacity chips, working-now list, streaming log tail, stale panel with at-risk
+  job, empty state): one panel per runner — host, uptime, last-beat age (fresh / stale /
+  gone thresholds), and its in-flight cards as ref links into the card drawer. Live feed
+  lines under each runner via the existing `AgentLog` stream, grouped by the refs that
+  runner reported. One correction to the artboard's copy: a stale runner's
+  `shared_clean` jobs requeue; `exclusive` runs park (affinity) — say so.
 - **Empty state**: "no runners connected", with the command to start one.
 - **Upgrade path (not built now):** when 04/05 land, executor registration/claims replace
   the heartbeat as the data source, and a capacity-per-isolation-class column appears;

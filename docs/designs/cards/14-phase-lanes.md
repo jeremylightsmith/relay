@@ -15,9 +15,11 @@ lanes** — a projection of the run, not stages.
 - Explicit non-goals, enforced in code review: lanes have **no** WIP limits, no
   notifications, no approve/reject affordances, no drag — they are read-only projection.
   Dragging a card still uses the column, not the lane.
-- Matches the "Relay Board — Code phase lanes" artboard. Ship behind a board-settings
-  toggle; judged after living with it — this card may end in removal, and that's a
-  valid outcome.
+- **No artboard exists for this** — the 2026-07-17 design pass skipped it and produced
+  the Value Stream Map instead. Before building anything here, check whether the VSM
+  (analytics view of the same signal) already scratches the itch; if not, get the
+  artboard drawn first. Ship behind a board-settings toggle; judged after living with
+  it — this card may end in removal, and that's a valid outcome.
 
 **Acceptance criteria.**
 

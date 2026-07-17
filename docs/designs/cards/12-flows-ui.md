@@ -8,9 +8,13 @@ triggers where.
 **Scope.**
 
 - A **Flows tab** in the existing board settings page (beside Stages / API keys),
-  matching the "Relay Flows" artboard: table of flows — name, trigger rendered as
-  "Next up → Spec → Spec:Review", isolation badge, version chip, origin badge
-  (default / customized), enabled toggle.
+  matching `docs/designs/Relay Flows.dc.html`: table of flows — name + node count,
+  trigger rendered as "Next up → Spec → Spec:Review", isolation badge (with the legend
+  line), version chip, enabled toggle, kebab (Edit / Duplicate / Reset to default —
+  the artboard has no origin *column*; the kebab + a "customized" affix carry it).
+  Two corrections to the artboard's example data: triggers pull from **Done**
+  substages (its "Spec:Review → Plan" would race the approve gate), and its stage
+  names ("In progress", Deploy flow) are exemplary — real rows come from the board.
 - **Enable/disable = the cutover lever**: confirm dialog with the double-dispatch
   warning (legacy watcher must be restarted with the stage removed from
   `relay_config.json` — link the ritual).

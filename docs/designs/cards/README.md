@@ -26,4 +26,8 @@ runner, and upgrades its data source when 04/05 land.
 | RLY-141 W1 · [11](11-runners-view.md) | Runners view: who's running, and what's on each | — (v0 now; 04/05 upgrade it) |
 | RLY-142 W12 · [12](12-flows-ui.md) | Flows management UI (board settings tab) | 01 (wants to land near 06's cutover) |
 | RLY-143 W13 · [13](13-flow-editor.md) | Flow editor: edit flows on the board | 01, 02, 12 |
-| RLY-144 W14 · [14](14-phase-lanes.md) | Code column phase lanes (experiment) | 06, 07 |
+| RLY-144 W14 · [14](14-phase-lanes.md) | Code column phase lanes (experiment) | 06, 07 (no artboard — check VSM first) |
+| RLY-146 W15 · [15](15-value-stream-map.md) | Value stream map | 17 (activity events feed it) |
+| RLY-147 W16 · [16](16-reopen.md) | Reopen: the default rework gesture | — (board feature; engine untouched) |
+| RLY-148 W17 · [17](17-card-activity.md) | Card activity: entry model, health strip, timeline | — (buildable now; W1/W8 render on it) |
+| RLY-149 W18 · [18](18-sub-cards.md) | Sub-cards: decomposition and bigger rework | 16 settles the model first |

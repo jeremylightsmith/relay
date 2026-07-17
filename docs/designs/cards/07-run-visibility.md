@@ -5,15 +5,21 @@ state is now data in Postgres + PubSub; show it.
 
 **Scope.**
 
-- Card drawer gains a run panel: the flow's nodes with live status (pending / running /
-  outcome), duration, attempt count; the active node's streamed log tail (build on the
-  RLY-55 log sheet + RLY-112 run-id attribution rather than beside them).
-- Board card face: small "node x/y" progress affordance while a run is active (palette per
-  design system: AI = violet).
-- Render the flow as a graph with the active node highlighted — Fabro's best visibility
-  idea. Cut this to a follow-up card if it doesn't fit; the node list is the must-have.
-- Match `docs/designs/` mockups; add/refresh Storybook stories for any new reusable
-  component.
+- **Run tab in the card drawer** (*Detail | Run | Activity*), matching
+  `docs/designs/Relay Card Run Panel.dc.html` — all its states: mid-flight (node list
+  with per-node duration/attempts/**cost**, failed node expanded with outcome detail,
+  loop chip, task-progress bar, "running vN" chip), re-entry, parked, baton revoked,
+  circuit breaker, history (collapsed totals: duration · nodes · $). One copy fix vs the
+  artboard: the review-failed loop re-runs implement with a **fresh** session carrying
+  the findings — only needs-input re-entry says "session resumed" (ADR rule).
+- Board card face per `docs/designs/Relay Board Run Affordances.dc.html` — the full
+  state strip: AI running (violet, node x/y), parked (amber), run failed (red, names the
+  node), your review (blue), **queued** (enabled flow awaiting executor capacity), done
+  (green, run totals travel with the card), cancelled (gray, claimed). Phone width
+  included.
+- Render the flow as a graph with the active node highlighted (mini graph per the
+  artboard; the full renderer is shared with the flow editor card).
+- Add/refresh Storybook stories for any new reusable component.
 
 **Acceptance criteria.**
 
