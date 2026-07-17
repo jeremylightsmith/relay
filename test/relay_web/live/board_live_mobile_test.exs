@@ -5,33 +5,25 @@ defmodule RelayWeb.BoardLiveMobileTest do
 
   alias Relay.Boards
 
-  describe "board at mobile widths" do
+  describe "board at mobile widths (RLY-94 · BOARD-01 pager)" do
     setup :register_and_log_in_user
 
-    test "below 720px the band strip flows in the document; the inner scroller returns at >=720px",
+    test "below 720px the pager CSS owns #board-bands; the desktop scroller returns at >=720px",
          %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       bands = view |> element("#board-bands") |> render()
 
-      # Below 720px there is NO inner horizontal scroll container: the band strip is
-      # document-flow — content-width (w-max) but at least full width (min-w-full) so the
-      # gray board canvas covers the whole scrollable width — with visible overflow, so
-      # <body> owns the horizontal scroll and iOS pinch-zoom magnifies the real document
-      # instead of a composited inner scroller going white.
-      assert bands =~ "min-w-full"
-      assert bands =~ "w-max"
-      assert bands =~ "overflow-x-visible"
-      assert bands =~ "overflow-y-visible"
+      # RLY-94 supersedes RLY-62's board-as-document below the drawer breakpoint: the
+      # app.css `@media (width < 45rem)` block turns #board-bands into a scroll-snap
+      # pager, so the document-flow utility classes are gone.
+      refute bands =~ "min-w-full"
+      refute bands =~ "w-max"
+      refute bands =~ "overflow-x-visible"
+      refute bands =~ "overflow-y-visible"
 
-      # The inline inner-scroller declarations that created the composited momentum layer
-      # are gone (Tailwind class forms use hyphens, e.g. `overflow-x-auto`, so these
-      # colon-form substrings match only the old inline style).
-      refute bands =~ "overflow-x:auto"
-      refute bands =~ "overflow-y:hidden"
-
-      # At >=720px the desktop app-shell's internal horizontal scroller is restored exactly.
+      # At >=720px the desktop app-shell's internal horizontal scroller is intact.
       assert bands =~ "drawer:w-auto"
       assert bands =~ "drawer:min-w-0"
       assert bands =~ "drawer:overflow-x-auto"
@@ -65,33 +57,21 @@ defmodule RelayWeb.BoardLiveMobileTest do
   describe "board scroll behavior below the mobile breakpoint" do
     setup :register_and_log_in_user
 
-    test "#board-viewport uses a dvh-based min-height and drops the fixed 100vh lock",
+    test "#board-viewport owns a bounded height at every width (RLY-94 supersedes RLY-62's document flow)",
          %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       viewport = view |> element("#board-viewport") |> render()
 
-      # Below 720px the board is a normal scrolling document: a dvh-based min-height,
-      # never a fixed height that would let iOS treat it as a non-scrolling canvas.
+      # The pager pages scroll internally at every width now (RLY-94), so the viewport is
+      # always a bounded, non-document-flow height — no width-conditional `drawer:` variant.
       # 53px == the top bar's exact height (no gap between the bar border and the board panel).
-      assert viewport =~ "min-h-[calc(100dvh_-_53px)]"
+      assert viewport =~ "h-[calc(100dvh_-_53px)]"
+      refute viewport =~ "min-h-[calc(100dvh_-_53px)]"
       # The old fixed viewport-height lock (and the static-viewport `vh` unit) is gone.
       refute viewport =~ "100vh"
       refute viewport =~ "height:calc"
-    end
-
-    test "at >=720px the board keeps its fixed viewport-height app shell",
-         %{conn: conn, user: user} do
-      board = Boards.get_or_create_default_board(user)
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
-
-      viewport = view |> element("#board-viewport") |> render()
-
-      # The desktop app-shell is preserved: the fixed height is restored at the
-      # 720px `drawer:` breakpoint (with min-height reset so it can't linger).
-      assert viewport =~ "drawer:h-[calc(100dvh_-_53px)]"
-      assert viewport =~ "drawer:min-h-0"
     end
   end
 end

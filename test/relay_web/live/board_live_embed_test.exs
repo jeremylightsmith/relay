@@ -32,10 +32,9 @@ defmodule RelayWeb.BoardLiveEmbedTest do
 
       viewport = view |> element("#board-viewport") |> render()
 
-      assert viewport =~ "min-h-dvh"
-      assert viewport =~ "drawer:h-dvh"
-      refute viewport =~ "min-h-[calc(100dvh_-_53px)]"
-      refute viewport =~ "drawer:h-[calc(100dvh_-_53px)]"
+      assert viewport =~ "h-dvh"
+      refute viewport =~ "min-h-dvh"
+      refute viewport =~ "calc(100dvh_-_53px)"
     end
   end
 
@@ -50,9 +49,9 @@ defmodule RelayWeb.BoardLiveEmbedTest do
 
       viewport = view |> element("#board-viewport") |> render()
 
-      assert viewport =~ "min-h-[calc(100dvh_-_53px)]"
-      assert viewport =~ "drawer:h-[calc(100dvh_-_53px)]"
-      refute viewport =~ "min-h-dvh drawer:h-dvh"
+      assert viewport =~ "h-[calc(100dvh_-_53px)]"
+      refute viewport =~ "min-h-[calc(100dvh_-_53px)]"
+      refute viewport =~ "h-dvh"
     end
   end
 

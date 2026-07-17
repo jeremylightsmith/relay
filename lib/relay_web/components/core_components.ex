@@ -2710,6 +2710,7 @@ defmodule RelayWeb.CoreComponents do
       <section
         id={@id}
         class="stage-column"
+        data-stage-id={@stage_id}
         data-wip={@wip_state}
         style={"flex:0 0 auto;width:#{@stage_width}px;display:flex;flex-direction:column;height:100%;background:var(--color-base-100);border:1px solid #{wip_border_color(@wip_state)};border-radius:14px;overflow:hidden;box-shadow:0 1px 3px oklch(0.5 0.02 255/0.06);"}
       >
@@ -2772,7 +2773,7 @@ defmodule RelayWeb.CoreComponents do
             +
           </button>
         </header>
-        <div style="display:flex;gap:0;flex:1;min-height:0;">
+        <div class="stage-lanes" style="display:flex;gap:0;flex:1;min-height:0;">
           <%!-- main / ongoing lane (RLY-1 item 3: collapsible; item 7: full-height drop zone) --%>
           <%= if @main_collapsed do %>
             <div
@@ -2792,7 +2793,10 @@ defmodule RelayWeb.CoreComponents do
               </span>
             </div>
           <% else %>
-            <div style="flex:0 0 240px;width:240px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;">
+            <div
+              class="stage-main-lane"
+              style="flex:0 0 240px;width:240px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;"
+            >
               <div
                 :if={@labeled}
                 id={"#{@id}-main-lane-header"}
@@ -2955,6 +2959,7 @@ defmodule RelayWeb.CoreComponents do
             <div
               :if={!sub.collapsed}
               id={"sublane-#{sub.id}"}
+              class="sublane"
               style={"flex:0 0 178px;width:178px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;background:#{lane_tint(sub.lane)};border-left:1px solid #{lane_divider(sub.lane)};"}
             >
               <div
