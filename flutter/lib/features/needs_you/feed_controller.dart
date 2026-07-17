@@ -20,11 +20,23 @@ class FeedState {
   bool get caughtUp => rows.isEmpty;
 }
 
+/// Injectable clock (RLY-128): [FeedController.refreshIfStale]'s staleness guard
+/// reads time through this seam so tests can age the feed without sleeping.
+final clockProvider = Provider<DateTime Function()>((ref) => DateTime.now);
+
 /// Owns the inbox's state and refresh policy (D2). No HTTP — that's FeedRepository.
 ///
-/// Freshness in V1 is manual + foreground: pull-to-refresh, app resume, and returning
-/// from a card. There is no realtime channel.
+/// Freshness is manual + foreground + focus-triggered (RLY-128): pull-to-refresh,
+/// app resume, regaining focus (throttled by [refreshIfStale]'s 15s guard), and
+/// an optimistic [removeRow] + background reconcile after every decision. There
+/// is still no realtime channel.
 class FeedController extends AsyncNotifier<FeedState> {
+  /// When the last *successful* page landed — via [_load] or [applyFeed]. Null
+  /// until something has landed, so a never-loaded feed is always stale.
+  DateTime? lastFetchedAt;
+
+  bool _fetching = false;
+
   @override
   Future<FeedState> build() => _load();
 
@@ -34,8 +46,14 @@ class FeedController extends AsyncNotifier<FeedState> {
     final token = ref.read(authTokenProvider);
     if (token == null || token.isEmpty) throw const MissingTokenException();
 
-    final page = await ref.read(feedRepositoryProvider).fetchFeed();
-    return FeedState(rows: page.rows, meta: page.meta);
+    _fetching = true;
+    try {
+      final page = await ref.read(feedRepositoryProvider).fetchFeed();
+      lastFetchedAt = ref.read(clockProvider)();
+      return FeedState(rows: page.rows, meta: page.meta);
+    } finally {
+      _fetching = false;
+    }
   }
 
   /// Refetch the feed. **Public on purpose** — this is the seam RLY-81/F5 calls when
@@ -47,11 +65,72 @@ class FeedController extends AsyncNotifier<FeedState> {
     state = await AsyncValue.guard(_load);
   }
 
+  /// RLY-128 D1: the focus-triggered refresh. Skips when the current page is
+  /// younger than [maxAge] or a fetch is already in flight; otherwise delegates
+  /// to [refresh]. Explicit user intent (pull-to-refresh, Retry) and the
+  /// app-resume hook keep calling [refresh] directly — the guard is only for
+  /// focus events, which can arrive in bursts (tab bounce, pop chains).
+  Future<void> refreshIfStale({
+    Duration maxAge = const Duration(seconds: 15),
+  }) async {
+    if (_fetching) return;
+    final last = lastFetchedAt;
+    if (last != null && ref.read(clockProvider)().difference(last) < maxAge) {
+      return;
+    }
+    await refresh();
+  }
+
+  /// RLY-128 D2: optimistically drop a decided row the moment its POST settles.
+  /// Refs are only unique per board, so the match needs both. No-op when the
+  /// row is absent or the state isn't data. The badge (needsYouCountProvider)
+  /// follows automatically since it derives from meta.count.
+  void removeRow({required String ref, required String boardSlug}) {
+    final current = state;
+    if (current is! AsyncData<FeedState>) return;
+    final s = current.value;
+    final rows = s.rows
+        .where((r) => !(r.ref == ref && r.board.slug == boardSlug))
+        .toList(growable: false);
+    if (rows.length == s.rows.length) return;
+    state = AsyncValue.data(
+      FeedState(
+        rows: rows,
+        meta: FeedMeta(
+          count: s.meta.count > 0 ? s.meta.count - 1 : 0,
+          workingCount: s.meta.workingCount,
+        ),
+      ),
+    );
+  }
+
+  /// RLY-128 D2: the background reconcile fired after an optimistic [removeRow].
+  /// Unlike [refresh] — reserved for *user-initiated* fetches (pull-to-refresh,
+  /// Retry, app-resume) where an [AsyncError] is the right way to surface a real
+  /// failure — this is an automatic fetch the human never asked for. Flipping a
+  /// good [AsyncData] to [AsyncError] here would replace the optimistically
+  /// cleared inbox with the full-screen error state over a transient blip, and
+  /// it races [ReviewQueue.advanceAfter]'s own authoritative `applyFeed`. So on
+  /// failure this leaves the current state (and [lastFetchedAt]) exactly as
+  /// [removeRow] left it; on success it adopts the fresh page like [refresh]
+  /// does.
+  Future<void> reconcile() async {
+    try {
+      state = AsyncValue.data(await _load());
+    } catch (_) {
+      // Swallow — an optimistic removal must stand until the next fetch that
+      // actually succeeds, not be undone by a flaky background blip.
+    }
+  }
+
   /// Adopt a page the caller already fetched. RLY-89: the review-queue walk's own
   /// end-of-snapshot refetch (`ReviewQueue.advanceAfter`) lands exactly the rows
   /// this inbox needs at exactly the moment it needs them — this is the seam that
-  /// hands them over without a second, redundant request.
+  /// hands them over without a second, redundant request. RLY-128: a handed-over
+  /// page is exactly as fresh as one we fetched ourselves, so it stamps
+  /// [lastFetchedAt] too.
   void applyFeed(FeedPage page) {
+    lastFetchedAt = ref.read(clockProvider)();
     state = AsyncValue.data(FeedState(rows: page.rows, meta: page.meta));
   }
 }
