@@ -1962,5 +1962,60 @@ class ExecuteParserTest(unittest.TestCase):
         self.assertEqual(args.func, relay.cmd_execute)
 
 
+class RelayConfigCommittedFileTest(unittest.TestCase):
+    """After the Plan cutover (RLY-138 / W12) the watcher drives Code alone. The committed
+    relay_config.json must carry exactly one pipeline entry and exactly one pool — a stale
+    Plan entry would double-dispatch Spec:Done cards alongside the flow engine, and an
+    orphaned `clean` pool would advertise a capability the watcher no longer has."""
+
+    CONFIG_PATH = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "relay_config.json",
+    )
+
+    def cfg(self):
+        with open(self.CONFIG_PATH) as f:
+            return json.load(f)
+
+    def test_pipeline_is_code_only(self):
+        stages = [e["stage"] for e in self.cfg()["pipeline"]]
+        self.assertEqual(stages, ["Code"])
+
+    def test_clean_pool_is_gone_and_work_remains(self):
+        pools = self.cfg()["pools"]
+        self.assertNotIn("clean", pools)
+        self.assertIn("work", pools)
+        self.assertEqual(pools["work"]["mode"], "exclusive")
+
+    def test_every_stage_names_a_pool_that_exists(self):
+        cfg = self.cfg()
+        for entry in cfg["pipeline"]:
+            pool = entry.get("pool")
+            if pool:
+                self.assertIn(pool, cfg["pools"],
+                              f"stage {entry['stage']} names missing pool {pool}")
+
+    def test_build_pools_accepts_the_committed_config(self):
+        pools = relay.build_pools(self.cfg())
+        self.assertEqual(sorted(pools), ["work"])
+        self.assertEqual(pools["work"]["slots"], ["work-1"])
+
+    def test_find_all_ready_dispatches_only_code_cards(self):
+        stages = [
+            {"id": 10, "name": "Next up",   "wip_limit": None, "parent_id": None},
+            {"id": 11, "name": "Spec:Done", "wip_limit": None, "parent_id": None},
+            {"id": 12, "name": "Plan:Done", "wip_limit": None, "parent_id": None},
+            {"id": 13, "name": "Code",      "wip_limit": None, "parent_id": None},
+        ]
+        cards = [
+            {"ref": "RLY-1", "stage_id": 10, "status": "queued"},
+            {"ref": "RLY-2", "stage_id": 11, "status": "queued"},
+            {"ref": "RLY-3", "stage_id": 12, "status": "queued"},
+        ]
+        board = {"stages": stages, "cards": cards}
+        ready = relay.find_all_ready(board, self.cfg(), set(), {"work": 1})
+        self.assertEqual([c["ref"] for c, _entry, _mode in ready], ["RLY-3"])
+
+
 if __name__ == "__main__":
     unittest.main()

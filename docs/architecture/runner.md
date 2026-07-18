@@ -25,8 +25,10 @@ Each tick (`poll_interval`, default 45s, plus a wake on any job finishing):
   `needs_input` and human-owned cards are skipped (ADR 0004); pool budgets are consumed as
   candidates are chosen so one tick never over-dispatches.
 - **Dispatch**: each card runs on a worker thread in a worktree slot from its stage's pool.
-  Pools (`relay_config.json`): a `shared` pool points N slots at one read-only worktree
-  (Spec/Plan); an `exclusive` pool gives each job its own `work-N` (Code). Worktrees live
+  Pools (`relay_config.json`): after the Spec (RLY-136) and Plan (RLY-138) cutovers the watcher
+  drives Code alone, and `pools` names exactly one entry — the `exclusive` `work` pool, giving
+  each job its own `work-N`. The `shared` `clean` pool that once pointed N slots at one
+  read-only worktree for Spec/Plan is **gone** — no stage references it anymore. Worktrees live
   under `.claude/worktrees/`, detached so they never collide with the root checkout.
   Exclusive slots are reset before use — leftovers are **stashed, never dropped** (a
   stranded edit once contained a real fix), then hard-reset and cleaned (`-fd`, keeping
@@ -60,15 +62,41 @@ only, the `tmp/exec-plan-status` scratch-file merge gate, and prompt-enforced ru
 
 Two dispatchers coexist while stages migrate off the legacy watcher:
 
-- **Spec** is **engine-driven** (RLY-136): a card in *Next up* is dispatched by the server-side
-  `Relay.Runs.Scheduler` to the node-job engine (`Relay.Runs`), claimed by `relay execute` over
-  the node-job REST API. Its `relay_config.json` pipeline entry has been removed.
-- **Plan** and **Code** are still **watcher-driven**: `relay watch` reads their `relay_config.json`
-  pipeline entries and runs them the legacy way, until RLY-138 (Plan) and RLY-139 (Code) cut them
-  over.
+- **Spec and Plan are engine-driven** (RLY-136, RLY-138): a card in *Next up* (Spec) or
+  *Spec:Done* (Plan) is dispatched by the server-side `Relay.Runs.Scheduler` to the node-job
+  engine (`Relay.Runs`), claimed by `relay execute` over the node-job REST API. Neither has a
+  `relay_config.json` pipeline entry any more.
+- **Code alone is still watcher-driven**: `relay watch` reads its `relay_config.json` pipeline
+  entry and runs it the legacy way, until RLY-139 cuts it over too — at which point this whole
+  section, and `relay watch`, retire.
 
 A stage is on exactly one dispatcher at a time. The cutover ritual that guarantees this — and why
 its order is fixed — is in [`../runbooks/flow-cutover.md`](../runbooks/flow-cutover.md).
+
+**Shared-budget arbitration: Plan preempts Spec.** `Relay.Runs.Scheduler.plan/1` folds over
+**all** enabled flows in one tick, sorted **rightmost `works_in` stage position first**
+(`scheduler.ex:38-45`, rule documented at `scheduler.ex:9-13`), threading one shared capacity
+accumulator through the fold. `Relay.Runs.Capacity` keys free slots
+`executor_id => %{shared_clean: n, exclusive: n}` **per isolation class, not per flow**
+(`capacity.ex:5-7`) — and Spec and Plan are both `:shared_clean`. So from the Plan cutover the
+two flows draw from **one** `shared_clean` budget, and rightmost-first means **Plan takes
+shared slots ahead of Spec** whenever both have eligible cards and capacity is scarce. This
+matches the watcher's old single `clean` pool in total capacity, but the *ordering* — always
+drain the right of the board (closer to Done) before pulling more in on the left — is new: it
+is intended WIP discipline, not Spec starvation, even though under real scarcity it will look
+like Spec is being starved. Pinned by `test/relay/runs/scheduler_test.exs` ("two flows sharing
+one shared_clean budget (spec + plan)") and exercised live over the REST API by
+`test/relay_web/api/plan_flow_e2e_test.exs` ("Spec and Plan enabled at once").
+
+**Acceptance-criterion-2 finding (RLY-138).** The Plan cutover required **no engine or executor
+change** — `Relay.Runs.Scheduler.plan/1` was already written flow-agnostic
+(`scheduler.ex:38-45,91-97,130-144,202-207`) from the W9/W11 Spec work, so enabling a second
+`:shared_clean` flow is pure configuration: seed data already present in
+`Relay.Flows.DefaultLibrary`, an `enable_flow/1` toggle, and the `relay_config.json` /
+`write-plan.md` edits described above. Every new test this card adds — both the pure-scheduler
+arbitration cases and the `plan_flow_e2e_test.exs` REST-level cases — passes **against an
+unmodified engine**: this branch changes nothing under `lib/`. That is the signal RLY-139 (Code)
+is betting on: adding a flow to this engine is configuration, not code.
 
 ## Node-job transport (RLY-134, ADR 0006 card 04)
 
@@ -127,7 +155,7 @@ two generations coexist on the same machine through the migration; nothing they 
   exclusive}`, `poll_timeout`, `heartbeat_interval`. Missing file → sensible defaults;
   capacity is the field a developer routinely edits.
 - **Worktree namespace.** `ExecutorPool` maps every job's `isolation` onto worktrees under the
-  `exec-*` namespace — disjoint from the watcher's `clean`/`work` pools — so a `relay watch` and
+  `exec-*` namespace — disjoint from the watcher's `work` pool — so a `relay watch` and
   a `relay execute` can run on the same checkout at once without contending over a worktree.
   `shared_clean` jobs share one reused `exec-clean` worktree (never reset per-job, only
   fast-forwarded to base when every shared slot is idle). `exclusive` jobs get a slot from a

@@ -21,8 +21,9 @@ defmodule Relay.RelayConfigTest do
     refute Map.has_key?(stages, "Spec")
   end
 
-  test "Plan stage invokes /write-plan with the card ref", %{stages: stages} do
-    assert Enum.any?(claude_steps(stages["Plan"]), &(&1 =~ "/write-plan {ref}"))
+  test "the pipeline no longer has a Plan stage (cut over to the engine-driven flow, RLY-138)",
+       %{stages: stages} do
+    refute Map.has_key?(stages, "Plan")
   end
 
   test "Code stage invokes /exec-plan with the card ref", %{stages: stages} do

@@ -1,20 +1,10 @@
 {
-  "_comment": "Project config for `relay`. `pools` defines worktree isolation for the runner: a `shared` pool runs up to `concurrency` jobs in one worktree (safe for read-only stages); an `exclusive` pool gives each job its own `<worktree>-N`. Each pipeline stage names its `pool`; a stage with no pool runs in ROOT. `pipeline` lists AI stages left-to-right; the runner works cards right-to-left. Per stage: `from`/`done`/`action` as before. Templates: {ref} {title} {branch} {pr_url} {stage} {from} {done} {relay} {url}.",
+  "_comment": "Project config for `relay watch`, the legacy board runner. After the Spec (RLY-136) and Plan (RLY-138) cutovers to the ADR 0006 flow engine, the watcher drives the Code stage ALONE; Spec and Plan are dispatched server-side by Relay.Runs.Scheduler. `pools` defines worktree isolation: the `work` pool is `exclusive`, giving each job its own `<worktree>-N`. Each pipeline stage names its `pool`; a stage with no pool runs in ROOT. `pipeline` lists AI stages left-to-right; the runner works cards right-to-left. Per stage: `from`/`done`/`action`. Templates: {ref} {title} {branch} {pr_url} {stage} {from} {done} {relay} {url}. RLY-139 (W13) retires this file entirely.",
   "poll_interval": 45,
   "pools": {
-    "clean": { "worktree": "clean", "mode": "shared",    "base": "origin/main", "concurrency": 3 },
     "work":  { "worktree": "work",  "mode": "exclusive", "base": "origin/main", "concurrency": 1 }
   },
   "pipeline": [
-    {
-      "stage": "Plan",
-      "from": "Spec:Done",
-      "done": "Plan:Done",
-      "pool": "clean",
-      "action": [
-        { "claude": "You are the AI working Relay card {ref} at the PLAN stage. Run /write-plan {ref} to completion — it reads the approved spec from the card and writes the implementation plan back to the card. This is authorized; proceed without asking. Then STOP. Do not touch git or other cards." }
-      ]
-    },
     {
       "stage": "Code",
       "from": "Plan:Done",

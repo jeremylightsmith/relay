@@ -665,7 +665,7 @@ def refresh_worktree(name, base):
 
 class ExecutorPool:
     """Executor-local worktree mapping (never sent to the server). Namespace-disjoint from the
-    watcher's clean/work pools so both runners run at once.
+    watcher's work pool so both runners run at once.
 
       shared_clean -> one shared worktree `<ns>-clean`, up to `capacity.shared_clean` concurrent
                       jobs, REUSED (never reset per-job); fast-forwarded to base only when every

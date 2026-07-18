@@ -55,6 +55,15 @@ defmodule Relay.Runs.SchedulerTest do
   defp cap(entries), do: Map.new(entries)
   defp slots(shared, excl), do: %{shared_clean: shared, exclusive: excl}
 
+  # The real board shape: Next up(1) → Spec(2) → Spec:Done(3) → Plan(4).
+  defp spec_and_plan_stages do
+    [stage(1, position: 1), stage(2, position: 2), stage(3, position: 3), stage(4, position: 4)]
+  end
+
+  defp spec_and_plan_flows do
+    [flow("spec", 1, 2, isolation: :shared_clean), flow("plan", 3, 4, isolation: :shared_clean)]
+  end
+
   describe "fresh pulls" do
     test "pulls a ready card onto a named executor, consuming its slot" do
       s =
@@ -124,6 +133,93 @@ defmodule Relay.Runs.SchedulerTest do
 
       # only one slot → the resume takes it, the fresh card is capacity-queued
       assert %Plan{dispatches: [{:resume, 99, 7}], to_queue: [10]} = Scheduler.plan(s)
+    end
+  end
+
+  # RLY-138 / W12: the first time two flows are enabled at once. Spec and Plan are both
+  # :shared_clean, so from the Plan cutover they draw from ONE per-isolation-class budget
+  # (Capacity keys executor_id => %{shared_clean: n, exclusive: n} — never per flow). Combined
+  # with rightmost-works_in-first (scheduler.ex:38-45), Plan preempts Spec for shared slots.
+  # That is intended WIP discipline — drain the right of the board first — and these cases pin
+  # it as a decision rather than an emergent surprise on a scarce-capacity day.
+  describe "two flows sharing one shared_clean budget (spec + plan)" do
+    test "with one shared slot, the Plan card preempts the Spec card" do
+      # Same shape as "processes flows by works-in stage position, descending" above (4 stages,
+      # 2 cards, 1 slot) — this instance names the real board's spec/plan flows specifically, so
+      # a regression there reads as "Plan lost its board seat" rather than an abstract flow "b".
+      s =
+        snap(
+          stages: spec_and_plan_stages(),
+          # 10 sits in Next up (spec's pulls_from); 20 sits in Spec:Done (plan's pulls_from)
+          cards: [card(10, 1), card(20, 3)],
+          flows: spec_and_plan_flows(),
+          capacity: cap([{7, slots(1, 0)}])
+        )
+
+      assert %Plan{dispatches: [{:start, 20, "plan", 7}], to_queue: [10], to_unqueue: []} =
+               Scheduler.plan(s)
+    end
+
+    test "with two shared slots, both flows dispatch once and the budget is spent, not double-spent" do
+      s =
+        snap(
+          stages: spec_and_plan_stages(),
+          # a third eligible card (11) sits behind 10 in Next up
+          cards: [card(10, 1, position: 1), card(11, 1, position: 2), card(20, 3)],
+          flows: spec_and_plan_flows(),
+          capacity: cap([{7, slots(2, 0)}])
+        )
+
+      assert %Plan{dispatches: [{:start, 20, "plan", 7}, {:start, 10, "spec", 7}], to_queue: [11]} =
+               Scheduler.plan(s)
+    end
+
+    test "all eligible cards across both flows dispatch when capacity is ample, in rightmost-flow-first order" do
+      # 3 slots, 3 eligible cards spread across the two flows → nothing is scarce, so this does
+      # NOT distinguish a shared budget from a per-flow one (see the 2-slot/3-card case above for
+      # that). What it pins is dispatch order under a real multi-flow snapshot: plan (rightmost
+      # works-in) goes first, then spec in card order.
+      s =
+        snap(
+          stages: spec_and_plan_stages(),
+          cards: [card(10, 1, position: 1), card(11, 1, position: 2), card(20, 3)],
+          flows: spec_and_plan_flows(),
+          capacity: cap([{7, slots(3, 0)}])
+        )
+
+      assert %Plan{
+               dispatches: [{:start, 20, "plan", 7}, {:start, 10, "spec", 7}, {:start, 11, "spec", 7}],
+               to_queue: []
+             } = Scheduler.plan(s)
+    end
+
+    test "a parked Plan run resumes ahead of a fresh Spec pull for the one shared slot" do
+      s =
+        snap(
+          stages: spec_and_plan_stages(),
+          cards: [card(10, 1), card(20, 4, status: :working)],
+          flows: spec_and_plan_flows(),
+          runs: [run(99, 20, flow_key: "plan", isolation: :shared_clean)],
+          capacity: cap([{7, slots(1, 0)}])
+        )
+
+      assert %Plan{dispatches: [{:resume, 99, 7}], to_queue: [10]} = Scheduler.plan(s)
+    end
+
+    test "exclusive capacity is a separate budget and is not consumed by the shared flows" do
+      # Code is :exclusive; a full shared_clean budget must not starve it, nor vice versa.
+      s =
+        snap(
+          stages: spec_and_plan_stages() ++ [stage(5, position: 5), stage(6, position: 6)],
+          cards: [card(10, 1), card(20, 3), card(30, 5)],
+          flows: spec_and_plan_flows() ++ [flow("code", 5, 6, isolation: :exclusive)],
+          capacity: cap([{7, slots(1, 1)}])
+        )
+
+      assert %Plan{dispatches: dispatches, to_queue: [10]} = Scheduler.plan(s)
+      assert {:start, 30, "code", 7} in dispatches
+      assert {:start, 20, "plan", 7} in dispatches
+      assert length(dispatches) == 2
     end
   end
 
