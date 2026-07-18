@@ -863,10 +863,14 @@ def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None):
     surfaced as a bare "stage did not complete".
 
     `on_proc`, if given, receives the live Popen so a caller can terminate it (executor
-    revoke)."""
+    revoke). Only executor node-jobs pass `on_proc` (a JobControl.register); only they get
+    their own process group (start_new_session), since only they hold a JobControl able to
+    kill that group. The plain `relay run` runner mode passes no `on_proc` and must keep the
+    child in the runner's own foreground process group so a Ctrl-C at the tty still reaches
+    it directly."""
     proc = subprocess.Popen(cmd, shell=True, cwd=cwd, text=True, bufsize=1,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            start_new_session=True)
+                            start_new_session=on_proc is not None)
     if on_proc:
         on_proc(proc)
     tail = collections.deque(maxlen=12)
@@ -937,8 +941,9 @@ class JobControl:
             # /bin/sh — a plain terminate() only kills the shell wrapper and leaves the
             # real command running as an orphan that keeps writing into the worktree
             # (including while the next job's reset_worktree() git-reset/cleans it).
-            # start_new_session=True (both Popen call sites) puts each job in its own
-            # process group, so killing that group takes the whole command tree with it.
+            # Anything registered here came through on_proc, so both Popen call sites put
+            # it in its own process group (start_new_session=on_proc is not None); killing
+            # that group takes the whole command tree with it.
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
         except Exception:
             proc.terminate()   # best-effort fallback (e.g. no real pid/process group)
@@ -985,9 +990,14 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
     child_env.setdefault("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0")
     if outcome_path:
         child_env["RELAY_NODE_OUTCOME"] = outcome_path
+    # Only executor node-jobs pass on_proc (a JobControl.register); only they get their own
+    # process group (start_new_session), since only they hold a JobControl able to kill that
+    # group. The plain `relay run` runner mode (_stream_claude, run_step) passes no on_proc
+    # and must keep the child in the runner's own foreground process group so a Ctrl-C at
+    # the tty still reaches it directly.
     proc = subprocess.Popen(cmd, cwd=cwd, text=True, bufsize=1, env=child_env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            start_new_session=True)
+                            start_new_session=on_proc is not None)
     if on_proc:
         on_proc(proc)
     captured = None

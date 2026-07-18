@@ -1325,12 +1325,25 @@ class StreamClaudeJobTest(unittest.TestCase):
         """JobControl.cancel() now kills the whole process group of the registered proc
         (see JobControlTest). If this Popen shared the runner's own process group (the
         default unless start_new_session=True), that group-kill would SIGTERM the runner
-        itself instead of just the claude subprocess."""
+        itself instead of just the claude subprocess. Executor node-jobs always pass
+        on_proc (a JobControl.register), which is what should trigger the detach."""
+        seen = {}
+        relay.subprocess.Popen = lambda *a, **k: (
+            seen.update(kwargs=k) or _FakePopen([], code=0))
+        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt", on_proc=lambda proc: None)
+        self.assertTrue(seen["kwargs"].get("start_new_session"))
+
+    def test_without_on_proc_does_not_detach_so_ctrl_c_still_reaches_the_child(self):
+        """The plain `relay run` runner mode (_stream_claude, run_step) calls this with no
+        on_proc and holds no JobControl to kill a detached group — if it detached anyway,
+        a Ctrl-C at the tty would no longer reach the running `claude -p` (it's no longer
+        in the terminal's foreground process group), hanging the runner until the child
+        exits on its own."""
         seen = {}
         relay.subprocess.Popen = lambda *a, **k: (
             seen.update(kwargs=k) or _FakePopen([], code=0))
         capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
-        self.assertTrue(seen["kwargs"].get("start_new_session"))
+        self.assertFalse(seen["kwargs"].get("start_new_session"))
 
     def test_a_render_error_falls_back_to_the_raw_line_and_keeps_streaming(self):
         """Mirrors the old _stream_claude behavior: the try wraps BOTH json.loads and
@@ -1564,14 +1577,29 @@ class JobControlTest(unittest.TestCase):
     def test_stream_shell_runs_its_own_process_group_so_group_kill_is_safe(self):
         """killpg(getpgid(pid)) is only safe to use if the child was put in its own new
         session; otherwise it shares the runner's own process group and a cancel would
-        SIGTERM the runner itself."""
+        SIGTERM the runner itself. Executor node-jobs always pass on_proc (a
+        JobControl.register), which is what should trigger the detach."""
+        seen = {}
+        orig_popen = relay.subprocess.Popen
+        self.addCleanup(setattr, relay.subprocess, "Popen", orig_popen)
+        relay.subprocess.Popen = lambda *a, **k: (
+            seen.update(kwargs=k) or _FakePopen([], code=0))
+        relay._stream_shell("true", "/tmp/wt", on_proc=lambda proc: None)
+        self.assertTrue(seen["kwargs"].get("start_new_session"))
+
+    def test_stream_shell_without_on_proc_does_not_detach_so_ctrl_c_still_reaches_the_child(self):
+        """The plain `relay run` runner mode (run_step) calls _stream_shell with no
+        on_proc and holds no JobControl to kill a detached group — if it detached anyway,
+        a Ctrl-C at the tty would no longer reach the running shell step (it's no longer
+        in the terminal's foreground process group), hanging the runner until the child
+        exits on its own."""
         seen = {}
         orig_popen = relay.subprocess.Popen
         self.addCleanup(setattr, relay.subprocess, "Popen", orig_popen)
         relay.subprocess.Popen = lambda *a, **k: (
             seen.update(kwargs=k) or _FakePopen([], code=0))
         relay._stream_shell("true", "/tmp/wt")
-        self.assertTrue(seen["kwargs"].get("start_new_session"))
+        self.assertFalse(seen["kwargs"].get("start_new_session"))
 
 
 if __name__ == "__main__":
