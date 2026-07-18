@@ -77,6 +77,23 @@ defmodule RelayWeb.Api.FallbackController do
     |> render(:error, code: "invalid_target", message: "target must be a main-lane stage before this card")
   end
 
+  def call(conn, {:error, :conflict}) do
+    conn
+    |> put_status(:conflict)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "conflict", message: "This job is no longer held by your claim")
+  end
+
+  def call(conn, {:error, :unknown_outcome}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "unknown_outcome",
+      message: "outcome must be one of: succeeded, failed, partial, needs_input"
+    )
+  end
+
   defp changeset_message(changeset) do
     changeset
     |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->

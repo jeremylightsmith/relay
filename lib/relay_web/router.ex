@@ -179,6 +179,8 @@ defmodule RelayWeb.Router do
     post "/cards/:ref/needs-input", CardController, :needs_input
     post "/cards/:ref/approve", CardController, :approve
     post "/cards/:ref/reject", CardController, :reject
+    post "/node-jobs/claim", NodeJobController, :claim
+    post "/node-jobs/:id/outcome", NodeJobController, :outcome
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
