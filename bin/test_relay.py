@@ -1430,7 +1430,7 @@ class AgentOutcomeContractTest(unittest.TestCase):
             f.write("{not valid json")
         self.addCleanup(os.remove, path)
         job = {"vars": {"ref": "RLY-1"}}
-        outcome, detail = relay.determine_agent_outcome(job, True, path)
+        outcome, detail = capture_ret(relay.determine_agent_outcome, job, True, path)
         self.assertEqual(outcome, "failed")
         self.assertIn("outcome file", detail)
 
