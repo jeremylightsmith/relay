@@ -130,8 +130,20 @@ never wrote a clean outcome:
    to signal `partial`; an unreadable/malformed file is treated as `failed`, not silently
    skipped, since a `claude -p` that exited 0 without writing a real outcome must not be
    reported as `succeeded`;
-3. otherwise, no outcome file was written → the process exit code decides: `0` →
-   `succeeded` with empty detail, non-zero → `failed`.
+3. otherwise, **no outcome file was written → `failed`, whatever the exit code**. An agent node
+   must *declare* its verdict: a `claude -p` that exits 0 having written nothing is
+   indistinguishable from one that did the work, so reporting it `succeeded` would let a node
+   route past its own gate having produced nothing. (RLY-163: the first live Spec-flow dogfood
+   landed a card in *Spec:Review* with an empty spec exactly this way — the agent asked its
+   question as prose instead of calling `needs-input` — and the same hole would let a silent
+   `final_review` reach `merge`.) Rule 1 still covers the legitimate "I stopped to ask a
+   human" case, so a skill that parks on a question needs no outcome file.
+
+Because rule 3 now fails a silent node, the executor **appends the outcome-contract
+instruction to every agent node's prompt automatically** (`OUTCOME_CONTRACT` in `bin/relay`) —
+the requirement travels with every invocation rather than depending on each flow's node prompt
+or each skill author remembering it. Shell and gate nodes are exempt: their exit code is
+already an unambiguous verdict.
 
 **Needs-input re-entry.** A `needs_input` outcome parks the run; when a human clears the card
 and the run resumes, the server hands the same node back with `resume_session` set to the
