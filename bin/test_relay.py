@@ -1487,6 +1487,23 @@ class RunNodeJobTest(unittest.TestCase):
         outcome, detail, sha, session = relay.run_node_job(job, "/tmp/wt", self.control)
         self.assertEqual((outcome, sha, session), ("succeeded", "deadbeef", "sess-9"))
 
+    def test_needs_input_reentry_resumes_the_prior_session(self):
+        """The claim payload's server field is `resume_session` (NodeJobController.claim_payload/1),
+        not `session_id` (that's the outcome-report field name) — a needs-input re-entry must
+        read the former or the agent loses its prior conversation and restarts cold."""
+        seen = {}
+
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None):
+            seen["session_id"] = session_id
+            return True, "sess-9"
+
+        relay._stream_claude_job = fake_stream
+        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        job = {"id": "nj-2", "run_id": "r1", "node_type": "agent", "run": "Implement…",
+               "isolation": "exclusive", "resume_session": "sess-prior", "vars": {"ref": "RLY-2"}}
+        relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertEqual(seen["session_id"], "sess-prior")
+
     def test_agent_job_writes_the_outcome_file_outside_the_worktree_and_cleans_it_up(self):
         """The outcome file must never land inside slot_path: reset_worktree() treats any
         untracked file there as a leftover worth salvaging (git stash), so every agent job

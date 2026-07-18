@@ -1095,7 +1095,7 @@ def run_node_job(job, slot_path, control):
         outcome_path = os.path.join(outcome_dir, "outcome.json")
         try:
             ok, session_id = _stream_claude_job(
-                job["run"], cwd=slot_path, tag=tag, session_id=job.get("session_id"),
+                job["run"], cwd=slot_path, tag=tag, session_id=job.get("resume_session"),
                 outcome_path=outcome_path, on_proc=control.register)
             outcome, detail = determine_agent_outcome(job, ok, outcome_path)
         finally:
