@@ -233,6 +233,8 @@ seeded from [`docs/designs/flows/*.jsonc`](designs/flows/README.md) — open tho
 literal node/edge contents of Spec, Plan, and Code. A repo may override specific fields
 per-project via `.relay/flows.json` (RLY-140) without forking the library.
 
-To honor invariant 3, every `action` should start by checking out `{branch}` and end by
-committing. To honor invariant 4, the Plan step writes to the card's `plan` field and the Code
-step materializes it inside `{branch}`.
+To honor invariant 3, an agent/shell node's `run` should start by checking out the card's
+branch (from `vars.branch`) and end by committing. To honor invariant 4, the Plan flow writes
+the plan to the card's `plan` field, and the Code flow's `branch` node materializes it into the
+worktree as `plan.md` (see [`code.jsonc`](designs/flows/code.jsonc)'s `branch` node) for
+`implement` to work through.
