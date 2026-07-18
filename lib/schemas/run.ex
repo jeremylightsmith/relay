@@ -21,7 +21,7 @@ defmodule Schemas.Run do
   schema "runs" do
     field :flow_key, :string
     field :status, Ecto.Enum, values: [:running, :parked, :done, :failed, :cancelled]
-    field :parked_reason, Ecto.Enum, values: [:needs_input, :claimed]
+    field :parked_reason, Ecto.Enum, values: [:needs_input, :claimed, :executor_gone]
     field :current_node, :string
     field :context, :map, default: %{}
     field :failure_detail, :string
