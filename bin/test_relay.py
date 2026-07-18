@@ -14,6 +14,7 @@ import importlib.util
 import io
 import json
 import os
+import threading
 import unittest
 import urllib.error
 
@@ -35,6 +36,12 @@ def capture(fn, *args, **kwargs):
     with contextlib.redirect_stdout(out):
         fn(*args, **kwargs)
     return out.getvalue()
+
+
+def capture_ret(fn, *args, **kwargs):
+    """Like capture(), but discards stdout and returns the function's return value."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        return fn(*args, **kwargs)
 
 
 class _FakeResp:
@@ -938,6 +945,1021 @@ class HeartbeatBeatTest(unittest.TestCase):
     def test_a_manifest_crash_never_raises_out_of_beat(self):
         hb = relay.Heartbeat(lambda: 1 / 0, interval=30)
         hb._beat()  # must swallow, exactly like an api() failure
+
+
+class ExecutorConfigTest(unittest.TestCase):
+    def setUp(self):
+        self._path = relay.EXECUTOR_CONFIG_PATH
+        self.addCleanup(setattr, relay, "EXECUTOR_CONFIG_PATH", self._path)
+
+    def _write(self, obj):
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            json.dump(obj, f)
+        self.addCleanup(os.remove, path)
+        relay.EXECUTOR_CONFIG_PATH = path
+
+    def test_missing_file_yields_defaults(self):
+        relay.EXECUTOR_CONFIG_PATH = "/nope/does/not/exist.json"
+        cfg = relay.load_executor_config()
+        self.assertEqual(cfg["namespace"], "exec")
+        self.assertEqual(cfg["capacity"], {"shared_clean": 1, "exclusive": 1})
+        self.assertEqual(cfg["poll_timeout"], 25)
+        self.assertEqual(cfg["heartbeat_interval"], 15)
+        self.assertTrue(cfg["name"])  # defaults to hostname
+
+    def test_partial_capacity_merges_over_defaults(self):
+        self._write({"capacity": {"shared_clean": 3}})
+        cfg = relay.load_executor_config()
+        self.assertEqual(cfg["capacity"], {"shared_clean": 3, "exclusive": 1})
+
+    def test_explicit_fields_win(self):
+        self._write({"name": "box", "namespace": "ex2", "poll_timeout": 5})
+        cfg = relay.load_executor_config()
+        self.assertEqual((cfg["name"], cfg["namespace"], cfg["poll_timeout"]), ("box", "ex2", 5))
+
+    def test_malformed_json_dies_with_the_cli_die_message(self):
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            f.write("{not json")
+        self.addCleanup(os.remove, path)
+        relay.EXECUTOR_CONFIG_PATH = path
+        with self.assertRaises(SystemExit):
+            relay.load_executor_config()
+
+
+class ExecutorPoolTest(unittest.TestCase):
+    CFG = {"namespace": "exec", "capacity": {"shared_clean": 2, "exclusive": 2}}
+
+    def pool(self):
+        return relay.ExecutorPool(self.CFG)
+
+    def test_namespace_is_disjoint_from_the_watcher_pools(self):
+        p = self.pool()
+        names = [p.shared_name] + list(p.excl)
+        self.assertEqual(p.shared_name, "exec-clean")
+        self.assertEqual(sorted(p.excl), ["exec-work-1", "exec-work-2"])
+        self.assertTrue(all(n.startswith("exec-") for n in names))
+        self.assertNotIn("clean", names)  # the watcher's shared worktree name
+        self.assertNotIn("work-1", names)
+
+    def test_shared_clean_reuses_one_worktree_without_reset(self):
+        p = self.pool()
+        a = p.assign({"isolation": "shared_clean", "run_id": "r1"})
+        b = p.assign({"isolation": "shared_clean", "run_id": "r2"})
+        self.assertEqual(a, ("exec-clean", False))
+        self.assertEqual(b, ("exec-clean", False))
+        self.assertIsNone(p.assign({"isolation": "shared_clean", "run_id": "r3"}))  # cap 2
+
+    def test_shared_capacity_reflects_free_slots(self):
+        p = self.pool()
+        self.assertEqual(p.capacity()["shared_clean"], 2)
+        p.assign({"isolation": "shared_clean", "run_id": "r1"})
+        self.assertEqual(p.capacity()["shared_clean"], 1)
+        p.release({"isolation": "shared_clean", "run_id": "r1"}, "exec-clean", "done")
+        self.assertEqual(p.capacity()["shared_clean"], 2)
+
+    def test_first_exclusive_job_of_a_run_resets_its_slot(self):
+        p = self.pool()
+        slot, reset = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        self.assertEqual(slot, "exec-work-1")
+        self.assertTrue(reset)  # first job of the run → reset before use
+
+    def test_subsequent_job_of_same_run_reuses_slot_without_reset(self):
+        p = self.pool()
+        slot1, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot1, "running")
+        slot2, reset2 = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        self.assertEqual(slot2, slot1)
+        self.assertFalse(reset2)  # same run reuses the worktree as-is
+
+    def test_running_and_parked_keep_the_slot_bound(self):
+        p = self.pool()
+        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "parked")
+        # parked run keeps its slot: capacity shows it as NOT free, and a different run
+        # cannot take it (only the other free slot).
+        self.assertEqual(p.capacity()["exclusive"], 1)
+        other, _ = p.assign({"isolation": "exclusive", "run_id": "r2"})
+        self.assertEqual(other, "exec-work-2")
+
+    def test_terminal_run_state_frees_the_slot(self):
+        p = self.pool()
+        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "done")
+        self.assertEqual(p.capacity()["exclusive"], 2)
+
+    def test_revoke_run_state_none_frees_the_slot(self):
+        p = self.pool()
+        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, None)  # revoke
+        self.assertEqual(p.capacity()["exclusive"], 2)
+
+    def test_exclusive_capacity_exhausts_then_returns_none(self):
+        p = self.pool()
+        p.assign({"isolation": "exclusive", "run_id": "r1"})
+        p.assign({"isolation": "exclusive", "run_id": "r2"})
+        self.assertEqual(p.capacity()["exclusive"], 0)
+        self.assertIsNone(p.assign({"isolation": "exclusive", "run_id": "r3"}))
+
+    def test_has_bound_slots_tracks_exclusive_bindings(self):
+        # The execute loop must keep polling while any exclusive slot is bound to a
+        # run, even when free capacity is 0 — the bound (possibly parked) run may
+        # have a pinned resume/next job the server will hand over regardless of
+        # advertised capacity (exclusive affinity, ADR 0006 §5). Without this the
+        # holder idles forever and the parked run never resumes.
+        p = self.pool()
+        self.assertFalse(p.has_bound_slots())
+        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        self.assertTrue(p.has_bound_slots())
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "parked")
+        self.assertTrue(p.has_bound_slots())  # parked keeps the binding
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "done")
+        self.assertFalse(p.has_bound_slots())  # terminal frees it
+
+    def test_has_bound_slots_ignores_shared_clean(self):
+        p = self.pool()
+        p.assign({"isolation": "shared_clean", "run_id": "r1"})
+        self.assertFalse(p.has_bound_slots())
+
+    def test_release_on_unknown_slot_does_not_raise(self):
+        p = self.pool()
+        # A slot the pool never handed out (e.g. a stale/None slot from a caller bug)
+        # must not crash release() with a KeyError — it's a no-op for an unbound slot.
+        p.release({"isolation": "exclusive", "run_id": "r1"}, "exec-work-99", "done")
+        p.release({"isolation": "exclusive", "run_id": "r1"}, None, "done")
+        self.assertEqual(p.capacity()["exclusive"], 2)
+
+    def test_refresh_idle_shared_holds_the_lock_across_the_reset(self):
+        """refresh_idle_shared's idle-check and the destructive refresh_worktree() reset
+        (git reset --hard + git clean, per reset_worktree's own docstring) must be atomic
+        under the pool lock — otherwise a job can be assign()ed into the shared worktree
+        between the check and the reset, and the reset then blows it out from under a
+        running job."""
+        p = self.pool()
+        refresh_started = threading.Event()
+        release_refresh = threading.Event()
+        events = []
+
+        def fake_refresh_worktree(name, base):
+            events.append("refresh-start")
+            refresh_started.set()
+            release_refresh.wait(timeout=2)
+            events.append("refresh-end")
+
+        real = relay.refresh_worktree
+        relay.refresh_worktree = fake_refresh_worktree
+        self.addCleanup(setattr, relay, "refresh_worktree", real)
+
+        refresher = threading.Thread(target=p.refresh_idle_shared)
+        refresher.start()
+        self.assertTrue(refresh_started.wait(timeout=2))
+
+        assigned = {}
+
+        def do_assign():
+            assigned["result"] = p.assign({"isolation": "shared_clean", "run_id": "r1"})
+            events.append("assign")
+
+        assigner = threading.Thread(target=do_assign)
+        assigner.start()
+        assigner.join(timeout=0.2)  # give it a real chance to race in if unlocked
+        self.assertNotIn("assign", events)  # must still be blocked behind the pool lock
+
+        release_refresh.set()
+        refresher.join(timeout=2)
+        assigner.join(timeout=2)
+
+        self.assertEqual(events, ["refresh-start", "refresh-end", "assign"])
+        self.assertEqual(assigned["result"], ("exec-clean", False))
+
+
+class ExecutorConfigCommittedFileTest(unittest.TestCase):
+    """The committed .relay/executor.json is a shared example checked into every clone; it
+    must not hardcode one developer's executor identity (the `name` is the executor's wire
+    identity used for claim/heartbeat/revoke — RLY-135 review)."""
+
+    def test_committed_executor_json_has_no_personal_name(self):
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            ".relay", "executor.json",
+        )
+        with open(path) as f:
+            cfg = json.load(f)
+        self.assertNotIn("name", cfg)
+
+
+class _FakePopen:
+    """Minimal Popen stand-in: yields the given stdout lines, then exits with `code`."""
+
+    def __init__(self, lines, code=0):
+        self.stdout = iter(lines)
+        self._code = code
+        self.terminated = False
+
+    def wait(self):
+        return self._code
+
+    def poll(self):
+        return self._code if self.terminated else None
+
+    def terminate(self):
+        self.terminated = True
+
+
+class NodeJobLogAttributionTest(unittest.TestCase):
+    def setUp(self):
+        self._fw, self._nj, self._ru = relay.FORWARDER, dict(relay.NODE_JOB_IDS), dict(relay.RUN_IDS)
+        self.addCleanup(setattr, relay, "FORWARDER", self._fw)
+        self.addCleanup(lambda: (relay.NODE_JOB_IDS.clear(), relay.NODE_JOB_IDS.update(self._nj)))
+        self.addCleanup(lambda: (relay.RUN_IDS.clear(), relay.RUN_IDS.update(self._ru)))
+
+    def test_watch_payload_shape_is_unchanged_without_a_node_job_id(self):
+        fw = relay.LogForwarder()
+        fw.enqueue("claude", "hello", "RLY-1", "run-9")
+        self.assertEqual(fw.q.get_nowait(),
+                         {"kind": "claude", "ref": "RLY-1", "text": "hello", "run_id": "run-9"})
+
+    def test_node_job_id_is_added_only_when_present(self):
+        fw = relay.LogForwarder()
+        fw.enqueue("claude", "hi", "RLY-1", "run-9", "nj-3")
+        self.assertEqual(fw.q.get_nowait(),
+                         {"kind": "claude", "ref": "RLY-1", "text": "hi",
+                          "run_id": "run-9", "node_job_id": "nj-3"})
+
+    def test_forward_attaches_the_current_node_job_id_for_the_ref(self):
+        seen = []
+        relay.FORWARDER = type("F", (), {"enqueue": lambda self, *a: seen.append(a)})()
+        relay.RUN_IDS["RLY-1"] = "run-9"
+        relay.NODE_JOB_IDS["RLY-1"] = "nj-3"
+        relay.forward("claude", "x", "RLY-1")
+        self.assertEqual(seen, [("claude", "x", "RLY-1", "run-9", "nj-3")])
+
+
+class ClaimAndReportTest(unittest.TestCase):
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+
+    def test_claim_posts_executor_and_capacity_and_returns_the_job(self):
+        sent = []
+        job = {"id": "nj-1", "run_id": "r1", "node_type": "shell",
+               "run": "true", "isolation": "shared_clean", "vars": {"ref": "RLY-1"}}
+        relay.api = lambda m, p, b=None, **k: (sent.append((m, p, b, k)) or job)
+        got = relay.claim_node_job({"name": "box", "host": "h"},
+                                   {"shared_clean": 2, "exclusive": 1}, 25)
+        self.assertEqual(got, job)
+        m, p, b, k = sent[0]
+        self.assertEqual((m, p), ("POST", "/api/node-jobs/claim"))
+        self.assertEqual(b, {"executor": {"name": "box", "host": "h"},
+                             "capacity": {"shared_clean": 2, "exclusive": 1}})
+        self.assertEqual(k.get("timeout"), 25)
+
+    def test_claim_empty_body_is_no_work(self):
+        relay.api = lambda *a, **k: {}       # 204/empty long-poll timeout
+        self.assertIsNone(relay.claim_node_job({"name": "b", "host": "h"}, {}, 25))
+
+    def test_claim_tolerates_a_read_timeout_as_no_work(self):
+        def boom(*a, **k):
+            raise relay.socket.timeout("timed out")
+        relay.api = boom
+        self.assertIsNone(relay.claim_node_job({"name": "b", "host": "h"}, {}, 25))
+
+    def test_report_outcome_posts_full_body_and_returns_run_state(self):
+        sent = []
+        relay.api = lambda m, p, b=None, **k: (sent.append((m, p, b)) or {"run_state": "parked"})
+        rs = relay.report_outcome("nj-1", "needs_input", "asked", "abc123", "sess-9")
+        self.assertEqual(rs, "parked")
+        m, p, b = sent[0]
+        self.assertEqual((m, p), ("POST", "/api/node-jobs/nj-1/outcome"))
+        self.assertEqual(b, {"outcome": "needs_input", "detail": "asked",
+                             "git_sha": "abc123", "session_id": "sess-9"})
+
+
+class ApiTimeoutPassthroughTest(unittest.TestCase):
+    """api(timeout=…) passes the read timeout to urlopen and re-raises socket.timeout so the
+    long-poll claim can treat it as 'no work', while leaving default (timeout-less) calls byte
+    identical to before."""
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in ("env", "_api_backoff", "log")}
+        relay.env = lambda name: "http://example.test"
+        relay._api_backoff = lambda attempt: None
+        relay.log = lambda *a, **k: None
+        self._urlopen = relay.urllib.request.urlopen
+        self.addCleanup(setattr, relay.urllib.request, "urlopen", self._urlopen)
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            setattr(relay, k, v)
+
+    def test_timeout_is_forwarded_to_urlopen(self):
+        seen = {}
+        relay.urllib.request.urlopen = lambda req, *a, **k: (
+            seen.update(k) or _FakeResp(b"{}"))
+        relay.api("POST", "/api/node-jobs/claim", {"x": 1}, timeout=25)
+        self.assertEqual(seen.get("timeout"), 25)
+
+    def test_default_call_passes_no_timeout_kwarg(self):
+        seen = {}
+        relay.urllib.request.urlopen = lambda req, *a, **k: (
+            seen.update(kwargs=dict(k)) or _FakeResp(b"{}"))
+        relay.api("GET", "/api/board")
+        self.assertEqual(seen["kwargs"], {})   # unchanged: no timeout kwarg
+
+    def test_socket_timeout_is_reraised_not_died(self):
+        def boom(req, *a, **k):
+            raise relay.socket.timeout("timed out")
+        relay.urllib.request.urlopen = boom
+        with self.assertRaises(relay.socket.timeout):
+            relay.api("POST", "/api/node-jobs/claim", {"x": 1}, timeout=25)
+
+
+class StreamClaudeJobTest(unittest.TestCase):
+    def setUp(self):
+        self._popen = relay.subprocess.Popen
+        self.addCleanup(setattr, relay.subprocess, "Popen", self._popen)
+
+    def test_captures_session_id_and_reports_success(self):
+        lines = [
+            json.dumps({"type": "system", "subtype": "init", "session_id": "sess-77"}),
+            json.dumps({"type": "assistant",
+                        "message": {"content": [{"type": "text", "text": "working"}]}}),
+            json.dumps({"type": "result", "session_id": "sess-77", "num_turns": 2}),
+        ]
+        relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=0)
+        ok, session = capture_ret(relay._stream_claude_job, "do it", cwd="/tmp/wt")
+        self.assertTrue(ok)
+        self.assertEqual(session, "sess-77")
+
+    def test_resume_inserts_the_prior_session_into_argv(self):
+        seen = {}
+
+        def fake_popen(cmd, *a, **k):
+            seen["cmd"] = cmd
+            seen["env"] = k.get("env", {})
+            return _FakePopen([], code=0)
+
+        relay.subprocess.Popen = fake_popen
+        capture_ret(relay._stream_claude_job, "resume prompt", cwd="/tmp/wt",
+                    session_id="sess-5", outcome_path="/tmp/wt/out.json")
+        self.assertIn("--resume", seen["cmd"])
+        self.assertEqual(seen["cmd"][seen["cmd"].index("--resume") + 1], "sess-5")
+        self.assertEqual(seen["env"].get("RELAY_NODE_OUTCOME"), "/tmp/wt/out.json")
+
+    def test_lifts_the_default_background_wait_ceiling_so_long_runs_do_not_get_cut_off(self):
+        """claude -p caps a background workflow's wait at 10 minutes by default; /exec-plan
+        runs far longer, so without lifting the cap -p would exit mid-run and the executor
+        would report a partial plan as succeeded."""
+        seen = {}
+        relay.subprocess.Popen = lambda cmd, *a, **k: (
+            seen.update(env=k.get("env", {})) or _FakePopen([], code=0))
+        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        self.assertEqual(seen["env"].get("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), "0")
+
+    def test_an_explicit_wait_ceiling_override_wins(self):
+        seen = {}
+
+        def fake_popen(cmd, *a, **k):
+            seen["env"] = k.get("env", {})
+            return _FakePopen([], code=0)
+
+        relay.subprocess.Popen = fake_popen
+        self._env = dict(os.environ)
+        os.environ["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"] = "5000"
+        self.addCleanup(os.environ.pop, "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", None)
+        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        self.assertEqual(seen["env"].get("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), "5000")
+
+    def test_registers_the_live_subprocess_for_cancellation(self):
+        proc = _FakePopen([], code=0)
+        relay.subprocess.Popen = lambda *a, **k: proc
+        registered = []
+        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt",
+                    on_proc=registered.append)
+        self.assertEqual(registered, [proc])
+
+    def test_runs_its_own_process_group_so_a_cancel_group_kill_never_hits_the_runner(self):
+        """JobControl.cancel() now kills the whole process group of the registered proc
+        (see JobControlTest). If this Popen shared the runner's own process group (the
+        default unless start_new_session=True), that group-kill would SIGTERM the runner
+        itself instead of just the claude subprocess. Executor node-jobs always pass
+        on_proc (a JobControl.register), which is what should trigger the detach."""
+        seen = {}
+        relay.subprocess.Popen = lambda *a, **k: (
+            seen.update(kwargs=k) or _FakePopen([], code=0))
+        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt", on_proc=lambda proc: None)
+        self.assertTrue(seen["kwargs"].get("start_new_session"))
+
+    def test_without_on_proc_does_not_detach_so_ctrl_c_still_reaches_the_child(self):
+        """The plain `relay run` runner mode (_stream_claude, run_step) calls this with no
+        on_proc and holds no JobControl to kill a detached group — if it detached anyway,
+        a Ctrl-C at the tty would no longer reach the running `claude -p` (it's no longer
+        in the terminal's foreground process group), hanging the runner until the child
+        exits on its own."""
+        seen = {}
+        relay.subprocess.Popen = lambda *a, **k: (
+            seen.update(kwargs=k) or _FakePopen([], code=0))
+        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        self.assertFalse(seen["kwargs"].get("start_new_session"))
+
+    def test_a_render_error_falls_back_to_the_raw_line_and_keeps_streaming(self):
+        """Mirrors the old _stream_claude behavior: the try wraps BOTH json.loads and
+        _print_claude_event, so a rendering bug prints the raw line instead of killing
+        the stream loop mid-job."""
+        bad = json.dumps({"type": "assistant",
+                          "message": {"content": [{"type": "text", "text": "x"}]}})
+        good = json.dumps({"type": "result", "session_id": "sess-2"})
+        relay.subprocess.Popen = lambda *a, **k: _FakePopen([bad, good], code=0)
+        orig = relay._print_claude_event
+
+        def flaky(ev, tag=""):
+            if ev.get("type") == "assistant":
+                raise RuntimeError("render boom")
+            return orig(ev, tag)
+
+        relay._print_claude_event = flaky
+        self.addCleanup(setattr, relay, "_print_claude_event", orig)
+        out = capture(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        self.assertIn(bad[:200], out)          # fell back to the raw line
+        self.assertIn("claude finished", out)  # ...and kept streaming the next event
+
+
+class StreamClaudeDelegatesTest(unittest.TestCase):
+    """_stream_claude must not duplicate _stream_claude_job's argv/env/parsing logic —
+    it's a thin wrapper so a fix to the wait-ceiling workaround or stream-json parsing
+    only has to be made once."""
+
+    def setUp(self):
+        self._job = relay._stream_claude_job
+        self.addCleanup(setattr, relay, "_stream_claude_job", self._job)
+
+    def test_stream_claude_delegates_to_stream_claude_job(self):
+        seen = {}
+        relay._stream_claude_job = lambda prompt, cwd, tag="": (
+            seen.update(prompt=prompt, cwd=cwd, tag=tag) or (True, "sess-x"))
+        ok = relay._stream_claude("do it", cwd="/tmp/wt", tag="[R] ")
+        self.assertTrue(ok)
+        self.assertEqual(seen, {"prompt": "do it", "cwd": "/tmp/wt", "tag": "[R] "})
+
+    def test_stream_claude_returns_only_the_bool_even_on_failure(self):
+        relay._stream_claude_job = lambda prompt, cwd, tag="": (False, None)
+        self.assertFalse(relay._stream_claude("do it", cwd="/tmp/wt"))
+
+
+class AgentOutcomeContractTest(unittest.TestCase):
+    def setUp(self):
+        self._get = relay.get_card
+        self.addCleanup(setattr, relay, "get_card", self._get)
+
+    def test_card_needs_input_wins_first(self):
+        relay.get_card = lambda ref: {"status": "needs_input"}
+        job = {"vars": {"ref": "RLY-1"}}
+        self.assertEqual(relay.determine_agent_outcome(job, True, None),
+                         ("needs_input", "agent asked the human"))
+
+    def test_outcome_file_supplies_partial(self):
+        import tempfile
+        relay.get_card = lambda ref: {"status": "working"}
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            json.dump({"outcome": "partial", "detail": "half done"}, f)
+        self.addCleanup(os.remove, path)
+        job = {"vars": {"ref": "RLY-1"}}
+        self.assertEqual(relay.determine_agent_outcome(job, True, path),
+                         ("partial", "half done"))
+
+    def test_exit_code_fallback(self):
+        relay.get_card = lambda ref: {"status": "working"}
+        job = {"vars": {"ref": "RLY-1"}}
+        self.assertEqual(relay.determine_agent_outcome(job, True, "/nope.json")[0], "succeeded")
+        self.assertEqual(relay.determine_agent_outcome(job, False, "/nope.json")[0], "failed")
+
+    def test_a_malformed_outcome_file_is_reported_as_failed_not_silently_succeeded(self):
+        """$RELAY_NODE_OUTCOME is the only way a node signals `partial`; if the file an
+        agent wrote is truncated/invalid JSON, swallowing the parse error and falling
+        through to the exit-code check would report `succeeded` for a claude -p process
+        that exited 0 while having failed to hand back its real outcome. That's a silent
+        wrong result, so a malformed file must be `failed`, not `succeeded`."""
+        import tempfile
+        relay.get_card = lambda ref: {"status": "working"}
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            f.write("{not valid json")
+        self.addCleanup(os.remove, path)
+        job = {"vars": {"ref": "RLY-1"}}
+        outcome, detail = capture_ret(relay.determine_agent_outcome, job, True, path)
+        self.assertEqual(outcome, "failed")
+        self.assertIn("outcome file", detail)
+
+    def test_a_malformed_outcome_file_is_logged_so_a_human_can_see_the_agent_tried(self):
+        import tempfile
+        relay.get_card = lambda ref: {"status": "working"}
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            f.write("{not valid json")
+        self.addCleanup(os.remove, path)
+        job = {"vars": {"ref": "RLY-1"}}
+        out = capture(relay.determine_agent_outcome, job, True, path)
+        self.assertIn("RLY-1", out)
+        self.assertIn(path, out)
+
+
+class RunNodeJobTest(unittest.TestCase):
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in
+                       ("_stream_shell", "_stream_claude_job", "determine_agent_outcome",
+                        "get_card")}
+        self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+        self._run = relay.subprocess.run                      # restore the attr, not the module
+        self.addCleanup(setattr, relay.subprocess, "run", self._run)
+        relay.subprocess.run = lambda *a, **k: type(
+            "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
+        self.control = relay.JobControl()
+
+    def test_shell_job_reports_succeeded_with_git_sha(self):
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None: True
+        job = {"id": "nj-1", "run_id": "r1", "node_type": "shell", "run": "true",
+               "isolation": "shared_clean", "vars": {"ref": "RLY-1"}}
+        outcome, detail, sha, session = relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertEqual((outcome, sha, session), ("succeeded", "deadbeef", None))
+
+    def test_shell_job_failure_carries_the_output_tail(self):
+        def fail(cmd, cwd, tag="", sink=None, on_proc=None):
+            if sink is not None:
+                sink.extend(["boom line"])
+            return False
+        relay._stream_shell = fail
+        job = {"id": "nj-1", "run_id": "r1", "node_type": "gate", "run": "false",
+               "isolation": "shared_clean", "vars": {"ref": "RLY-1"}}
+        outcome, detail, _, _ = relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertEqual(outcome, "failed")
+        self.assertIn("boom line", detail)
+
+    def test_agent_job_captures_session_and_uses_the_contract(self):
+        relay._stream_claude_job = lambda prompt, cwd, tag="", session_id=None, \
+            outcome_path=None, on_proc=None: (True, "sess-9")
+        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        job = {"id": "nj-2", "run_id": "r1", "node_type": "agent", "run": "Implement…",
+               "isolation": "exclusive", "vars": {"ref": "RLY-2"}}
+        outcome, detail, sha, session = relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertEqual((outcome, sha, session), ("succeeded", "deadbeef", "sess-9"))
+
+    def test_needs_input_reentry_resumes_the_prior_session(self):
+        """The claim payload's server field is `resume_session` (NodeJobController.claim_payload/1),
+        not `session_id` (that's the outcome-report field name) — a needs-input re-entry must
+        read the former or the agent loses its prior conversation and restarts cold."""
+        seen = {}
+
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None):
+            seen["session_id"] = session_id
+            return True, "sess-9"
+
+        relay._stream_claude_job = fake_stream
+        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        job = {"id": "nj-2", "run_id": "r1", "node_type": "agent", "run": "Implement…",
+               "isolation": "exclusive", "resume_session": "sess-prior", "vars": {"ref": "RLY-2"}}
+        relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertEqual(seen["session_id"], "sess-prior")
+
+    def test_agent_job_writes_the_outcome_file_outside_the_worktree_and_cleans_it_up(self):
+        """The outcome file must never land inside slot_path: reset_worktree() treats any
+        untracked file there as a leftover worth salvaging (git stash), so every agent job
+        would otherwise leave the next job's reset_worktree() logging a spurious salvage."""
+        seen = {}
+
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None):
+            seen["stream_path"] = outcome_path
+            self.assertTrue(os.path.exists(os.path.dirname(outcome_path)))
+            return True, "sess-9"
+
+        def fake_determine(job, ok, path):
+            seen["determine_path"] = path
+            return "succeeded", ""
+
+        relay._stream_claude_job = fake_stream
+        relay.determine_agent_outcome = fake_determine
+        job = {"id": "nj-2", "run_id": "r1", "node_type": "agent", "run": "Implement…",
+               "isolation": "exclusive", "vars": {"ref": "RLY-2"}}
+        relay.run_node_job(job, "/tmp/wt", self.control)
+
+        # both calls got the exact same path
+        self.assertEqual(seen["stream_path"], seen["determine_path"])
+        # ...and it lives outside the worktree the job ran in
+        self.assertFalse(seen["stream_path"].startswith("/tmp/wt"))
+        # cleaned up once the job is done — no leakage into the next job on this slot
+        self.assertFalse(os.path.exists(os.path.dirname(seen["stream_path"])))
+
+    def test_git_sha_is_none_when_rev_parse_fails(self):
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None: True
+        relay.subprocess.run = lambda *a, **k: type(
+            "R", (), {"stdout": "", "returncode": 128})()
+        job = {"id": "nj-5", "run_id": "r1", "node_type": "shell", "run": "true",
+               "isolation": "shared_clean", "vars": {"ref": "RLY-5"}}
+        _, _, sha, _ = relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertIsNone(sha)
+
+    def test_shell_job_expands_ref_branch_relay_and_url_placeholders(self):
+        """The server stores `run` raw and only resolves `vars` (Runs.build_payload); the
+        executor is the only place {ref}/{branch}/... can be expanded. `relay` and `url`
+        are not server-sent vars at all, so run_node_job must supply them itself, the same
+        way work()'s vars dict does for `relay watch`."""
+        seen = {}
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None: (
+            seen.__setitem__("cmd", cmd) or True)
+        old_url = os.environ.get("RELAY_URL")
+        os.environ["RELAY_URL"] = "https://relay.example"
+        self.addCleanup(lambda: (
+            os.environ.__setitem__("RELAY_URL", old_url) if old_url is not None
+            else os.environ.pop("RELAY_URL", None)))
+        job = {"id": "nj-6", "run_id": "r1", "node_type": "shell",
+               "run": "git checkout -B {branch} && {relay} card {ref} --json > out; "
+                      "curl {url}",
+               "isolation": "shared_clean",
+               "vars": {"ref": "RLY-6", "branch": "rly-6-do-thing"}}
+        relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertEqual(
+            seen["cmd"],
+            "git checkout -B rly-6-do-thing && " + relay.HERE
+            + " card RLY-6 --json > out; curl https://relay.example")
+
+    def test_shell_job_does_not_splice_none_for_nil_vars(self):
+        """build_payload puts prior_detail/findings in vars as nil (-> None in Python)
+        when absent; render()'s str(v) would splice the literal string "None" into the
+        command if those keys weren't filtered out first."""
+        seen = {}
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None: (
+            seen.__setitem__("cmd", cmd) or True)
+        job = {"id": "nj-7", "run_id": "r1", "node_type": "shell", "run": "echo {ref}",
+               "isolation": "shared_clean",
+               "vars": {"ref": "RLY-7", "prior_detail": None, "findings": None}}
+        relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertEqual(seen["cmd"], "echo RLY-7")
+        self.assertNotIn("None", seen["cmd"])
+
+    def test_agent_job_expands_placeholders_in_the_prompt(self):
+        seen = {}
+
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None):
+            seen["prompt"] = prompt
+            return True, "sess-1"
+
+        relay._stream_claude_job = fake_stream
+        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        job = {"id": "nj-8", "run_id": "r1", "node_type": "agent", "run": "/brainstorm {ref}",
+               "isolation": "exclusive", "vars": {"ref": "RLY-8"}}
+        relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertEqual(seen["prompt"], "/brainstorm RLY-8")
+
+
+class JobControlTest(unittest.TestCase):
+    def test_cancel_terminates_a_registered_running_proc(self):
+        c = relay.JobControl()
+        proc = _FakePopen([], code=0)
+        c.register(proc)
+        self.assertFalse(c.cancelled())
+        c.cancel()
+        self.assertTrue(c.cancelled())
+        self.assertTrue(proc.terminated)
+
+    def test_a_revoke_before_the_proc_starts_still_terminates_it(self):
+        c = relay.JobControl()
+        c.cancel()                # revoke landed first
+        proc = _FakePopen([], code=0)
+        c.register(proc)          # proc registers after → terminate immediately
+        self.assertTrue(proc.terminated)
+
+    def test_cancel_kills_the_whole_process_group_not_just_the_registered_proc(self):
+        """_stream_shell runs its command with shell=True, so the registered proc is
+        /bin/sh; a bare proc.terminate() only kills the shell wrapper and leaves the real
+        command running as an orphan that keeps writing into the worktree — including
+        while the next job's reset_worktree() is git-reset/clean-ing the same directory.
+        Cancel must kill the whole process group instead."""
+        c = relay.JobControl()
+        proc = _FakePopen([], code=0)
+        proc.pid = 4242
+        killed = []
+        self._killpg, self._getpgid = relay.os.killpg, relay.os.getpgid
+        relay.os.killpg = lambda pgid, sig: killed.append((pgid, sig))
+        relay.os.getpgid = lambda pid: pid   # pretend the pgid equals the pid for the test
+        self.addCleanup(setattr, relay.os, "killpg", self._killpg)
+        self.addCleanup(setattr, relay.os, "getpgid", self._getpgid)
+
+        c.register(proc)
+        c.cancel()
+
+        self.assertEqual(killed, [(4242, relay.signal.SIGTERM)])
+        self.assertFalse(proc.terminated)   # group kill used, not the plain terminate()
+
+    def test_cancel_falls_back_to_plain_terminate_when_the_proc_has_no_process_group(self):
+        """A fake/degenerate proc without a real pid (as in the other JobControl tests)
+        must still be terminated — the group-kill path is best-effort, not a hard
+        requirement, so a lookup failure falls back to proc.terminate()."""
+        c = relay.JobControl()
+        proc = _FakePopen([], code=0)   # no .pid attribute
+        c.register(proc)
+        c.cancel()
+        self.assertTrue(proc.terminated)
+
+    def test_stream_shell_runs_its_own_process_group_so_group_kill_is_safe(self):
+        """killpg(getpgid(pid)) is only safe to use if the child was put in its own new
+        session; otherwise it shares the runner's own process group and a cancel would
+        SIGTERM the runner itself. Executor node-jobs always pass on_proc (a
+        JobControl.register), which is what should trigger the detach."""
+        seen = {}
+        orig_popen = relay.subprocess.Popen
+        self.addCleanup(setattr, relay.subprocess, "Popen", orig_popen)
+        relay.subprocess.Popen = lambda *a, **k: (
+            seen.update(kwargs=k) or _FakePopen([], code=0))
+        relay._stream_shell("true", "/tmp/wt", on_proc=lambda proc: None)
+        self.assertTrue(seen["kwargs"].get("start_new_session"))
+
+    def test_stream_shell_without_on_proc_does_not_detach_so_ctrl_c_still_reaches_the_child(self):
+        """The plain `relay run` runner mode (run_step) calls _stream_shell with no
+        on_proc and holds no JobControl to kill a detached group — if it detached anyway,
+        a Ctrl-C at the tty would no longer reach the running shell step (it's no longer
+        in the terminal's foreground process group), hanging the runner until the child
+        exits on its own."""
+        seen = {}
+        orig_popen = relay.subprocess.Popen
+        self.addCleanup(setattr, relay.subprocess, "Popen", orig_popen)
+        relay.subprocess.Popen = lambda *a, **k: (
+            seen.update(kwargs=k) or _FakePopen([], code=0))
+        relay._stream_shell("true", "/tmp/wt")
+        self.assertFalse(seen["kwargs"].get("start_new_session"))
+
+
+class ExecutorHeartbeatTest(unittest.TestCase):
+    """The per-executor heartbeat POSTs {executor, running:[…]} to /api/node-jobs/heartbeat
+    and READS the revoked ids from the response (unlike the watcher's Heartbeat, which discards
+    the body). The legacy /api/board/heartbeat path is untouched."""
+
+    def _capture(self, hb):
+        calls, revoked = [], []
+        orig = relay.api
+        relay.api = lambda *a, **k: (calls.append(a) or {"revoked": ["nj-7"]})
+        try:
+            hb.on_revoke = revoked.append
+            hb._beat()
+        finally:
+            relay.api = orig
+        return calls, revoked
+
+    def test_beat_posts_running_and_signals_each_revoked_job(self):
+        hb = relay.ExecutorHeartbeat({"name": "box", "host": "h"},
+                                     lambda: ["nj-7", "nj-8"], lambda jid: None, interval=15)
+        calls, revoked = self._capture(hb)
+        (method, path, body), = calls
+        self.assertEqual((method, path), ("POST", "/api/node-jobs/heartbeat"))
+        self.assertEqual(body, {"executor": {"name": "box", "host": "h"},
+                                "running": ["nj-7", "nj-8"]})
+        self.assertEqual(revoked, ["nj-7"])
+
+    def test_a_beat_error_is_swallowed(self):
+        hb = relay.ExecutorHeartbeat({"name": "b", "host": "h"},
+                                     lambda: 1 / 0, lambda jid: None, interval=15)
+        hb._beat()   # must not raise, exactly like the watcher's Heartbeat
+
+    def test_a_404_beat_prints_nothing_to_stderr(self):
+        """The server route doesn't exist yet (docs/agent-integration.md: "client-side only
+        for now") — a real urlopen() 404 must be swallowed silently by the soft_404 call, not
+        fall through to die()'s stderr print, or a long-running `relay execute` would spam an
+        error line on every heartbeat tick forever."""
+        hb = relay.ExecutorHeartbeat({"name": "b", "host": "h"},
+                                     lambda: [], lambda jid: None, interval=15)
+        orig_env, orig_urlopen = relay.env, relay.urllib.request.urlopen
+        relay.env = lambda name: "http://example.test"
+        relay.urllib.request.urlopen = lambda req, *a, **k: (
+            _ for _ in ()).throw(_http_error(404))
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err):
+                hb._beat()
+        finally:
+            relay.env = orig_env
+            relay.urllib.request.urlopen = orig_urlopen
+        self.assertEqual(err.getvalue(), "")
+
+
+class ExecuteOneTest(unittest.TestCase):
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in
+                       ("run_node_job", "report_outcome", "reset_worktree",
+                        "worktree_path", "DRY", "log")}
+        self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+        relay.DRY = False
+        relay.worktree_path = lambda name: "/tmp/" + name
+        self.resets = []
+        relay.reset_worktree = lambda path, base: self.resets.append(path)
+        self.reports = []
+        relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
+        self.pool = relay.ExecutorPool(
+            {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 1}})
+
+    def test_first_exclusive_job_resets_then_runs_and_reports(self):
+        relay.run_node_job = lambda job, path, control: ("succeeded", "", "sha1", None)
+        job = {"id": "nj-1", "run_id": "r1", "node_type": "shell", "run": "x",
+               "isolation": "exclusive", "vars": {"ref": "RLY-1"}}
+        slot, reset = self.pool.assign(job)
+        rs = relay.execute_one(job, slot, reset, relay.JobControl(), self.pool)
+        self.assertEqual(rs, "done")
+        self.assertEqual(self.resets, ["/tmp/exec-work-1"])          # reset before use
+        self.assertEqual(self.reports[0], ("nj-1", "succeeded", "", "sha1", None))
+
+    def test_shared_job_is_not_reset(self):
+        relay.run_node_job = lambda job, path, control: ("succeeded", "", "sha2", None)
+        job = {"id": "nj-2", "run_id": "r2", "node_type": "shell", "run": "x",
+               "isolation": "shared_clean", "vars": {"ref": "RLY-2"}}
+        slot, reset = self.pool.assign(job)
+        relay.execute_one(job, slot, reset, relay.JobControl(), self.pool)
+        self.assertEqual(self.resets, [])                            # shared: never reset per-job
+
+    def test_a_revoke_of_a_shared_job_does_not_reset_the_shared_worktree(self):
+        """A revoked shared_clean job must NOT reset exec-clean: capacity.shared_clean allows
+        several concurrent jobs in that single shared worktree (ExecutorPool docstring: shared
+        is REUSED, never reset per-job), so resetting on revoke would blow away the other
+        jobs still running there. There is nothing worth salvaging for a shared job either —
+        refresh_idle_shared() fast-forwards it once every shared slot is idle."""
+        control = relay.JobControl()
+
+        def revoked_run(job, path, ctl):
+            ctl.cancel()                     # heartbeat revoked it while it ran
+            return ("succeeded", "", "sha", None)
+
+        relay.run_node_job = revoked_run
+        job = {"id": "nj-9", "run_id": "r9", "node_type": "shell", "run": "x",
+               "isolation": "shared_clean", "vars": {"ref": "RLY-9"}}
+        slot, reset = self.pool.assign(job)
+        rs = relay.execute_one(job, slot, reset, control, self.pool)
+        self.assertIsNone(rs)
+        self.assertEqual(self.reports, [])                           # §5: no outcome for a revoke
+        self.assertEqual(self.resets, [])                            # shared: never reset on revoke
+        self.assertEqual(self.pool.capacity()["shared_clean"], 1)    # slot freed
+
+    def test_a_revoke_mid_run_resets_and_reports_nothing(self):
+        control = relay.JobControl()
+
+        def revoked_run(job, path, ctl):
+            ctl.cancel()                     # heartbeat revoked it while it ran
+            return ("succeeded", "", "sha", None)
+
+        relay.run_node_job = revoked_run
+        job = {"id": "nj-3", "run_id": "r3", "node_type": "agent", "run": "x",
+               "isolation": "exclusive", "vars": {"ref": "RLY-3"}}
+        slot, reset = self.pool.assign(job)
+        rs = relay.execute_one(job, slot, reset, control, self.pool)
+        self.assertIsNone(rs)
+        self.assertEqual(self.reports, [])                           # §5: no outcome for a revoke
+        self.assertEqual(self.resets, ["/tmp/exec-work-1", "/tmp/exec-work-1"])  # pre + salvage
+        self.assertEqual(self.pool.capacity()["exclusive"], 1)       # slot freed
+
+    def test_a_worker_crash_reports_failed_and_frees_the_slot(self):
+        def boom(job, path, control):
+            raise RuntimeError("kaboom")
+
+        relay.run_node_job = boom
+        job = {"id": "nj-4", "run_id": "r4", "node_type": "shell", "run": "x",
+               "isolation": "exclusive", "vars": {"ref": "RLY-4"}}
+        slot, reset = self.pool.assign(job)
+        relay.execute_one(job, slot, reset, relay.JobControl(), self.pool)
+        self.assertEqual(self.reports[0][:2], ("nj-4", "failed"))
+        self.assertIn("kaboom", self.reports[0][2])
+        self.assertEqual(self.pool.capacity()["exclusive"], 1)       # never leak a slot
+
+    def test_a_systemexit_from_run_node_job_is_caught_and_reported(self):
+        """api()'s die() raises SystemExit (a BaseException, not an Exception) — e.g. an
+        agent node's determine_agent_outcome calling get_card() when the server is down.
+        It must be caught here, not just plain Exception, or the outcome is lost silently
+        when it escapes this worker thread."""
+        def boom(job, path, control):
+            raise SystemExit(1)
+
+        relay.run_node_job = boom
+        job = {"id": "nj-5", "run_id": "r5", "node_type": "agent", "run": "x",
+               "isolation": "exclusive", "vars": {"ref": "RLY-5"}}
+        slot, reset = self.pool.assign(job)
+        rs = relay.execute_one(job, slot, reset, relay.JobControl(), self.pool)
+        self.assertEqual(self.reports[0][:2], ("nj-5", "failed"))
+        self.assertIn("worker crashed", self.reports[0][2])
+        self.assertEqual(rs, "done")
+        self.assertEqual(self.pool.capacity()["exclusive"], 1)       # never leak a slot
+
+    def test_a_second_systemexit_while_reporting_the_crash_is_logged_not_raised(self):
+        """If report_outcome's own api() call die()s too (server still down while we try to
+        report the crash), that SystemExit must not propagate and vanish the job a second
+        time — it should be logged, and the slot still freed."""
+        def boom(job, path, control):
+            raise RuntimeError("kaboom")
+
+        relay.run_node_job = boom
+        relay.report_outcome = lambda *a: (_ for _ in ()).throw(SystemExit(1))
+        logs = []
+        relay.log = lambda *a, **k: logs.append(a)
+        job = {"id": "nj-6", "run_id": "r6", "node_type": "shell", "run": "x",
+               "isolation": "exclusive", "vars": {"ref": "RLY-6"}}
+        slot, reset = self.pool.assign(job)
+        rs = relay.execute_one(job, slot, reset, relay.JobControl(), self.pool)   # must not raise
+        self.assertIsNone(rs)
+        self.assertTrue(logs)                                         # logged, not silent
+        self.assertEqual(self.pool.capacity()["exclusive"], 1)       # never leak a slot
+
+
+class ExecuteLoopTest(unittest.TestCase):
+    """`execute --once` drains one claim→execute→report cycle; a long-poll timeout is 'no
+    work', not an error."""
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in
+                       ("load_executor_config", "claim_node_job", "run_node_job",
+                        "report_outcome", "reset_worktree", "refresh_worktree",
+                        "FORWARDER", "env", "log", "DRY")}
+        self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+        self.addCleanup(relay.signal.signal, relay.signal.SIGINT,
+                         relay.signal.getsignal(relay.signal.SIGINT))
+        relay.DRY = False
+        relay.env = lambda name: "x"
+        relay.log = lambda *a, **k: None
+        relay.reset_worktree = lambda *a, **k: None
+        relay.refresh_worktree = lambda *a, **k: None   # loop ff's the idle shared worktree
+        relay.run_node_job = lambda job, path, control: ("succeeded", "", "sha", None)
+        relay.load_executor_config = lambda: {
+            "name": "box", "namespace": "exec",
+            "capacity": {"shared_clean": 1, "exclusive": 0},
+            "poll_timeout": 1, "heartbeat_interval": 60}
+        self.addCleanup(setattr, relay.ExecutorPool, "ensure", relay.ExecutorPool.ensure)
+        relay.ExecutorPool.ensure = lambda self: None
+        os.environ.setdefault("RELAY_URL", "http://example.test")
+        os.environ.setdefault("RELAY_API_KEY", "k")
+
+    def test_once_claims_runs_and_reports(self):
+        job = {"id": "nj-1", "run_id": "r1", "node_type": "shell", "run": "true",
+               "isolation": "shared_clean", "vars": {"ref": "RLY-1"}}
+        relay.claim_node_job = lambda executor, capacity, timeout: job
+        self.reports = []
+        relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+
+        self.assertEqual(self.reports[0][:2], ("nj-1", "succeeded"))
+        self.assertEqual(self.reports[0][3], "sha")
+
+    def test_long_poll_timeout_is_no_work_not_error(self):
+        relay.claim_node_job = lambda executor, capacity, timeout: None   # 204/timeout
+        self.reports = []
+        relay.report_outcome = lambda *a: self.reports.append(a)
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+
+        self.assertEqual(self.reports, [])   # nothing ran, no error raised
+
+    def test_dry_run_claims_nothing_and_mutates_nothing(self):
+        calls = []
+        relay.claim_node_job = lambda *a, **k: calls.append(a)
+        relay.report_outcome = lambda *a: calls.append(a)
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=True, interval=None))
+
+        self.assertEqual(calls, [])          # dry-run performs no claim / no outcome
+
+    def test_a_malformed_claimed_job_is_reported_failed_not_dropped(self):
+        """A job missing `isolation` blows up ExecutorPool.assign with a KeyError; untrusted
+        server input must not crash the claim loop — it must be reported failed so the server
+        doesn't hold the claim open forever, and the loop must keep polling rather than die."""
+        job = {"id": "nj-9", "run_id": "r9", "node_type": "shell", "run": "x",
+               "vars": {"ref": "RLY-9"}}                      # no "isolation" key
+        relay.claim_node_job = lambda executor, capacity, timeout: job
+        self.reports = []
+        relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+
+        self.assertEqual(self.reports[0][:2], ("nj-9", "failed"))
+
+    def test_an_unplaceable_job_is_reported_failed_not_dropped(self):
+        """The server can hand back a job whose isolation class this executor has no free
+        slot for (here: capacity advertises exclusive:0, server sends an exclusive job
+        anyway). It must be reported failed rather than silently discarded while the server
+        thinks the claim is still held."""
+        job = {"id": "nj-10", "run_id": "r10", "node_type": "shell", "run": "x",
+               "isolation": "exclusive", "vars": {"ref": "RLY-10"}}   # cfg advertises exclusive:0
+        relay.claim_node_job = lambda executor, capacity, timeout: job
+        self.reports = []
+        relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+
+        self.assertEqual(self.reports[0][:2], ("nj-10", "failed"))
+
+
+class ExecuteParserTest(unittest.TestCase):
+    def test_execute_subcommand_parses_flags(self):
+        args = relay.build_parser().parse_args(["execute", "--once", "--dry-run"])
+        self.assertEqual(args.cmd, "execute")
+        self.assertTrue(args.once)
+        self.assertTrue(args.dry_run)
+        self.assertEqual(args.func, relay.cmd_execute)
 
 
 if __name__ == "__main__":

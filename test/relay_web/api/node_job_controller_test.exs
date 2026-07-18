@@ -77,11 +77,12 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
   describe "POST /api/node-jobs/claim" do
     test "200 with the rendered job payload and no worktree path", %{conn: conn, board: board} do
       flow = four_outcome_flow(board)
-      {_run, job} = start_queued_job(board, flow)
+      {run, job} = start_queued_job(board, flow)
 
       body = conn |> claim() |> json_response(200)
 
       assert body["id"] == job.id
+      assert body["run_id"] == run.id
       assert body["node_id"] == "work"
       assert body["node_type"] == "agent"
       assert body["run"] == "work {ref}"
@@ -156,23 +157,24 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
         )
         |> json_response(200)
 
-      assert body == %{"status" => "ok"}
+      assert body == %{"status" => "ok", "run_state" => "done"}
       assert Runs.get_run!(run.id).status == :done
     end
 
-    test "failed and partial each complete with 200", %{conn: conn, board: board, flow: flow} do
+    test "failed and partial each complete with 200 and report run_state done", %{conn: conn, board: board, flow: flow} do
       for outcome <- ["failed", "partial"] do
         {run, id} = claim_one(conn, board, flow)
 
         assert conn
                |> post(~p"/api/node-jobs/#{id}/outcome", Jason.encode!(%{"outcome" => outcome, "detail" => "x"}))
-               |> json_response(200) == %{"status" => "ok"}
+               |> json_response(200) == %{"status" => "ok", "run_state" => "done"}
 
         assert Runs.get_run!(run.id).status == :done
       end
     end
 
-    test "needs_input parks the run and blocks the card", %{conn: conn, board: board, flow: flow} do
+    test "needs_input parks the run, blocks the card, and reports run_state parked",
+         %{conn: conn, board: board, flow: flow} do
       {run, id} = claim_one(conn, board, flow)
 
       assert conn
@@ -180,7 +182,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
                ~p"/api/node-jobs/#{id}/outcome",
                Jason.encode!(%{"outcome" => "needs_input", "detail" => "q?", "session_id" => "s_a41"})
              )
-             |> json_response(200) == %{"status" => "ok"}
+             |> json_response(200) == %{"status" => "ok", "run_state" => "parked"}
 
       parked = Runs.get_run!(run.id)
       assert parked.status == :parked

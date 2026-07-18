@@ -47,15 +47,18 @@ defmodule RelayWeb.Api.NodeJobController do
   @doc """
   Reports a node-job outcome, completing the job and waking the engine to route
   it. `outcome` must be in the closed set (else 422 `unknown_outcome`); the job
-  must still be held by a live claim (else 409 `conflict`).
+  must still be held by a live claim (else 409 `conflict`). Replies with the
+  run's post-outcome `run_state` (running|parked|done|failed|cancelled) so the
+  executor knows whether to keep or free an exclusive worktree slot bound to
+  this run (ExecutorPool.release, bin/relay).
   """
   def outcome(conn, %{"id" => id} = params) do
     board = conn.assigns.current_board
 
     with {:ok, outcome} <- parse_outcome(params["outcome"]),
          {:ok, job} <- Runs.get_claimed_job(board, id),
-         {:ok, _run} <- report(job, outcome, params) do
-      json(conn, %{status: "ok"})
+         {:ok, run} <- report(job, outcome, params) do
+      json(conn, %{status: "ok", run_state: Atom.to_string(run.status)})
     end
   end
 
@@ -128,6 +131,7 @@ defmodule RelayWeb.Api.NodeJobController do
 
     %{
       id: job.id,
+      run_id: job.run_id,
       ref: get_in(payload, ["vars", "ref"]),
       node_id: job.node_key,
       node_type: payload["node_type"],

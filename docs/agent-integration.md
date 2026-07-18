@@ -98,14 +98,15 @@ outcomes. This card (RLY-134) adds that transport, on top of the same board-key 
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/node-jobs/claim` | Claim the next eligible node-job. Request: `{executor: {name, host, interval}, capacity: {shared_clean, exclusive}}`. Response: `200` with `{id, ref, node_id, node_type, run, isolation, resume_session, vars}` (no worktree path — that's executor-local), or `204` when nothing is claimable (the endpoint long-polls ~25s before returning `204`; pass `?wait=0` to short-poll instead). |
-| `POST /api/node-jobs/:id/outcome` | Report a job's result. Request: `{outcome, detail, git_sha, session_id}`, `outcome` one of `succeeded \| failed \| partial \| needs_input`. `422 unknown_outcome` for any other value; `409 conflict` if the job is no longer held by a live claim. |
+| `POST /api/node-jobs/claim` | Claim the next eligible node-job. Request: `{executor: {name, host, interval}, capacity: {shared_clean, exclusive}}`. Response: `200` with `{id, run_id, ref, node_id, node_type, run, isolation, resume_session, vars}` (no worktree path — that's executor-local; `run_id` is the owning run's row id, which `ExecutorPool` binds an exclusive worktree slot to), or `204` when nothing is claimable (the endpoint long-polls ~25s before returning `204`; pass `?wait=0` to short-poll instead). |
+| `POST /api/node-jobs/:id/outcome` | Report a job's result. Request: `{outcome, detail, git_sha, session_id}`, `outcome` one of `succeeded \| failed \| partial \| needs_input`. Response: `200` with `{status: "ok", run_state}` — `run_state` is the run's post-outcome status (`running \| parked \| done \| failed \| cancelled`), which `ExecutorPool.release` reads to decide whether to keep or free an exclusive slot. `422 unknown_outcome` for any other value; `409 conflict` if the job is no longer held by a live claim. |
 | `POST /api/board/heartbeat` | An **executor beat** is a superset of the RLY-141 watcher heartbeat — it adds `name` + `capacity` (e.g. `{"shared_clean": 3, "exclusive": 1}`). A `name` + `capacity` beat upserts a durable `Executor` row *and* still feeds `Relay.RunnerPresence`, so the Runners view is unchanged. A legacy or capacity-less beat is inert on this new path (additive, never subtractive). |
+| `POST /api/node-jobs/heartbeat` | The **executor's own** heartbeat (RLY-135, `relay execute`'s `ExecutorHeartbeat`): `{executor: {name, host}, running: [job-id, …]}`, response `{revoked: [job-id, …]}` — job-ids the server wants terminated (§ revoke, below). Distinct from the `/api/board/heartbeat` beat above, which only carries capacity for presence/liveness. **Client-side only for now**: `bin/relay` posts to it, but no server route exists yet — a follow-up card wires the revoke response. |
 | `POST /api/board/logs` | Each entry may now carry an optional `node_job_id` (alongside the existing `run_id`), identifying the node-job that emitted the line. |
 
-### The `RELAY_OUTCOME_PATH` contract
+### The `RELAY_NODE_OUTCOME` contract
 
-Before running an agent node, the executor sets `RELAY_OUTCOME_PATH` to a **per-job** temp
+Before running an agent node, the executor sets `RELAY_NODE_OUTCOME` to a **per-job** temp
 file (never a fixed path like `tmp/relay-outcome.json` — overlapping `shared_clean` jobs
 share a read-only worktree and must never collide). The agent node's prompt ends by writing
 that file:
@@ -119,10 +120,60 @@ that file:
 `/api/node-jobs/:id/outcome`, the executor augments the file's contents with `git_sha` (the
 worktree's HEAD after the node ran) and `session_id` (the `claude -p` session id).
 
-**Fallbacks**, in priority order, when the node itself never wrote a clean outcome:
-1. the card was moved to `needs_input` during the node → report `needs_input`;
-2. otherwise, no outcome file was written → the process exit code decides: `0` →
+**Fallbacks**, evaluated in this order by `determine_agent_outcome`, when the node itself
+never wrote a clean outcome:
+1. the card was moved to `needs_input` during the node → report `needs_input` (checked first —
+   a human question always wins, even if the node also wrote an outcome file);
+2. otherwise, `RELAY_NODE_OUTCOME` supplies `{outcome, detail}` — the only channel a node has
+   to signal `partial`; an unreadable/malformed file is treated as `failed`, not silently
+   skipped, since a `claude -p` that exited 0 without writing a real outcome must not be
+   reported as `succeeded`;
+3. otherwise, no outcome file was written → the process exit code decides: `0` →
    `succeeded` with empty detail, non-zero → `failed`.
+
+**Needs-input re-entry.** A `needs_input` outcome parks the run; when a human clears the card
+and the run resumes, the server hands the same node back with `resume_session` set to the
+`session_id` the executor captured and reported last time. The executor's `_stream_claude_job`
+inserts `--resume <session_id>` into the `claude -p` argv, so the agent picks the conversation
+back up with its prior context intact rather than starting the node over from scratch.
+
+### `relay execute` — the executor runner mode
+
+`bin/relay execute` is the second runner mode (RLY-135, alongside `relay watch` above): it
+claims node-jobs from the endpoints in the table above, runs each in an executor-owned git
+worktree, and reports a typed outcome. `relay watch` is untouched — the two can run at once on
+the same machine.
+
+- **Config: `.relay/executor.json`** (separate from `relay_config.json`, so the two runner
+  generations never contend over one file):
+
+  ```json
+  {
+    "namespace": "exec",
+    "capacity": { "shared_clean": 3, "exclusive": 1 },
+    "poll_timeout": 25,
+    "heartbeat_interval": 15
+  }
+  ```
+
+  `name` defaults to the hostname, `namespace` to `exec`; a missing file falls back to
+  `capacity: {shared_clean: 1, exclusive: 1}`. `capacity` is the field you'll routinely edit —
+  it caps how many `shared_clean` jobs and how many `exclusive` run-slots this executor
+  advertises at once. Worktrees for both classes live under the `exec-*` namespace
+  (`exec-clean`, `exec-work-1`, …), disjoint from `relay watch`'s `clean`/`work-N` pools.
+
+- **Running it:** `bin/relay execute` runs the claim/execute/report loop until Ctrl-C (which
+  stops claiming and waits for in-flight jobs to finish). `--once` drains a single
+  claim→execute→report cycle and exits (useful for scripting/testing). `--dry-run` claims and
+  mutates nothing — it only logs the capacity it would advertise. `--interval N` overrides the
+  configured `poll_timeout`.
+
+- **Cancel/revoke.** If a run is cancelled server-side while this executor is running one of
+  its node-jobs, the next heartbeat's `{revoked: [...]}` response terminates that job's live
+  subprocess. For an `exclusive` job (bound 1:1 to that job/run) it also resets the job's
+  worktree; a revoked `shared_clean` job is left as-is, since `exec-clean` is shared by other
+  jobs that may still be running there and resetting it would destroy their work. Either way,
+  no outcome is reported for a revoked job.
 
 ## Operating invariants
 

@@ -32,10 +32,12 @@ import mimetypes
 import os
 import queue
 import re
+import shutil
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -45,10 +47,12 @@ import uuid
 HERE = os.path.abspath(__file__)
 ROOT = os.path.dirname(os.path.dirname(HERE))
 CONFIG_PATH = os.path.join(ROOT, "relay_config.json")
+EXECUTOR_CONFIG_PATH = os.path.join(ROOT, ".relay", "executor.json")
 DRY = False
 FORWARDER = None
 HEARTBEAT = None
 RUN_IDS = {}   # ref -> uuid4 of the run currently working it (RLY-112)
+NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RLY-135)
 
 
 def die(msg):
@@ -102,18 +106,23 @@ def _retryable(method, err):
     return isinstance(err, urllib.error.URLError)
 
 
-def api(method, path, body=None, soft_404=False):
+def api(method, path, body=None, soft_404=False, timeout=None):
     url = env("RELAY_URL").rstrip("/") + path
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Authorization", f"Bearer {env('RELAY_API_KEY')}")
     if data is not None:
         req.add_header("Content-Type", "application/json")
+    # Pass a read timeout only when asked (the long-poll claim): a bare urlopen keeps the
+    # prior global-default behavior for every existing call, byte for byte.
+    open_kwargs = {} if timeout is None else {"timeout": timeout}
     for attempt in range(1, API_MAX_ATTEMPTS + 1):
         try:
-            with urllib.request.urlopen(req) as resp:
+            with urllib.request.urlopen(req, **open_kwargs) as resp:
                 raw = resp.read()
                 return json.loads(raw) if raw else {}
+        except socket.timeout:
+            raise   # long-poll read timeout — the claim caller treats it as 'no work'
         except urllib.error.HTTPError as e:
             if soft_404 and e.code == 404:
                 return None
@@ -145,7 +154,7 @@ def _ref_from_tag(tag):
 def forward(kind, text, ref=None):
     """Best-effort: hand one feed line to the background mirror, if one is running."""
     if FORWARDER is not None:
-        FORWARDER.enqueue(kind, text, ref, RUN_IDS.get(ref))
+        FORWARDER.enqueue(kind, text, ref, RUN_IDS.get(ref), NODE_JOB_IDS.get(ref))
 
 
 class LogForwarder:
@@ -168,9 +177,12 @@ class LogForwarder:
     def stop(self):
         self._stop.set()
 
-    def enqueue(self, kind, text, ref=None, run_id=None):
+    def enqueue(self, kind, text, ref=None, run_id=None, node_job_id=None):
+        item = {"kind": kind, "ref": ref, "text": text, "run_id": run_id}
+        if node_job_id is not None:
+            item["node_job_id"] = node_job_id
         try:
-            self.q.put_nowait({"kind": kind, "ref": ref, "text": text, "run_id": run_id})
+            self.q.put_nowait(item)
         except queue.Full:
             pass
 
@@ -242,6 +254,46 @@ class Heartbeat:
         try:
             api("POST", "/api/board/heartbeat", {**self.identity, **self.manifest_fn()})
         except SystemExit:  # api() die()s on HTTP/network error
+            pass
+        except Exception:
+            pass
+
+    def _run(self):
+        while not self._stop.wait(self.interval):
+            self._beat()
+
+
+class ExecutorHeartbeat:
+    """Per-executor heartbeat for `relay execute`. POSTs {executor, running:[job-ids]} to
+    /api/node-jobs/heartbeat every `interval`s and READS the response's revoked job-ids —
+    unlike the watcher's Heartbeat, which discards the body — handing each to `on_revoke` (§5).
+    Best-effort like Heartbeat: swallows api()'s die() and any other error. soft_404=True on
+    the call itself, so a not-yet-existing server route is silent (no error line) rather than
+    a die() every beat — see docs/agent-integration.md's "client-side only for now" note. The
+    legacy watcher keeps using /api/board/heartbeat with its bare payload, untouched."""
+
+    def __init__(self, executor, running_fn, on_revoke, interval=15):
+        self.executor = executor
+        self.running_fn = running_fn
+        self.on_revoke = on_revoke
+        self.interval = interval
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def _beat(self):
+        try:
+            resp = api("POST", "/api/node-jobs/heartbeat",
+                       {"executor": self.executor, "running": self.running_fn()},
+                       soft_404=True)
+            for job_id in (resp or {}).get("revoked", []):
+                self.on_revoke(job_id)
+        except SystemExit:      # api() die()s on HTTP/network error
             pass
         except Exception:
             pass
@@ -515,6 +567,30 @@ def load_config():
     return json.load(open(CONFIG_PATH))
 
 
+def load_executor_config():
+    """Executor-local config from .relay/executor.json — separate from relay_config.json,
+    which `relay watch` keeps reading through the migration, so the two runner generations
+    never contend over one file. Missing file → sensible defaults; capacity is the only field
+    a developer routinely edits (ADR 0006, table 1)."""
+    defaults = {
+        "name": socket.gethostname(),
+        "namespace": "exec",
+        "capacity": {"shared_clean": 1, "exclusive": 1},
+        "poll_timeout": 25,
+        "heartbeat_interval": 15,
+    }
+    try:
+        with open(EXECUTOR_CONFIG_PATH) as f:
+            cfg = json.load(f)
+    except FileNotFoundError:
+        return defaults
+    except json.JSONDecodeError as e:
+        die(f"{EXECUTOR_CONFIG_PATH} is not valid JSON: {e}")
+    merged = {**defaults, **cfg}
+    merged["capacity"] = {**defaults["capacity"], **(cfg.get("capacity") or {})}
+    return merged
+
+
 WORKTREES_DIR = os.path.join(ROOT, ".claude", "worktrees")
 
 
@@ -585,6 +661,94 @@ def refresh_worktree(name, base):
         return
     subprocess.run(["git", "fetch", "origin", "--prune"], cwd=ROOT, check=False)
     reset_worktree(path, base)
+
+
+class ExecutorPool:
+    """Executor-local worktree mapping (never sent to the server). Namespace-disjoint from the
+    watcher's clean/work pools so both runners run at once.
+
+      shared_clean -> one shared worktree `<ns>-clean`, up to `capacity.shared_clean` concurrent
+                      jobs, REUSED (never reset per-job); fast-forwarded to base only when every
+                      shared slot is idle (the watcher's scan() discipline).
+      exclusive    -> a fixed pool `<ns>-work-1..N`; a slot is BOUND to a run from its first job
+                      until the run reaches a terminal run_state, and reset only on that first job
+                      (a run's nodes share one worktree — the branch diff is the reviewers' bus).
+    """
+
+    def __init__(self, cfg, base="origin/main"):
+        self.ns = cfg.get("namespace", "exec")
+        self.base = base
+        self.cap_shared = cfg["capacity"]["shared_clean"]
+        self.cap_excl = cfg["capacity"]["exclusive"]
+        self.shared_name = f"{self.ns}-clean"
+        self.shared_used = 0
+        # exclusive slot name -> run_id it is bound to (None = free)
+        self.excl = {f"{self.ns}-work-{i}": None for i in range(1, self.cap_excl + 1)}
+        self.lock = threading.Lock()
+
+    def capacity(self):
+        """Currently-free capacity per class, for advertising on a claim. A slot bound to a
+        parked run counts as NOT free (exclusive affinity is absolute — ADR 0006 §5)."""
+        with self.lock:
+            return {
+                "shared_clean": max(0, self.cap_shared - self.shared_used),
+                "exclusive": sum(1 for bound in self.excl.values() if bound is None),
+            }
+
+    def has_bound_slots(self):
+        """True while any exclusive slot is bound to a run (running or parked). The
+        execute loop keeps polling in that case even at 0 free capacity: the bound
+        run may have a pinned resume/next job the server hands over regardless of
+        advertised capacity (exclusive affinity — ADR 0006 §5)."""
+        with self.lock:
+            return any(bound is not None for bound in self.excl.values())
+
+    def ensure(self):
+        ensure_worktree(self.shared_name, self.base)
+        for name in self.excl:
+            ensure_worktree(name, self.base)
+
+    def refresh_idle_shared(self):
+        """The idle-check and the reset must be one atomic step under the pool lock:
+        refresh_worktree()'s hard reset + git clean assumes the worktree is idle for its
+        whole duration (see reset_worktree's docstring), so dropping the lock in between
+        would let assign() hand the worktree to a job mid-reset."""
+        with self.lock:
+            if self.shared_used == 0:
+                refresh_worktree(self.shared_name, self.base)
+
+    def assign(self, job):
+        """Reserve a slot for `job`; return (slot_name, reset?) or None when no slot is free.
+        reset? is True only for the first job of an exclusive run."""
+        iso = job["isolation"]
+        run_id = job["run_id"]
+        with self.lock:
+            if iso == "shared_clean":
+                if self.shared_used >= self.cap_shared:
+                    return None
+                self.shared_used += 1
+                return self.shared_name, False
+            for name, bound in self.excl.items():          # reuse the run's own slot
+                if bound == run_id:
+                    return name, False
+            for name, bound in self.excl.items():          # else take a free slot
+                if bound is None:
+                    self.excl[name] = run_id
+                    return name, True
+            return None
+
+    def release(self, job, slot, run_state):
+        """Free/keep the slot per the outcome's run_state. shared_clean always frees; an
+        exclusive slot stays bound while running/parked and unbinds on a terminal state
+        (done/failed/cancelled) or a revoke (run_state=None)."""
+        with self.lock:
+            if job["isolation"] == "shared_clean":
+                self.shared_used = max(0, self.shared_used - 1)
+                return
+            if run_state in ("running", "parked"):
+                return
+            if slot in self.excl:
+                self.excl[slot] = None
 
 
 def blocked(card):
@@ -738,15 +902,25 @@ def _print_claude_event(ev, tag=""):
         forward("claude", line, ref)
 
 
-def _stream_shell(cmd, cwd, tag="", sink=None):
+def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None):
     """Run a shell step with a live, tag-prefixed feed. Returns True on success.
 
     On failure the tail of the output is appended to `sink` so the card can carry the
     actual reason. Streaming it to the console alone was not enough: the console is
     not what a human reads later, so a stage that died on one line of git output
-    surfaced as a bare "stage did not complete"."""
+    surfaced as a bare "stage did not complete".
+
+    `on_proc`, if given, receives the live Popen so a caller can terminate it (executor
+    revoke). Only executor node-jobs pass `on_proc` (a JobControl.register); only they get
+    their own process group (start_new_session), since only they hold a JobControl able to
+    kill that group. The plain `relay run` runner mode passes no `on_proc` and must keep the
+    child in the runner's own foreground process group so a Ctrl-C at the tty still reaches
+    it directly."""
     proc = subprocess.Popen(cmd, shell=True, cwd=cwd, text=True, bufsize=1,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            start_new_session=on_proc is not None)
+    if on_proc:
+        on_proc(proc)
     tail = collections.deque(maxlen=12)
     for line in proc.stdout:
         print(f"    {tag}{line.rstrip()}", flush=True)
@@ -759,28 +933,11 @@ def _stream_shell(cmd, cwd, tag="", sink=None):
 
 def _stream_claude(prompt, cwd=ROOT, tag=""):
     """Run headless claude with a live streamed feed. Returns True on success.
-    --dangerously-skip-permissions lets it use tools unattended (this is an autonomous
-    runner); --output-format stream-json emits one event per step, streamed here."""
-    cmd = ["claude", "-p", prompt, "--dangerously-skip-permissions",
-           "--verbose", "--output-format", "stream-json"]
-    # `claude -p` caps how long it waits for a background workflow at 10 minutes
-    # by default (CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, v2.1.182+). /exec-plan runs
-    # far longer than that, so without lifting the cap -p exits mid-run and the
-    # stage ships a PARTIAL plan as if it were done. "0" = wait until the workflow
-    # finishes on its own (it is internally bounded). An explicit env override wins.
-    env = dict(os.environ)
-    env.setdefault("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0")
-    proc = subprocess.Popen(cmd, cwd=cwd, text=True, bufsize=1, env=env,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    for line in proc.stdout:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            _print_claude_event(json.loads(line), tag)
-        except Exception:
-            print(f"    {tag}" + line[:200], flush=True)
-    return proc.wait() == 0
+    Thin wrapper over _stream_claude_job (the executor variant): same argv, env-var
+    handling, and stream-json rendering, minus session capture/--resume/on_proc. Keeping
+    one implementation means the wait-ceiling workaround and the stream parsing only
+    have to be fixed once."""
+    return _stream_claude_job(prompt, cwd, tag)[0]
 
 
 def run_step(step, vars, cwd=ROOT, tag="", sink=None):
@@ -800,6 +957,225 @@ def run_step(step, vars, cwd=ROOT, tag="", sink=None):
         return _stream_claude(prompt, cwd, tag)
     log(f"  ! unknown step: {step}")
     return False
+
+
+class JobControl:
+    """Per-job cancel handle: a threading.Event plus the live subprocess, so a heartbeat-borne
+    revoke (§5) can terminate the running `claude -p`/shell step even if it registers after the
+    revoke arrives."""
+
+    def __init__(self):
+        self._cancelled = threading.Event()
+        self._proc = None
+
+    def register(self, proc):
+        self._proc = proc
+        if self._cancelled.is_set():
+            self._terminate()
+
+    def cancel(self):
+        self._cancelled.set()
+        self._terminate()
+
+    def cancelled(self):
+        return self._cancelled.is_set()
+
+    def _terminate(self):
+        proc = self._proc
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            # _stream_shell runs its command with shell=True, so the registered proc is
+            # /bin/sh — a plain terminate() only kills the shell wrapper and leaves the
+            # real command running as an orphan that keeps writing into the worktree
+            # (including while the next job's reset_worktree() git-reset/cleans it).
+            # Anything registered here came through on_proc, so both Popen call sites put
+            # it in its own process group (start_new_session=on_proc is not None); killing
+            # that group takes the whole command tree with it.
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except Exception:
+            proc.terminate()   # best-effort fallback (e.g. no real pid/process group)
+
+
+def claim_node_job(executor, capacity, timeout):
+    """Long-poll claim: hold one request open (advertising free `capacity` per isolation class)
+    up to `timeout`s. Returns a job dict, or None on a 204/empty body or a read timeout — both
+    mean 'no work', not an error (§7)."""
+    try:
+        resp = api("POST", "/api/node-jobs/claim",
+                   {"executor": executor, "capacity": capacity}, timeout=timeout)
+    except socket.timeout:
+        return None
+    return resp or None
+
+
+def report_outcome(job_id, outcome, detail, git_sha, session_id=None):
+    """POST the typed outcome; return the server-assigned run_state
+    (running|parked|done|failed|cancelled) that tells the executor whether to keep or free an
+    exclusive slot (§3)."""
+    resp = api("POST", f"/api/node-jobs/{job_id}/outcome",
+               {"outcome": outcome, "detail": detail,
+                "git_sha": git_sha, "session_id": session_id})
+    return (resp or {}).get("run_state")
+
+
+def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None):
+    """Executor variant of _stream_claude. Runs `claude -p` (or `--resume <session_id>` on a
+    needs-input re-entry), streams events, captures the claude session id from the stream-json
+    events (init/result carry `session_id`), and sets $RELAY_NODE_OUTCOME so an agent node can
+    signal `partial`. Returns (ok, captured_session_id). `on_proc` receives the live Popen."""
+    cmd = ["claude", "-p", prompt, "--dangerously-skip-permissions",
+           "--verbose", "--output-format", "stream-json"]
+    if session_id:
+        cmd[2:2] = ["--resume", session_id]     # claude -p --resume <session> <prompt>
+    child_env = dict(os.environ)
+    # `claude -p` caps how long it waits for a background workflow at 10 minutes
+    # by default (CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, v2.1.182+). /exec-plan runs
+    # far longer than that, so without lifting the cap -p exits mid-run and the
+    # stage ships a PARTIAL plan as if it were done. "0" = wait until the workflow
+    # finishes on its own (it is internally bounded). An explicit env override wins,
+    # hence setdefault rather than an unconditional assignment.
+    child_env.setdefault("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0")
+    if outcome_path:
+        child_env["RELAY_NODE_OUTCOME"] = outcome_path
+    # Only executor node-jobs pass on_proc (a JobControl.register); only they get their own
+    # process group (start_new_session), since only they hold a JobControl able to kill that
+    # group. The plain `relay run` runner mode (_stream_claude, run_step) passes no on_proc
+    # and must keep the child in the runner's own foreground process group so a Ctrl-C at
+    # the tty still reaches it directly.
+    proc = subprocess.Popen(cmd, cwd=cwd, text=True, bufsize=1, env=child_env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            start_new_session=on_proc is not None)
+    if on_proc:
+        on_proc(proc)
+    captured = None
+    for line in proc.stdout:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+            captured = ev.get("session_id") or captured
+            _print_claude_event(ev, tag)
+        except Exception:
+            print(f"    {tag}" + line[:200], flush=True)
+    return proc.wait() == 0, captured
+
+
+def determine_agent_outcome(job, ok, outcome_path):
+    """Agent-node outcome contract, evaluated in order (agent-integration.md is the write-up):
+      1. re-fetch the card — status needs_input ⇒ needs_input (exactly as work() detects today);
+      2. else an outcome file at $RELAY_NODE_OUTCOME supplies {outcome, detail} — the only
+         way a node signals `partial`;
+      3. else exit code: 0 ⇒ succeeded, non-zero ⇒ failed."""
+    ref = (job.get("vars") or {}).get("ref")
+    if ref:
+        card = get_card(ref)
+        if card.get("status") == "needs_input":
+            return "needs_input", "agent asked the human"
+    if outcome_path and os.path.exists(outcome_path):
+        try:
+            with open(outcome_path) as f:
+                data = json.load(f)
+            return data.get("outcome", "succeeded"), data.get("detail", "")
+        except Exception as e:
+            # The outcome file is the ONLY channel a node has to signal `partial`; if it's
+            # unreadable/malformed (e.g. an LLM-driven step wrote truncated JSON), falling
+            # through to the exit-code check would silently report `succeeded` for a claude
+            # -p process that exited 0 but never actually handed back its real outcome. Treat
+            # it as `failed` instead, and log so a human can see the node tried to report.
+            log(f"  ⚠ {ref}: outcome file at {outcome_path} is unreadable/malformed: {e}",
+                ref=ref, kind="error")
+            return "failed", f"outcome file at {outcome_path} is unreadable/malformed: {e}"
+    return ("succeeded", "") if ok else ("failed", "agent exited non-zero")
+
+
+def run_node_job(job, slot_path, control):
+    """Run one claimed node-job in `slot_path`; return (outcome, detail, git_sha, session_id).
+    Reuses the streaming primitives, tagged per job. Does NOT report — the caller POSTs the
+    outcome (§6) and acts on the run_state (§3).
+
+    Placeholder expansion ({ref}/{branch}/{relay}/... ) stays executor-side per
+    Schemas.Flow.Node/build_payload's contract: the server stores `run` raw and only
+    resolves `vars`. `relay`/`url` are not server-sent vars at all — supply them here,
+    same as `work()`'s vars dict does for `relay watch`. `is not None` matters:
+    build_payload puts prior_detail/findings in vars as `nil` (-> None) when absent, and
+    a naive str(v) would splice the literal string "None" into the command."""
+    ref = (job.get("vars") or {}).get("ref") or job["id"]
+    tag = f"[{ref}] "
+    raw_vars = dict(job.get("vars") or {})
+    raw_vars.setdefault("relay", HERE)
+    raw_vars.setdefault("url", os.environ.get("RELAY_URL", ""))
+    vars = {k: v for k, v in raw_vars.items() if v is not None}
+    cmd = render(job["run"], vars)
+    session_id = None
+    if job.get("node_type") == "agent":
+        # The outcome file must live OUTSIDE the checkout: reset_worktree() salvages any
+        # non-empty `git status --porcelain`, so a file inside slot_path would make every
+        # agent job leave a spurious "salvaging leftovers" stash for the next job on this
+        # slot. A fresh tempdir per job also means there is never a stale file to read.
+        outcome_dir = tempfile.mkdtemp(prefix="relay-node-outcome-")
+        outcome_path = os.path.join(outcome_dir, "outcome.json")
+        try:
+            ok, session_id = _stream_claude_job(
+                cmd, cwd=slot_path, tag=tag, session_id=job.get("resume_session"),
+                outcome_path=outcome_path, on_proc=control.register)
+            outcome, detail = determine_agent_outcome(job, ok, outcome_path)
+        finally:
+            shutil.rmtree(outcome_dir, ignore_errors=True)
+    else:  # shell | gate
+        tail = []
+        ok = _stream_shell(cmd, slot_path, tag, sink=tail, on_proc=control.register)
+        outcome = "succeeded" if ok else "failed"
+        detail = "" if ok else "\n".join(tail).strip()
+    sha_proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=slot_path,
+                              capture_output=True, text=True)
+    git_sha = sha_proc.stdout.strip() if sha_proc.returncode == 0 else None
+    return outcome, detail, git_sha, session_id
+
+
+def execute_one(job, slot, reset, control, pool):
+    """Worker body for one node-job: reset the slot if it is the run's first exclusive job,
+    run the step, and — unless a revoke landed mid-run — report the outcome and return the
+    server's run_state. On revoke of an EXCLUSIVE job, reset the worktree (salvaging via
+    stash) since it is bound to this job/run alone; a revoked shared_clean job must NOT reset
+    exec-clean — capacity.shared_clean lets several jobs run there concurrently, and
+    resetting would blow away the others still in flight (the shared worktree is only ever
+    fast-forwarded when fully idle, by refresh_idle_shared()). Either way, no outcome is
+    reported for a revoke (§5). Always frees/keeps the slot per run_state in a finally (never
+    leak a slot)."""
+    slot_path = worktree_path(slot)
+    run_state = None
+    revoked = False
+    try:
+        if reset and not DRY:
+            reset_worktree(slot_path, pool.base)
+        outcome, detail, git_sha, session_id = run_node_job(job, slot_path, control)
+        if control.cancelled():
+            revoked = True
+            if not DRY and job.get("isolation") != "shared_clean":
+                reset_worktree(slot_path, pool.base)
+            return None
+        run_state = report_outcome(job["id"], outcome, detail, git_sha, session_id)
+        return run_state
+    except (Exception, SystemExit) as e:
+        # run_node_job (or the report_outcome call above) can raise SystemExit via api()'s
+        # die() — e.g. an agent node's determine_agent_outcome calling get_card() when the
+        # server is unreachable. SystemExit is a BaseException, not an Exception, so plain
+        # `except Exception` would miss it: it would escape this worker thread, and Python's
+        # threading module discards uncaught exceptions on non-main threads silently — the
+        # job would be lost with no outcome and nothing printed. Catch it here explicitly so
+        # this remains the one place that always reports (never leak a slot on crash).
+        try:
+            run_state = report_outcome(job["id"], "failed", f"worker crashed: {e}", "", None)
+        except (Exception, SystemExit) as report_err:
+            # a second die() while reporting the crash (server still down) — log rather than
+            # let this vanish too.
+            log(f"failed to report crash outcome for {job['id']}: {report_err}", kind="error")
+            run_state = None
+        return run_state
+    finally:
+        pool.release(job, slot, None if (revoked or control.cancelled()) else run_state)
 
 
 def flag(ref, reason):
@@ -963,6 +1339,142 @@ def cmd_watch(args):
         e["thread"].join()
 
 
+def cmd_execute(args):
+    """Second runner mode (ADR 0006): claim node-jobs from the server, run each in an executor
+    worktree, and report a typed outcome. `relay watch` is untouched; both may run at once."""
+    global DRY, FORWARDER
+    DRY = args.dry_run
+    cfg = load_executor_config()
+    poll_timeout = args.interval or cfg["poll_timeout"]
+    env("RELAY_URL"), env("RELAY_API_KEY")
+    executor = {"name": cfg["name"], "host": socket.gethostname()}
+    pool = ExecutorPool(cfg)
+    if not DRY:
+        FORWARDER = LogForwarder()
+        FORWARDER.start()
+        pool.ensure()
+
+    lock = threading.Lock()
+    wake = threading.Event()
+    stop = threading.Event()
+    in_flight = {}   # job-id -> {"thread", "control"}
+
+    def running_ids():
+        with lock:
+            return list(in_flight)
+
+    def revoke(job_id):
+        with lock:
+            entry = in_flight.get(job_id)
+        if entry:
+            entry["control"].cancel()
+
+    def reject(job, detail):
+        """A claimed job this executor cannot run — malformed (missing `isolation` or
+        `run_id` key, so ExecutorPool.assign raises KeyError before it can even place it;
+        an unrecognized-but-present `isolation` value is NOT caught here — assign() treats
+        anything other than the literal "shared_clean" as exclusive) or unplaceable (the
+        server handed back a job whose isolation class has no free slot here). Untrusted
+        server input must not crash the daemon or be dropped silently: report it failed so
+        the server's claim lease doesn't sit held-and-running forever, and log it either
+        way."""
+        job_id = job.get("id") if isinstance(job, dict) else None
+        log(f"rejecting claimed job {job_id or job!r}: {detail}", kind="error")
+        if job_id is None:
+            return
+        try:
+            report_outcome(job_id, "failed", detail, "", None)
+        except (Exception, SystemExit) as e:
+            log(f"failed to report rejection for {job_id}: {e}", kind="error")
+
+    hb = None
+    if not DRY:
+        hb = ExecutorHeartbeat(executor, running_ids, revoke,
+                               interval=cfg["heartbeat_interval"])
+        hb.start()
+
+    def worker(job, slot, reset, control):
+        ref = (job.get("vars") or {}).get("ref") or job["id"]
+        NODE_JOB_IDS[ref] = job["id"]
+        RUN_IDS[ref] = job.get("run_id")
+        try:
+            execute_one(job, slot, reset, control, pool)
+        finally:
+            with lock:
+                in_flight.pop(job["id"], None)
+            NODE_JOB_IDS.pop(ref, None)
+            RUN_IDS.pop(ref, None)
+            wake.set()
+
+    def _shutdown(*_):
+        log("shutting down — no new claims; waiting for in-flight jobs")
+        stop.set()
+        wake.set()
+    signal.signal(signal.SIGINT, _shutdown)
+
+    log(f"executing on {os.environ['RELAY_URL']} as {cfg['name']}"
+        + (" (dry-run)" if DRY else "") + (" — one job" if args.once else ""))
+
+    while not stop.is_set():
+        cap = pool.capacity()
+        # No free slots → idle, UNLESS an exclusive slot is bound to a run: that
+        # run's pinned resume/next job is claimable regardless of advertised
+        # capacity (affinity), so we must keep polling or the run never resumes.
+        if not DRY and sum(cap.values()) <= 0 and not pool.has_bound_slots():
+            wake.wait(poll_timeout)
+            wake.clear()
+            continue
+        if DRY:
+            log(f"  (dry) would claim advertising {cap}")
+            break
+        pool.refresh_idle_shared()
+        try:
+            job = claim_node_job(executor, cap, poll_timeout)
+        except SystemExit as e:                     # exhausted api() retries → die()
+            log(f"claim failed, will retry: {e}", kind="error")
+            if args.once:
+                break
+            wake.wait(1)
+            wake.clear()
+            continue
+        if job is None:                             # long-poll timeout / 204 → re-poll
+            if args.once:
+                break
+            continue
+        try:
+            assigned = pool.assign(job)
+        except (KeyError, TypeError) as e:          # malformed job: assign can't even read it
+            reject(job, f"malformed job: {e}")
+            if args.once:
+                break
+            wake.wait(1)                            # back off — don't hot-loop re-polling
+            wake.clear()
+            continue
+        if assigned is None:                        # no free slot for this job's isolation
+            reject(job, f"no free {job.get('isolation')!r} slot advertised {cap}")
+            if args.once:
+                break
+            wake.wait(1)                            # back off — don't hot-loop re-polling
+            wake.clear()
+            continue
+        slot, reset = assigned
+        control = JobControl()
+        t = threading.Thread(target=worker, args=(job, slot, reset, control), daemon=True)
+        with lock:
+            in_flight[job["id"]] = {"thread": t, "control": control}
+        t.start()
+        if args.once:
+            t.join()
+            break
+
+    for e in list(in_flight.values()):              # join outstanding workers
+        e["thread"].join()
+    if hb:
+        hb.stop()
+    if FORWARDER and not DRY:
+        FORWARDER.stop()
+
+
 # ============================ argparse ============================
 
 def build_parser():
@@ -1015,6 +1527,10 @@ def build_parser():
     w.add_argument("--once", action="store_true")
     w.add_argument("--dry-run", action="store_true")
     w.add_argument("--interval", type=int)
+    ex = add("execute", cmd_execute)
+    ex.add_argument("--once", action="store_true")
+    ex.add_argument("--dry-run", action="store_true")
+    ex.add_argument("--interval", type=int)
     return p
 
 
