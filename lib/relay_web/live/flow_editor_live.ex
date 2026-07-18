@@ -88,13 +88,26 @@ defmodule RelayWeb.FlowEditorLive do
         isolation: working.isolation
       })
 
-    errors =
-      changeset.errors
-      |> Keyword.take([:nodes, :edges])
-      |> Enum.map(fn {_field, {msg, _opts}} -> msg end)
-
-    assign(socket, :errors, errors)
+    assign(socket, :errors, changeset_error_messages(changeset))
   end
+
+  # Flattens top-level AND nested (cast_embed) errors into plain message strings.
+  # `Ecto.Changeset.traverse_errors/2` alone isn't enough because it returns a
+  # nested %{field => [msg | %{...}]} shape — this walks it down to the leaves.
+  defp changeset_error_messages(changeset) do
+    changeset
+    |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->
+      Enum.reduce(opts, msg, fn {key, value}, acc -> String.replace(acc, "%{#{key}}", to_string(value)) end)
+    end)
+    |> flatten_error_messages()
+    |> Enum.uniq()
+  end
+
+  defp flatten_error_messages(errors) when is_map(errors),
+    do: Enum.flat_map(errors, fn {_f, v} -> flatten_error_messages(v) end)
+
+  defp flatten_error_messages(errors) when is_list(errors), do: Enum.flat_map(errors, &flatten_error_messages/1)
+  defp flatten_error_messages(msg) when is_binary(msg), do: [msg]
 
   defp dirty?(flow, working) do
     Enum.map(flow.nodes, &Map.take(&1, @node_fields)) != working.nodes or
@@ -312,8 +325,8 @@ defmodule RelayWeb.FlowEditorLive do
         socket |> put_flash(:info, "Saved as v#{flow.version}.") |> load_flow(flow)
 
       {:error, changeset} ->
-        errors = Enum.map(changeset.errors, fn {_f, {msg, _}} -> msg end)
-        assign(socket, :errors, socket.assigns.errors ++ errors)
+        errors = changeset_error_messages(changeset)
+        assign(socket, :errors, Enum.uniq(socket.assigns.errors ++ errors))
     end
   end
 
@@ -456,6 +469,7 @@ defmodule RelayWeb.FlowEditorLive do
               selected={@selected}
               interactive?={!@read_only?}
               lands_on={stage_name(@stages, @working.lands_on_stage_id)}
+              connecting_target?={connecting_target?(@connecting)}
             />
           </div>
           <aside
@@ -668,6 +682,9 @@ defmodule RelayWeb.FlowEditorLive do
       "background:oklch(0.82 0.05 250);color:white;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:not-allowed;opacity:0.7;"
 
   defp stage_name(stages, id), do: Enum.find_value(stages, &(&1.id == id && &1.name))
+
+  defp connecting_target?(%{from: from}), do: not is_nil(from)
+  defp connecting_target?(_), do: false
 
   defp stats(working) do
     nodes = length(working.nodes)

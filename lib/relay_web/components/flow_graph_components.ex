@@ -73,6 +73,10 @@ defmodule RelayWeb.FlowGraphComponents do
   attr :node_states, :map, default: %{}
   attr :lands_on, :string, default: nil
 
+  attr :connecting_target?, :boolean,
+    default: false,
+    doc: "true mid connect-edge, once a source is picked — makes the `done` sentinel a clickable target"
+
   def flow_graph(assigns) do
     {w, h} = assigns.layout.size
     assigns = assign(assigns, width: w, height: h)
@@ -157,6 +161,18 @@ defmodule RelayWeb.FlowGraphComponents do
         <span style="width:7px;height:7px;border-radius:50%;background:oklch(0.60 0.13 155);"></span>
         lands → {@lands_on}
       </div>
+
+      <button
+        :if={@interactive? and @connecting_target?}
+        id="flow-node-done"
+        type="button"
+        data-node="done"
+        phx-click="select_node"
+        phx-value-key="done"
+        style={done_marker_style(@layout)}
+      >
+        done
+      </button>
     </div>
     """
   end
@@ -287,6 +303,17 @@ defmodule RelayWeb.FlowGraphComponents do
   defp exit_point(layout) do
     {_w, h} = layout.size
     {60, min(h - 40, 190)}
+  end
+
+  # Clickable "done" sentinel — only rendered mid connect-edge (picking a target), so it never
+  # competes with real-node selection but is reachable as a valid connect target (RLY-143).
+  defp done_marker_style(layout) do
+    {x, y} = exit_point(layout)
+
+    "position:absolute;left:#{x}px;top:#{y}px;transform:translate(-50%,-50%);z-index:5;" <>
+      "font-size:10px;font-weight:700;font-family:ui-monospace,monospace;border-radius:20px;" <>
+      "padding:6px 12px;cursor:pointer;border:1.5px dashed oklch(0.60 0.13 155);" <>
+      "background:oklch(0.97 0.02 155);color:oklch(0.42 0.10 155);"
   end
 
   defp edge_label_style(edge, layout) do

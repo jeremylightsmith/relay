@@ -172,6 +172,44 @@ defmodule RelayWeb.FlowEditorLiveTest do
     refute has_element?(view, ~s([data-node="branch"]))
   end
 
+  test "renaming a node to an empty key is blocked inline and disables Save", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="branch"])) |> render_click()
+
+    view
+    |> element("#inspector-node-rename-form")
+    |> render_change(%{"value" => ""})
+
+    assert has_element?(view, "#flow-editor-errors")
+    assert has_element?(view, "#flow-editor-save[disabled]")
+  end
+
+  test "renaming a node to a reserved sentinel name is blocked inline and disables Save", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="branch"])) |> render_click()
+
+    view
+    |> element("#inspector-node-rename-form")
+    |> render_change(%{"value" => "done"})
+
+    assert has_element?(view, "#flow-editor-errors")
+    assert has_element?(view, "#flow-editor-save[disabled]")
+  end
+
+  test "Connect edge: connecting a node to done creates an edge landing on done", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    count_before = count_edges(render(view))
+
+    view |> element("#toolbar-connect-edge") |> render_click()
+    view |> element(~s([data-node="branch"])) |> render_click()
+    assert has_element?(view, "#flow-node-done")
+
+    view |> element("#flow-node-done") |> render_click()
+
+    assert count_edges(render(view)) == count_before + 1
+    assert has_element?(view, "#inspector-edge-to", "done")
+  end
+
   test "Delete node in the inspector removes an unreferenced node", %{conn: conn, board: board} do
     {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
     view |> element("#palette-shell") |> render_click()
