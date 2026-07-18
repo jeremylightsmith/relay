@@ -73,13 +73,15 @@ defmodule RelayWeb.FlowLayout do
     spine
     |> Enum.chunk_every(@cols)
     |> Enum.with_index()
-    |> Enum.flat_map(fn {row, r} ->
-      for {k, c} <- Enum.with_index(row) do
-        col = if rem(r, 2) == 1, do: @cols - 1 - c, else: c
-        {k, {r, col}}
-      end
-    end)
+    |> Enum.flat_map(&serpentine_row/1)
     |> Map.new()
+  end
+
+  defp serpentine_row({row, r}) do
+    for {k, c} <- Enum.with_index(row) do
+      col = if rem(r, 2) == 1, do: @cols - 1 - c, else: c
+      {k, {r, col}}
+    end
   end
 
   defp place_fix(nodes, edges, spine_set, spine_grid) do
@@ -102,20 +104,25 @@ defmodule RelayWeb.FlowLayout do
   end
 
   defp partner_col(key, edges, spine_grid) do
-    partner =
-      Enum.find_value(edges, fn e ->
-        cond do
-          e.to == key and Map.get(e, :on) == :failed and Map.has_key?(spine_grid, e.from) -> e.from
-          e.from == key and Map.get(e, :on) == :succeeded and Map.has_key?(spine_grid, e.to) -> e.to
-          true -> nil
-        end
-      end)
+    partner = Enum.find_value(edges, &partner_of(&1, key, spine_grid))
 
     case partner && Map.get(spine_grid, partner) do
       {_r, c} -> c
       _ -> nil
     end
   end
+
+  # An edge names `key`'s partner when it links `key` to an already-placed spine node: a
+  # `:failed` edge landing on `key` (the reviewer) or a `:succeeded` edge leaving `key`.
+  defp partner_of(%{to: key, from: from} = e, key, spine_grid) do
+    if Map.get(e, :on) == :failed and Map.has_key?(spine_grid, from), do: from
+  end
+
+  defp partner_of(%{from: key, to: to} = e, key, spine_grid) do
+    if Map.get(e, :on) == :succeeded and Map.has_key?(spine_grid, to), do: to
+  end
+
+  defp partner_of(_edge, _key, _spine_grid), do: nil
 
   defp first_free(col, taken) do
     if MapSet.member?(taken, col), do: first_free(col + 1, taken), else: col
