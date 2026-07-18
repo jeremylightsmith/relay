@@ -48,6 +48,25 @@ defmodule RelayWeb.FlowEditorLiveTest do
     assert Flows.get_flow!(board, "code").pulls_from_stage_id == other.id
   end
 
+  test "saving a trigger change that collides with another enabled flow's pulls-from stage shows an inline error",
+       %{conn: conn, board: board} do
+    code = Flows.get_flow!(board, "code")
+    spec = Flows.get_flow!(board, "spec")
+    {:ok, code} = Flows.enable_flow(code)
+    {:ok, spec} = Flows.enable_flow(spec)
+
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    view
+    |> element("#trigger-pulls-from")
+    |> render_change(%{"stage_id" => to_string(spec.pulls_from_stage_id)})
+
+    view |> element("#flow-editor-save") |> render_click()
+
+    assert has_element?(view, "#flow-editor-errors", "another enabled flow already pulls from this stage")
+    assert Flows.get_flow!(board, "code").pulls_from_stage_id == code.pulls_from_stage_id
+  end
+
   test "editing then Save opens the confirm modal; confirm bumps to v2", %{conn: conn, board: board} do
     {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
 

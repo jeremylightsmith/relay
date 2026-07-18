@@ -81,6 +81,26 @@ defmodule Relay.FlowVersionsTest do
       assert Repo.reload(flow).version == 1
       assert Flows.get_version(flow, 2) == nil
     end
+
+    test "an enabled flow saved to pull from another enabled flow's stage errors gracefully" do
+      %{board: board} = board_with_stages()
+      [pulls, other_pulls, _lands] = Relay.Boards.list_stages(board)
+
+      {:ok, rival} = Flows.create_flow(board, valid_attrs(board, %{key: "rival"}))
+      {:ok, _rival} = Flows.enable_flow(rival)
+
+      {:ok, flow} =
+        Flows.create_flow(board, valid_attrs(board, %{key: "custom", pulls_from_stage_id: other_pulls.id}))
+
+      {:ok, flow} = Flows.enable_flow(flow)
+
+      assert {:error, changeset} = Flows.save_definition(flow, %{pulls_from_stage_id: pulls.id})
+
+      assert %{pulls_from_stage_id: ["another enabled flow already pulls from this stage"]} =
+               errors_on(changeset)
+
+      assert Repo.reload(flow).pulls_from_stage_id == other_pulls.id
+    end
   end
 
   describe "mid_run_count/1" do

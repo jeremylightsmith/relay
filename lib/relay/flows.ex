@@ -67,11 +67,20 @@ defmodule Relay.Flows do
     end)
   end
 
-  @doc "Updates a flow's definition with the same validation as `create_flow/2`."
+  @doc """
+  Updates a flow's definition with the same validation as `create_flow/2`. Also guards the
+  one-enabled-per-pulls-from-stage rule (mirrors `enable_flow/1`) — an already-enabled flow can
+  change its `pulls_from_stage_id` right into another enabled flow's, and the partial unique
+  index would otherwise raise instead of returning `{:error, changeset}`.
+  """
   def update_flow(%Flow{} = flow, attrs) do
     flow
     |> Flow.changeset(attrs)
     |> validate_trigger_stages(flow.board_id)
+    |> Changeset.unique_constraint(:pulls_from_stage_id,
+      name: :flows_one_enabled_per_pulls_from_index,
+      message: "another enabled flow already pulls from this stage"
+    )
     |> Repo.update()
   end
 
