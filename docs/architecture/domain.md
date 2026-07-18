@@ -10,18 +10,44 @@ sharing behavior.
 - **Boards** — boards and their stage tree (stages, sub-lanes, review gates, WIP limits,
   `ai_enabled`). Stage/config semantics: [ADR 0003](../adr/0003-card-state-stage-type-validity.md).
 - **Flows** — workflow definitions as declarative graph data (ADR 0006 / RLY-131): per-board
-  rows in the `flows` table (`key`, `enabled`, `isolation`, three trigger stage FKs stored as
-  ids with nilify-on-delete) with the node/edge graph embedded as jsonb; `"start"`/`"done"`
-  are edge sentinels. `Relay.Flows.seed_default_flows!/1` idempotently seeds the default
-  spec/plan/code library (from `Relay.Flows.DefaultLibrary`, the compiled translation of
-  `docs/designs/flows/*.jsonc`) — `Boards.create_board/2` calls it after enabling the
-  `Spec:Review`/`Spec:Done`/`Plan:Done` sub-lanes so every trigger resolves. Flows seed
-  disabled; at most one enabled flow may pull from a stage (partial unique index). Nothing
-  executes yet — the engine is the Runs card (02); versioning is RLY-152.
-  The Flows settings tab (RLY-142) is backed by `customized?/1` (normalized
-  nodes/edges/isolation comparison against the library — trigger wiring never counts),
-  `default_key?/1`, `duplicate_flow/1` (disabled `<key>-copy` clone), and
-  `reset_to_default/1` (restores the shipped definition; triggers and `enabled` untouched).
+  rows in the `flows` table (`key`, `enabled`, `isolation`, `version`, three trigger stage FKs
+  stored as ids with nilify-on-delete) with the node/edge graph embedded as jsonb; `"start"`/
+  `"done"` are edge sentinels; nodes carry an optional `timeout_minutes` (validated `> 0`).
+  `Relay.Flows.seed_default_flows!/1` idempotently seeds the default spec/plan/code library
+  (from `Relay.Flows.DefaultLibrary`, the compiled translation of `docs/designs/flows/*.jsonc`)
+  — `Boards.create_board/2` calls it after enabling the `Spec:Review`/`Spec:Done`/`Plan:Done`
+  sub-lanes so every trigger resolves. Flows seed disabled; at most one enabled flow may pull
+  from a stage (partial unique index). Nothing executes yet — the engine is the Runs card (02).
+  **Versioning (RLY-152, absorbed into the flow editor card):** every flow's definition
+  (nodes, edges, isolation) is versioned — `flows.version` holds the current number, and each
+  version is snapshotted immutably into `flow_versions` (`belongs_to :flow`, `version`,
+  `isolation`, embedded `nodes`/`edges`; no `updated_at`, never edited after insert). A flow
+  always has a snapshot row for its current version — created on `create_flow/2`,
+  `duplicate_flow/1`, and `seed_default_flows!/1`, and on every bump — the invariant a future
+  Runs pin-to-version feature relies on. `save_definition/2` is the one path that changes a
+  flow's definition after creation: it validates like `update_flow/2`, then bumps `version` to
+  n+1 and writes a new snapshot **only if** the definition changed; a trigger-only change
+  (including a stage rename) saves with no bump, since triggers are per-board wiring and not
+  part of the versioned definition. `get_version/2` fetches an immutable snapshot by number;
+  `mid_run_count/1` is a stub returning `0` until the Runs schema pins a card to a version
+  (RLY-132 makes it real). The Flows settings tab (RLY-142) is backed by `customized?/1`
+  (normalized nodes/edges/isolation comparison against the library — trigger wiring never
+  counts), `default_key?/1`, `duplicate_flow/1` (disabled `<key>-copy` clone), and
+  `reset_to_default/1` (restores the shipped definition via `save_definition/2`, so a reset
+  bumps the version and snapshots like any other save; triggers and `enabled` untouched).
+  `diff_from_default/1` structurally diffs a customized default flow against its shipped
+  default (`nil` for a non-library key) — nodes grouped added/removed/changed (changed lists
+  the differing fields), edges as `{from, to, on}` tuples grouped added/removed.
+  **Editor (RLY-143):** `RelayWeb.FlowEditorLive`, a full-page LiveView at
+  `/board/:slug/flows/:key`, edits a flow's working copy (nodes/edges/isolation/triggers) with
+  inline validation against `Schemas.Flow.changeset/2`, saves through `save_definition/2`
+  behind a "Save as v(n+1)" confirm modal, and offers the diff-vs-default / reset-to-default
+  affordance for customized library flows. The graph is rendered by the shared
+  `RelayWeb.FlowGraphComponents.flow_graph/1` function component (absolutely-positioned node
+  divs + an SVG edge layer, `interactive?` toggles `phx-click`, accepts `node_states` for a
+  later read-only reuse by the run panel) laid out by the pure, unit-tested
+  `RelayWeb.FlowLayout.layout/2` (a deterministic serpentine layout derived from graph
+  structure alone — no stored coordinates, no dragging).
 - **Runs** — the workflow execution engine (ADR 0006 card 02 / RLY-132): a run executes a
   flow graph against a card as a supervised, Postgres-backed state machine. Outcome routing
   on `succeeded/failed/partial/needs_input`, per-node `max_retries`, per-edge `max_loops`, a
@@ -91,6 +117,7 @@ erDiagram
     Board ||--o{ Card : has
     Board ||--o{ Flow : "flow definitions"
     Stage |o--o{ Flow : "trigger (pulls-from / works-in / lands-on)"
+    Flow ||--o{ FlowVersion : "immutable version snapshots"
     Card ||--o{ SubTask : has
     Card ||--o{ CardOwner : "owners (user or agent)"
     Card ||--o{ Comment : timeline

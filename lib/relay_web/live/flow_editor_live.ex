@@ -10,6 +10,7 @@ defmodule RelayWeb.FlowEditorLive do
 
   alias Relay.Boards
   alias Relay.Flows
+  alias RelayWeb.FlowEditorComponents
   alias RelayWeb.FlowGraphComponents
   alias RelayWeb.FlowLayout
   alias Schemas.Board
@@ -37,6 +38,7 @@ defmodule RelayWeb.FlowEditorLive do
          |> assign(:read_only?, Board.archived?(board))
          |> assign(:selected, nil)
          |> assign(:modal, nil)
+         |> assign(:connecting, nil)
          |> load_flow(flow)}
     end
   end
@@ -57,6 +59,9 @@ defmodule RelayWeb.FlowEditorLive do
     |> assign(:working, working)
     |> assign(:dirty?, false)
     |> assign(:errors, [])
+    |> assign(:selected, nil)
+    |> assign(:connecting, nil)
+    |> assign(:diff, Flows.diff_from_default(flow))
     |> validate_working()
   end
 
@@ -110,16 +115,54 @@ defmodule RelayWeb.FlowEditorLive do
 
   @impl true
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket)
-      when event in ~w(validate_trigger save confirm_save discard edit_node_field select_node select_edge) do
+      when event in ~w(validate_trigger save confirm_save discard edit_node_field select_node
+                        select_edge rename_node add_node connect_edge delete_selected
+                        delete_start_edge edit_edge open_diff open_reset confirm_reset) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
+  end
+
+  # ---- selection, including "connect edge" mode (first click sets from, second sets to) ----
+
+  def handle_event("select_node", %{"key" => key}, %{assigns: %{connecting: %{from: nil}}} = socket) do
+    if key == "start" do
+      {:noreply, socket}
+    else
+      {:noreply, assign(socket, :connecting, %{from: key})}
+    end
+  end
+
+  def handle_event("select_node", %{"key" => to}, %{assigns: %{connecting: %{from: from}}} = socket) do
+    socket =
+      apply_working(socket, fn w ->
+        %{w | edges: w.edges ++ [%{from: from, to: to, on: :succeeded, max_loops: nil}]}
+      end)
+
+    index = length(socket.assigns.working.edges) - 1
+    {:noreply, socket |> assign(:connecting, nil) |> assign(:selected, {:edge, index})}
   end
 
   def handle_event("select_node", %{"key" => key}, socket) do
     {:noreply, assign(socket, :selected, {:node, key})}
   end
 
+  def handle_event("select_edge", _params, %{assigns: %{connecting: connecting}} = socket) when not is_nil(connecting) do
+    {:noreply, socket}
+  end
+
   def handle_event("select_edge", %{"index" => i}, socket) do
     {:noreply, assign(socket, :selected, {:edge, String.to_integer(i)})}
+  end
+
+  def handle_event("connect_edge", _params, %{assigns: %{connecting: nil}} = socket) do
+    {:noreply, assign(socket, :connecting, %{from: nil})}
+  end
+
+  def handle_event("connect_edge", _params, socket) do
+    {:noreply, assign(socket, :connecting, nil)}
+  end
+
+  def handle_event("cancel_connect", _params, socket) do
+    {:noreply, assign(socket, :connecting, nil)}
   end
 
   def handle_event("close_modal", _params, socket) do
@@ -132,7 +175,7 @@ defmodule RelayWeb.FlowEditorLive do
     {:noreply, apply_working(socket, &Map.put(&1, key, id))}
   end
 
-  # low-level working-copy node-field edit (the inspector calls this; Task 4 adds the form UI)
+  # low-level working-copy node-field edit (the inspector form/chips/steppers emit this)
   def handle_event("edit_node_field", %{"key" => key, "field" => field, "value" => value}, socket) do
     field = String.to_existing_atom(field)
     value = cast_node_value(field, value)
@@ -142,6 +185,93 @@ defmodule RelayWeb.FlowEditorLive do
        nodes = Enum.map(w.nodes, fn n -> if n.key == key, do: Map.put(n, field, value), else: n end)
        %{w | nodes: nodes}
      end)}
+  end
+
+  def handle_event("edit_edge", %{"index" => i, "field" => field, "value" => value}, socket) do
+    i = String.to_integer(i)
+    field = String.to_existing_atom(field)
+    value = cast_edge_value(field, value)
+
+    {:noreply, apply_working(socket, fn w -> %{w | edges: List.update_at(w.edges, i, &Map.put(&1, field, value))} end)}
+  end
+
+  def handle_event("rename_node", %{"key" => old, "value" => new}, socket) do
+    {:noreply,
+     socket
+     |> apply_working(fn w ->
+       nodes = Enum.map(w.nodes, fn n -> if n.key == old, do: %{n | key: new}, else: n end)
+
+       edges =
+         Enum.map(w.edges, fn e -> e |> update_endpoint(:from, old, new) |> update_endpoint(:to, old, new) end)
+
+       %{w | nodes: nodes, edges: edges}
+     end)
+     |> assign(:selected, {:node, new})}
+  end
+
+  def handle_event("add_node", %{"type" => type}, socket) do
+    type = String.to_existing_atom(type)
+    key = unique_node_key(socket.assigns.working.nodes, type)
+
+    node = %{
+      key: key,
+      type: type,
+      run: nil,
+      model: nil,
+      effort: nil,
+      max_retries: nil,
+      timeout_minutes: nil
+    }
+
+    {:noreply,
+     socket
+     |> apply_working(fn w -> %{w | nodes: w.nodes ++ [node]} end)
+     |> assign(:selected, {:node, key})}
+  end
+
+  def handle_event("delete_selected", _params, %{assigns: %{selected: {:edge, i}}} = socket) do
+    {:noreply,
+     socket
+     |> apply_working(fn w -> %{w | edges: List.delete_at(w.edges, i)} end)
+     |> assign(:selected, nil)}
+  end
+
+  def handle_event("delete_selected", _params, %{assigns: %{selected: {:node, key}}} = socket) do
+    if referenced_count(socket.assigns.working, key) == 0 do
+      {:noreply,
+       socket
+       |> apply_working(fn w -> %{w | nodes: Enum.reject(w.nodes, &(&1.key == key))} end)
+       |> assign(:selected, nil)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("delete_selected", _params, socket), do: {:noreply, socket}
+
+  # test-hook analog for the toolbar's "select the start edge, then Delete" flow.
+  def handle_event("delete_start_edge", _params, socket) do
+    case Enum.find_index(socket.assigns.working.edges, &(&1.from == "start")) do
+      nil -> {:noreply, socket}
+      i -> {:noreply, apply_working(socket, fn w -> %{w | edges: List.delete_at(w.edges, i)} end)}
+    end
+  end
+
+  def handle_event("open_diff", _params, socket), do: {:noreply, assign(socket, :modal, :diff)}
+  def handle_event("open_reset", _params, socket), do: {:noreply, assign(socket, :modal, :reset)}
+
+  def handle_event("confirm_reset", _params, socket) do
+    case Flows.reset_to_default(socket.assigns.flow) do
+      {:ok, flow} ->
+        {:noreply,
+         socket
+         |> assign(:modal, nil)
+         |> put_flash(:info, "Reset to the shipped default.")
+         |> load_flow(flow)}
+
+      {:error, _} ->
+        {:noreply, socket |> assign(:modal, nil) |> put_flash(:error, "Couldn’t reset this flow.")}
+    end
   end
 
   def handle_event("save", _params, socket) do
@@ -197,7 +327,35 @@ defmodule RelayWeb.FlowEditorLive do
   defp cast_node_value(_f, ""), do: nil
   defp cast_node_value(_f, v), do: v
 
+  defp cast_edge_value(:on, v), do: String.to_existing_atom(v)
+
+  defp cast_edge_value(:max_loops, v) do
+    case Integer.parse(v || "") do
+      {n, _} -> n
+      _ -> nil
+    end
+  end
+
+  defp update_endpoint(edge, field, old, new),
+    do: if(Map.get(edge, field) == old, do: Map.put(edge, field, new), else: edge)
+
+  defp referenced_count(working, key), do: Enum.count(working.edges, &(&1.from == key or &1.to == key))
+
+  defp unique_node_key(nodes, type) do
+    taken = MapSet.new(nodes, & &1.key)
+    Enum.find(Stream.map(1..10_000, &"#{type}-#{&1}"), &(not MapSet.member?(taken, &1)))
+  end
+
   defp humanize(key), do: String.replace(key, ["_", "-"], " ")
+
+  # ---- diff-vs-default helpers ----
+
+  defp diff_present?(nil), do: false
+  defp diff_present?(diff), do: diff_node_count(diff) + diff_edge_count(diff) > 0
+
+  defp diff_node_count(diff), do: length(diff.nodes.added) + length(diff.nodes.removed) + length(diff.nodes.changed)
+
+  defp diff_edge_count(diff), do: length(diff.edges.added) + length(diff.edges.removed)
 
   # ---- render (chrome; inspector + canvas interactions land in Task 4) ----
 
@@ -232,7 +390,7 @@ defmodule RelayWeb.FlowEditorLive do
           </span>
         </div>
 
-        <%!-- Toolbar (palette + connect + delete land fully in Task 4; buttons present here) --%>
+        <%!-- Toolbar --%>
         <div
           id="flow-editor-toolbar"
           style="min-height:50px;display:flex;align-items:center;gap:10px;padding:7px 16px;border-bottom:1px solid oklch(0.93 0.006 255);background:oklch(0.992 0.002 255);flex-wrap:wrap;"
@@ -240,7 +398,13 @@ defmodule RelayWeb.FlowEditorLive do
           <span style="font-size:10.5px;font-weight:600;letter-spacing:0.06em;font-family:ui-monospace,monospace;color:oklch(0.58 0.02 255);">
             ADD NODE
           </span>
-          <%!-- Task 4 fills the 5-type palette here (agent/shell/gate/parallel/human). --%>
+          <FlowEditorComponents.palette read_only?={@read_only?} />
+          <div style="width:1px;height:22px;background:oklch(0.90 0.006 255);margin:0 4px;"></div>
+          <FlowEditorComponents.toolbar_actions
+            connecting?={!!@connecting}
+            has_selection?={!!@selected}
+            read_only?={@read_only?}
+          />
         </div>
 
         <%!-- Trigger bar --%>
@@ -288,11 +452,23 @@ defmodule RelayWeb.FlowEditorLive do
               lands_on={stage_name(@stages, @working.lands_on_stage_id)}
             />
           </div>
-          <%!-- Inspector panel is filled by Task 4; placeholder keeps layout stable. --%>
           <aside
             id="flow-inspector"
             style="width:328px;flex:0 0 auto;border-left:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);overflow-y:auto;"
           >
+            <FlowEditorComponents.node_inspector
+              :if={match?({:node, _}, @selected)}
+              node={selected_node(@working, @selected)}
+              edges={outgoing_edges(@working, @selected)}
+              referenced_count={referenced_count(@working, elem(@selected, 1))}
+              read_only?={@read_only?}
+            />
+            <FlowEditorComponents.edge_inspector
+              :if={match?({:edge, _}, @selected)}
+              edge={selected_edge(@working, @selected)}
+              index={elem(@selected, 1)}
+              read_only?={@read_only?}
+            />
           </aside>
         </div>
 
@@ -349,7 +525,32 @@ defmodule RelayWeb.FlowEditorLive do
           <span style="margin-left:auto;font-family:ui-monospace,monospace;font-size:11.5px;color:oklch(0.60 0.02 255);">
             {stats(@working)}
           </span>
-          <%!-- Task 4 appends the diff-vs-default affordance here. --%>
+          <div
+            :if={diff_present?(@diff)}
+            id="flow-diff-affordance"
+            style="display:flex;align-items:center;gap:10px;font-size:11.5px;color:oklch(0.46 0.14 292);"
+          >
+            <span>
+              {diff_node_count(@diff)} nodes · {diff_edge_count(@diff)} edges differ from the shipped default
+            </span>
+            <button
+              id="flow-diff-view"
+              type="button"
+              phx-click="open_diff"
+              style="background:transparent;border:none;color:oklch(0.46 0.14 292);font-size:11.5px;font-weight:600;text-decoration:underline;"
+            >
+              View diff
+            </button>
+            <button
+              id="flow-diff-reset"
+              type="button"
+              phx-click="open_reset"
+              disabled={@read_only?}
+              style="background:transparent;border:none;color:oklch(0.46 0.14 292);font-size:11.5px;font-weight:600;text-decoration:underline;"
+            >
+              Reset to default
+            </button>
+          </div>
         </div>
       </div>
 
@@ -406,6 +607,12 @@ defmodule RelayWeb.FlowEditorLive do
           </div>
         </div>
       </div>
+
+      <FlowEditorComponents.diff_modal :if={@modal == :diff} diff={@diff} />
+      <FlowEditorComponents.reset_confirm_modal
+        :if={@modal == :reset}
+        flow_name={humanize(@flow.key)}
+      />
     </Layouts.app>
     """
   end
@@ -462,4 +669,8 @@ defmodule RelayWeb.FlowEditorLive do
     loops = Enum.count(working.edges, &(&1[:max_loops] not in [nil, 0]))
     "#{nodes} nodes · #{edges} edges · #{loops} loops"
   end
+
+  defp selected_node(working, {:node, key}), do: Enum.find(working.nodes, &(&1.key == key))
+  defp outgoing_edges(working, {:node, key}), do: Enum.filter(working.edges, &(&1.from == key))
+  defp selected_edge(working, {:edge, i}), do: Enum.at(working.edges, i)
 end
