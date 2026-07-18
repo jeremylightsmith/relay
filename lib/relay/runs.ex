@@ -422,22 +422,30 @@ defmodule Relay.Runs do
   defp normalize_capacity(_cap), do: %{}
 
   @doc """
-  Atomically claims the next eligible `queued` job for `executor`: the oldest
-  job whose `payload["isolation"]` is a class with advertised free capacity `> 0`
-  and that is unpinned (`executor_name` nil) or already pinned to this executor.
-  `SELECT … FOR UPDATE SKIP LOCKED` inside a transaction so two executors never
-  grab the same job. Returns `{:ok, job}` or `{:ok, nil}` when nothing matches.
+  Atomically claims the next eligible `queued` job for `executor`, scoped to
+  the executor's board (a board-A key must never see board-B's jobs — the
+  claim payload carries the run's `ref`/`vars`, so this is an authz boundary,
+  not just filtering): the oldest job whose `payload["isolation"]` is a class
+  with advertised free capacity `> 0` and that is unpinned (`executor_name`
+  nil) or already pinned to this executor. `SELECT … FOR UPDATE SKIP LOCKED`
+  inside a transaction so two executors never grab the same job. Returns
+  `{:ok, job}` or `{:ok, nil}` when nothing matches.
   """
-  def claim_next_job(%Executor{name: name, capacity: capacity}) do
+  def claim_next_job(%Executor{board_id: board_id, name: name, capacity: capacity}) do
     case for {class, n} <- capacity, is_integer(n) and n > 0, do: class do
       [] -> {:ok, nil}
-      allowed -> Repo.transaction(fn -> do_claim_next_job(name, allowed) end)
+      allowed -> Repo.transaction(fn -> do_claim_next_job(board_id, name, allowed) end)
     end
   end
 
-  defp do_claim_next_job(name, allowed) do
+  defp do_claim_next_job(board_id, name, allowed) do
     query =
       from j in NodeJob,
+        join: r in Run,
+        on: r.id == j.run_id,
+        join: c in Card,
+        on: c.id == r.card_id,
+        where: c.board_id == ^board_id,
         where: j.state == :queued,
         where: fragment("?->>'isolation'", j.payload) in ^allowed,
         where: is_nil(j.executor_name) or j.executor_name == ^name,
@@ -450,18 +458,27 @@ defmodule Relay.Runs do
         nil
 
       job ->
-        {:ok, claimed} = transition_job(job, [:queued], state: :claimed, executor_name: name, claimed_at: now())
+        {:ok, claimed} = claim_job(job, name)
         claimed
     end
   end
 
   @doc """
-  The board's node-job `id` when it is held by a live claim (`state in [:claimed,
-  :running]`). `{:error, :not_found}` when no such job exists on the board,
-  `{:error, :conflict}` when it exists but is not currently held — so a zombie
-  executor cannot clobber a reassigned or revoked job.
+  The board's node-job `id` (integer or numeric string — the controller hands
+  in a raw path param) when it is held by a live claim (`state in [:claimed,
+  :running]`). `{:error, :not_found}` when no such job exists on the board or
+  `id` isn't a valid integer, `{:error, :conflict}` when it exists but is not
+  currently held — so a zombie executor cannot clobber a reassigned or
+  revoked job.
   """
-  def get_claimed_job(%Board{id: board_id}, id) do
+  def get_claimed_job(%Board{} = board, id) when is_binary(id) do
+    case Integer.parse(id) do
+      {int_id, ""} -> get_claimed_job(board, int_id)
+      _invalid -> {:error, :not_found}
+    end
+  end
+
+  def get_claimed_job(%Board{id: board_id}, id) when is_integer(id) do
     job =
       Repo.one(
         from j in NodeJob,
@@ -505,54 +522,57 @@ defmodule Relay.Runs do
   end
 
   defp reclaim_executor(%Executor{board_id: board_id, name: name}) do
-    jobs =
+    rows =
       Repo.all(
         from j in NodeJob,
           join: r in Run,
           on: r.id == j.run_id,
           join: c in Card,
           on: c.id == r.card_id,
-          where: c.board_id == ^board_id and j.executor_name == ^name and j.state in ^@active_job_states
+          where: c.board_id == ^board_id and j.executor_name == ^name and j.state in ^@active_job_states,
+          select: {j, r, c.id}
       )
 
-    Enum.each(jobs, fn job ->
+    Enum.each(rows, fn {job, run, card_id} ->
       case job.payload["isolation"] do
-        "exclusive" -> park_for_reclaim(Repo.get!(Run, job.run_id))
-        _shared -> requeue_job(job)
+        "exclusive" -> park_for_reclaim(run)
+        _shared -> requeue_job(job, board_id, card_id)
       end
     end)
   end
 
-  defp requeue_job(%NodeJob{} = job) do
+  defp requeue_job(%NodeJob{} = job, board_id, card_id) do
     {1, _} =
       Repo.update_all(
         from(j in NodeJob, where: j.id == ^job.id and j.state in ^@active_job_states),
         set: [state: :queued, executor_name: nil, claimed_at: nil]
       )
 
-    broadcast_runs(board_id_for_job(job), {:run_changed, card_id_for_job(job)})
+    broadcast_runs(board_id, {:run_changed, card_id})
     :ok
   end
 
   @doc false
+  # Revokes any lingering active job regardless of the run's current status
+  # FIRST — the job that triggered this reclaim must never stay stuck
+  # :claimed/:running under a dead executor's name, even if the run itself
+  # already moved on (e.g. parked/finished via a concurrent path) by the time
+  # this runs — then, only for a still-:running run, flips it to
+  # :parked/:executor_gone (affinity is absolute; the run waits for its
+  # machine).
   def park_for_reclaim(%Run{} = run) do
     stop_server(run)
     run = Repo.get!(Run, run.id)
 
+    revoke_active_jobs(run)
+
     if run.status == :running do
-      revoke_active_jobs(run)
       run = run |> Changeset.change(status: :parked, parked_reason: :executor_gone) |> Repo.update!()
       broadcast_runs(board_id_of(run), {:run_parked, run})
     end
 
     :ok
   end
-
-  defp board_id_for_job(%NodeJob{run_id: run_id}) do
-    Repo.one!(from j in Run, join: c in Card, on: c.id == j.card_id, where: j.id == ^run_id, select: c.board_id)
-  end
-
-  defp card_id_for_job(%NodeJob{run_id: run_id}), do: Repo.one!(from r in Run, where: r.id == ^run_id, select: r.card_id)
 
   ## Seams for the RunServer, the Listener (Task 3), and the boot resumer.
   ## @doc false: internal engine plumbing, not public context API.

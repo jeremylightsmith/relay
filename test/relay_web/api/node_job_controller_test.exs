@@ -106,6 +106,38 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
 
       assert response(conn, 204)
     end
+
+    test "204 immediately (no long-poll) when the executor advertises zero capacity", %{conn: conn} do
+      {micros, conn} =
+        :timer.tc(fn ->
+          post(
+            conn,
+            ~p"/api/node-jobs/claim",
+            Jason.encode!(%{
+              "executor" => %{"name" => "zero-capacity"},
+              "capacity" => %{"shared_clean" => 0, "exclusive" => 0}
+            })
+          )
+        end)
+
+      assert response(conn, 204)
+      # Well under the 25s long-poll window — proves it short-circuited.
+      assert micros < 5_000_000
+    end
+
+    test "the long-poll ignores unrelated mailbox messages and still claims on the real run event",
+         %{conn: conn, board: board} do
+      flow = four_outcome_flow(board)
+      send(self(), :some_unrelated_message)
+
+      task = Task.async(fn -> Process.sleep(50) && start_queued_job(board, flow) end)
+
+      body = conn |> claim() |> json_response(200)
+      Task.await(task)
+
+      assert body["node_id"] == "work"
+      assert_received :some_unrelated_message
+    end
   end
 
   describe "POST /api/node-jobs/:id/outcome" do
@@ -188,6 +220,12 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
     test "an unknown job id is 404", %{conn: conn} do
       assert conn
              |> post(~p"/api/node-jobs/999999/outcome", Jason.encode!(%{"outcome" => "succeeded"}))
+             |> json_response(404)
+    end
+
+    test "a non-numeric job id is 404, not a 500", %{conn: conn} do
+      assert conn
+             |> post(~p"/api/node-jobs/abc/outcome", Jason.encode!(%{"outcome" => "succeeded"}))
              |> json_response(404)
     end
   end

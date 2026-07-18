@@ -150,6 +150,7 @@ erDiagram
     Flow |o--o{ Run : "live definition (nilified on delete)"
     Run ||--o{ NodeExecution : "per-attempt history"
     NodeExecution ||--o| NodeJob : "dispatch unit"
+    Board ||--o{ Executor : "registered executors"
     Board ||--o{ Membership : has
     User ||--o{ Membership : has
     Board ||--o{ ApiKey : "agent credentials"

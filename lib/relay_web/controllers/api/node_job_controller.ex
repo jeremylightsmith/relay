@@ -14,6 +14,11 @@ defmodule RelayWeb.Api.NodeJobController do
   # ~25s sits safely under Fly's proxy idle timeout.
   @long_poll_ms 25_000
 
+  # Every tag `Relay.Runs`/`RunServer` broadcast on `board:<id>:runs` — anything
+  # else landing in this request process's mailbox (e.g. a stray monitor `:DOWN`)
+  # must fall through rather than be silently swallowed by the long-poll.
+  @run_event_tags [:run_started, :node_started, :node_finished, :run_finished, :run_changed, :run_parked, :run_resumed]
+
   @outcomes %{
     "succeeded" => :succeeded,
     "failed" => :failed,
@@ -77,15 +82,27 @@ defmodule RelayWeb.Api.NodeJobController do
   end
 
   defp maybe_wait(conn, board, executor, params) do
-    if params["wait"] in ["0", 0] do
-      send_resp(conn, 204, "")
-    else
-      Runs.subscribe(board.id)
-      wait_loop(conn, executor, System.monotonic_time(:millisecond) + @long_poll_ms)
+    cond do
+      params["wait"] in ["0", 0] ->
+        send_resp(conn, 204, "")
+
+      # No advertised capacity → claim_next_job/1 can never succeed for this
+      # executor; a full 25s long-poll would be a wasted connection.
+      zero_capacity?(executor) ->
+        send_resp(conn, 204, "")
+
+      true ->
+        Runs.subscribe(board.id)
+        wait_loop(conn, executor, System.monotonic_time(:millisecond) + @long_poll_ms)
     end
   end
 
-  # Retry the atomic claim whenever any run event fires; give up at the deadline.
+  defp zero_capacity?(%{capacity: capacity}) do
+    Enum.all?(capacity, fn {_class, n} -> not (is_integer(n) and n > 0) end)
+  end
+
+  # Retry the atomic claim whenever a run event fires; anything else in the
+  # mailbox (e.g. a stray monitor message) falls through and keeps waiting.
   defp wait_loop(conn, executor, deadline) do
     timeout = deadline - System.monotonic_time(:millisecond)
 
@@ -93,7 +110,7 @@ defmodule RelayWeb.Api.NodeJobController do
       send_resp(conn, 204, "")
     else
       receive do
-        _run_event ->
+        run_event when is_tuple(run_event) and elem(run_event, 0) in @run_event_tags ->
           case Runs.claim_next_job(executor) do
             {:ok, nil} -> wait_loop(conn, executor, deadline)
             {:ok, job} -> json(conn, claim_payload(job))
