@@ -32,10 +32,12 @@ import mimetypes
 import os
 import queue
 import re
+import shutil
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -878,28 +880,11 @@ def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None):
 
 def _stream_claude(prompt, cwd=ROOT, tag=""):
     """Run headless claude with a live streamed feed. Returns True on success.
-    --dangerously-skip-permissions lets it use tools unattended (this is an autonomous
-    runner); --output-format stream-json emits one event per step, streamed here."""
-    cmd = ["claude", "-p", prompt, "--dangerously-skip-permissions",
-           "--verbose", "--output-format", "stream-json"]
-    # `claude -p` caps how long it waits for a background workflow at 10 minutes
-    # by default (CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, v2.1.182+). /exec-plan runs
-    # far longer than that, so without lifting the cap -p exits mid-run and the
-    # stage ships a PARTIAL plan as if it were done. "0" = wait until the workflow
-    # finishes on its own (it is internally bounded). An explicit env override wins.
-    env = dict(os.environ)
-    env.setdefault("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0")
-    proc = subprocess.Popen(cmd, cwd=cwd, text=True, bufsize=1, env=env,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    for line in proc.stdout:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            _print_claude_event(json.loads(line), tag)
-        except Exception:
-            print(f"    {tag}" + line[:200], flush=True)
-    return proc.wait() == 0
+    Thin wrapper over _stream_claude_job (the executor variant): same argv, env-var
+    handling, and stream-json rendering, minus session capture/--resume/on_proc. Keeping
+    one implementation means the wait-ceiling workaround and the stream parsing only
+    have to be fixed once."""
+    return _stream_claude_job(prompt, cwd, tag)[0]
 
 
 def run_step(step, vars, cwd=ROOT, tag="", sink=None):
@@ -993,11 +978,10 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
             continue
         try:
             ev = json.loads(line)
+            captured = ev.get("session_id") or captured
+            _print_claude_event(ev, tag)
         except Exception:
             print(f"    {tag}" + line[:200], flush=True)
-            continue
-        captured = ev.get("session_id") or captured
-        _print_claude_event(ev, tag)
     return proc.wait() == 0, captured
 
 
@@ -1030,22 +1014,27 @@ def run_node_job(job, slot_path, control):
     tag = f"[{ref}] "
     session_id = None
     if job.get("node_type") == "agent":
-        outcome_path = os.path.join(slot_path, ".relay-node-outcome.json")
+        # The outcome file must live OUTSIDE the checkout: reset_worktree() salvages any
+        # non-empty `git status --porcelain`, so a file inside slot_path would make every
+        # agent job leave a spurious "salvaging leftovers" stash for the next job on this
+        # slot. A fresh tempdir per job also means there is never a stale file to read.
+        outcome_dir = tempfile.mkdtemp(prefix="relay-node-outcome-")
+        outcome_path = os.path.join(outcome_dir, "outcome.json")
         try:
-            os.remove(outcome_path)               # never read a stale file from a prior job
-        except FileNotFoundError:
-            pass
-        ok, session_id = _stream_claude_job(
-            job["run"], cwd=slot_path, tag=tag, session_id=job.get("session_id"),
-            outcome_path=outcome_path, on_proc=control.register)
-        outcome, detail = determine_agent_outcome(job, ok, outcome_path)
+            ok, session_id = _stream_claude_job(
+                job["run"], cwd=slot_path, tag=tag, session_id=job.get("session_id"),
+                outcome_path=outcome_path, on_proc=control.register)
+            outcome, detail = determine_agent_outcome(job, ok, outcome_path)
+        finally:
+            shutil.rmtree(outcome_dir, ignore_errors=True)
     else:  # shell | gate
         tail = []
         ok = _stream_shell(job["run"], slot_path, tag, sink=tail, on_proc=control.register)
         outcome = "succeeded" if ok else "failed"
         detail = "" if ok else "\n".join(tail).strip()
-    git_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=slot_path,
-                             capture_output=True, text=True).stdout.strip()
+    sha_proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=slot_path,
+                              capture_output=True, text=True)
+    git_sha = sha_proc.stdout.strip() if sha_proc.returncode == 0 else None
     return outcome, detail, git_sha, session_id
 
 

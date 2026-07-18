@@ -1297,6 +1297,49 @@ class StreamClaudeJobTest(unittest.TestCase):
                     on_proc=registered.append)
         self.assertEqual(registered, [proc])
 
+    def test_a_render_error_falls_back_to_the_raw_line_and_keeps_streaming(self):
+        """Mirrors the old _stream_claude behavior: the try wraps BOTH json.loads and
+        _print_claude_event, so a rendering bug prints the raw line instead of killing
+        the stream loop mid-job."""
+        bad = json.dumps({"type": "assistant",
+                          "message": {"content": [{"type": "text", "text": "x"}]}})
+        good = json.dumps({"type": "result", "session_id": "sess-2"})
+        relay.subprocess.Popen = lambda *a, **k: _FakePopen([bad, good], code=0)
+        orig = relay._print_claude_event
+
+        def flaky(ev, tag=""):
+            if ev.get("type") == "assistant":
+                raise RuntimeError("render boom")
+            return orig(ev, tag)
+
+        relay._print_claude_event = flaky
+        self.addCleanup(setattr, relay, "_print_claude_event", orig)
+        out = capture(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        self.assertIn(bad[:200], out)          # fell back to the raw line
+        self.assertIn("claude finished", out)  # ...and kept streaming the next event
+
+
+class StreamClaudeDelegatesTest(unittest.TestCase):
+    """_stream_claude must not duplicate _stream_claude_job's argv/env/parsing logic —
+    it's a thin wrapper so a fix to the wait-ceiling workaround or stream-json parsing
+    only has to be made once."""
+
+    def setUp(self):
+        self._job = relay._stream_claude_job
+        self.addCleanup(setattr, relay, "_stream_claude_job", self._job)
+
+    def test_stream_claude_delegates_to_stream_claude_job(self):
+        seen = {}
+        relay._stream_claude_job = lambda prompt, cwd, tag="": (
+            seen.update(prompt=prompt, cwd=cwd, tag=tag) or (True, "sess-x"))
+        ok = relay._stream_claude("do it", cwd="/tmp/wt", tag="[R] ")
+        self.assertTrue(ok)
+        self.assertEqual(seen, {"prompt": "do it", "cwd": "/tmp/wt", "tag": "[R] "})
+
+    def test_stream_claude_returns_only_the_bool_even_on_failure(self):
+        relay._stream_claude_job = lambda prompt, cwd, tag="": (False, None)
+        self.assertFalse(relay._stream_claude("do it", cwd="/tmp/wt"))
+
 
 class AgentOutcomeContractTest(unittest.TestCase):
     def setUp(self):
@@ -1336,7 +1379,7 @@ class RunNodeJobTest(unittest.TestCase):
         self._run = relay.subprocess.run                      # restore the attr, not the module
         self.addCleanup(setattr, relay.subprocess, "run", self._run)
         relay.subprocess.run = lambda *a, **k: type(
-            "R", (), {"stdout": "deadbeef\n"})()
+            "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
         self.control = relay.JobControl()
 
     def test_shell_job_reports_succeeded_with_git_sha(self):
@@ -1366,6 +1409,43 @@ class RunNodeJobTest(unittest.TestCase):
                "isolation": "exclusive", "vars": {"ref": "RLY-2"}}
         outcome, detail, sha, session = relay.run_node_job(job, "/tmp/wt", self.control)
         self.assertEqual((outcome, sha, session), ("succeeded", "deadbeef", "sess-9"))
+
+    def test_agent_job_writes_the_outcome_file_outside_the_worktree_and_cleans_it_up(self):
+        """The outcome file must never land inside slot_path: reset_worktree() treats any
+        untracked file there as a leftover worth salvaging (git stash), so every agent job
+        would otherwise leave the next job's reset_worktree() logging a spurious salvage."""
+        seen = {}
+
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None):
+            seen["stream_path"] = outcome_path
+            self.assertTrue(os.path.exists(os.path.dirname(outcome_path)))
+            return True, "sess-9"
+
+        def fake_determine(job, ok, path):
+            seen["determine_path"] = path
+            return "succeeded", ""
+
+        relay._stream_claude_job = fake_stream
+        relay.determine_agent_outcome = fake_determine
+        job = {"id": "nj-2", "run_id": "r1", "node_type": "agent", "run": "Implement…",
+               "isolation": "exclusive", "vars": {"ref": "RLY-2"}}
+        relay.run_node_job(job, "/tmp/wt", self.control)
+
+        # both calls got the exact same path
+        self.assertEqual(seen["stream_path"], seen["determine_path"])
+        # ...and it lives outside the worktree the job ran in
+        self.assertFalse(seen["stream_path"].startswith("/tmp/wt"))
+        # cleaned up once the job is done — no leakage into the next job on this slot
+        self.assertFalse(os.path.exists(os.path.dirname(seen["stream_path"])))
+
+    def test_git_sha_is_none_when_rev_parse_fails(self):
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None: True
+        relay.subprocess.run = lambda *a, **k: type(
+            "R", (), {"stdout": "", "returncode": 128})()
+        job = {"id": "nj-5", "run_id": "r1", "node_type": "shell", "run": "true",
+               "isolation": "shared_clean", "vars": {"ref": "RLY-5"}}
+        _, _, sha, _ = relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertIsNone(sha)
 
 
 class JobControlTest(unittest.TestCase):
