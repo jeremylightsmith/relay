@@ -36,6 +36,12 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
 
     conn = put_req_header(conn, "authorization", "Bearer " <> token)
 
+    # Subscribe so each test can wait on the run's real terminal event before it returns
+    # (mirrors W11's spec_flow_e2e_test.exs). `:sys.get_state` alone is not enough: it only
+    # drains what is ALREADY in the Listener's mailbox, so a broadcast still in flight lands
+    # after the drain and reconciles into a torn-down sandbox.
+    :ok = Runs.subscribe(board.id)
+
     %{conn: conn, board: board}
   end
 
@@ -71,6 +77,18 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
 
   defp start_scheduler(board) do
     start_supervised!({Server, [board_id: board.id, tick_ms: 3_600_000, debounce_ms: 5, name: :"e2e_sched_#{board.id}"]})
+  end
+
+  # Let both async DB readers finish before the test returns and ExUnit tears the sandbox
+  # down. Killing either mid-query is what produces the `client #PID exited` Postgrex
+  # disconnect: the Listener reconciles off run broadcasts, and the scheduler's 5ms debounce
+  # can fire a reconcile just after the last assertion. Callers must first wait on the run's
+  # terminal broadcast, so the triggering message is already in the mailbox rather than still
+  # in flight — `:sys.get_state` only drains what has actually arrived.
+  defp settle(server) do
+    _ = :sys.get_state(Process.whereis(Listener))
+    _ = :sys.get_state(server)
+    :ok
   end
 
   defp stage_name(board, card_id) do
@@ -111,11 +129,12 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
       assert Runs.get_run!(run.id).status == :done
       assert stage_name(board, card.id) == "Plan:Done"
 
-      # Drain the Listener's mailbox before the sandbox tears down: the outcome POST above
-      # broadcasts synchronously, but Listener.reconcile/1 runs asynchronously off that
-      # broadcast and can still be mid-query when the test process exits, poisoning the
-      # sandbox connection (see Relay.Runs.Listener's @moduledoc).
-      _ = :sys.get_state(Process.whereis(Listener))
+      # Wait for the run's terminal broadcast, THEN drain the Listener. Waiting first is what
+      # makes the drain meaningful — it guarantees the reconcile-triggering message has landed
+      # in the Listener's mailbox rather than still being in flight toward it.
+      assert_receive {:run_finished, %{id: finished_id}}, 2_000
+      assert finished_id == run.id
+      settle(server)
     end
 
     test "a needs_input outcome parks the run and blocks the card instead of landing it",
@@ -140,9 +159,11 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
       assert Cards.get_card(board, card.id).status == :needs_input
       refute stage_name(board, card.id) == "Plan:Done"
 
-      # Drain the Listener's mailbox before the sandbox tears down (see the other test in
-      # this describe block for why).
-      _ = :sys.get_state(Process.whereis(Listener))
+      # Wait for the park broadcast before draining (see the other test in this describe
+      # block for why the order matters).
+      assert_receive {:run_parked, %{id: parked_id}}, 2_000
+      assert parked_id == run.id
+      settle(server)
     end
   end
 
@@ -183,10 +204,11 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
       assert stage_name(board, plan_card.id) == "Plan:Done"
       assert Runs.active_runs(board.id) == []
 
-      # Drain the Listener's mailbox before the sandbox tears down (see the "Plan flow, end
-      # to end" tests above for why): this test also reports two runs to completion, which
-      # can leave Listener mid-reconcile when the test process exits.
-      _ = :sys.get_state(Process.whereis(Listener))
+      # Both runs finished, so wait for BOTH terminal broadcasts before draining (see the
+      # "Plan flow, end to end" tests above for why the order matters).
+      assert_receive {:run_finished, _}, 2_000
+      assert_receive {:run_finished, _}, 2_000
+      settle(server)
     end
 
     test "with only one shared slot, the Plan card is worked and the Spec card waits",
@@ -207,6 +229,12 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
       assert run.card_id == plan_card.id
       assert run.flow_key == "plan"
       assert stage_name(board, spec_card.id) == "Next up"
+
+      # This test deliberately leaves the run :running, so settle the start broadcasts before
+      # the sandbox tears down (see the "Plan flow, end to end" tests for why).
+      assert_receive {:run_started, _}, 2_000
+      assert_receive {:node_started, _, _}, 2_000
+      settle(server)
     end
   end
 end
