@@ -22,6 +22,17 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
     view
   end
 
+  defp open_new_flow(conn, board) do
+    view = open_flows(conn, board)
+    view |> element("#new-flow-button") |> render_click()
+    view
+  end
+
+  defp stage_ids(board) do
+    [pulls, works, lands | _] = Boards.list_stages(board)
+    %{pulls: pulls.id, works: works.id, lands: lands.id}
+  end
+
   describe "navigation" do
     test "rail and mobile strip both carry a Flows entry that opens the pane",
          %{conn: conn, board: board} do
@@ -42,13 +53,13 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       assert has_element?(view, "#flows-pane")
     end
 
-    test "the header carries no version language and no + New flow button",
+    test "the header carries no version language but does carry the + New flow button",
          %{conn: conn, board: board} do
       view = open_flows(conn, board)
 
       assert has_element?(view, "#flows-pane", "A flow is the automation attached to a stage transition")
       refute render(view) =~ "versioned"
-      refute render(view) =~ "New flow"
+      assert has_element?(view, "#new-flow-button", "New flow")
     end
   end
 
@@ -317,6 +328,238 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
 
       assert render(view) =~ "archived (read-only)"
       assert Flows.get_flow(board, "spec-copy") == nil
+    end
+  end
+
+  describe "+ New flow button (RLY-158)" do
+    test "the button matches the artboard's placement, glyph and fill",
+         %{conn: conn, board: board} do
+      view = open_flows(conn, board)
+
+      # docs/designs/Relay Flows.dc.html line 74 — primary-blue fill, 8px radius,
+      # 9px 15px padding, 13px/600 label, with a 15px "+" glyph before "New flow".
+      button =
+        view
+        |> element("#new-flow-button")
+        |> render()
+
+      assert button =~ "background:oklch(0.60 0.14 250)"
+      assert button =~ "color:oklch(1 0 0)"
+      assert button =~ "border-radius:8px"
+      assert button =~ "padding:9px 15px"
+      assert button =~ "font-size:13px"
+      assert button =~ "font-weight:600"
+      assert button =~ "font-size:15px;line-height:1"
+      assert button =~ "New flow"
+
+      # …in the artboard's right-hand header column (lines 63-72).
+      assert has_element?(view, "#flows-header-actions #new-flow-button")
+      assert render(view) =~ "align-items:flex-end;gap:10px;flex:0 0 auto;margin-top:4px;"
+    end
+
+    test "the button renders on a board with no flows at all", %{conn: conn, board: board} do
+      Repo.delete_all(from f in Flow, where: f.board_id == ^board.id)
+
+      view = open_flows(conn, board)
+
+      assert has_element?(view, "#flows-empty")
+      assert has_element?(view, "#new-flow-button")
+    end
+
+    test "an archived board does not render the button", %{conn: conn, board: board} do
+      {:ok, _} = Boards.archive_board(board)
+
+      view = open_flows(conn, board)
+
+      assert has_element?(view, "#flows-pane")
+      refute has_element?(view, "#new-flow-button")
+    end
+
+    test "an archived board shows a static read-only banner explaining why the button is gone",
+         %{conn: conn, board: board} do
+      {:ok, _} = Boards.archive_board(board)
+
+      view = open_flows(conn, board)
+
+      assert has_element?(view, "#flows-read-only-banner")
+      assert render(view) =~ "archived (read-only)"
+    end
+
+    test "an unarchived board renders no read-only banner", %{conn: conn, board: board} do
+      view = open_flows(conn, board)
+
+      refute has_element?(view, "#flows-read-only-banner")
+    end
+  end
+
+  describe "creating a flow from scratch (RLY-158)" do
+    test "clicking the button opens the panel with the key prefilled and isolation defaulted",
+         %{conn: conn, board: board} do
+      view = open_new_flow(conn, board)
+
+      assert has_element?(view, "#new-flow-form")
+      assert has_element?(view, "#new-flow-key[value='new-flow']")
+      assert has_element?(view, "#new-flow-pulls-from")
+      assert has_element?(view, "#new-flow-works-in")
+      assert has_element?(view, "#new-flow-lands-on")
+      assert has_element?(view, "#new-flow-isolation option[value='shared_clean'][selected]")
+    end
+
+    test "the pickers offer sub-lane stages, not just top-level ones",
+         %{conn: conn, board: board} do
+      view = open_new_flow(conn, board)
+
+      assert has_element?(view, "#new-flow-pulls-from", "Spec:Review")
+    end
+
+    test "creating a flow persists it disabled and navigates to the editor",
+         %{conn: conn, board: board} do
+      view = open_new_flow(conn, board)
+      ids = stage_ids(board)
+
+      assert {:error, {:live_redirect, %{to: to}}} =
+               view
+               |> form("#new-flow-form", %{
+                 "flow" => %{
+                   "key" => "deploy-gate",
+                   "isolation" => "shared_clean",
+                   "pulls_from_stage_id" => to_string(ids.pulls),
+                   "works_in_stage_id" => to_string(ids.works),
+                   "lands_on_stage_id" => to_string(ids.lands)
+                 }
+               })
+               |> render_submit()
+
+      assert to == "/board/#{board.slug}/flows/deploy-gate"
+
+      created = Flows.get_flow!(board, "deploy-gate")
+      refute created.enabled
+      assert created.version == 1
+      assert created.nodes == []
+      assert [%{from: "start", to: "done", on: nil}] = created.edges
+      assert created.pulls_from_stage_id == ids.pulls
+      assert created.works_in_stage_id == ids.works
+      assert created.lands_on_stage_id == ids.lands
+    end
+
+    test "the created flow's row shows 0 nodes and an off toggle",
+         %{conn: conn, board: board} do
+      view = open_new_flow(conn, board)
+      ids = stage_ids(board)
+
+      view
+      |> form("#new-flow-form", %{
+        "flow" => %{
+          "key" => "deploy-gate",
+          "isolation" => "shared_clean",
+          "pulls_from_stage_id" => to_string(ids.pulls),
+          "works_in_stage_id" => to_string(ids.works),
+          "lands_on_stage_id" => to_string(ids.lands)
+        }
+      })
+      |> render_submit()
+
+      created = Flows.get_flow!(board, "deploy-gate")
+      view = open_flows(conn, board)
+
+      assert has_element?(view, "#flow-#{created.id}-nodes-count", "0 nodes")
+      assert has_element?(view, "#flow-#{created.id}-toggle[aria-pressed='false']")
+    end
+
+    test "a blank trigger stage keeps the panel open with an inline error",
+         %{conn: conn, board: board} do
+      view = open_new_flow(conn, board)
+      ids = stage_ids(board)
+
+      html =
+        view
+        |> form("#new-flow-form", %{
+          "flow" => %{
+            "key" => "deploy-gate",
+            "isolation" => "shared_clean",
+            "pulls_from_stage_id" => "",
+            "works_in_stage_id" => to_string(ids.works),
+            "lands_on_stage_id" => to_string(ids.lands)
+          }
+        })
+        |> render_submit()
+
+      assert has_element?(view, "#new-flow-form")
+      assert html =~ "is required"
+      assert Flows.get_flow(board, "deploy-gate") == nil
+    end
+
+    test "a duplicate key keeps the panel open and preserves the stage selections",
+         %{conn: conn, board: board} do
+      view = open_new_flow(conn, board)
+      ids = stage_ids(board)
+
+      html =
+        view
+        |> form("#new-flow-form", %{
+          "flow" => %{
+            "key" => "spec",
+            "isolation" => "shared_clean",
+            "pulls_from_stage_id" => to_string(ids.pulls),
+            "works_in_stage_id" => to_string(ids.works),
+            "lands_on_stage_id" => to_string(ids.lands)
+          }
+        })
+        |> render_submit()
+
+      assert has_element?(view, "#new-flow-form")
+      assert html =~ "has already been taken"
+      assert has_element?(view, "#new-flow-pulls-from option[value='#{ids.pulls}'][selected]")
+      assert has_element?(view, "#new-flow-works-in option[value='#{ids.works}'][selected]")
+      assert has_element?(view, "#new-flow-lands-on option[value='#{ids.lands}'][selected]")
+    end
+
+    test "a malformed key is rejected inline", %{conn: conn, board: board} do
+      view = open_new_flow(conn, board)
+      ids = stage_ids(board)
+
+      html =
+        view
+        |> form("#new-flow-form", %{
+          "flow" => %{
+            "key" => "Deploy Gate!",
+            "isolation" => "shared_clean",
+            "pulls_from_stage_id" => to_string(ids.pulls),
+            "works_in_stage_id" => to_string(ids.works),
+            "lands_on_stage_id" => to_string(ids.lands)
+          }
+        })
+        |> render_submit()
+
+      assert has_element?(view, "#new-flow-form")
+      assert html =~ "must be lowercase letters, numbers and dashes"
+    end
+
+    test "cancel closes the panel without creating anything", %{conn: conn, board: board} do
+      view = open_new_flow(conn, board)
+
+      view |> element("#new-flow-cancel") |> render_click()
+
+      refute has_element?(view, "#new-flow-form")
+      assert Flows.get_flow(board, "new-flow") == nil
+    end
+
+    test "an archived board rejects flow_create as read-only", %{conn: conn, board: board} do
+      {:ok, _} = Boards.archive_board(board)
+      view = open_flows(conn, board)
+
+      render_click(view, "flow_create", %{
+        "flow" => %{
+          "key" => "sneaky",
+          "isolation" => "shared_clean",
+          "pulls_from_stage_id" => "1",
+          "works_in_stage_id" => "1",
+          "lands_on_stage_id" => "1"
+        }
+      })
+
+      assert render(view) =~ "archived (read-only)"
+      assert Flows.get_flow(board, "sneaky") == nil
     end
   end
 end

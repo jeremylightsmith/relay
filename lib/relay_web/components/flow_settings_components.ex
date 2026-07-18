@@ -3,8 +3,9 @@ defmodule RelayWeb.FlowSettingsComponents do
   Function components for the board settings **Flows** pane (RLY-142),
   matching `docs/designs/Relay Flows.dc.html`. Page-specific — no storybook
   entry; all events live on `RelayWeb.BoardSettingsLive`. Recorded artboard
-  deviations (no "+ New flow" button, kebab-carried origin, inlined cutover
-  ritual, engine note) are pinned in the card's spec. Editing a flow's
+  deviations (kebab-carried origin, inlined cutover ritual, engine note, and the
+  mockup-only Configured/First-run state switcher) are pinned in the card's spec.
+  The artboard's "+ New flow" button ships as of RLY-158. Editing a flow's
   definition now navigates to the full-page editor (`RelayWeb.FlowEditorLive`,
   RLY-143); the row meta line shows the current version.
   """
@@ -17,21 +18,57 @@ defmodule RelayWeb.FlowSettingsComponents do
   def flow_name(%Flow{key: key}), do: key |> String.replace("-", " ") |> String.capitalize()
 
   attr :rows, :list, required: true, doc: "%{flow: %Flow{}, customized?: bool, resettable?: bool} maps"
-  attr :panel, :any, required: true, doc: "nil | {flow_id, :confirm} | {flow_id, :reset}"
+  attr :panel, :any, required: true, doc: "nil | {flow_id, :confirm} | {flow_id, :reset} | {:new, form}"
   attr :slug, :string, required: true, doc: "the board slug, for the Edit item's editor link"
+  attr :stages, :list, required: true, doc: "the board's stages, unfiltered, for the create form's pickers"
+  attr :read_only?, :boolean, required: true, doc: "archived board — hides the create affordance"
 
   def flows_pane(assigns) do
     ~H"""
     <section id="flows-pane">
-      <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px 0;color:oklch(0.26 0.02 255);">
-        Flows
-      </h1>
-      <%!-- Artboard blurb minus the versioning sentence (deferred to RLY-152). --%>
-      <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0;max-width:600px;">
-        A flow is the automation attached to a stage transition — it pulls work from one
-        stage, runs a graph of agent and shell steps, and lands the card on the next stage
-        when it succeeds.
-      </p>
+      <%!-- Mirrors the board view's read-only banner (board_live.ex:109-124): the
+            "+ New flow" button is silently absent for an archived board, so state why. --%>
+      <div
+        :if={@read_only?}
+        id="flows-read-only-banner"
+        style="display:flex;align-items:center;gap:10px;background:oklch(0.97 0.04 85);border:1px solid oklch(0.85 0.09 85);color:oklch(0.42 0.09 85);border-radius:10px;padding:11px 16px;margin-bottom:18px;font-size:13.5px;"
+      >
+        <.icon name="hero-archive-box" class="size-4" />
+        <span>This board is archived (read-only). Flows can't be created or changed.</span>
+      </div>
+
+      <%!-- Artboard lines 63-76: header is a flex row with the create button in a
+            right-hand column. The artboard's Configured/First-run state switcher above
+            the button is a mockup-only affordance and is deliberately not shipped. --%>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:20px;">
+        <div>
+          <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px 0;color:oklch(0.26 0.02 255);">
+            Flows
+          </h1>
+          <%!-- Artboard blurb minus the versioning sentence (deferred to RLY-152). --%>
+          <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0;max-width:600px;">
+            A flow is the automation attached to a stage transition — it pulls work from one
+            stage, runs a graph of agent and shell steps, and lands the card on the next stage
+            when it succeeds.
+          </p>
+        </div>
+        <div
+          :if={!@read_only?}
+          id="flows-header-actions"
+          style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex:0 0 auto;margin-top:4px;"
+        >
+          <button
+            type="button"
+            id="new-flow-button"
+            phx-click="flow_new"
+            style="display:flex;align-items:center;gap:6px;background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 15px;font-size:13px;font-weight:600;"
+          >
+            <span style="font-size:15px;line-height:1;">+</span>New flow
+          </button>
+        </div>
+      </div>
+
+      <.new_flow_panel :if={new_form(@panel)} form={new_form(@panel)} stages={@stages} />
 
       <div
         :if={@rows == []}
@@ -64,6 +101,95 @@ defmodule RelayWeb.FlowSettingsComponents do
     </section>
     """
   end
+
+  # @panel's create variant carries the form itself; the row-keyed :confirm/:reset
+  # variants are tuples whose first element is an integer id, so they never collide.
+  defp new_form({:new, form}), do: form
+  defp new_form(_panel), do: nil
+
+  attr :form, :any, required: true
+  attr :stages, :list, required: true
+
+  defp new_flow_panel(assigns) do
+    ~H"""
+    <div
+      id="new-flow-panel"
+      style="margin:20px 0 4px 0;background:oklch(1 0 0);border:1px solid oklch(0.91 0.03 250);border-radius:12px;padding:14px 16px;max-width:640px;"
+    >
+      <div style="font-size:13.5px;font-weight:600;color:oklch(0.34 0.10 250);margin-bottom:3px;">
+        New flow
+      </div>
+      <p style="font-size:12.5px;line-height:1.5;color:oklch(0.44 0.04 250);margin:0 0 12px 0;">
+        Pick a key and the three stages this flow triggers on. It is created switched off with
+        an empty graph — add its steps in the editor, then turn it on here.
+      </p>
+      <.form
+        for={@form}
+        id="new-flow-form"
+        phx-submit="flow_create"
+        phx-change="flow_create_validate"
+      >
+        <.input
+          field={@form[:key]}
+          type="text"
+          id="new-flow-key"
+          label="Key"
+          placeholder="deploy-gate"
+        />
+        <.input
+          field={@form[:pulls_from_stage_id]}
+          type="select"
+          id="new-flow-pulls-from"
+          label="PULLS FROM"
+          prompt="—"
+          options={stage_options(@stages)}
+        />
+        <.input
+          field={@form[:works_in_stage_id]}
+          type="select"
+          id="new-flow-works-in"
+          label="WORKS IN"
+          prompt="—"
+          options={stage_options(@stages)}
+        />
+        <.input
+          field={@form[:lands_on_stage_id]}
+          type="select"
+          id="new-flow-lands-on"
+          label="LANDS ON SUCCESS"
+          prompt="—"
+          options={stage_options(@stages)}
+        />
+        <.input
+          field={@form[:isolation]}
+          type="select"
+          id="new-flow-isolation"
+          label="Isolation"
+          options={[{"Shared clean", "shared_clean"}, {"Exclusive", "exclusive"}]}
+        />
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button
+            type="submit"
+            id="new-flow-create"
+            style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+          >
+            Create flow
+          </button>
+          <button
+            type="button"
+            id="new-flow-cancel"
+            phx-click="flow_cancel_panel"
+            style="background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);color:oklch(0.48 0.02 255);border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+          >
+            Cancel
+          </button>
+        </div>
+      </.form>
+    </div>
+    """
+  end
+
+  defp stage_options(stages), do: Enum.map(stages, &{&1.name, &1.id})
 
   attr :rows, :list, required: true
 

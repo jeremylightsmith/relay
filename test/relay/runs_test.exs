@@ -398,7 +398,7 @@ defmodule Relay.RunsTest do
       # that run), so a capacity-only filter would never hand it the run's own
       # resume/next job — pinned to it — and the run could never resume. A job
       # pinned to this executor must claim regardless of advertised capacity.
-      flow = exclusive_flow(board, "excl_pin")
+      flow = exclusive_flow(board, "excl-pin")
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
       job = Runs.active_job(run)
 
@@ -412,7 +412,7 @@ defmodule Relay.RunsTest do
     end
 
     test "a job pinned to another executor is never claimed, even with spare capacity", %{board: board} do
-      flow = exclusive_flow(board, "excl_pin2")
+      flow = exclusive_flow(board, "excl-pin2")
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
       job = Runs.active_job(run)
 
@@ -426,7 +426,7 @@ defmodule Relay.RunsTest do
 
   describe "exclusive executor affinity (insert_job!)" do
     test "pins an exclusive run's subsequent job to the executor holding the run", %{board: board} do
-      flow = exclusive_flow(board, "excl_affinity")
+      flow = exclusive_flow(board, "excl-affinity")
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
 
       {:ok, e} = Runs.upsert_executor(board, %{"name" => "e", "capacity" => %{"exclusive" => 1}})
@@ -460,7 +460,7 @@ defmodule Relay.RunsTest do
       # (terminally failing a resumable run). So a revoked most-recent job must
       # leave the next job unpinned — the resume re-offers to any free executor
       # with a fresh worktree.
-      flow = exclusive_flow(board, "excl_revoke")
+      flow = exclusive_flow(board, "excl-revoke")
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
       {:ok, e} = Runs.upsert_executor(board, %{"name" => "e", "capacity" => %{"exclusive" => 1}})
       {:ok, _claimed} = Runs.claim_next_job(e)
@@ -478,7 +478,7 @@ defmodule Relay.RunsTest do
       # Guards the multi-node case: reading the SINGLE most-recent job (not the
       # newest non-nil executor_name) is what prevents an earlier :done node's
       # retained name from resurrecting affinity a later revoke just voided.
-      flow = exclusive_flow(board, "excl_revoke_multi")
+      flow = exclusive_flow(board, "excl-revoke-multi")
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
       {:ok, e} = Runs.upsert_executor(board, %{"name" => "e", "capacity" => %{"exclusive" => 1}})
 

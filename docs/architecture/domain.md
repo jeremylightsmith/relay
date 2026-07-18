@@ -32,7 +32,12 @@ sharing behavior.
   `mid_run_count/1` is a stub returning `0` until the Runs schema pins a card to a version
   (RLY-132 makes it real). The Flows settings tab (RLY-142) is backed by `customized?/1`
   (normalized nodes/edges/isolation comparison against the library — trigger wiring never
-  counts), `default_key?/1`, `duplicate_flow/1` (disabled `<key>-copy` clone), and
+  counts), `default_key?/1`, `duplicate_flow/1` (disabled `<key>-copy` clone),
+  `unique_key/2` (the `base`/`base-2`/… generator behind both `-copy` and the create form's
+  prefilled key), create-from-scratch (RLY-158 — the tab's "+ New flow" panel collects a key,
+  all three trigger stages and isolation, then calls `create_flow/2` with an empty
+  `start → done` skeleton and hands off to the editor; the flow is created disabled, so
+  creation can never breach the one-enabled-flow-per-stage rule), and
   `reset_to_default/1` (restores the shipped definition via `save_definition/2`, so a reset
   bumps the version and snapshots like any other save; triggers and `enabled` untouched).
   `diff_from_default/1` structurally diffs a customized default flow against its shipped
