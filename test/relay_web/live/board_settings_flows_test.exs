@@ -228,48 +228,20 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
   end
 
   describe "kebab actions" do
-    test "Edit flow opens the read-only definition panel listing nodes and edges",
-         %{conn: conn, board: board} do
+    test "the flow row's Edit item links to the full-page editor", %{conn: conn, board: board} do
+      view = open_flows(conn, board)
       code = flow(board, "code")
-      view = open_flows(conn, board)
 
-      view |> element("#flow-#{code.id}-edit") |> render_click()
-
-      assert has_element?(view, "#flow-#{code.id}-definition")
-      assert has_element?(view, "#flow-#{code.id}-node-implement", "implement")
-      assert has_element?(view, "#flow-#{code.id}-node-implement", "agent")
-      assert has_element?(view, "#flow-#{code.id}-node-implement", "sonnet")
-      assert has_element?(view, "#flow-#{code.id}-node-precommit", "mix precommit")
-      assert has_element?(view, "#flow-#{code.id}-definition", "start → branch")
-      assert has_element?(view, "#flow-#{code.id}-definition", "spec_review → implement on failed (max_loops 3)")
-      assert has_element?(view, "#flow-#{code.id}-definition-note", "RLY-143")
+      assert has_element?(
+               view,
+               ~s(a#flow-#{code.id}-edit[href="/board/#{board.slug}/flows/code"])
+             )
     end
 
-    test "a node's retries render when set", %{conn: conn, board: board} do
-      spec = flow(board, "spec")
+    test "the flow row meta line shows the version", %{conn: conn, board: board} do
       view = open_flows(conn, board)
-
-      view |> element("#flow-#{spec.id}-edit") |> render_click()
-
-      assert has_element?(view, "#flow-#{spec.id}-node-brainstorm", "/brainstorm {ref}")
-      assert has_element?(view, "#flow-#{spec.id}-node-brainstorm", "retries 1")
-    end
-
-    test "the definition panel and the toggle confirm are mutually exclusive",
-         %{conn: conn, board: board} do
-      spec = flow(board, "spec")
-      view = open_flows(conn, board)
-
-      view |> element("#flow-#{spec.id}-toggle") |> render_click()
-      assert has_element?(view, "#flow-#{spec.id}-confirm")
-
-      view |> element("#flow-#{spec.id}-edit") |> render_click()
-      refute has_element?(view, "#flow-#{spec.id}-confirm")
-      assert has_element?(view, "#flow-#{spec.id}-definition")
-
-      view |> element("#flow-#{spec.id}-toggle") |> render_click()
-      refute has_element?(view, "#flow-#{spec.id}-definition")
-      assert has_element?(view, "#flow-#{spec.id}-confirm")
+      code = flow(board, "code")
+      assert has_element?(view, "#flow-#{code.id}-nodes-count", "v#{code.version}")
     end
 
     test "Duplicate adds a disabled customized copy with no Reset item",

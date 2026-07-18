@@ -20,14 +20,16 @@ defmodule Schemas.Flow.Node do
     field :model, :string
     field :effort, :string
     field :max_retries, :integer
+    field :timeout_minutes, :integer
   end
 
   @doc "Validates one node; graph-level rules (key uniqueness) live on Schemas.Flow."
   def changeset(node, attrs) do
     node
-    |> cast(attrs, [:key, :type, :run, :model, :effort, :max_retries])
+    |> cast(attrs, [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes])
     |> validate_required([:key, :type])
     |> validate_exclusion(:key, ["start", "done"], message: "is a reserved sentinel name")
     |> validate_number(:max_retries, greater_than: 0)
+    |> validate_number(:timeout_minutes, greater_than: 0)
   end
 end

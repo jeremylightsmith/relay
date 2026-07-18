@@ -19,6 +19,7 @@ defmodule Schemas do
       Comment,
       DeviceToken,
       Flow,
+      FlowVersion,
       Membership,
       NodeExecution,
       NodeJob,

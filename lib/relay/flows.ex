@@ -21,6 +21,7 @@ defmodule Relay.Flows do
   alias Relay.Repo
   alias Schemas.Board
   alias Schemas.Flow
+  alias Schemas.FlowVersion
   alias Schemas.Stage
 
   @trigger_fields [:pulls_from_stage_id, :works_in_stage_id, :lands_on_stage_id]
@@ -48,20 +49,38 @@ defmodule Relay.Flows do
   @doc """
   Creates a flow on `board` with full graph validation. `board_id` and
   `enabled` are never cast — flows are created disabled and flipped via
-  `enable_flow/1`. Returns `{:ok, flow} | {:error, changeset}`.
+  `enable_flow/1`. Inserts a v1 snapshot in the same transaction — every
+  flow always has a snapshot row for its current version. Returns
+  `{:ok, flow} | {:error, changeset}`.
   """
   def create_flow(%Board{} = board, attrs) do
-    %Flow{board_id: board.id}
-    |> Flow.changeset(attrs)
-    |> validate_trigger_stages(board.id)
-    |> Repo.insert()
+    changeset =
+      %Flow{board_id: board.id}
+      |> Flow.changeset(attrs)
+      |> validate_trigger_stages(board.id)
+
+    Repo.transaction(fn ->
+      case Repo.insert(changeset) do
+        {:ok, flow} -> snapshot!(flow)
+        {:error, cs} -> Repo.rollback(cs)
+      end
+    end)
   end
 
-  @doc "Updates a flow's definition with the same validation as `create_flow/2`."
+  @doc """
+  Updates a flow's definition with the same validation as `create_flow/2`. Also guards the
+  one-enabled-per-pulls-from-stage rule (mirrors `enable_flow/1`) — an already-enabled flow can
+  change its `pulls_from_stage_id` right into another enabled flow's, and the partial unique
+  index would otherwise raise instead of returning `{:error, changeset}`.
+  """
   def update_flow(%Flow{} = flow, attrs) do
     flow
     |> Flow.changeset(attrs)
     |> validate_trigger_stages(flow.board_id)
+    |> Changeset.unique_constraint(:pulls_from_stage_id,
+      name: :flows_one_enabled_per_pulls_from_index,
+      message: "another enabled flow already pulls from this stage"
+    )
     |> Repo.update()
   end
 
@@ -116,12 +135,13 @@ defmodule Relay.Flows do
       %Flow{board_id: board.id}
       |> Flow.changeset(attrs)
       |> Repo.insert!()
+      |> snapshot!()
     end
 
     :ok
   end
 
-  @node_fields [:key, :type, :run, :model, :effort, :max_retries]
+  @node_fields [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes]
   @edge_fields [:from, :to, :on, :max_loops]
 
   @doc """
@@ -150,7 +170,8 @@ defmodule Relay.Flows do
   @doc """
   Creates a disabled copy of `flow` on the same board — same nodes, edges,
   isolation, and trigger stages — under key `"<key>-copy"` (then `-copy-2`,
-  `-copy-3`, … until unique). Returns `{:ok, flow} | {:error, changeset}`.
+  `-copy-3`, … until unique). Inserts a v1 snapshot in the same transaction.
+  Returns `{:ok, flow} | {:error, changeset}`.
   """
   def duplicate_flow(%Flow{} = flow) do
     attrs = %{
@@ -163,22 +184,60 @@ defmodule Relay.Flows do
       edges: Enum.map(flow.edges, &Map.take(&1, @edge_fields))
     }
 
-    %Flow{board_id: flow.board_id}
-    |> Flow.changeset(attrs)
-    |> Repo.insert()
+    Repo.transaction(fn ->
+      case Repo.insert(Flow.changeset(%Flow{board_id: flow.board_id}, attrs)) do
+        {:ok, copy} -> snapshot!(copy)
+        {:error, cs} -> Repo.rollback(cs)
+      end
+    end)
+  end
+
+  @doc """
+  The editor's save path. Validates the working copy like `update_flow/2`. When the
+  **definition** (nodes, edges, isolation) changed, bumps `version` to n+1 and writes a new
+  immutable snapshot; a trigger-only change saves with no bump (triggers are per-board wiring,
+  not part of the versioned definition). Runs entirely in one transaction.
+  """
+  def save_definition(%Flow{} = flow, attrs) do
+    fn -> save_and_maybe_bump(flow, attrs) end
+    |> Repo.transaction()
+    |> preload_saved()
+  end
+
+  @doc "The immutable snapshot for `flow` at version `n`, or nil."
+  def get_version(%Flow{id: flow_id}, n) when is_integer(n) do
+    Repo.get_by(FlowVersion, flow_id: flow_id, version: n)
+  end
+
+  @doc """
+  Count of cards currently mid-run on this flow. Returns 0 until the Runs schema (RLY-132)
+  exists — the save modal omits the mid-run note when 0. RLY-132 makes this real.
+  """
+  def mid_run_count(%Flow{}), do: 0
+
+  @doc """
+  Structural diff of a customized default flow against its shipped default, or nil for a
+  non-default key. Node keys are grouped added/removed/changed (changed lists the differing
+  fields); edges are `{from, to, on}` tuples grouped added/removed.
+  """
+  def diff_from_default(%Flow{} = flow) do
+    case default_for(flow.key) do
+      nil -> nil
+      default -> %{nodes: diff_nodes(flow, default), edges: diff_edges(flow, default)}
+    end
   end
 
   @doc """
   Replaces the flow's nodes, edges, and isolation with the default library
   definition for its key. Triggers and `enabled` are untouched, so a reset
-  can never trip the one-enabled-per-pulls-from rule. Returns
-  `{:error, :not_a_default}` for a non-library key. No version history yet
-  (RLY-152).
+  can never trip the one-enabled-per-pulls-from rule. Routes through
+  `save_definition/2`, so a reset bumps the version and snapshots like any
+  save. Returns `{:error, :not_a_default}` for a non-library key.
   """
   def reset_to_default(%Flow{} = flow) do
     case default_for(flow.key) do
       nil -> {:error, :not_a_default}
-      default -> update_flow(flow, Map.take(default, [:isolation, :nodes, :edges]))
+      default -> save_definition(flow, Map.take(default, [:isolation, :nodes, :edges]))
     end
   end
 
@@ -188,6 +247,83 @@ defmodule Relay.Flows do
   # shape: every field present, nil when unset.
   defp normalize(items, fields) do
     Enum.map(items || [], fn item -> Map.new(fields, &{&1, Map.get(item, &1)}) end)
+  end
+
+  defp save_and_maybe_bump(flow, attrs) do
+    case update_flow(flow, attrs) do
+      {:error, cs} -> Repo.rollback(cs)
+      {:ok, updated} -> bump_if_changed(flow, updated)
+    end
+  end
+
+  defp bump_if_changed(flow, updated) do
+    if definition_changed?(flow, updated) do
+      updated
+      |> Changeset.change(version: flow.version + 1)
+      |> Repo.update!()
+      |> snapshot!()
+    else
+      updated
+    end
+  end
+
+  defp preload_saved({:ok, flow}) do
+    {:ok, Repo.preload(flow, [:pulls_from_stage, :works_in_stage, :lands_on_stage])}
+  end
+
+  defp preload_saved(other), do: other
+
+  defp snapshot!(%Flow{} = flow) do
+    %FlowVersion{}
+    |> FlowVersion.snapshot_changeset(%{
+      flow_id: flow.id,
+      version: flow.version,
+      isolation: flow.isolation,
+      nodes: Enum.map(flow.nodes, &Map.take(&1, @node_fields)),
+      edges: Enum.map(flow.edges, &Map.take(&1, @edge_fields))
+    })
+    |> Repo.insert!()
+
+    flow
+  end
+
+  defp definition_changed?(%Flow{} = before, %Flow{} = now) do
+    before.isolation != now.isolation or
+      normalize(before.nodes, @node_fields) != normalize(now.nodes, @node_fields) or
+      normalize(before.edges, @edge_fields) != normalize(now.edges, @edge_fields)
+  end
+
+  defp diff_nodes(flow, default) do
+    cur = Map.new(flow.nodes, &{&1.key, &1})
+    def_ = Map.new(default.nodes, &{&1.key, Map.new(@node_fields, fn f -> {f, Map.get(&1, f)} end)})
+    cur_keys = MapSet.new(Map.keys(cur))
+    def_keys = MapSet.new(Map.keys(def_))
+
+    changed =
+      for key <- MapSet.intersection(cur_keys, def_keys),
+          fields = changed_fields(Map.fetch!(cur, key), Map.fetch!(def_, key)),
+          fields != [],
+          do: %{key: key, fields: fields}
+
+    %{
+      added: Enum.sort(MapSet.to_list(MapSet.difference(cur_keys, def_keys))),
+      removed: Enum.sort(MapSet.to_list(MapSet.difference(def_keys, cur_keys))),
+      changed: Enum.sort_by(changed, & &1.key)
+    }
+  end
+
+  defp changed_fields(node, default_map) do
+    for f <- @node_fields, Map.get(node, f) != Map.get(default_map, f), do: f
+  end
+
+  defp diff_edges(flow, default) do
+    cur = MapSet.new(flow.edges, &{&1.from, &1.to, &1.on})
+    def_ = MapSet.new(default.edges, &{&1.from, &1.to, Map.get(&1, :on)})
+
+    %{
+      added: Enum.sort(MapSet.to_list(MapSet.difference(cur, def_))),
+      removed: Enum.sort(MapSet.to_list(MapSet.difference(def_, cur)))
+    }
   end
 
   defp unique_copy_key(%Flow{board_id: board_id, key: key}) do

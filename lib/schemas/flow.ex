@@ -6,7 +6,8 @@ defmodule Schemas.Flow do
   deleting a stage disarms the flow rather than blocking. Nodes and edges
   are embedded jsonb; `"start"`/`"done"` are edge-endpoint sentinels, not
   nodes. `board_id` and `enabled` are set programmatically by `Relay.Flows`,
-  never cast. No `version` column yet (RLY-152).
+  never cast. `version` holds the current definition version;
+  `flow_versions` snapshots each one.
   """
 
   use Ecto.Schema
@@ -15,6 +16,7 @@ defmodule Schemas.Flow do
 
   schema "flows" do
     field :key, :string
+    field :version, :integer, default: 1
     field :enabled, :boolean, default: false
     field :isolation, Ecto.Enum, values: [:shared_clean, :exclusive]
 
