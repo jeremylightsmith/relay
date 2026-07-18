@@ -262,19 +262,22 @@ defmodule Relay.Runs.RunServer do
   # at once: request_input blocks the card (:needs_input → amber, needs-you
   # rollup) and the scheduler skips :needs_input cards by rule (it must not
   # re-pull a card whose last run failed — a stronger guarantee than the old
-  # :ready-in-a-work-stage accident). B1 / RLY-136, parity with bin/relay's flag().
+  # :ready-in-a-work-stage accident). B1 / RLY-136.
+  #
+  # Unlike bin/relay's flag() (which wraps the detail in "[auto] stage failed: …
+  # a human needs to look" framing), this posts the bare detail — plan-mandated
+  # (plan.md Task 2), not full parity. Revisit if a human later wants the framing.
   defp card_fail_effects(run, execution) do
     card = Repo.get!(Card, run.card_id)
-
-    detail =
-      Enum.find(
-        [execution && execution.detail, run.failure_detail, "The agent's run failed."],
-        &(is_binary(&1) and String.trim(&1) != "")
-      )
-
+    detail = first_present([execution && execution.detail, run.failure_detail]) || "The agent's run failed."
     {:ok, _card} = Relay.Cards.request_input(card, detail, :agent)
     :ok
   end
+
+  # First non-blank string in `candidates`, or nil. "" is truthy in Elixir, so a
+  # naive `||` chain would post a blank Comment body and crash request_input's
+  # hard match — this is what makes the blank-detail fallback actually reachable.
+  defp first_present(candidates), do: Enum.find(candidates, &(is_binary(&1) and String.trim(&1) != ""))
 
   # Terminal path shared with the no-flow branches: close the run, leave
   # the failure on the card, flag the card :needs_input, broadcast.

@@ -23,7 +23,7 @@ defmodule Relay.Runs.Scheduler.ScriptedExecutor do
   end
 
   @doc "Claim the next job. Returns the decoded payload map, or nil on 204 (nothing claimable)."
-  def claim(conn, name, capacity \\ %{"shared_clean" => 1}) do
+  def claim(conn, name, capacity) do
     conn =
       post(conn, "/api/node-jobs/claim?wait=0", %{
         "executor" => %{"name" => name, "host" => "scripted", "interval" => 30},
@@ -43,6 +43,7 @@ defmodule Relay.Runs.Scheduler.ScriptedExecutor do
     conn
     |> put_req_header("content-type", "application/json")
     |> post("/api/board/logs", Jason.encode!(entries))
+    |> response(200)
   end
 
   @doc "Simulate the skill asking a structured question batch (blocks the card)."
