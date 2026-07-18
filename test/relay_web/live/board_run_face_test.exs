@@ -44,6 +44,42 @@ defmodule RelayWeb.BoardRunFaceTest do
     assert has_element?(view, "[data-ref='#{ref}'].border-l-error")
   end
 
+  test "a failed run's tile names the node it died on after close_run!/3",
+       %{conn: conn, board: board, code: code} do
+    card = ai_card(code, "Died mid flight", :working)
+    run = insert(:run, card: card, current_node: "quality_review")
+    insert(:node_execution, run: run, node: "implement")
+    insert(:node_execution, run: run, node: "quality_review", outcome: :failed)
+    ref = Cards.ref(board, card)
+
+    closed = Runs.close_run!(run, :failed, "boom")
+    assert is_nil(closed.current_node)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+    render_async(view)
+
+    assert has_element?(view, "#card-#{ref}-run-face", "RUN FAILED")
+    assert has_element?(view, "#card-#{ref}-run-face", "stuck at quality_review")
+  end
+
+  test "a cancelled run's tile names the node it stopped at",
+       %{conn: conn, board: board, code: code} do
+    card = ai_card(code, "Cancelled mid flight", :working)
+    run = insert(:run, card: card, current_node: "implement")
+    insert(:node_execution, run: run, node: "branch")
+    insert(:node_execution, run: run, node: "implement", outcome: nil, duration_s: nil)
+    ref = Cards.ref(board, card)
+
+    closed = Runs.close_run!(run, :cancelled, nil)
+    assert is_nil(closed.current_node)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+    render_async(view)
+
+    assert has_element?(view, "#card-#{ref}-run-face", "CANCELLED")
+    assert has_element?(view, "#card-#{ref}-run-face", "stopped at implement")
+  end
+
   test "a queued card face names the flow", %{conn: conn, board: board} do
     flow = Flows.get_flow!(board, "code")
     {:ok, flow} = Flows.enable_flow(flow)

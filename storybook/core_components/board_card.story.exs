@@ -171,7 +171,16 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
           status: :working,
           active_owner: :ai,
           owners: [%{actor_type: :agent}],
-          run: {:run, %{status: :failed, current_node: "quality_review", flow_key: "code", flow_version: 3, attempts: 3}}
+          run:
+            {:run,
+             %{
+               status: :failed,
+               current_node: nil,
+               last_node: "quality_review",
+               flow_key: "code",
+               flow_version: 3,
+               attempts: 3
+             }}
         }
       },
       %Variation{
@@ -206,7 +215,16 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
           status: :working,
           active_owner: :ai,
           owners: [%{actor_type: :agent}],
-          run: {:run, %{status: :cancelled, current_node: "implement", flow_key: "code", flow_version: 3, attempts: 1}}
+          run:
+            {:run,
+             %{
+               status: :cancelled,
+               current_node: nil,
+               last_node: "implement",
+               flow_key: "code",
+               flow_version: 3,
+               attempts: 1
+             }}
         }
       },
       %Variation{

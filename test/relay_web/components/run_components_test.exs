@@ -349,7 +349,16 @@ defmodule RelayWeb.RunComponentsTest do
       failed =
         render_component(&RunComponents.run_face/1,
           ref: "R",
-          run: {:run, %{status: :failed, current_node: "quality_review", flow_key: "code", flow_version: 3, attempts: 3}}
+          run:
+            {:run,
+             %{
+               status: :failed,
+               current_node: nil,
+               last_node: "quality_review",
+               flow_key: "code",
+               flow_version: 3,
+               attempts: 3
+             }}
         )
 
       queued = render_component(&RunComponents.run_face/1, ref: "R", run: {:queued, %{key: "code"}})
@@ -365,7 +374,16 @@ defmodule RelayWeb.RunComponentsTest do
       cancelled =
         render_component(&RunComponents.run_face/1,
           ref: "R",
-          run: {:run, %{status: :cancelled, current_node: "implement", flow_key: "code", flow_version: 3, attempts: 1}}
+          run:
+            {:run,
+             %{
+               status: :cancelled,
+               current_node: nil,
+               last_node: "implement",
+               flow_key: "code",
+               flow_version: 3,
+               attempts: 1
+             }}
         )
 
       assert parked =~ "PARKED · NEEDS YOU"

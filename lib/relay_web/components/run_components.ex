@@ -915,7 +915,7 @@ defmodule RelayWeb.RunComponents do
           <% end %>
         </div>
         <div style="font-family:var(--font-mono);font-size:11px;color:oklch(0.50 0.09 22);">
-          stuck at {@summary.current_node}
+          stuck at {@summary.last_node}
           <%= if @summary[:flow_version] do %>
             · v{@summary.flow_version}
           <% end %>
@@ -977,7 +977,7 @@ defmodule RelayWeb.RunComponents do
           CANCELLED · CLAIMED
         </div>
         <div style="font-family:var(--font-mono);font-size:11px;color:oklch(0.50 0.02 255);">
-          stopped at {@summary.current_node} · resumable
+          stopped at {@summary.last_node} · resumable
         </div>
       </div>
     </div>

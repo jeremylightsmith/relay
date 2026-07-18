@@ -2728,6 +2728,10 @@ defmodule RelayWeb.CoreComponents do
       flow_key: run.flow_key,
       flow_version: nil,
       current_node: run.current_node,
+      # RLY-159: `close_run!/3` nils `current_node` on every terminal close, so the
+      # summary carries the last node the run was at — mirroring the SQL-derived
+      # `last_node` in `Relay.Runs.run_summaries_for_board/1`.
+      last_node: Relay.Runs.last_node(run, run.node_executions || []),
       started_at: run.started_at,
       finished_at: run.finished_at
     }
