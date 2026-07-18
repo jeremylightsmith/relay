@@ -263,6 +263,43 @@ class Heartbeat:
             self._beat()
 
 
+class ExecutorHeartbeat:
+    """Per-executor heartbeat for `relay execute`. POSTs {executor, running:[job-ids]} to
+    /api/node-jobs/heartbeat every `interval`s and READS the response's revoked job-ids —
+    unlike the watcher's Heartbeat, which discards the body — handing each to `on_revoke` (§5).
+    Best-effort like Heartbeat: swallows api()'s die() and any other error. The legacy watcher
+    keeps using /api/board/heartbeat with its bare payload, untouched."""
+
+    def __init__(self, executor, running_fn, on_revoke, interval=15):
+        self.executor = executor
+        self.running_fn = running_fn
+        self.on_revoke = on_revoke
+        self.interval = interval
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def _beat(self):
+        try:
+            resp = api("POST", "/api/node-jobs/heartbeat",
+                       {"executor": self.executor, "running": self.running_fn()})
+            for job_id in (resp or {}).get("revoked", []):
+                self.on_revoke(job_id)
+        except SystemExit:      # api() die()s on HTTP/network error
+            pass
+        except Exception:
+            pass
+
+    def _run(self):
+        while not self._stop.wait(self.interval):
+            self._beat()
+
+
 def utc_now_iso():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -1074,6 +1111,32 @@ def run_node_job(job, slot_path, control):
     return outcome, detail, git_sha, session_id
 
 
+def execute_one(job, slot, reset, control, pool):
+    """Worker body for one node-job: reset the slot if it is the run's first exclusive job,
+    run the step, and — unless a revoke landed mid-run — report the outcome and return the
+    server's run_state. A revoke resets the worktree (salvaging via stash) and reports nothing
+    (§5). Always frees/keeps the slot per run_state in a finally (never leak a slot)."""
+    slot_path = worktree_path(slot)
+    run_state = None
+    revoked = False
+    try:
+        if reset and not DRY:
+            reset_worktree(slot_path, pool.base)
+        outcome, detail, git_sha, session_id = run_node_job(job, slot_path, control)
+        if control.cancelled():
+            revoked = True
+            if not DRY:
+                reset_worktree(slot_path, pool.base)
+            return None
+        run_state = report_outcome(job["id"], outcome, detail, git_sha, session_id)
+        return run_state
+    except Exception as e:                      # never leak a slot on crash
+        run_state = report_outcome(job["id"], "failed", f"worker crashed: {e}", "", None)
+        return run_state
+    finally:
+        pool.release(job, slot, None if (revoked or control.cancelled()) else run_state)
+
+
 def flag(ref, reason):
     log(f"  ⚑ {ref}: {reason}", ref=ref, kind="error")
     if not DRY:
@@ -1235,6 +1298,108 @@ def cmd_watch(args):
         e["thread"].join()
 
 
+def cmd_execute(args):
+    """Second runner mode (ADR 0006): claim node-jobs from the server, run each in an executor
+    worktree, and report a typed outcome. `relay watch` is untouched; both may run at once."""
+    global DRY, FORWARDER
+    DRY = args.dry_run
+    cfg = load_executor_config()
+    poll_timeout = args.interval or cfg["poll_timeout"]
+    env("RELAY_URL"), env("RELAY_API_KEY")
+    executor = {"name": cfg["name"], "host": socket.gethostname()}
+    pool = ExecutorPool(cfg)
+    if not DRY:
+        FORWARDER = LogForwarder()
+        FORWARDER.start()
+        pool.ensure()
+
+    lock = threading.Lock()
+    wake = threading.Event()
+    stop = threading.Event()
+    in_flight = {}   # job-id -> {"thread", "control"}
+
+    def running_ids():
+        with lock:
+            return list(in_flight)
+
+    def revoke(job_id):
+        with lock:
+            entry = in_flight.get(job_id)
+        if entry:
+            entry["control"].cancel()
+
+    hb = None
+    if not DRY:
+        hb = ExecutorHeartbeat(executor, running_ids, revoke,
+                               interval=cfg["heartbeat_interval"])
+        hb.start()
+
+    def worker(job, slot, reset, control):
+        ref = (job.get("vars") or {}).get("ref") or job["id"]
+        NODE_JOB_IDS[ref] = job["id"]
+        RUN_IDS[ref] = job.get("run_id")
+        try:
+            execute_one(job, slot, reset, control, pool)
+        finally:
+            with lock:
+                in_flight.pop(job["id"], None)
+            NODE_JOB_IDS.pop(ref, None)
+            RUN_IDS.pop(ref, None)
+            wake.set()
+
+    def _shutdown(*_):
+        log("shutting down — no new claims; waiting for in-flight jobs")
+        stop.set()
+        wake.set()
+    signal.signal(signal.SIGINT, _shutdown)
+
+    log(f"executing on {os.environ['RELAY_URL']} as {cfg['name']}"
+        + (" (dry-run)" if DRY else "") + (" — one job" if args.once else ""))
+
+    while not stop.is_set():
+        cap = pool.capacity()
+        if not DRY and sum(cap.values()) <= 0:      # no free slots → wait for a worker
+            wake.wait(poll_timeout)
+            wake.clear()
+            continue
+        if DRY:
+            log(f"  (dry) would claim advertising {cap}")
+            break
+        pool.refresh_idle_shared()
+        try:
+            job = claim_node_job(executor, cap, poll_timeout)
+        except SystemExit as e:                     # exhausted api() retries → die()
+            log(f"claim failed, will retry: {e}", kind="error")
+            if args.once:
+                break
+            wake.wait(1)
+            wake.clear()
+            continue
+        if job is None:                             # long-poll timeout / 204 → re-poll
+            if args.once:
+                break
+            continue
+        assigned = pool.assign(job)
+        if assigned is None:                        # raced out of capacity since claiming
+            continue
+        slot, reset = assigned
+        control = JobControl()
+        t = threading.Thread(target=worker, args=(job, slot, reset, control), daemon=True)
+        with lock:
+            in_flight[job["id"]] = {"thread": t, "control": control}
+        t.start()
+        if args.once:
+            t.join()
+            break
+
+    for e in list(in_flight.values()):              # join outstanding workers
+        e["thread"].join()
+    if hb:
+        hb.stop()
+    if FORWARDER and not DRY:
+        FORWARDER.stop()
+
+
 # ============================ argparse ============================
 
 def build_parser():
@@ -1287,6 +1452,10 @@ def build_parser():
     w.add_argument("--once", action="store_true")
     w.add_argument("--dry-run", action="store_true")
     w.add_argument("--interval", type=int)
+    ex = add("execute", cmd_execute)
+    ex.add_argument("--once", action="store_true")
+    ex.add_argument("--dry-run", action="store_true")
+    ex.add_argument("--interval", type=int)
     return p
 
 

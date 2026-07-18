@@ -1602,5 +1602,166 @@ class JobControlTest(unittest.TestCase):
         self.assertFalse(seen["kwargs"].get("start_new_session"))
 
 
+class ExecutorHeartbeatTest(unittest.TestCase):
+    """The per-executor heartbeat POSTs {executor, running:[…]} to /api/node-jobs/heartbeat
+    and READS the revoked ids from the response (unlike the watcher's Heartbeat, which discards
+    the body). The legacy /api/board/heartbeat path is untouched."""
+
+    def _capture(self, hb):
+        calls, revoked = [], []
+        orig = relay.api
+        relay.api = lambda *a, **k: (calls.append(a) or {"revoked": ["nj-7"]})
+        try:
+            hb.on_revoke = revoked.append
+            hb._beat()
+        finally:
+            relay.api = orig
+        return calls, revoked
+
+    def test_beat_posts_running_and_signals_each_revoked_job(self):
+        hb = relay.ExecutorHeartbeat({"name": "box", "host": "h"},
+                                     lambda: ["nj-7", "nj-8"], lambda jid: None, interval=15)
+        calls, revoked = self._capture(hb)
+        (method, path, body), = calls
+        self.assertEqual((method, path), ("POST", "/api/node-jobs/heartbeat"))
+        self.assertEqual(body, {"executor": {"name": "box", "host": "h"},
+                                "running": ["nj-7", "nj-8"]})
+        self.assertEqual(revoked, ["nj-7"])
+
+    def test_a_beat_error_is_swallowed(self):
+        hb = relay.ExecutorHeartbeat({"name": "b", "host": "h"},
+                                     lambda: 1 / 0, lambda jid: None, interval=15)
+        hb._beat()   # must not raise, exactly like the watcher's Heartbeat
+
+
+class ExecuteOneTest(unittest.TestCase):
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in
+                       ("run_node_job", "report_outcome", "reset_worktree",
+                        "worktree_path", "DRY")}
+        self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+        relay.DRY = False
+        relay.worktree_path = lambda name: "/tmp/" + name
+        self.resets = []
+        relay.reset_worktree = lambda path, base: self.resets.append(path)
+        self.reports = []
+        relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
+        self.pool = relay.ExecutorPool(
+            {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 1}})
+
+    def test_first_exclusive_job_resets_then_runs_and_reports(self):
+        relay.run_node_job = lambda job, path, control: ("succeeded", "", "sha1", None)
+        job = {"id": "nj-1", "run_id": "r1", "node_type": "shell", "run": "x",
+               "isolation": "exclusive", "vars": {"ref": "RLY-1"}}
+        slot, reset = self.pool.assign(job)
+        rs = relay.execute_one(job, slot, reset, relay.JobControl(), self.pool)
+        self.assertEqual(rs, "done")
+        self.assertEqual(self.resets, ["/tmp/exec-work-1"])          # reset before use
+        self.assertEqual(self.reports[0], ("nj-1", "succeeded", "", "sha1", None))
+
+    def test_shared_job_is_not_reset(self):
+        relay.run_node_job = lambda job, path, control: ("succeeded", "", "sha2", None)
+        job = {"id": "nj-2", "run_id": "r2", "node_type": "shell", "run": "x",
+               "isolation": "shared_clean", "vars": {"ref": "RLY-2"}}
+        slot, reset = self.pool.assign(job)
+        relay.execute_one(job, slot, reset, relay.JobControl(), self.pool)
+        self.assertEqual(self.resets, [])                            # shared: never reset per-job
+
+    def test_a_revoke_mid_run_resets_and_reports_nothing(self):
+        control = relay.JobControl()
+
+        def revoked_run(job, path, ctl):
+            ctl.cancel()                     # heartbeat revoked it while it ran
+            return ("succeeded", "", "sha", None)
+
+        relay.run_node_job = revoked_run
+        job = {"id": "nj-3", "run_id": "r3", "node_type": "agent", "run": "x",
+               "isolation": "exclusive", "vars": {"ref": "RLY-3"}}
+        slot, reset = self.pool.assign(job)
+        rs = relay.execute_one(job, slot, reset, control, self.pool)
+        self.assertIsNone(rs)
+        self.assertEqual(self.reports, [])                           # §5: no outcome for a revoke
+        self.assertEqual(self.resets, ["/tmp/exec-work-1", "/tmp/exec-work-1"])  # pre + salvage
+        self.assertEqual(self.pool.capacity()["exclusive"], 1)       # slot freed
+
+    def test_a_worker_crash_reports_failed_and_frees_the_slot(self):
+        def boom(job, path, control):
+            raise RuntimeError("kaboom")
+
+        relay.run_node_job = boom
+        job = {"id": "nj-4", "run_id": "r4", "node_type": "shell", "run": "x",
+               "isolation": "exclusive", "vars": {"ref": "RLY-4"}}
+        slot, reset = self.pool.assign(job)
+        relay.execute_one(job, slot, reset, relay.JobControl(), self.pool)
+        self.assertEqual(self.reports[0][:2], ("nj-4", "failed"))
+        self.assertIn("kaboom", self.reports[0][2])
+        self.assertEqual(self.pool.capacity()["exclusive"], 1)       # never leak a slot
+
+
+class ExecuteLoopTest(unittest.TestCase):
+    """`execute --once` drains one claim→execute→report cycle; a long-poll timeout is 'no
+    work', not an error."""
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in
+                       ("load_executor_config", "claim_node_job", "run_node_job",
+                        "report_outcome", "reset_worktree", "refresh_worktree",
+                        "FORWARDER", "env", "log", "DRY")}
+        self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+        relay.DRY = False
+        relay.env = lambda name: "x"
+        relay.log = lambda *a, **k: None
+        relay.reset_worktree = lambda *a, **k: None
+        relay.refresh_worktree = lambda *a, **k: None   # loop ff's the idle shared worktree
+        relay.run_node_job = lambda job, path, control: ("succeeded", "", "sha", None)
+        relay.load_executor_config = lambda: {
+            "name": "box", "namespace": "exec",
+            "capacity": {"shared_clean": 1, "exclusive": 0},
+            "poll_timeout": 1, "heartbeat_interval": 60}
+        self.addCleanup(setattr, relay.ExecutorPool, "ensure", relay.ExecutorPool.ensure)
+        relay.ExecutorPool.ensure = lambda self: None
+        os.environ.setdefault("RELAY_URL", "http://example.test")
+        os.environ.setdefault("RELAY_API_KEY", "k")
+
+    def test_once_claims_runs_and_reports(self):
+        job = {"id": "nj-1", "run_id": "r1", "node_type": "shell", "run": "true",
+               "isolation": "shared_clean", "vars": {"ref": "RLY-1"}}
+        relay.claim_node_job = lambda executor, capacity, timeout: job
+        self.reports = []
+        relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+
+        self.assertEqual(self.reports[0][:2], ("nj-1", "succeeded"))
+        self.assertEqual(self.reports[0][3], "sha")
+
+    def test_long_poll_timeout_is_no_work_not_error(self):
+        relay.claim_node_job = lambda executor, capacity, timeout: None   # 204/timeout
+        self.reports = []
+        relay.report_outcome = lambda *a: self.reports.append(a)
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+
+        self.assertEqual(self.reports, [])   # nothing ran, no error raised
+
+    def test_dry_run_claims_nothing_and_mutates_nothing(self):
+        calls = []
+        relay.claim_node_job = lambda *a, **k: calls.append(a)
+        relay.report_outcome = lambda *a: calls.append(a)
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=True, interval=None))
+
+        self.assertEqual(calls, [])          # dry-run performs no claim / no outcome
+
+
+class ExecuteParserTest(unittest.TestCase):
+    def test_execute_subcommand_parses_flags(self):
+        args = relay.build_parser().parse_args(["execute", "--once", "--dry-run"])
+        self.assertEqual(args.cmd, "execute")
+        self.assertTrue(args.once)
+        self.assertTrue(args.dry_run)
+        self.assertEqual(args.func, relay.cmd_execute)
+
+
 if __name__ == "__main__":
     unittest.main()

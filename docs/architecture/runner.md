@@ -89,10 +89,48 @@ that stays server-side.
   `node_job_id` alongside `run_id` — same nullable-string shape, not an FK. It rides through
   `Relay.AgentLog.stamp/1` → `Relay.Activity.LogSink.row/2` → `activities.node_job_id`, kept
   for W6's run panel to key log lines off a specific node-job.
-- The full outcome-file contract (`RELAY_OUTCOME_PATH`) executors must honor is documented in
+- The full outcome-file contract (`RELAY_NODE_OUTCOME`) executors must honor is documented in
   [`../agent-integration.md`](../agent-integration.md#node-job-protocol-adr-0006).
 
+## Executor mode (`relay execute`) (RLY-135, ADR 0006 card 05)
+
+`bin/relay execute` is the second runner mode: a thin, board-agnostic client of the node-job
+transport above. `relay watch` (the whole "The watch loop" section above) is **byte-for-byte
+untouched** — it keeps reading `relay_config.json` and posting to `/api/board/heartbeat`. The
+two generations coexist on the same machine through the migration; nothing they touch overlaps.
+
+- **Config.** `.relay/executor.json` (a separate file from `relay_config.json`) holds
+  `name` (defaults to hostname), `namespace` (default `exec`), `capacity: {shared_clean,
+  exclusive}`, `poll_timeout`, `heartbeat_interval`. Missing file → sensible defaults;
+  capacity is the field a developer routinely edits.
+- **Worktree namespace.** `ExecutorPool` maps every job's `isolation` onto worktrees under the
+  `exec-*` namespace — disjoint from the watcher's `clean`/`work` pools — so a `relay watch` and
+  a `relay execute` can run on the same checkout at once without contending over a worktree.
+  `shared_clean` jobs share one reused `exec-clean` worktree (never reset per-job, only
+  fast-forwarded to base when every shared slot is idle). `exclusive` jobs get a slot from a
+  fixed `exec-work-1..N` pool, bound to a run from its first job until that run reaches a
+  terminal `run_state` — the reset happens only on that first job, since a run's later nodes
+  build on the diff its earlier nodes left in the worktree.
+- **The claim/execute/report loop (`cmd_execute`).** Each iteration: advertise current free
+  capacity per isolation class on a long-poll `POST /api/node-jobs/claim` (a read timeout is
+  "no work", not an error); on a claim, hand the job to a worker thread bounded by the pool's
+  free slots; the worker resets the slot if needed, runs the step (shell/gate via
+  `_stream_shell`, agent via `_stream_claude_job`), and POSTs the typed outcome to
+  `/api/node-jobs/:id/outcome`. `--once` drains a single claim→execute→report cycle and exits;
+  `--dry-run` claims and mutates nothing (it only logs the capacity it would advertise);
+  `--interval` overrides the configured poll timeout; SIGINT stops claiming new work and waits
+  for in-flight workers to finish.
+- **Heartbeat-borne revoke.** `ExecutorHeartbeat` POSTs `{executor, running: [job-ids]}` to
+  `POST /api/node-jobs/heartbeat` every `heartbeat_interval`s and — unlike the watcher's
+  `Heartbeat`, which discards the response body — reads back `{revoked: [job-ids]}` and
+  terminates each one's live subprocess via its `JobControl`. A revoked job resets its worktree
+  (salvaging any leftovers via `git stash`, same as `reset_worktree` elsewhere) and reports no
+  outcome — the server already knows a revoked job never finished. **This endpoint is
+  client-side only for now**: `bin/relay` posts to it, but no server route exists yet (the W9
+  server currently only extends `/api/board/heartbeat` — see "Node-job transport" above); wiring
+  the server-side revoke response is left to a follow-up card.
+
 ---
-*Sources of truth: `bin/relay`, `relay_config.json`, `bin/test_relay.py`,
-`lib/relay_web/controllers/api/node_job_controller.ex`, `lib/relay/runs.ex`,
+*Sources of truth: `bin/relay`, `relay_config.json`, `.relay/executor.json`,
+`bin/test_relay.py`, `lib/relay_web/controllers/api/node_job_controller.ex`, `lib/relay/runs.ex`,
 `lib/relay_web/controllers/api/board_controller.ex`.*
