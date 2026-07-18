@@ -533,6 +533,8 @@ def load_executor_config():
             cfg = json.load(f)
     except FileNotFoundError:
         return defaults
+    except json.JSONDecodeError as e:
+        die(f"{EXECUTOR_CONFIG_PATH} is not valid JSON: {e}")
     merged = {**defaults, **cfg}
     merged["capacity"] = {**defaults["capacity"], **(cfg.get("capacity") or {})}
     return merged
@@ -648,10 +650,13 @@ class ExecutorPool:
             ensure_worktree(name, self.base)
 
     def refresh_idle_shared(self):
+        """The idle-check and the reset must be one atomic step under the pool lock:
+        refresh_worktree()'s hard reset + git clean assumes the worktree is idle for its
+        whole duration (see reset_worktree's docstring), so dropping the lock in between
+        would let assign() hand the worktree to a job mid-reset."""
         with self.lock:
-            idle = self.shared_used == 0
-        if idle:
-            refresh_worktree(self.shared_name, self.base)
+            if self.shared_used == 0:
+                refresh_worktree(self.shared_name, self.base)
 
     def assign(self, job):
         """Reserve a slot for `job`; return (slot_name, reset?) or None when no slot is free.
@@ -683,7 +688,8 @@ class ExecutorPool:
                 return
             if run_state in ("running", "parked"):
                 return
-            self.excl[slot] = None
+            if slot in self.excl:
+                self.excl[slot] = None
 
 
 def blocked(card):

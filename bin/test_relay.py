@@ -14,6 +14,7 @@ import importlib.util
 import io
 import json
 import os
+import threading
 import unittest
 import urllib.error
 
@@ -972,6 +973,16 @@ class ExecutorConfigTest(unittest.TestCase):
         cfg = relay.load_executor_config()
         self.assertEqual((cfg["name"], cfg["namespace"], cfg["poll_timeout"]), ("box", "ex2", 5))
 
+    def test_malformed_json_dies_with_the_cli_die_message(self):
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            f.write("{not json")
+        self.addCleanup(os.remove, path)
+        relay.EXECUTOR_CONFIG_PATH = path
+        with self.assertRaises(SystemExit):
+            relay.load_executor_config()
+
 
 class ExecutorPoolTest(unittest.TestCase):
     CFG = {"namespace": "exec", "capacity": {"shared_clean": 2, "exclusive": 2}}
@@ -1046,6 +1057,72 @@ class ExecutorPoolTest(unittest.TestCase):
         p.assign({"isolation": "exclusive", "run_id": "r2"})
         self.assertEqual(p.capacity()["exclusive"], 0)
         self.assertIsNone(p.assign({"isolation": "exclusive", "run_id": "r3"}))
+
+    def test_release_on_unknown_slot_does_not_raise(self):
+        p = self.pool()
+        # A slot the pool never handed out (e.g. a stale/None slot from a caller bug)
+        # must not crash release() with a KeyError — it's a no-op for an unbound slot.
+        p.release({"isolation": "exclusive", "run_id": "r1"}, "exec-work-99", "done")
+        p.release({"isolation": "exclusive", "run_id": "r1"}, None, "done")
+        self.assertEqual(p.capacity()["exclusive"], 2)
+
+    def test_refresh_idle_shared_holds_the_lock_across_the_reset(self):
+        """refresh_idle_shared's idle-check and the destructive refresh_worktree() reset
+        (git reset --hard + git clean, per reset_worktree's own docstring) must be atomic
+        under the pool lock — otherwise a job can be assign()ed into the shared worktree
+        between the check and the reset, and the reset then blows it out from under a
+        running job."""
+        p = self.pool()
+        refresh_started = threading.Event()
+        release_refresh = threading.Event()
+        events = []
+
+        def fake_refresh_worktree(name, base):
+            events.append("refresh-start")
+            refresh_started.set()
+            release_refresh.wait(timeout=2)
+            events.append("refresh-end")
+
+        real = relay.refresh_worktree
+        relay.refresh_worktree = fake_refresh_worktree
+        self.addCleanup(setattr, relay, "refresh_worktree", real)
+
+        refresher = threading.Thread(target=p.refresh_idle_shared)
+        refresher.start()
+        self.assertTrue(refresh_started.wait(timeout=2))
+
+        assigned = {}
+
+        def do_assign():
+            assigned["result"] = p.assign({"isolation": "shared_clean", "run_id": "r1"})
+            events.append("assign")
+
+        assigner = threading.Thread(target=do_assign)
+        assigner.start()
+        assigner.join(timeout=0.2)  # give it a real chance to race in if unlocked
+        self.assertNotIn("assign", events)  # must still be blocked behind the pool lock
+
+        release_refresh.set()
+        refresher.join(timeout=2)
+        assigner.join(timeout=2)
+
+        self.assertEqual(events, ["refresh-start", "refresh-end", "assign"])
+        self.assertEqual(assigned["result"], ("exec-clean", False))
+
+
+class ExecutorConfigCommittedFileTest(unittest.TestCase):
+    """The committed .relay/executor.json is a shared example checked into every clone; it
+    must not hardcode one developer's executor identity (the `name` is the executor's wire
+    identity used for claim/heartbeat/revoke — RLY-135 review)."""
+
+    def test_committed_executor_json_has_no_personal_name(self):
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            ".relay", "executor.json",
+        )
+        with open(path) as f:
+            cfg = json.load(f)
+        self.assertNotIn("name", cfg)
 
 
 if __name__ == "__main__":
