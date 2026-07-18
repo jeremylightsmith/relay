@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""relay — one tool for a Relay board: a REST-API CLI, and (with no arguments) a
-board *runner* that watches the board and drives ready cards through a pipeline.
+"""relay — one tool for a Relay board: a REST-API CLI, and (with `relay execute`) the
+board *executor* that claims node-jobs from the server and runs them.
 
-This file is generic: it knows the Relay REST API and how to watch/dispatch, but
-NOTHING about any particular board's columns, agents, or skills. All of that —
-the pipeline, and what to run when a card is ready at each stage — lives in
-`relay_config.json` (see its `_comment`). The runner just executes the steps it
-finds there.
+This file is generic: it knows the Relay REST API and how to execute node-jobs, but
+NOTHING about any particular board's columns, agents, or skills. All of that lives
+server-side as flow data (ADR 0006) — the executor just runs the node it is handed.
 
 Config (env): RELAY_URL, RELAY_API_KEY  (a board key from /board/settings)
+Executor-local config: .relay/executor.json (worktree namespace + capacity)
 
-  relay                       # run the board runner (watch loop)
-  relay watch [--once] [--dry-run] [--interval N]
-  relay board [--json]        relay card REF [--json]     relay pull [--json]
+  relay execute [--once] [--dry-run] [--interval N]   # the executor
+  relay board [--json]        relay card REF [--json]
   relay comment REF TEXT      relay move REF STAGE        relay status REF STATUS
   relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF [Q] [--questions @file]
   relay own REF / release REF relay approve REF           relay reject REF NOTE
@@ -20,7 +18,6 @@ Config (env): RELAY_URL, RELAY_API_KEY  (a board key from /board/settings)
   relay criteria REF @file    # acceptance criteria (numbered, authored at Spec)
   relay attach REF FILE [--caption TEXT] [--json]
   relay tag REF [VALUE]       # set the card's tag (omit VALUE to clear)
-  relay layout   # config skeleton
 
 TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output.
 """
@@ -42,16 +39,13 @@ import threading
 import time
 import urllib.error
 import urllib.request
-import uuid
 
 HERE = os.path.abspath(__file__)
 ROOT = os.path.dirname(os.path.dirname(HERE))
-CONFIG_PATH = os.path.join(ROOT, "relay_config.json")
 EXECUTOR_CONFIG_PATH = os.path.join(ROOT, ".relay", "executor.json")
 DRY = False
 FORWARDER = None
-HEARTBEAT = None
-RUN_IDS = {}   # ref -> uuid4 of the run currently working it (RLY-112)
+RUN_IDS = {}   # ref -> run_id of the run currently working it (RLY-112)
 NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RLY-135)
 
 
@@ -63,20 +57,6 @@ def die(msg):
 def log(msg, *, ref=None, kind="lifecycle"):
     print(f"[relay] {msg}", flush=True)
     forward(kind, msg, ref)
-
-
-def banner(lines):
-    """Print a prominent #-rule banner around `lines` in the runner feed.
-
-    Every physical line goes through log(), so it keeps the "[relay] " prefix and
-    interleaves/greps cleanly with the rest of the streamed feed. Fixed 63-wide rule
-    (no terminal-width detection) so logs and CI output stay deterministic."""
-    rule = "#" * 63
-    log("")
-    log(rule)
-    for line in lines:
-        log(f"## {line}")
-    log(rule)
 
 
 # ============================ REST API client ============================
@@ -214,63 +194,14 @@ class LogForwarder:
                 self._send(batch)
 
 
-class Heartbeat:
-    """Background thread posting this runner's identity + manifest to
-    /api/board/heartbeat every `interval` seconds (RLY-141).
-
-    Best-effort by construction, exactly like LogForwarder._send: swallows api()'s
-    die() (SystemExit) and every other exception, so a heartbeat can never stall or
-    raise into work(). One request per tick regardless of card count.
-
-    Beats ALWAYS, including when idle — an idle-but-connected runner must be
-    distinguishable from no runner at all, which is the exact question the Runners
-    view exists to answer. `manifest_fn` returns the live
-    {"pools": [...], "jobs": [...], "refs": [...]} snapshot; the watch loop's
-    `pools`/`in_flight` dicts ARE the exact truth, so there is nothing else to
-    track. `runner_id` is minted once and stable for this process's lifetime;
-    `interval` is sent so the server derives freshness from what this runner
-    actually promised."""
-
-    def __init__(self, manifest_fn, interval=30):
-        self.manifest_fn = manifest_fn
-        self.interval = interval
-        host = socket.gethostname()
-        self.identity = {
-            "runner_id": f"{host}-{os.getpid()}-{uuid.uuid4().hex[:4]}",
-            "host": host,
-            "started_at": utc_now_iso(),
-            "interval": interval,
-        }
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-
-    def start(self):
-        self._thread.start()
-
-    def stop(self):
-        self._stop.set()
-
-    def _beat(self):
-        try:
-            api("POST", "/api/board/heartbeat", {**self.identity, **self.manifest_fn()})
-        except SystemExit:  # api() die()s on HTTP/network error
-            pass
-        except Exception:
-            pass
-
-    def _run(self):
-        while not self._stop.wait(self.interval):
-            self._beat()
-
-
 class ExecutorHeartbeat:
     """Per-executor heartbeat for `relay execute`. POSTs {executor, running:[job-ids]} to
-    /api/node-jobs/heartbeat every `interval`s and READS the response's revoked job-ids —
-    unlike the watcher's Heartbeat, which discards the body — handing each to `on_revoke` (§5).
-    Best-effort like Heartbeat: swallows api()'s die() and any other error. soft_404=True on
-    the call itself, so a not-yet-existing server route is silent (no error line) rather than
-    a die() every beat — see docs/agent-integration.md's "client-side only for now" note. The
-    legacy watcher keeps using /api/board/heartbeat with its bare payload, untouched."""
+    /api/node-jobs/heartbeat every `interval`s and READS the response's revoked job-ids,
+    handing each to `on_revoke` (§5). Best-effort by construction: swallows api()'s die()
+    (SystemExit) and any other error, so a heartbeat can never stall or raise into a job.
+    soft_404=True on the call itself, so a not-yet-existing server route is silent (no error
+    line) rather than a die() every beat — see docs/agent-integration.md's "client-side only
+    for now" note."""
 
     def __init__(self, executor, running_fn, on_revoke, interval=15):
         self.executor = executor
@@ -551,27 +482,11 @@ def cmd_attach(args):
     emit(args, {**data, "markdown": md}, md)
 
 
-def cmd_layout(args):
-    """Print a relay_config.json pipeline skeleton derived from the live board."""
-    b = get_board()
-    ai = [s for s in b["stages"] if s.get("ai_enabled")]
-    print(json.dumps({"poll_interval": 45, "pipeline": [
-        {"stage": s["name"], "from": "<column left of it>", "done": "<its Review/Done sub-stage>",
-         "action": [{"claude": "<what to do for {ref}>"}]} for s in ai
-    ]}, indent=2))
-
-
-# ============================ the runner ============================
-
-def load_config():
-    return json.load(open(CONFIG_PATH))
-
+# ============================ the executor ============================
 
 def load_executor_config():
-    """Executor-local config from .relay/executor.json — separate from relay_config.json,
-    which `relay watch` keeps reading through the migration, so the two runner generations
-    never contend over one file. Missing file → sensible defaults; capacity is the only field
-    a developer routinely edits (ADR 0006, table 1)."""
+    """Executor-local config from .relay/executor.json. Missing file → sensible defaults;
+    capacity is the only field a developer routinely edits (ADR 0006, table 1)."""
     defaults = {
         "name": socket.gethostname(),
         "namespace": "exec",
@@ -598,22 +513,6 @@ def worktree_path(name):
     return os.path.join(WORKTREES_DIR, name)
 
 
-def build_pools(cfg):
-    """Pools from cfg['pools']. A pool is a list of worktree 'slots': a `shared`
-    pool points all N slots at one worktree (safe for read-only Spec/Plan); an
-    `exclusive` pool gives each slot its own worktree-N. Concurrency == #slots."""
-    pools = {}
-    for name, spec in (cfg.get("pools") or {}).items():
-        n = spec.get("concurrency", 1)
-        wt = spec["worktree"]
-        if spec.get("mode") == "shared":
-            slots = [wt] * n
-        else:
-            slots = [f"{wt}-{i}" for i in range(1, n + 1)]
-        pools[name] = {"spec": spec, "slots": slots, "free": list(slots)}
-    return pools
-
-
 def ensure_worktree(name, base):
     """Create <WORKTREES_DIR>/<name> as a DETACHED checkout at `base` if missing,
     so it never holds a branch and cannot collide with ROOT's checked-out branch."""
@@ -631,9 +530,9 @@ def reset_worktree(path, base):
 
     A pool worktree is scratch space, but a job that dies mid-run can leave edits
     behind — and `git checkout` REFUSES to clobber them. That is not a small thing:
-    an uncommitted execute-plan.js edit sat in work-1 and silently failed every Code
-    stage two seconds in, for hours, reported only as "Code stage did not complete".
-    So preparing a worktree must never be blockable by leftovers.
+    an uncommitted edit once sat in work-1 and silently failed every Code stage two
+    seconds in, for hours, reported only as "Code stage did not complete". So
+    preparing a worktree must never be blockable by leftovers.
 
     Leftovers are stashed rather than dropped: that stranded edit turned out to
     contain a real fix, so silent destruction is the wrong default. Recover with
@@ -751,126 +650,6 @@ class ExecutorPool:
                 self.excl[slot] = None
 
 
-def blocked(card):
-    return card.get("status") == "needs_input"
-
-
-def human_owned(card):
-    # rule 4 — a card a human owns is off-limits to the agent; AI-owned and
-    # unowned cards stay eligible. active_owner is "ai" | "human" | None.
-    return card.get("active_owner") == "human"
-
-
-def find_ready(b, cfg):
-    """(card, entry, mode) for the next card to work — right-to-left priority; resume before fresh."""
-    by_name = {s["name"]: s for s in b["stages"]}
-    by_id = {}
-    for c in b["cards"]:
-        by_id.setdefault(c["stage_id"], []).append(c)
-
-    # main stage id -> [its sub-lane stage ids], so a WIP limit counts its whole column
-    children = {}
-    for s in b["stages"]:
-        parent = s.get("parent_id")
-        if parent is not None:
-            children.setdefault(parent, []).append(s["id"])
-
-    def cards_in(name):
-        s = by_name.get(name)
-        return by_id.get(s["id"], []) if s else []
-
-    def used(name):
-        s = by_name.get(name)
-        if not s:
-            return 0
-        total = len(by_id.get(s["id"], []))
-        for child_id in children.get(s["id"], []):
-            total += len(by_id.get(child_id, []))
-        return total
-
-    def wip_ok(name):
-        s = by_name.get(name)
-        limit = s.get("wip_limit") if s else None
-        return not limit or used(name) < limit
-
-    for entry in reversed(cfg["pipeline"]):
-        for c in cards_in(entry["stage"]):
-            if c.get("status") == "working" and not blocked(c) and not human_owned(c):
-                return c, entry, "resume"
-        if wip_ok(entry["stage"]):
-            for c in cards_in(entry["from"]):
-                if not blocked(c) and not human_owned(c):
-                    return c, entry, "fresh"
-    return None
-
-
-def find_all_ready(b, cfg, in_flight, free_by_pool):
-    """All cards to dispatch this tick, right-to-left (resume before fresh),
-    honoring WIP limits AND per-pool free-slot budgets, excluding in-flight refs.
-    Pure: `in_flight` is a set of refs already being worked; `free_by_pool` maps
-    pool name -> free slot count. WIP and pool budgets are consumed as candidates
-    are chosen, so a single tick never over-dispatches."""
-    by_name = {s["name"]: s for s in b["stages"]}
-    by_id = {}
-    for c in b["cards"]:
-        by_id.setdefault(c["stage_id"], []).append(c)
-
-    children = {}
-    for s in b["stages"]:
-        parent = s.get("parent_id")
-        if parent is not None:
-            children.setdefault(parent, []).append(s["id"])
-
-    def cards_in(name):
-        s = by_name.get(name)
-        return by_id.get(s["id"], []) if s else []
-
-    def used(name):
-        s = by_name.get(name)
-        if not s:
-            return 0
-        total = len(by_id.get(s["id"], []))
-        for child_id in children.get(s["id"], []):
-            total += len(by_id.get(child_id, []))
-        return total
-
-    free = dict(free_by_pool)   # local, mutable
-    extra = {}                  # stage name -> newly-assigned fresh count
-    chosen = []
-
-    def take(card, entry, mode, count_wip):
-        pool = entry.get("pool")
-        if pool is not None and free.get(pool, 0) <= 0:
-            return
-        if pool is not None:
-            free[pool] -= 1
-        if count_wip:
-            extra[entry["stage"]] = extra.get(entry["stage"], 0) + 1
-        chosen.append((card, entry, mode))
-
-    def wip_room(name):
-        s = by_name.get(name)
-        limit = s.get("wip_limit") if s else None
-        return not limit or (used(name) + extra.get(name, 0)) < limit
-
-    for entry in reversed(cfg["pipeline"]):
-        for c in cards_in(entry["stage"]):          # resume in-progress first
-            if c["ref"] in in_flight:
-                continue
-            if c.get("status") == "working" and not blocked(c):
-                take(c, entry, "resume", count_wip=False)
-        for c in cards_in(entry["from"]):            # then pull fresh
-            if c["ref"] in in_flight or blocked(c):
-                continue
-            if wip_room(entry["stage"]):
-                take(c, entry, "fresh", count_wip=True)
-    return chosen
-
-
-def slug(text):
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40] or "card"
-
-
 def render(template, vars):
     for k, v in vars.items():
         template = template.replace("{" + k + "}", str(v))
@@ -911,11 +690,9 @@ def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None):
     surfaced as a bare "stage did not complete".
 
     `on_proc`, if given, receives the live Popen so a caller can terminate it (executor
-    revoke). Only executor node-jobs pass `on_proc` (a JobControl.register); only they get
-    their own process group (start_new_session), since only they hold a JobControl able to
-    kill that group. The plain `relay run` runner mode passes no `on_proc` and must keep the
-    child in the runner's own foreground process group so a Ctrl-C at the tty still reaches
-    it directly."""
+    revoke). Every caller is an executor node-job, which passes `on_proc` (a
+    JobControl.register) and so gets its own process group (start_new_session), since only
+    a JobControl can kill that group."""
     proc = subprocess.Popen(cmd, shell=True, cwd=cwd, text=True, bufsize=1,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=on_proc is not None)
@@ -929,34 +706,6 @@ def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None):
     if not ok and sink is not None:
         sink.extend(tail)
     return ok
-
-
-def _stream_claude(prompt, cwd=ROOT, tag=""):
-    """Run headless claude with a live streamed feed. Returns True on success.
-    Thin wrapper over _stream_claude_job (the executor variant): same argv, env-var
-    handling, and stream-json rendering, minus session capture/--resume/on_proc. Keeping
-    one implementation means the wait-ceiling workaround and the stream parsing only
-    have to be fixed once."""
-    return _stream_claude_job(prompt, cwd, tag)[0]
-
-
-def run_step(step, vars, cwd=ROOT, tag="", sink=None):
-    """A pipeline step is {shell: cmd} or {claude: prompt}. Returns True on success."""
-    if "shell" in step:
-        cmd = render(step["shell"], vars)
-        if DRY:
-            log(f"  (dry) {tag}shell: {cmd}")
-            return True
-        return _stream_shell(cmd, cwd, tag, sink=sink)
-    if "claude" in step:
-        prompt = render(step["claude"], vars)
-        if DRY:
-            log(f"  (dry) {tag}claude -p <<<\n"
-                + "\n".join("      " + l for l in prompt.splitlines()))
-            return True
-        return _stream_claude(prompt, cwd, tag)
-    log(f"  ! unknown step: {step}")
-    return False
 
 
 class JobControl:
@@ -1036,19 +785,17 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
         cmd += ["--agent", agent]
     child_env = dict(os.environ)
     # `claude -p` caps how long it waits for a background workflow at 10 minutes
-    # by default (CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, v2.1.182+). /exec-plan runs
-    # far longer than that, so without lifting the cap -p exits mid-run and the
-    # stage ships a PARTIAL plan as if it were done. "0" = wait until the workflow
-    # finishes on its own (it is internally bounded). An explicit env override wins,
+    # by default (CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, v2.1.182+). A long agent
+    # node (implement, final_review) can run past that, and without lifting the cap
+    # -p exits mid-run and the node reports a partial result as if it were done.
+    # "0" = wait until the work finishes on its own. An explicit env override wins,
     # hence setdefault rather than an unconditional assignment.
     child_env.setdefault("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0")
     if outcome_path:
         child_env["RELAY_NODE_OUTCOME"] = outcome_path
-    # Only executor node-jobs pass on_proc (a JobControl.register); only they get their own
-    # process group (start_new_session), since only they hold a JobControl able to kill that
-    # group. The plain `relay run` runner mode (_stream_claude, run_step) passes no on_proc
-    # and must keep the child in the runner's own foreground process group so a Ctrl-C at
-    # the tty still reaches it directly.
+    # Every caller is an executor node-job, which passes on_proc (a JobControl.register)
+    # and so gets its own process group (start_new_session), since only a JobControl can
+    # kill that group.
     proc = subprocess.Popen(cmd, cwd=cwd, text=True, bufsize=1, env=child_env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=on_proc is not None)
@@ -1103,10 +850,10 @@ def run_node_job(job, slot_path, control):
 
     Placeholder expansion ({ref}/{branch}/{relay}/... ) stays executor-side per
     Schemas.Flow.Node/build_payload's contract: the server stores `run` raw and only
-    resolves `vars`. `relay`/`url` are not server-sent vars at all — supply them here,
-    same as `work()`'s vars dict does for `relay watch`. `is not None` matters:
-    build_payload puts prior_detail/findings in vars as `nil` (-> None) when absent, and
-    a naive str(v) would splice the literal string "None" into the command."""
+    resolves `vars`. `relay`/`url` are not server-sent vars at all — supply them here.
+    `is not None` matters: build_payload puts prior_detail/findings in vars as `nil`
+    (-> None) when absent, and a naive str(v) would splice the literal string "None"
+    into the command."""
     ref = (job.get("vars") or {}).get("ref") or job["id"]
     tag = f"[{ref}] "
     raw_vars = dict(job.get("vars") or {})
@@ -1184,170 +931,9 @@ def execute_one(job, slot, reset, control, pool):
         pool.release(job, slot, None if (revoked or control.cancelled()) else run_state)
 
 
-def flag(ref, reason):
-    log(f"  ⚑ {ref}: {reason}", ref=ref, kind="error")
-    if not DRY:
-        try:
-            # `reason` may carry the failing step's multi-line output, so the closing
-            # note goes on its own line rather than being glued onto a stack trace.
-            needs_input(ref, f"[auto] stage failed: {reason}\n\n"
-                             f"A human needs to look — the runner won't retry until "
-                             f"this is cleared.")
-        except SystemExit:
-            pass
-
-
-def work(card, entry, mode, cwd=ROOT, tag=""):
-    ref = card["ref"]
-    RUN_IDS[ref] = str(uuid.uuid4())
-    n = ref.split("-")[-1]
-    vars = {"ref": ref, "title": card["title"], "stage": entry["stage"], "from": entry["from"],
-            "done": entry["done"],
-            "branch": card.get("branch") or f"rly-{n}-{slug(card['title'])}",
-            "pr_url": card.get("pr_url") or "",
-            "relay": HERE, "url": os.environ.get("RELAY_URL", "")}
-    banner([
-        f"→ {ref}  {card['title']}",
-        f"{entry['stage']} ({mode}) — then {entry['done']}",
-    ])
-    if DRY:
-        for step in entry["action"]:
-            run_step(step, vars, cwd, tag)
-        return
-    if mode == "fresh":
-        move(ref, entry["stage"])
-    set_status(ref, "working")
-    tail = []
-    ok = all(run_step(step, vars, cwd, tag, sink=tail) for step in entry["action"])
-    after = get_card(ref)
-    if after.get("status") == "needs_input":
-        return log(f"  {ref} asked the human — left blocked in {entry['stage']}")
-    if not ok:
-        # Carry the failing step's own output onto the card. "<stage> stage did not
-        # complete" alone sends a human digging through a runner log they were not
-        # watching to find one line of git output.
-        why = "\n".join(tail).strip()
-        reason = f"{entry['stage']} stage did not complete"
-        return flag(ref, f"{reason}:\n\n{why}" if why else reason)
-    comment(ref, f"{entry['stage']} done → pushing to {entry['done']}")
-    move(ref, entry["done"])
-    log(f"  ✓ {ref} pushed to {entry['done']}")
-
-
-def cmd_watch(args):
-    global DRY, FORWARDER, HEARTBEAT
-    DRY = args.dry_run
-    cfg = load_config()
-    interval = args.interval or cfg.get("poll_interval", 45)
-    env("RELAY_URL"), env("RELAY_API_KEY")
-    if not DRY:
-        FORWARDER = LogForwarder()
-        FORWARDER.start()
-    pools = build_pools(cfg)
-    lock = threading.Lock()
-    wake = threading.Event()
-    stop = threading.Event()
-    in_flight = {}   # ref -> {"thread", "stage", "pool", "started_at"}
-
-    def manifest():
-        with lock:
-            return {
-                "pools": [
-                    {"name": name,
-                     "mode": "shared" if p["spec"].get("mode") == "shared" else "exclusive",
-                     "used": len(p["slots"]) - len(p["free"]),
-                     "total": len(p["slots"])}
-                    for name, p in pools.items()
-                ],
-                "jobs": [
-                    {"ref": ref, "stage": e["stage"], "pool": e["pool"],
-                     "started_at": e["started_at"]}
-                    for ref, e in in_flight.items()
-                ],
-                "refs": list(in_flight),
-            }
-
-    if not DRY:
-        HEARTBEAT = Heartbeat(manifest)
-        HEARTBEAT.start()
-
-    if not DRY:
-        for p in pools.values():
-            for wt in dict.fromkeys(p["slots"]):   # unique worktree names
-                ensure_worktree(wt, p["spec"]["base"])
-
-    def run_job(card, entry, mode, pool_name, slot):
-        ref = card["ref"]
-        cwd = worktree_path(slot) if slot else ROOT
-        try:
-            # Take an exclusive slot back to a clean base before using it: this slot
-            # is held by this job alone, and a previous job's leftovers would
-            # otherwise make the stage's `git checkout -B` refuse and fail the card
-            # two seconds in with no usable reason. Shared slots are deliberately NOT
-            # reset here — scan() refreshes those only when every slot is idle, so
-            # resetting one now could clobber a sibling job mid-run.
-            if slot and not DRY and pools[pool_name]["spec"].get("mode") != "shared":
-                reset_worktree(cwd, pools[pool_name]["spec"]["base"])
-            work(card, entry, mode, cwd=cwd, tag=f"[{ref}] ")
-        except Exception as e:                     # never leak a slot on crash
-            flag(ref, f"worker crashed: {e}")
-        finally:
-            with lock:
-                if pool_name:
-                    pools[pool_name]["free"].append(slot)
-                in_flight.pop(ref, None)
-            wake.set()
-
-    def scan():
-        b = get_board()
-        with lock:
-            if not DRY:                            # ff idle shared worktrees to base
-                for p in pools.values():
-                    if (p["spec"].get("mode") == "shared"
-                            and len(p["free"]) == len(p["slots"])):
-                        refresh_worktree(p["spec"]["worktree"], p["spec"]["base"])
-            budgets = {name: len(p["free"]) for name, p in pools.items()}
-            for card, entry, mode in find_all_ready(b, cfg, set(in_flight), budgets):
-                pool_name = entry.get("pool")
-                slot = None
-                if pool_name:
-                    if not pools[pool_name]["free"]:
-                        continue
-                    slot = pools[pool_name]["free"].pop()
-                t = threading.Thread(target=run_job,
-                                     args=(card, entry, mode, pool_name, slot),
-                                     daemon=True)
-                in_flight[card["ref"]] = {"thread": t, "stage": entry["stage"],
-                                          "pool": pool_name,
-                                          "started_at": utc_now_iso()}
-                t.start()
-
-    def _shutdown(*_):
-        log("shutting down — no new dispatch; waiting for in-flight workers")
-        stop.set()
-        wake.set()
-    signal.signal(signal.SIGINT, _shutdown)
-
-    log(f"watching {os.environ['RELAY_URL']} every {interval}s (concurrent)"
-        + (" (dry-run)" if DRY else "") + (" — one pass" if args.once else ""))
-
-    while not stop.is_set():
-        try:
-            scan()
-        except SystemExit as e:            # exhausted api() retries → die() in scan()
-            log(f"board scan failed, will retry next tick: {e}", kind="error")
-        if args.once:
-            break
-        wake.wait(interval)
-        wake.clear()
-
-    for e in list(in_flight.values()):             # join outstanding workers
-        e["thread"].join()
-
-
 def cmd_execute(args):
-    """Second runner mode (ADR 0006): claim node-jobs from the server, run each in an executor
-    worktree, and report a typed outcome. `relay watch` is untouched; both may run at once."""
+    """The runner mode (ADR 0006): claim node-jobs from the server, run each in an executor
+    worktree, and report a typed outcome."""
     global DRY, FORWARDER
     DRY = args.dry_run
     cfg = load_executor_config()
@@ -1503,7 +1089,6 @@ def build_parser():
     c.add_argument("--stage")
     c.add_argument("--description")
     c.add_argument("--tag")
-    add("pull", cmd_pull, json_flag=True)
     add("move", _simple(lambda a: move(a.ref, a.stage)), "ref", "stage", json_flag=True)
     add("status", _simple(lambda a: set_status(a.ref, a.status)), "ref", "status", json_flag=True)
     add("describe", _simple(lambda a: set_description(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
@@ -1528,11 +1113,6 @@ def build_parser():
     add("comment", cmd_comment, "ref", "text")
     at = add("attach", cmd_attach, "ref", "file", json_flag=True)
     at.add_argument("--caption")
-    add("layout", cmd_layout)
-    w = add("watch", cmd_watch)
-    w.add_argument("--once", action="store_true")
-    w.add_argument("--dry-run", action="store_true")
-    w.add_argument("--interval", type=int)
     ex = add("execute", cmd_execute)
     ex.add_argument("--once", action="store_true")
     ex.add_argument("--dry-run", action="store_true")
@@ -1540,22 +1120,14 @@ def build_parser():
     return p
 
 
-def cmd_pull(args):
-    """Advisory: print the next ready card per the config (does not move it)."""
-    ready = find_ready(get_board(), load_config())
-    if not ready:
-        return emit(args, None, "No card ready to pull.")
-    c, entry, _ = ready
-    emit(args, {"card": c, "target_stage": entry["stage"]},
-         f'{card_line(c)}  → ready for {entry["stage"]}')
-
-
 def main():
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
     if not getattr(args, "cmd", None):
-        # no arguments → run the board runner with defaults
-        ns = argparse.Namespace(once=False, dry_run=False, interval=None)
-        return cmd_watch(ns)
+        # The board runner is gone (RLY-139): dispatch is server-side now, and this
+        # binary's runner mode is `relay execute`.
+        parser.print_help()
+        return
     args.func(args)
 
 

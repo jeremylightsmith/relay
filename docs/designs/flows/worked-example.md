@@ -38,15 +38,15 @@ UNCHANGED IN BOTH WORLDS: .claude/skills/* (brainstorm, TDD, debugging, …),
 | --- | --- | --- | --- |
 | **Spec** | Reads the card, asks the human clarifying questions (needs-input stepper), writes the spec + acceptance criteria back to the card | **Cut over (RLY-136):** no `relay_config.json` pipeline entry — runs as the enabled `spec` [Flow row ↓](#spec-stage) (22 lines) on the engine + [`brainstorm` skill](../../../.claude/skills/brainstorm/SKILL.md) | [Flow row ↓](#spec-stage) (22 lines) |
 | **Plan** | Turns the approved spec into the implementation plan stored on the card | **Cut over (RLY-138):** no `relay_config.json` pipeline entry — runs as the enabled `plan` [Flow row ↓](#plan-stage) (18 lines) on the engine + [`write-plan` command](../../../.claude/commands/write-plan.md) | [Flow row ↓](#plan-stage) (18 lines) |
-| **Code** | Implements the plan task-by-task with TDD + two reviews each, then precommit, whole-branch review, smoke, acceptance, and PR + squash-merge | [pipeline entry ↓](#code-stage) + [`exec-plan` command](../../../.claude/commands/exec-plan.md) (119) + [`execute-plan.js`](../../../.claude/workflows/execute-plan.js) (485) + 8 agent files (533) | [Flow row ↓](#code-stage) (90 lines) |
+| **Code** | Implements the plan task-by-task with TDD + two reviews each, then precommit, whole-branch review, smoke, acceptance, and PR + squash-merge | **Cut over (RLY-139):** no `relay_config.json` pipeline entry — runs as the enabled `code` [Flow row ↓](#code-stage) (`code.jsonc`, 13 nodes / 22 edges) on the engine + 7 [`.claude/agents/`](../../../.claude/agents/) files named by node `agent` | [Flow row ↓](#code-stage) (`code.jsonc`) |
 
 ### Spec stage
 
 **Today — cut over (RLY-136).** Spec no longer has a `relay_config.json` pipeline entry; it
 runs as the enabled `spec` Flow on the engine (see "Tomorrow" below, which is now *today's*
-reality for this stage). Code below is unchanged — still watcher-driven, still described by
-its live pipeline entry — until RLY-139 cuts it over the same way. See
-[`docs/runbooks/flow-cutover.md`](../../runbooks/flow-cutover.md) for the ritual.
+reality for this stage). Code is cut over too (RLY-139, below) — every AI-enabled stage now
+runs on the engine, and the legacy `relay watch` / `relay_config.json` dispatcher is deleted.
+See [`docs/runbooks/flow-cutover.md`](../../runbooks/flow-cutover.md) for the cutover ritual.
 
 Files it pulls in: [`.claude/skills/brainstorm/`](../../../.claude/skills/brainstorm/SKILL.md)
 (the behavior — stays in both worlds, developer-owned).
@@ -74,9 +74,9 @@ outcome contract; "then STOP, don't touch git" becomes node boundaries the engin
 
 **Today — cut over (RLY-138).** Plan no longer has a `relay_config.json` pipeline entry; it
 runs as the enabled `plan` Flow on the engine (see "Tomorrow" below, which is now *today's*
-reality for this stage). Code below is unchanged — still watcher-driven, still described by
-its live pipeline entry — until RLY-139 cuts it over the same way. See
-[`docs/runbooks/flow-cutover.md`](../../runbooks/flow-cutover.md) for the ritual.
+reality for this stage). Code is cut over too (RLY-139, below) — every AI-enabled stage now
+runs on the engine, and the legacy `relay watch` / `relay_config.json` dispatcher is deleted.
+See [`docs/runbooks/flow-cutover.md`](../../runbooks/flow-cutover.md) for the cutover ritual.
 
 Historical record — the `relay_config.json` entry this replaced, now deleted:
 
@@ -112,8 +112,14 @@ Files it pulls in: [`.claude/commands/write-plan.md`](../../../.claude/commands/
 
 ### Code stage
 
-**Today** — `relay_config.json` entry, verbatim (the orchestration itself lives elsewhere —
-this entry only wraps it in shell):
+**Today — cut over (RLY-139).** Code no longer has a `relay_config.json` pipeline entry; it
+runs as the enabled `code` Flow on the engine (see "Tomorrow" below, which is now *today's*
+reality for this stage). This was the last stage on the legacy dispatcher — `relay watch`,
+`relay_config.json`, `.claude/commands/exec-plan.md` and `.claude/workflows/execute-plan.js`
+are all deleted; every AI-enabled stage now runs on the engine. See
+[`docs/runbooks/flow-cutover.md`](../../runbooks/flow-cutover.md) for the cutover ritual.
+
+Historical record — the `relay_config.json` entry this replaced, now deleted:
 
 ```json
 {
@@ -132,34 +138,44 @@ this entry only wraps it in shell):
 }
 ```
 
-Files it pulls in:
+Historical record — the files that entry pulled in, also now deleted:
 [`exec-plan.md`](../../../.claude/commands/exec-plan.md) (119) →
-[`execute-plan.js`](../../../.claude/workflows/execute-plan.js) (485) → the agents:
+[`execute-plan.js`](../../../.claude/workflows/execute-plan.js) (485).
+
+Files it pulls in **today**: the node `agent` field (RLY-139) points a reviewer/implementer
+node at a `.claude/agents/<name>.md` definition, which supplies the system prompt for
+`claude -p --agent` — developer-owned, freely editable —
 [`plan-implementer`](../../../.claude/agents/plan-implementer.md) (57) ·
 [`spec-reviewer`](../../../.claude/agents/spec-reviewer.md) (67) ·
 [`quality-reviewer`](../../../.claude/agents/quality-reviewer.md) (74) ·
 [`final-reviewer`](../../../.claude/agents/final-reviewer.md) (60) ·
 [`final-fixer`](../../../.claude/agents/final-fixer.md) (27) ·
 [`smoke-tester`](../../../.claude/agents/smoke-tester.md) (127) ·
-[`acceptance-tester`](../../../.claude/agents/acceptance-tester.md) (82) ·
-[`rebaser`](../../../.claude/agents/rebaser.md) (39).
+[`acceptance-tester`](../../../.claude/agents/acceptance-tester.md) (82).
+[`rebaser`](../../../.claude/agents/rebaser.md) (39) stays in the repo but no Code node names
+it yet.
 
-**Tomorrow** — the `Flow` row is [`code.jsonc`](code.jsonc) **in its entirety** (90 lines:
-14 nodes, 22 edges, models per node) plus the record wrapper:
+**Tomorrow** — the `Flow` row is [`code.jsonc`](code.jsonc) **in its entirety** (13 nodes,
+22 edges, models + agents per node) plus the record wrapper:
 
 ```jsonc
 { "key": "code", "board_id": 1, "enabled": false, "origin": "default", "version": 1,
   "isolation": "exclusive",
   "trigger": { "from": "Plan:Done", "stage": "Code", "done": "Review" },
-  "nodes": { /* the 14 nodes of code.jsonc — branch, implement, spec_review,
-                quality_review, next_task, precommit, final_review, final_fix,
-                smoke, smoke_fix, acceptance, acceptance_fix, post, merge */ },
-  "edges": [ /* its 22 outcome-routed edges, fix loops bounded by max_loops */ ] }
+  "nodes": { /* the 13 nodes of code.jsonc — branch, implement (foreach: "card.sub_tasks"),
+                spec_review, quality_review, precommit, final_review, final_fix,
+                smoke, smoke_fix, acceptance, acceptance_fix, post, merge. The next_task
+                grep-gate is GONE — "which task is next" is engine-derived (RLY-139). */ },
+  "edges": [ /* its 22 outcome-routed edges: quality_review carries TWO guarded
+                succeeded edges on the same outcome — { to: implement, when:
+                foreach_remaining } and { to: precommit, when: foreach_exhausted } —
+                which is what the next_task gate was faking; fix loops bounded by
+                max_loops, now scoped per foreach iteration */ ] }
 ```
 
-The 8 agent files' *prompts* become the nodes' `run` strings; the files themselves become
-optional repo-side overrides. The 4 trailing shell steps and the `tmp/exec-plan-status`
-gate become the `merge` node + routing.
+The agent files' *prompts* become the nodes' `run` strings, and 7 of them are also pointed
+at directly by a node's `agent` field for a richer system prompt. The 4 trailing shell steps
+and the `tmp/exec-plan-status` gate become the `merge` node + routing.
 
 ## Tomorrow's repo files, in full
 
@@ -187,7 +203,7 @@ point):
 
 **The flow definitions** are not repo files at all — they're rows in the `Flow` table,
 seeded from [`spec.jsonc`](spec.jsonc) (22 lines), [`plan.jsonc`](plan.jsonc) (18), and
-[`code.jsonc`](code.jsonc) (90). Those three files ARE the literal contents; open them.
+[`code.jsonc`](code.jsonc) (98). Those three files ARE the literal contents; open them.
 
 ## The domain objects and how they stick together
 
@@ -198,8 +214,10 @@ erDiagram
     Flow }o--|| Stage : "trigger: from / stage / done"
     Flow ||--o{ Run : "one per card traversal"
     Card ||--o{ Run : has
+    Card ||--o{ SubTask : "parsed from plan (RLY-139)"
     Run ||--o{ NodeExecution : "history, one per node attempt"
     Run ||--o{ NodeJob : "work in flight"
+    SubTask ||--o{ NodeExecution : "binds one foreach iteration"
     Executor ||--o{ NodeJob : claims
     Board ||--o{ Executor : "registered machines"
 
@@ -214,15 +232,21 @@ erDiagram
         string status "running | parked | done | failed | cancelled"
         string current_node
     }
+    SubTask {
+        string title "### Task N: <name> heading"
+        bool done "checked at the loop tail, after review"
+        int position
+    }
     NodeExecution {
         string outcome "succeeded | failed | partial | needs_input"
         string git_sha
         string session_id
         int attempt
+        int sub_task_id "nil outside a foreach (RLY-139)"
     }
     NodeJob {
         string state "queued | claimed | running | done | revoked"
-        json payload "rendered run, isolation, vars"
+        json payload "rendered run, isolation, vars, agent"
     }
     Executor {
         string name
@@ -248,29 +272,43 @@ Every row involved (abridged JSON; timestamps trimmed):
   "capacity": { "shared_clean": 3, "exclusive": 1 },
   "last_heartbeat": "…T18:42:07Z", "status": "online" }
 
+// SubTask — parsed from the card's plan at run start (RLY-139); task 1 already
+// checked off (it passed both reviews), task 2 is the iteration in flight
+{ "id": 501, "card_id": 150, "title": "Add CSV export endpoint",   "done": true,  "position": 1 }
+{ "id": 502, "card_id": 150, "title": "Wire the export button up", "done": false, "position": 2 }
+
 // Run — RLY-150's traversal of the code flow
 { "id": "run_7f3a", "card_id": 150, "flow_key": "code", "flow_version": 1,
   "status": "running", "current_node": "implement", "started_at": "…T17:55:02Z" }
 
-// NodeExecution — the history so far (what RLY-137 renders on the card)
-{ "run": "run_7f3a", "node": "branch",         "attempt": 1, "outcome": "succeeded", "git_sha": "9c01d4e", "duration_s": 2 }
-{ "run": "run_7f3a", "node": "implement",      "attempt": 1, "outcome": "succeeded", "git_sha": "5e2f90c", "session_id": "s_a41…", "duration_s": 861 }
-{ "run": "run_7f3a", "node": "spec_review",    "attempt": 1, "outcome": "succeeded", "git_sha": "5e2f90c", "duration_s": 173 }
-{ "run": "run_7f3a", "node": "quality_review", "attempt": 1, "outcome": "failed",    "git_sha": "5e2f90c", "duration_s": 244,
+// NodeExecution — the history so far (what RLY-137 renders on the card). branch is
+// unbound (sub_task_id nil); task 1's three iteration nodes are bound to 501 and
+// already checked off at quality_review; task 2's implement/spec_review/quality_review
+// are bound to 502 — the failed quality_review is what looped back into implement.
+{ "run": "run_7f3a", "node": "branch",         "attempt": 1, "sub_task_id": null, "outcome": "succeeded", "git_sha": "9c01d4e", "duration_s": 2 }
+{ "run": "run_7f3a", "node": "implement",      "attempt": 1, "sub_task_id": 501,  "outcome": "succeeded", "git_sha": "…", "duration_s": 701 }
+{ "run": "run_7f3a", "node": "spec_review",    "attempt": 1, "sub_task_id": 501,  "outcome": "succeeded", "git_sha": "…", "duration_s": 140 }
+{ "run": "run_7f3a", "node": "quality_review", "attempt": 1, "sub_task_id": 501,  "outcome": "succeeded", "git_sha": "…", "duration_s": 190 }
+{ "run": "run_7f3a", "node": "implement",      "attempt": 1, "sub_task_id": 502,  "outcome": "succeeded", "git_sha": "5e2f90c", "session_id": "s_a41…", "duration_s": 861 }
+{ "run": "run_7f3a", "node": "spec_review",    "attempt": 1, "sub_task_id": 502,  "outcome": "succeeded", "git_sha": "5e2f90c", "duration_s": 173 }
+{ "run": "run_7f3a", "node": "quality_review", "attempt": 1, "sub_task_id": 502,  "outcome": "failed",    "git_sha": "5e2f90c", "duration_s": 244,
   "detail": "export test asserts on private struct internals; assert on the CSV bytes instead" }
 
-// NodeJob — the work in flight right now (loop 1 of 3 back into implement,
-// carrying the finding; session resumes so the implementer keeps its context)
+// NodeJob — the work in flight right now (loop 1 of 3 back into implement, still
+// bound to sub_task 502; carrying the finding; session resumes so the implementer
+// keeps its context)
 { "id": "nj_c88", "run": "run_7f3a", "node": "implement", "state": "claimed",
   "executor_id": 3, "claimed_at": "…T18:41:55Z",
-  "payload": { "isolation": "exclusive", "resume_session": "s_a41…",
-               "run": "Implement the NEXT unchecked task … If reviewer findings are attached, address them.",
+  "payload": { "isolation": "exclusive", "resume_session": "s_a41…", "agent": "plan-implementer",
+               "run": "Implement the task named {sub_task} from the card's plan with strict red/green TDD. One task only — do not start the next one. If reviewer findings are attached, address them.",
                "vars": { "ref": "RLY-150", "branch": "rly-150-csv-export",
+                         "sub_task": "Wire the export button up",
                          "findings": "export test asserts on private struct internals; …" } } }
 ```
 
 That's the entire state: **3 Flow rows per board (written once), 1 Executor row per
-machine, and ~1 Run + ~15 NodeExecution rows + transient NodeJobs per card worked.**
+machine, and ~1 Run + ~2 SubTask + ~15 NodeExecution rows + transient NodeJobs per card
+worked.**
 
 ## The complexity ledger
 

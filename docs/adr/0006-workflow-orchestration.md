@@ -170,13 +170,15 @@ Everything in this section is **illustrative, not final** — the commitment is 
 | `partial` | retries exhausted but usable output, node opted in | follow `partial` edge | noted on card |
 | `needs_input` | agent asked the human a question | checkpoint + park the run | card → `needs_input`, drawer stepper; the answer re-enters the same node with its agent session resumed (`claude -p --resume`) |
 
-**Default flow library** (what Relay ships; each row replaces a `relay_config.json` entry)
+**Default flow library** (what Relay ships; each row replaces a `relay_config.json` entry —
+that file, and the `relay watch` dispatcher that read it, are now deleted; all three rows
+below are cut over)
 
-| Flow | Pulls from | Works in | On success → | Nodes |
-| --- | --- | --- | --- | --- |
-| Spec | Next up | Spec | Spec:Review | `brainstorm` (agent) |
-| Plan | Spec:Done | Plan | Plan:Done | `write-plan` (agent) |
-| Code | Plan:Done | Code | Review | branch → implement ⇄ review loop → precommit gate → smoke → merge |
+| Flow | Pulls from | Works in | On success → | Nodes | Status |
+| --- | --- | --- | --- | --- | --- |
+| Spec | Next up | Spec | Spec:Review | `brainstorm` (agent) | **Cut over (RLY-136)** |
+| Plan | Spec:Done | Plan | Plan:Done | `write-plan` (agent) | **Cut over (RLY-138)** |
+| Code | Plan:Done | Code | Review | branch → implement ⇄ review loop → precommit gate → smoke → merge | **Cut over (RLY-139)** |
 
 **Example flow definition** — the Spec flow, the simplest one and the first to build:
 
@@ -264,11 +266,11 @@ this is the developer-owned layer):
 | Artifact | Today | Tomorrow | Who customizes it |
 | --- | --- | --- | --- |
 | `bin/relay` | 995-line CLI + watcher, copied by hand | same file, smaller: CLI + executor (`relay execute`); `relay init` scaffolds a new project (lands with RLY-135) | nobody — it's generic |
-| `relay_config.json` | 42 lines: pipeline (stages/prompts) + pools + poll interval | **gone** — pipeline moves into server-side flows; executor keeps a small local config (worktree namespace, capacity per isolation class) | developer (capacity only) |
+| `relay_config.json` | 42 lines: pipeline (stages/prompts) + pools + poll interval | **gone (RLY-139)** — deleted; executor keeps `.relay/executor.json` | developer (capacity only) |
 | `.claude/skills/` (brainstorm, systematic-debugging, TDD, verification…) | node behavior + process discipline | **unchanged** — agent nodes run in the checkout, so these keep working | developer, freely |
-| `.claude/commands/` (write-plan, exec-plan, finish, worktree) | stage entry points the runner prompts into | write-plan stays (Plan node calls it); **exec-plan retires with RLY-139**; finish/worktree stay (human use) | developer |
-| `.claude/workflows/execute-plan.js` | 485 lines — the entire Code orchestration | **gone** — became [`code.jsonc`](../designs/flows/code.jsonc)'s nodes + edges | — |
-| `.claude/agents/*.md` (8: plan-implementer, spec/quality/final reviewers, final-fixer, smoke, acceptance, rebaser) | subagent types execute-plan.js spawns | optional — their prompts become flow-node `run` prompts; keep the files if a repo wants richer per-node system prompts and point node overrides at them | developer |
+| `.claude/commands/` (write-plan, exec-plan, finish, worktree) | stage entry points the runner prompts into | write-plan/finish/worktree stay; **exec-plan deleted (RLY-139)** | developer |
+| `.claude/workflows/execute-plan.js` | 485 lines — the entire Code orchestration | **gone (RLY-139)** — deleted; its orchestration is [`code.jsonc`](../designs/flows/code.jsonc)'s nodes + edges | — |
+| `.claude/agents/*.md` (8: plan-implementer, spec/quality/final reviewers, final-fixer, smoke, acceptance, rebaser) | subagent types execute-plan.js spawns | **kept** — pointed at by node `agent`, rendered as `--agent <name>` | developer |
 | `.relay/flows.json` | n/a | per-project flow overrides (RLY-140) | developer |
 | `CLAUDE.md` / `AGENTS.md` | project instructions every agent reads | unchanged | developer |
 
@@ -297,7 +299,7 @@ and literal example rows: see the
 | Runner/executor process on a dev machine | `bin/relay watch` in a terminal | `relay execute` in a terminal (or launchd); registers itself, advertises capacity |
 | Worktrees | `.claude/worktrees/{clean,work-N}` per config | executor-owned namespace (`exec-*`), auto-created |
 | `claude` CLI, `gh` auth, git push rights | required on the runner machine | unchanged, required on every executor machine |
-| `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` env hack | required for /exec-plan | **gone** |
+| `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` env hack | required for /exec-plan | **kept** — still needed by long agent nodes on the executor path |
 
 Maintenance story in one line: **developers edit files in their repo (table 1); Relay
 maintains the objects (table 2); machines need table 3 once.**
@@ -356,8 +358,10 @@ brain/hands problem we are taking on. What we adopt and where we deliberately di
   merge all; conflicts route to a rebase agent) or **ensemble** (N attempts at one
   thing: pick a winner, fast-forward to its SHA, losers recorded as `skipped` with
   their SHAs inspectable). Ensemble (a review judge-panel) is the expected first
-  customer, in or after RLY-139. Until then: YAGNI — cold build caches make ephemeral
-  forks expensive on a laptop, so this waits for proven value.
+  customer, **deferred to RLY-161 (W19)** — RLY-139 (Code's cutover) shipped `foreach`
+  instead, sequential `spec_review`/`quality_review` still two agent nodes. Until then:
+  YAGNI — cold build caches make ephemeral forks expensive on a laptop, so this waits
+  for proven value.
 
 ### Design pass (2026-07-17) — what the artboards decided
 
