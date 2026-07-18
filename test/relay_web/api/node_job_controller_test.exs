@@ -36,7 +36,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
         pulls_from_stage_id: next_up.id,
         works_in_stage_id: spec.id,
         lands_on_stage_id: plan.id,
-        nodes: [%{key: "work", type: :agent, run: "work {ref}"}],
+        nodes: [%{key: "work", type: :agent, run: "work {ref}", agent: "plan-implementer"}],
         edges: [
           %{from: "start", to: "work"},
           %{from: "work", to: "done", on: :succeeded},
@@ -87,6 +87,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert body["node_type"] == "agent"
       assert body["run"] == "work {ref}"
       assert body["isolation"] == "shared_clean"
+      assert body["agent"] == "plan-implementer"
       assert body["vars"]["ref"]
       refute Map.has_key?(body, "worktree")
       refute Map.has_key?(body, "path")

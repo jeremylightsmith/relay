@@ -15,7 +15,7 @@ defmodule Relay.Runs.EngineTest do
 
   defp execution(attrs) do
     Map.merge(
-      %{node_key: "work", visit: 1, attempt: 1, outcome: :succeeded, failure_signature: nil},
+      %{node_key: "work", visit: 1, attempt: 1, outcome: :succeeded, failure_signature: nil, sub_task_id: nil},
       Map.new(attrs)
     )
   end
@@ -153,5 +153,142 @@ defmodule Relay.Runs.EngineTest do
     long = String.duplicate("x", 600)
     assert Engine.failure_signature(long) == Engine.failure_signature(String.slice(long, 0, 500))
     refute Engine.failure_signature("a") == Engine.failure_signature("b")
+  end
+
+  # --- foreach: guarded edge selection (W13) ---
+
+  # head --succeeded--> head (when: remaining) | tail (when: exhausted), plus an
+  # unguarded failed edge, i.e. the reconciled Code flow's shape in miniature.
+  defp foreach_flow do
+    flow(
+      [
+        [key: "head", type: :agent, foreach: "card.sub_tasks"],
+        [key: "tail", type: :gate]
+      ],
+      [
+        [from: "start", to: "head"],
+        [from: "head", to: "head", on: :succeeded, when: :foreach_remaining],
+        [from: "head", to: "tail", on: :succeeded, when: :foreach_exhausted],
+        [from: "tail", to: "done", on: :succeeded]
+      ]
+    )
+  end
+
+  test "a foreach_remaining guard routes back into the loop head while items remain" do
+    current = execution(node_key: "head", sub_task_id: 1)
+
+    assert Engine.decide(foreach_flow(), [current], current, foreach_remaining: 2) ==
+             {:transition, "head"}
+  end
+
+  test "a foreach_exhausted guard leaves the loop when no items remain" do
+    current = execution(node_key: "head", sub_task_id: 1)
+
+    assert Engine.decide(foreach_flow(), [current], current, foreach_remaining: 0) ==
+             {:transition, "tail"}
+  end
+
+  test "an unguarded edge is the fallback when no guard is satisfied" do
+    flow =
+      flow(
+        [[key: "head", type: :agent, foreach: "card.sub_tasks"], [key: "other", type: :agent]],
+        [
+          [from: "start", to: "head"],
+          [from: "head", to: "head", on: :succeeded, when: :foreach_remaining],
+          [from: "head", to: "other", on: :succeeded]
+        ]
+      )
+
+    current = execution(node_key: "head", sub_task_id: 1)
+    assert Engine.decide(flow, [current], current, foreach_remaining: 0) == {:transition, "other"}
+  end
+
+  # --- per-iteration budgets (decision 8) ---
+
+  # head --failed--> head, max_loops 3, inside a foreach: the Code flow's
+  # implement <-> review lap, in miniature.
+  defp lap_flow do
+    flow(
+      [[key: "head", type: :agent, foreach: "card.sub_tasks"], [key: "tail", type: :gate]],
+      [
+        [from: "start", to: "head"],
+        [from: "head", to: "head", on: :failed, max_loops: 3],
+        [from: "head", to: "tail", on: :succeeded, when: :foreach_exhausted]
+      ]
+    )
+  end
+
+  defp lap(sub_task_id, n) do
+    failed(node_key: "head", visit: n, sub_task_id: sub_task_id, detail: "finding #{sub_task_id}-#{n}")
+  end
+
+  test "max_loops resets across foreach iterations — task 1's churn does not spend task 2's budget" do
+    # Task 1 burned its full 3 laps; task 2's FIRST refusal must still loop back.
+    history = [lap(1, 1), lap(1, 2), lap(1, 3), lap(2, 4)]
+    current = List.last(history)
+
+    assert Engine.decide(lap_flow(), history, current, sub_task_id: 2, foreach_remaining: 1) ==
+             {:transition, "head"}
+  end
+
+  test "max_loops still fires WITHIN one foreach iteration" do
+    history = [lap(1, 1), lap(1, 2), lap(1, 3), lap(1, 4)]
+    current = List.last(history)
+
+    assert {:fail, "loop_budget_exhausted:" <> _} =
+             Engine.decide(lap_flow(), history, current, sub_task_id: 1, foreach_remaining: 1)
+  end
+
+  test "the visit cap is iteration-scoped the same way" do
+    # Two visits of "head" on task 1, then task 2's first visit: under a cap of 2 the
+    # global count (3) would fail, the iteration-scoped count (1) must not.
+    flow =
+      flow(
+        [[key: "head", type: :agent, foreach: "card.sub_tasks"], [key: "mid", type: :agent]],
+        [
+          [from: "start", to: "head"],
+          [from: "head", to: "mid", on: :succeeded],
+          [from: "mid", to: "head", on: :succeeded]
+        ]
+      )
+
+    history = [
+      execution(node_key: "head", visit: 1, sub_task_id: 1),
+      execution(node_key: "mid", visit: 1, sub_task_id: 1),
+      execution(node_key: "head", visit: 2, sub_task_id: 1),
+      execution(node_key: "mid", visit: 2, sub_task_id: 1),
+      execution(node_key: "head", visit: 3, sub_task_id: 2),
+      execution(node_key: "mid", visit: 3, sub_task_id: 2)
+    ]
+
+    current = List.last(history)
+    assert Engine.decide(flow, history, current, visit_cap: 2, sub_task_id: 2) == {:transition, "head"}
+  end
+
+  test "the circuit breaker stays GLOBAL across foreach iterations (deliberate asymmetry)" do
+    history = [
+      failed(node_key: "head", visit: 1, sub_task_id: 1, detail: "same boom"),
+      failed(node_key: "head", visit: 2, sub_task_id: 2, detail: "same boom"),
+      failed(node_key: "head", visit: 3, sub_task_id: 3, detail: "same boom")
+    ]
+
+    current = List.last(history)
+
+    assert {:fail, "circuit_breaker:" <> _} =
+             Engine.decide(lap_flow(), history, current, sub_task_id: 3, foreach_remaining: 1)
+  end
+
+  test "sub_task_id nil scopes to the whole run — nodes outside a foreach are untouched" do
+    # Identical history to the max_loops-within-one-iteration case, but unkeyed: the
+    # global count must still fail the run, proving scope_to_iteration(h, nil) is identity.
+    history = [
+      failed(node_key: "head", visit: 1, detail: "a"),
+      failed(node_key: "head", visit: 2, detail: "b"),
+      failed(node_key: "head", visit: 3, detail: "c"),
+      failed(node_key: "head", visit: 4, detail: "d")
+    ]
+
+    current = List.last(history)
+    assert {:fail, "loop_budget_exhausted:" <> _} = Engine.decide(lap_flow(), history, current)
   end
 end

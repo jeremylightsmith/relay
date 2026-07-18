@@ -51,7 +51,7 @@ Postgres must be running locally with a `postgres` / `postgres` role (see
 
 This repo ships a Claude Code toolkit under `.claude/`: skills (TDD, systematic debugging,
 verification, brainstorming, …) and a command pipeline — `/brainstorm` → `/write-plan` →
-`/exec-plan` → `/finish`. `AGENTS.md` documents how these are expected to be used.
+the Code flow → `/finish`. `AGENTS.md` documents how these are expected to be used.
 
 ## Repository layout
 

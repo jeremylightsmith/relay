@@ -76,7 +76,7 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       assert has_element?(view, "#flow-row-#{code.id}", "Code")
 
       assert has_element?(view, "#flow-#{spec.id}-nodes-count", "1 node")
-      assert has_element?(view, "#flow-#{code.id}-nodes-count", "14 nodes")
+      assert has_element?(view, "#flow-#{code.id}-nodes-count", "13 nodes")
 
       assert has_element?(view, "#flow-#{spec.id}-trigger", "Next up")
       assert has_element?(view, "#flow-#{spec.id}-trigger", "Spec:Review")
@@ -155,7 +155,7 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
   end
 
   describe "enable/disable cutover confirm" do
-    test "toggle opens the enable confirm with the double-dispatch ritual; cancel persists nothing",
+    test "toggle opens the enable confirm naming the runner start command; cancel persists nothing",
          %{conn: conn, board: board} do
       spec = flow(board, "spec")
       view = open_flows(conn, board)
@@ -164,9 +164,10 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
 
       assert has_element?(view, "#flow-#{spec.id}-confirm", "Turn on the Spec flow?")
       assert has_element?(view, "#flow-#{spec.id}-confirm", "handed to the AI automatically")
-      assert has_element?(view, "#flow-#{spec.id}-confirm", "bin/relay watch")
-      assert has_element?(view, "#flow-#{spec.id}-confirm", "relay_config.json")
-      assert has_element?(view, "#flow-#{spec.id}-confirm", "double dispatch")
+      assert has_element?(view, "#flow-#{spec.id}-confirm", "bin/relay execute")
+      assert has_element?(view, "#flow-#{spec.id}-confirm", "advertising capacity")
+      refute has_element?(view, "#flow-#{spec.id}-confirm", "bin/relay watch")
+      refute has_element?(view, "#flow-#{spec.id}-confirm", "relay_config.json")
       assert has_element?(view, "#flow-#{spec.id}-toggle[aria-pressed='false']")
       refute Flows.get_flow!(board, "spec").enabled
 
@@ -193,7 +194,9 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
 
       assert has_element?(view, "#flow-#{spec.id}-confirm", "Turn off the Spec flow?")
       assert has_element?(view, "#flow-#{spec.id}-confirm", "wait for a human instead")
-      assert has_element?(view, "#flow-#{spec.id}-confirm", "re-add this stage's entry")
+      assert has_element?(view, "#flow-#{spec.id}-confirm", "Turn the flow back on")
+      refute has_element?(view, "#flow-#{spec.id}-confirm", "re-add this stage's entry")
+      refute has_element?(view, "#flow-#{spec.id}-confirm", "relay_config.json")
 
       view |> element("#flow-#{spec.id}-confirm-cta") |> render_click()
 

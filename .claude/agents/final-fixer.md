@@ -1,6 +1,6 @@
 ---
 name: final-fixer
-description: Fix all blocking findings from the whole-branch review in one consolidated pass, keeping the suite green. Used by the /exec-plan workflow; the findings arrive in the message.
+description: Fix all blocking findings from the whole-branch review in one consolidated pass, keeping the suite green. Used by the Code flow's `final_fix` node; the findings arrive in the message.
 model: opus
 ---
 

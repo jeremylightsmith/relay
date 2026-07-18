@@ -1,15 +1,18 @@
-# Working Relay from an agent (CLI + autonomous board runner)
+# Working Relay from an agent (CLI + node-job executor)
 
 Relay is programmable over a REST API (MMF 09) and a single `bin/relay` tool. That tool is two
 things in one:
 
 - a **CLI** — read the board and drive a card (`bin/relay board`, `move`, `comment`, …);
-- a **board runner** — run with no arguments (`bin/relay watch`) and it watches the board and
-  drives *ready* cards through a pipeline autonomously, "passing the baton" between humans and AI.
+- **`relay execute`** — the runner mode: claims node-jobs from the server and runs them,
+  "passing the baton" between humans and AI as cards move through a board's flows.
 
-`bin/relay` is generic — it knows the REST API and how to watch/dispatch, but **nothing** about
-any particular board's columns, agents, or skills. All of that lives in **`relay_config.json`**.
-This split is deliberate: another team customizes the runner by editing config, not code.
+Dispatch is entirely server-side (ADR 0006): which cards are ready, which flow they run, and
+what each step does are all `Flow`/`Flow.Node`/`Flow.Edge` rows owned by `Relay.Runs.Scheduler`
+and `Relay.Runs`. `bin/relay` is generic — it knows the REST API and how to execute a claimed
+node-job, but **nothing** about any particular board's columns, agents, or skills. Per-project
+customization happens in **Settings › Flows** (or a per-project `.relay/flows.json` override,
+RLY-140), not in a runner config file.
 
 ---
 
@@ -36,7 +39,6 @@ Human output by default; add `--json` for machine output. Non-zero exit on any e
 | `bin/relay board` | The board: stages with their cards |
 | `bin/relay card RLY-12` | One card: description, plan, branch, timeline |
 | `bin/relay create "Fix login" --stage Backlog` | Create a new card (title; optional `--stage`/`--description`/`--tag`) |
-| `bin/relay pull` | (advisory) the next ready card per the config |
 | `bin/relay comment RLY-12 "…"` | Post a comment (as Relay AI) |
 | `bin/relay move RLY-12 Code` | Move to a stage (by name, e.g. `"Code:Review"`) |
 | `bin/relay status RLY-12 working` | Set status (`ready`\|`working`\|`needs_input`\|`in_review`) |
@@ -64,19 +66,21 @@ means "ready" is used two ways below: **positionally**, a card is
 `ready` means the card isn't actively `working`/blocked — it's just sitting wherever it is.
 Don't set a `done` status; move the card to its terminal stage instead and Done follows.
 
-## The runner
+## The executor
 
-`bin/relay watch` polls the board and, on any change, works the single **rightmost ready** card
-one hop, then re-polls. It is cheap when idle — it fingerprints the board and only spends model
-tokens when there is actual work.
+`bin/relay execute` claims node-jobs from the server and runs each in an executor-owned git
+worktree. It is cheap when idle — a long-poll claim only returns when there is actual work, or
+after `poll_timeout` seconds.
 
-Reasoning stages run headless Claude (`claude -p --dangerously-skip-permissions --output-format
-stream-json`, streamed as a live feed); mechanical steps (git, PR, merge) run shell. The pipeline —
-which columns are AI columns, what to run at each, and where finished work goes — is entirely in
-`relay_config.json`. Regenerate a skeleton from your board with `bin/relay layout`.
+Agent nodes run headless Claude (`claude -p --dangerously-skip-permissions --output-format
+stream-json`, streamed as a live feed, `--agent <name>` when the node names one — see
+"Agent node → `.claude/agents` definition" in [`docs/architecture/runner.md`](architecture/runner.md));
+`shell`/`gate` nodes run shell. Which stages are AI-enabled, what each node does, and where
+finished work goes are entirely `Flow` data — see [`docs/designs/flows/`](designs/flows/README.md)
+for the shipped library and Settings › Flows to view or override it on a board.
 
-- **Watch it live:** `bin/relay watch` prints a `🤖`/`🔧` play-by-play of each headless step.
-- **One pass:** `bin/relay watch --once`. **Dry run (no tokens, no mutations):** `--dry-run`.
+- **Watch it live:** `bin/relay execute` prints a `🤖`/`🔧` play-by-play of each headless step.
+- **One job:** `bin/relay execute --once`. **Dry run (no tokens, no mutations):** `--dry-run`.
 
 ### Auth: subscription vs API tokens
 
@@ -90,17 +94,15 @@ not silently fall back to paid API). Working one card at a time keeps this manag
 
 ## Node-job protocol (ADR 0006)
 
-`bin/relay watch` above is *today's* runner — it reasons about stages itself. ADR 0006's
-target shape moves that reasoning server-side (`Relay.Runs`, the flow engine) and leaves a
-**thin executor** on the dev machine that only claims node-jobs, runs them, and reports
-outcomes. This card (RLY-134) adds that transport, on top of the same board-key `/api`
-(ADR 0001 — no parallel surface):
+Every stage's reasoning lives server-side (`Relay.Runs`, the flow engine); `bin/relay execute`
+is a **thin executor** that only claims node-jobs, runs them, and reports outcomes, on top of
+the same board-key `/api` (ADR 0001 — no parallel surface):
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/node-jobs/claim` | Claim the next eligible node-job. Request: `{executor: {name, host, interval}, capacity: {shared_clean, exclusive}}`. Response: `200` with `{id, run_id, ref, node_id, node_type, run, isolation, resume_session, vars}` (no worktree path — that's executor-local; `run_id` is the owning run's row id, which `ExecutorPool` binds an exclusive worktree slot to), or `204` when nothing is claimable (the endpoint long-polls ~25s before returning `204`; pass `?wait=0` to short-poll instead). |
+| `POST /api/node-jobs/claim` | Claim the next eligible node-job. Request: `{executor: {name, host, interval}, capacity: {shared_clean, exclusive}}`. Response: `200` with `{id, run_id, ref, node_id, node_type, agent, run, isolation, resume_session, vars}` (`agent` is the `.claude/agents/<name>.md` definition a `type: agent` node names, or `nil`; no worktree path — that's executor-local; `run_id` is the owning run's row id, which `ExecutorPool` binds an exclusive worktree slot to), or `204` when nothing is claimable (the endpoint long-polls ~25s before returning `204`; pass `?wait=0` to short-poll instead). |
 | `POST /api/node-jobs/:id/outcome` | Report a job's result. Request: `{outcome, detail, git_sha, session_id}`, `outcome` one of `succeeded \| failed \| partial \| needs_input`. Response: `200` with `{status: "ok", run_state}` — `run_state` is the run's post-outcome status (`running \| parked \| done \| failed \| cancelled`), which `ExecutorPool.release` reads to decide whether to keep or free an exclusive slot. `422 unknown_outcome` for any other value; `409 conflict` if the job is no longer held by a live claim. |
-| `POST /api/board/heartbeat` | An **executor beat** is a superset of the RLY-141 watcher heartbeat — it adds `name` + `capacity` (e.g. `{"shared_clean": 3, "exclusive": 1}`). A `name` + `capacity` beat upserts a durable `Executor` row *and* still feeds `Relay.RunnerPresence`, so the Runners view is unchanged. A legacy or capacity-less beat is inert on this new path (additive, never subtractive). |
+| `POST /api/board/heartbeat` | An **executor beat** carries `name` + `capacity` (e.g. `{"shared_clean": 3, "exclusive": 1}`). It upserts a durable `Executor` row *and* feeds `Relay.RunnerPresence`, so the Runners view shows who's registered. A capacity-less beat is inert on this path. |
 | `POST /api/node-jobs/heartbeat` | The **executor's own** heartbeat (RLY-135, `relay execute`'s `ExecutorHeartbeat`): `{executor: {name, host}, running: [job-id, …]}`, response `{revoked: [job-id, …]}` — job-ids the server wants terminated (§ revoke, below). Distinct from the `/api/board/heartbeat` beat above, which only carries capacity for presence/liveness. **Client-side only for now**: `bin/relay` posts to it, but no server route exists yet — a follow-up card wires the revoke response. |
 | `POST /api/board/logs` | Each entry may now carry an optional `node_job_id` (alongside the existing `run_id`), identifying the node-job that emitted the line. |
 
@@ -139,13 +141,10 @@ back up with its prior context intact rather than starting the node over from sc
 
 ### `relay execute` — the executor runner mode
 
-`bin/relay execute` is the second runner mode (RLY-135, alongside `relay watch` above): it
-claims node-jobs from the endpoints in the table above, runs each in an executor-owned git
-worktree, and reports a typed outcome. `relay watch` is untouched — the two can run at once on
-the same machine.
+`bin/relay execute` is **the runner mode**: it claims node-jobs from the endpoints in the
+table above, runs each in an executor-owned git worktree, and reports a typed outcome.
 
-- **Config: `.relay/executor.json`** (separate from `relay_config.json`, so the two runner
-  generations never contend over one file):
+- **Config: `.relay/executor.json`**:
 
   ```json
   {
@@ -160,7 +159,7 @@ the same machine.
   `capacity: {shared_clean: 1, exclusive: 1}`. `capacity` is the field you'll routinely edit —
   it caps how many `shared_clean` jobs and how many `exclusive` run-slots this executor
   advertises at once. Worktrees for both classes live under the `exec-*` namespace
-  (`exec-clean`, `exec-work-1`, …), disjoint from `relay watch`'s `work-N` pool.
+  (`exec-clean`, `exec-work-1`, …), auto-created.
 
 - **Running it:** `bin/relay execute` runs the claim/execute/report loop until Ctrl-C (which
   stops claiming and waits for in-flight jobs to finish). `--once` drains a single
@@ -220,24 +219,22 @@ build your own runner or agents, honor these:
 
 8. **Ask, don't guess.** If a reasoning stage needs clarification, it calls `bin/relay needs-input`
    and stops; the human answers in the drawer; the card unblocks and resumes on a later tick.
-   Verification (`mix precommit` + the exec-plan review + the acceptance-smoke "eyes") is baked into
-   the Code stage, which finishes by pushing, opening the PR, and squash-merging it — so nothing
-   merges unverified. There is no separate Deploy stage.
+   Verification is baked into the Code flow itself, not one script: `precommit` (gate, `mix
+   precommit`) → `final_review` (whole-branch review) → `smoke` → `acceptance` (the "eyes" that
+   watch it actually run) all have to pass before `merge` pushes, opens the PR, and
+   squash-merges it — so nothing merges unverified. There is no separate Deploy stage.
 
-## Customizing (`relay_config.json`)
+## Customizing a board's flows
 
-The config is the whole contract. Per AI stage:
+A board's flows — which stages are AI-enabled, what each node does, model/effort per node,
+retry/loop budgets — are `Flow`/`Flow.Node`/`Flow.Edge` rows, not a repo config file. View or
+edit them in **Settings › Flows**; the shipped defaults (`Relay.Flows.DefaultLibrary`) are
+seeded from [`docs/designs/flows/*.jsonc`](designs/flows/README.md) — open those files for the
+literal node/edge contents of Spec, Plan, and Code. A repo may override specific fields
+per-project via `.relay/flows.json` (RLY-140) without forking the library.
 
-```json
-{ "stage": "Plan", "from": "Spec:Done", "done": "Plan:Done",
-  "action": [ { "claude": "…design and `{relay} describe {ref} @<file>`…" } ] }
-```
-
-- `from` — the column a ready card is pulled from; `stage` — the AI column it's moved into;
-  `done` — where to push when finished (`*:Review` = checkpoint, `*:Done` = auto-continue).
-- `action` — ordered steps, each `{ "shell": "…" }` or `{ "claude": "…" }`. Templates available:
-  `{ref} {title} {branch} {stage} {from} {done} {relay} {url}`.
-
-To honor invariant 3, every `action` should start by checking out `{branch}` and end by
-committing. To honor invariant 4, the Plan step writes to the card's `plan` field and the Code
-step materializes it inside `{branch}`.
+To honor invariant 3, an agent/shell node's `run` should start by checking out the card's
+branch (from `vars.branch`) and end by committing. To honor invariant 4, the Plan flow writes
+the plan to the card's `plan` field, and the Code flow's `branch` node materializes it into the
+worktree as `plan.md` (see [`code.jsonc`](designs/flows/code.jsonc)'s `branch` node) for
+`implement` to work through.

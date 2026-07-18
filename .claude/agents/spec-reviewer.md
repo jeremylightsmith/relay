@@ -1,6 +1,6 @@
 ---
 name: spec-reviewer
-description: Stage 1 review — verify a just-implemented plan task matches its spec in plan.md (nothing missing, nothing extra). Used by the /exec-plan workflow; the task under review is named in the message. Returns a pass/findings verdict.
+description: Stage 1 review — verify a just-implemented plan task matches its spec in plan.md (nothing missing, nothing extra). Used by the Code flow's `spec_review` node; the task under review is named in the message. Returns a pass/findings verdict.
 model: sonnet
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: quality-reviewer
-description: Stage 2 review — judge whether a spec-passing plan task change is well-built (clean, conventional, meaningful tests). Used by the /exec-plan workflow; the task is named in the message. Returns a pass/findings verdict.
+description: Stage 2 review — judge whether a spec-passing plan task change is well-built (clean, conventional, meaningful tests). Used by the Code flow's `quality_review` node; the task is named in the message. Returns a pass/findings verdict.
 model: opus
 ---
 

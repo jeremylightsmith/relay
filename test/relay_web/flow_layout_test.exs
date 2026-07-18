@@ -17,12 +17,15 @@ defmodule RelayWeb.FlowLayoutTest do
       {nodes, edges} = code_flow()
       %{positions: pos} = FlowLayout.layout(nodes, edges)
 
-      # spine = branch → implement → ... following :succeeded edges
+      # spine = branch → implement → ... following :succeeded edges, continuing
+      # through quality_review's foreach_exhausted edge rather than looping
+      # back via its foreach_remaining edge — 6 nodes fill row 0 exactly.
       assert {0, 0} = cell(pos["branch"])
       assert {0, 1} = cell(pos["implement"])
-      assert {0, 5} = cell(pos["precommit"])
-      # row 1 snakes back right→left: final_review sits under precommit (col 5)
-      assert {1, 5} = cell(pos["final_review"])
+      assert {0, 4} = cell(pos["precommit"])
+      assert {0, 5} = cell(pos["final_review"])
+      # row 1 snakes back right→left: smoke sits at the far right (col 5)
+      assert {1, 5} = cell(pos["smoke"])
       assert {1, _} = cell(pos["merge"])
     end
 
@@ -62,6 +65,27 @@ defmodule RelayWeb.FlowLayoutTest do
       {orow, _} = cell(pos["orphan"])
       {arow, _} = cell(pos["a"])
       assert orow > arow
+    end
+
+    # W13: a `foreach` loop head's two guarded edges both carry `on: :succeeded`
+    # (RLY-139) — the spine must keep moving forward through the one that
+    # doesn't loop back, not dead-end at the first-listed edge.
+    test "a node with two guarded :succeeded edges continues the spine through the non-looping one" do
+      nodes = [
+        %{key: "head", type: :agent, foreach: "card.sub_tasks"},
+        %{key: "tail", type: :gate}
+      ]
+
+      edges = [
+        %{from: "start", to: "head", on: nil},
+        %{from: "head", to: "head", on: :succeeded, when: :foreach_remaining},
+        %{from: "head", to: "tail", on: :succeeded, when: :foreach_exhausted},
+        %{from: "tail", to: "done", on: :succeeded}
+      ]
+
+      %{positions: pos} = FlowLayout.layout(nodes, edges)
+      assert {0, 0} = cell(pos["head"])
+      assert {0, 1} = cell(pos["tail"])
     end
   end
 end

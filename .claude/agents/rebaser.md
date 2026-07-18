@@ -1,6 +1,6 @@
 ---
 name: rebaser
-description: Rebase the current feature branch onto origin/main and resolve conflicts preserving both intents, leaving the branch green (mix precommit) — or abort cleanly and escalate. Used by the /exec-plan workflow when the cheap sync agent detects a conflict.
+description: Rebase the current feature branch onto origin/main and resolve conflicts preserving both intents, leaving the branch green (mix precommit) — or abort cleanly and escalate. Stays in the repo post-RLY-139, but no Code flow node names it yet (docs/designs/flows/worked-example.md); invoke by hand when a branch needs a conflict-safe rebase.
 model: sonnet
 ---
 

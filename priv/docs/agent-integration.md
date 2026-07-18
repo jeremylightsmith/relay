@@ -1,30 +1,31 @@
 # Agent integration
 
-`bin/relay` is two things in one: a **CLI** for driving a card by hand, and a **board runner**
-that watches the board and drives *ready* cards through a pipeline autonomously — "passing the
-baton" between humans and AI.
+`bin/relay` is two things in one: a **CLI** for driving a card by hand, and a **node-job
+executor** (`bin/relay execute`) that claims work from the server's flow engine and runs it —
+"passing the baton" between humans and AI.
 
 ## The runner
 
-Run `bin/relay watch` and it polls the board and, on any change, works the single **rightmost
-ready** card one hop, then re-polls. It is cheap when idle: it fingerprints the board and only
-spends model tokens when there's real work.
+Dispatch is entirely server-side: which cards are ready, which flow they run, and what each
+step does are `Flow` rows owned by the board's scheduler, editable in **Settings › Flows**.
+`bin/relay execute` knows nothing about any particular board's columns, agents, or skills — it
+just claims the node-jobs the server hands it and runs them, in an executor-owned git worktree.
 
-1. **Pull** the rightmost ready card (the column to its right is an AI column).
-2. **Work** one stage — a reasoning stage runs headless Claude; mechanical steps run shell.
-3. **Hand back** by pushing to the next column (`*:Review` to stop for a human, `*:Done` to
-   auto-continue).
+1. **Claim** the next node-job from the server (a long-poll — cheap when idle).
+2. **Run** it — an agent node runs headless Claude; `shell`/`gate` nodes run shell.
+3. **Report** the outcome back to the server, which advances the flow (moving the card to the
+   next column when the flow lands there).
 
 ```bash
-bin/relay watch            # live 🤖/🔧 play-by-play
-bin/relay watch --once     # a single pass
-bin/relay watch --dry-run  # no tokens, no mutations
+bin/relay execute            # live 🤖/🔧 play-by-play
+bin/relay execute --once     # a single claim-and-run pass
+bin/relay execute --dry-run  # no tokens, no mutations
 ```
 
 > [!TIP]
-> The pipeline — which columns are AI columns, what runs at each, and where finished work goes
-> — lives entirely in `relay_config.json`. `bin/relay` knows the API and how to dispatch but
-> nothing about your board's columns; customise the runner by editing config, not code.
+> Per-board customization — which stages are AI-enabled, what each node does, and where
+> finished work goes — lives entirely in **Settings › Flows**, not in a runner config file.
+> `bin/relay` is generic across boards; customise the flow, not the code.
 
 ## Operating invariants
 
@@ -43,5 +44,5 @@ other's work:
 > **On failure, flag the card — never retry-loop.** Set the card to `needs_input` with the
 > reason. Blocked cards are skipped, so a flagged card waits for a human instead of looping.
 
-See the repository's `docs/agent-integration.md` for the full runner reference and the
-`relay_config.json` schema.
+See the repository's `docs/agent-integration.md` and `docs/architecture/runner.md` for the
+full runner reference.

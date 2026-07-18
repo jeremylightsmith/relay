@@ -1,6 +1,6 @@
 ---
 name: acceptance-tester
-description: Run the card's human-authored acceptance criteria against the branch and return a per-criterion verdict. Used by the /exec-plan workflow after the smoke passes; the card ref arrives in the message. Returns pass/fail/blocked plus a per-criterion checklist.
+description: Run the card's human-authored acceptance criteria against the branch and return a per-criterion verdict. Used by the Code flow's `acceptance` node after smoke passes; the card ref arrives in the message. Returns pass/fail/blocked plus a per-criterion checklist.
 model: opus
 ---
 

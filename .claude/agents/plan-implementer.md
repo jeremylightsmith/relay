@@ -1,6 +1,6 @@
 ---
 name: plan-implementer
-description: Implement ONE task from the repo-root plan.md using strict TDD. Used by the /exec-plan workflow's implement step; the specific task (and any reviewer findings to address) arrive in the message.
+description: Implement ONE task from the repo-root plan.md using strict TDD. Used by the Code flow's `implement` node (a `foreach` loop, one iteration per task); the specific task (and any reviewer findings to address) arrive in the message.
 model: sonnet
 ---
 

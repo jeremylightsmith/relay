@@ -5,8 +5,9 @@ description: Complete a development branch — verify, then merge / PR / keep / 
 Complete the current branch's work.
 
 1. **Verify (tests):** run `mix precommit`. If it fails, stop and report — do not offer options.
-2. **Verify (eyes) — for any UI/behavior change.** `mix precommit` and the `/exec-plan` reviews
-   check behavior and structure, **not pixels.** Before merging UI work: run the app, drive it
+2. **Verify (eyes) — for any UI/behavior change.** `mix precommit` and the Code flow's own
+   `precommit` → `final_review` → `smoke` → `acceptance` nodes check behavior and structure,
+   **not pixels.** Before merging UI work: run the app, drive it
    to each state the change touches, screenshot every state, and **compare against the matching
    `docs/designs/*.html` artboard** (most MMFs are ports of `index.html`, `pipeline.html`,
    `client.html`, `contract.html`, `live_session.html`, `invoicing.html` — the design is the

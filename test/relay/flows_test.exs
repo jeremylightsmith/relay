@@ -88,6 +88,167 @@ defmodule Relay.FlowsTest do
       assert {:ok, updated} = Flows.update_flow(flow, %{nodes: [%{key: "work", type: :shell, run: "true"}]})
       assert [%{type: :shell, run: "true"}] = updated.nodes
     end
+
+    test "accepts two guarded edges leaving one node on the same outcome" do
+      %{board: board} = board_with_stages()
+
+      attrs =
+        valid_attrs(%{
+          nodes: [
+            %{key: "work", type: :agent, run: "a", foreach: "card.sub_tasks"},
+            %{key: "after", type: :gate, run: "true"}
+          ],
+          edges: [
+            %{from: "start", to: "work"},
+            %{from: "work", to: "work", on: :succeeded, when: :foreach_remaining},
+            %{from: "work", to: "after", on: :succeeded, when: :foreach_exhausted},
+            %{from: "after", to: "done", on: :succeeded}
+          ]
+        })
+
+      assert {:ok, flow} = Flows.create_flow(board, attrs)
+      assert %{foreach: "card.sub_tasks"} = Enum.find(flow.nodes, &(&1.key == "work"))
+      assert %{when: :foreach_remaining} = Enum.find(flow.edges, &(&1.to == "work" and &1.from == "work"))
+    end
+
+    test "still rejects two UNGUARDED edges on one route" do
+      %{board: board} = board_with_stages()
+
+      attrs =
+        valid_attrs(%{
+          nodes: [%{key: "work", type: :agent, run: "a"}, %{key: "other", type: :agent, run: "b"}],
+          edges: [
+            %{from: "start", to: "work"},
+            %{from: "work", to: "done", on: :succeeded},
+            %{from: "work", to: "other", on: :succeeded}
+          ]
+        })
+
+      assert {:error, changeset} = Flows.create_flow(board, attrs)
+      assert "only one edge may leave a node per outcome" in messages_on(changeset, :edges)
+    end
+
+    test "rejects a guarded edge in a flow with no foreach node" do
+      %{board: board} = board_with_stages()
+
+      attrs =
+        valid_attrs(%{
+          nodes: [%{key: "work", type: :agent, run: "a"}],
+          edges: [
+            %{from: "start", to: "work"},
+            %{from: "work", to: "done", on: :succeeded, when: :foreach_exhausted}
+          ]
+        })
+
+      assert {:error, changeset} = Flows.create_flow(board, attrs)
+      assert "a flow with guarded edges must have exactly one foreach node" in messages_on(changeset, :edges)
+    end
+
+    test "rejects an unknown foreach source" do
+      %{board: board} = board_with_stages()
+
+      attrs = valid_attrs(%{nodes: [%{key: "work", type: :agent, run: "a", foreach: "card.comments"}]})
+
+      assert {:error, changeset} = Flows.create_flow(board, attrs)
+      assert %{nodes: [%{foreach: [~s(must be "card.sub_tasks")]}]} = errors_on(changeset)
+    end
+
+    test "an agent node may name its .claude/agents definition; other node types may not" do
+      %{board: board} = board_with_stages()
+
+      ok = valid_attrs(%{nodes: [%{key: "work", type: :agent, run: "a", agent: "plan-implementer"}]})
+      assert {:ok, flow} = Flows.create_flow(board, ok)
+      assert %{agent: "plan-implementer"} = Enum.find(flow.nodes, &(&1.key == "work"))
+
+      bad =
+        valid_attrs(%{
+          key: "custom-2",
+          nodes: [%{key: "work", type: :gate, run: "true", agent: "plan-implementer"}]
+        })
+
+      assert {:error, changeset} = Flows.create_flow(board, bad)
+      assert %{nodes: [%{agent: ["is only valid on an agent node"]}]} = errors_on(changeset)
+    end
+  end
+
+  describe "duplicate_flow/1 and save_definition/2 round-trip foreach/when (regression)" do
+    defp foreach_attrs do
+      valid_attrs(%{
+        nodes: [
+          %{key: "work", type: :agent, run: "a", foreach: "card.sub_tasks"},
+          %{key: "after", type: :gate, run: "true"}
+        ],
+        edges: [
+          %{from: "start", to: "work"},
+          %{from: "work", to: "work", on: :succeeded, when: :foreach_remaining},
+          %{from: "work", to: "after", on: :succeeded, when: :foreach_exhausted},
+          %{from: "after", to: "done", on: :succeeded}
+        ]
+      })
+    end
+
+    test "duplicate_flow/1 preserves foreach and when instead of stripping them" do
+      %{board: board} = board_with_stages()
+      {:ok, original} = Flows.create_flow(board, foreach_attrs())
+
+      assert {:ok, copy} = Flows.duplicate_flow(original)
+      assert %{foreach: "card.sub_tasks"} = Enum.find(copy.nodes, &(&1.key == "work"))
+      assert %{when: :foreach_remaining} = Enum.find(copy.edges, &(&1.from == "work" and &1.to == "work"))
+      assert %{when: :foreach_exhausted} = Enum.find(copy.edges, &(&1.from == "work" and &1.to == "after"))
+    end
+
+    test "save_definition/2 preserves foreach and when in both the flow and its snapshot" do
+      %{board: board} = board_with_stages()
+      {:ok, flow} = Flows.create_flow(board, foreach_attrs())
+
+      assert {:ok, updated} = Flows.save_definition(flow, %{isolation: :exclusive})
+      assert %{foreach: "card.sub_tasks"} = Enum.find(updated.nodes, &(&1.key == "work"))
+
+      snapshot = Flows.get_version(updated, updated.version)
+      assert %{foreach: "card.sub_tasks"} = Enum.find(snapshot.nodes, &(&1.key == "work"))
+      assert %{when: :foreach_remaining} = Enum.find(snapshot.edges, &(&1.from == "work" and &1.to == "work"))
+    end
+
+    test "save_definition/2 flags a foreach-only change as a definition change (bumps version)" do
+      %{board: board} = board_with_stages()
+      {:ok, flow} = Flows.create_flow(board, foreach_attrs())
+
+      unguarded_attrs =
+        foreach_attrs()
+        |> Map.put(:nodes, [%{key: "work", type: :agent, run: "a"}, %{key: "after", type: :gate, run: "true"}])
+        |> Map.put(:edges, [
+          %{from: "start", to: "work"},
+          %{from: "work", to: "after", on: :succeeded},
+          %{from: "after", to: "done", on: :succeeded}
+        ])
+
+      assert {:ok, updated} = Flows.save_definition(flow, unguarded_attrs)
+      assert updated.version == flow.version + 1
+      assert Enum.find(updated.nodes, &(&1.key == "work")).foreach == nil
+    end
+
+    defp agent_attrs do
+      valid_attrs(%{nodes: [%{key: "work", type: :agent, run: "a", agent: "plan-implementer"}]})
+    end
+
+    test "duplicate_flow/1 preserves agent instead of stripping it" do
+      %{board: board} = board_with_stages()
+      {:ok, original} = Flows.create_flow(board, agent_attrs())
+
+      assert {:ok, copy} = Flows.duplicate_flow(original)
+      assert %{agent: "plan-implementer"} = Enum.find(copy.nodes, &(&1.key == "work"))
+    end
+
+    test "save_definition/2 preserves agent in both the flow and its snapshot" do
+      %{board: board} = board_with_stages()
+      {:ok, flow} = Flows.create_flow(board, agent_attrs())
+
+      assert {:ok, updated} = Flows.save_definition(flow, %{isolation: :exclusive})
+      assert %{agent: "plan-implementer"} = Enum.find(updated.nodes, &(&1.key == "work"))
+
+      snapshot = Flows.get_version(updated, updated.version)
+      assert %{agent: "plan-implementer"} = Enum.find(snapshot.nodes, &(&1.key == "work"))
+    end
   end
 
   describe "graph validation (AC 3)" do

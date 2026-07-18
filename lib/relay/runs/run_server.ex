@@ -19,6 +19,15 @@ defmodule Relay.Runs.RunServer do
       re-entry that resumes an AI session.
     * `:attach` — just serialize incoming reports (server was restarted
       or lazily started by `report_outcome/2`).
+
+  Under a `foreach` node each execution carries the `sub_task_id` of the
+  iteration it belongs to: entering the loop head resolves the first undone
+  sub_task, a `:foreach_exhausted` edge unbinds, and everything else inherits.
+  The loop tail (the node whose outgoing edges carry a `when` guard) checks its
+  sub_task off on `succeeded` — the ROW WRITE happens inside the transaction
+  (before the remaining count is recomputed and handed to the engine), but,
+  like every other card effect here, the `{:card_upserted, ...}` broadcast for
+  it is deferred until after commit.
   """
 
   use GenServer, restart: :transient
@@ -33,6 +42,7 @@ defmodule Relay.Runs.RunServer do
   alias Schemas.NodeJob
   alias Schemas.Run
   alias Schemas.Stage
+  alias Schemas.SubTask
 
   def start_link(opts) do
     run_id = Keyword.fetch!(opts, :run_id)
@@ -97,19 +107,33 @@ defmodule Relay.Runs.RunServer do
   end
 
   # One transaction: finalize the reported attempt, decide, write the next
-  # run/execution/job rows. Card effects + broadcasts + dispatch happen
-  # after commit (Relay.Cards manages its own transactions and pushes).
+  # run/execution/job rows. Card effects + broadcasts + dispatch happen after
+  # commit (Relay.Cards manages its own transactions and pushes) — the sub_task
+  # check-off is the one exception to "no card writes in here": its ROW WRITE
+  # must land before Engine.decide runs (remaining_sub_tasks reads it on this
+  # same connection), so check_off_sub_task/3 writes it directly and returns
+  # the checked-off id; the broadcast for that write still waits until after
+  # commit, alongside every other card effect below.
   defp apply_outcome(run, flow, job, attrs, state) do
-    {:ok, {decision, execution, next}} =
+    {:ok, {decision, execution, next, checked_off_id}} =
       Repo.transaction(fn ->
         execution = Runs.finalize_job!(job, attrs)
+        # Order matters: check off, THEN count, THEN route. One place, one ordering,
+        # no second source of truth for "how many tasks are left".
+        checked_off_id = check_off_sub_task(run, flow, execution)
         history = outcome_history(run)
-        decision = Engine.decide(flow, history, execution, Runs.engine_opts())
-        {decision, execution, apply_decision(decision, run, flow, execution)}
+
+        opts =
+          Runs.engine_opts() ++
+            [sub_task_id: execution.sub_task_id, foreach_remaining: Runs.remaining_sub_tasks(run)]
+
+        decision = Engine.decide(flow, history, execution, opts)
+        {decision, execution, apply_decision(decision, run, flow, execution), checked_off_id}
       end)
 
     run = Repo.get!(Run, run.id)
     board_id = Runs.board_id_of(run)
+    notify_sub_task_checked_off(run, checked_off_id)
     log_failure_if_final(decision, run, execution)
     Runs.broadcast_runs(board_id, {:node_finished, run, execution})
 
@@ -146,18 +170,27 @@ defmodule Relay.Runs.RunServer do
   # Row writes per decision, inside apply_outcome's transaction. Returns
   # {next_execution, next_job} for continuing decisions, nil otherwise.
   defp apply_decision({:retry, node}, run, flow, execution) do
-    next = Runs.insert_execution!(run, node, execution.visit, execution.attempt + 1)
-    job = Runs.insert_job!(run, next, Runs.build_payload(run, flow, node, findings: execution.detail))
+    next = Runs.insert_execution!(run, node, execution.visit, execution.attempt + 1, execution.sub_task_id)
+
+    job =
+      Runs.insert_job!(
+        run,
+        next,
+        Runs.build_payload(run, flow, node, findings: execution.detail, sub_task_id: execution.sub_task_id)
+      )
+
     {next, job}
   end
 
   defp apply_decision({:transition, node}, run, flow, execution) do
     run = run |> Ecto.Changeset.change(current_node: node) |> Repo.update!()
-    next = Runs.insert_execution!(run, node, next_visit(run, node), 1)
+    sub_task_id = binding_for(run, flow, node, execution)
+    next = Runs.insert_execution!(run, node, next_visit(run, node), 1, sub_task_id)
 
     opts = [
       prior_detail: execution.detail,
-      findings: if(execution.outcome == :failed, do: execution.detail)
+      findings: if(execution.outcome == :failed, do: execution.detail),
+      sub_task_id: sub_task_id
     ]
 
     job = Runs.insert_job!(run, next, Runs.build_payload(run, flow, node, opts))
@@ -178,13 +211,86 @@ defmodule Relay.Runs.RunServer do
     nil
   end
 
+  # A task is checked off ONLY after it passes every review in the loop — the loop
+  # tail is the node whose outgoing edges carry a `when` guard. So a checked box on
+  # the card means "reviewed", not "attempted" (strictly better than the grep-gate
+  # it replaces, where the implementer checked its own box).
+  #
+  # Writes the row DIRECTLY (not via Relay.Cards.set_sub_task_done/3) so no
+  # broadcast fires from inside apply_outcome's transaction — see the comment
+  # there and notify_sub_task_checked_off/2 below. Returns the checked-off
+  # sub_task id, or nil when nothing was checked off.
+  defp check_off_sub_task(run, flow, %NodeExecution{outcome: :succeeded, sub_task_id: id} = execution)
+       when is_integer(id) do
+    if loop_tail?(flow, execution.node_key) do
+      sub_task = Repo.get_by!(SubTask, id: id, card_id: run.card_id)
+      {:ok, _updated} = sub_task |> SubTask.changeset(%{done: true}) |> Repo.update()
+      id
+    end
+  end
+
+  defp check_off_sub_task(_run, _flow, _execution), do: nil
+
+  defp loop_tail?(flow, node_key), do: Enum.any?(flow.edges, &(&1.from == node_key and not is_nil(&1.when)))
+
+  # Post-commit half of check_off_sub_task/3: broadcasts the card_upserted for
+  # the row already written inside apply_outcome's transaction. Reloads rather
+  # than trusting a stale in-memory card, same as every other effect in this file.
+  defp notify_sub_task_checked_off(_run, nil), do: :ok
+
+  defp notify_sub_task_checked_off(run, _sub_task_id) do
+    card = Repo.get!(Card, run.card_id)
+    Relay.Cards.notify_upserted(card)
+  end
+
+  # Which iteration the NEXT execution belongs to:
+  #   * entering the foreach head        -> resolve the first undone sub_task
+  #   * leaving via a :foreach_exhausted -> nil (we're out of the loop)
+  #   * anything else                    -> inherit (spec_review/quality_review and
+  #                                          retries stay bound to the same task)
+  defp binding_for(run, flow, node, execution) do
+    cond do
+      node == Runs.foreach_node_key(flow) -> Runs.next_sub_task_id(run)
+      exits_loop?(flow, execution, node) -> nil
+      true -> execution.sub_task_id
+    end
+  end
+
+  defp exits_loop?(flow, execution, node) do
+    Enum.any?(
+      flow.edges,
+      &(&1.from == execution.node_key and &1.to == node and &1.on == execution.outcome and
+          &1.when == :foreach_exhausted)
+    )
+  end
+
+  # The current node's binding, for a re-entry that starts a fresh attempt of the
+  # same visit (boot resume / needs-input answer / hand-back).
+  defp current_sub_task_id(run, node_key) do
+    Repo.one(
+      from e in NodeExecution,
+        where: e.run_id == ^run.id and e.node_key == ^node_key,
+        order_by: [desc: e.id],
+        limit: 1,
+        select: e.sub_task_id
+    )
+  end
+
   # Boot/park re-entry: fresh attempt of the current node, same visit.
   defp enter_same_node!(run, flow, resume_session) do
     node = run.current_node
     visit = max_for(run, node, :visit) || 1
     attempt = (max_in_visit(run, node, visit) || 0) + 1
-    execution = Runs.insert_execution!(run, node, visit, attempt)
-    job = Runs.insert_job!(run, execution, Runs.build_payload(run, flow, node, resume_session: resume_session))
+    sub_task_id = current_sub_task_id(run, node)
+    execution = Runs.insert_execution!(run, node, visit, attempt, sub_task_id)
+
+    job =
+      Runs.insert_job!(
+        run,
+        execution,
+        Runs.build_payload(run, flow, node, resume_session: resume_session, sub_task_id: sub_task_id)
+      )
+
     {execution, job}
   end
 

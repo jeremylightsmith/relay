@@ -1,6 +1,6 @@
 ---
 name: final-reviewer
-description: Whole-branch cross-cutting review after all plan tasks are done and precommit passes — catches issues per-task reviews miss. Used by the /exec-plan workflow. Returns a pass/findings verdict.
+description: Whole-branch cross-cutting review after all plan tasks are done and precommit passes — catches issues per-task reviews miss. Used by the Code flow's `final_review` node. Returns a pass/findings verdict.
 model: opus
 ---
 

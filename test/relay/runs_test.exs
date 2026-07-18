@@ -3,9 +3,11 @@ defmodule Relay.RunsTest do
 
   alias Relay.Runs
   alias Relay.Runs.FakeDispatcher
+  alias Schemas.Card
   alias Schemas.NodeExecution
   alias Schemas.NodeJob
   alias Schemas.Run
+  alias Schemas.SubTask
 
   setup do
     FakeDispatcher.register(self())
@@ -643,6 +645,201 @@ defmodule Relay.RunsTest do
       # It's alive and clocked; the reclaim behaviour itself is covered above.
       assert Process.alive?(pid)
       _ = :sys.get_state(pid)
+    end
+  end
+
+  # A minimal foreach flow: the head loops on itself while items remain.
+  # `head_max_retries` lets a test give the loop head a retry budget (nil, the
+  # default, keeps it unset — a single failed outcome then has no route and
+  # fails the run, as the existing tests below rely on).
+  defp foreach_flow_attrs(head_max_retries) do
+    %{
+      key: "loopy",
+      isolation: :exclusive,
+      nodes: [
+        %{key: "head", type: :agent, run: "work {sub_task}", foreach: "card.sub_tasks", max_retries: head_max_retries},
+        %{key: "after", type: :gate, run: "true"}
+      ],
+      edges: [
+        %{from: "start", to: "head"},
+        %{from: "head", to: "head", on: :succeeded, when: :foreach_remaining},
+        %{from: "head", to: "after", on: :succeeded, when: :foreach_exhausted},
+        %{from: "after", to: "done", on: :succeeded}
+      ]
+    }
+  end
+
+  # A board + enabled foreach flow + a card sitting in the flow's pulls-from stage,
+  # carrying `plan`. Mirrors this file's existing flow fixtures. The card factory
+  # derives board_id from the stage, so pass only `stage:`.
+  defp setup_foreach(opts) do
+    board = insert(:board)
+    pulls = insert(:stage, board: board, name: "Plan:Done", position: 1)
+    works = insert(:stage, board: board, name: "Code", category: :in_progress, type: :work, position: 2)
+    lands = insert(:stage, board: board, name: "Review", category: :in_progress, type: :review, position: 3)
+
+    attrs =
+      Map.merge(foreach_flow_attrs(Keyword.get(opts, :head_max_retries)), %{
+        pulls_from_stage_id: pulls.id,
+        works_in_stage_id: works.id,
+        lands_on_stage_id: lands.id
+      })
+
+    {:ok, flow} = Relay.Flows.create_flow(board, attrs)
+    {:ok, flow} = Relay.Flows.enable_flow(flow)
+    card = insert(:card, stage: pulls, plan: Keyword.fetch!(opts, :plan))
+
+    %{board: board, flow: flow, card: card}
+  end
+
+  describe "foreach: the engine owns the task list (W13)" do
+    test "start_run parses the card's plan into sub_tasks" do
+      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n\n### Task 2: Beta\n")
+
+      assert {:ok, _run} = Runs.start_run(card, flow)
+
+      assert ["Alpha", "Beta"] =
+               Repo.all(from st in SubTask, where: st.card_id == ^card.id, order_by: :position, select: st.title)
+    end
+
+    test "start_run leaves existing sub_tasks alone" do
+      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n")
+      {:ok, _card} = Relay.Cards.set_sub_tasks(card, [%{title: "Written by the Plan stage"}])
+
+      assert {:ok, _run} = Runs.start_run(card, flow)
+
+      assert ["Written by the Plan stage"] =
+               Repo.all(from st in SubTask, where: st.card_id == ^card.id, select: st.title)
+    end
+
+    test "entering the foreach node stamps the first undone sub_task, and the payload names it" do
+      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n\n### Task 2: Beta\n")
+      {:ok, run} = Runs.start_run(card, flow)
+
+      execution = Repo.one!(from e in NodeExecution, where: e.run_id == ^run.id)
+      [alpha, _beta] = Repo.all(from st in SubTask, where: st.card_id == ^card.id, order_by: :position)
+
+      assert execution.node_key == "head"
+      assert execution.sub_task_id == alpha.id
+
+      job = Runs.active_job(run)
+      assert job.payload["vars"]["sub_task"] == "Alpha"
+    end
+
+    test "the loop tail checks the sub_task off, then routes on the recomputed remaining count" do
+      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n\n### Task 2: Beta\n")
+      {:ok, run} = Runs.start_run(card, flow)
+      [alpha, beta] = Repo.all(from st in SubTask, where: st.card_id == ^card.id, order_by: :position)
+
+      # Iteration 1 succeeds at the tail (here head IS the tail — it carries the guards).
+      {:ok, _run} = Runs.report_outcome(Runs.active_job(run), %{outcome: :succeeded, detail: "done alpha"})
+
+      assert Repo.get!(SubTask, alpha.id).done
+      refute Repo.get!(SubTask, beta.id).done
+
+      # ...and the guard sent us back into the loop head, now bound to Beta.
+      second = Repo.one!(from e in NodeExecution, where: e.run_id == ^run.id and is_nil(e.outcome))
+      assert second.node_key == "head"
+      assert second.sub_task_id == beta.id
+      assert Runs.active_job(run).payload["vars"]["sub_task"] == "Beta"
+
+      # Iteration 2 exhausts the list: the exhausted guard leaves the loop, unbound.
+      {:ok, _run} = Runs.report_outcome(Runs.active_job(run), %{outcome: :succeeded, detail: "done beta"})
+      assert Repo.get!(SubTask, beta.id).done
+
+      third = Repo.one!(from e in NodeExecution, where: e.run_id == ^run.id and is_nil(e.outcome))
+      assert third.node_key == "after"
+      assert third.sub_task_id == nil
+    end
+
+    test "the check-off broadcasts {:card_upserted, card} after commit, with the done sub_task preloaded" do
+      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n")
+      {:ok, run} = Runs.start_run(card, flow)
+      [alpha] = Repo.all(from st in SubTask, where: st.card_id == ^card.id)
+      Relay.Events.subscribe(card.board_id)
+
+      {:ok, _run} = Runs.report_outcome(Runs.active_job(run), %{outcome: :succeeded, detail: "done alpha"})
+
+      assert_receive {:card_upserted, %Card{id: id} = broadcast_card}
+      assert id == card.id
+      assert [%SubTask{id: sub_task_id, done: true}] = broadcast_card.sub_tasks
+      assert sub_task_id == alpha.id
+    end
+
+    test "a failed iteration does NOT check its sub_task off" do
+      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n")
+      {:ok, run} = Runs.start_run(card, flow)
+      [alpha] = Repo.all(from st in SubTask, where: st.card_id == ^card.id)
+
+      {:ok, _run} = Runs.report_outcome(Runs.active_job(run), %{outcome: :failed, detail: "reviewer refused"})
+
+      refute Repo.get!(SubTask, alpha.id).done
+    end
+
+    test "resuming a parked foreach node re-enters bound to its own iteration, not an earlier one at this node" do
+      %{board: board, flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n\n### Task 2: Beta\n")
+      # setup_foreach mints its own board (distinct from this file's `setup` block's), so
+      # subscribe to ITS topic — the outer subscription is watching the wrong board.
+      :ok = Runs.subscribe(board.id)
+      {:ok, run} = Runs.start_run(card, flow)
+      assert_receive {:node_started, _run, %NodeExecution{node_key: "head"}}
+      [alpha, beta] = Repo.all(from st in SubTask, where: st.card_id == ^card.id, order_by: :position)
+
+      # Iteration 1 (Alpha) succeeds at the tail, routing back into the loop head bound to Beta —
+      # the "head" node now has TWO executions, under two different sub_tasks.
+      {:ok, _run} = Runs.report_outcome(Runs.active_job(run), %{outcome: :succeeded, detail: "done alpha"})
+      assert Repo.get!(SubTask, alpha.id).done
+      assert_receive {:node_started, _run, %NodeExecution{node_key: "head", sub_task_id: beta_id}}
+      assert beta_id == beta.id
+
+      # Iteration 2 (Beta) needs input: parks the run mid-loop, still bound to Beta.
+      assert {:ok, %Run{status: :parked}} =
+               Runs.report_outcome(Runs.active_job(run), %{
+                 outcome: :needs_input,
+                 detail: "which?",
+                 session_id: "s1"
+               })
+
+      assert_receive {:run_parked, %Run{}}
+      run = Runs.get_run!(run.id)
+
+      # Resume (boot resume / needs-input resume / hand-back all share this {:reenter, _}
+      # path): the fresh attempt must stay bound to Beta — the node's LATEST execution —
+      # not fall back to Alpha, the same node's first-ever binding.
+      assert {:ok, %Run{status: :running}} = Runs.resume_run(run, resume_session: "s1")
+
+      assert_receive {:node_started, %Run{}, %NodeExecution{node_key: "head"} = execution}
+      assert execution.sub_task_id == beta.id
+      assert Runs.active_job(run).payload["vars"]["sub_task"] == "Beta"
+    end
+
+    test "a failed iteration that retries (the :retry inherit path) stays bound to the same sub_task" do
+      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n", head_max_retries: 1)
+      {:ok, run} = Runs.start_run(card, flow)
+      [alpha] = Repo.all(from st in SubTask, where: st.card_id == ^card.id)
+
+      assert {:ok, %Run{status: :running}} =
+               Runs.report_outcome(Runs.active_job(run), %{outcome: :failed, detail: "boom"})
+
+      retry_execution = Repo.one!(from e in NodeExecution, where: e.run_id == ^run.id and is_nil(e.outcome))
+      assert retry_execution.node_key == "head"
+      assert retry_execution.visit == 1
+      assert retry_execution.attempt == 2
+      assert retry_execution.sub_task_id == alpha.id
+      assert Runs.active_job(run).payload["vars"]["findings"] == "boom"
+    end
+
+    test "a plan with no task headings runs straight past the loop" do
+      %{flow: flow, card: card} = setup_foreach(plan: "# Prose only")
+      {:ok, run} = Runs.start_run(card, flow)
+
+      execution = Repo.one!(from e in NodeExecution, where: e.run_id == ^run.id)
+      assert execution.sub_task_id == nil
+
+      {:ok, _run} = Runs.report_outcome(Runs.active_job(run), %{outcome: :succeeded, detail: "ok"})
+
+      next = Repo.one!(from e in NodeExecution, where: e.run_id == ^run.id and is_nil(e.outcome))
+      assert next.node_key == "after"
     end
   end
 end

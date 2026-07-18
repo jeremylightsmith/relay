@@ -31,8 +31,8 @@ card, work it, and hand it back. See [`docs/agent-integration.md`](docs/agent-in
 
 ## Skill discipline
 
-This project ships skills in `.claude/skills/` and a pipeline of commands
-(`/brainstorm` → `/write-plan` → `/exec-plan` → `/finish`). They only help if you actually
+This project ships skills in `.claude/skills/` and a pipeline
+(`/brainstorm` → `/write-plan` → the Code flow → `/finish`). They only help if you actually
 use them.
 
 - **If there's even a reasonable chance a skill applies, invoke it (via the `Skill` tool)

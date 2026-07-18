@@ -31,6 +31,31 @@ defmodule RelayWeb.FlowEditorLiveTest do
     assert to =~ "/board/#{board.slug}/settings"
   end
 
+  test "opening a foreach flow does not corrupt the working copy with a spurious routing error", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, _flow} =
+      Flows.create_flow(board, %{
+        key: "loopy",
+        isolation: :shared_clean,
+        nodes: [
+          %{key: "work", type: :agent, run: "a", foreach: "card.sub_tasks"},
+          %{key: "after", type: :gate, run: "true"}
+        ],
+        edges: [
+          %{from: "start", to: "work"},
+          %{from: "work", to: "work", on: :succeeded, when: :foreach_remaining},
+          %{from: "work", to: "after", on: :succeeded, when: :foreach_exhausted},
+          %{from: "after", to: "done", on: :succeeded}
+        ]
+      })
+
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/loopy")
+
+    refute has_element?(view, "#flow-editor-errors")
+  end
+
   test "editing a trigger stage marks dirty and saves without a version bump", %{conn: conn, board: board} do
     {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
     code = Flows.get_flow!(board, "code")
@@ -371,7 +396,7 @@ defmodule RelayWeb.FlowEditorLiveTest do
   # helper: return the code flow's nodes with implement.run changed (as attr maps)
   defp bump_implement_run(flow) do
     Enum.map(flow.nodes, fn n ->
-      base = Map.take(n, [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes])
+      base = Map.take(n, [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes, :foreach])
       if n.key == "implement", do: %{base | run: "CUSTOM"}, else: base
     end)
   end

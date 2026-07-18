@@ -71,14 +71,15 @@ defmodule Relay.FlowsSeedTest do
     assert [%{key: "write_plan", type: :agent, run: "/write-plan {ref}", max_retries: 1}] = plan.nodes
 
     code = Flows.get_flow(ctx.board, "code")
-    assert length(code.nodes) == 14
-    assert length(code.edges) == 22
+    assert length(code.nodes) == 13
+    assert length(code.edges) == 21
+
+    # The next_task grep-gate is gone: "which task is next" is engine-derived now.
+    refute Enum.any?(code.nodes, &(&1.key == "next_task"))
+    assert %{foreach: "card.sub_tasks"} = Enum.find(code.nodes, &(&1.key == "implement"))
 
     implement = Enum.find(code.nodes, &(&1.key == "implement"))
     assert %{type: :agent, model: "sonnet", effort: "high"} = implement
-
-    assert %{type: :gate, run: "! grep -q -- '- \\[ \\]' plan.md"} =
-             Enum.find(code.nodes, &(&1.key == "next_task"))
 
     assert %{type: :gate, run: "mix precommit"} = Enum.find(code.nodes, &(&1.key == "precommit"))
     assert %{type: :shell} = Enum.find(code.nodes, &(&1.key == "merge"))
@@ -87,6 +88,39 @@ defmodule Relay.FlowsSeedTest do
              Enum.find(code.edges, &(&1.from == "spec_review" and &1.to == "implement"))
 
     assert %{on: :succeeded} = Enum.find(code.edges, &(&1.from == "merge" and &1.to == "done"))
+
+    # Two edges leave quality_review on the SAME outcome, split by their guard.
+    assert %{to: "implement", when: :foreach_remaining} =
+             Enum.find(code.edges, &(&1.from == "quality_review" and &1.when == :foreach_remaining))
+
+    assert %{to: "precommit", when: :foreach_exhausted} =
+             Enum.find(code.edges, &(&1.from == "quality_review" and &1.when == :foreach_exhausted))
+  end
+
+  test "the Code flow's agent nodes name their .claude/agents definition" do
+    ctx = library_board()
+    :ok = Flows.seed_default_flows!(ctx.board)
+    code = Flows.get_flow(ctx.board, "code")
+
+    mapping = %{
+      "implement" => "plan-implementer",
+      "spec_review" => "spec-reviewer",
+      "quality_review" => "quality-reviewer",
+      "final_review" => "final-reviewer",
+      "final_fix" => "final-fixer",
+      "smoke" => "smoke-tester",
+      "acceptance" => "acceptance-tester"
+    }
+
+    for {key, agent} <- mapping do
+      assert %{agent: ^agent} = Enum.find(code.nodes, &(&1.key == key)), "#{key} must name #{agent}"
+      assert File.exists?(Path.join([File.cwd!(), ".claude", "agents", "#{agent}.md"]))
+    end
+
+    # smoke_fix, acceptance_fix and post keep bare prompts — no agent file exists.
+    for key <- ["smoke_fix", "acceptance_fix", "post"] do
+      assert %{agent: nil} = Enum.find(code.nodes, &(&1.key == key))
+    end
   end
 
   test "is idempotent and never clobbers edits (AC 2)" do

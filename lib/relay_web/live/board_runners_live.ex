@@ -5,7 +5,7 @@ defmodule RelayWeb.BoardRunnersLive do
   (freshness dot + FRESH/STALE/GONE pill, capacity chips with used/total pips,
   WORKING NOW rows linking into the card drawer, dark streaming log tail), header
   summary chips, the at-risk note on a stale/gone runner with jobs, and the empty
-  state naming the real `bin/relay watch` start command.
+  state naming the real `bin/relay execute` start command.
 
   Data comes from `Relay.RunnerPresence` (beats) and `Relay.AgentLog` (feed lines,
   routed to the runner whose *latest beat* claimed the line's ref; unclaimed and
@@ -57,8 +57,9 @@ defmodule RelayWeb.BoardRunnersLive do
       <div id="runners-page" style="background:oklch(0.955 0.008 255);min-height:calc(100vh - 74px);">
         <div style="max-width:1120px;margin:0 auto;padding:30px 28px 72px 28px;">
           <%= if @runners == [] do %>
-            <%!-- Empty state — artboard lines ~139-157; command is bin/relay watch on
-                 purpose (spec §6: npx relay-runner doesn't exist yet). --%>
+            <%!-- Empty state — artboard lines ~139-157; command is bin/relay execute on
+                 purpose (spec §6: npx relay-runner doesn't exist yet; RLY-139 retired the
+                 legacy bin/relay watch board-runner this used to name). --%>
             <div
               id="runners-empty"
               style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:62vh;text-align:center;"
@@ -82,13 +83,13 @@ defmodule RelayWeb.BoardRunnersLive do
                   class="font-mono"
                   style="font-size:12.5px;color:oklch(0.85 0.02 255);"
                 >
-                  <span style="color:oklch(0.60 0.10 155);">$</span> bin/relay watch
+                  <span style="color:oklch(0.60 0.10 155);">$</span> bin/relay execute
                 </span>
                 <button
                   type="button"
                   id="copy-start-command"
                   phx-hook=".CopyCmd"
-                  data-command="bin/relay watch"
+                  data-command="bin/relay execute"
                   class="font-mono"
                   style="background:oklch(0.30 0.02 255);border:1px solid oklch(0.40 0.02 255);color:oklch(0.82 0.02 255);border-radius:7px;padding:6px 11px;font-size:11.5px;font-weight:600;"
                 >

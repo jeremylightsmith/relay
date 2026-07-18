@@ -26,6 +26,7 @@ defmodule Relay.Runs do
   alias Relay.Cards
   alias Relay.Repo
   alias Relay.Runs.Engine
+  alias Relay.Runs.PlanTasks
   alias Relay.Runs.RunServer
   alias Schemas.Board
   alias Schemas.Card
@@ -35,6 +36,7 @@ defmodule Relay.Runs do
   alias Schemas.NodeJob
   alias Schemas.Run
   alias Schemas.Stage
+  alias Schemas.SubTask
 
   @pubsub Relay.PubSub
   @append_index 1_000_000
@@ -299,11 +301,14 @@ defmodule Relay.Runs do
   end
 
   defp do_start_run(card, flow, start_target, context) do
+    :ok = maybe_seed_sub_tasks(card, flow)
+
     result =
       Repo.transaction(fn ->
         run = insert_run(card, flow, start_target, context)
-        execution = insert_execution!(run, start_target, 1, 1)
-        job = insert_job!(run, execution, build_payload(run, flow, start_target, []))
+        sub_task_id = if start_target == foreach_node_key(flow), do: next_sub_task_id(run)
+        execution = insert_execution!(run, start_target, 1, 1, sub_task_id)
+        job = insert_job!(run, execution, build_payload(run, flow, start_target, sub_task_id: sub_task_id))
         {run, execution, job}
       end)
 
@@ -330,6 +335,21 @@ defmodule Relay.Runs do
 
       {:error, %Changeset{errors: errors}} ->
         if Keyword.has_key?(errors, :card_id), do: {:error, :active_run_exists}, else: {:error, :invalid}
+    end
+  end
+
+  # A `foreach` flow iterates the card's sub_tasks, so the server materializes them
+  # from the card's plan at RUN START (never on re-entry — that would wipe
+  # done-state). A card whose sub_tasks were already written (by the Plan stage, or
+  # by a human) is left alone: the authored list wins over the parsed one.
+  defp maybe_seed_sub_tasks(card, flow) do
+    with true <- Enum.any?(flow.nodes, &(not is_nil(&1.foreach))),
+         false <- Repo.exists?(from st in SubTask, where: st.card_id == ^card.id),
+         [_ | _] = tasks <- PlanTasks.parse(card.plan) do
+      {:ok, _card} = Cards.set_sub_tasks(card, tasks)
+      :ok
+    else
+      _no_seed -> :ok
     end
   end
 
@@ -653,8 +673,42 @@ defmodule Relay.Runs do
   end
 
   @doc false
-  def insert_execution!(%Run{} = run, node_key, visit, attempt) do
-    %NodeExecution{run_id: run.id, node_key: node_key, visit: visit, attempt: attempt, started_at: now()}
+  def foreach_node_key(%Flow{nodes: nodes}) do
+    case Enum.find(nodes, &(not is_nil(&1.foreach))) do
+      nil -> nil
+      node -> node.key
+    end
+  end
+
+  # "Which task is next" is DERIVED, never persisted: the first sub_task in
+  # position order that isn't done. Done-state already lives durably in Postgres,
+  # so a crashed-and-resumed run recomputes the same answer with no cursor.
+  @doc false
+  def next_sub_task_id(%Run{card_id: card_id}) do
+    Repo.one(
+      from st in SubTask,
+        where: st.card_id == ^card_id and st.done == false,
+        order_by: [asc: st.position, asc: st.id],
+        limit: 1,
+        select: st.id
+    )
+  end
+
+  @doc false
+  def remaining_sub_tasks(%Run{card_id: card_id}) do
+    Repo.aggregate(from(st in SubTask, where: st.card_id == ^card_id and st.done == false), :count)
+  end
+
+  @doc false
+  def insert_execution!(%Run{} = run, node_key, visit, attempt, sub_task_id \\ nil) do
+    %NodeExecution{
+      run_id: run.id,
+      node_key: node_key,
+      visit: visit,
+      attempt: attempt,
+      sub_task_id: sub_task_id,
+      started_at: now()
+    }
     |> NodeExecution.changeset()
     |> Repo.insert!()
   end
@@ -763,16 +817,26 @@ defmodule Relay.Runs do
         "ref" => Cards.ref(board, card),
         "branch" => card.branch || default_branch(board, card),
         "prior_detail" => opts[:prior_detail],
-        "findings" => opts[:findings]
+        "findings" => opts[:findings],
+        "sub_task" => sub_task_title(opts[:sub_task_id])
       })
 
     %{
       "run" => node.run,
       "node_type" => Atom.to_string(node.type),
+      "agent" => node.agent,
       "isolation" => Atom.to_string(flow.isolation),
       "resume_session" => opts[:resume_session],
       "vars" => vars
     }
+  end
+
+  # {sub_task} lets a foreach node's prompt name the exact task it is working
+  # instead of saying "the next unchecked one".
+  defp sub_task_title(nil), do: nil
+
+  defp sub_task_title(sub_task_id) do
+    Repo.one(from st in SubTask, where: st.id == ^sub_task_id, select: st.title)
   end
 
   @doc false

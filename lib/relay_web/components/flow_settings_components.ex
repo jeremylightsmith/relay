@@ -437,20 +437,21 @@ defmodule RelayWeb.FlowSettingsComponents do
   defp confirm_title(%Flow{} = flow), do: "Turn off the #{flow_name(flow)} flow?"
 
   # Enable body = the artboard's behavioral line (minus the version phrase,
-  # RLY-152) + the inlined double-dispatch cutover ritual (spec interview #3).
+  # RLY-152) + the inlined runner-readiness ritual (spec interview #3). RLY-139
+  # retired the legacy bin/relay watch dispatcher (and relay_config.json with it),
+  # so the risk on enable is no longer double dispatch — it's a gap: no runner
+  # advertising capacity means cards queue with nothing to pick them up.
   defp confirm_body(%Flow{enabled: false} = flow) do
     "New cards reaching #{pulls_name(flow)} will be handed to the AI automatically. " <>
       "Cards already sitting there won't move until you say so. Before turning this on, " <>
-      "make sure the legacy watcher no longer serves this stage: stop bin/relay watch, " <>
-      "remove this stage's entry from relay_config.json, and restart it. While both are " <>
-      "configured, the old watcher and the server engine will race for the same cards " <>
-      "(double dispatch)."
+      "make sure a runner (bin/relay execute) is connected and advertising capacity — " <>
+      "with none connected, cards will queue with no dispatcher to run them."
   end
 
   defp confirm_body(%Flow{} = flow) do
     "Cards reaching #{pulls_name(flow)} will stop being picked up and wait for a human " <>
-      "instead. Runs already in flight finish normally. To hand the stage back to the " <>
-      "legacy watcher, re-add this stage's entry to relay_config.json and restart it."
+      "instead. Runs already in flight finish normally. Turn the flow back on any time " <>
+      "to resume automatic dispatch."
   end
 
   defp confirm_cta(%Flow{enabled: false} = flow), do: "Turn on #{flow_name(flow)}"

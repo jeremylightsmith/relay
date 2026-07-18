@@ -15,7 +15,6 @@ exits non-zero.
 | `bin/relay board` | The board: stages with their cards |
 | `bin/relay card RLY-12` | One card: description, plan, branch, timeline |
 | `bin/relay create "Fix login" --stage Backlog` | Create a card (optional `--stage`/`--description`/`--tag`) |
-| `bin/relay pull` | (advisory) the next ready card per the config |
 | `bin/relay comment RLY-12 "…"` | Post a comment (as Relay AI) |
 | `bin/relay move RLY-12 Code` | Move to a stage by name |
 | `bin/relay status RLY-12 working` | Set status (`ready`, `working`, `needs_input`, `in_review`) |

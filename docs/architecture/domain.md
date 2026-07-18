@@ -105,6 +105,15 @@ sharing behavior.
   executor's own live capacity is the final backstop (YAGNI: no multi-board reservation
   yet). `Relay.Runs.SchedulerSupervisor.start_all/0` boot-starts one scheduler per board
   only when `:runs_auto_start` is on (dev/prod; off in test).
+  **Budget accounting is per `foreach` iteration; the breaker is global (RLY-139).** Inside a
+  `foreach` loop, `max_loops`, `max_retries` and the per-node visit cap are counted over
+  the history filtered to the current iteration's `sub_task_id`, so `max_loops: 3` means
+  "3 laps per task" and a churny early task cannot spend a later task's budget. The
+  failure-signature circuit breaker deliberately keeps the FULL, unfiltered history:
+  per-iteration budgets exist to bound *productive* churn, while the breaker catches
+  *unproductive* repetition — the identical failure recurring across task boundaries is
+  more alarming, not less. Outside a `foreach` there is no `sub_task_id`, the filter is
+  the identity function, and every budget is whole-run exactly as before (RLY-139).
 - **Cards** — the card lifecycle: create/edit/move/archive, status (`working`,
   `needs_input`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject, needs-input
   questions. Card state × stage validity is governed by

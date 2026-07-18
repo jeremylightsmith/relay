@@ -1,33 +1,43 @@
 # Runbook: cutting a stage over to an engine-driven flow
 
-Moves one pipeline stage (`<Stage>`) off the legacy `relay watch` dispatcher and onto the
-server-side scheduler + node-job engine (ADR 0006). Written once; W11 cut over **Spec**, W12
-cuts over **Plan**, W13 cuts over **Code** — substitute `<Stage>` and its `relay_config.json`
-entry throughout.
+Moves one pipeline stage (`<Stage>`) onto the server-side scheduler + node-job engine
+(ADR 0006). Written once; W11 cut over **Spec**, W12 cut over **Plan**, W13 cut over **Code** —
+substitute `<Stage>` throughout. All three stages are now cut over; the legacy `relay watch`
+dispatcher and `relay_config.json` that Spec's and Plan's rituals moved a stage off of were
+deleted in the Code cutover PR (RLY-139) — see "Rollback" below for what that means for a
+revert.
 
 ## Why the order is not negotiable
 
-Two dispatchers must never pull the same cards. The watcher loads `relay_config.json` **once at
-startup** (`load_config()` at `bin/relay:566`, called from `cmd_watch`), so removing a stage from
-the file without restarting the watcher leaves it still pulling that stage. And the server-side
-flow is inert until deployed. So:
+**For Spec and Plan (RLY-136, RLY-138), while `relay watch` still ran:** two dispatchers must
+never pull the same cards. The watcher loaded `relay_config.json` **once at startup**, so
+removing a stage from the file without restarting the watcher left it still pulling that stage.
+And the server-side flow is inert until deployed. So enabling the flow before restarting the
+watcher meant both dispatchers on the same cards (double dispatch); restarting the watcher
+before the deploy was live meant a stage nothing worked.
 
-- **Enabling the flow server-side before restarting the watcher** → both dispatchers on the same
-  cards (double dispatch — the exact failure this ritual prevents).
-- **Restarting the watcher before the deploy is live** → a stage nothing works.
+**For Code (RLY-139), with the watcher gone:** the hazard is no longer double dispatch — there
+is only one dispatcher left. It is a **gap**: the flow must be enabled only once the deploy is
+live *and* an executor is advertising `exclusive` capacity, or *Plan:Done* cards sit with no
+dispatcher at all (the same "a stage nothing works" failure, from the opposite direction).
 
 ## The ritual (in order)
 
 1. **Merge and deploy.** The flow definition and any engine fix must be live server-side before
    anything else changes. Confirm the deploy is healthy.
-2. **On the runner machine: pull ROOT, then restart `relay watch`** — with `<Stage>`'s entry
-   already removed from `relay_config.json` (that removal ships in the same PR). The restart is
-   what makes the watcher forget the stage; the file edit alone does nothing until restart.
+2. **Code only (RLY-139):** there is no watcher left to restart — `relay watch`,
+   `relay_config.json`, `/exec-plan` and `execute-plan.js` were deleted in the cutover PR.
+   Confirm on the runner machine that no old `relay watch` process is still alive
+   (`pgrep -fl "relay watch"` → nothing); a stale one from before the deploy would still be
+   holding the retired config in memory and would double-dispatch Code cards.
 3. **Only now, enable the flow** in the board's **Settings › Flows** (RLY-142's toggle, which
-   already shows the double-dispatch warning dialog). No CLI or mix task — the UI toggle is the
-   only enable path.
-4. **Start / confirm `relay execute`** is connected and advertising capacity for the flow's
-   isolation class (`shared_clean` for Spec/Plan, `exclusive` for Code).
+   shows a runner-readiness warning before turning on: make sure a runner (`bin/relay execute`)
+   is connected and advertising capacity, or cards will queue with no dispatcher to pick them
+   up — RLY-139 replaced the toggle's original double-dispatch warning with this, since the
+   legacy watcher it warned about is gone). No CLI or mix task — the UI toggle is the only
+   enable path.
+4. **Start / confirm `relay execute`** is connected and advertising `exclusive` capacity — the
+   Code flow's isolation class.
 
    **Prerequisite this step depends on, not yet shipped by any binary:** `Relay.Runs.Capacity`
    (what the scheduler reads to decide whether to dispatch) is fed from exactly one place — the
@@ -68,12 +78,28 @@ flow is inert until deployed. So:
   route. Do not use the runners view to judge this cutover (tracked as B2, a follow-up). Use the
   card's run panel instead.
 
+**Code dogfood (RLY-139 acceptance 11, human-verify):** after the ritual, move one real
+card from *Plan:Done* and watch its drawer Run tab through the run — the card should
+reach *Review* with a merged PR, and the Run tab should have shown live which task each
+`implement` node was working and which verdict each review returned. This cannot be
+checked in-suite (it needs a real `claude`, a real executor and a real deploy);
+`test/relay/runs/code_flow_e2e_test.exs` is its in-suite proxy.
+
 ## Rollback
 
-1. Disable the flow in **Settings › Flows**.
-2. Restore `<Stage>`'s entry in `relay_config.json`.
-3. Restart `relay watch` so it reloads the restored config.
+For **Spec** and **Plan**, rollback is: disable the flow in Settings › Flows, restore the
+stage's `relay_config.json` entry, restart `relay watch`.
 
-**Not rolled back:** an in-flight run's `Run` / `NodeExecution` rows persist — cancel the run from
-the card's run panel if you need it gone. Rolling back the flow does not retroactively unwind a
-run already in progress.
+For **Code (RLY-139) there is no legacy path left to fall back to** — the cutover PR
+deleted `relay watch`, `relay_config.json`, `/exec-plan` and `execute-plan.js`. The only
+lever is a revert:
+
+1. Disable the `code` flow in **Settings › Flows** (stops new dispatch immediately).
+2. `git revert <SHA>` — the pre-cutover commit is **646e7b6**
+   (`rly 158 w18 create a flow from scratch (#119)`), the last commit on `main` before
+   RLY-139 landed. Reverting *to* that state restores the legacy runner files.
+3. Deploy the revert, then work Code cards by hand (`/write-plan` output + a human at the
+   keyboard) until the engine path is fixed.
+
+**Not rolled back:** an in-flight run's `Run` / `NodeExecution` rows persist — cancel the
+run from the card's run panel if you need it gone.

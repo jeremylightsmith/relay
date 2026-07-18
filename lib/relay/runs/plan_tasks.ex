@@ -1,0 +1,23 @@
+defmodule Relay.Runs.PlanTasks do
+  @moduledoc """
+  Parses a card's `plan` into the sub_task list a `foreach` node iterates
+  (W13 / RLY-139). The format is the one `/write-plan` already mandates:
+  `### Task N: <name>` headings, in document order, title = the heading text.
+  Pure and total — a plan with no headings yields `[]`, which makes the first
+  `foreach` guard evaluate `:foreach_exhausted` and the run proceed straight
+  past the loop rather than iterate on nothing.
+  """
+
+  # Anchored at line start (multiline) so a "### Task 1:" mentioned mid-sentence
+  # in prose is not mistaken for a heading.
+  @heading ~r/^###[ \t]+Task[ \t]+\d+[ \t]*:[ \t]*(?<title>\S.*?)[ \t]*$/m
+
+  @spec parse(String.t() | nil) :: [%{title: String.t()}]
+  def parse(nil), do: []
+
+  def parse(plan) when is_binary(plan) do
+    @heading
+    |> Regex.scan(plan, capture: :all_names)
+    |> Enum.map(fn [title] -> %{title: title} end)
+  end
+end
