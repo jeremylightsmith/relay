@@ -1541,6 +1541,58 @@ class RunNodeJobTest(unittest.TestCase):
         _, _, sha, _ = relay.run_node_job(job, "/tmp/wt", self.control)
         self.assertIsNone(sha)
 
+    def test_shell_job_expands_ref_branch_relay_and_url_placeholders(self):
+        """The server stores `run` raw and only resolves `vars` (Runs.build_payload); the
+        executor is the only place {ref}/{branch}/... can be expanded. `relay` and `url`
+        are not server-sent vars at all, so run_node_job must supply them itself, the same
+        way work()'s vars dict does for `relay watch`."""
+        seen = {}
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None: (
+            seen.__setitem__("cmd", cmd) or True)
+        old_url = os.environ.get("RELAY_URL")
+        os.environ["RELAY_URL"] = "https://relay.example"
+        self.addCleanup(lambda: (
+            os.environ.__setitem__("RELAY_URL", old_url) if old_url is not None
+            else os.environ.pop("RELAY_URL", None)))
+        job = {"id": "nj-6", "run_id": "r1", "node_type": "shell",
+               "run": "git checkout -B {branch} && {relay} card {ref} --json > out; "
+                      "curl {url}",
+               "isolation": "shared_clean",
+               "vars": {"ref": "RLY-6", "branch": "rly-6-do-thing"}}
+        relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertEqual(
+            seen["cmd"],
+            "git checkout -B rly-6-do-thing && " + relay.HERE
+            + " card RLY-6 --json > out; curl https://relay.example")
+
+    def test_shell_job_does_not_splice_none_for_nil_vars(self):
+        """build_payload puts prior_detail/findings in vars as nil (-> None in Python)
+        when absent; render()'s str(v) would splice the literal string "None" into the
+        command if those keys weren't filtered out first."""
+        seen = {}
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None: (
+            seen.__setitem__("cmd", cmd) or True)
+        job = {"id": "nj-7", "run_id": "r1", "node_type": "shell", "run": "echo {ref}",
+               "isolation": "shared_clean",
+               "vars": {"ref": "RLY-7", "prior_detail": None, "findings": None}}
+        relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertEqual(seen["cmd"], "echo RLY-7")
+        self.assertNotIn("None", seen["cmd"])
+
+    def test_agent_job_expands_placeholders_in_the_prompt(self):
+        seen = {}
+
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None):
+            seen["prompt"] = prompt
+            return True, "sess-1"
+
+        relay._stream_claude_job = fake_stream
+        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        job = {"id": "nj-8", "run_id": "r1", "node_type": "agent", "run": "/brainstorm {ref}",
+               "isolation": "exclusive", "vars": {"ref": "RLY-8"}}
+        relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertEqual(seen["prompt"], "/brainstorm RLY-8")
+
 
 class JobControlTest(unittest.TestCase):
     def test_cancel_terminates_a_registered_running_proc(self):

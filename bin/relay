@@ -1085,9 +1085,21 @@ def determine_agent_outcome(job, ok, outcome_path):
 def run_node_job(job, slot_path, control):
     """Run one claimed node-job in `slot_path`; return (outcome, detail, git_sha, session_id).
     Reuses the streaming primitives, tagged per job. Does NOT report — the caller POSTs the
-    outcome (§6) and acts on the run_state (§3)."""
+    outcome (§6) and acts on the run_state (§3).
+
+    Placeholder expansion ({ref}/{branch}/{relay}/... ) stays executor-side per
+    Schemas.Flow.Node/build_payload's contract: the server stores `run` raw and only
+    resolves `vars`. `relay`/`url` are not server-sent vars at all — supply them here,
+    same as `work()`'s vars dict does for `relay watch`. `is not None` matters:
+    build_payload puts prior_detail/findings in vars as `nil` (-> None) when absent, and
+    a naive str(v) would splice the literal string "None" into the command."""
     ref = (job.get("vars") or {}).get("ref") or job["id"]
     tag = f"[{ref}] "
+    raw_vars = dict(job.get("vars") or {})
+    raw_vars.setdefault("relay", HERE)
+    raw_vars.setdefault("url", os.environ.get("RELAY_URL", ""))
+    vars = {k: v for k, v in raw_vars.items() if v is not None}
+    cmd = render(job["run"], vars)
     session_id = None
     if job.get("node_type") == "agent":
         # The outcome file must live OUTSIDE the checkout: reset_worktree() salvages any
@@ -1098,14 +1110,14 @@ def run_node_job(job, slot_path, control):
         outcome_path = os.path.join(outcome_dir, "outcome.json")
         try:
             ok, session_id = _stream_claude_job(
-                job["run"], cwd=slot_path, tag=tag, session_id=job.get("resume_session"),
+                cmd, cwd=slot_path, tag=tag, session_id=job.get("resume_session"),
                 outcome_path=outcome_path, on_proc=control.register)
             outcome, detail = determine_agent_outcome(job, ok, outcome_path)
         finally:
             shutil.rmtree(outcome_dir, ignore_errors=True)
     else:  # shell | gate
         tail = []
-        ok = _stream_shell(job["run"], slot_path, tag, sink=tail, on_proc=control.register)
+        ok = _stream_shell(cmd, slot_path, tag, sink=tail, on_proc=control.register)
         outcome = "succeeded" if ok else "failed"
         detail = "" if ok else "\n".join(tail).strip()
     sha_proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=slot_path,
