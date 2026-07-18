@@ -133,3 +133,52 @@ in Task 7 is a bug — the Consumes/Produces names must match exactly). Fix inli
 the plan to the card (`./bin/relay plan <ref> @<tmpfile>`), summarize the task breakdown, and
 point the user to `/exec-plan <ref>`. Do NOT launch `/exec-plan` yourself — that's a separate,
 human-gated step.
+
+## Headless / runner use (no human to dialogue with)
+
+When the board's flow engine runs this command as the `write_plan` node there is no human in
+the loop. The node's `run` is a bare `/write-plan {ref}`, so every operational rule lives here.
+
+- **The work is pre-authorized.** Proceed without asking for confirmation. Read the card, write
+  the plan, stop.
+- **Blast radius: do not touch git, do not touch other cards.** No branches, no commits, no
+  pushes, no stage moves. The only write you make is the plan on the card you were given
+  (`./bin/relay plan <ref> @<tmpfile>`).
+- **Terminal STOP.** When the plan is on the card, you are done — stop. Explicitly do **NOT**
+  run `/exec-plan`, and do not start implementing. The interactive steps above say approval is
+  "a separate, human-gated step"; headless this is a hard stop, because there is no human
+  standing at that gate to be asked.
+- **No approved spec → raise `needs-input`, never a silent stop.** Step 1 tells the interactive
+  path to stop and tell the user. Headless there is no user to tell, and a silent stop reads to
+  the engine as `succeeded` — the card would land on `Plan:Done` carrying no plan, and the Code
+  flow would then fail two stages downstream on `test -s plan.md` with a confusing error. So if
+  the card's `spec` field is empty or missing, park the card where the problem actually is:
+
+      cat > /tmp/questions.json <<'JSON'
+      [
+        {
+          "prompt": "**No approved spec.** This card has no `spec`, so there is nothing to plan from. How should I proceed?",
+          "options": [
+            "Run `/brainstorm <ref>` to produce a spec first, then re-run `/write-plan <ref>`. — RECOMMENDED",
+            "Paste the spec here and I'll plan directly from it."
+          ],
+          "allow_text": true
+        }
+      ]
+      JSON
+      ./bin/relay needs-input <ref> --questions @/tmp/questions.json
+
+  Then stop. **Always the structured `--questions @<tmpfile>` JSON-array form** of
+  `{prompt, options, allow_text}` objects — never a hand-numbered prose string. The drawer
+  renders its one-question-at-a-time stepper only for the structured form; a string degrades to
+  a wall of text (RLY-109).
+
+  The engine **parks** a run on the `needs_input` outcome without needing an edge for it, so the
+  `plan` flow's single `write_plan → done on: :succeeded` edge is correct as-is and needs no
+  change.
+- **CHANGES REQUESTED / delta re-plan is already headless-safe** — it reads the rejection off
+  the card, not from a human. Follow it exactly as written above: plan **only the delta**. Do
+  not re-plan greenfield just because no human is present to confirm.
+- **Do not raise `needs-input` for anything else.** Unlike `/brainstorm`, planning is not a
+  dialogue: the spec is the approved input and the plan is a mechanical elaboration of it. An
+  empty spec is the one genuine blocker.
