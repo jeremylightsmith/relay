@@ -962,11 +962,29 @@ class AgentOutcomeContractTest(unittest.TestCase):
         self.assertEqual(relay.determine_agent_outcome(job, True, path),
                          ("partial", "half done"))
 
-    def test_exit_code_fallback(self):
+    def test_no_outcome_file_is_failed_even_on_a_clean_exit(self):
+        """An agent node must DECLARE its verdict. Exiting 0 without writing
+        $RELAY_NODE_OUTCOME used to be reported `succeeded`, which let a node that produced
+        nothing route past its gate — the RLY-159 dogfood shipped a card to Spec:Review with
+        an empty spec that way, and the same hole would let a silent review approve a merge.
+        No file (and no needs-input) is now `failed`, whatever the exit code."""
         relay.get_card = lambda ref: {"status": "working"}
         job = {"vars": {"ref": "RLY-1"}}
-        self.assertEqual(relay.determine_agent_outcome(job, True, "/nope.json")[0], "succeeded")
+        outcome, detail = relay.determine_agent_outcome(job, True, "/nope.json")
+        self.assertEqual(outcome, "failed")
+        self.assertIn("did not write", detail)
         self.assertEqual(relay.determine_agent_outcome(job, False, "/nope.json")[0], "failed")
+
+    def test_a_declared_success_is_still_honored(self):
+        import tempfile
+        relay.get_card = lambda ref: {"status": "working"}
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            json.dump({"outcome": "succeeded", "detail": "wrote the spec"}, f)
+        self.addCleanup(os.remove, path)
+        job = {"vars": {"ref": "RLY-1"}}
+        self.assertEqual(relay.determine_agent_outcome(job, True, path),
+                         ("succeeded", "wrote the spec"))
 
     def test_a_malformed_outcome_file_is_reported_as_failed_not_silently_succeeded(self):
         """$RELAY_NODE_OUTCOME is the only way a node signals `partial`; if the file an
@@ -1175,7 +1193,37 @@ class RunNodeJobTest(unittest.TestCase):
         job = {"id": "nj-8", "run_id": "r1", "node_type": "agent", "run": "/brainstorm {ref}",
                "isolation": "exclusive", "vars": {"ref": "RLY-8"}}
         relay.run_node_job(job, "/tmp/wt", self.control)
-        self.assertEqual(seen["prompt"], "/brainstorm RLY-8")
+        self.assertTrue(seen["prompt"].startswith("/brainstorm RLY-8"))
+
+    def test_every_agent_prompt_carries_the_outcome_contract(self):
+        """The requirement to declare an outcome must not depend on each flow's node prompt
+        (or each skill author) remembering it — the executor appends it to EVERY agent node,
+        so a node that says nothing about outcomes still gets told. Shell nodes are exempt:
+        their exit code IS an unambiguous verdict."""
+        seen = {}
+
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None):
+            seen["prompt"] = prompt
+            return True, "sess-1"
+
+        def fake_shell(cmd, cwd, tag, sink=None, on_proc=None):
+            seen["cmd"] = cmd
+            return True
+
+        relay._stream_claude_job = fake_stream
+        relay._stream_shell = fake_shell
+        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+
+        agent_job = {"id": "nj-9", "run_id": "r1", "node_type": "agent", "run": "review it",
+                     "isolation": "exclusive", "vars": {"ref": "RLY-9"}}
+        relay.run_node_job(agent_job, "/tmp/wt", self.control)
+        self.assertIn("RELAY_NODE_OUTCOME", seen["prompt"])
+        self.assertIn("succeeded", seen["prompt"])
+
+        shell_job = {"id": "nj-10", "run_id": "r1", "node_type": "shell", "run": "true",
+                     "isolation": "exclusive", "vars": {"ref": "RLY-10"}}
+        relay.run_node_job(shell_job, "/tmp/wt", self.control)
+        self.assertNotIn("RELAY_NODE_OUTCOME", seen["cmd"])
 
 
 class JobControlTest(unittest.TestCase):

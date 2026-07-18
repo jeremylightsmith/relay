@@ -816,7 +816,12 @@ def determine_agent_outcome(job, ok, outcome_path):
       1. re-fetch the card — status needs_input ⇒ needs_input (exactly as work() detects today);
       2. else an outcome file at $RELAY_NODE_OUTCOME supplies {outcome, detail} — the only
          way a node signals `partial`;
-      3. else exit code: 0 ⇒ succeeded, non-zero ⇒ failed."""
+      3. else NO outcome file ⇒ failed. An agent node must DECLARE its verdict: a `claude -p`
+         that exits 0 having written nothing is indistinguishable from one that did the work,
+         so treating it as `succeeded` lets a node route past its own gate having produced
+         nothing (RLY-163 — the RLY-159 dogfood landed a card in Spec:Review with an empty
+         spec exactly this way, and the same hole would let a silent review reach `merge`).
+         Rule 1 still covers the legitimate "I stopped to ask a human" case."""
     ref = (job.get("vars") or {}).get("ref")
     if ref:
         card = get_card(ref)
@@ -836,7 +841,31 @@ def determine_agent_outcome(job, ok, outcome_path):
             log(f"  ⚠ {ref}: outcome file at {outcome_path} is unreadable/malformed: {e}",
                 ref=ref, kind="error")
             return "failed", f"outcome file at {outcome_path} is unreadable/malformed: {e}"
-    return ("succeeded", "") if ok else ("failed", "agent exited non-zero")
+    if ok:
+        return ("failed",
+                f"agent exited 0 but did not write an outcome to $RELAY_NODE_OUTCOME "
+                f"({outcome_path}) and did not raise needs-input — a node must declare its "
+                f"verdict, so this is not treated as success")
+    return ("failed", "agent exited non-zero")
+
+
+# Appended to EVERY agent node's prompt. The requirement to declare an outcome must not
+# depend on each flow's node prompt or each skill author remembering it — determine_agent_outcome
+# now fails a node that writes nothing, so a node never told about the file would always fail.
+# Shell/gate nodes are exempt: their exit code is already an unambiguous verdict.
+OUTCOME_CONTRACT = """
+
+---
+BEFORE YOU FINISH — declare your outcome (required). Write JSON to the file named by the
+$RELAY_NODE_OUTCOME environment variable:
+
+    {"outcome": "succeeded|failed|partial", "detail": "one line on what you did or what is wrong"}
+
+`detail` is handed to the next node as {prior.detail}, so make it useful — for a review, the
+findings; for a failure, why. If you need a human instead, run `relay needs-input <ref> --questions @<file>`
+and stop; that parks the run and you need not write this file. Exiting without either is
+reported as `failed`, because a node that declares nothing cannot be distinguished from one
+that did nothing."""
 
 
 def run_node_job(job, slot_path, control):
@@ -867,7 +896,8 @@ def run_node_job(job, slot_path, control):
         outcome_path = os.path.join(outcome_dir, "outcome.json")
         try:
             ok, session_id = _stream_claude_job(
-                cmd, cwd=slot_path, tag=tag, session_id=job.get("resume_session"),
+                cmd + OUTCOME_CONTRACT, cwd=slot_path, tag=tag,
+                session_id=job.get("resume_session"),
                 outcome_path=outcome_path, on_proc=control.register, agent=job.get("agent"))
             outcome, detail = determine_agent_outcome(job, ok, outcome_path)
         finally:
