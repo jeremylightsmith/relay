@@ -56,5 +56,43 @@ Each tick (`poll_interval`, default 45s, plus a wake on any job finishing):
 Known sharp edges this design accepts (and ADR 0006 removes): stage-level granularity
 only, the `tmp/exec-plan-status` scratch-file merge gate, and prompt-enforced rules.
 
+## Node-job transport (RLY-134, ADR 0006 card 04)
+
+The first slice of ADR 0006's target shape: a pure REST transport on top of the runs engine
+(W5, `Relay.Runs`), board-key auth like the rest of `/api`, no scheduling/dispatch policy —
+that stays server-side.
+
+- `POST /api/node-jobs/claim` (`RelayWeb.Api.NodeJobController.claim/2`) — upserts the
+  advertising executor (a claim doubles as a liveness touch, via
+  `Relay.Runs.upsert_executor/2`) then atomically claims the oldest eligible `queued`
+  `NodeJob` (`Relay.Runs.claim_next_job/1`, `SELECT … FOR UPDATE SKIP LOCKED`). Long-polls
+  up to ~25s on the `board:<id>:runs` topic when nothing is immediately claimable (`?wait=0`
+  short-polls instead); serialises the raw `run` + resolved `vars` W5 already stored, never
+  a worktree path.
+- `POST /api/node-jobs/:id/outcome` (`.outcome/2`) — `Relay.Runs.get_claimed_job/2` (board-
+  scoped, 409 `conflict` if the job isn't `claimed`/`running`), then
+  `Relay.Runs.report_outcome/2` against the closed outcome set (422 `unknown_outcome`
+  otherwise).
+- **Executor heartbeat superset.** `BoardController.heartbeat/2` gained a third, independent,
+  additive branch: a beat carrying `name` + `capacity` (on top of the RLY-141 watcher fields)
+  calls `Relay.Runs.upsert_executor/2`, writing/refreshing a durable `Schemas.Executor` row
+  (`{board_id, name}`, capacity map, `last_heartbeat`). It still calls
+  `Relay.RunnerPresence.beat/2` exactly as before — the Runners view (RLY-141) is unchanged.
+  A legacy or capacity-less beat never touches the `Executor` table.
+- **Executor liveness + reclaim.** `Relay.Runs.ExecutorReaper` (supervised, see
+  [`runtime.md`](runtime.md)) periodically calls `Relay.Runs.reclaim_stale_executors/0`:
+  a stale executor's (`Relay.Runs.executor_stale?/2`) in-flight `shared_clean` jobs go back
+  to `queued`; its `exclusive` runs are parked (`Relay.Runs.park_for_reclaim/1`,
+  `parked_reason: :executor_gone`) rather than requeued, since exclusive runs are pinned to
+  one executor's worktree.
+- **Log `node_job_id` convergence.** `POST /api/board/logs` entries may carry an optional
+  `node_job_id` alongside `run_id` — same nullable-string shape, not an FK. It rides through
+  `Relay.AgentLog.stamp/1` → `Relay.Activity.LogSink.row/2` → `activities.node_job_id`, kept
+  for W6's run panel to key log lines off a specific node-job.
+- The full outcome-file contract (`RELAY_OUTCOME_PATH`) executors must honor is documented in
+  [`../agent-integration.md`](../agent-integration.md#node-job-protocol-adr-0006).
+
 ---
-*Sources of truth: `bin/relay`, `relay_config.json`, `bin/test_relay.py`.*
+*Sources of truth: `bin/relay`, `relay_config.json`, `bin/test_relay.py`,
+`lib/relay_web/controllers/api/node_job_controller.ex`, `lib/relay/runs.ex`,
+`lib/relay_web/controllers/api/board_controller.ex`.*

@@ -88,6 +88,42 @@ not silently fall back to paid API). Working one card at a time keeps this manag
 
 ---
 
+## Node-job protocol (ADR 0006)
+
+`bin/relay watch` above is *today's* runner — it reasons about stages itself. ADR 0006's
+target shape moves that reasoning server-side (`Relay.Runs`, the flow engine) and leaves a
+**thin executor** on the dev machine that only claims node-jobs, runs them, and reports
+outcomes. This card (RLY-134) adds that transport, on top of the same board-key `/api`
+(ADR 0001 — no parallel surface):
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/node-jobs/claim` | Claim the next eligible node-job. Request: `{executor: {name, host, interval}, capacity: {shared_clean, exclusive}}`. Response: `200` with `{id, ref, node_id, node_type, run, isolation, resume_session, vars}` (no worktree path — that's executor-local), or `204` when nothing is claimable (the endpoint long-polls ~25s before returning `204`; pass `?wait=0` to short-poll instead). |
+| `POST /api/node-jobs/:id/outcome` | Report a job's result. Request: `{outcome, detail, git_sha, session_id}`, `outcome` one of `succeeded \| failed \| partial \| needs_input`. `422 unknown_outcome` for any other value; `409 conflict` if the job is no longer held by a live claim. |
+| `POST /api/board/heartbeat` | An **executor beat** is a superset of the RLY-141 watcher heartbeat — it adds `name` + `capacity` (e.g. `{"shared_clean": 3, "exclusive": 1}`). A `name` + `capacity` beat upserts a durable `Executor` row *and* still feeds `Relay.RunnerPresence`, so the Runners view is unchanged. A legacy or capacity-less beat is inert on this new path (additive, never subtractive). |
+| `POST /api/board/logs` | Each entry may now carry an optional `node_job_id` (alongside the existing `run_id`), identifying the node-job that emitted the line. |
+
+### The `RELAY_OUTCOME_PATH` contract
+
+Before running an agent node, the executor sets `RELAY_OUTCOME_PATH` to a **per-job** temp
+file (never a fixed path like `tmp/relay-outcome.json` — overlapping `shared_clean` jobs
+share a read-only worktree and must never collide). The agent node's prompt ends by writing
+that file:
+
+```json
+{"outcome": "succeeded", "detail": "…"}
+```
+
+`outcome` must be one of the closed set above; `detail` becomes the edge-borne
+`{prior.detail}` / `{nodes.<id>.detail}` for the next node. Before `POST`ing to
+`/api/node-jobs/:id/outcome`, the executor augments the file's contents with `git_sha` (the
+worktree's HEAD after the node ran) and `session_id` (the `claude -p` session id).
+
+**Fallbacks**, in priority order, when the node itself never wrote a clean outcome:
+1. the card was moved to `needs_input` during the node → report `needs_input`;
+2. otherwise, no outcome file was written → the process exit code decides: `0` →
+   `succeeded` with empty detail, non-zero → `failed`.
+
 ## Operating invariants
 
 These are the rules the runner relies on. Break one and cards corrupt each other's work. If you

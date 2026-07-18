@@ -23,7 +23,8 @@ defmodule Relay.AgentLog do
   deliberately unchanged (Q7→A) — the per-board sheet keeps its ephemeral feed, and
   ref-less board-level lines stay broadcast-only, never persisted. Each stamped entry
   also carries `run_id` — the AI session that emitted the line, captured from day one
-  though nothing renders it yet.
+  though nothing renders it yet — and, alongside it, `node_job_id` (RLY-134): the
+  node-job that emitted the line.
   """
 
   use Boundary, deps: [Relay.Activity]
@@ -48,7 +49,7 @@ defmodule Relay.AgentLog do
   as `{:agent_log, entry}` on `topic(board_id)`, and hands the ref-tagged ones to
   `Relay.Activity.LogSink` for persistence. Fire-and-forget: always returns `:ok`.
   Each raw entry is a string-keyed map with `"ref"` (optional), `"kind"`, `"text"`,
-  and `"run_id"` (optional).
+  `"run_id"` (optional), and `"node_job_id"` (optional).
   """
   def record(board_id, entries) when is_list(entries) do
     stamped = Enum.map(entries, &stamp/1)
@@ -67,7 +68,8 @@ defmodule Relay.AgentLog do
       ref: blank_to_nil(Map.get(entry, "ref")),
       kind: Map.get(@kinds, Map.get(entry, "kind"), :lifecycle),
       text: to_string(Map.get(entry, "text", "")),
-      run_id: blank_to_nil(Map.get(entry, "run_id"))
+      run_id: blank_to_nil(Map.get(entry, "run_id")),
+      node_job_id: blank_to_nil(Map.get(entry, "node_job_id"))
     }
   end
 

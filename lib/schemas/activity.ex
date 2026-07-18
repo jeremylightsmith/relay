@@ -18,8 +18,11 @@ defmodule Schemas.Activity do
   Both are written in bulk by `Relay.Activity.LogSink` via `insert_all`, which
   bypasses `changeset/1` by design — they are best-effort chatter, not audit rows.
   `text`/`run_id` are null on every audit row; a human-triggered Retry (RLY-148)
-  writes an `:action` row with `text` set and `run_id` null. There is deliberately
-  no `:heartbeat` type: liveness is `cards.agent_heartbeat_at` (Q3→B).
+  writes an `:action` row with `text` set and `run_id` null. `node_job_id` (RLY-134)
+  rides alongside `run_id` — same nullable-string shape, not an FK — and identifies
+  the node-job (not the run) that emitted the line, keyed off by W6's run panel.
+  There is deliberately no `:heartbeat` type: liveness is `cards.agent_heartbeat_at`
+  (Q3→B).
   """
 
   use Ecto.Schema
@@ -48,6 +51,7 @@ defmodule Schemas.Activity do
     field :actor_type, Ecto.Enum, values: [:user, :agent]
     field :text, :string
     field :run_id, :string
+    field :node_job_id, :string
 
     belongs_to :card, Schemas.Card
     belongs_to :user, Schemas.User

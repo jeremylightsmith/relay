@@ -164,6 +164,7 @@ defmodule Relay.Activity.LogSink do
       user_id: nil,
       text: entry.text,
       run_id: entry.run_id,
+      node_job_id: entry.node_job_id,
       inserted_at: ts,
       updated_at: ts
     }
