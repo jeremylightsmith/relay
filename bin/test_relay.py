@@ -1638,7 +1638,7 @@ class ExecuteOneTest(unittest.TestCase):
     def setUp(self):
         self._saved = {k: getattr(relay, k) for k in
                        ("run_node_job", "report_outcome", "reset_worktree",
-                        "worktree_path", "DRY")}
+                        "worktree_path", "DRY", "log")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
         relay.DRY = False
         relay.worktree_path = lambda name: "/tmp/" + name
@@ -1697,6 +1697,43 @@ class ExecuteOneTest(unittest.TestCase):
         self.assertIn("kaboom", self.reports[0][2])
         self.assertEqual(self.pool.capacity()["exclusive"], 1)       # never leak a slot
 
+    def test_a_systemexit_from_run_node_job_is_caught_and_reported(self):
+        """api()'s die() raises SystemExit (a BaseException, not an Exception) — e.g. an
+        agent node's determine_agent_outcome calling get_card() when the server is down.
+        It must be caught here, not just plain Exception, or the outcome is lost silently
+        when it escapes this worker thread."""
+        def boom(job, path, control):
+            raise SystemExit(1)
+
+        relay.run_node_job = boom
+        job = {"id": "nj-5", "run_id": "r5", "node_type": "agent", "run": "x",
+               "isolation": "exclusive", "vars": {"ref": "RLY-5"}}
+        slot, reset = self.pool.assign(job)
+        rs = relay.execute_one(job, slot, reset, relay.JobControl(), self.pool)
+        self.assertEqual(self.reports[0][:2], ("nj-5", "failed"))
+        self.assertIn("worker crashed", self.reports[0][2])
+        self.assertEqual(rs, "done")
+        self.assertEqual(self.pool.capacity()["exclusive"], 1)       # never leak a slot
+
+    def test_a_second_systemexit_while_reporting_the_crash_is_logged_not_raised(self):
+        """If report_outcome's own api() call die()s too (server still down while we try to
+        report the crash), that SystemExit must not propagate and vanish the job a second
+        time — it should be logged, and the slot still freed."""
+        def boom(job, path, control):
+            raise RuntimeError("kaboom")
+
+        relay.run_node_job = boom
+        relay.report_outcome = lambda *a: (_ for _ in ()).throw(SystemExit(1))
+        logs = []
+        relay.log = lambda *a, **k: logs.append(a)
+        job = {"id": "nj-6", "run_id": "r6", "node_type": "shell", "run": "x",
+               "isolation": "exclusive", "vars": {"ref": "RLY-6"}}
+        slot, reset = self.pool.assign(job)
+        rs = relay.execute_one(job, slot, reset, relay.JobControl(), self.pool)   # must not raise
+        self.assertIsNone(rs)
+        self.assertTrue(logs)                                         # logged, not silent
+        self.assertEqual(self.pool.capacity()["exclusive"], 1)       # never leak a slot
+
 
 class ExecuteLoopTest(unittest.TestCase):
     """`execute --once` drains one claim→execute→report cycle; a long-poll timeout is 'no
@@ -1708,6 +1745,8 @@ class ExecuteLoopTest(unittest.TestCase):
                         "report_outcome", "reset_worktree", "refresh_worktree",
                         "FORWARDER", "env", "log", "DRY")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+        self.addCleanup(relay.signal.signal, relay.signal.SIGINT,
+                         relay.signal.getsignal(relay.signal.SIGINT))
         relay.DRY = False
         relay.env = lambda name: "x"
         relay.log = lambda *a, **k: None
@@ -1752,6 +1791,35 @@ class ExecuteLoopTest(unittest.TestCase):
         relay.cmd_execute(argparse.Namespace(once=True, dry_run=True, interval=None))
 
         self.assertEqual(calls, [])          # dry-run performs no claim / no outcome
+
+    def test_a_malformed_claimed_job_is_reported_failed_not_dropped(self):
+        """A job missing `isolation` blows up ExecutorPool.assign with a KeyError; untrusted
+        server input must not crash the claim loop — it must be reported failed so the server
+        doesn't hold the claim open forever, and the loop must keep polling rather than die."""
+        job = {"id": "nj-9", "run_id": "r9", "node_type": "shell", "run": "x",
+               "vars": {"ref": "RLY-9"}}                      # no "isolation" key
+        relay.claim_node_job = lambda executor, capacity, timeout: job
+        self.reports = []
+        relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+
+        self.assertEqual(self.reports[0][:2], ("nj-9", "failed"))
+
+    def test_an_unplaceable_job_is_reported_failed_not_dropped(self):
+        """The server can hand back a job whose isolation class this executor has no free
+        slot for (here: capacity advertises exclusive:0, server sends an exclusive job
+        anyway). It must be reported failed rather than silently discarded while the server
+        thinks the claim is still held."""
+        job = {"id": "nj-10", "run_id": "r10", "node_type": "shell", "run": "x",
+               "isolation": "exclusive", "vars": {"ref": "RLY-10"}}   # cfg advertises exclusive:0
+        relay.claim_node_job = lambda executor, capacity, timeout: job
+        self.reports = []
+        relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+
+        self.assertEqual(self.reports[0][:2], ("nj-10", "failed"))
 
 
 class ExecuteParserTest(unittest.TestCase):

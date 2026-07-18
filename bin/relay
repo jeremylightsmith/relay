@@ -1130,8 +1130,21 @@ def execute_one(job, slot, reset, control, pool):
             return None
         run_state = report_outcome(job["id"], outcome, detail, git_sha, session_id)
         return run_state
-    except Exception as e:                      # never leak a slot on crash
-        run_state = report_outcome(job["id"], "failed", f"worker crashed: {e}", "", None)
+    except (Exception, SystemExit) as e:
+        # run_node_job (or the report_outcome call above) can raise SystemExit via api()'s
+        # die() — e.g. an agent node's determine_agent_outcome calling get_card() when the
+        # server is unreachable. SystemExit is a BaseException, not an Exception, so plain
+        # `except Exception` would miss it: it would escape this worker thread, and Python's
+        # threading module discards uncaught exceptions on non-main threads silently — the
+        # job would be lost with no outcome and nothing printed. Catch it here explicitly so
+        # this remains the one place that always reports (never leak a slot on crash).
+        try:
+            run_state = report_outcome(job["id"], "failed", f"worker crashed: {e}", "", None)
+        except (Exception, SystemExit) as report_err:
+            # a second die() while reporting the crash (server still down) — log rather than
+            # let this vanish too.
+            log(f"failed to report crash outcome for {job['id']}: {report_err}", kind="error")
+            run_state = None
         return run_state
     finally:
         pool.release(job, slot, None if (revoked or control.cancelled()) else run_state)
@@ -1328,6 +1341,21 @@ def cmd_execute(args):
         if entry:
             entry["control"].cancel()
 
+    def reject(job, detail):
+        """A claimed job this executor cannot run — malformed (missing/bad `isolation` or
+        `run_id`, so ExecutorPool.assign can't even place it) or unplaceable (the server
+        handed back a job whose isolation class has no free slot here). Untrusted server
+        input must not crash the daemon or be dropped silently: report it failed so the
+        server's claim lease doesn't sit held-and-running forever, and log it either way."""
+        job_id = job.get("id") if isinstance(job, dict) else None
+        log(f"rejecting claimed job {job_id or job!r}: {detail}", kind="error")
+        if job_id is None:
+            return
+        try:
+            report_outcome(job_id, "failed", detail, "", None)
+        except (Exception, SystemExit) as e:
+            log(f"failed to report rejection for {job_id}: {e}", kind="error")
+
     hb = None
     if not DRY:
         hb = ExecutorHeartbeat(executor, running_ids, revoke,
@@ -1379,8 +1407,21 @@ def cmd_execute(args):
             if args.once:
                 break
             continue
-        assigned = pool.assign(job)
-        if assigned is None:                        # raced out of capacity since claiming
+        try:
+            assigned = pool.assign(job)
+        except (KeyError, TypeError) as e:          # malformed job: assign can't even read it
+            reject(job, f"malformed job: {e}")
+            if args.once:
+                break
+            wake.wait(1)                            # back off — don't hot-loop re-polling
+            wake.clear()
+            continue
+        if assigned is None:                        # no free slot for this job's isolation
+            reject(job, f"no free {job.get('isolation')!r} slot advertised {cap}")
+            if args.once:
+                break
+            wake.wait(1)                            # back off — don't hot-loop re-polling
+            wake.clear()
             continue
         slot, reset = assigned
         control = JobControl()
