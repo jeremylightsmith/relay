@@ -124,6 +124,22 @@ defmodule Relay.FlowsManagementTest do
       assert reset.pulls_from_stage_id == flow.pulls_from_stage_id
     end
 
+    test "reset bumps the version and writes a new snapshot" do
+      board = seeded_board()
+
+      {:ok, flow} =
+        Flows.update_flow(Flows.get_flow!(board, "plan"), %{
+          nodes: [%{key: "write_plan", type: :agent, run: "custom", max_retries: 1}],
+          edges: [%{from: "start", to: "write_plan"}, %{from: "write_plan", to: "done", on: :succeeded}]
+        })
+
+      before = flow.version
+      {:ok, reset} = Flows.reset_to_default(flow)
+
+      assert reset.version == before + 1
+      assert %Schemas.FlowVersion{} = Flows.get_version(reset, reset.version)
+    end
+
     test "returns {:error, :not_a_default} for a non-library key" do
       board = seeded_board()
       {:ok, copy} = Flows.duplicate_flow(Flows.get_flow!(board, "spec"))
