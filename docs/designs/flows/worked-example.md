@@ -8,27 +8,24 @@ after the W-cards land.
 ## The file trees, side by side
 
 ```text
-TODAY — repo files that make the flow      TOMORROW — repo files that make the flow
+TODAY — repo files that make the flow      HISTORICAL — deleted in the cutover
 ─────────────────────────────────────      ─────────────────────────────────────────
-bin/relay                    995 lines     bin/relay              ~600 lines (est.)
-relay_config.json             42           .relay/executor.jsonc   ~10
-.claude/workflows/
-  execute-plan.js            485           (gone — rows in the Flow table,
-.claude/commands/                           seeded from docs/designs/flows/*.jsonc,
-  exec-plan.md               119            130 lines of data for all three flows)
-.claude/agents/
-  plan-implementer.md         57           (optional — prompts absorbed into flow
-  spec-reviewer.md            67            nodes; keep any you want to override)
+bin/relay                   1135 lines     relay_config.json           42 (RLY-139)
+.relay/executor.json           6 lines     .claude/workflows/
+.claude/agents/                              execute-plan.js          485 (RLY-139)
+  plan-implementer.md         57           .claude/commands/
+  spec-reviewer.md            67             exec-plan.md             119 (RLY-139)
   quality-reviewer.md         74
-  final-reviewer.md           60
-  final-fixer.md              27
-  smoke-tester.md            127
-  acceptance-tester.md        82
-  rebaser.md                  39
+  final-reviewer.md           60           .claude/agents/*.md are KEPT — RLY-139 settled
+  final-fixer.md              27           this the other way from an earlier "optional,
+  smoke-tester.md            127           prompts absorbed into flow nodes" plan: each is
+  acceptance-tester.md        82           pointed at directly by a flow node's `agent`
+  rebaser.md                  39           field, rendered as `claude -p --agent <name>`.
 ─────────────────────────────────────      ─────────────────────────────────────────
-flow machinery:            2,174 lines     repo-side:            ~610 lines
-                                           server-side data:      3 Flow rows
-UNCHANGED IN BOTH WORLDS: .claude/skills/* (brainstorm, TDD, debugging, …),
+repo-side: bin/relay + 8 agent            server-side data:      3 Flow rows
+files = 1,668 lines                       (spec.jsonc 22 + plan.jsonc 18 +
+                                           code.jsonc 98 = 138 lines of data)
+UNCHANGED THROUGHOUT: .claude/skills/* (brainstorm, TDD, debugging, …),
 .claude/commands/write-plan.md, CLAUDE.md/AGENTS.md, board stages, API key.
 ```
 
@@ -38,7 +35,7 @@ UNCHANGED IN BOTH WORLDS: .claude/skills/* (brainstorm, TDD, debugging, …),
 | --- | --- | --- | --- |
 | **Spec** | Reads the card, asks the human clarifying questions (needs-input stepper), writes the spec + acceptance criteria back to the card | **Cut over (RLY-136):** no `relay_config.json` pipeline entry — runs as the enabled `spec` [Flow row ↓](#spec-stage) (22 lines) on the engine + [`brainstorm` skill](../../../.claude/skills/brainstorm/SKILL.md) | [Flow row ↓](#spec-stage) (22 lines) |
 | **Plan** | Turns the approved spec into the implementation plan stored on the card | **Cut over (RLY-138):** no `relay_config.json` pipeline entry — runs as the enabled `plan` [Flow row ↓](#plan-stage) (18 lines) on the engine + [`write-plan` command](../../../.claude/commands/write-plan.md) | [Flow row ↓](#plan-stage) (18 lines) |
-| **Code** | Implements the plan task-by-task with TDD + two reviews each, then precommit, whole-branch review, smoke, acceptance, and PR + squash-merge | **Cut over (RLY-139):** no `relay_config.json` pipeline entry — runs as the enabled `code` [Flow row ↓](#code-stage) (`code.jsonc`, 13 nodes / 22 edges) on the engine + 7 [`.claude/agents/`](../../../.claude/agents/) files named by node `agent` | [Flow row ↓](#code-stage) (`code.jsonc`) |
+| **Code** | Implements the plan task-by-task with TDD + two reviews each, then precommit, whole-branch review, smoke, acceptance, and PR + squash-merge | **Cut over (RLY-139):** no `relay_config.json` pipeline entry — runs as the enabled `code` [Flow row ↓](#code-stage) (`code.jsonc`, 13 nodes / 21 edges) on the engine + 7 [`.claude/agents/`](../../../.claude/agents/) files named by node `agent` | [Flow row ↓](#code-stage) (`code.jsonc`) |
 
 ### Spec stage
 
@@ -156,7 +153,7 @@ node at a `.claude/agents/<name>.md` definition, which supplies the system promp
 it yet.
 
 **Tomorrow** — the `Flow` row is [`code.jsonc`](code.jsonc) **in its entirety** (13 nodes,
-22 edges, models + agents per node) plus the record wrapper:
+21 edges, models + agents per node) plus the record wrapper:
 
 ```jsonc
 { "key": "code", "board_id": 1, "enabled": false, "origin": "default", "version": 1,
@@ -166,7 +163,7 @@ it yet.
                 spec_review, quality_review, precommit, final_review, final_fix,
                 smoke, smoke_fix, acceptance, acceptance_fix, post, merge. The next_task
                 grep-gate is GONE — "which task is next" is engine-derived (RLY-139). */ },
-  "edges": [ /* its 22 outcome-routed edges: quality_review carries TWO guarded
+  "edges": [ /* its 21 outcome-routed edges: quality_review carries TWO guarded
                 succeeded edges on the same outcome — { to: implement, when:
                 foreach_remaining } and { to: precommit, when: foreach_exhausted } —
                 which is what the next_task gate was faking; fix loops bounded by

@@ -31,8 +31,11 @@ dispatcher at all (the same "a stage nothing works" failure, from the opposite d
    (`pgrep -fl "relay watch"` → nothing); a stale one from before the deploy would still be
    holding the retired config in memory and would double-dispatch Code cards.
 3. **Only now, enable the flow** in the board's **Settings › Flows** (RLY-142's toggle, which
-   already shows the double-dispatch warning dialog). No CLI or mix task — the UI toggle is the
-   only enable path.
+   shows a runner-readiness warning before turning on: make sure a runner (`bin/relay execute`)
+   is connected and advertising capacity, or cards will queue with no dispatcher to pick them
+   up — RLY-139 replaced the toggle's original double-dispatch warning with this, since the
+   legacy watcher it warned about is gone). No CLI or mix task — the UI toggle is the only
+   enable path.
 4. **Start / confirm `relay execute`** is connected and advertising `exclusive` capacity — the
    Code flow's isolation class.
 

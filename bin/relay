@@ -234,10 +234,6 @@ class ExecutorHeartbeat:
             self._beat()
 
 
-def utc_now_iso():
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-
 def read_arg(text):
     if text == "-":
         return sys.stdin.read()

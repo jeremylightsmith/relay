@@ -43,10 +43,13 @@ looks like the leftward flow is being starved. Pinned by
 - **Log mirror**: every feed line is queued to a background `LogForwarder` thread that
   batches `POST /api/board/logs` (best-effort: drops on full queue, swallows all errors) —
   landing in `Activity.LogSink` → the card timeline, and `AgentLog` → the live log sheet.
-- **Executor heartbeat**: `ExecutorHeartbeat` posts `{executor, running: [job-ids]}` to
-  `POST /api/node-jobs/heartbeat` every `heartbeat_interval`s and reads back
-  `{revoked: [job-ids]}`, terminating each revoked job's live subprocess (see "Node-job
-  transport" below).
+- **Executor heartbeat (client-side only)**: `ExecutorHeartbeat` posts `{executor,
+  running: [job-ids]}` to `POST /api/node-jobs/heartbeat` every `heartbeat_interval`s,
+  expecting `{revoked: [job-ids]}` back so it can terminate each revoked job's live
+  subprocess (see "Node-job transport" below) — but no server route exists yet
+  (`router.ex` registers only `/node-jobs/claim` and `/node-jobs/:id/outcome`), so the
+  POST 404s and no subprocess is ever terminated. Revoke is DB-state-only today
+  (`Relay.Runs.NoopDispatcher.revoke/1` → `:ok`); wiring the response is a follow-up.
 - **Run ids**: each executor worker tags its log lines with the claimed job's `run_id`
   (RLY-112) so a card's timeline can group lines by run.
 
@@ -120,9 +123,14 @@ nothing else — every board-specific fact lives server-side as flow data.
   `--dry-run` claims and mutates nothing (it only logs the capacity it would advertise);
   `--interval` overrides the configured poll timeout; SIGINT stops claiming new work and waits
   for in-flight workers to finish.
-- **Heartbeat-borne revoke.** `ExecutorHeartbeat` POSTs `{executor, running: [job-ids]}` to
-  `POST /api/node-jobs/heartbeat` every `heartbeat_interval`s and reads back
-  `{revoked: [job-ids]}`, terminating each one's live subprocess via its `JobControl`. A
+- **Heartbeat-borne revoke (not yet wired server-side).** `ExecutorHeartbeat` POSTs
+  `{executor, running: [job-ids]}` to `POST /api/node-jobs/heartbeat` every
+  `heartbeat_interval`s, expecting `{revoked: [job-ids]}` back so it can terminate each
+  one's live subprocess via its `JobControl`. **In reality no server route exists yet** —
+  the POST 404s, the client never sees a revoke list, and no subprocess is ever
+  terminated. Revoke is DB-state-only (`Relay.Runs.NoopDispatcher.revoke/1` → `:ok`, the
+  configured dispatcher per `config/config.exs:73`); the behavior described next is what
+  happens once the response is wired, not what happens today. A
   revoked **exclusive** job resets its worktree (salvaging any leftovers via `git stash`,
   same as `reset_worktree` elsewhere), since that worktree is bound 1:1 to this job/run. A
   revoked **`shared_clean`** job leaves `exec-clean` untouched instead — that worktree is
