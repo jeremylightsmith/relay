@@ -70,6 +70,68 @@ defmodule Relay.FlowsManagementTest do
     end
   end
 
+  describe "diff_from_default/1" do
+    test "nil for a non-library key" do
+      board = seeded_board()
+      {:ok, copy} = Flows.duplicate_flow(Flows.get_flow!(board, "spec"))
+      assert Flows.diff_from_default(copy) == nil
+    end
+
+    test "empty diff for a freshly seeded default flow" do
+      board = seeded_board()
+      flow = Flows.get_flow!(board, "spec")
+
+      assert Flows.diff_from_default(flow) == %{
+               nodes: %{added: [], removed: [], changed: []},
+               edges: %{added: [], removed: []}
+             }
+    end
+
+    test "a changed node field is reported under changed, keyed by node key" do
+      board = seeded_board()
+
+      {:ok, flow} =
+        Flows.update_flow(Flows.get_flow!(board, "spec"), %{
+          nodes: [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref} --deep", max_retries: 2}],
+          edges: [%{from: "start", to: "brainstorm"}, %{from: "brainstorm", to: "done", on: :succeeded}]
+        })
+
+      assert Flows.diff_from_default(flow) == %{
+               nodes: %{added: [], removed: [], changed: [%{key: "brainstorm", fields: [:run, :max_retries]}]},
+               edges: %{added: [], removed: []}
+             }
+    end
+
+    test "added/removed nodes and edges when the graph is restructured" do
+      board = seeded_board()
+
+      {:ok, flow} =
+        Flows.update_flow(Flows.get_flow!(board, "plan"), %{
+          nodes: [
+            %{key: "gather", type: :agent, run: "gather context", max_retries: 1},
+            %{key: "draft", type: :agent, run: "/write-plan {ref}", max_retries: 1}
+          ],
+          edges: [
+            %{from: "start", to: "gather"},
+            %{from: "gather", to: "draft", on: :succeeded},
+            %{from: "draft", to: "done", on: :succeeded}
+          ]
+        })
+
+      assert Flows.diff_from_default(flow) == %{
+               nodes: %{added: ["draft", "gather"], removed: ["write_plan"], changed: []},
+               edges: %{
+                 added: [
+                   {"draft", "done", :succeeded},
+                   {"gather", "draft", :succeeded},
+                   {"start", "gather", nil}
+                 ],
+                 removed: [{"start", "write_plan", nil}, {"write_plan", "done", :succeeded}]
+               }
+             }
+    end
+  end
+
   describe "duplicate_flow/1" do
     test "copies definition and triggers, disabled, under <key>-copy" do
       board = seeded_board()
