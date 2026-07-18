@@ -246,6 +246,23 @@ defmodule Relay.FlowsTest do
       assert [%{}, %{max_loops: [_]}] = errors_on(changeset).edges
     end
 
+    test "timeout_minutes casts and must be positive" do
+      %{board: board} = board_with_stages()
+
+      attrs =
+        valid_attrs(%{
+          nodes: [%{key: "work", type: :agent, run: "go", timeout_minutes: 25}]
+        })
+
+      assert {:ok, flow} = Flows.create_flow(board, attrs)
+      assert [%{timeout_minutes: 25}] = flow.nodes
+
+      assert {:error, changeset} =
+               Flows.create_flow(board, valid_attrs(%{nodes: [%{key: "w", type: :agent, timeout_minutes: 0}]}))
+
+      assert %{nodes: [%{timeout_minutes: ["must be greater than 0"]}]} = errors_on(changeset)
+    end
+
     test "rejects a trigger stage belonging to a different board" do
       %{board: board} = board_with_stages()
       %{pulls: foreign_stage} = board_with_stages()
