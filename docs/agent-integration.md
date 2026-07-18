@@ -229,7 +229,7 @@ build your own runner or agents, honor these:
 The config is the whole contract. Per AI stage:
 
 ```json
-{ "stage": "Spec", "from": "Next up", "done": "Spec:Review",
+{ "stage": "Plan", "from": "Spec:Done", "done": "Plan:Done",
   "action": [ { "claude": "…design and `{relay} describe {ref} @<file>`…" } ] }
 ```
 

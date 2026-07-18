@@ -28,14 +28,45 @@ flow is inert until deployed. So:
    only enable path.
 4. **Start / confirm `relay execute`** is connected and advertising capacity for the flow's
    isolation class (`shared_clean` for Spec/Plan, `exclusive` for Code).
-5. **Watch the runners view** (`/board/:slug/runners`) for the first card through: exactly one
-   dispatcher claiming, a run row appearing on the card, the executor's capacity visible.
+
+   **Prerequisite this step depends on, not yet shipped by any binary:** `Relay.Runs.Capacity`
+   (what the scheduler reads to decide whether to dispatch) is fed from exactly one place — the
+   `name` + `capacity` branch of `POST /api/board/heartbeat`
+   (`RelayWeb.Api.BoardController.heartbeat/2`, `maybe_advertise_executor/2`). `relay execute`'s
+   own heartbeat posts to `/api/node-jobs/heartbeat` instead, with `{"executor", "running"}` only
+   — it never hits `/api/board/heartbeat` and never sends `name`/`capacity`. Until an
+   executor-side sender for that route ships, **manually POST it yourself** before this step is
+   considered done, e.g.:
+
+   ```
+   curl -X POST https://<board-host>/api/board/heartbeat \
+     -H "Authorization: Bearer <board-key>" -H "Content-Type: application/json" \
+     -d '{"name": "<executor-name>", "capacity": {"shared_clean": <n>, "exclusive": <n>}}'
+   ```
+
+   Send the executor's **configured** total (the `capacity` you intend it to run, i.e.
+   `cfg["capacity"]`) — not `ExecutorPool.capacity()`'s live free count. The scheduler already
+   debits in-flight `:running` runs from the advertised total itself
+   (`Scheduler.Server.build_snapshot/1`); posting the already-decremented free count here would
+   double-debit every running run (see the TRAP comment at `board_controller.ex:57-61`).
+
+   **If this beat is never sent, the ritual silently fails**: `Capacity.snapshot()` stays empty,
+   the scheduler plans zero dispatches every tick, and `<Stage>` cards sit in *Next up* with no
+   dispatcher at all — exactly the "a stage nothing works" failure this runbook exists to avoid,
+   just one step later than the ordering hazard above.
+5. **Confirm a card actually dispatches**: watch the first `<Stage>` card in *Next up* pick up a
+   `Run` row (see Verification below) rather than sitting idle.
 
 ## Verification — "it worked"
 
 - Exactly **one** dispatcher claims each `<Stage>` card (never both watch + engine).
-- A `Run` row appears on the card (its run panel / timeline shows the node starting).
-- The executor and its advertised capacity are visible in the runners view.
+- A `Run` row appears on the card (its run panel / timeline shows the node starting) within one
+  scheduler tick of the capacity beat landing.
+- **Not yet available:** the runners view (`/board/:slug/runners`) does **not** show the engine
+  executor or its capacity — that page is backed by `Relay.RunnerPresence`, which only the legacy
+  watcher's heartbeat populates (`runner_id` field); `relay execute` sends no `runner_id` to that
+  route. Do not use the runners view to judge this cutover (tracked as B2, a follow-up). Use the
+  card's run panel instead.
 
 ## Rollback
 
