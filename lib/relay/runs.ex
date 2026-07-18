@@ -301,8 +301,30 @@ defmodule Relay.Runs do
   end
 
   defp do_start_run(card, flow, start_target, context) do
-    :ok = maybe_seed_sub_tasks(card, flow)
+    case maybe_seed_sub_tasks(card, flow) do
+      :ok -> start_seeded_run(card, flow, start_target, context)
+      {:error, :no_plan_tasks} -> block_on_unusable_plan(card, flow)
+    end
+  end
 
+  # No run is created, and the card blocks on a human: a `:needs_input` card is skipped by
+  # the scheduler by rule, so this reports the defect once instead of the scheduler re-pulling
+  # a card it can never work.
+  defp block_on_unusable_plan(card, flow) do
+    {:ok, _card} =
+      Cards.request_input(
+        card,
+        "The #{flow.key} flow could not start: this card's plan produced no tasks. " <>
+          "Its `foreach` node iterates the plan's `## Task N: <name>` headings (two to four " <>
+          "hashes) and found none, so there is nothing to implement. Fix the plan's task " <>
+          "headings and move the card back to re-run.",
+        :agent
+      )
+
+    {:error, :no_plan_tasks}
+  end
+
+  defp start_seeded_run(card, flow, start_target, context) do
     result =
       Repo.transaction(fn ->
         run = insert_run(card, flow, start_target, context)
@@ -342,14 +364,30 @@ defmodule Relay.Runs do
   # from the card's plan at RUN START (never on re-entry — that would wipe
   # done-state). A card whose sub_tasks were already written (by the Plan stage, or
   # by a human) is left alone: the authored list wins over the parsed one.
+  #
+  # Returns `{:error, :no_plan_tasks}` when the flow iterates the plan but no task list can
+  # be produced. That case MUST NOT start the run (RLY-165): with zero sub_tasks the first
+  # foreach guard reads `remaining == 0` as `:foreach_exhausted` and routes straight past
+  # every implement lap to `precommit` — trivially green on an empty diff — then reviews,
+  # smoke and `merge`. An unreadable plan would merge an empty branch as though the work
+  # were done. `:foreach_exhausted` must mean "I finished the work", never "I found none".
   defp maybe_seed_sub_tasks(card, flow) do
-    with true <- Enum.any?(flow.nodes, &(not is_nil(&1.foreach))),
-         false <- Repo.exists?(from st in SubTask, where: st.card_id == ^card.id),
-         [_ | _] = tasks <- PlanTasks.parse(card.plan) do
-      {:ok, _card} = Cards.set_sub_tasks(card, tasks)
-      :ok
-    else
-      _no_seed -> :ok
+    cond do
+      not Enum.any?(flow.nodes, &(not is_nil(&1.foreach))) ->
+        :ok
+
+      Repo.exists?(from st in SubTask, where: st.card_id == ^card.id) ->
+        :ok
+
+      true ->
+        case PlanTasks.parse(card.plan) do
+          [_ | _] = tasks ->
+            {:ok, _card} = Cards.set_sub_tasks(card, tasks)
+            :ok
+
+          [] ->
+            {:error, :no_plan_tasks}
+        end
     end
   end
 
