@@ -1,6 +1,9 @@
 defmodule Relay.Runs.Scheduler.RunsEngineTest do
   use Relay.DataCase, async: false
 
+  import Ecto.Query
+  import ExUnit.CaptureLog
+
   alias Relay.Runs
   alias Relay.Runs.Scheduler.RunsEngine
 
@@ -32,13 +35,58 @@ defmodule Relay.Runs.Scheduler.RunsEngineTest do
   test "start_run/3 tolerates a lost race (active run already exists) as :ok",
        %{card: card, flow: flow} do
     assert :ok = RunsEngine.start_run(card.id, flow.key, "exec-1")
-    # A second dispatch for the same card must not crash the scheduler.
+    # A second dispatch for the same card must not crash the scheduler — and, crucially,
+    # must not create a second Run row for it.
     assert :ok = RunsEngine.start_run(card.id, flow.key, "exec-1")
+
+    assert Relay.Repo.aggregate(from(r in Schemas.Run, where: r.card_id == ^card.id), :count) == 1
   end
 
   test "start_run/3 tolerates a disabled/vanished flow as :ok", %{card: card} do
-    assert :ok = RunsEngine.start_run(card.id, "no-such-flow", "exec-1")
+    capture_log(fn ->
+      assert :ok = RunsEngine.start_run(card.id, "no-such-flow", "exec-1")
+    end)
+
     refute Runs.active_run(Relay.Repo.get!(Schemas.Card, card.id))
+  end
+
+  test "start_run/3 logs a warning on a permanent failure instead of swallowing it silently",
+       %{board: board} do
+    next_up = Enum.find(Relay.Boards.list_stages(board), &(&1.name == "Next up"))
+    spec_stage = Enum.find(Relay.Boards.list_stages(board), &(&1.name == "Spec"))
+
+    {:ok, human_flow} =
+      Relay.Flows.create_flow(board, %{
+        key: "human",
+        isolation: :shared_clean,
+        pulls_from_stage_id: spec_stage.id,
+        works_in_stage_id: spec_stage.id,
+        lands_on_stage_id: next_up.id,
+        nodes: [%{key: "review", type: :human}],
+        edges: [%{from: "start", to: "review"}, %{from: "review", to: "done", on: :succeeded}]
+      })
+
+    {:ok, human_flow} = Relay.Flows.enable_flow(human_flow)
+    {:ok, card} = Relay.Cards.create_card(next_up, %{title: "Needs a human node"})
+
+    log =
+      capture_log(fn ->
+        assert :ok = RunsEngine.start_run(card.id, human_flow.key, "exec-1")
+      end)
+
+    assert log =~ "unsupported_node_type"
+    assert log =~ "card_id=#{card.id}"
+    assert log =~ "flow_key=human"
+  end
+
+  test "start_run/3 logs a warning when the card, board, or flow cannot be found" do
+    log =
+      capture_log(fn ->
+        assert :ok = RunsEngine.start_run(-1, "no-such-flow", "exec-1")
+      end)
+
+    assert log =~ "card_id=-1"
+    assert log =~ "flow_key=no-such-flow"
   end
 
   test "active_runs/1 returns the snapshot run shape for the board's active runs",

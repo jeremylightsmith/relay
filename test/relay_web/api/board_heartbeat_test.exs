@@ -146,8 +146,6 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
 
   test "an executor beat carrying name + capacity lands free slots in Relay.Runs.Capacity",
        %{conn: conn, board: board} do
-    Capacity.reset()
-
     {:ok, %{id: exec_id}} =
       Relay.Runs.upsert_executor(board, %{"name" => "exec-hb", "capacity" => %{"shared_clean" => 2}})
 

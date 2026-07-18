@@ -11,6 +11,12 @@ defmodule Relay.Runs.Scheduler.RunsEngine do
   been disabled. Both documented returns (`:active_run_exists`, `:flow_disabled`)
   are benign here — swallow them as `:ok`; the next reconcile re-derives from
   fresh state. The scheduler must never crash on a lost race.
+
+  Every other outcome is a permanent condition, not a race (an unsupported node
+  type, an empty flow, an invalid changeset, or a missing card/board/flow) — the
+  card stays `:ready` and the next reconcile would just re-dispatch and fail the
+  same way forever. Those are logged via `Logger.warning/1`, naming the card id,
+  flow key, and reason, so they're visible to an operator instead of vanishing.
   """
 
   @behaviour Relay.Runs.Scheduler.Engine
@@ -22,23 +28,45 @@ defmodule Relay.Runs.Scheduler.RunsEngine do
   alias Schemas.Card
   alias Schemas.Run
 
+  require Logger
+
   @impl true
   def active_runs(board_id), do: Runs.active_runs(board_id)
 
   @impl true
   def start_run(card_id, flow_key, _executor_id) do
+    case lookup(card_id, flow_key) do
+      {:ok, card, flow} ->
+        case Runs.start_run(card, flow) do
+          {:ok, _run} -> :ok
+          {:error, :active_run_exists} -> :ok
+          {:error, :flow_disabled} -> :ok
+          {:error, other} -> warn(card_id, flow_key, other)
+        end
+
+      {:error, reason} ->
+        warn(card_id, flow_key, reason)
+    end
+  end
+
+  defp lookup(card_id, flow_key) do
     with %Card{} = card <- Repo.get(Card, card_id),
          %Board{} = board <- Repo.get(Board, card.board_id),
          %{} = flow <- Enum.find(Flows.list_enabled_flows(board), &(&1.key == flow_key)) do
-      case Runs.start_run(card, flow) do
-        {:ok, _run} -> :ok
-        {:error, :active_run_exists} -> :ok
-        {:error, :flow_disabled} -> :ok
-        {:error, _other} -> :ok
-      end
+      {:ok, card, flow}
     else
-      _ -> :ok
+      _ -> {:error, :card_board_or_flow_not_found}
     end
+  end
+
+  # Not a race — the card stays :ready and would be re-dispatched (and fail the
+  # same way) on the next reconcile, so this must be visible to an operator.
+  defp warn(card_id, flow_key, reason) do
+    Logger.warning(
+      "RunsEngine.start_run/3 permanent failure: card_id=#{card_id} flow_key=#{flow_key} reason=#{inspect(reason)}"
+    )
+
+    :ok
   end
 
   @impl true
