@@ -116,6 +116,24 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     refute_receive {:start_run, _, _, _}, 50
   end
 
+  test "an in-flight :running run holds its capacity slot across reconciles (B3 accounting)" do
+    %{board: board, pulls: pulls} = board_with_flow(:ready)
+    other_card = insert(:card, stage: pulls, status: :ready)
+
+    # A running run (on some other card) already holds the board's only advertised
+    # shared_clean slot — the executor's next heartbeat hasn't caught up yet.
+    start_engine([
+      %{id: 55, card_id: -1, status: :running, flow_key: "spec", isolation: :shared_clean, pinned_executor_id: nil}
+    ])
+
+    pid = start_server(board.id)
+    :ok = Capacity.put(7, %{shared_clean: 1, exclusive: 0})
+    :ok = Server.reconcile_now(pid)
+
+    refute_receive {:start_run, _, _, _}, 50
+    assert Repo.get!(Card, other_card.id).status == :queued
+  end
+
   test "disabling the flow unqueues a previously :queued card (criterion 5)" do
     %{board: board, flow: flow, card: card} = board_with_flow(:ready)
     start_engine([])

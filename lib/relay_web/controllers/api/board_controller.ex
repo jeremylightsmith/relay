@@ -47,19 +47,39 @@ defmodule RelayWeb.Api.BoardController do
         :ok
     end
 
-    # RLY-134: an executor beat is a superset — it additionally carries `name` +
-    # `capacity` and upserts the durable Executor row. Inert for legacy / RLY-141
-    # payloads, which carry no capacity (backward compat is a hard requirement).
-    case params do
-      %{"capacity" => capacity, "name" => name} when is_map(capacity) and is_binary(name) and name != "" ->
-        _ = Runs.upsert_executor(board, params)
-        :ok
-
-      _ ->
-        :ok
-    end
+    # RLY-134/RLY-136: an executor beat is a superset — it carries `name` + `capacity`,
+    # upserts the durable Executor row, AND advertises free slots into Relay.Runs.Capacity
+    # (the ETS store the scheduler reads). Keyed by the durable Executor row id.
+    :ok = maybe_advertise_executor(board, params)
 
     json(conn, %{stamped: stamped})
+  end
+
+  defp maybe_advertise_executor(board, %{"capacity" => capacity, "name" => name} = params)
+       when is_map(capacity) and is_binary(name) and name != "" do
+    case Runs.upsert_executor(board, params) do
+      {:ok, executor} -> Runs.Capacity.put(executor.id, atomize_capacity(capacity))
+      _error -> :ok
+    end
+  end
+
+  defp maybe_advertise_executor(_board, _params), do: :ok
+
+  # JSON delivers string-keyed classes; Relay.Runs.Capacity keys on atoms. Only the
+  # two known isolation classes cross over; anything else is dropped (never String.to_atom
+  # on request data — memory-leak risk).
+  defp atomize_capacity(capacity) do
+    %{
+      shared_clean: capacity_int(capacity, "shared_clean"),
+      exclusive: capacity_int(capacity, "exclusive")
+    }
+  end
+
+  defp capacity_int(capacity, key) do
+    case Map.get(capacity, key) do
+      n when is_integer(n) and n >= 0 -> n
+      _ -> 0
+    end
   end
 
   # RLY-67: the board index drops the top-level Done column unless ?include_done is set.

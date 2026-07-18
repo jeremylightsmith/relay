@@ -101,17 +101,47 @@ defmodule Relay.Runs.Scheduler.Server do
   defp build_snapshot(state) do
     board = Boards.get_board_by_id!(state.board_id)
     cards = Cards.list_cards(board)
+    runs = state.engine.active_runs(state.board_id)
 
     snapshot = %Snapshot{
       stages: Enum.map(Boards.list_stages(board), &stage_snap/1),
       cards: Enum.map(cards, &card_snap(&1, board)),
       flows: Enum.map(Relay.Flows.list_enabled_flows(board), &flow_snap/1),
-      runs: state.engine.active_runs(state.board_id),
-      capacity: Capacity.snapshot()
+      runs: runs,
+      capacity: reserve_active_runs(Capacity.snapshot(), runs)
     }
 
     {snapshot, Map.new(cards, &{&1.id, &1})}
   end
+
+  # A run that is :running is being worked on an executor right now, so it holds
+  # one slot of its isolation class until it finishes — even if the executor's
+  # next heartbeat hasn't yet reflected it. Subtract those held slots from the
+  # advertised capacity before planning (parked runs hold no slot; the pure
+  # planner's resume_runs consumes a slot only when it actually resumes one).
+  defp reserve_active_runs(capacity, runs) do
+    runs
+    |> Enum.filter(&(&1.status == :running))
+    |> Enum.reduce(capacity, fn run, cap -> reserve_slot(cap, run.isolation, run.pinned_executor_id) end)
+  end
+
+  defp reserve_slot(cap, nil, _pinned), do: cap
+
+  defp reserve_slot(cap, class, pinned) do
+    target =
+      if is_map_key(cap, pinned) do
+        pinned
+      else
+        cap |> Map.keys() |> Enum.sort() |> Enum.find(&free?(cap, &1, class))
+      end
+
+    case target do
+      nil -> cap
+      executor_id -> Map.update!(cap, executor_id, &Map.update(&1, class, 0, fn n -> max(n - 1, 0) end))
+    end
+  end
+
+  defp free?(cap, executor_id, class), do: Map.get(Map.get(cap, executor_id, %{}), class, 0) > 0
 
   defp stage_snap(stage) do
     %{id: stage.id, position: stage.position, parent_id: stage.parent_id, wip_limit: stage.wip_limit}

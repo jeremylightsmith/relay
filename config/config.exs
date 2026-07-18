@@ -77,9 +77,9 @@ config :relay,
   generators: [timestamp_type: :utc_datetime]
 
 # Server-side scheduler shell (ADR 0006 / RLY-133): off by default (no auto-start
-# of a per-board scheduler) and bound to the Noop engine seam until a real
-# adapter onto Relay.Runs's run-execution engine is wired up.
-config :relay, runs_auto_start: false, runs_engine: Relay.Runs.Scheduler.NoopEngine
+# of a per-board scheduler) and bound to the real Relay.Runs adapter (RLY-136 / W11).
+# NoopEngine stays in the tree — W8's scheduler tests still inject it directly.
+config :relay, runs_auto_start: false, runs_engine: Relay.Runs.Scheduler.RunsEngine
 
 # Configure tailwind (the version is required)
 config :tailwind,
