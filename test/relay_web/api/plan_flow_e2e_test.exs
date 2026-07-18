@@ -79,12 +79,16 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
     start_supervised!({Server, [board_id: board.id, tick_ms: 3_600_000, debounce_ms: 5, name: :"e2e_sched_#{board.id}"]})
   end
 
-  # Let both async DB readers finish before the test returns and ExUnit tears the sandbox
-  # down. Killing either mid-query is what produces the `client #PID exited` Postgrex
-  # disconnect: the Listener reconciles off run broadcasts, and the scheduler's 5ms debounce
-  # can fire a reconcile just after the last assertion. Callers must first wait on the run's
-  # terminal broadcast, so the triggering message is already in the mailbox rather than still
-  # in flight — `:sys.get_state` only drains what has actually arrived.
+  # Belt-and-braces drain of the two async DB readers (the Listener, reconciling off run
+  # broadcasts, and the per-test scheduler) so neither is mid-query when the test returns —
+  # being killed mid-query is what produces the `client #PID exited` Postgrex disconnect.
+  #
+  # What actually makes this deterministic is the `assert_receive` on the run's terminal
+  # broadcast that every caller does FIRST: it proves the reconcile-triggering message has
+  # arrived, and `:sys.get_state` only drains what has already arrived. Note this does NOT
+  # close the scheduler's debounce race on its own — `mark_dirty/1` arms a `send_after`, and a
+  # pending timer survives a mailbox drain; that one is closed by ExUnit teardown order
+  # (`OnExitHandler.run/1` terminates supervised children before the sandbox owner is stopped).
   defp settle(server) do
     _ = :sys.get_state(Process.whereis(Listener))
     _ = :sys.get_state(server)

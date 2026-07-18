@@ -94,9 +94,9 @@ change** — `Relay.Runs.Scheduler.plan/1` was already written flow-agnostic
 `:shared_clean` flow is pure configuration: seed data already present in
 `Relay.Flows.DefaultLibrary`, an `enable_flow/1` toggle, and the `relay_config.json` /
 `write-plan.md` edits described above. Every new test this card adds — both the pure-scheduler
-arbitration cases and the `plan_flow_e2e_test.exs` REST-level cases — **passed on first run**
-against the unmodified engine. That is the signal RLY-139 (Code) is betting on: adding a flow
-to this engine is configuration, not code.
+arbitration cases and the `plan_flow_e2e_test.exs` REST-level cases — passes **against an
+unmodified engine**: this branch changes nothing under `lib/`. That is the signal RLY-139 (Code)
+is betting on: adding a flow to this engine is configuration, not code.
 
 ## Node-job transport (RLY-134, ADR 0006 card 04)
 
