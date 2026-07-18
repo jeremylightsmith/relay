@@ -22,6 +22,10 @@ config :relay, RelayWeb.Endpoint,
     ]
   ]
 
+# RLY-133: per-board schedulers run in prod; the engine stays Noop until a real
+# adapter onto Relay.Runs's run-execution engine is wired up.
+config :relay, runs_auto_start: true
+
 # Configure Swoosh API Client
 config :swoosh, api_client: Swoosh.ApiClient.Req
 

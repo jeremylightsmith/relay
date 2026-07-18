@@ -36,6 +36,15 @@ defmodule Relay.Flows do
     )
   end
 
+  @doc "The board's **enabled** flows in stable `key` order (the scheduler's input)."
+  def list_enabled_flows(%Board{id: board_id}) do
+    Repo.all(
+      from f in Flow,
+        where: f.board_id == ^board_id and f.enabled == true,
+        order_by: f.key
+    )
+  end
+
   @doc "The board's flow with `key`, or nil."
   def get_flow(%Board{id: board_id}, key) when is_binary(key) do
     Repo.get_by(Flow, board_id: board_id, key: key)

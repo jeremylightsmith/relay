@@ -326,4 +326,32 @@ defmodule Relay.FlowsTest do
       assert %{lands_on_stage_id: ["must be set before the flow can be enabled"]} = errors_on(changeset)
     end
   end
+
+  describe "list_enabled_flows/1" do
+    test "returns only enabled flows, in key order" do
+      board = insert(:board)
+      works = insert(:stage, board: board)
+      lands = insert(:stage, board: board)
+
+      # each *enabled* flow needs its own pulls-from stage — the DB enforces at
+      # most one enabled flow per pulls-from stage (flows_one_enabled_per_pulls_from_index).
+      on = fn key, enabled ->
+        insert(:flow,
+          board: board,
+          key: key,
+          enabled: enabled,
+          pulls_from_stage_id: insert(:stage, board: board).id,
+          works_in_stage_id: works.id,
+          lands_on_stage_id: lands.id
+        )
+      end
+
+      _b = on.("b-flow", true)
+      _a = on.("a-flow", true)
+      _off = on.("c-flow", false)
+
+      keys = board |> Flows.list_enabled_flows() |> Enum.map(& &1.key)
+      assert keys == ["a-flow", "b-flow"]
+    end
+  end
 end

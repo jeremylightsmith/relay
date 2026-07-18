@@ -76,6 +76,11 @@ config :relay,
   ecto_repos: [Relay.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+# Server-side scheduler shell (ADR 0006 / RLY-133): off by default (no auto-start
+# of a per-board scheduler) and bound to the Noop engine seam until a real
+# adapter onto Relay.Runs's run-execution engine is wired up.
+config :relay, runs_auto_start: false, runs_engine: Relay.Runs.Scheduler.NoopEngine
+
 # Configure tailwind (the version is required)
 config :tailwind,
   version: "4.3.1",

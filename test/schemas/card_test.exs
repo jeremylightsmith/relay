@@ -79,13 +79,16 @@ defmodule Schemas.CardTest do
       assert get_field(changeset, :status) == :ready
     end
 
-    test "status enum is the four RLY-48 values, defaulting to :ready" do
+    test "status enum includes :queued (RLY-133), defaulting to :ready" do
       assert %Card{}.status == :ready
 
       ok = Card.status_changeset(%Card{}, %{status: :in_review})
       assert ok.valid?
 
-      bad = Card.status_changeset(%Card{}, %{status: :queued})
+      queued = Card.status_changeset(%Card{}, %{status: :queued})
+      assert queued.valid?
+
+      bad = Card.status_changeset(%Card{}, %{status: :bogus})
       refute bad.valid?
       assert %{status: ["is invalid"]} = errors_on(bad)
     end

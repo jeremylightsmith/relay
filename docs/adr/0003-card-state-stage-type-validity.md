@@ -28,10 +28,10 @@ default (the status a card takes when it has no valid status to keep) is:
 
 | Stage type | Valid statuses | Default on entry |
 | --- | --- | --- |
-| `queue` | `ready` | `ready` |
+| `queue` | `ready`, `queued` | `ready` |
 | `work` / `planning` | `working`, `ready`, `needs_input` | `working` |
 | `review` | `in_review`, `ready` | `in_review` |
-| `done` | `ready` | `ready` |
+| `done` | `ready`, `queued` | `ready` |
 
 Encoded as `Schemas.Stage.valid_status?/2` and `Schemas.Stage.default_status/1` — pure,
 stateless functions with no DB access, so every caller (contexts, LiveView, tests) shares
@@ -85,6 +85,18 @@ single stored `:ready` status ("parked, no work happening") and made **Done a de
 while a `:ready` card in a mid-board Done sub-lane is merely parked. `:done` remains a stage
 `type`; it is no longer a card *status*. See `Relay.Cards.done?/2`,
 `Relay.Cards.ready_awaiting_human?/2`, and `Relay.Cards.needs_you?/2`.
+
+### Update (RLY-133): `:queued` returns as a capacity-blocked marker
+
+RLY-48 collapsed `:queued` into `:ready`; RLY-133 re-introduces it with a **narrower, new
+meaning**: the scheduler (`Relay.Runs.Scheduler`) sets a pulls-from card to `:queued` when an
+enabled flow *would* pull it but no executor capacity is free, and back to `:ready` when it no
+longer would (flow disabled, WIP filled, human-claimed). It is therefore valid **only** in the
+stages a flow pulls from — a `:queue` stage (Next up) and `:done` sub-lanes (Spec:Done,
+Plan:Done) — and is **never an entry status** (`default_status/1` is unchanged; only the
+scheduler sets it). WIP-blocked cards stay `:ready`; `:queued` means capacity-blocked
+specifically. The `→ :working` transition and the stage move remain the engine's (W5), not the
+scheduler's.
 
 ## Alternatives considered
 

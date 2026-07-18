@@ -35,7 +35,7 @@ defmodule Schemas.Card do
     field :ref_number, :integer
 
     field :status, Ecto.Enum,
-      values: [:ready, :working, :needs_input, :in_review],
+      values: [:ready, :working, :needs_input, :in_review, :queued],
       default: :ready
 
     field :blocked_since, :utc_datetime

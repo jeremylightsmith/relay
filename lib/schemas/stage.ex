@@ -73,11 +73,11 @@ defmodule Schemas.Stage do
   def default_status(:review), do: :in_review
   def default_status(:done), do: :ready
 
-  @doc "Whether `status` is valid for a stage of `type` (RLY-48 validity matrix)."
-  def valid_status?(status, :queue), do: status == :ready
+  @doc "Whether `status` is valid for a stage of `type` (RLY-48 validity matrix; RLY-133 adds :queued)."
+  def valid_status?(status, :queue), do: status in [:ready, :queued]
   def valid_status?(status, type) when type in [:work, :planning], do: status in [:working, :ready, :needs_input]
   def valid_status?(status, :review), do: status == :in_review
-  def valid_status?(status, :done), do: status == :ready
+  def valid_status?(status, :done), do: status in [:ready, :queued]
 
   # ai_enabled only applies to work/planning; every other type zeroes it (create + type change).
   defp normalize_ai_enabled(changeset) do
