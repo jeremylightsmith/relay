@@ -1289,6 +1289,30 @@ class StreamClaudeJobTest(unittest.TestCase):
         self.assertEqual(seen["cmd"][seen["cmd"].index("--resume") + 1], "sess-5")
         self.assertEqual(seen["env"].get("RELAY_NODE_OUTCOME"), "/tmp/wt/out.json")
 
+    def test_lifts_the_default_background_wait_ceiling_so_long_runs_do_not_get_cut_off(self):
+        """claude -p caps a background workflow's wait at 10 minutes by default; /exec-plan
+        runs far longer, so without lifting the cap -p would exit mid-run and the executor
+        would report a partial plan as succeeded."""
+        seen = {}
+        relay.subprocess.Popen = lambda cmd, *a, **k: (
+            seen.update(env=k.get("env", {})) or _FakePopen([], code=0))
+        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        self.assertEqual(seen["env"].get("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), "0")
+
+    def test_an_explicit_wait_ceiling_override_wins(self):
+        seen = {}
+
+        def fake_popen(cmd, *a, **k):
+            seen["env"] = k.get("env", {})
+            return _FakePopen([], code=0)
+
+        relay.subprocess.Popen = fake_popen
+        self._env = dict(os.environ)
+        os.environ["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"] = "5000"
+        self.addCleanup(os.environ.pop, "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", None)
+        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        self.assertEqual(seen["env"].get("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), "5000")
+
     def test_registers_the_live_subprocess_for_cancellation(self):
         proc = _FakePopen([], code=0)
         relay.subprocess.Popen = lambda *a, **k: proc
@@ -1296,6 +1320,17 @@ class StreamClaudeJobTest(unittest.TestCase):
         capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt",
                     on_proc=registered.append)
         self.assertEqual(registered, [proc])
+
+    def test_runs_its_own_process_group_so_a_cancel_group_kill_never_hits_the_runner(self):
+        """JobControl.cancel() now kills the whole process group of the registered proc
+        (see JobControlTest). If this Popen shared the runner's own process group (the
+        default unless start_new_session=True), that group-kill would SIGTERM the runner
+        itself instead of just the claude subprocess."""
+        seen = {}
+        relay.subprocess.Popen = lambda *a, **k: (
+            seen.update(kwargs=k) or _FakePopen([], code=0))
+        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        self.assertTrue(seen["kwargs"].get("start_new_session"))
 
     def test_a_render_error_falls_back_to_the_raw_line_and_keeps_streaming(self):
         """Mirrors the old _stream_claude behavior: the try wraps BOTH json.loads and
@@ -1368,6 +1403,35 @@ class AgentOutcomeContractTest(unittest.TestCase):
         job = {"vars": {"ref": "RLY-1"}}
         self.assertEqual(relay.determine_agent_outcome(job, True, "/nope.json")[0], "succeeded")
         self.assertEqual(relay.determine_agent_outcome(job, False, "/nope.json")[0], "failed")
+
+    def test_a_malformed_outcome_file_is_reported_as_failed_not_silently_succeeded(self):
+        """$RELAY_NODE_OUTCOME is the only way a node signals `partial`; if the file an
+        agent wrote is truncated/invalid JSON, swallowing the parse error and falling
+        through to the exit-code check would report `succeeded` for a claude -p process
+        that exited 0 while having failed to hand back its real outcome. That's a silent
+        wrong result, so a malformed file must be `failed`, not `succeeded`."""
+        import tempfile
+        relay.get_card = lambda ref: {"status": "working"}
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            f.write("{not valid json")
+        self.addCleanup(os.remove, path)
+        job = {"vars": {"ref": "RLY-1"}}
+        outcome, detail = relay.determine_agent_outcome(job, True, path)
+        self.assertEqual(outcome, "failed")
+        self.assertIn("outcome file", detail)
+
+    def test_a_malformed_outcome_file_is_logged_so_a_human_can_see_the_agent_tried(self):
+        import tempfile
+        relay.get_card = lambda ref: {"status": "working"}
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            f.write("{not valid json")
+        self.addCleanup(os.remove, path)
+        job = {"vars": {"ref": "RLY-1"}}
+        out = capture(relay.determine_agent_outcome, job, True, path)
+        self.assertIn("RLY-1", out)
+        self.assertIn(path, out)
 
 
 class RunNodeJobTest(unittest.TestCase):
@@ -1464,6 +1528,50 @@ class JobControlTest(unittest.TestCase):
         proc = _FakePopen([], code=0)
         c.register(proc)          # proc registers after → terminate immediately
         self.assertTrue(proc.terminated)
+
+    def test_cancel_kills_the_whole_process_group_not_just_the_registered_proc(self):
+        """_stream_shell runs its command with shell=True, so the registered proc is
+        /bin/sh; a bare proc.terminate() only kills the shell wrapper and leaves the real
+        command running as an orphan that keeps writing into the worktree — including
+        while the next job's reset_worktree() is git-reset/clean-ing the same directory.
+        Cancel must kill the whole process group instead."""
+        c = relay.JobControl()
+        proc = _FakePopen([], code=0)
+        proc.pid = 4242
+        killed = []
+        self._killpg, self._getpgid = relay.os.killpg, relay.os.getpgid
+        relay.os.killpg = lambda pgid, sig: killed.append((pgid, sig))
+        relay.os.getpgid = lambda pid: pid   # pretend the pgid equals the pid for the test
+        self.addCleanup(setattr, relay.os, "killpg", self._killpg)
+        self.addCleanup(setattr, relay.os, "getpgid", self._getpgid)
+
+        c.register(proc)
+        c.cancel()
+
+        self.assertEqual(killed, [(4242, relay.signal.SIGTERM)])
+        self.assertFalse(proc.terminated)   # group kill used, not the plain terminate()
+
+    def test_cancel_falls_back_to_plain_terminate_when_the_proc_has_no_process_group(self):
+        """A fake/degenerate proc without a real pid (as in the other JobControl tests)
+        must still be terminated — the group-kill path is best-effort, not a hard
+        requirement, so a lookup failure falls back to proc.terminate()."""
+        c = relay.JobControl()
+        proc = _FakePopen([], code=0)   # no .pid attribute
+        c.register(proc)
+        c.cancel()
+        self.assertTrue(proc.terminated)
+
+    def test_stream_shell_runs_its_own_process_group_so_group_kill_is_safe(self):
+        """killpg(getpgid(pid)) is only safe to use if the child was put in its own new
+        session; otherwise it shares the runner's own process group and a cancel would
+        SIGTERM the runner itself."""
+        seen = {}
+        orig_popen = relay.subprocess.Popen
+        self.addCleanup(setattr, relay.subprocess, "Popen", orig_popen)
+        relay.subprocess.Popen = lambda *a, **k: (
+            seen.update(kwargs=k) or _FakePopen([], code=0))
+        relay._stream_shell("true", "/tmp/wt")
+        self.assertTrue(seen["kwargs"].get("start_new_session"))
 
 
 if __name__ == "__main__":

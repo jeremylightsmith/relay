@@ -865,7 +865,8 @@ def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None):
     `on_proc`, if given, receives the live Popen so a caller can terminate it (executor
     revoke)."""
     proc = subprocess.Popen(cmd, shell=True, cwd=cwd, text=True, bufsize=1,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            start_new_session=True)
     if on_proc:
         on_proc(proc)
     tail = collections.deque(maxlen=12)
@@ -928,8 +929,19 @@ class JobControl:
         return self._cancelled.is_set()
 
     def _terminate(self):
-        if self._proc is not None and self._proc.poll() is None:
-            self._proc.terminate()
+        proc = self._proc
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            # _stream_shell runs its command with shell=True, so the registered proc is
+            # /bin/sh — a plain terminate() only kills the shell wrapper and leaves the
+            # real command running as an orphan that keeps writing into the worktree
+            # (including while the next job's reset_worktree() git-reset/cleans it).
+            # start_new_session=True (both Popen call sites) puts each job in its own
+            # process group, so killing that group takes the whole command tree with it.
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except Exception:
+            proc.terminate()   # best-effort fallback (e.g. no real pid/process group)
 
 
 def claim_node_job(executor, capacity, timeout):
@@ -964,11 +976,18 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
     if session_id:
         cmd[2:2] = ["--resume", session_id]     # claude -p --resume <session> <prompt>
     child_env = dict(os.environ)
+    # `claude -p` caps how long it waits for a background workflow at 10 minutes
+    # by default (CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, v2.1.182+). /exec-plan runs
+    # far longer than that, so without lifting the cap -p exits mid-run and the
+    # stage ships a PARTIAL plan as if it were done. "0" = wait until the workflow
+    # finishes on its own (it is internally bounded). An explicit env override wins,
+    # hence setdefault rather than an unconditional assignment.
     child_env.setdefault("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0")
     if outcome_path:
         child_env["RELAY_NODE_OUTCOME"] = outcome_path
     proc = subprocess.Popen(cmd, cwd=cwd, text=True, bufsize=1, env=child_env,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            start_new_session=True)
     if on_proc:
         on_proc(proc)
     captured = None
@@ -1001,8 +1020,15 @@ def determine_agent_outcome(job, ok, outcome_path):
             with open(outcome_path) as f:
                 data = json.load(f)
             return data.get("outcome", "succeeded"), data.get("detail", "")
-        except Exception:
-            pass
+        except Exception as e:
+            # The outcome file is the ONLY channel a node has to signal `partial`; if it's
+            # unreadable/malformed (e.g. an LLM-driven step wrote truncated JSON), falling
+            # through to the exit-code check would silently report `succeeded` for a claude
+            # -p process that exited 0 but never actually handed back its real outcome. Treat
+            # it as `failed` instead, and log so a human can see the node tried to report.
+            log(f"  ⚠ {ref}: outcome file at {outcome_path} is unreadable/malformed: {e}",
+                ref=ref, kind="error")
+            return "failed", f"outcome file at {outcome_path} is unreadable/malformed: {e}"
     return ("succeeded", "") if ok else ("failed", "agent exited non-zero")
 
 
