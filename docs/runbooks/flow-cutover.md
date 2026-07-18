@@ -8,7 +8,7 @@ entry throughout.
 ## Why the order is not negotiable
 
 Two dispatchers must never pull the same cards. The watcher loads `relay_config.json` **once at
-startup** (`load_config()` at `bin/relay:514`, called from `cmd_watch`), so removing a stage from
+startup** (`load_config()` at `bin/relay:566`, called from `cmd_watch`), so removing a stage from
 the file without restarting the watcher leaves it still pulling that stage. And the server-side
 flow is inert until deployed. So:
 
