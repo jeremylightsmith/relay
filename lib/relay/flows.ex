@@ -184,7 +184,7 @@ defmodule Relay.Flows do
   """
   def duplicate_flow(%Flow{} = flow) do
     attrs = %{
-      key: unique_copy_key(flow),
+      key: unique_key(flow.board_id, "#{flow.key}-copy"),
       isolation: flow.isolation,
       pulls_from_stage_id: flow.pulls_from_stage_id,
       works_in_stage_id: flow.works_in_stage_id,
@@ -247,6 +247,22 @@ defmodule Relay.Flows do
     case default_for(flow.key) do
       nil -> {:error, :not_a_default}
       default -> save_definition(flow, Map.take(default, [:isolation, :nodes, :edges]))
+    end
+  end
+
+  @doc """
+  The first key of the form `base`, `base-2`, `base-3`, … not already taken on `board`.
+  Backs both Duplicate's `-copy` suffix and the create form's prefilled default key.
+  """
+  def unique_key(%Board{id: board_id}, base) when is_binary(base), do: unique_key(board_id, base)
+
+  def unique_key(board_id, base) when is_integer(board_id) and is_binary(base) do
+    taken = MapSet.new(Repo.all(from f in Flow, where: f.board_id == ^board_id, select: f.key))
+
+    if MapSet.member?(taken, base) do
+      Enum.find(Stream.map(2..10_000, &"#{base}-#{&1}"), &(not MapSet.member?(taken, &1)))
+    else
+      base
     end
   end
 
@@ -333,17 +349,6 @@ defmodule Relay.Flows do
       added: Enum.sort(MapSet.to_list(MapSet.difference(cur, def_))),
       removed: Enum.sort(MapSet.to_list(MapSet.difference(def_, cur)))
     }
-  end
-
-  defp unique_copy_key(%Flow{board_id: board_id, key: key}) do
-    taken = MapSet.new(Repo.all(from f in Flow, where: f.board_id == ^board_id, select: f.key))
-    base = "#{key}-copy"
-
-    if MapSet.member?(taken, base) do
-      Enum.find(Stream.map(2..10_000, &"#{base}-#{&1}"), &(not MapSet.member?(taken, &1)))
-    else
-      base
-    end
   end
 
   defp validate_trigger_completeness(changeset) do

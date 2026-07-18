@@ -208,4 +208,118 @@ defmodule Relay.FlowsManagementTest do
       assert {:error, :not_a_default} = Flows.reset_to_default(copy)
     end
   end
+
+  describe "create-from-scratch (RLY-158)" do
+    setup do
+      %{board: seeded_board()}
+    end
+
+    test "a skeleton flow with all three triggers is created disabled at v1", %{board: board} do
+      spec = Flows.get_flow!(board, "spec")
+
+      assert {:ok, flow} =
+               Flows.create_flow(board, %{
+                 key: "deploy-gate",
+                 isolation: :shared_clean,
+                 pulls_from_stage_id: spec.pulls_from_stage_id,
+                 works_in_stage_id: spec.works_in_stage_id,
+                 lands_on_stage_id: spec.lands_on_stage_id,
+                 nodes: [],
+                 edges: [%{from: "start", to: "done"}]
+               })
+
+      assert flow.key == "deploy-gate"
+      refute flow.enabled
+      assert flow.version == 1
+      assert flow.nodes == []
+      assert [%{from: "start", to: "done", on: nil}] = flow.edges
+    end
+
+    test "a malformed key is rejected with the format message", %{board: board} do
+      assert {:error, changeset} =
+               Flows.create_flow(board, %{
+                 key: "Deploy Gate!",
+                 isolation: :shared_clean,
+                 nodes: [],
+                 edges: [%{from: "start", to: "done"}]
+               })
+
+      assert "must be lowercase letters, numbers and dashes" in errors_on(changeset).key
+    end
+
+    test "the shipped and generated key shapes all pass the format validation", %{board: board} do
+      for key <- ~w(spec plan code spec-copy spec-copy-2 new-flow new-flow-2 deploy-gate a1) do
+        assert {:ok, _} =
+                 Flows.create_flow(board, %{
+                   key: key <> "-x",
+                   isolation: :shared_clean,
+                   nodes: [],
+                   edges: [%{from: "start", to: "done"}]
+                 })
+      end
+    end
+
+    test "a duplicate key on the same board is rejected", %{board: board} do
+      assert {:error, changeset} =
+               Flows.create_flow(board, %{
+                 key: "spec",
+                 isolation: :shared_clean,
+                 nodes: [],
+                 edges: [%{from: "start", to: "done"}]
+               })
+
+      assert errors_on(changeset).key != []
+    end
+
+    test "unique_key/2 walks past taken keys", %{board: board} do
+      assert Flows.unique_key(board, "new-flow") == "new-flow"
+      assert Flows.unique_key(board, "spec") == "spec-2"
+
+      {:ok, _} =
+        Flows.create_flow(board, %{
+          key: "spec-2",
+          isolation: :shared_clean,
+          nodes: [],
+          edges: [%{from: "start", to: "done"}]
+        })
+
+      assert Flows.unique_key(board, "spec") == "spec-3"
+    end
+
+    test "duplicate_flow/1 still suffixes -copy then -copy-2", %{board: board} do
+      spec = Flows.get_flow!(board, "spec")
+
+      assert {:ok, first} = Flows.duplicate_flow(spec)
+      assert first.key == "spec-copy"
+
+      assert {:ok, second} = Flows.duplicate_flow(spec)
+      assert second.key == "spec-copy-2"
+    end
+
+    test "creating on an already-enabled stage succeeds but enabling is refused", %{board: board} do
+      spec = Flows.get_flow!(board, "spec")
+      {:ok, spec} = Flows.enable_flow(spec)
+      assert spec.enabled
+
+      assert {:ok, rival} =
+               Flows.create_flow(board, %{
+                 key: "spec-rival",
+                 isolation: :shared_clean,
+                 pulls_from_stage_id: spec.pulls_from_stage_id,
+                 works_in_stage_id: spec.works_in_stage_id,
+                 lands_on_stage_id: spec.lands_on_stage_id,
+                 nodes: [%{key: "n", type: :agent, run: "x"}],
+                 edges: [%{from: "start", to: "n"}, %{from: "n", to: "done", on: :succeeded}]
+               })
+
+      refute rival.enabled
+
+      assert {:error, changeset} = Flows.enable_flow(rival)
+
+      assert "another enabled flow already pulls from this stage" in errors_on(changeset).pulls_from_stage_id
+
+      refute Flows.get_flow!(board, "spec-rival").enabled
+      assert Enum.map(Flows.list_enabled_flows(board), & &1.key) == ["spec"]
+    end
+  end
 end

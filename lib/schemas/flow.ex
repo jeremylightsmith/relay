@@ -40,6 +40,7 @@ defmodule Schemas.Flow do
     flow
     |> cast(attrs, [:key, :isolation, :pulls_from_stage_id, :works_in_stage_id, :lands_on_stage_id])
     |> validate_required([:key, :isolation])
+    |> validate_format(:key, ~r/^[a-z0-9]+(-[a-z0-9]+)*$/, message: "must be lowercase letters, numbers and dashes")
     |> cast_embed(:nodes)
     |> cast_embed(:edges)
     |> validate_unique_node_keys()
