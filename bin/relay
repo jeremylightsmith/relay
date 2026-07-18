@@ -1114,8 +1114,13 @@ def run_node_job(job, slot_path, control):
 def execute_one(job, slot, reset, control, pool):
     """Worker body for one node-job: reset the slot if it is the run's first exclusive job,
     run the step, and — unless a revoke landed mid-run — report the outcome and return the
-    server's run_state. A revoke resets the worktree (salvaging via stash) and reports nothing
-    (§5). Always frees/keeps the slot per run_state in a finally (never leak a slot)."""
+    server's run_state. On revoke of an EXCLUSIVE job, reset the worktree (salvaging via
+    stash) since it is bound to this job/run alone; a revoked shared_clean job must NOT reset
+    exec-clean — capacity.shared_clean lets several jobs run there concurrently, and
+    resetting would blow away the others still in flight (the shared worktree is only ever
+    fast-forwarded when fully idle, by refresh_idle_shared()). Either way, no outcome is
+    reported for a revoke (§5). Always frees/keeps the slot per run_state in a finally (never
+    leak a slot)."""
     slot_path = worktree_path(slot)
     run_state = None
     revoked = False
@@ -1125,7 +1130,7 @@ def execute_one(job, slot, reset, control, pool):
         outcome, detail, git_sha, session_id = run_node_job(job, slot_path, control)
         if control.cancelled():
             revoked = True
-            if not DRY:
+            if not DRY and job.get("isolation") != "shared_clean":
                 reset_worktree(slot_path, pool.base)
             return None
         run_state = report_outcome(job["id"], outcome, detail, git_sha, session_id)
@@ -1342,11 +1347,14 @@ def cmd_execute(args):
             entry["control"].cancel()
 
     def reject(job, detail):
-        """A claimed job this executor cannot run — malformed (missing/bad `isolation` or
-        `run_id`, so ExecutorPool.assign can't even place it) or unplaceable (the server
-        handed back a job whose isolation class has no free slot here). Untrusted server
-        input must not crash the daemon or be dropped silently: report it failed so the
-        server's claim lease doesn't sit held-and-running forever, and log it either way."""
+        """A claimed job this executor cannot run — malformed (missing `isolation` or
+        `run_id` key, so ExecutorPool.assign raises KeyError before it can even place it;
+        an unrecognized-but-present `isolation` value is NOT caught here — assign() treats
+        anything other than the literal "shared_clean" as exclusive) or unplaceable (the
+        server handed back a job whose isolation class has no free slot here). Untrusted
+        server input must not crash the daemon or be dropped silently: report it failed so
+        the server's claim lease doesn't sit held-and-running forever, and log it either
+        way."""
         job_id = job.get("id") if isinstance(job, dict) else None
         log(f"rejecting claimed job {job_id or job!r}: {detail}", kind="error")
         if job_id is None:

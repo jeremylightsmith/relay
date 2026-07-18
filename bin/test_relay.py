@@ -1667,6 +1667,28 @@ class ExecuteOneTest(unittest.TestCase):
         relay.execute_one(job, slot, reset, relay.JobControl(), self.pool)
         self.assertEqual(self.resets, [])                            # shared: never reset per-job
 
+    def test_a_revoke_of_a_shared_job_does_not_reset_the_shared_worktree(self):
+        """A revoked shared_clean job must NOT reset exec-clean: capacity.shared_clean allows
+        several concurrent jobs in that single shared worktree (ExecutorPool docstring: shared
+        is REUSED, never reset per-job), so resetting on revoke would blow away the other
+        jobs still running there. There is nothing worth salvaging for a shared job either —
+        refresh_idle_shared() fast-forwards it once every shared slot is idle."""
+        control = relay.JobControl()
+
+        def revoked_run(job, path, ctl):
+            ctl.cancel()                     # heartbeat revoked it while it ran
+            return ("succeeded", "", "sha", None)
+
+        relay.run_node_job = revoked_run
+        job = {"id": "nj-9", "run_id": "r9", "node_type": "shell", "run": "x",
+               "isolation": "shared_clean", "vars": {"ref": "RLY-9"}}
+        slot, reset = self.pool.assign(job)
+        rs = relay.execute_one(job, slot, reset, control, self.pool)
+        self.assertIsNone(rs)
+        self.assertEqual(self.reports, [])                           # §5: no outcome for a revoke
+        self.assertEqual(self.resets, [])                            # shared: never reset on revoke
+        self.assertEqual(self.pool.capacity()["shared_clean"], 1)    # slot freed
+
     def test_a_revoke_mid_run_resets_and_reports_nothing(self):
         control = relay.JobControl()
 
