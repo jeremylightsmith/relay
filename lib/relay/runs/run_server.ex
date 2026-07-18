@@ -265,7 +265,13 @@ defmodule Relay.Runs.RunServer do
   # :ready-in-a-work-stage accident). B1 / RLY-136, parity with bin/relay's flag().
   defp card_fail_effects(run, execution) do
     card = Repo.get!(Card, run.card_id)
-    detail = (execution && execution.detail) || run.failure_detail || "The agent's run failed."
+
+    detail =
+      Enum.find(
+        [execution && execution.detail, run.failure_detail, "The agent's run failed."],
+        &(is_binary(&1) and String.trim(&1) != "")
+      )
+
     {:ok, _card} = Relay.Cards.request_input(card, detail, :agent)
     :ok
   end

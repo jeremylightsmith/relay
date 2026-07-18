@@ -152,13 +152,19 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
     Exec.heartbeat(exec, "exec-1", %{"shared_clean" => 1})
     assert_receive {:run_started, run}, 2_000
 
+    # start_run/3 broadcasts the first node_started right after run_started; drain it here
+    # (as the first test does) so the retry's own node_started below is the next message in
+    # the mailbox, not this stale one — otherwise the retry assertion below would match the
+    # initial attempt-1 message and prove nothing about the retry actually happening.
+    assert_receive {:node_started, %{id: first_run_id}, _first_execution}, 2_000
+    assert first_run_id == run.id
+
     # brainstorm has max_retries: 1 and no failed edge -> attempt 1 retries, attempt 2 fails.
     detail = "Traceback (most recent call last):\n  boom\nfatal: the node exploded"
 
     job1 = Exec.claim(exec, "exec-1", %{"shared_clean" => 1})
     Exec.outcome(exec, job1["id"], %{"outcome" => "failed", "detail" => detail})
-    assert_receive {:node_started, %{id: retry_id}, _retry_exec}, 2_000
-    assert retry_id == run.id
+    assert_receive {:node_started, _retry_run, %{node_key: "brainstorm", attempt: 2}}, 2_000
 
     job2 = Exec.claim(exec, "exec-1", %{"shared_clean" => 1})
     Exec.outcome(exec, job2["id"], %{"outcome" => "failed", "detail" => detail})
