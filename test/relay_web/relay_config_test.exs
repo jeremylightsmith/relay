@@ -16,8 +16,9 @@ defmodule Relay.RelayConfigTest do
     assert is_list(config["pipeline"])
   end
 
-  test "Spec stage invokes the card-aware brainstorm skill", %{stages: stages} do
-    assert Enum.any?(claude_steps(stages["Spec"]), &(&1 =~ "/brainstorm {ref}"))
+  test "the pipeline no longer has a Spec stage (cut over to the engine-driven flow, RLY-136)",
+       %{stages: stages} do
+    refute Map.has_key?(stages, "Spec")
   end
 
   test "Plan stage invokes /write-plan with the card ref", %{stages: stages} do

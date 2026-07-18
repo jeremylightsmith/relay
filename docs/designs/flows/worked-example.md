@@ -36,25 +36,17 @@ UNCHANGED IN BOTH WORLDS: .claude/skills/* (brainstorm, TDD, debugging, …),
 
 | Stage | What it does | Today's configuration | Tomorrow's configuration |
 | --- | --- | --- | --- |
-| **Spec** | Reads the card, asks the human clarifying questions (needs-input stepper), writes the spec + acceptance criteria back to the card | [pipeline entry ↓](#spec-stage) + [`brainstorm` skill](../../../.claude/skills/brainstorm/SKILL.md) | [Flow row ↓](#spec-stage) (22 lines) |
+| **Spec** | Reads the card, asks the human clarifying questions (needs-input stepper), writes the spec + acceptance criteria back to the card | **Cut over (RLY-136):** no `relay_config.json` pipeline entry — runs as the enabled `spec` [Flow row ↓](#spec-stage) (22 lines) on the engine + [`brainstorm` skill](../../../.claude/skills/brainstorm/SKILL.md) | [Flow row ↓](#spec-stage) (22 lines) |
 | **Plan** | Turns the approved spec into the implementation plan stored on the card | [pipeline entry ↓](#plan-stage) + [`write-plan` command](../../../.claude/commands/write-plan.md) (135 lines) | [Flow row ↓](#plan-stage) (18 lines) |
 | **Code** | Implements the plan task-by-task with TDD + two reviews each, then precommit, whole-branch review, smoke, acceptance, and PR + squash-merge | [pipeline entry ↓](#code-stage) + [`exec-plan` command](../../../.claude/commands/exec-plan.md) (119) + [`execute-plan.js`](../../../.claude/workflows/execute-plan.js) (485) + 8 agent files (533) | [Flow row ↓](#code-stage) (90 lines) |
 
 ### Spec stage
 
-**Today** — `relay_config.json` pipeline entry, verbatim:
-
-```json
-{
-  "stage": "Spec",
-  "from": "Next up",
-  "done": "Spec:Review",
-  "pool": "clean",
-  "action": [
-    { "claude": "You are the AI working Relay card {ref} at the SPEC stage. Run /brainstorm {ref} to completion — headless, no human to dialogue with. It reads the card (honoring any CHANGES REQUESTED block), asks the human any clarifying questions it would normally ask first — asked in ONE {relay} needs-input {ref} --questions @<tmpfile> call carrying a JSON array of `{prompt, options, allow_text}` objects, NOT a hand-numbered question string — the drawer only renders its one-question-at-a-time stepper for the structured form, and a string falls back to a wall of text (RLY-109) — and otherwise designs the feature and writes the spec back to the card. This is authorized; proceed without asking. Then STOP. Do not touch git or other cards." }
-  ]
-}
-```
+**Today — cut over (RLY-136).** Spec no longer has a `relay_config.json` pipeline entry; it
+runs as the enabled `spec` Flow on the engine (see "Tomorrow" below, which is now *today's*
+reality for this stage). Plan and Code below are unchanged — still watcher-driven, still
+described by their live pipeline entries — until RLY-138 and RLY-139 cut them over the same
+way. See [`docs/runbooks/flow-cutover.md`](../../runbooks/flow-cutover.md) for the ritual.
 
 Files it pulls in: [`.claude/skills/brainstorm/`](../../../.claude/skills/brainstorm/SKILL.md)
 (the behavior — stays in both worlds, developer-owned).
