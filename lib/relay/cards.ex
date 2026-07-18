@@ -289,6 +289,20 @@ defmodule Relay.Cards do
   end
 
   @doc """
+  Reloads `card` (owners + sub_tasks preloaded) and broadcasts `{:card_upserted,
+  card}`. For a caller that already wrote a card-owned row (e.g. a sub_task's
+  `done` flag) inside its own transaction and must defer the broadcast until
+  after that transaction commits — Relay.Runs.RunServer's foreach check-off
+  is the motivating case (W13): the row write has to land before the run's
+  `Engine.decide` runs, but a PubSub push must never leave the process ahead
+  of the commit it describes.
+  """
+  def notify_upserted(%Card{} = card) do
+    {:ok, _card} = broadcast_upserted({:ok, reload_with_owners(card)})
+    :ok
+  end
+
+  @doc """
   Sets the card's `ai_result` blob (a string-keyed map) via `update_card/2` (which
   broadcasts). Plan/Code write the summary + changes + screens.
   """

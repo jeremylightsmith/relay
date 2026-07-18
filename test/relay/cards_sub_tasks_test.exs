@@ -71,6 +71,20 @@ defmodule Relay.CardsSubTasksTest do
     end
   end
 
+  describe "notify_upserted/1" do
+    test "reloads the card (owners + sub_tasks preloaded) and broadcasts {:card_upserted, card}",
+         %{board: board, card: card} do
+      {:ok, card} = Cards.set_sub_tasks(card, [%{"title" => "A", "done" => true}])
+      :ok = Events.subscribe(board.id)
+
+      assert :ok = Cards.notify_upserted(card)
+
+      card_id = card.id
+      assert_receive {:card_upserted, %Card{id: ^card_id} = broadcast_card}
+      assert [%SubTask{title: "A", done: true}] = broadcast_card.sub_tasks
+    end
+  end
+
   describe "sub_task_progress/1" do
     test "counts done and total from the preloaded list", %{card: card} do
       {:ok, card} =

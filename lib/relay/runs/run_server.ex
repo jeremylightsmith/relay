@@ -24,8 +24,10 @@ defmodule Relay.Runs.RunServer do
   iteration it belongs to: entering the loop head resolves the first undone
   sub_task, a `:foreach_exhausted` edge unbinds, and everything else inherits.
   The loop tail (the node whose outgoing edges carry a `when` guard) checks its
-  sub_task off on `succeeded` — inside the transaction, before the remaining
-  count is recomputed and handed to the engine.
+  sub_task off on `succeeded` — the ROW WRITE happens inside the transaction
+  (before the remaining count is recomputed and handed to the engine), but,
+  like every other card effect here, the `{:card_upserted, ...}` broadcast for
+  it is deferred until after commit.
   """
 
   use GenServer, restart: :transient
@@ -40,6 +42,7 @@ defmodule Relay.Runs.RunServer do
   alias Schemas.NodeJob
   alias Schemas.Run
   alias Schemas.Stage
+  alias Schemas.SubTask
 
   def start_link(opts) do
     run_id = Keyword.fetch!(opts, :run_id)
@@ -104,15 +107,20 @@ defmodule Relay.Runs.RunServer do
   end
 
   # One transaction: finalize the reported attempt, decide, write the next
-  # run/execution/job rows. Card effects + broadcasts + dispatch happen
-  # after commit (Relay.Cards manages its own transactions and pushes).
+  # run/execution/job rows. Card effects + broadcasts + dispatch happen after
+  # commit (Relay.Cards manages its own transactions and pushes) — the sub_task
+  # check-off is the one exception to "no card writes in here": its ROW WRITE
+  # must land before Engine.decide runs (remaining_sub_tasks reads it on this
+  # same connection), so check_off_sub_task/3 writes it directly and returns
+  # the checked-off id; the broadcast for that write still waits until after
+  # commit, alongside every other card effect below.
   defp apply_outcome(run, flow, job, attrs, state) do
-    {:ok, {decision, execution, next}} =
+    {:ok, {decision, execution, next, checked_off_id}} =
       Repo.transaction(fn ->
         execution = Runs.finalize_job!(job, attrs)
         # Order matters: check off, THEN count, THEN route. One place, one ordering,
         # no second source of truth for "how many tasks are left".
-        check_off_sub_task(run, flow, execution)
+        checked_off_id = check_off_sub_task(run, flow, execution)
         history = outcome_history(run)
 
         opts =
@@ -120,11 +128,12 @@ defmodule Relay.Runs.RunServer do
             [sub_task_id: execution.sub_task_id, foreach_remaining: Runs.remaining_sub_tasks(run)]
 
         decision = Engine.decide(flow, history, execution, opts)
-        {decision, execution, apply_decision(decision, run, flow, execution)}
+        {decision, execution, apply_decision(decision, run, flow, execution), checked_off_id}
       end)
 
     run = Repo.get!(Run, run.id)
     board_id = Runs.board_id_of(run)
+    notify_sub_task_checked_off(run, checked_off_id)
     log_failure_if_final(decision, run, execution)
     Runs.broadcast_runs(board_id, {:node_finished, run, execution})
 
@@ -206,19 +215,33 @@ defmodule Relay.Runs.RunServer do
   # tail is the node whose outgoing edges carry a `when` guard. So a checked box on
   # the card means "reviewed", not "attempted" (strictly better than the grep-gate
   # it replaces, where the implementer checked its own box).
+  #
+  # Writes the row DIRECTLY (not via Relay.Cards.set_sub_task_done/3) so no
+  # broadcast fires from inside apply_outcome's transaction — see the comment
+  # there and notify_sub_task_checked_off/2 below. Returns the checked-off
+  # sub_task id, or nil when nothing was checked off.
   defp check_off_sub_task(run, flow, %NodeExecution{outcome: :succeeded, sub_task_id: id} = execution)
        when is_integer(id) do
     if loop_tail?(flow, execution.node_key) do
-      card = Repo.get!(Card, run.card_id)
-      {:ok, _card} = Relay.Cards.set_sub_task_done(card, id, true)
+      sub_task = Repo.get_by!(SubTask, id: id, card_id: run.card_id)
+      {:ok, _updated} = sub_task |> SubTask.changeset(%{done: true}) |> Repo.update()
+      id
     end
-
-    :ok
   end
 
-  defp check_off_sub_task(_run, _flow, _execution), do: :ok
+  defp check_off_sub_task(_run, _flow, _execution), do: nil
 
   defp loop_tail?(flow, node_key), do: Enum.any?(flow.edges, &(&1.from == node_key and not is_nil(&1.when)))
+
+  # Post-commit half of check_off_sub_task/3: broadcasts the card_upserted for
+  # the row already written inside apply_outcome's transaction. Reloads rather
+  # than trusting a stale in-memory card, same as every other effect in this file.
+  defp notify_sub_task_checked_off(_run, nil), do: :ok
+
+  defp notify_sub_task_checked_off(run, _sub_task_id) do
+    card = Repo.get!(Card, run.card_id)
+    Relay.Cards.notify_upserted(card)
+  end
 
   # Which iteration the NEXT execution belongs to:
   #   * entering the foreach head        -> resolve the first undone sub_task
