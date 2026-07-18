@@ -1344,6 +1344,101 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  describe "board_card/1 run affordances" do
+    defp run_card(run, extra \\ %{}) do
+      render_component(
+        &CoreComponents.board_card/1,
+        Map.merge(
+          %{id: "c", ref: "RLY-9", title: "CSV export of the board", status: :working, run: run},
+          extra
+        )
+      )
+    end
+
+    test "an active run replaces the legacy strip, progress bar, and working label" do
+      html =
+        run_card(
+          {:run,
+           %{
+             status: :running,
+             node_index: 2,
+             node_count: 4,
+             current_node: "implement",
+             flow_key: "code",
+             flow_version: 3,
+             attempts: 2
+           }},
+          %{health: :live, log_text: "old strip", log_at: DateTime.utc_now(), progress: 61}
+        )
+
+      assert html =~ ~s(id="card-RLY-9-run-face")
+      assert html =~ "node 2 of 4"
+      refute html =~ "card-RLY-9-log-strip"
+      refute html =~ "old strip"
+      refute html =~ ~s(class="card-status")
+      assert html =~ "border-l-secondary"
+    end
+
+    test "a parked run replaces the needs-you chip with PARKED · NEEDS YOU" do
+      html =
+        run_card(
+          {:run, %{status: :parked, current_node: "brainstorm", flow_key: "spec", flow_version: 2, attempts: 1}},
+          %{status: :needs_input, question: "Full text?"}
+        )
+
+      assert html =~ "PARKED · NEEDS YOU"
+      refute html =~ "card-needs-input"
+      refute html =~ "card-question-preview"
+      assert html =~ "border-l-warning"
+    end
+
+    test "failed, queued, done, and cancelled paint their accents" do
+      failed =
+        run_card(
+          {:run, %{status: :failed, current_node: "quality_review", flow_key: "code", flow_version: 3, attempts: 3}}
+        )
+
+      queued = run_card({:queued, %{key: "code"}}, %{status: :ready})
+
+      done =
+        run_card(
+          {:run,
+           %{status: :done, duration_s: 581, cost: Decimal.new("0.38"), flow_key: "code", flow_version: 3, attempts: 4}},
+          %{status: :ready}
+        )
+
+      cancelled =
+        run_card({:run, %{status: :cancelled, current_node: "implement", flow_key: "code", flow_version: 3, attempts: 1}})
+
+      assert failed =~ "RUN FAILED"
+      assert failed =~ "border-l-error"
+      assert queued =~ "QUEUED · CODE FLOW"
+      assert queued =~ "border-l-base-300"
+      assert done =~ "merged · 9:41"
+      assert done =~ "border-l-success"
+      assert cancelled =~ "CANCELLED · CLAIMED"
+    end
+
+    test "a done run on an in_review card shows the blue review treatment" do
+      html =
+        run_card(
+          {:run, %{status: :done, duration_s: 581, cost: nil, flow_key: "code", flow_version: 3, attempts: 4}},
+          %{status: :in_review}
+        )
+
+      assert html =~ "READY FOR YOUR REVIEW"
+      assert html =~ "border-l-primary"
+    end
+
+    test "without a run the legacy strip logic is untouched" do
+      html = run_card(nil, %{health: :live, log_text: "uploaded 24/40 posts", log_at: DateTime.utc_now()})
+
+      assert html =~ "card-RLY-9-log-strip"
+      assert html =~ "uploaded 24/40 posts"
+      refute html =~ "run-face"
+    end
+  end
+
   describe "avatar/1" do
     test "renders the photo when src is present" do
       html =

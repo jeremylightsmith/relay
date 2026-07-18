@@ -100,6 +100,13 @@ defmodule Relay.Runs.Listener do
     :ok
   end
 
+  # Defensive fallback: any other run shape (e.g. a parked run with an
+  # unexpected/missing `parked_reason`, such as data seeded or migrated
+  # outside `Relay.Runs`'s own park_* functions) is left untouched rather
+  # than crashing the reconciler — reconciliation self-heals on the next
+  # event, so a no-op here is safe.
+  defp reconcile_card(_card, %Run{}), do: :ok
+
   defp last_session(%Run{} = run) do
     Repo.one(
       from e in NodeExecution,

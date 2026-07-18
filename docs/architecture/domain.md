@@ -33,6 +33,22 @@ sharing behavior.
   `Relay.Runs.Dispatcher` behaviour (`config :relay, :runs_dispatcher`; default
   `NoopDispatcher` — jobs sit `:queued` for card 04's pull transport). All card writes go
   through `Relay.Cards`, so ADR 0003/0004 rules apply automatically.
+  **Read side (RLY-137):** `list_runs_for_card/1` (newest-first, node executions
+  preloaded chronologically) and `latest_run/1` back the card drawer's Run tab;
+  `run_summaries_for_board/1` batches every card's latest-run summary
+  (`status`, `flow_key`, `current_node`, `node_index`/`node_count` on the flow's
+  happy path, `duration_s`/`cost`/`nodes`/`attempts` totals) in three queries for
+  the board card face. `happy_path/1` linearizes a flow's `:succeeded`-edge chain
+  from `start` to `done`. `queued_flow/4` and `face_summary/4` are pure
+  derivations over a card + flows + summaries — no scheduler/NodeJob read — that
+  decide what the board card face shows (`{:run, summary}`, `{:queued, flow}`, or
+  `nil` → legacy strip). Callers refetch via the coarse
+  `{:run_changed, card_id}` event on `board:<id>:runs`
+  (`Relay.Runs.broadcast_run_changed/2`) rather than patching state from the
+  engine's fine-grained events — see [runtime.md](runtime.md). `duration_s` is
+  derived (summed `finished_at - started_at`) since `NodeExecution` stores no
+  duration column; `flow_version` in a summary is always `nil` today (`Run`
+  points at the live flow row, no version column yet — RLY-152).
 - **Cards** — the card lifecycle: create/edit/move/archive, status (`working`,
   `needs_input`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject, needs-input
   questions. Card state × stage validity is governed by

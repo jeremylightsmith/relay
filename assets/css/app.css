@@ -597,6 +597,13 @@ textarea.commit-field-input { min-height: 64px; }
 /* RLY-48: the drawer's "Relay AI is working" strip pulse. */
 @keyframes relaypulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
+/* RLY-137: the run timeline's active-node ring (artboard's `crring`). */
+@keyframes relayring {
+  0% { box-shadow: 0 0 0 0 oklch(0.56 0.16 292 / 0.4); }
+  70% { box-shadow: 0 0 0 7px oklch(0.56 0.16 292 / 0); }
+  100% { box-shadow: 0 0 0 0 oklch(0.56 0.16 292 / 0); }
+}
+
 /* RLY-112: the Activity timeline's connecting rule (Relay Card Activity.dc.html §04). */
 #card-drawer-activity { position: relative; }
 #card-drawer-activity::before {

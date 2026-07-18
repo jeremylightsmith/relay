@@ -3,6 +3,7 @@ defmodule Relay.Runs.ListenerTest do
 
   alias Relay.Runs
   alias Relay.Runs.FakeDispatcher
+  alias Relay.Runs.Listener
   alias Schemas.NodeJob
   alias Schemas.Run
 
@@ -96,7 +97,30 @@ defmodule Relay.Runs.ListenerTest do
     {:ok, _comment} =
       Relay.Activity.add_comment(reload(board, card), %{actor: {:user, user.id}, body: "looking"})
 
-    _ = :sys.get_state(Relay.Runs.Listener)
+    _ = :sys.get_state(Listener)
     assert length(Runs.list_runs(reload(board, card))) == 2
+  end
+
+  test "a parked run with an unexpected parked_reason (e.g. nil) is left alone, not crashed on",
+       %{user: user, board: board, card: card} do
+    run =
+      insert(:run,
+        card: card,
+        flow_key: "spec",
+        status: :parked,
+        parked_reason: nil,
+        current_node: "brainstorm"
+      )
+
+    listener_pid = Process.whereis(Listener)
+    ref = Process.monitor(listener_pid)
+
+    {:ok, _comment} =
+      Relay.Activity.add_comment(reload(board, card), %{actor: {:user, user.id}, body: "still parked"})
+
+    _ = :sys.get_state(Listener)
+    refute_receive {:DOWN, ^ref, :process, ^listener_pid, _reason}
+
+    assert %Run{status: :parked, parked_reason: nil} = Runs.get_run!(run.id)
   end
 end

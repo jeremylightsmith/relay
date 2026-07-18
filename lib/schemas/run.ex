@@ -30,6 +30,7 @@ defmodule Schemas.Run do
 
     belongs_to :card, Schemas.Card
     belongs_to :flow, Schemas.Flow
+    has_many :node_executions, Schemas.NodeExecution
 
     timestamps(type: :utc_datetime)
   end
