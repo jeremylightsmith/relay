@@ -1395,7 +1395,15 @@ defmodule RelayWeb.CoreComponentsTest do
     test "failed, queued, done, and cancelled paint their accents" do
       failed =
         run_card(
-          {:run, %{status: :failed, current_node: "quality_review", flow_key: "code", flow_version: 3, attempts: 3}}
+          {:run,
+           %{
+             status: :failed,
+             current_node: nil,
+             last_node: "quality_review",
+             flow_key: "code",
+             flow_version: 3,
+             attempts: 3
+           }}
         )
 
       queued = run_card({:queued, %{key: "code"}}, %{status: :ready})
@@ -1408,7 +1416,17 @@ defmodule RelayWeb.CoreComponentsTest do
         )
 
       cancelled =
-        run_card({:run, %{status: :cancelled, current_node: "implement", flow_key: "code", flow_version: 3, attempts: 1}})
+        run_card(
+          {:run,
+           %{
+             status: :cancelled,
+             current_node: nil,
+             last_node: "implement",
+             flow_key: "code",
+             flow_version: 3,
+             attempts: 1
+           }}
+        )
 
       assert failed =~ "RUN FAILED"
       assert failed =~ "border-l-error"
