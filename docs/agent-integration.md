@@ -160,7 +160,7 @@ the same machine.
   `capacity: {shared_clean: 1, exclusive: 1}`. `capacity` is the field you'll routinely edit —
   it caps how many `shared_clean` jobs and how many `exclusive` run-slots this executor
   advertises at once. Worktrees for both classes live under the `exec-*` namespace
-  (`exec-clean`, `exec-work-1`, …), disjoint from `relay watch`'s `clean`/`work-N` pools.
+  (`exec-clean`, `exec-work-1`, …), disjoint from `relay watch`'s `work-N` pool.
 
 - **Running it:** `bin/relay execute` runs the claim/execute/report loop until Ctrl-C (which
   stops claiming and waits for in-flight jobs to finish). `--once` drains a single

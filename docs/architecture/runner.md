@@ -155,7 +155,7 @@ two generations coexist on the same machine through the migration; nothing they 
   exclusive}`, `poll_timeout`, `heartbeat_interval`. Missing file → sensible defaults;
   capacity is the field a developer routinely edits.
 - **Worktree namespace.** `ExecutorPool` maps every job's `isolation` onto worktrees under the
-  `exec-*` namespace — disjoint from the watcher's `clean`/`work` pools — so a `relay watch` and
+  `exec-*` namespace — disjoint from the watcher's `work` pool — so a `relay watch` and
   a `relay execute` can run on the same checkout at once without contending over a worktree.
   `shared_clean` jobs share one reused `exec-clean` worktree (never reset per-job, only
   fast-forwarded to base when every shared slot is idle). `exclusive` jobs get a slot from a
