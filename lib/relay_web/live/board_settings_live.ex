@@ -926,7 +926,7 @@ defmodule RelayWeb.BoardSettingsLive do
         save_board_name save_board_slug edit_stage save_stage add_stage delete_stage
         toggle_wip bump_wip reorder_stage toggle_lane set_type toggle_ai set_reject_to
         toggle_collapsed_default invite_member remove_member flow_toggle flow_confirm_toggle
-        flow_duplicate flow_reset flow_confirm_reset
+        flow_duplicate flow_reset flow_confirm_reset flow_new flow_create_validate flow_create
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -1175,6 +1175,30 @@ defmodule RelayWeb.BoardSettingsLive do
     {:noreply, socket |> assign(:flow_panel, nil) |> assign_flows()}
   end
 
+  # RLY-158 — create from scratch. The panel is a {:new, form} variant of @flow_panel
+  # rendered above the table, so it works on a board with no flows at all. Cancel reuses
+  # the shared "flow_cancel_panel" event.
+  def handle_event("flow_new", _params, socket) do
+    form = new_flow_form(%{"key" => Flows.unique_key(socket.assigns.board, "new-flow")})
+    {:noreply, assign(socket, :flow_panel, {:new, form})}
+  end
+
+  def handle_event("flow_create_validate", %{"flow" => params}, socket) do
+    {:noreply, assign(socket, :flow_panel, {:new, new_flow_form(params)})}
+  end
+
+  def handle_event("flow_create", %{"flow" => params}, socket) do
+    board = socket.assigns.board
+
+    case create_new_flow(board, params) do
+      {:ok, flow} ->
+        {:noreply, push_navigate(socket, to: ~p"/board/#{board.slug}/flows/#{flow.key}")}
+
+      {:error, errors} ->
+        {:noreply, assign(socket, :flow_panel, {:new, new_flow_form(params, errors)})}
+    end
+  end
+
   @impl true
   def handle_info({:member_removed, user_id}, socket) do
     if socket.assigns.current_scope.user.id == user_id do
@@ -1258,6 +1282,49 @@ defmodule RelayWeb.BoardSettingsLive do
     |> Enum.map(fn {_field, {message, _meta}} -> message end)
     |> Enum.uniq()
     |> Enum.join("; ")
+  end
+
+  @new_flow_trigger_fields [:pulls_from_stage_id, :works_in_stage_id, :lands_on_stage_id]
+
+  # The all-three-triggers-required rule is a *form* rule, not a context rule:
+  # create_flow/2 itself happily creates a flow with no triggers (that's how a
+  # seeded flow with an unresolvable stage name lands).
+  defp create_new_flow(board, params) do
+    case Enum.filter(@new_flow_trigger_fields, &blank_param?(params[to_string(&1)])) do
+      [] ->
+        attrs =
+          params
+          |> Map.take(["key", "isolation" | Enum.map(@new_flow_trigger_fields, &to_string/1)])
+          |> Map.merge(%{"nodes" => [], "edges" => [%{"from" => "start", "to" => "done"}]})
+
+        case Flows.create_flow(board, attrs) do
+          {:ok, flow} -> {:ok, flow}
+          {:error, changeset} -> {:error, changeset.errors}
+        end
+
+      missing ->
+        {:error, Enum.map(missing, &{&1, {"is required", []}})}
+    end
+  end
+
+  defp blank_param?(nil), do: true
+  defp blank_param?(value) when is_binary(value), do: String.trim(value) == ""
+
+  defp new_flow_form(params, errors \\ []) do
+    defaults = %{
+      "key" => "",
+      "isolation" => "shared_clean",
+      "pulls_from_stage_id" => "",
+      "works_in_stage_id" => "",
+      "lands_on_stage_id" => ""
+    }
+
+    # <.input> hides errors on fields LiveView still marks unused, and a stage the
+    # user never touched is exactly the field we need the error on — so drop the
+    # markers before building the form.
+    params = Map.reject(params, fn {key, _} -> String.starts_with?(key, "_unused_") end)
+
+    to_form(Map.merge(defaults, params), as: :flow, errors: errors)
   end
 
   defp assign_members(socket) do
