@@ -267,8 +267,10 @@ class ExecutorHeartbeat:
     """Per-executor heartbeat for `relay execute`. POSTs {executor, running:[job-ids]} to
     /api/node-jobs/heartbeat every `interval`s and READS the response's revoked job-ids —
     unlike the watcher's Heartbeat, which discards the body — handing each to `on_revoke` (§5).
-    Best-effort like Heartbeat: swallows api()'s die() and any other error. The legacy watcher
-    keeps using /api/board/heartbeat with its bare payload, untouched."""
+    Best-effort like Heartbeat: swallows api()'s die() and any other error. soft_404=True on
+    the call itself, so a not-yet-existing server route is silent (no error line) rather than
+    a die() every beat — see docs/agent-integration.md's "client-side only for now" note. The
+    legacy watcher keeps using /api/board/heartbeat with its bare payload, untouched."""
 
     def __init__(self, executor, running_fn, on_revoke, interval=15):
         self.executor = executor
@@ -287,7 +289,8 @@ class ExecutorHeartbeat:
     def _beat(self):
         try:
             resp = api("POST", "/api/node-jobs/heartbeat",
-                       {"executor": self.executor, "running": self.running_fn()})
+                       {"executor": self.executor, "running": self.running_fn()},
+                       soft_404=True)
             for job_id in (resp or {}).get("revoked", []):
                 self.on_revoke(job_id)
         except SystemExit:      # api() die()s on HTTP/network error

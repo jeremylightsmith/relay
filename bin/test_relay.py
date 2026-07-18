@@ -1650,6 +1650,26 @@ class ExecutorHeartbeatTest(unittest.TestCase):
                                      lambda: 1 / 0, lambda jid: None, interval=15)
         hb._beat()   # must not raise, exactly like the watcher's Heartbeat
 
+    def test_a_404_beat_prints_nothing_to_stderr(self):
+        """The server route doesn't exist yet (docs/agent-integration.md: "client-side only
+        for now") — a real urlopen() 404 must be swallowed silently by the soft_404 call, not
+        fall through to die()'s stderr print, or a long-running `relay execute` would spam an
+        error line on every heartbeat tick forever."""
+        hb = relay.ExecutorHeartbeat({"name": "b", "host": "h"},
+                                     lambda: [], lambda jid: None, interval=15)
+        orig_env, orig_urlopen = relay.env, relay.urllib.request.urlopen
+        relay.env = lambda name: "http://example.test"
+        relay.urllib.request.urlopen = lambda req, *a, **k: (
+            _ for _ in ()).throw(_http_error(404))
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err):
+                hb._beat()
+        finally:
+            relay.env = orig_env
+            relay.urllib.request.urlopen = orig_urlopen
+        self.assertEqual(err.getvalue(), "")
+
 
 class ExecuteOneTest(unittest.TestCase):
     def setUp(self):
