@@ -19,6 +19,7 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
   alias Relay.Repo
   alias Relay.Runs
   alias Relay.Runs.Capacity
+  alias Relay.Runs.Listener
   alias Relay.Runs.Scheduler.ScriptedExecutor, as: Exec
   alias Relay.Runs.Scheduler.Server
 
@@ -109,6 +110,12 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
 
       assert Runs.get_run!(run.id).status == :done
       assert stage_name(board, card.id) == "Plan:Done"
+
+      # Drain the Listener's mailbox before the sandbox tears down: the outcome POST above
+      # broadcasts synchronously, but Listener.reconcile/1 runs asynchronously off that
+      # broadcast and can still be mid-query when the test process exits, poisoning the
+      # sandbox connection (see Relay.Runs.Listener's @moduledoc).
+      _ = :sys.get_state(Process.whereis(Listener))
     end
 
     test "a needs_input outcome parks the run and blocks the card instead of landing it",
@@ -132,6 +139,10 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
       assert Runs.get_run!(run.id).status == :parked
       assert Cards.get_card(board, card.id).status == :needs_input
       refute stage_name(board, card.id) == "Plan:Done"
+
+      # Drain the Listener's mailbox before the sandbox tears down (see the other test in
+      # this describe block for why).
+      _ = :sys.get_state(Process.whereis(Listener))
     end
   end
 
@@ -171,6 +182,11 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
       assert stage_name(board, spec_card.id) == "Spec:Review"
       assert stage_name(board, plan_card.id) == "Plan:Done"
       assert Runs.active_runs(board.id) == []
+
+      # Drain the Listener's mailbox before the sandbox tears down (see the "Plan flow, end
+      # to end" tests above for why): this test also reports two runs to completion, which
+      # can leave Listener mid-reconcile when the test process exits.
+      _ = :sys.get_state(Process.whereis(Listener))
     end
 
     test "with only one shared slot, the Plan card is worked and the Spec card waits",
