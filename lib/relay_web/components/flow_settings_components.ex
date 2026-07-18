@@ -26,6 +26,17 @@ defmodule RelayWeb.FlowSettingsComponents do
   def flows_pane(assigns) do
     ~H"""
     <section id="flows-pane">
+      <%!-- Mirrors the board view's read-only banner (board_live.ex:109-124): the
+            "+ New flow" button is silently absent for an archived board, so state why. --%>
+      <div
+        :if={@read_only?}
+        id="flows-read-only-banner"
+        style="display:flex;align-items:center;gap:10px;background:oklch(0.97 0.04 85);border:1px solid oklch(0.85 0.09 85);color:oklch(0.42 0.09 85);border-radius:10px;padding:11px 16px;margin-bottom:18px;font-size:13.5px;"
+      >
+        <.icon name="hero-archive-box" class="size-4" />
+        <span>This board is archived (read-only). Flows can't be created or changed.</span>
+      </div>
+
       <%!-- Artboard lines 63-76: header is a flex row with the create button in a
             right-hand column. The artboard's Configured/First-run state switcher above
             the button is a mockup-only affordance and is deliberately not shipped. --%>

@@ -374,6 +374,22 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       assert has_element?(view, "#flows-pane")
       refute has_element?(view, "#new-flow-button")
     end
+
+    test "an archived board shows a static read-only banner explaining why the button is gone",
+         %{conn: conn, board: board} do
+      {:ok, _} = Boards.archive_board(board)
+
+      view = open_flows(conn, board)
+
+      assert has_element?(view, "#flows-read-only-banner")
+      assert render(view) =~ "archived (read-only)"
+    end
+
+    test "an unarchived board renders no read-only banner", %{conn: conn, board: board} do
+      view = open_flows(conn, board)
+
+      refute has_element?(view, "#flows-read-only-banner")
+    end
   end
 
   describe "creating a flow from scratch (RLY-158)" do
