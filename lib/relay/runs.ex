@@ -154,7 +154,7 @@ defmodule Relay.Runs do
     Map.new(latest, fn run ->
       path = Map.get(paths, run.flow_key, [])
       index = run.current_node && Enum.find_index(path, &(&1 == run.current_node))
-      tot = Map.get(totals, run.id, %{duration_s: nil, cost: nil, nodes: 0, attempts: 0})
+      tot = Map.get(totals, run.id, %{duration_s: nil, cost: nil, nodes: 0, attempts: 0, last_node: nil})
 
       {run.card_id,
        %{
@@ -164,6 +164,7 @@ defmodule Relay.Runs do
          flow_key: run.flow_key,
          flow_version: nil,
          current_node: run.current_node,
+         last_node: run.current_node || tot.last_node,
          node_index: index && index + 1,
          node_count: if(path == [], do: nil, else: length(path)),
          started_at: run.started_at,
@@ -174,6 +175,25 @@ defmodule Relay.Runs do
          attempts: tot.attempts
        }}
     end)
+  end
+
+  @doc """
+  The node the run was last at: `current_node` while the run is live, else the
+  `node_key` of its most recent `NodeExecution`.
+
+  `close_run!/3` nils `current_node` on every terminal close, so a closed run's
+  board tile would otherwise name no node at all (RLY-159). Ordering is
+  `started_at` desc with `id` desc as tiebreak — `started_at` is second-precision,
+  so two executions in the same second are separated by insertion order.
+  """
+  def last_node(%{current_node: node_key}, _node_executions) when is_binary(node_key), do: node_key
+
+  def last_node(_run, []), do: nil
+
+  def last_node(_run, node_executions) do
+    node_executions
+    |> Enum.max_by(&{DateTime.to_unix(&1.started_at), &1.id})
+    |> Map.fetch!(:node_key)
   end
 
   defp node_totals([]), do: %{}
@@ -188,7 +208,8 @@ defmodule Relay.Runs do
            duration_s: sum(fragment("EXTRACT(EPOCH FROM (? - ?))::integer", ne.finished_at, ne.started_at)),
            cost: sum(ne.cost),
            nodes: count(ne.node_key, :distinct),
-           attempts: count(ne.id)
+           attempts: count(ne.id),
+           last_node: fragment("(array_agg(? ORDER BY ? DESC, ? DESC))[1]", ne.node_key, ne.started_at, ne.id)
          }}
     )
     |> Repo.all()

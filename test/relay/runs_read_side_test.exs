@@ -77,6 +77,84 @@ defmodule Relay.RunsReadSideTest do
 
       assert Runs.run_summaries_for_board(board) == %{}
     end
+
+    test "a live run's last_node is just its current_node" do
+      user = insert(:user)
+      {:ok, board} = Relay.Boards.create_board(user, %{name: "Live"})
+      board = Relay.Repo.preload(board, :stages)
+      card = insert(:card, stage: hd(board.stages))
+      run = insert(:run, card: card, flow_key: "code", current_node: "implement")
+      insert(:node_execution, run: run, node: "branch")
+
+      summary = Runs.run_summaries_for_board(board)[card.id]
+
+      assert summary.current_node == "implement"
+      assert summary.last_node == "implement"
+    end
+
+    test "a run closed :failed by close_run!/3 still names the node it died on" do
+      user = insert(:user)
+      {:ok, board} = Relay.Boards.create_board(user, %{name: "Failed"})
+      board = Relay.Repo.preload(board, :stages)
+      card = insert(:card, stage: hd(board.stages))
+      run = insert(:run, card: card, flow_key: "code", current_node: "quality_review")
+      insert(:node_execution, run: run, node: "implement")
+      insert(:node_execution, run: run, node: "quality_review", outcome: :failed)
+
+      Runs.close_run!(run, :failed, "boom")
+
+      summary = Runs.run_summaries_for_board(board)[card.id]
+
+      assert summary.status == :failed
+      assert is_nil(summary.current_node)
+      assert summary.last_node == "quality_review"
+    end
+
+    test "a :cancelled run whose final execution is still in flight names that node" do
+      user = insert(:user)
+      {:ok, board} = Relay.Boards.create_board(user, %{name: "Cancelled"})
+      board = Relay.Repo.preload(board, :stages)
+      card = insert(:card, stage: hd(board.stages))
+      run = insert(:run, card: card, flow_key: "code", current_node: "implement")
+      insert(:node_execution, run: run, node: "branch")
+      insert(:node_execution, run: run, node: "implement", outcome: nil, duration_s: nil)
+
+      Runs.close_run!(run, :cancelled, nil)
+
+      summary = Runs.run_summaries_for_board(board)[card.id]
+
+      assert is_nil(summary.current_node)
+      assert summary.last_node == "implement"
+    end
+
+    test "a closed run with no executions has a nil last_node" do
+      user = insert(:user)
+      {:ok, board} = Relay.Boards.create_board(user, %{name: "Bare"})
+      board = Relay.Repo.preload(board, :stages)
+      card = insert(:card, stage: hd(board.stages))
+      run = insert(:run, card: card, flow_key: "code", current_node: "branch")
+
+      Runs.close_run!(run, :failed, "died early")
+
+      summary = Runs.run_summaries_for_board(board)[card.id]
+
+      assert is_nil(summary.current_node)
+      assert is_nil(summary.last_node)
+    end
+  end
+
+  describe "last_node/2" do
+    test "prefers current_node, else the most recent execution (id breaks a same-second tie)" do
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+
+      earlier = %{id: 1, node_key: "implement", started_at: now}
+      later = %{id: 2, node_key: "quality_review", started_at: now}
+
+      assert Runs.last_node(%{current_node: "implement"}, []) == "implement"
+      assert Runs.last_node(%{current_node: nil}, [earlier, later]) == "quality_review"
+      assert Runs.last_node(%{current_node: nil}, [later, earlier]) == "quality_review"
+      assert Runs.last_node(%{current_node: nil}, []) == nil
+    end
   end
 
   describe "queued_flow/4" do
