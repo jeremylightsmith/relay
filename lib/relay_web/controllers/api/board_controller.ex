@@ -53,6 +53,12 @@ defmodule RelayWeb.Api.BoardController do
     # `capacity` carried here is the executor's *configured* per-class slot count, not a
     # live free count — Relay.Runs.Scheduler.Server debits in-flight :running runs from
     # it server-side before planning (see Relay.Runs.Capacity's moduledoc).
+    #
+    # TRAP for the executor-side cutover: bin/relay's ExecutorPool.capacity() (used today
+    # only for /api/node-jobs/claim, not this route) returns CURRENTLY-FREE capacity,
+    # already decremented as slots are taken. Whichever client first posts `capacity` on
+    # this route must send the configured total (cfg["capacity"]) — posting the live-free
+    # count here would double-debit every already-running run.
     :ok = maybe_advertise_executor(board, params)
 
     json(conn, %{stamped: stamped})

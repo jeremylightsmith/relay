@@ -56,9 +56,13 @@ defmodule Relay.Runs do
   maps — the shape `Relay.Runs.Scheduler.plan/1` reads. `isolation` comes from
   the live flow row (left-joined, so a run whose flow was deleted still appears
   and excludes its card from fresh pulls, with `isolation: nil` → undispatchable
-  until the run fails on its next transition). `pinned_executor_id` is nil in
-  W11: only `:shared_clean` flows are enabled, and shared runs use greedy (`:any`)
-  placement; exclusive pinning derivation lands with the Code flow (RLY-139).
+  until the run fails on its next transition). `pinned_executor_id` is always
+  nil: executor-affinity pinning (deriving which executor already holds an
+  `:exclusive` run's worktree) is UNIMPLEMENTED (RLY-139), not merely unused.
+  Every board can enable an `:exclusive`-isolation flow today (e.g. the seeded
+  `code` flow, toggleable from board settings) — until RLY-139 lands, a parked
+  run from one never resumes (`Scheduler.resume_runs/2`'s `{:pinned, nil}`
+  target is never free), so enabling such a flow is not yet safe.
   """
   def active_runs(board_id) do
     from(r in Run,

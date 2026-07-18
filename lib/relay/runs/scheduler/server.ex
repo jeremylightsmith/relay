@@ -138,19 +138,24 @@ defmodule Relay.Runs.Scheduler.Server do
   # never drift out of sync with how the planner actually placed the run.
   # `:none` (nothing to take, e.g. capacity already fully spent) leaves the
   # snapshot unchanged rather than raising.
+  #
+  # Always targets `:any`, even for `:exclusive` runs: executor-affinity pinning
+  # is unimplemented (`pinned_executor_id` is always nil — RLY-139), so a
+  # `{:pinned, nil}` target would be permanently unfree and this debit would be
+  # a silent no-op — exactly the isolation class where an unaccounted running
+  # run is most damaging (two exclusive runs sharing one worktree). Debiting
+  # greedily may charge the wrong executor's slot, but it keeps the aggregate
+  # slot count correct, which is what this accounting exists to protect. This
+  # mirrors `Relay.Runs.Scheduler.place_fresh/4`, which already places every
+  # fresh pull — exclusive included — against `:any`.
   defp reserve_slot(cap, %{isolation: nil}), do: cap
 
   defp reserve_slot(cap, run) do
-    case Scheduler.take_slot(cap, run.isolation, executor_target(run)) do
+    case Scheduler.take_slot(cap, run.isolation, :any) do
       :none -> cap
       {_executor_id, updated} -> updated
     end
   end
-
-  # Mirrors Relay.Runs.Scheduler's own target selection: exclusive runs are
-  # pinned to their affine executor, everything else is greedy (`:any`).
-  defp executor_target(%{isolation: :exclusive, pinned_executor_id: eid}), do: {:pinned, eid}
-  defp executor_target(_run), do: :any
 
   defp stage_snap(stage) do
     %{id: stage.id, position: stage.position, parent_id: stage.parent_id, wip_limit: stage.wip_limit}
