@@ -264,4 +264,234 @@ defmodule Relay.RunsTest do
              )
     end
   end
+
+  describe "upsert_executor/2" do
+    setup %{board: board}, do: %{board: board}
+
+    test "inserts then updates the durable row keyed {board_id, name}", %{board: board} do
+      {:ok, e1} =
+        Runs.upsert_executor(board, %{
+          "name" => "jeremy-mbp",
+          "host" => "jeremy-mbp.local",
+          "interval" => 30,
+          "capacity" => %{"shared_clean" => 3, "exclusive" => 1}
+        })
+
+      assert e1.board_id == board.id
+      assert e1.name == "jeremy-mbp"
+      assert e1.capacity == %{"shared_clean" => 3, "exclusive" => 1}
+      assert %DateTime{} = e1.last_heartbeat
+
+      {:ok, e2} =
+        Runs.upsert_executor(board, %{"name" => "jeremy-mbp", "capacity" => %{"shared_clean" => 1}})
+
+      assert e2.id == e1.id
+      assert e2.capacity == %{"shared_clean" => 1}
+      assert Relay.Repo.aggregate(Schemas.Executor, :count) == 1
+    end
+  end
+
+  describe "claim_next_job/1" do
+    test "atomically claims the oldest queued job the executor has capacity for", %{board: board} do
+      flow = enabled_spec_flow(board)
+      card = card_in(board, "Next up")
+      {:ok, run} = Runs.start_run(card, flow)
+      queued = Runs.active_job(run)
+
+      {:ok, executor} =
+        Runs.upsert_executor(board, %{"name" => "e1", "capacity" => %{"shared_clean" => 1, "exclusive" => 1}})
+
+      assert {:ok, claimed} = Runs.claim_next_job(executor)
+      assert claimed.id == queued.id
+      assert claimed.state == :claimed
+      assert claimed.executor_name == "e1"
+      assert %DateTime{} = claimed.claimed_at
+
+      # Nothing left to claim → {:ok, nil}
+      assert {:ok, nil} = Runs.claim_next_job(executor)
+    end
+
+    test "skips a class the executor has no capacity for", %{board: board} do
+      flow = enabled_spec_flow(board)
+      {:ok, _run} = Runs.start_run(card_in(board, "Next up"), flow)
+
+      {:ok, executor} = Runs.upsert_executor(board, %{"name" => "e2", "capacity" => %{"exclusive" => 1}})
+
+      # The spec flow is shared_clean; an exclusive-only executor claims nothing.
+      assert {:ok, nil} = Runs.claim_next_job(executor)
+    end
+
+    test "never claims another board's job, even with the globally-older id and a colliding executor name",
+         %{board: board_a, user: user} do
+      flow_a = enabled_spec_flow(board_a)
+      {:ok, run_a} = Runs.start_run(card_in(board_a, "Next up"), flow_a)
+      queued_a = Runs.active_job(run_a)
+
+      {:ok, board_b} = Relay.Boards.create_board(user, %{name: "Other Board"})
+      flow_b = enabled_spec_flow(board_b)
+      {:ok, run_b} = Runs.start_run(card_in(board_b, "Next up"), flow_b)
+      queued_b = Runs.active_job(run_b)
+
+      # board_a's job was created first (lower id) and both executors share a
+      # name, so an unscoped claim would find board_a's job first.
+      {:ok, executor_b} =
+        Runs.upsert_executor(board_b, %{"name" => "shared-hostname", "capacity" => %{"shared_clean" => 1}})
+
+      assert {:ok, claimed} = Runs.claim_next_job(executor_b)
+      assert claimed.id == queued_b.id
+      refute claimed.id == queued_a.id
+
+      # board_a's job is untouched.
+      still_queued = Runs.active_job(run_a)
+      assert still_queued.id == queued_a.id
+      assert still_queued.state == :queued
+    end
+  end
+
+  describe "get_claimed_job/2" do
+    test "returns held jobs, 404s unknown ids, conflicts on unheld state", %{board: board} do
+      flow = enabled_spec_flow(board)
+      {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
+      job = Runs.active_job(run)
+
+      # queued (not held) → conflict
+      assert {:error, :conflict} = Runs.get_claimed_job(board, job.id)
+
+      {:ok, executor} = Runs.upsert_executor(board, %{"name" => "e", "capacity" => %{"shared_clean" => 1}})
+      {:ok, claimed} = Runs.claim_next_job(executor)
+
+      assert {:ok, held} = Runs.get_claimed_job(board, claimed.id)
+      assert held.id == claimed.id
+      assert {:error, :not_found} = Runs.get_claimed_job(board, 999_999)
+
+      other = insert(:board)
+      assert {:error, :not_found} = Runs.get_claimed_job(other, claimed.id)
+    end
+  end
+
+  describe "reclaim_stale_executors/0" do
+    test "requeues a stale executor's shared_clean job for another executor", %{board: board} do
+      flow = enabled_spec_flow(board)
+      {:ok, _run} = Runs.start_run(card_in(board, "Next up"), flow)
+
+      {:ok, gone} =
+        Runs.upsert_executor(board, %{"name" => "gone", "interval" => 30, "capacity" => %{"shared_clean" => 1}})
+
+      {:ok, claimed} = Runs.claim_next_job(gone)
+      assert claimed.state == :claimed
+
+      # Backdate past 2 × interval so the executor reads stale.
+      stale_at = DateTime.add(DateTime.utc_now(), -1000, :second)
+
+      Relay.Repo.update_all(from(e in Schemas.Executor, where: e.id == ^gone.id),
+        set: [last_heartbeat: DateTime.truncate(stale_at, :second)]
+      )
+
+      :ok = Runs.reclaim_stale_executors()
+
+      requeued = Relay.Repo.get!(NodeJob, claimed.id)
+      assert requeued.state == :queued
+      assert requeued.executor_name == nil
+
+      {:ok, other} = Runs.upsert_executor(board, %{"name" => "other", "capacity" => %{"shared_clean" => 1}})
+      assert {:ok, reclaimed} = Runs.claim_next_job(other)
+      assert reclaimed.id == claimed.id
+      assert reclaimed.executor_name == "other"
+    end
+
+    test "parks an exclusive run instead of requeuing", %{board: board} do
+      # A one-node exclusive flow so the queued job is exclusive.
+      next_up = Enum.find(board.stages, &(&1.name == "Next up"))
+      spec = Enum.find(board.stages, &(&1.name == "Spec"))
+      plan = Enum.find(board.stages, &(&1.name == "Plan"))
+
+      {:ok, flow} =
+        Relay.Flows.create_flow(board, %{
+          key: "excl",
+          isolation: :exclusive,
+          pulls_from_stage_id: next_up.id,
+          works_in_stage_id: spec.id,
+          lands_on_stage_id: plan.id,
+          nodes: [%{key: "work", type: :agent, run: "work {ref}"}],
+          edges: [%{from: "start", to: "work"}, %{from: "work", to: "done", on: :succeeded}]
+        })
+
+      {:ok, flow} = Relay.Flows.enable_flow(flow)
+      {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
+
+      {:ok, gone} =
+        Runs.upsert_executor(board, %{"name" => "gone2", "interval" => 30, "capacity" => %{"exclusive" => 1}})
+
+      {:ok, claimed} = Runs.claim_next_job(gone)
+
+      Relay.Repo.update_all(from(e in Schemas.Executor, where: e.id == ^gone.id),
+        set: [last_heartbeat: DateTime.truncate(DateTime.add(DateTime.utc_now(), -1000, :second), :second)]
+      )
+
+      :ok = Runs.reclaim_stale_executors()
+
+      assert Runs.get_run!(run.id).status == :parked
+      assert Runs.get_run!(run.id).parked_reason == :executor_gone
+      assert Relay.Repo.get!(NodeJob, claimed.id).state == :revoked
+    end
+
+    test "park_for_reclaim/1 revokes a lingering active job even when the run isn't :running", %{board: board} do
+      next_up = Enum.find(board.stages, &(&1.name == "Next up"))
+      spec = Enum.find(board.stages, &(&1.name == "Spec"))
+      plan = Enum.find(board.stages, &(&1.name == "Plan"))
+
+      {:ok, flow} =
+        Relay.Flows.create_flow(board, %{
+          key: "excl3",
+          isolation: :exclusive,
+          pulls_from_stage_id: next_up.id,
+          works_in_stage_id: spec.id,
+          lands_on_stage_id: plan.id,
+          nodes: [%{key: "work", type: :agent, run: "work {ref}"}],
+          edges: [%{from: "start", to: "work"}, %{from: "work", to: "done", on: :succeeded}]
+        })
+
+      {:ok, flow} = Relay.Flows.enable_flow(flow)
+      {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
+
+      {:ok, gone} = Runs.upsert_executor(board, %{"name" => "gone3", "capacity" => %{"exclusive" => 1}})
+      {:ok, claimed} = Runs.claim_next_job(gone)
+
+      # Simulate the run having moved on (e.g. cancelled via a concurrent
+      # path) WITHOUT its job having been revoked first — the exact race the
+      # fix guards against, so the job doesn't stay stuck :claimed forever.
+      Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [status: :cancelled])
+      run = Runs.get_run!(run.id)
+
+      :ok = Runs.park_for_reclaim(run)
+
+      assert Relay.Repo.get!(NodeJob, claimed.id).state == :revoked
+      # A non-running run's own status is left alone — reclaim doesn't clobber it.
+      assert Runs.get_run!(run.id).status == :cancelled
+    end
+
+    test "executor_stale?/2 is the pure threshold — max(60s, 2 × interval)" do
+      now = ~U[2026-07-17 12:00:00Z]
+      fresh = %Schemas.Executor{interval: 30, last_heartbeat: DateTime.add(now, -59, :second)}
+      stale = %Schemas.Executor{interval: 30, last_heartbeat: DateTime.add(now, -61, :second)}
+      # floor: a tiny interval still gets a 60s grace.
+      tiny_fresh = %Schemas.Executor{interval: 1, last_heartbeat: DateTime.add(now, -59, :second)}
+
+      refute Runs.executor_stale?(fresh, now)
+      assert Runs.executor_stale?(stale, now)
+      refute Runs.executor_stale?(tiny_fresh, now)
+    end
+  end
+
+  describe "ExecutorReaper" do
+    test "sweeps on its interval" do
+      # This file's setup already starts a `Relay.Runs.Supervisor` (with its
+      # own default-named reaper), so give this one a distinct name to avoid
+      # clobbering that global registration.
+      pid = start_supervised!({Relay.Runs.ExecutorReaper, interval_ms: 20, name: :test_executor_reaper})
+      # It's alive and clocked; the reclaim behaviour itself is covered above.
+      assert Process.alive?(pid)
+      _ = :sys.get_state(pid)
+    end
+  end
 end

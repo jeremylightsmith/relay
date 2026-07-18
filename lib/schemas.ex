@@ -18,6 +18,7 @@ defmodule Schemas do
       CardRejection,
       Comment,
       DeviceToken,
+      Executor,
       Flow,
       FlowVersion,
       Membership,

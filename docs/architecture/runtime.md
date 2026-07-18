@@ -20,7 +20,8 @@ One flat `one_for_one` supervisor (`Relay.Supervisor`, started by `Relay.Applica
 | `Relay.Activity.Pruner` | ages `:action` chatter out after 14 days; first sweep one interval after boot |
 | `Task.Supervisor` (`Relay.Push.TaskSupervisor`) | push dispatch off the caller's process (RLY-81) |
 | `Finch` (`Relay.Push.APNSFinch`) | dedicated HTTP/2 pool — APNs requires h2; Req's default pool is h1-first |
-| `Relay.Runs.Supervisor` | runs engine (RLY-132): run-id `Registry`, `DynamicSupervisor` with one transient `RunServer` per `:running` run, the card-event `Listener`, and a boot task that resumes unfinished runs from Postgres (revokes orphaned jobs, re-dispatches the current node). Not started in test. |
+| `Relay.Runs.Supervisor` | runs engine (RLY-132): run-id `Registry`, `DynamicSupervisor` with one transient `RunServer` per `:running` run, the card-event `Listener`, a boot task that resumes unfinished runs from Postgres (revokes orphaned jobs, re-dispatches the current node), and `Relay.Runs.ExecutorReaper` (RLY-134, inside this `rest_for_one` subtree). Not started in test. |
+| `Relay.Runs.ExecutorReaper` | inside `Relay.Runs.Supervisor` — periodic (30s) sweep calling `Relay.Runs.reclaim_stale_executors/0`: requeues a dead executor's `shared_clean` jobs, parks its `exclusive` runs (`parked_reason: :executor_gone`). No new PubSub topic — the claim long-poll (`POST /api/node-jobs/claim`) reuses `board:<id>:runs` below. |
 | `RelayWeb.Endpoint` | Bandit HTTP server, WebSockets |
 
 ## PubSub topics
@@ -79,4 +80,4 @@ sequenceDiagram
 *Sources of truth: `lib/relay/application.ex`, `lib/relay/events.ex`,
 `lib/relay/agent_log.ex`, `lib/relay/board_watch.ex`, `lib/relay/runner_presence.ex`,
 `lib/relay_web/api_log.ex`, `lib/relay/runs.ex`, `lib/relay/runs/supervisor.ex`,
-`lib/relay/runs/listener.ex`, `lib/relay/runs/`.*
+`lib/relay/runs/listener.ex`, `lib/relay/runs/executor_reaper.ex`, `lib/relay/runs/`.*

@@ -100,4 +100,46 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
     assert %{"stamped" => 1} = json_response(beat(conn, ["RLY-7"]), 200)
     assert RunnerPresence.list(board.id) == []
   end
+
+  test "an executor beat (name + capacity) upserts an Executor row AND still feeds presence",
+       %{conn: conn, board: board, stage: stage} do
+    insert(:card, stage: stage, ref_number: 7)
+    :ok = RunnerPresence.subscribe(board.id)
+
+    conn =
+      conn
+      |> put_req_header("content-type", "application/json")
+      |> post(
+        ~p"/api/board/heartbeat",
+        Jason.encode!(%{
+          "runner_id" => "mbp-1",
+          "name" => "jeremy-mbp",
+          "host" => "mbp",
+          "interval" => 30,
+          "pools" => [%{"name" => "clean", "mode" => "shared", "used" => 0, "total" => 3}],
+          "jobs" => [],
+          "refs" => ["RLY-7"],
+          "capacity" => %{"shared_clean" => 3, "exclusive" => 1}
+        })
+      )
+
+    assert %{"stamped" => 1} = json_response(conn, 200)
+    # Still appears in the existing Runners view (RLY-141) — zero UI change.
+    assert_receive {:runner_beat, %{runner_id: "mbp-1"}}
+    # And now upserts the durable executor row.
+    executor = Repo.get_by!(Schemas.Executor, board_id: board.id, name: "jeremy-mbp")
+    assert executor.capacity == %{"shared_clean" => 3, "exclusive" => 1}
+  end
+
+  test "a capacity-less RLY-141 beat upserts no Executor row (additive, never subtractive)",
+       %{conn: conn, board: _board, stage: stage} do
+    insert(:card, stage: stage, ref_number: 7)
+
+    conn
+    |> put_req_header("content-type", "application/json")
+    |> post(~p"/api/board/heartbeat", Jason.encode!(%{"runner_id" => "w1", "interval" => 30, "refs" => ["RLY-7"]}))
+    |> json_response(200)
+
+    assert Repo.aggregate(Schemas.Executor, :count) == 0
+  end
 end

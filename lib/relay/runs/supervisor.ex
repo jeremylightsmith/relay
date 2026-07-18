@@ -21,7 +21,8 @@ defmodule Relay.Runs.Supervisor do
       {Registry, keys: :unique, name: Relay.Runs.Registry},
       {DynamicSupervisor, name: Relay.Runs.RunSupervisor, strategy: :one_for_one},
       Relay.Runs.Listener,
-      Supervisor.child_spec({Task, &Relay.Runs.resume_all/0}, id: :runs_boot_resume, restart: :temporary)
+      Supervisor.child_spec({Task, &Relay.Runs.resume_all/0}, id: :runs_boot_resume, restart: :temporary),
+      Relay.Runs.ExecutorReaper
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)

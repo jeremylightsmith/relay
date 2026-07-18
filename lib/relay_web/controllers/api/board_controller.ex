@@ -6,6 +6,7 @@ defmodule RelayWeb.Api.BoardController do
   alias Relay.BoardWatch
   alias Relay.Cards
   alias Relay.RunnerPresence
+  alias Relay.Runs
 
   action_fallback RelayWeb.Api.FallbackController
 
@@ -41,6 +42,18 @@ defmodule RelayWeb.Api.BoardController do
     case params do
       %{"runner_id" => runner_id} when is_binary(runner_id) and runner_id != "" ->
         :ok = RunnerPresence.beat(board.id, params)
+
+      _ ->
+        :ok
+    end
+
+    # RLY-134: an executor beat is a superset — it additionally carries `name` +
+    # `capacity` and upserts the durable Executor row. Inert for legacy / RLY-141
+    # payloads, which carry no capacity (backward compat is a hard requirement).
+    case params do
+      %{"capacity" => capacity, "name" => name} when is_map(capacity) and is_binary(name) and name != "" ->
+        _ = Runs.upsert_executor(board, params)
+        :ok
 
       _ ->
         :ok

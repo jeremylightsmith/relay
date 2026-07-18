@@ -23,7 +23,8 @@ defmodule Relay.Activity.LogSinkTest do
         ref: "RLY-7",
         kind: :claude,
         text: "a line",
-        run_id: nil
+        run_id: nil,
+        node_job_id: nil
       },
       attrs
     )

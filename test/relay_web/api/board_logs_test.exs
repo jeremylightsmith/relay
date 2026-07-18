@@ -64,6 +64,22 @@ defmodule RelayWeb.Api.BoardLogsTest do
     assert Repo.aggregate(from(a in Schemas.Activity, where: a.text == "scanning board"), :count) == 0
   end
 
+  test "a node_job_id on a log line is persisted and broadcast", %{conn: conn, board: board} do
+    card = insert(:card, stage: insert(:stage, board: board), ref_number: 7)
+    Relay.Events.subscribe(board.id)
+
+    assert response(
+             post_logs(conn, [%{"kind" => "claude", "ref" => "RLY-7", "text" => "working", "node_job_id" => "812"}]),
+             200
+           )
+
+    :ok = settle()
+
+    assert_receive {:card_log_appended, card_id, [row]} when card_id == card.id
+    assert row.node_job_id == "812"
+    assert Repo.get_by!(Schemas.Activity, card_id: card.id).node_job_id == "812"
+  end
+
   test "an unauthenticated POST is rejected with 401" do
     conn =
       build_conn()
