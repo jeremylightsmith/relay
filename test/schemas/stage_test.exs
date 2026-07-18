@@ -37,6 +37,14 @@ defmodule Schemas.StageTest do
     refute Stage.valid_status?(:ready, :review)
     refute Stage.valid_status?(:working, :done)
     assert Stage.valid_status?(:ready, :done)
+
+    # RLY-133: :queued is the pre-run "capacity-blocked, waiting for a runner" marker, valid only
+    # where a flow pulls from — a queue stage (Next up) or a done sub-lane (Spec:Done, Plan:Done).
+    assert Stage.valid_status?(:queued, :queue)
+    assert Stage.valid_status?(:queued, :done)
+    refute Stage.valid_status?(:queued, :work)
+    refute Stage.valid_status?(:queued, :planning)
+    refute Stage.valid_status?(:queued, :review)
   end
 
   test "ai_enabled is forced false unless the type is work or planning" do

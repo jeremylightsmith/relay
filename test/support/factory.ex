@@ -102,6 +102,23 @@ defmodule Relay.Factory do
     card |> merge_attributes(attrs) |> evaluate_lazy_attributes()
   end
 
+  # Full-control factory: `board` (when overridden) must be persisted. Trigger stage ids and
+  # `enabled` are set explicitly by the caller.
+  def flow_factory(attrs) do
+    {board, attrs} = Map.pop_lazy(attrs, :board, fn -> insert(:board) end)
+
+    flow = %Schemas.Flow{
+      board_id: board.id,
+      key: sequence(:flow_key, &"flow-#{&1}"),
+      enabled: false,
+      isolation: :shared_clean,
+      nodes: [],
+      edges: []
+    }
+
+    flow |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
+
   # Full-control factory: `card` (when overridden) must be a persisted card.
   # With a `user`, builds a human owner; without, the single AI agent owner.
   def card_owner_factory(attrs) do
