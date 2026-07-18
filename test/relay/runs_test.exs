@@ -702,6 +702,30 @@ defmodule Relay.RunsTest do
                Repo.all(from st in SubTask, where: st.card_id == ^card.id, order_by: :position, select: st.title)
     end
 
+    test "refuses to start a foreach run when the plan yields no tasks, and flags the card" do
+      # RLY-165: an unparseable plan used to seed zero sub_tasks and start anyway. The first
+      # foreach guard then read `remaining == 0` as :foreach_exhausted and routed straight
+      # PAST every implement lap to precommit — which passes trivially on an empty diff —
+      # then reviews, smoke and `merge`. An unreadable plan would have merged an empty branch.
+      # Zero tasks is a defect, not a finished loop: no run, and the card blocks on a human so
+      # the scheduler stops re-pulling it.
+      %{flow: flow, card: card} = setup_foreach(plan: "# Just prose\n\nNo tasks in here.")
+
+      assert {:error, :no_plan_tasks} = Runs.start_run(card, flow)
+
+      refute Repo.exists?(from r in Run, where: r.card_id == ^card.id)
+      assert Repo.get!(Card, card.id).status == :needs_input
+    end
+
+    test "a non-foreach flow with an unparseable plan is unaffected", %{board: board} do
+      # The guard is specific to flows that iterate the plan; spec/plan have no foreach node
+      # and must still start on a card whose plan has no task headings.
+      flow = enabled_spec_flow(board)
+      card = card_in(board, "Next up")
+
+      assert {:ok, _run} = Runs.start_run(card, flow)
+    end
+
     test "start_run leaves existing sub_tasks alone" do
       %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n")
       {:ok, _card} = Relay.Cards.set_sub_tasks(card, [%{title: "Written by the Plan stage"}])
@@ -829,17 +853,17 @@ defmodule Relay.RunsTest do
       assert Runs.active_job(run).payload["vars"]["findings"] == "boom"
     end
 
-    test "a plan with no task headings runs straight past the loop" do
+    test "an unparseable plan never routes past the loop — no node ever runs (RLY-165)" do
+      # This test previously asserted the OPPOSITE ("runs straight past the loop"), which is
+      # the defect the first live Code dogfood hit: past the loop means past every implement
+      # lap, into precommit (green on an empty diff), reviews, smoke and `merge`. The
+      # legitimate exhausted-after-completing-all-tasks routing is covered above, where
+      # `third.node_key == "after"` follows real work.
       %{flow: flow, card: card} = setup_foreach(plan: "# Prose only")
-      {:ok, run} = Runs.start_run(card, flow)
 
-      execution = Repo.one!(from e in NodeExecution, where: e.run_id == ^run.id)
-      assert execution.sub_task_id == nil
+      assert {:error, :no_plan_tasks} = Runs.start_run(card, flow)
 
-      {:ok, _run} = Runs.report_outcome(Runs.active_job(run), %{outcome: :succeeded, detail: "ok"})
-
-      next = Repo.one!(from e in NodeExecution, where: e.run_id == ^run.id and is_nil(e.outcome))
-      assert next.node_key == "after"
+      refute Repo.exists?(from e in NodeExecution, join: r in Run, on: r.id == e.run_id, where: r.card_id == ^card.id)
     end
   end
 end

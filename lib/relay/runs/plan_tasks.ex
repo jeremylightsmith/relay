@@ -10,7 +10,12 @@ defmodule Relay.Runs.PlanTasks do
 
   # Anchored at line start (multiline) so a "### Task 1:" mentioned mid-sentence
   # in prose is not mistaken for a heading.
-  @heading ~r/^###[ \t]+Task[ \t]+\d+[ \t]*:[ \t]*(?<title>\S.*?)[ \t]*$/m
+  #
+  # Two to four hashes, because the heading LEVEL is prose, not a contract (RLY-165). The
+  # parser used to demand exactly three; `/write-plan` emits two about as often, and the first
+  # live Code dogfood parsed to [] for that reason alone. A single `#` is excluded on purpose —
+  # that is the plan's own document title, not a task.
+  @heading ~r/^\#{2,4}[ \t]+Task[ \t]+\d+[ \t]*:[ \t]*(?<title>\S.*?)[ \t]*$/m
 
   @spec parse(String.t() | nil) :: [%{title: String.t()}]
   def parse(nil), do: []
