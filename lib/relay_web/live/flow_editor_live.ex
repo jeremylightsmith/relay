@@ -15,8 +15,8 @@ defmodule RelayWeb.FlowEditorLive do
   alias RelayWeb.FlowLayout
   alias Schemas.Board
 
-  @node_fields [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes]
-  @edge_fields [:from, :to, :on, :max_loops]
+  @node_fields [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes, :foreach]
+  @edge_fields [:from, :to, :on, :max_loops, :when]
 
   @impl true
   def mount(%{"slug" => slug, "key" => key}, _session, socket) do

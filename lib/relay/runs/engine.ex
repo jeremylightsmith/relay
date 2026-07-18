@@ -43,8 +43,11 @@ defmodule Relay.Runs.Engine do
        the visit cap fails the run (the backstop under unlimited loops).
 
   Under a `foreach`, budgets are accounted PER ITERATION: `opts[:sub_task_id]`
-  filters the history before `max_retries`, `max_loops` and the visit cap are
-  counted, so a churny task cannot spend a later task's budget. The
+  filters the history before `max_loops` and the visit cap are counted, so a
+  churny task cannot spend a later task's budget. (`max_retries` also receives
+  the scoped history, but is a no-op either way — `retry_budget_left?/3`
+  further filters by `visit`, which a real run never reuses across
+  iterations, so the sub_task_id filter never changes its count.) The
   failure-signature breaker keeps the FULL history on purpose — per-iteration
   budgets bound productive churn, the breaker catches unproductive repetition,
   which is more alarming across iterations, not less. `sub_task_id: nil` makes

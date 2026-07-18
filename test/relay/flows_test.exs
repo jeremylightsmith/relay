@@ -154,6 +154,63 @@ defmodule Relay.FlowsTest do
     end
   end
 
+  describe "duplicate_flow/1 and save_definition/2 round-trip foreach/when (regression)" do
+    defp foreach_attrs do
+      valid_attrs(%{
+        nodes: [
+          %{key: "work", type: :agent, run: "a", foreach: "card.sub_tasks"},
+          %{key: "after", type: :gate, run: "true"}
+        ],
+        edges: [
+          %{from: "start", to: "work"},
+          %{from: "work", to: "work", on: :succeeded, when: :foreach_remaining},
+          %{from: "work", to: "after", on: :succeeded, when: :foreach_exhausted},
+          %{from: "after", to: "done", on: :succeeded}
+        ]
+      })
+    end
+
+    test "duplicate_flow/1 preserves foreach and when instead of stripping them" do
+      %{board: board} = board_with_stages()
+      {:ok, original} = Flows.create_flow(board, foreach_attrs())
+
+      assert {:ok, copy} = Flows.duplicate_flow(original)
+      assert %{foreach: "card.sub_tasks"} = Enum.find(copy.nodes, &(&1.key == "work"))
+      assert %{when: :foreach_remaining} = Enum.find(copy.edges, &(&1.from == "work" and &1.to == "work"))
+      assert %{when: :foreach_exhausted} = Enum.find(copy.edges, &(&1.from == "work" and &1.to == "after"))
+    end
+
+    test "save_definition/2 preserves foreach and when in both the flow and its snapshot" do
+      %{board: board} = board_with_stages()
+      {:ok, flow} = Flows.create_flow(board, foreach_attrs())
+
+      assert {:ok, updated} = Flows.save_definition(flow, %{isolation: :exclusive})
+      assert %{foreach: "card.sub_tasks"} = Enum.find(updated.nodes, &(&1.key == "work"))
+
+      snapshot = Flows.get_version(updated, updated.version)
+      assert %{foreach: "card.sub_tasks"} = Enum.find(snapshot.nodes, &(&1.key == "work"))
+      assert %{when: :foreach_remaining} = Enum.find(snapshot.edges, &(&1.from == "work" and &1.to == "work"))
+    end
+
+    test "save_definition/2 flags a foreach-only change as a definition change (bumps version)" do
+      %{board: board} = board_with_stages()
+      {:ok, flow} = Flows.create_flow(board, foreach_attrs())
+
+      unguarded_attrs =
+        foreach_attrs()
+        |> Map.put(:nodes, [%{key: "work", type: :agent, run: "a"}, %{key: "after", type: :gate, run: "true"}])
+        |> Map.put(:edges, [
+          %{from: "start", to: "work"},
+          %{from: "work", to: "after", on: :succeeded},
+          %{from: "after", to: "done", on: :succeeded}
+        ])
+
+      assert {:ok, updated} = Flows.save_definition(flow, unguarded_attrs)
+      assert updated.version == flow.version + 1
+      assert Enum.find(updated.nodes, &(&1.key == "work")).foreach == nil
+    end
+  end
+
   describe "graph validation (AC 3)" do
     test "rejects an unknown node type" do
       %{board: board} = board_with_stages()
