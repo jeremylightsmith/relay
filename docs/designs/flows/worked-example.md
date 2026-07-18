@@ -44,9 +44,9 @@ UNCHANGED IN BOTH WORLDS: .claude/skills/* (brainstorm, TDD, debugging, …),
 
 **Today — cut over (RLY-136).** Spec no longer has a `relay_config.json` pipeline entry; it
 runs as the enabled `spec` Flow on the engine (see "Tomorrow" below, which is now *today's*
-reality for this stage). Plan and Code below are unchanged — still watcher-driven, still
-described by their live pipeline entries — until RLY-138 and RLY-139 cut them over the same
-way. See [`docs/runbooks/flow-cutover.md`](../../runbooks/flow-cutover.md) for the ritual.
+reality for this stage). Code below is unchanged — still watcher-driven, still described by
+its live pipeline entry — until RLY-139 cuts it over the same way. See
+[`docs/runbooks/flow-cutover.md`](../../runbooks/flow-cutover.md) for the ritual.
 
 Files it pulls in: [`.claude/skills/brainstorm/`](../../../.claude/skills/brainstorm/SKILL.md)
 (the behavior — stays in both worlds, developer-owned).
