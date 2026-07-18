@@ -130,6 +130,7 @@ defmodule RelayWeb.FlowEditorComponents do
               type="text"
               value={@node.key}
               disabled={@read_only?}
+              phx-debounce="blur"
               style="width:100%;padding:7px 9px;border:1px solid oklch(0.90 0.006 255);border-radius:7px;font-size:15px;font-weight:600;color:oklch(0.26 0.02 255);background:oklch(0.99 0.002 255);"
             />
           </form>
@@ -542,6 +543,12 @@ defmodule RelayWeb.FlowEditorComponents do
     do:
       "font-size:12px;font-weight:500;padding:6px 14px;border-radius:6px;color:oklch(0.52 0.02 255);background:transparent;border:0;"
 
-  defp stepper_value(nil, delta), do: max(0, delta)
-  defp stepper_value(current, delta), do: max(0, current + delta)
+  # Valid values are nil ("no limit") or a positive integer (schemas require
+  # `greater_than: 0`). Stepping below 1 clears the field to nil rather than landing on the
+  # invalid 0 — returns "" (not nil) so the `phx-value-value` attribute isn't dropped from the
+  # markup; `cast_node_value/2` and `cast_edge_value/2` already treat "" as nil.
+  defp stepper_value(current, delta) do
+    next = (current || 0) + delta
+    if next < 1, do: "", else: next
+  end
 end

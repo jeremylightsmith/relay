@@ -117,6 +117,46 @@ defmodule RelayWeb.FlowEditorLiveTest do
     assert has_element?(view, "#flow-editor-unsaved-bar")
   end
 
+  test "stepping MAX RETRIES below the minimum clears it to no-limit instead of an invalid 0", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    # "implement" has no max_retries set (nil == no limit, displayed as 0)
+    view |> element(~s([data-node="implement"])) |> render_click()
+
+    # stepping down from unset must stay unset, not introduce an invalid 0
+    view |> element("#inspector-max-retries-dec") |> render_click()
+    refute has_element?(view, "#flow-editor-unsaved-bar")
+
+    view |> element("#inspector-max-retries-inc") |> render_click()
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+    refute has_element?(view, "#flow-editor-errors")
+
+    # stepping back down from 1 clears to no-limit rather than landing on 0
+    view |> element("#inspector-max-retries-dec") |> render_click()
+    refute has_element?(view, "#flow-editor-unsaved-bar")
+  end
+
+  test "stepping MAX LOOPS below the minimum clears it to no-limit instead of an invalid 0", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    # spec_review → implement (failed, max_loops: 3) is edge index 3
+    view |> element(~s([data-edge="3"])) |> render_click()
+
+    for _ <- 1..3, do: view |> element("#inspector-max-loops-dec") |> render_click()
+    # 3 -> 2 -> 1 -> nil: dirty (differs from the shipped default of 3) but not invalid
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+    refute has_element?(view, "#flow-editor-errors")
+    refute has_element?(view, "#flow-editor-save[disabled]")
+
+    # a further decrement from unset stays unset, never reaching 0
+    view |> element("#inspector-max-loops-dec") |> render_click()
+    refute has_element?(view, "#flow-editor-errors")
+  end
+
   test "Delete edge in the inspector removes the selected edge", %{conn: conn, board: board} do
     {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
     count_before = count_edges(render(view))
@@ -170,6 +210,23 @@ defmodule RelayWeb.FlowEditorLiveTest do
 
     assert has_element?(view, ~s([data-node="branch2"]))
     refute has_element?(view, ~s([data-node="branch"]))
+  end
+
+  test "a stale rename event (old key no longer present) is a no-op and doesn't corrupt selection", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="branch"])) |> render_click()
+
+    # simulate an in-flight keystroke event whose hidden "key" field is stale (the client
+    # fired before the previous rename's patch landed) — no node is keyed "does-not-exist"
+    render_hook(view, "rename_node", %{"key" => "does-not-exist", "value" => "zzz"})
+
+    # no rename happened, and selection/inspector must still render safely
+    refute has_element?(view, ~s([data-node="zzz"]))
+    assert has_element?(view, ~s([data-node="branch"]))
+    assert has_element?(view, "#inspector-node-name")
   end
 
   test "renaming a node to an empty key is blocked inline and disables Save", %{conn: conn, board: board} do

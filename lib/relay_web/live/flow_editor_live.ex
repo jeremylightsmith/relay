@@ -208,18 +208,26 @@ defmodule RelayWeb.FlowEditorLive do
     {:noreply, apply_working(socket, fn w -> %{w | edges: List.update_at(w.edges, i, &Map.put(&1, field, value))} end)}
   end
 
+  # `phx-change` fires per keystroke; the hidden `key` input can carry a stale value from an
+  # in-flight patch when events outrun the round trip. Guard against renaming a node that no
+  # longer exists under `old` — otherwise `@selected` gets pointed at a key with no matching
+  # node and the inspector below dereferences nil.
   def handle_event("rename_node", %{"key" => old, "value" => new}, socket) do
-    {:noreply,
-     socket
-     |> apply_working(fn w ->
-       nodes = Enum.map(w.nodes, fn n -> if n.key == old, do: %{n | key: new}, else: n end)
+    if Enum.any?(socket.assigns.working.nodes, &(&1.key == old)) do
+      {:noreply,
+       socket
+       |> apply_working(fn w ->
+         nodes = Enum.map(w.nodes, fn n -> if n.key == old, do: %{n | key: new}, else: n end)
 
-       edges =
-         Enum.map(w.edges, fn e -> e |> update_endpoint(:from, old, new) |> update_endpoint(:to, old, new) end)
+         edges =
+           Enum.map(w.edges, fn e -> e |> update_endpoint(:from, old, new) |> update_endpoint(:to, old, new) end)
 
-       %{w | nodes: nodes, edges: edges}
-     end)
-     |> assign(:selected, {:node, new})}
+         %{w | nodes: nodes, edges: edges}
+       end)
+       |> assign(:selected, {:node, new})}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_event("add_node", %{"type" => type}, socket) do
@@ -477,7 +485,7 @@ defmodule RelayWeb.FlowEditorLive do
             style="width:328px;flex:0 0 auto;border-left:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);overflow-y:auto;"
           >
             <FlowEditorComponents.node_inspector
-              :if={match?({:node, _}, @selected)}
+              :if={match?({:node, _}, @selected) and selected_node(@working, @selected)}
               node={selected_node(@working, @selected)}
               edges={outgoing_edges(@working, @selected)}
               referenced_count={referenced_count(@working, elem(@selected, 1))}
