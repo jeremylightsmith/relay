@@ -1309,6 +1309,29 @@ class StreamClaudeJobTest(unittest.TestCase):
         self.assertEqual(seen["cmd"][seen["cmd"].index("--resume") + 1], "sess-5")
         self.assertEqual(seen["env"].get("RELAY_NODE_OUTCOME"), "/tmp/wt/out.json")
 
+    def test_agent_appends_the_dash_dash_agent_flag(self):
+        seen = {}
+
+        def fake_popen(cmd, *a, **k):
+            seen["cmd"] = cmd
+            return _FakePopen([], code=0)
+
+        relay.subprocess.Popen = fake_popen
+        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt", agent="plan-implementer")
+        self.assertIn("--agent", seen["cmd"])
+        self.assertEqual(seen["cmd"][seen["cmd"].index("--agent") + 1], "plan-implementer")
+
+    def test_no_agent_appends_no_dash_dash_agent_flag(self):
+        seen = {}
+
+        def fake_popen(cmd, *a, **k):
+            seen["cmd"] = cmd
+            return _FakePopen([], code=0)
+
+        relay.subprocess.Popen = fake_popen
+        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        self.assertNotIn("--agent", seen["cmd"])
+
     def test_lifts_the_default_background_wait_ceiling_so_long_runs_do_not_get_cut_off(self):
         """claude -p caps a background workflow's wait at 10 minutes by default; /exec-plan
         runs far longer, so without lifting the cap -p would exit mid-run and the executor
@@ -1500,12 +1523,45 @@ class RunNodeJobTest(unittest.TestCase):
 
     def test_agent_job_captures_session_and_uses_the_contract(self):
         relay._stream_claude_job = lambda prompt, cwd, tag="", session_id=None, \
-            outcome_path=None, on_proc=None: (True, "sess-9")
+            outcome_path=None, on_proc=None, agent=None: (True, "sess-9")
         relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
         job = {"id": "nj-2", "run_id": "r1", "node_type": "agent", "run": "Implement…",
                "isolation": "exclusive", "vars": {"ref": "RLY-2"}}
         outcome, detail, sha, session = relay.run_node_job(job, "/tmp/wt", self.control)
         self.assertEqual((outcome, sha, session), ("succeeded", "deadbeef", "sess-9"))
+
+    def test_agent_job_passes_the_agent_flag_through_to_stream_claude_job(self):
+        """A flow node's `agent` (e.g. "plan-implementer") rides the claim payload as
+        job["agent"]; run_node_job must forward it to _stream_claude_job so --agent
+        <name> reaches `claude -p` (RLY-139 / W13 Task 4)."""
+        seen = {}
+
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None):
+            seen["agent"] = agent
+            return True, "sess-9"
+
+        relay._stream_claude_job = fake_stream
+        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        job = {"id": "nj-2", "run_id": "r1", "node_type": "agent", "run": "Implement…",
+               "isolation": "exclusive", "agent": "plan-implementer", "vars": {"ref": "RLY-2"}}
+        relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertEqual(seen["agent"], "plan-implementer")
+
+    def test_agent_job_with_no_agent_field_passes_none(self):
+        """A node with no `agent` (today's plain agent nodes) must invoke exactly as
+        before: agent=None, so _stream_claude_job appends no --agent flag."""
+        seen = {}
+
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None):
+            seen["agent"] = agent
+            return True, "sess-9"
+
+        relay._stream_claude_job = fake_stream
+        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        job = {"id": "nj-2", "run_id": "r1", "node_type": "agent", "run": "/brainstorm {ref}",
+               "isolation": "exclusive", "vars": {"ref": "RLY-2"}}
+        relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertIsNone(seen["agent"])
 
     def test_needs_input_reentry_resumes_the_prior_session(self):
         """The claim payload's server field is `resume_session` (NodeJobController.claim_payload/1),
@@ -1513,7 +1569,7 @@ class RunNodeJobTest(unittest.TestCase):
         read the former or the agent loses its prior conversation and restarts cold."""
         seen = {}
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None):
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None):
             seen["session_id"] = session_id
             return True, "sess-9"
 
@@ -1530,7 +1586,7 @@ class RunNodeJobTest(unittest.TestCase):
         would otherwise leave the next job's reset_worktree() logging a spurious salvage."""
         seen = {}
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None):
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None):
             seen["stream_path"] = outcome_path
             self.assertTrue(os.path.exists(os.path.dirname(outcome_path)))
             return True, "sess-9"
@@ -1602,7 +1658,7 @@ class RunNodeJobTest(unittest.TestCase):
     def test_agent_job_expands_placeholders_in_the_prompt(self):
         seen = {}
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None):
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None):
             seen["prompt"] = prompt
             return True, "sess-1"
 

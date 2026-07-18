@@ -824,6 +824,7 @@ defmodule Relay.Runs do
     %{
       "run" => node.run,
       "node_type" => Atom.to_string(node.type),
+      "agent" => node.agent,
       "isolation" => Atom.to_string(flow.isolation),
       "resume_session" => opts[:resume_session],
       "vars" => vars

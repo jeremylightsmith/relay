@@ -10,6 +10,10 @@ defmodule Schemas.Flow.Node do
   `foreach` (nil = not a loop head) makes the node a `foreach` LOOP HEAD:
   each entry into it begins one iteration bound to one of the card's
   sub_tasks. `"card.sub_tasks"` is the only source W13 accepts.
+
+  `agent` (agent nodes only) names a `.claude/agents/<name>.md` definition: the
+  executor appends `--agent <name>` to its `claude -p` call, so the file supplies
+  the system prompt while `run` stays the user prompt. nil = today's invocation.
   """
 
   use Ecto.Schema
@@ -26,16 +30,29 @@ defmodule Schemas.Flow.Node do
     field :max_retries, :integer
     field :timeout_minutes, :integer
     field :foreach, :string
+    field :agent, :string
   end
 
   @doc "Validates one node; graph-level rules (key uniqueness) live on Schemas.Flow."
   def changeset(node, attrs) do
     node
-    |> cast(attrs, [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes, :foreach])
+    |> cast(attrs, [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes, :foreach, :agent])
     |> validate_required([:key, :type])
     |> validate_exclusion(:key, ["start", "done"], message: "is a reserved sentinel name")
     |> validate_number(:max_retries, greater_than: 0)
     |> validate_number(:timeout_minutes, greater_than: 0)
     |> validate_inclusion(:foreach, ["card.sub_tasks"], message: ~s(must be "card.sub_tasks"))
+    |> validate_agent_only_on_agent_nodes()
+  end
+
+  # `agent` names a `.claude/agents/<name>.md` definition the executor passes to
+  # `claude -p --agent`. It is meaningless on a shell/gate/human node, so say so
+  # loudly rather than silently ignoring it.
+  defp validate_agent_only_on_agent_nodes(changeset) do
+    if get_field(changeset, :agent) && get_field(changeset, :type) != :agent do
+      add_error(changeset, :agent, "is only valid on an agent node")
+    else
+      changeset
+    end
   end
 end

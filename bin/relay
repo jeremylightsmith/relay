@@ -1019,15 +1019,21 @@ def report_outcome(job_id, outcome, detail, git_sha, session_id=None):
     return (resp or {}).get("run_state")
 
 
-def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None):
+def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None,
+                      agent=None):
     """Executor variant of _stream_claude. Runs `claude -p` (or `--resume <session_id>` on a
     needs-input re-entry), streams events, captures the claude session id from the stream-json
     events (init/result carry `session_id`), and sets $RELAY_NODE_OUTCOME so an agent node can
-    signal `partial`. Returns (ok, captured_session_id). `on_proc` receives the live Popen."""
+    signal `partial`. `agent` selects a `.claude/agents/<name>.md` definition via --agent; an
+    unknown name makes the CLI fail loudly (verified against 2.1.214) rather than silently
+    degrade to the default agent, which is what makes this safe to depend on. Returns
+    (ok, captured_session_id). `on_proc` receives the live Popen."""
     cmd = ["claude", "-p", prompt, "--dangerously-skip-permissions",
            "--verbose", "--output-format", "stream-json"]
     if session_id:
         cmd[2:2] = ["--resume", session_id]     # claude -p --resume <session> <prompt>
+    if agent:
+        cmd += ["--agent", agent]
     child_env = dict(os.environ)
     # `claude -p` caps how long it waits for a background workflow at 10 minutes
     # by default (CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, v2.1.182+). /exec-plan runs
@@ -1119,7 +1125,7 @@ def run_node_job(job, slot_path, control):
         try:
             ok, session_id = _stream_claude_job(
                 cmd, cwd=slot_path, tag=tag, session_id=job.get("resume_session"),
-                outcome_path=outcome_path, on_proc=control.register)
+                outcome_path=outcome_path, on_proc=control.register, agent=job.get("agent"))
             outcome, detail = determine_agent_outcome(job, ok, outcome_path)
         finally:
             shutil.rmtree(outcome_dir, ignore_errors=True)

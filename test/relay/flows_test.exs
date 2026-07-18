@@ -152,6 +152,23 @@ defmodule Relay.FlowsTest do
       assert {:error, changeset} = Flows.create_flow(board, attrs)
       assert %{nodes: [%{foreach: [~s(must be "card.sub_tasks")]}]} = errors_on(changeset)
     end
+
+    test "an agent node may name its .claude/agents definition; other node types may not" do
+      %{board: board} = board_with_stages()
+
+      ok = valid_attrs(%{nodes: [%{key: "work", type: :agent, run: "a", agent: "plan-implementer"}]})
+      assert {:ok, flow} = Flows.create_flow(board, ok)
+      assert %{agent: "plan-implementer"} = Enum.find(flow.nodes, &(&1.key == "work"))
+
+      bad =
+        valid_attrs(%{
+          key: "custom-2",
+          nodes: [%{key: "work", type: :gate, run: "true", agent: "plan-implementer"}]
+        })
+
+      assert {:error, changeset} = Flows.create_flow(board, bad)
+      assert %{nodes: [%{agent: ["is only valid on an agent node"]}]} = errors_on(changeset)
+    end
   end
 
   describe "duplicate_flow/1 and save_definition/2 round-trip foreach/when (regression)" do

@@ -61,6 +61,7 @@ defmodule Relay.Flows.DefaultLibrary do
           model: "sonnet",
           effort: "high",
           foreach: "card.sub_tasks",
+          agent: "plan-implementer",
           run:
             "Implement the task named {sub_task} from the card's plan with strict red/green TDD. " <>
               "One task only — do not start the next one. If reviewer findings are attached, address them."
@@ -69,12 +70,14 @@ defmodule Relay.Flows.DefaultLibrary do
           key: "spec_review",
           type: :agent,
           model: "sonnet",
+          agent: "spec-reviewer",
           run: "Review the just-implemented task against its spec in the plan: nothing missing, nothing extra."
         },
         %{
           key: "quality_review",
           type: :agent,
           model: "opus",
+          agent: "quality-reviewer",
           run: "Judge whether the change is well-built: clean, conventional, meaningfully tested."
         },
         %{key: "precommit", type: :gate, run: "mix precommit"},
@@ -82,6 +85,7 @@ defmodule Relay.Flows.DefaultLibrary do
           key: "final_review",
           type: :agent,
           model: "opus",
+          agent: "final-reviewer",
           run:
             "Whole-branch cross-cutting review — issues only visible across the whole diff. " <>
               "Includes the docs/architecture freshness check."
@@ -90,12 +94,14 @@ defmodule Relay.Flows.DefaultLibrary do
           key: "final_fix",
           type: :agent,
           model: "opus",
+          agent: "final-fixer",
           run: "Fix every blocking finding from the review in one consolidated pass; keep the suite green."
         },
         %{
           key: "smoke",
           type: :agent,
           model: "opus",
+          agent: "smoke-tester",
           run:
             "Drive the new behavior end-to-end through the running app; screenshot each " <>
               "new/changed state against its docs/designs artboard."
@@ -110,6 +116,7 @@ defmodule Relay.Flows.DefaultLibrary do
           key: "acceptance",
           type: :agent,
           model: "opus",
+          agent: "acceptance-tester",
           run:
             "Run the card's acceptance criteria verbatim; return a per-criterion verdict " <>
               "(human-verify criteria don't block)."

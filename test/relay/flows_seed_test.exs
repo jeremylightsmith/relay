@@ -97,6 +97,32 @@ defmodule Relay.FlowsSeedTest do
              Enum.find(code.edges, &(&1.from == "quality_review" and &1.when == :foreach_exhausted))
   end
 
+  test "the Code flow's agent nodes name their .claude/agents definition" do
+    ctx = library_board()
+    :ok = Flows.seed_default_flows!(ctx.board)
+    code = Flows.get_flow(ctx.board, "code")
+
+    mapping = %{
+      "implement" => "plan-implementer",
+      "spec_review" => "spec-reviewer",
+      "quality_review" => "quality-reviewer",
+      "final_review" => "final-reviewer",
+      "final_fix" => "final-fixer",
+      "smoke" => "smoke-tester",
+      "acceptance" => "acceptance-tester"
+    }
+
+    for {key, agent} <- mapping do
+      assert %{agent: ^agent} = Enum.find(code.nodes, &(&1.key == key)), "#{key} must name #{agent}"
+      assert File.exists?(Path.join([File.cwd!(), ".claude", "agents", "#{agent}.md"]))
+    end
+
+    # smoke_fix, acceptance_fix and post keep bare prompts — no agent file exists.
+    for key <- ["smoke_fix", "acceptance_fix", "post"] do
+      assert %{agent: nil} = Enum.find(code.nodes, &(&1.key == key))
+    end
+  end
+
   test "is idempotent and never clobbers edits (AC 2)" do
     ctx = library_board()
     :ok = Flows.seed_default_flows!(ctx.board)

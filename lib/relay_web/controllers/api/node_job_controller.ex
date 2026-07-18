@@ -135,6 +135,7 @@ defmodule RelayWeb.Api.NodeJobController do
       ref: get_in(payload, ["vars", "ref"]),
       node_id: job.node_key,
       node_type: payload["node_type"],
+      agent: payload["agent"],
       run: payload["run"],
       isolation: payload["isolation"],
       resume_session: payload["resume_session"],
