@@ -36,6 +36,8 @@ defmodule Relay.Activity.LogSink do
   alias Relay.Events
   alias Relay.Repo
 
+  require Logger
+
   @debounce_ms 250
   @max_buffer 500
 
@@ -104,17 +106,31 @@ defmodule Relay.Activity.LogSink do
   defp flush(state) do
     state = cancel_timer(state)
     entries = Enum.reverse(state.buffer)
-    refs = resolve_refs(state.refs, entries)
 
-    resolved =
-      Enum.flat_map(entries, fn {board_id, entry} ->
-        case Map.get(refs, {board_id, entry.ref}) do
-          nil -> []
-          card_id -> [{board_id, card_id, entry}]
-        end
-      end)
+    # Best-effort by construction (see moduledoc): a DB error must NOT crash the sink.
+    # It sits as a :one_for_one sibling of Relay.Repo, so a crash storm on a transient
+    # DB blip would trip the supervisor's max_restarts and take the Repo down with it.
+    # On failure we drop the in-flight batch (the doc's stated tradeoff) and keep the
+    # resolved-ref cache, staying alive for the next window.
+    refs =
+      try do
+        refs = resolve_refs(state.refs, entries)
 
-    insert_and_broadcast(resolved)
+        resolved =
+          Enum.flat_map(entries, fn {board_id, entry} ->
+            case Map.get(refs, {board_id, entry.ref}) do
+              nil -> []
+              card_id -> [{board_id, card_id, entry}]
+            end
+          end)
+
+        insert_and_broadcast(resolved)
+        refs
+      rescue
+        error ->
+          Logger.warning("LogSink dropped #{state.count} buffered log line(s): #{Exception.message(error)}")
+          state.refs
+      end
 
     %{state | buffer: [], count: 0, refs: refs}
   end
