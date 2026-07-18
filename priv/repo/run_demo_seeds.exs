@@ -45,7 +45,7 @@ Repo.delete_all(from b in Board, where: b.owner_id == ^user.id and b.slug == "ru
 
 {:ok, board} = Boards.create_board(user, %{name: "Run Demo"})
 
-board =
+case_result =
   case board |> Changeset.change(slug: "run-demo") |> Repo.update() do
     {:ok, updated} ->
       updated
@@ -54,7 +54,8 @@ board =
       IO.puts("Could not force slug \"run-demo\" — using generated slug #{board.slug} instead.")
       board
   end
-  |> Repo.preload(:stages)
+
+board = Repo.preload(case_result, :stages)
 
 stage = fn name -> Enum.find(board.stages, &(&1.name == name)) || hd(board.stages) end
 
@@ -169,19 +170,43 @@ parked = new_card.("Spec", "Board search")
     :agent
   )
 
-run = add_run.(parked, %{flow_key: "spec", status: :parked, current_node: "brainstorm", started_at: minutes_ago.(12)})
+run =
+  add_run.(parked, %{
+    flow_key: "spec",
+    status: :parked,
+    parked_reason: :needs_input,
+    current_node: "brainstorm",
+    started_at: minutes_ago.(12)
+  })
+
 add_ne.(run, %{node: "brainstorm", outcome: :needs_input, duration_s: 190, cost: cost.("0.15")})
 
 # 4 · Baton revoked: a human claimed the card mid-run; run cancelled, work preserved.
 revoked = new_card.("Code", "Legacy import cleanup")
 {:ok, revoked} = Cards.set_owners(revoked, [{:user, user.id}], {:user, user.id})
-run = add_run.(revoked, %{status: :cancelled, current_node: "implement", started_at: minutes_ago.(20), finished_at: minutes_ago.(2)})
+
+run =
+  add_run.(revoked, %{
+    status: :cancelled,
+    current_node: "implement",
+    started_at: minutes_ago.(20),
+    finished_at: minutes_ago.(2)
+  })
+
 add_ne.(run, %{node: "branch", duration_s: 8, cost: cost.("0.00")})
 add_ne.(run, %{node: "implement", outcome: nil, duration_s: 72, cost: cost.("0.40")})
 
 # 5 · Circuit breaker: quality_review failed 3× on the same finding; run stopped.
 circuit = working.(new_card.("Code", "Saved filters & smart lists"))
-run = add_run.(circuit, %{status: :failed, current_node: "quality_review", started_at: minutes_ago.(15), finished_at: minutes_ago.(1)})
+
+run =
+  add_run.(circuit, %{
+    status: :failed,
+    current_node: "quality_review",
+    started_at: minutes_ago.(15),
+    finished_at: minutes_ago.(1)
+  })
+
 add_ne.(run, %{node: "implement", duration_s: 160, cost: cost.("0.90")})
 add_ne.(run, %{node: "quality_review", outcome: :failed, duration_s: 48, cost: cost.("0.35"), detail: qr_detail})
 add_ne.(run, %{node: "implement", attempt: 2, duration_s: 130, cost: cost.("0.72")})
@@ -215,7 +240,15 @@ add_ne.(run, %{node: "merge", duration_s: 55, cost: cost.("0.09")})
 # 8 · Cancelled · claimed (face state): same shape as revoked, different card.
 cancelled = new_card.("Code", "Bulk archive stale cards")
 {:ok, cancelled} = Cards.set_owners(cancelled, [{:user, user.id}], {:user, user.id})
-run = add_run.(cancelled, %{status: :cancelled, current_node: "implement", started_at: minutes_ago.(40), finished_at: minutes_ago.(25)})
+
+run =
+  add_run.(cancelled, %{
+    status: :cancelled,
+    current_node: "implement",
+    started_at: minutes_ago.(40),
+    finished_at: minutes_ago.(25)
+  })
+
 add_ne.(run, %{node: "implement", outcome: nil, duration_s: 45, cost: cost.("0.21")})
 
 # 9 · Queued: AI-ready card in the enabled code flow's pulls-from stage, no run.
@@ -225,13 +258,40 @@ queued_stage = Enum.find(board.stages, &(&1.id == code_flow.pulls_from_stage_id)
 
 # 10 · History: three prior runs (done · failed · done), inspectable after the fact.
 history = new_card.("Review", "Keyboard shortcuts for the card drawer")
-run1 = add_run.(history, %{status: :done, current_node: nil, started_at: minutes_ago.(3000), finished_at: minutes_ago.(2969), inserted_at: minutes_ago.(3000)})
+
+run1 =
+  add_run.(history, %{
+    status: :done,
+    current_node: nil,
+    started_at: minutes_ago.(3000),
+    finished_at: minutes_ago.(2969),
+    inserted_at: minutes_ago.(3000)
+  })
+
 add_ne.(run1, %{node: "implement", duration_s: 1500, cost: cost.("3.20")})
 add_ne.(run1, %{node: "merge", duration_s: 360, cost: cost.("0.90")})
-run2 = add_run.(history, %{status: :failed, current_node: "quality_review", started_at: minutes_ago.(1500), finished_at: minutes_ago.(1491), inserted_at: minutes_ago.(1500)})
+
+run2 =
+  add_run.(history, %{
+    status: :failed,
+    current_node: "quality_review",
+    started_at: minutes_ago.(1500),
+    finished_at: minutes_ago.(1491),
+    inserted_at: minutes_ago.(1500)
+  })
+
 add_ne.(run2, %{node: "implement", duration_s: 300, cost: cost.("1.10")})
 add_ne.(run2, %{node: "quality_review", outcome: :failed, duration_s: 250, cost: cost.("1.18"), detail: qr_detail})
-run3 = add_run.(history, %{status: :done, current_node: nil, started_at: minutes_ago.(170), finished_at: minutes_ago.(123), inserted_at: minutes_ago.(170)})
+
+run3 =
+  add_run.(history, %{
+    status: :done,
+    current_node: nil,
+    started_at: minutes_ago.(170),
+    finished_at: minutes_ago.(123),
+    inserted_at: minutes_ago.(170)
+  })
+
 add_ne.(run3, %{node: "implement", attempt: 1, duration_s: 1200, cost: cost.("2.80")})
 add_ne.(run3, %{node: "quality_review", duration_s: 400, cost: cost.("1.40")})
 add_ne.(run3, %{node: "merge", duration_s: 220, cost: cost.("2.00")})
