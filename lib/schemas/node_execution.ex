@@ -9,6 +9,11 @@ defmodule Schemas.NodeExecution do
   breaker; `git_sha` anchors engine state to code state; `session_id`
   powers `--resume` on needs-input re-entry; `cost` is executor-reported
   (04/05; schema-ready now). All fields programmatic, never cast.
+
+  `sub_task_id` binds the execution to one `foreach` ITERATION (nil outside a
+  foreach): it is what makes "which task is in flight" renderable on the card,
+  and it is the key `Engine.decide/4` scopes `max_loops`/`max_retries`/the
+  visit cap to. Programmatic, never cast.
   """
 
   use Ecto.Schema
@@ -29,6 +34,7 @@ defmodule Schemas.NodeExecution do
     field :cost, :decimal
     field :started_at, :utc_datetime
     field :finished_at, :utc_datetime
+    field :sub_task_id, :integer
 
     belongs_to :run, Schemas.Run
 

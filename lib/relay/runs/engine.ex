@@ -41,26 +41,43 @@ defmodule Relay.Runs.Engine do
        never silently passes. An edge past its `max_loops` (nil =>
        unlimited) fails the run; target `"done"` finishes; a target at
        the visit cap fails the run (the backstop under unlimited loops).
+
+  Under a `foreach`, budgets are accounted PER ITERATION: `opts[:sub_task_id]`
+  filters the history before `max_retries`, `max_loops` and the visit cap are
+  counted, so a churny task cannot spend a later task's budget. The
+  failure-signature breaker keeps the FULL history on purpose — per-iteration
+  budgets bound productive churn, the breaker catches unproductive repetition,
+  which is more alarming across iterations, not less. `sub_task_id: nil` makes
+  the filter the identity function, so every node outside a `foreach` behaves
+  exactly as it did before W13. `opts[:foreach_remaining]` (default 0) is the
+  guard input, computed by RunServer — the engine stays pure.
   """
   @spec decide(Flow.t(), [map()], map(), keyword()) :: decision()
   def decide(%Flow{} = flow, history, current, opts \\ []) do
     breaker_threshold = Keyword.get(opts, :breaker_threshold, @default_breaker_threshold)
-    visit_cap = Keyword.get(opts, :visit_cap, @default_visit_cap)
+    scoped = scope_to_iteration(history, Keyword.get(opts, :sub_task_id))
 
     cond do
       current.outcome == :needs_input ->
         {:park, :needs_input}
 
+      # The breaker gets the FULL, unfiltered history — deliberately (see @moduledoc).
       current.outcome == :failed and breaker_tripped?(history, current, breaker_threshold) ->
         {:fail, "circuit_breaker: the same failure repeated #{breaker_threshold} times"}
 
-      current.outcome == :failed and retry_budget_left?(flow, history, current) ->
+      current.outcome == :failed and retry_budget_left?(flow, scoped, current) ->
         {:retry, current.node_key}
 
       true ->
-        route(flow, history, current, visit_cap)
+        route(flow, scoped, current, opts)
     end
   end
+
+  # Iteration scoping: nil (any node outside a foreach) is the IDENTITY function,
+  # so those nodes keep whole-run budgets exactly as before. Map.get, not the dot
+  # access, because history rows may be plain maps in tests.
+  defp scope_to_iteration(history, nil), do: history
+  defp scope_to_iteration(history, id), do: Enum.filter(history, &(Map.get(&1, :sub_task_id) == id))
 
   @doc """
   SHA-1 signature of a normalized failure detail (trimmed, truncated to
@@ -98,15 +115,27 @@ defmodule Relay.Runs.Engine do
     end
   end
 
-  defp route(flow, history, current, visit_cap) do
-    case Enum.find(flow.edges, &(&1.from == current.node_key and &1.on == current.outcome)) do
+  defp route(flow, history, current, opts) do
+    case select_edge(flow, current, Keyword.get(opts, :foreach_remaining, 0)) do
       nil ->
         {:fail, "no_route_for_outcome: #{current.node_key} → #{current.outcome}"}
 
       edge ->
-        follow(edge, history, current, visit_cap)
+        follow(edge, history, current, Keyword.get(opts, :visit_cap, @default_visit_cap))
     end
   end
+
+  # All {from, on} candidates: the first whose guard is SATISFIED wins, else the
+  # unguarded one. Schemas.Flow guarantees at most one unguarded edge per route.
+  defp select_edge(flow, current, remaining) do
+    candidates = Enum.filter(flow.edges, &(&1.from == current.node_key and &1.on == current.outcome))
+
+    Enum.find(candidates, &guard_satisfied?(&1, remaining)) || Enum.find(candidates, &is_nil(&1.when))
+  end
+
+  defp guard_satisfied?(%{when: :foreach_remaining}, remaining), do: remaining > 0
+  defp guard_satisfied?(%{when: :foreach_exhausted}, remaining), do: remaining == 0
+  defp guard_satisfied?(_unguarded, _remaining), do: false
 
   defp follow(edge, history, current, visit_cap) do
     cond do

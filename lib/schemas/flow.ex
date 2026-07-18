@@ -47,6 +47,7 @@ defmodule Schemas.Flow do
     |> validate_edge_endpoints()
     |> validate_start_edges()
     |> validate_unique_routing()
+    |> validate_foreach_guards()
     |> unique_constraint(:key, name: :flows_board_id_key_index)
   end
 
@@ -94,15 +95,34 @@ defmodule Schemas.Flow do
     |> check(Enum.all?(rest, &(not is_nil(&1.on))), "every edge except the start edge requires an outcome")
   end
 
+  # Guarded edges may be plural on one {from, on} — that is the whole point of
+  # `when` — so the uniqueness key includes the guard. Two UNGUARDED edges (or
+  # two edges carrying the same guard) on one route are still ambiguous.
   defp validate_unique_routing(changeset) do
     duplicated? =
       changeset
       |> get_field(:edges)
       |> Kernel.||([])
-      |> Enum.frequencies_by(&{&1.from, &1.on})
+      |> Enum.frequencies_by(&{&1.from, &1.on, &1.when})
       |> Enum.any?(fn {_route, count} -> count > 1 end)
 
     check(changeset, not duplicated?, "only one edge may leave a node per outcome")
+  end
+
+  # A guard reads the remaining count of THE flow's foreach node, so a guarded
+  # edge without exactly one foreach node has nothing to read. Multi-foreach
+  # flows are out of scope (fan-out belongs to `parallel`, RLY-161).
+  defp validate_foreach_guards(changeset) do
+    guarded? =
+      changeset |> get_field(:edges) |> Kernel.||([]) |> Enum.any?(&(not is_nil(&1.when)))
+
+    heads = changeset |> get_field(:nodes) |> Kernel.||([]) |> Enum.count(&(not is_nil(&1.foreach)))
+
+    check(
+      changeset,
+      not guarded? or heads == 1,
+      "a flow with guarded edges must have exactly one foreach node"
+    )
   end
 
   defp check(changeset, true, _message), do: changeset

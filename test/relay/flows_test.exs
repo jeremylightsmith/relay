@@ -88,6 +88,70 @@ defmodule Relay.FlowsTest do
       assert {:ok, updated} = Flows.update_flow(flow, %{nodes: [%{key: "work", type: :shell, run: "true"}]})
       assert [%{type: :shell, run: "true"}] = updated.nodes
     end
+
+    test "accepts two guarded edges leaving one node on the same outcome" do
+      %{board: board} = board_with_stages()
+
+      attrs =
+        valid_attrs(%{
+          nodes: [
+            %{key: "work", type: :agent, run: "a", foreach: "card.sub_tasks"},
+            %{key: "after", type: :gate, run: "true"}
+          ],
+          edges: [
+            %{from: "start", to: "work"},
+            %{from: "work", to: "work", on: :succeeded, when: :foreach_remaining},
+            %{from: "work", to: "after", on: :succeeded, when: :foreach_exhausted},
+            %{from: "after", to: "done", on: :succeeded}
+          ]
+        })
+
+      assert {:ok, flow} = Flows.create_flow(board, attrs)
+      assert %{foreach: "card.sub_tasks"} = Enum.find(flow.nodes, &(&1.key == "work"))
+      assert %{when: :foreach_remaining} = Enum.find(flow.edges, &(&1.to == "work" and &1.from == "work"))
+    end
+
+    test "still rejects two UNGUARDED edges on one route" do
+      %{board: board} = board_with_stages()
+
+      attrs =
+        valid_attrs(%{
+          nodes: [%{key: "work", type: :agent, run: "a"}, %{key: "other", type: :agent, run: "b"}],
+          edges: [
+            %{from: "start", to: "work"},
+            %{from: "work", to: "done", on: :succeeded},
+            %{from: "work", to: "other", on: :succeeded}
+          ]
+        })
+
+      assert {:error, changeset} = Flows.create_flow(board, attrs)
+      assert "only one edge may leave a node per outcome" in messages_on(changeset, :edges)
+    end
+
+    test "rejects a guarded edge in a flow with no foreach node" do
+      %{board: board} = board_with_stages()
+
+      attrs =
+        valid_attrs(%{
+          nodes: [%{key: "work", type: :agent, run: "a"}],
+          edges: [
+            %{from: "start", to: "work"},
+            %{from: "work", to: "done", on: :succeeded, when: :foreach_exhausted}
+          ]
+        })
+
+      assert {:error, changeset} = Flows.create_flow(board, attrs)
+      assert "a flow with guarded edges must have exactly one foreach node" in messages_on(changeset, :edges)
+    end
+
+    test "rejects an unknown foreach source" do
+      %{board: board} = board_with_stages()
+
+      attrs = valid_attrs(%{nodes: [%{key: "work", type: :agent, run: "a", foreach: "card.comments"}]})
+
+      assert {:error, changeset} = Flows.create_flow(board, attrs)
+      assert %{nodes: [%{foreach: [~s(must be "card.sub_tasks")]}]} = errors_on(changeset)
+    end
   end
 
   describe "graph validation (AC 3)" do

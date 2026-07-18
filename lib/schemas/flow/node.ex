@@ -6,6 +6,10 @@ defmodule Schemas.Flow.Node do
   executor's to expand). `model`/`effort` nil means inherit the executor
   default. `human`/`parallel` carry no type-specific attrs yet (nothing
   executes before card 02).
+
+  `foreach` (nil = not a loop head) makes the node a `foreach` LOOP HEAD:
+  each entry into it begins one iteration bound to one of the card's
+  sub_tasks. `"card.sub_tasks"` is the only source W13 accepts.
   """
 
   use Ecto.Schema
@@ -21,15 +25,17 @@ defmodule Schemas.Flow.Node do
     field :effort, :string
     field :max_retries, :integer
     field :timeout_minutes, :integer
+    field :foreach, :string
   end
 
   @doc "Validates one node; graph-level rules (key uniqueness) live on Schemas.Flow."
   def changeset(node, attrs) do
     node
-    |> cast(attrs, [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes])
+    |> cast(attrs, [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes, :foreach])
     |> validate_required([:key, :type])
     |> validate_exclusion(:key, ["start", "done"], message: "is a reserved sentinel name")
     |> validate_number(:max_retries, greater_than: 0)
     |> validate_number(:timeout_minutes, greater_than: 0)
+    |> validate_inclusion(:foreach, ["card.sub_tasks"], message: ~s(must be "card.sub_tasks"))
   end
 end
