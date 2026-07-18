@@ -137,7 +137,7 @@ defmodule Relay.Runs.RunServer do
         {:stop, :normal, {:ok, run}, state}
 
       {{:fail, _reason}, nil} ->
-        card_fail_effects(run)
+        card_fail_effects(run, execution)
         Runs.broadcast_runs(board_id, {:run_finished, run})
         {:stop, :normal, {:ok, run}, state}
     end
@@ -258,21 +258,24 @@ defmodule Relay.Runs.RunServer do
     :ok
   end
 
-  # Run failed → the card parks :ready in its work stage awaiting a human
-  # ("needs you" derives from state; 03's scheduler must not re-pull a
-  # card whose last run failed).
-  defp card_fail_effects(run) do
+  # Run failed → flag the card with the node's actual output so a human sees it
+  # at once: request_input blocks the card (:needs_input → amber, needs-you
+  # rollup) and the scheduler skips :needs_input cards by rule (it must not
+  # re-pull a card whose last run failed — a stronger guarantee than the old
+  # :ready-in-a-work-stage accident). B1 / RLY-136, parity with bin/relay's flag().
+  defp card_fail_effects(run, execution) do
     card = Repo.get!(Card, run.card_id)
-    {:ok, _card} = Relay.Cards.set_status(card, %{status: :ready}, :agent)
+    detail = (execution && execution.detail) || run.failure_detail || "The agent's run failed."
+    {:ok, _card} = Relay.Cards.request_input(card, detail, :agent)
     :ok
   end
 
   # Terminal path shared with the no-flow branches: close the run, leave
-  # the failure on the card, park the card :ready, broadcast.
+  # the failure on the card, flag the card :needs_input, broadcast.
   defp fail_effects(run, execution, reason) do
     run = Runs.close_run!(run, :failed, reason)
     log_failure_if_final({:fail, reason}, run, execution)
-    card_fail_effects(run)
+    card_fail_effects(run, execution)
     Runs.broadcast_runs(Runs.board_id_of(run), {:run_finished, run})
     :ok
   end

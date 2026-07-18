@@ -184,7 +184,7 @@ defmodule Relay.RunsTest do
       assert_receive {:run_finished, %Run{status: :done}}
     end
 
-    test "an unrouted outcome fails the run and parks the card :ready with the failure on its timeline",
+    test "an unrouted outcome fails the run and flags the card :needs_input with the failure on its timeline",
          %{board: board} do
       flow = enabled_spec_flow(board)
       card = card_in(board, "Next up")
@@ -201,7 +201,9 @@ defmodule Relay.RunsTest do
       assert_receive {:run_finished, %Run{status: :failed}}
 
       card = Relay.Cards.get_card(board, card.id)
-      assert card.status == :ready
+      # B1: the card blocks immediately (not silently :ready) and enters the needs-you rollup.
+      assert card.status == :needs_input
+      assert Relay.Cards.needs_you?(card, Relay.Boards.list_stages(board))
       assert Enum.any?(Relay.Activity.list_timeline(card), &match?(%Schemas.Activity{type: :failure}, &1))
     end
 
