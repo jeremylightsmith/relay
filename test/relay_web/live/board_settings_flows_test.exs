@@ -42,13 +42,13 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       assert has_element?(view, "#flows-pane")
     end
 
-    test "the header carries no version language and no + New flow button",
+    test "the header carries no version language but does carry the + New flow button",
          %{conn: conn, board: board} do
       view = open_flows(conn, board)
 
       assert has_element?(view, "#flows-pane", "A flow is the automation attached to a stage transition")
       refute render(view) =~ "versioned"
-      refute render(view) =~ "New flow"
+      assert has_element?(view, "#new-flow-button", "New flow")
     end
   end
 
@@ -317,6 +317,51 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
 
       assert render(view) =~ "archived (read-only)"
       assert Flows.get_flow(board, "spec-copy") == nil
+    end
+  end
+
+  describe "+ New flow button (RLY-158)" do
+    test "the button matches the artboard's placement, glyph and fill",
+         %{conn: conn, board: board} do
+      view = open_flows(conn, board)
+
+      # docs/designs/Relay Flows.dc.html line 74 — primary-blue fill, 8px radius,
+      # 9px 15px padding, 13px/600 label, with a 15px "+" glyph before "New flow".
+      button =
+        view
+        |> element("#new-flow-button")
+        |> render()
+
+      assert button =~ "background:oklch(0.60 0.14 250)"
+      assert button =~ "color:oklch(1 0 0)"
+      assert button =~ "border-radius:8px"
+      assert button =~ "padding:9px 15px"
+      assert button =~ "font-size:13px"
+      assert button =~ "font-weight:600"
+      assert button =~ "font-size:15px;line-height:1"
+      assert button =~ "New flow"
+
+      # …in the artboard's right-hand header column (lines 63-72).
+      assert has_element?(view, "#flows-header-actions #new-flow-button")
+      assert render(view) =~ "align-items:flex-end;gap:10px;flex:0 0 auto;margin-top:4px;"
+    end
+
+    test "the button renders on a board with no flows at all", %{conn: conn, board: board} do
+      Repo.delete_all(from f in Flow, where: f.board_id == ^board.id)
+
+      view = open_flows(conn, board)
+
+      assert has_element?(view, "#flows-empty")
+      assert has_element?(view, "#new-flow-button")
+    end
+
+    test "an archived board does not render the button", %{conn: conn, board: board} do
+      {:ok, _} = Boards.archive_board(board)
+
+      view = open_flows(conn, board)
+
+      assert has_element?(view, "#flows-pane")
+      refute has_element?(view, "#new-flow-button")
     end
   end
 end

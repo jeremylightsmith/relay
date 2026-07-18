@@ -591,6 +591,8 @@ defmodule RelayWeb.BoardSettingsLive do
               rows={@flow_rows}
               panel={@flow_panel}
               slug={@board.slug}
+              stages={@flow_stages}
+              read_only?={@read_only?}
             />
 
             <section :if={@section == :members} id="members-pane">
@@ -878,6 +880,7 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:stage_form, nil)
      |> assign(:invite_form, to_form(%{"email" => ""}, as: :invite))
      |> assign(:flow_rows, [])
+     |> assign(:flow_stages, [])
      |> assign(:flow_panel, nil)
      |> assign_members()
      |> refresh_stages()}
@@ -1227,15 +1230,19 @@ defmodule RelayWeb.BoardSettingsLive do
   end
 
   defp assign_flows(socket) do
+    board = socket.assigns.board
+
     rows =
-      socket.assigns.board
+      board
       |> Flows.list_flows()
       |> Enum.map(fn flow ->
         customized? = Flows.customized?(flow)
         %{flow: flow, customized?: customized?, resettable?: customized? and Flows.default_key?(flow.key)}
       end)
 
-    assign(socket, :flow_rows, rows)
+    socket
+    |> assign(:flow_rows, rows)
+    |> assign(:flow_stages, Boards.list_stages(board))
   end
 
   # Ids in the DOM come from this board's own flow rows.
