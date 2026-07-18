@@ -55,6 +55,15 @@ defmodule Relay.Runs.SchedulerTest do
   defp cap(entries), do: Map.new(entries)
   defp slots(shared, excl), do: %{shared_clean: shared, exclusive: excl}
 
+  # The real board shape: Next up(1) → Spec(2) → Spec:Done(3) → Plan(4).
+  defp spec_and_plan_stages do
+    [stage(1, position: 1), stage(2, position: 2), stage(3, position: 3), stage(4, position: 4)]
+  end
+
+  defp spec_and_plan_flows do
+    [flow("spec", 1, 2, isolation: :shared_clean), flow("plan", 3, 4, isolation: :shared_clean)]
+  end
+
   describe "fresh pulls" do
     test "pulls a ready card onto a named executor, consuming its slot" do
       s =
@@ -133,18 +142,11 @@ defmodule Relay.Runs.SchedulerTest do
   # with rightmost-works_in-first (scheduler.ex:38-45), Plan preempts Spec for shared slots.
   # That is intended WIP discipline — drain the right of the board first — and these cases pin
   # it as a decision rather than an emergent surprise on a scarce-capacity day.
-  # Module-level helpers (ExUnit forbids defp inside describe).
-  # The real board shape: Next up(1) → Spec(2) → Spec:Done(3) → Plan(4).
-  defp spec_and_plan_stages do
-    [stage(1, position: 1), stage(2, position: 2), stage(3, position: 3), stage(4, position: 4)]
-  end
-
-  defp spec_and_plan_flows do
-    [flow("spec", 1, 2, isolation: :shared_clean), flow("plan", 3, 4, isolation: :shared_clean)]
-  end
-
   describe "two flows sharing one shared_clean budget (spec + plan)" do
     test "with one shared slot, the Plan card preempts the Spec card" do
+      # Same shape as "processes flows by works-in stage position, descending" above (4 stages,
+      # 2 cards, 1 slot) — this instance names the real board's spec/plan flows specifically, so
+      # a regression there reads as "Plan lost its board seat" rather than an abstract flow "b".
       s =
         snap(
           stages: spec_and_plan_stages(),
@@ -172,9 +174,11 @@ defmodule Relay.Runs.SchedulerTest do
                Scheduler.plan(s)
     end
 
-    test "the shared budget is drawn down across flows, not per flow" do
-      # 3 slots, 3 eligible cards spread across the two flows → all three dispatch and nothing
-      # queues; the point is that plan's dispatch does NOT get its own private budget.
+    test "all eligible cards across both flows dispatch when capacity is ample, in rightmost-flow-first order" do
+      # 3 slots, 3 eligible cards spread across the two flows → nothing is scarce, so this does
+      # NOT distinguish a shared budget from a per-flow one (see the 2-slot/3-card case above for
+      # that). What it pins is dispatch order under a real multi-flow snapshot: plan (rightmost
+      # works-in) goes first, then spec in card order.
       s =
         snap(
           stages: spec_and_plan_stages(),
