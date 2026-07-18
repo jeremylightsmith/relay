@@ -60,9 +60,10 @@ defmodule Relay.Flows.DefaultLibrary do
           type: :agent,
           model: "sonnet",
           effort: "high",
+          foreach: "card.sub_tasks",
           run:
-            "Implement the NEXT unchecked task in the card's plan with strict red/green TDD, " <>
-              "then check it off. One task only. If reviewer findings are attached, address them."
+            "Implement the task named {sub_task} from the card's plan with strict red/green TDD. " <>
+              "One task only — do not start the next one. If reviewer findings are attached, address them."
         },
         %{
           key: "spec_review",
@@ -76,7 +77,6 @@ defmodule Relay.Flows.DefaultLibrary do
           model: "opus",
           run: "Judge whether the change is well-built: clean, conventional, meaningfully tested."
         },
-        %{key: "next_task", type: :gate, run: "! grep -q -- '- \\[ \\]' plan.md"},
         %{key: "precommit", type: :gate, run: "mix precommit"},
         %{
           key: "final_review",
@@ -141,9 +141,8 @@ defmodule Relay.Flows.DefaultLibrary do
         %{from: "spec_review", to: "implement", on: :failed, max_loops: 3},
         %{from: "spec_review", to: "quality_review", on: :succeeded},
         %{from: "quality_review", to: "implement", on: :failed, max_loops: 3},
-        %{from: "quality_review", to: "next_task", on: :succeeded},
-        %{from: "next_task", to: "implement", on: :failed},
-        %{from: "next_task", to: "precommit", on: :succeeded},
+        %{from: "quality_review", to: "implement", on: :succeeded, when: :foreach_remaining},
+        %{from: "quality_review", to: "precommit", on: :succeeded, when: :foreach_exhausted},
         %{from: "precommit", to: "final_fix", on: :failed, max_loops: 2},
         %{from: "precommit", to: "final_review", on: :succeeded},
         %{from: "final_review", to: "final_fix", on: :failed, max_loops: 2},

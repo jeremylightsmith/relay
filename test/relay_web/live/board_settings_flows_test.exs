@@ -76,7 +76,7 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       assert has_element?(view, "#flow-row-#{code.id}", "Code")
 
       assert has_element?(view, "#flow-#{spec.id}-nodes-count", "1 node")
-      assert has_element?(view, "#flow-#{code.id}-nodes-count", "14 nodes")
+      assert has_element?(view, "#flow-#{code.id}-nodes-count", "13 nodes")
 
       assert has_element?(view, "#flow-#{spec.id}-trigger", "Next up")
       assert has_element?(view, "#flow-#{spec.id}-trigger", "Spec:Review")

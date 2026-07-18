@@ -396,7 +396,7 @@ defmodule RelayWeb.FlowEditorLiveTest do
   # helper: return the code flow's nodes with implement.run changed (as attr maps)
   defp bump_implement_run(flow) do
     Enum.map(flow.nodes, fn n ->
-      base = Map.take(n, [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes])
+      base = Map.take(n, [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes, :foreach])
       if n.key == "implement", do: %{base | run: "CUSTOM"}, else: base
     end)
   end

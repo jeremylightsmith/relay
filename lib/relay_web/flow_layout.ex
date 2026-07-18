@@ -64,9 +64,21 @@ defmodule RelayWeb.FlowLayout do
         Enum.reverse(acc)
 
       true ->
-        next = Enum.find(edges, &(&1.from == key and Map.get(&1, :on) == :succeeded))
-        walk(next && next.to, edges, node_keys, MapSet.put(seen, key), [key | acc])
+        seen = MapSet.put(seen, key)
+        next = next_spine_target(edges, key, seen)
+        walk(next, edges, node_keys, seen, [key | acc])
     end
+  end
+
+  # A `foreach` loop head (W13) may leave TWO :succeeded edges — one guarded
+  # `foreach_remaining` back to itself, one guarded `foreach_exhausted` onward
+  # — so the first-listed edge is no longer necessarily the spine's next
+  # step. Prefer whichever candidate does NOT loop back to an already-visited
+  # node (`seen` already includes `key`, so a self-loop is excluded too);
+  # the spine should keep moving forward.
+  defp next_spine_target(edges, key, seen) do
+    candidates = for %{from: ^key, to: to} = e <- edges, Map.get(e, :on) == :succeeded, do: to
+    Enum.find(candidates, &(not MapSet.member?(seen, &1))) || List.first(candidates)
   end
 
   defp serpentine(spine) do

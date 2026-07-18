@@ -71,14 +71,15 @@ defmodule Relay.FlowsSeedTest do
     assert [%{key: "write_plan", type: :agent, run: "/write-plan {ref}", max_retries: 1}] = plan.nodes
 
     code = Flows.get_flow(ctx.board, "code")
-    assert length(code.nodes) == 14
-    assert length(code.edges) == 22
+    assert length(code.nodes) == 13
+    assert length(code.edges) == 21
+
+    # The next_task grep-gate is gone: "which task is next" is engine-derived now.
+    refute Enum.any?(code.nodes, &(&1.key == "next_task"))
+    assert %{foreach: "card.sub_tasks"} = Enum.find(code.nodes, &(&1.key == "implement"))
 
     implement = Enum.find(code.nodes, &(&1.key == "implement"))
     assert %{type: :agent, model: "sonnet", effort: "high"} = implement
-
-    assert %{type: :gate, run: "! grep -q -- '- \\[ \\]' plan.md"} =
-             Enum.find(code.nodes, &(&1.key == "next_task"))
 
     assert %{type: :gate, run: "mix precommit"} = Enum.find(code.nodes, &(&1.key == "precommit"))
     assert %{type: :shell} = Enum.find(code.nodes, &(&1.key == "merge"))
@@ -87,6 +88,13 @@ defmodule Relay.FlowsSeedTest do
              Enum.find(code.edges, &(&1.from == "spec_review" and &1.to == "implement"))
 
     assert %{on: :succeeded} = Enum.find(code.edges, &(&1.from == "merge" and &1.to == "done"))
+
+    # Two edges leave quality_review on the SAME outcome, split by their guard.
+    assert %{to: "implement", when: :foreach_remaining} =
+             Enum.find(code.edges, &(&1.from == "quality_review" and &1.when == :foreach_remaining))
+
+    assert %{to: "precommit", when: :foreach_exhausted} =
+             Enum.find(code.edges, &(&1.from == "quality_review" and &1.when == :foreach_exhausted))
   end
 
   test "is idempotent and never clobbers edits (AC 2)" do
