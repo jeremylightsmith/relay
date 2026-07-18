@@ -175,8 +175,17 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
     # B1: the card blocks immediately (not silently :ready) and enters the needs-you rollup.
     assert card.status == :needs_input
     assert Cards.needs_you?(card, Relay.Boards.list_stages(board))
-    # the failing node's actual output tail is captured on the run's execution (the card's
-    # run panel surfaces it) - the reported detail reached the human, not a generic message.
+
+    # the reported detail reached the human as the :needs_input question comment on the
+    # card itself (not a generic "The agent's run failed." placeholder) - this is the
+    # assertion that would catch a regression to a generic or route-error message.
+    assert Enum.any?(Relay.Activity.list_timeline(card), fn
+             %Schemas.Comment{kind: :question, body: body} -> body =~ "exploded"
+             _ -> false
+           end)
+
+    # the failing node's actual output tail is also captured on the run's execution (the
+    # card's run panel surfaces it).
     assert Relay.Repo.exists?(
              from e in Schemas.NodeExecution,
                where: e.run_id == ^failed_id and e.outcome == :failed and ilike(e.detail, "%exploded%")
