@@ -150,7 +150,7 @@ defmodule Relay.Flows do
     :ok
   end
 
-  @node_fields [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes, :foreach]
+  @node_fields [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes, :foreach, :agent]
   @edge_fields [:from, :to, :on, :max_loops, :when]
 
   @doc """

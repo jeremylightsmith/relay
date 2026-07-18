@@ -15,7 +15,7 @@ defmodule RelayWeb.FlowEditorLive do
   alias RelayWeb.FlowLayout
   alias Schemas.Board
 
-  @node_fields [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes, :foreach]
+  @node_fields [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes, :foreach, :agent]
   @edge_fields [:from, :to, :on, :max_loops, :when]
 
   @impl true

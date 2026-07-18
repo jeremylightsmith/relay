@@ -226,6 +226,29 @@ defmodule Relay.FlowsTest do
       assert updated.version == flow.version + 1
       assert Enum.find(updated.nodes, &(&1.key == "work")).foreach == nil
     end
+
+    defp agent_attrs do
+      valid_attrs(%{nodes: [%{key: "work", type: :agent, run: "a", agent: "plan-implementer"}]})
+    end
+
+    test "duplicate_flow/1 preserves agent instead of stripping it" do
+      %{board: board} = board_with_stages()
+      {:ok, original} = Flows.create_flow(board, agent_attrs())
+
+      assert {:ok, copy} = Flows.duplicate_flow(original)
+      assert %{agent: "plan-implementer"} = Enum.find(copy.nodes, &(&1.key == "work"))
+    end
+
+    test "save_definition/2 preserves agent in both the flow and its snapshot" do
+      %{board: board} = board_with_stages()
+      {:ok, flow} = Flows.create_flow(board, agent_attrs())
+
+      assert {:ok, updated} = Flows.save_definition(flow, %{isolation: :exclusive})
+      assert %{agent: "plan-implementer"} = Enum.find(updated.nodes, &(&1.key == "work"))
+
+      snapshot = Flows.get_version(updated, updated.version)
+      assert %{agent: "plan-implementer"} = Enum.find(snapshot.nodes, &(&1.key == "work"))
+    end
   end
 
   describe "graph validation (AC 3)" do
