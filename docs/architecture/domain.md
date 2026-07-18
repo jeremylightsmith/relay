@@ -75,6 +75,28 @@ sharing behavior.
   derived (summed `finished_at - started_at`) since `NodeExecution` stores no
   duration column; `flow_version` in a summary is always `nil` today (`Run`
   points at the live flow row, no version column yet — RLY-152).
+  **Server-side dispatch (ADR 0006 / RLY-133):** the same `Relay.Runs` boundary also owns
+  the scheduler brain — the server-side heir to `bin/relay`'s `find_all_ready`. The pure
+  core `Relay.Runs.Scheduler.plan/1` takes a `Snapshot` (stages/cards/flows/runs/capacity
+  as plain maps — no DB, no processes) and returns an ordered `Plan` of `{:start, ...}` /
+  `{:resume, ...}` dispatches plus the pulls-from `ready ↔ queued` reconciliation
+  (rightmost-works-in-stage-first flow priority, resume-before-fresh, WIP counted across
+  sub-lanes, named-executor capacity with exclusive-isolation affinity — no over-dispatch
+  in one pass). A per-board `Relay.Runs.Scheduler.Server` GenServer (registered in
+  `Relay.Runs.SchedulerRegistry`, supervised by the `Relay.Runs.SchedulerSupervisor`
+  `DynamicSupervisor`) assembles the snapshot, calls `plan/1`, and delegates each decision
+  to the injectable `Relay.Runs.Scheduler.Engine` behaviour (`active_runs/1`,
+  `start_run/3`, `resume_run/2` — `config :relay, :runs_engine`; default
+  `Relay.Runs.Scheduler.NoopEngine` until a real adapter onto the run-execution engine
+  above is wired up). The scheduler writes no `Run` rows and moves no cards into
+  works-in — it owns only the `ready ↔ queued` marking; the engine owns the rest. It
+  reacts to the board's `Relay.Events` topic and `Relay.Runs.Capacity`'s
+  `runs:capacity` topic (an executor-keyed ETS store of advertised free capacity per
+  isolation class, empty until W9), with a slow ~60s tick as backstop. Cross-board
+  capacity is global by executor — a stale/contended view can over-assign; the
+  executor's own live capacity is the final backstop (YAGNI: no multi-board reservation
+  yet). `Relay.Runs.SchedulerSupervisor.start_all/0` boot-starts one scheduler per board
+  only when `:runs_auto_start` is on (dev/prod; off in test).
 - **Cards** — the card lifecycle: create/edit/move/archive, status (`working`,
   `needs_input`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject, needs-input
   questions. Card state × stage validity is governed by

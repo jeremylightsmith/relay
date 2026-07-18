@@ -17,7 +17,7 @@ defmodule Relay.Runs do
 
   use Boundary,
     deps: [Relay.Activity, Relay.Boards, Relay.Cards, Relay.Events, Relay.Flows, Relay.Repo, Schemas],
-    exports: [Supervisor]
+    exports: [Supervisor, Capacity, SchedulerSupervisor]
 
   import Ecto.Query
 

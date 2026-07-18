@@ -1,0 +1,158 @@
+defmodule Relay.Runs.Scheduler.Server do
+  @moduledoc """
+  The per-board event-driven shell (ADR 0006 / RLY-133). Assembles a
+  `Relay.Runs.Scheduler.Snapshot` from the DB + `Relay.Runs.Capacity`, calls the
+  pure `Relay.Runs.Scheduler.plan/1`, delegates each dispatch to the injected
+  `Relay.Runs.Scheduler.Engine`, and applies the `ready ↔ queued` marking via
+  `Relay.Cards` (the only card writes the scheduler owns — it never writes
+  `Run` rows or moves cards into works-in).
+
+  Reacts to the board's `Relay.Events` topic and the `Relay.Runs.Capacity`
+  capacity-changed topic, debouncing a burst into one reconcile, with a slow
+  (~60s) tick as backstop. `reconcile_now/1` forces a synchronous reconcile.
+  """
+
+  use GenServer
+
+  alias Relay.Boards
+  alias Relay.Cards
+  alias Relay.Runs.Capacity
+  alias Relay.Runs.Scheduler
+  alias Relay.Runs.Scheduler.Snapshot
+
+  @tick_ms 60_000
+  @debounce_ms 50
+
+  def start_link(opts) do
+    board_id = Keyword.fetch!(opts, :board_id)
+    GenServer.start_link(__MODULE__, opts, name: name(opts, board_id))
+  end
+
+  defp name(opts, board_id) do
+    Keyword.get(opts, :name, {:via, Registry, {Relay.Runs.SchedulerRegistry, board_id}})
+  end
+
+  @doc "Forces a synchronous reconcile; returns `:ok` once it has run."
+  def reconcile_now(server), do: GenServer.call(server, :reconcile)
+
+  @impl true
+  def init(opts) do
+    board_id = Keyword.fetch!(opts, :board_id)
+
+    state = %{
+      board_id: board_id,
+      engine: Keyword.get(opts, :engine, default_engine()),
+      tick_ms: Keyword.get(opts, :tick_ms, @tick_ms),
+      debounce_ms: Keyword.get(opts, :debounce_ms, @debounce_ms),
+      pending?: false
+    }
+
+    Relay.Events.subscribe(board_id)
+    Capacity.subscribe()
+    Process.send_after(self(), :tick, state.tick_ms)
+    {:ok, state, {:continue, :boot_reconcile}}
+  end
+
+  defp default_engine, do: Application.get_env(:relay, :runs_engine, Relay.Runs.Scheduler.NoopEngine)
+
+  @impl true
+  def handle_continue(:boot_reconcile, state), do: {:noreply, reconcile(state)}
+
+  @impl true
+  def handle_call(:reconcile, _from, state), do: {:reply, :ok, reconcile(state)}
+
+  @impl true
+  def handle_info(:tick, state) do
+    Process.send_after(self(), :tick, state.tick_ms)
+    {:noreply, reconcile(state)}
+  end
+
+  def handle_info(:flush, state), do: {:noreply, reconcile(%{state | pending?: false})}
+
+  # Any capacity change or card move/upsert on this board is a reason to reconcile.
+  def handle_info({:executor_capacity_changed, _executor_id}, state), do: {:noreply, mark_dirty(state)}
+  def handle_info({:card_moved, _card, _from_stage_id}, state), do: {:noreply, mark_dirty(state)}
+  def handle_info({:card_upserted, _card}, state), do: {:noreply, mark_dirty(state)}
+  def handle_info({:card_archived, _card}, state), do: {:noreply, mark_dirty(state)}
+  def handle_info(_msg, state), do: {:noreply, state}
+
+  # Debounce a burst of events into one reconcile.
+  defp mark_dirty(%{pending?: true} = state), do: state
+
+  defp mark_dirty(state) do
+    Process.send_after(self(), :flush, state.debounce_ms)
+    %{state | pending?: true}
+  end
+
+  defp reconcile(state) do
+    {snapshot, cards_by_id} = build_snapshot(state)
+    plan = Scheduler.plan(snapshot)
+    Enum.each(plan.dispatches, &dispatch(&1, state.engine))
+    apply_marking(plan, cards_by_id)
+    state
+  end
+
+  defp dispatch({:start, card_id, flow_key, executor_id}, engine), do: engine.start_run(card_id, flow_key, executor_id)
+
+  defp dispatch({:resume, run_id, executor_id}, engine), do: engine.resume_run(run_id, executor_id)
+
+  # --- snapshot assembly (returns the loaded card structs so apply_marking can write status) ---
+
+  defp build_snapshot(state) do
+    board = Boards.get_board_by_id!(state.board_id)
+    cards = Cards.list_cards(board)
+
+    snapshot = %Snapshot{
+      stages: Enum.map(Boards.list_stages(board), &stage_snap/1),
+      cards: Enum.map(cards, &card_snap(&1, board)),
+      flows: Enum.map(Relay.Flows.list_enabled_flows(board), &flow_snap/1),
+      runs: state.engine.active_runs(state.board_id),
+      capacity: Capacity.snapshot()
+    }
+
+    {snapshot, Map.new(cards, &{&1.id, &1})}
+  end
+
+  defp stage_snap(stage) do
+    %{id: stage.id, position: stage.position, parent_id: stage.parent_id, wip_limit: stage.wip_limit}
+  end
+
+  defp card_snap(card, board) do
+    %{
+      id: card.id,
+      ref: Cards.ref(board, card),
+      stage_id: card.stage_id,
+      status: card.status,
+      active_owner: Cards.active_owner_type(card),
+      position: card.position
+    }
+  end
+
+  defp flow_snap(flow) do
+    %{
+      key: flow.key,
+      pulls_from_stage_id: flow.pulls_from_stage_id,
+      works_in_stage_id: flow.works_in_stage_id,
+      isolation: flow.isolation
+    }
+  end
+
+  # --- the scheduler-owned ready <-> queued marking ---
+
+  defp apply_marking(plan, cards_by_id) do
+    Enum.each(plan.to_queue, &set_status(cards_by_id, &1, :queued))
+    Enum.each(plan.to_unqueue, &set_status(cards_by_id, &1, :ready))
+    :ok
+  end
+
+  # :queued/:ready are valid in the pulls-from stage (queue/done), so a plain set_status is safe.
+  # Skip a no-op write (already at the target status) — set_status/3 re-broadcasts unconditionally,
+  # which would re-trigger this reconcile in a loop.
+  defp set_status(cards_by_id, card_id, status) do
+    case Map.get(cards_by_id, card_id) do
+      nil -> :ok
+      %{status: ^status} -> :ok
+      card -> Cards.set_status(card, %{status: status})
+    end
+  end
+end

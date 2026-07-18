@@ -6,6 +6,8 @@ defmodule Relay.Application do
   use Boundary, top_level?: true, deps: [Relay, RelayWeb]
   use Application
 
+  alias Relay.Runs.SchedulerSupervisor
+
   @impl true
   def start(_type, _args) do
     children =
@@ -18,6 +20,16 @@ defmodule Relay.Application do
         Relay.BoardWatch,
         # RLY-141: ETS presence for connected runners; prunes runners silent >24h.
         Relay.RunnerPresence,
+        # RLY-133: server-side dispatch. Capacity store (empty until W9), the per-board
+        # scheduler registry + dynamic supervisor, and a boot task that starts a scheduler per
+        # board only when :runs_auto_start is on (off in test, so boot never queries the DB).
+        Relay.Runs.Capacity,
+        {Registry, keys: :unique, name: Relay.Runs.SchedulerRegistry},
+        SchedulerSupervisor,
+        Supervisor.child_spec({Task, &SchedulerSupervisor.start_all/0},
+          id: :runs_scheduler_boot,
+          restart: :transient
+        ),
         # RLY-112: debounces ref-tagged runner log lines into one insert_all per burst.
         Relay.Activity.LogSink,
         # RLY-112: ages :action chatter out after 14 days. Its first sweep is one

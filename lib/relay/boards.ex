@@ -161,6 +161,14 @@ defmodule Relay.Boards do
     Repo.all(from s in Stage, where: s.board_id == ^board_id, order_by: s.position)
   end
 
+  @doc "System-wide (non-scoped) board lookup by id, raising when missing. Used by Relay.Runs."
+  def get_board_by_id!(id), do: Repo.get!(Board, id)
+
+  @doc "Every non-archived board's id (non-scoped) — the scheduler bootstrap enumerates these."
+  def list_board_ids do
+    Repo.all(from b in Board, where: is_nil(b.archived_at), select: b.id)
+  end
+
   @doc "Returns the stage with `id` on `board`, or nil (board-scoped lookup)."
   def get_stage(%Board{id: board_id}, id) do
     Repo.get_by(Stage, id: id, board_id: board_id)
