@@ -432,10 +432,11 @@ defmodule Relay.Runs do
   `{:ok, job}` or `{:ok, nil}` when nothing matches.
   """
   def claim_next_job(%Executor{board_id: board_id, name: name, capacity: capacity}) do
-    case for {class, n} <- capacity, is_integer(n) and n > 0, do: class do
-      [] -> {:ok, nil}
-      allowed -> Repo.transaction(fn -> do_claim_next_job(board_id, name, allowed) end)
-    end
+    allowed = for {class, n} <- capacity, is_integer(n) and n > 0, do: class
+    # Never short-circuit on empty capacity: a job pinned to this executor (an
+    # exclusive run it already holds — ADR 0006 §5) is claimable regardless of
+    # advertised free capacity, since the executor is already holding that slot.
+    Repo.transaction(fn -> do_claim_next_job(board_id, name, allowed) end)
   end
 
   defp do_claim_next_job(board_id, name, allowed) do
@@ -447,8 +448,11 @@ defmodule Relay.Runs do
         on: c.id == r.card_id,
         where: c.board_id == ^board_id,
         where: j.state == :queued,
-        where: fragment("?->>'isolation'", j.payload) in ^allowed,
-        where: is_nil(j.executor_name) or j.executor_name == ^name,
+        # Unpinned jobs need advertised free capacity in their class; a job
+        # already pinned to this executor bypasses the capacity filter.
+        where:
+          j.executor_name == ^name or
+            (is_nil(j.executor_name) and fragment("?->>'isolation'", j.payload) in ^allowed),
         order_by: [asc: j.id],
         limit: 1,
         lock: "FOR UPDATE SKIP LOCKED"
@@ -633,11 +637,39 @@ defmodule Relay.Runs do
       node_execution_id: execution.id,
       node_key: execution.node_key,
       state: :queued,
-      payload: payload
+      payload: payload,
+      executor_name: exclusive_holder(run, payload)
     }
     |> NodeJob.changeset()
     |> Repo.insert!()
   end
+
+  # Exclusive runs have absolute executor affinity (ADR 0006 §5): once an
+  # executor claims a run's first job, every later job — the next node after an
+  # advance, or the same node re-entered after needs-input — is pinned to that
+  # same executor, so it lands on the machine holding the run's worktree. The
+  # first job has no prior holder (returns nil → unpinned), so any executor with
+  # exclusive capacity may start the run. `shared_clean` runs are never pinned.
+  # Without this, a parked exclusive run's resume job is unpinned and the holder
+  # (advertising exclusive: 0) can never reclaim it — the affinity deadlock.
+  #
+  # Affinity is read from the SINGLE most-recent job, and only while it isn't
+  # `:revoked`. A normal advance and a needs-input park both finalize the prior
+  # job to `:done` with the slot kept bound (the worktree survives) → pin. A
+  # revoke (human baton via `park_claimed`, or `executor_gone` reclaim) resets
+  # the worktree and unbinds the slot → the most-recent job is `:revoked` → do
+  # not pin, so the resume re-offers to any free executor with a fresh worktree.
+  # (Looking only at the most-recent job — not the newest non-nil `executor_name`
+  # — is what makes the multi-node revoke case correct: an earlier `:done` node's
+  # retained name must not resurrect affinity the revoke just voided.)
+  defp exclusive_holder(%Run{id: run_id}, %{"isolation" => "exclusive"}) do
+    case Repo.one(from j in NodeJob, where: j.run_id == ^run_id, order_by: [desc: j.id], limit: 1) do
+      %NodeJob{state: state, executor_name: name} when state != :revoked -> name
+      _ -> nil
+    end
+  end
+
+  defp exclusive_holder(_run, _payload), do: nil
 
   @doc false
   def finalize_job!(%NodeJob{} = job, attrs) do

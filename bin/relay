@@ -695,6 +695,14 @@ class ExecutorPool:
                 "exclusive": sum(1 for bound in self.excl.values() if bound is None),
             }
 
+    def has_bound_slots(self):
+        """True while any exclusive slot is bound to a run (running or parked). The
+        execute loop keeps polling in that case even at 0 free capacity: the bound
+        run may have a pinned resume/next job the server hands over regardless of
+        advertised capacity (exclusive affinity — ADR 0006 §5)."""
+        with self.lock:
+            return any(bound is not None for bound in self.excl.values())
+
     def ensure(self):
         ensure_worktree(self.shared_name, self.base)
         for name in self.excl:
@@ -1409,7 +1417,10 @@ def cmd_execute(args):
 
     while not stop.is_set():
         cap = pool.capacity()
-        if not DRY and sum(cap.values()) <= 0:      # no free slots → wait for a worker
+        # No free slots → idle, UNLESS an exclusive slot is bound to a run: that
+        # run's pinned resume/next job is claimable regardless of advertised
+        # capacity (affinity), so we must keep polling or the run never resumes.
+        if not DRY and sum(cap.values()) <= 0 and not pool.has_bound_slots():
             wake.wait(poll_timeout)
             wake.clear()
             continue

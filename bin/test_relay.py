@@ -1064,6 +1064,26 @@ class ExecutorPoolTest(unittest.TestCase):
         self.assertEqual(p.capacity()["exclusive"], 0)
         self.assertIsNone(p.assign({"isolation": "exclusive", "run_id": "r3"}))
 
+    def test_has_bound_slots_tracks_exclusive_bindings(self):
+        # The execute loop must keep polling while any exclusive slot is bound to a
+        # run, even when free capacity is 0 — the bound (possibly parked) run may
+        # have a pinned resume/next job the server will hand over regardless of
+        # advertised capacity (exclusive affinity, ADR 0006 §5). Without this the
+        # holder idles forever and the parked run never resumes.
+        p = self.pool()
+        self.assertFalse(p.has_bound_slots())
+        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        self.assertTrue(p.has_bound_slots())
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "parked")
+        self.assertTrue(p.has_bound_slots())  # parked keeps the binding
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "done")
+        self.assertFalse(p.has_bound_slots())  # terminal frees it
+
+    def test_has_bound_slots_ignores_shared_clean(self):
+        p = self.pool()
+        p.assign({"isolation": "shared_clean", "run_id": "r1"})
+        self.assertFalse(p.has_bound_slots())
+
     def test_release_on_unknown_slot_does_not_raise(self):
         p = self.pool()
         # A slot the pool never handed out (e.g. a stale/None slot from a caller bug)

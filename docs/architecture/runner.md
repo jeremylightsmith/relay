@@ -68,7 +68,16 @@ that stays server-side.
   `NodeJob` (`Relay.Runs.claim_next_job/1`, `SELECT … FOR UPDATE SKIP LOCKED`). Long-polls
   up to ~25s on the `board:<id>:runs` topic when nothing is immediately claimable (`?wait=0`
   short-polls instead); serialises the raw `run` + resolved `vars` W5 already stored, never
-  a worktree path.
+  a worktree path. **Eligibility respects exclusive affinity (ADR 0006 §5):** an *unpinned*
+  job (`executor_name` nil) needs advertised free capacity in its isolation class, but a job
+  *pinned* to the requesting executor (`executor_name` = its name) is claimable regardless of
+  advertised capacity — the executor is already holding that run's bound worktree slot.
+  Pinning is set at enqueue: `Relay.Runs.insert_job!/3` pins every job of an `exclusive` run
+  after the first to the executor that claimed the first, so an `exclusive` run's later nodes
+  and its needs-input **resume** always return to the machine holding its worktree (and a
+  parked run whose holder advertises `exclusive: 0` can still be handed its own resume — the
+  fix for the affinity deadlock; the executor keeps polling while it holds bound slots via
+  `ExecutorPool.has_bound_slots/0`).
 - `POST /api/node-jobs/:id/outcome` (`.outcome/2`) — `Relay.Runs.get_claimed_job/2` (board-
   scoped, 409 `conflict` if the job isn't `claimed`/`running`), then
   `Relay.Runs.report_outcome/2` against the closed outcome set (422 `unknown_outcome`
