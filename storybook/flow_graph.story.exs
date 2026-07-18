@@ -15,8 +15,7 @@ defmodule Storybook.FlowGraph do
     [
       %Variation{
         id: :default_code_flow,
-        description:
-          "The shipped Code flow: 14 nodes, serpentine, dashed failed edges, max-N loop badges.",
+        description: "The shipped Code flow: 14 nodes, serpentine, dashed failed edges, max-N loop badges.",
         attributes: %{
           nodes: code.nodes,
           edges: code.edges,
