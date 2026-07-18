@@ -170,7 +170,10 @@ the same machine.
 
 - **Cancel/revoke.** If a run is cancelled server-side while this executor is running one of
   its node-jobs, the next heartbeat's `{revoked: [...]}` response terminates that job's live
-  subprocess and resets its worktree — no outcome is reported for a revoked job.
+  subprocess. For an `exclusive` job (bound 1:1 to that job/run) it also resets the job's
+  worktree; a revoked `shared_clean` job is left as-is, since `exec-clean` is shared by other
+  jobs that may still be running there and resetting it would destroy their work. Either way,
+  no outcome is reported for a revoked job.
 
 ## Operating invariants
 

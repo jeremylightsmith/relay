@@ -123,9 +123,13 @@ two generations coexist on the same machine through the migration; nothing they 
 - **Heartbeat-borne revoke.** `ExecutorHeartbeat` POSTs `{executor, running: [job-ids]}` to
   `POST /api/node-jobs/heartbeat` every `heartbeat_interval`s and — unlike the watcher's
   `Heartbeat`, which discards the response body — reads back `{revoked: [job-ids]}` and
-  terminates each one's live subprocess via its `JobControl`. A revoked job resets its worktree
-  (salvaging any leftovers via `git stash`, same as `reset_worktree` elsewhere) and reports no
-  outcome — the server already knows a revoked job never finished. **This endpoint is
+  terminates each one's live subprocess via its `JobControl`. A revoked **exclusive** job resets
+  its worktree (salvaging any leftovers via `git stash`, same as `reset_worktree` elsewhere),
+  since that worktree is bound 1:1 to this job/run. A revoked **`shared_clean`** job leaves
+  `exec-clean` untouched instead — that worktree is shared by other jobs still running
+  concurrently, and resetting it would destroy their work; it's only ever fast-forwarded once
+  every shared slot is idle. Either way, no outcome is reported for a revoked job — the server
+  already knows a revoked job never finished. **This endpoint is
   client-side only for now**: `bin/relay` posts to it, but no server route exists yet (the W9
   server currently only extends `/api/board/heartbeat` — see "Node-job transport" above); wiring
   the server-side revoke response is left to a follow-up card.
