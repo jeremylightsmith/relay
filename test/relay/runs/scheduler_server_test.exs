@@ -134,6 +134,36 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     assert Repo.get!(Card, other_card.id).status == :queued
   end
 
+  test "a :parked run holds no capacity slot — only :running runs are debited" do
+    %{board: board, card: card} = board_with_flow(:ready)
+
+    start_engine([
+      %{id: 55, card_id: -1, status: :parked, flow_key: "spec", isolation: :shared_clean, pinned_executor_id: nil}
+    ])
+
+    pid = start_server(board.id)
+    :ok = Capacity.put(7, %{shared_clean: 1, exclusive: 0})
+    :ok = Server.reconcile_now(pid)
+
+    assert_receive {:start_run, card_id, "spec", 7}, 500
+    assert card_id == card.id
+  end
+
+  test "a :running run whose flow was deleted (isolation: nil) leaves capacity untouched" do
+    %{board: board, card: card} = board_with_flow(:ready)
+
+    start_engine([
+      %{id: 55, card_id: -1, status: :running, flow_key: "gone", isolation: nil, pinned_executor_id: nil}
+    ])
+
+    pid = start_server(board.id)
+    :ok = Capacity.put(7, %{shared_clean: 1, exclusive: 0})
+    :ok = Server.reconcile_now(pid)
+
+    assert_receive {:start_run, card_id, "spec", 7}, 500
+    assert card_id == card.id
+  end
+
   test "disabling the flow unqueues a previously :queued card (criterion 5)" do
     %{board: board, flow: flow, card: card} = board_with_flow(:ready)
     start_engine([])

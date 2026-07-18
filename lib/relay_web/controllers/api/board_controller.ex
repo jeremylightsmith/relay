@@ -48,8 +48,11 @@ defmodule RelayWeb.Api.BoardController do
     end
 
     # RLY-134/RLY-136: an executor beat is a superset — it carries `name` + `capacity`,
-    # upserts the durable Executor row, AND advertises free slots into Relay.Runs.Capacity
-    # (the ETS store the scheduler reads). Keyed by the durable Executor row id.
+    # upserts the durable Executor row, AND advertises capacity into Relay.Runs.Capacity
+    # (the ETS store the scheduler reads). Keyed by the durable Executor row id. The
+    # `capacity` carried here is the executor's *configured* per-class slot count, not a
+    # live free count — Relay.Runs.Scheduler.Server debits in-flight :running runs from
+    # it server-side before planning (see Relay.Runs.Capacity's moduledoc).
     :ok = maybe_advertise_executor(board, params)
 
     json(conn, %{stamped: stamped})

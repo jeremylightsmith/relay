@@ -174,7 +174,18 @@ defmodule Relay.Runs.Scheduler do
 
   # --- capacity consumption ---
 
-  defp take_slot(capacity, class, :any) do
+  @doc """
+  Greedy slot placement: finds an executor with a free slot of `class` (the
+  lowest-id executor first for `:any`; the affine executor only for
+  `{:pinned, executor_id}`) and decrements it. Returns `{executor_id, updated_capacity}`
+  or `:none` when nothing is free. Public because `Relay.Runs.Scheduler.Server`
+  reuses this exact arithmetic to debit capacity for in-flight `:running` runs
+  (the B3 accounting fix) — the two calculations must never diverge, since the
+  server's subtraction is a re-derivation of a placement this function made on
+  an earlier beat.
+  """
+  @spec take_slot(map(), atom(), :any | {:pinned, term()}) :: {term(), map()} | :none
+  def take_slot(capacity, class, :any) do
     capacity
     |> Map.keys()
     |> Enum.sort()
@@ -182,7 +193,7 @@ defmodule Relay.Runs.Scheduler do
     |> consume(capacity, class)
   end
 
-  defp take_slot(capacity, class, {:pinned, executor_id}) do
+  def take_slot(capacity, class, {:pinned, executor_id}) do
     if free?(capacity, executor_id, class),
       do: consume(executor_id, capacity, class),
       else: :none

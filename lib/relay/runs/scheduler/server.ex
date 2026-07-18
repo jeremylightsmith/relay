@@ -119,29 +119,38 @@ defmodule Relay.Runs.Scheduler.Server do
   # next heartbeat hasn't yet reflected it. Subtract those held slots from the
   # advertised capacity before planning (parked runs hold no slot; the pure
   # planner's resume_runs consumes a slot only when it actually resumes one).
+  #
+  # NOTE (board-scoped vs. global): `runs` here is this board's active runs only
+  # (`state.engine.active_runs(state.board_id)`), but `Capacity.snapshot/0` is
+  # global — an executor shared across boards has its capacity debited only by
+  # the runs each board's own scheduler knows about. Two boards dispatching to
+  # the same executor at once can each believe a slot is free. Tracked as a
+  # follow-up; not a regression introduced here (there was no accounting at all
+  # before this change).
   defp reserve_active_runs(capacity, runs) do
     runs
     |> Enum.filter(&(&1.status == :running))
-    |> Enum.reduce(capacity, fn run, cap -> reserve_slot(cap, run.isolation, run.pinned_executor_id) end)
+    |> Enum.reduce(capacity, fn run, cap -> reserve_slot(cap, run) end)
   end
 
-  defp reserve_slot(cap, nil, _pinned), do: cap
+  # Reuses Relay.Runs.Scheduler.take_slot/3 — the pure planner's own greedy
+  # placement arithmetic — instead of a second copy, so this subtraction can
+  # never drift out of sync with how the planner actually placed the run.
+  # `:none` (nothing to take, e.g. capacity already fully spent) leaves the
+  # snapshot unchanged rather than raising.
+  defp reserve_slot(cap, %{isolation: nil}), do: cap
 
-  defp reserve_slot(cap, class, pinned) do
-    target =
-      if is_map_key(cap, pinned) do
-        pinned
-      else
-        cap |> Map.keys() |> Enum.sort() |> Enum.find(&free?(cap, &1, class))
-      end
-
-    case target do
-      nil -> cap
-      executor_id -> Map.update!(cap, executor_id, &Map.update(&1, class, 0, fn n -> max(n - 1, 0) end))
+  defp reserve_slot(cap, run) do
+    case Scheduler.take_slot(cap, run.isolation, executor_target(run)) do
+      :none -> cap
+      {_executor_id, updated} -> updated
     end
   end
 
-  defp free?(cap, executor_id, class), do: Map.get(Map.get(cap, executor_id, %{}), class, 0) > 0
+  # Mirrors Relay.Runs.Scheduler's own target selection: exclusive runs are
+  # pinned to their affine executor, everything else is greedy (`:any`).
+  defp executor_target(%{isolation: :exclusive, pinned_executor_id: eid}), do: {:pinned, eid}
+  defp executor_target(_run), do: :any
 
   defp stage_snap(stage) do
     %{id: stage.id, position: stage.position, parent_id: stage.parent_id, wip_limit: stage.wip_limit}
