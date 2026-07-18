@@ -38,6 +38,12 @@ def capture(fn, *args, **kwargs):
     return out.getvalue()
 
 
+def capture_ret(fn, *args, **kwargs):
+    """Like capture(), but discards stdout and returns the function's return value."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        return fn(*args, **kwargs)
+
+
 class _FakeResp:
     """Minimal stand-in for a urlopen() result: a context manager with .read()."""
 
@@ -1123,6 +1129,261 @@ class ExecutorConfigCommittedFileTest(unittest.TestCase):
         with open(path) as f:
             cfg = json.load(f)
         self.assertNotIn("name", cfg)
+
+
+class _FakePopen:
+    """Minimal Popen stand-in: yields the given stdout lines, then exits with `code`."""
+
+    def __init__(self, lines, code=0):
+        self.stdout = iter(lines)
+        self._code = code
+        self.terminated = False
+
+    def wait(self):
+        return self._code
+
+    def poll(self):
+        return self._code if self.terminated else None
+
+    def terminate(self):
+        self.terminated = True
+
+
+class NodeJobLogAttributionTest(unittest.TestCase):
+    def setUp(self):
+        self._fw, self._nj, self._ru = relay.FORWARDER, dict(relay.NODE_JOB_IDS), dict(relay.RUN_IDS)
+        self.addCleanup(setattr, relay, "FORWARDER", self._fw)
+        self.addCleanup(lambda: (relay.NODE_JOB_IDS.clear(), relay.NODE_JOB_IDS.update(self._nj)))
+        self.addCleanup(lambda: (relay.RUN_IDS.clear(), relay.RUN_IDS.update(self._ru)))
+
+    def test_watch_payload_shape_is_unchanged_without_a_node_job_id(self):
+        fw = relay.LogForwarder()
+        fw.enqueue("claude", "hello", "RLY-1", "run-9")
+        self.assertEqual(fw.q.get_nowait(),
+                         {"kind": "claude", "ref": "RLY-1", "text": "hello", "run_id": "run-9"})
+
+    def test_node_job_id_is_added_only_when_present(self):
+        fw = relay.LogForwarder()
+        fw.enqueue("claude", "hi", "RLY-1", "run-9", "nj-3")
+        self.assertEqual(fw.q.get_nowait(),
+                         {"kind": "claude", "ref": "RLY-1", "text": "hi",
+                          "run_id": "run-9", "node_job_id": "nj-3"})
+
+    def test_forward_attaches_the_current_node_job_id_for_the_ref(self):
+        seen = []
+        relay.FORWARDER = type("F", (), {"enqueue": lambda self, *a: seen.append(a)})()
+        relay.RUN_IDS["RLY-1"] = "run-9"
+        relay.NODE_JOB_IDS["RLY-1"] = "nj-3"
+        relay.forward("claude", "x", "RLY-1")
+        self.assertEqual(seen, [("claude", "x", "RLY-1", "run-9", "nj-3")])
+
+
+class ClaimAndReportTest(unittest.TestCase):
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+
+    def test_claim_posts_executor_and_capacity_and_returns_the_job(self):
+        sent = []
+        job = {"id": "nj-1", "run_id": "r1", "node_type": "shell",
+               "run": "true", "isolation": "shared_clean", "vars": {"ref": "RLY-1"}}
+        relay.api = lambda m, p, b=None, **k: (sent.append((m, p, b, k)) or job)
+        got = relay.claim_node_job({"name": "box", "host": "h"},
+                                   {"shared_clean": 2, "exclusive": 1}, 25)
+        self.assertEqual(got, job)
+        m, p, b, k = sent[0]
+        self.assertEqual((m, p), ("POST", "/api/node-jobs/claim"))
+        self.assertEqual(b, {"executor": {"name": "box", "host": "h"},
+                             "capacity": {"shared_clean": 2, "exclusive": 1}})
+        self.assertEqual(k.get("timeout"), 25)
+
+    def test_claim_empty_body_is_no_work(self):
+        relay.api = lambda *a, **k: {}       # 204/empty long-poll timeout
+        self.assertIsNone(relay.claim_node_job({"name": "b", "host": "h"}, {}, 25))
+
+    def test_claim_tolerates_a_read_timeout_as_no_work(self):
+        def boom(*a, **k):
+            raise relay.socket.timeout("timed out")
+        relay.api = boom
+        self.assertIsNone(relay.claim_node_job({"name": "b", "host": "h"}, {}, 25))
+
+    def test_report_outcome_posts_full_body_and_returns_run_state(self):
+        sent = []
+        relay.api = lambda m, p, b=None, **k: (sent.append((m, p, b)) or {"run_state": "parked"})
+        rs = relay.report_outcome("nj-1", "needs_input", "asked", "abc123", "sess-9")
+        self.assertEqual(rs, "parked")
+        m, p, b = sent[0]
+        self.assertEqual((m, p), ("POST", "/api/node-jobs/nj-1/outcome"))
+        self.assertEqual(b, {"outcome": "needs_input", "detail": "asked",
+                             "git_sha": "abc123", "session_id": "sess-9"})
+
+
+class ApiTimeoutPassthroughTest(unittest.TestCase):
+    """api(timeout=…) passes the read timeout to urlopen and re-raises socket.timeout so the
+    long-poll claim can treat it as 'no work', while leaving default (timeout-less) calls byte
+    identical to before."""
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in ("env", "_api_backoff", "log")}
+        relay.env = lambda name: "http://example.test"
+        relay._api_backoff = lambda attempt: None
+        relay.log = lambda *a, **k: None
+        self._urlopen = relay.urllib.request.urlopen
+        self.addCleanup(setattr, relay.urllib.request, "urlopen", self._urlopen)
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            setattr(relay, k, v)
+
+    def test_timeout_is_forwarded_to_urlopen(self):
+        seen = {}
+        relay.urllib.request.urlopen = lambda req, *a, **k: (
+            seen.update(k) or _FakeResp(b"{}"))
+        relay.api("POST", "/api/node-jobs/claim", {"x": 1}, timeout=25)
+        self.assertEqual(seen.get("timeout"), 25)
+
+    def test_default_call_passes_no_timeout_kwarg(self):
+        seen = {}
+        relay.urllib.request.urlopen = lambda req, *a, **k: (
+            seen.update(kwargs=dict(k)) or _FakeResp(b"{}"))
+        relay.api("GET", "/api/board")
+        self.assertEqual(seen["kwargs"], {})   # unchanged: no timeout kwarg
+
+    def test_socket_timeout_is_reraised_not_died(self):
+        def boom(req, *a, **k):
+            raise relay.socket.timeout("timed out")
+        relay.urllib.request.urlopen = boom
+        with self.assertRaises(relay.socket.timeout):
+            relay.api("POST", "/api/node-jobs/claim", {"x": 1}, timeout=25)
+
+
+class StreamClaudeJobTest(unittest.TestCase):
+    def setUp(self):
+        self._popen = relay.subprocess.Popen
+        self.addCleanup(setattr, relay.subprocess, "Popen", self._popen)
+
+    def test_captures_session_id_and_reports_success(self):
+        lines = [
+            json.dumps({"type": "system", "subtype": "init", "session_id": "sess-77"}),
+            json.dumps({"type": "assistant",
+                        "message": {"content": [{"type": "text", "text": "working"}]}}),
+            json.dumps({"type": "result", "session_id": "sess-77", "num_turns": 2}),
+        ]
+        relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=0)
+        ok, session = capture_ret(relay._stream_claude_job, "do it", cwd="/tmp/wt")
+        self.assertTrue(ok)
+        self.assertEqual(session, "sess-77")
+
+    def test_resume_inserts_the_prior_session_into_argv(self):
+        seen = {}
+
+        def fake_popen(cmd, *a, **k):
+            seen["cmd"] = cmd
+            seen["env"] = k.get("env", {})
+            return _FakePopen([], code=0)
+
+        relay.subprocess.Popen = fake_popen
+        capture_ret(relay._stream_claude_job, "resume prompt", cwd="/tmp/wt",
+                    session_id="sess-5", outcome_path="/tmp/wt/out.json")
+        self.assertIn("--resume", seen["cmd"])
+        self.assertEqual(seen["cmd"][seen["cmd"].index("--resume") + 1], "sess-5")
+        self.assertEqual(seen["env"].get("RELAY_NODE_OUTCOME"), "/tmp/wt/out.json")
+
+    def test_registers_the_live_subprocess_for_cancellation(self):
+        proc = _FakePopen([], code=0)
+        relay.subprocess.Popen = lambda *a, **k: proc
+        registered = []
+        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt",
+                    on_proc=registered.append)
+        self.assertEqual(registered, [proc])
+
+
+class AgentOutcomeContractTest(unittest.TestCase):
+    def setUp(self):
+        self._get = relay.get_card
+        self.addCleanup(setattr, relay, "get_card", self._get)
+
+    def test_card_needs_input_wins_first(self):
+        relay.get_card = lambda ref: {"status": "needs_input"}
+        job = {"vars": {"ref": "RLY-1"}}
+        self.assertEqual(relay.determine_agent_outcome(job, True, None),
+                         ("needs_input", "agent asked the human"))
+
+    def test_outcome_file_supplies_partial(self):
+        import tempfile
+        relay.get_card = lambda ref: {"status": "working"}
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            json.dump({"outcome": "partial", "detail": "half done"}, f)
+        self.addCleanup(os.remove, path)
+        job = {"vars": {"ref": "RLY-1"}}
+        self.assertEqual(relay.determine_agent_outcome(job, True, path),
+                         ("partial", "half done"))
+
+    def test_exit_code_fallback(self):
+        relay.get_card = lambda ref: {"status": "working"}
+        job = {"vars": {"ref": "RLY-1"}}
+        self.assertEqual(relay.determine_agent_outcome(job, True, "/nope.json")[0], "succeeded")
+        self.assertEqual(relay.determine_agent_outcome(job, False, "/nope.json")[0], "failed")
+
+
+class RunNodeJobTest(unittest.TestCase):
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in
+                       ("_stream_shell", "_stream_claude_job", "determine_agent_outcome",
+                        "get_card")}
+        self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+        self._run = relay.subprocess.run                      # restore the attr, not the module
+        self.addCleanup(setattr, relay.subprocess, "run", self._run)
+        relay.subprocess.run = lambda *a, **k: type(
+            "R", (), {"stdout": "deadbeef\n"})()
+        self.control = relay.JobControl()
+
+    def test_shell_job_reports_succeeded_with_git_sha(self):
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None: True
+        job = {"id": "nj-1", "run_id": "r1", "node_type": "shell", "run": "true",
+               "isolation": "shared_clean", "vars": {"ref": "RLY-1"}}
+        outcome, detail, sha, session = relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertEqual((outcome, sha, session), ("succeeded", "deadbeef", None))
+
+    def test_shell_job_failure_carries_the_output_tail(self):
+        def fail(cmd, cwd, tag="", sink=None, on_proc=None):
+            if sink is not None:
+                sink.extend(["boom line"])
+            return False
+        relay._stream_shell = fail
+        job = {"id": "nj-1", "run_id": "r1", "node_type": "gate", "run": "false",
+               "isolation": "shared_clean", "vars": {"ref": "RLY-1"}}
+        outcome, detail, _, _ = relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertEqual(outcome, "failed")
+        self.assertIn("boom line", detail)
+
+    def test_agent_job_captures_session_and_uses_the_contract(self):
+        relay._stream_claude_job = lambda prompt, cwd, tag="", session_id=None, \
+            outcome_path=None, on_proc=None: (True, "sess-9")
+        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        job = {"id": "nj-2", "run_id": "r1", "node_type": "agent", "run": "Implement…",
+               "isolation": "exclusive", "vars": {"ref": "RLY-2"}}
+        outcome, detail, sha, session = relay.run_node_job(job, "/tmp/wt", self.control)
+        self.assertEqual((outcome, sha, session), ("succeeded", "deadbeef", "sess-9"))
+
+
+class JobControlTest(unittest.TestCase):
+    def test_cancel_terminates_a_registered_running_proc(self):
+        c = relay.JobControl()
+        proc = _FakePopen([], code=0)
+        c.register(proc)
+        self.assertFalse(c.cancelled())
+        c.cancel()
+        self.assertTrue(c.cancelled())
+        self.assertTrue(proc.terminated)
+
+    def test_a_revoke_before_the_proc_starts_still_terminates_it(self):
+        c = relay.JobControl()
+        c.cancel()                # revoke landed first
+        proc = _FakePopen([], code=0)
+        c.register(proc)          # proc registers after → terminate immediately
+        self.assertTrue(proc.terminated)
 
 
 if __name__ == "__main__":
