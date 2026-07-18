@@ -940,5 +940,113 @@ class HeartbeatBeatTest(unittest.TestCase):
         hb._beat()  # must swallow, exactly like an api() failure
 
 
+class ExecutorConfigTest(unittest.TestCase):
+    def setUp(self):
+        self._path = relay.EXECUTOR_CONFIG_PATH
+        self.addCleanup(setattr, relay, "EXECUTOR_CONFIG_PATH", self._path)
+
+    def _write(self, obj):
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            json.dump(obj, f)
+        self.addCleanup(os.remove, path)
+        relay.EXECUTOR_CONFIG_PATH = path
+
+    def test_missing_file_yields_defaults(self):
+        relay.EXECUTOR_CONFIG_PATH = "/nope/does/not/exist.json"
+        cfg = relay.load_executor_config()
+        self.assertEqual(cfg["namespace"], "exec")
+        self.assertEqual(cfg["capacity"], {"shared_clean": 1, "exclusive": 1})
+        self.assertEqual(cfg["poll_timeout"], 25)
+        self.assertEqual(cfg["heartbeat_interval"], 15)
+        self.assertTrue(cfg["name"])  # defaults to hostname
+
+    def test_partial_capacity_merges_over_defaults(self):
+        self._write({"capacity": {"shared_clean": 3}})
+        cfg = relay.load_executor_config()
+        self.assertEqual(cfg["capacity"], {"shared_clean": 3, "exclusive": 1})
+
+    def test_explicit_fields_win(self):
+        self._write({"name": "box", "namespace": "ex2", "poll_timeout": 5})
+        cfg = relay.load_executor_config()
+        self.assertEqual((cfg["name"], cfg["namespace"], cfg["poll_timeout"]), ("box", "ex2", 5))
+
+
+class ExecutorPoolTest(unittest.TestCase):
+    CFG = {"namespace": "exec", "capacity": {"shared_clean": 2, "exclusive": 2}}
+
+    def pool(self):
+        return relay.ExecutorPool(self.CFG)
+
+    def test_namespace_is_disjoint_from_the_watcher_pools(self):
+        p = self.pool()
+        names = [p.shared_name] + list(p.excl)
+        self.assertEqual(p.shared_name, "exec-clean")
+        self.assertEqual(sorted(p.excl), ["exec-work-1", "exec-work-2"])
+        self.assertTrue(all(n.startswith("exec-") for n in names))
+        self.assertNotIn("clean", names)  # the watcher's shared worktree name
+        self.assertNotIn("work-1", names)
+
+    def test_shared_clean_reuses_one_worktree_without_reset(self):
+        p = self.pool()
+        a = p.assign({"isolation": "shared_clean", "run_id": "r1"})
+        b = p.assign({"isolation": "shared_clean", "run_id": "r2"})
+        self.assertEqual(a, ("exec-clean", False))
+        self.assertEqual(b, ("exec-clean", False))
+        self.assertIsNone(p.assign({"isolation": "shared_clean", "run_id": "r3"}))  # cap 2
+
+    def test_shared_capacity_reflects_free_slots(self):
+        p = self.pool()
+        self.assertEqual(p.capacity()["shared_clean"], 2)
+        p.assign({"isolation": "shared_clean", "run_id": "r1"})
+        self.assertEqual(p.capacity()["shared_clean"], 1)
+        p.release({"isolation": "shared_clean", "run_id": "r1"}, "exec-clean", "done")
+        self.assertEqual(p.capacity()["shared_clean"], 2)
+
+    def test_first_exclusive_job_of_a_run_resets_its_slot(self):
+        p = self.pool()
+        slot, reset = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        self.assertEqual(slot, "exec-work-1")
+        self.assertTrue(reset)  # first job of the run → reset before use
+
+    def test_subsequent_job_of_same_run_reuses_slot_without_reset(self):
+        p = self.pool()
+        slot1, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot1, "running")
+        slot2, reset2 = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        self.assertEqual(slot2, slot1)
+        self.assertFalse(reset2)  # same run reuses the worktree as-is
+
+    def test_running_and_parked_keep_the_slot_bound(self):
+        p = self.pool()
+        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "parked")
+        # parked run keeps its slot: capacity shows it as NOT free, and a different run
+        # cannot take it (only the other free slot).
+        self.assertEqual(p.capacity()["exclusive"], 1)
+        other, _ = p.assign({"isolation": "exclusive", "run_id": "r2"})
+        self.assertEqual(other, "exec-work-2")
+
+    def test_terminal_run_state_frees_the_slot(self):
+        p = self.pool()
+        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "done")
+        self.assertEqual(p.capacity()["exclusive"], 2)
+
+    def test_revoke_run_state_none_frees_the_slot(self):
+        p = self.pool()
+        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, None)  # revoke
+        self.assertEqual(p.capacity()["exclusive"], 2)
+
+    def test_exclusive_capacity_exhausts_then_returns_none(self):
+        p = self.pool()
+        p.assign({"isolation": "exclusive", "run_id": "r1"})
+        p.assign({"isolation": "exclusive", "run_id": "r2"})
+        self.assertEqual(p.capacity()["exclusive"], 0)
+        self.assertIsNone(p.assign({"isolation": "exclusive", "run_id": "r3"}))
+
+
 if __name__ == "__main__":
     unittest.main()

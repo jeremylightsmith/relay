@@ -45,6 +45,7 @@ import uuid
 HERE = os.path.abspath(__file__)
 ROOT = os.path.dirname(os.path.dirname(HERE))
 CONFIG_PATH = os.path.join(ROOT, "relay_config.json")
+EXECUTOR_CONFIG_PATH = os.path.join(ROOT, ".relay", "executor.json")
 DRY = False
 FORWARDER = None
 HEARTBEAT = None
@@ -515,6 +516,28 @@ def load_config():
     return json.load(open(CONFIG_PATH))
 
 
+def load_executor_config():
+    """Executor-local config from .relay/executor.json — separate from relay_config.json,
+    which `relay watch` keeps reading through the migration, so the two runner generations
+    never contend over one file. Missing file → sensible defaults; capacity is the only field
+    a developer routinely edits (ADR 0006, table 1)."""
+    defaults = {
+        "name": socket.gethostname(),
+        "namespace": "exec",
+        "capacity": {"shared_clean": 1, "exclusive": 1},
+        "poll_timeout": 25,
+        "heartbeat_interval": 15,
+    }
+    try:
+        with open(EXECUTOR_CONFIG_PATH) as f:
+            cfg = json.load(f)
+    except FileNotFoundError:
+        return defaults
+    merged = {**defaults, **cfg}
+    merged["capacity"] = {**defaults["capacity"], **(cfg.get("capacity") or {})}
+    return merged
+
+
 WORKTREES_DIR = os.path.join(ROOT, ".claude", "worktrees")
 
 
@@ -585,6 +608,82 @@ def refresh_worktree(name, base):
         return
     subprocess.run(["git", "fetch", "origin", "--prune"], cwd=ROOT, check=False)
     reset_worktree(path, base)
+
+
+class ExecutorPool:
+    """Executor-local worktree mapping (never sent to the server). Namespace-disjoint from the
+    watcher's clean/work pools so both runners run at once.
+
+      shared_clean -> one shared worktree `<ns>-clean`, up to `capacity.shared_clean` concurrent
+                      jobs, REUSED (never reset per-job); fast-forwarded to base only when every
+                      shared slot is idle (the watcher's scan() discipline).
+      exclusive    -> a fixed pool `<ns>-work-1..N`; a slot is BOUND to a run from its first job
+                      until the run reaches a terminal run_state, and reset only on that first job
+                      (a run's nodes share one worktree — the branch diff is the reviewers' bus).
+    """
+
+    def __init__(self, cfg, base="origin/main"):
+        self.ns = cfg.get("namespace", "exec")
+        self.base = base
+        self.cap_shared = cfg["capacity"]["shared_clean"]
+        self.cap_excl = cfg["capacity"]["exclusive"]
+        self.shared_name = f"{self.ns}-clean"
+        self.shared_used = 0
+        # exclusive slot name -> run_id it is bound to (None = free)
+        self.excl = {f"{self.ns}-work-{i}": None for i in range(1, self.cap_excl + 1)}
+        self.lock = threading.Lock()
+
+    def capacity(self):
+        """Currently-free capacity per class, for advertising on a claim. A slot bound to a
+        parked run counts as NOT free (exclusive affinity is absolute — ADR 0006 §5)."""
+        with self.lock:
+            return {
+                "shared_clean": max(0, self.cap_shared - self.shared_used),
+                "exclusive": sum(1 for bound in self.excl.values() if bound is None),
+            }
+
+    def ensure(self):
+        ensure_worktree(self.shared_name, self.base)
+        for name in self.excl:
+            ensure_worktree(name, self.base)
+
+    def refresh_idle_shared(self):
+        with self.lock:
+            idle = self.shared_used == 0
+        if idle:
+            refresh_worktree(self.shared_name, self.base)
+
+    def assign(self, job):
+        """Reserve a slot for `job`; return (slot_name, reset?) or None when no slot is free.
+        reset? is True only for the first job of an exclusive run."""
+        iso = job["isolation"]
+        run_id = job["run_id"]
+        with self.lock:
+            if iso == "shared_clean":
+                if self.shared_used >= self.cap_shared:
+                    return None
+                self.shared_used += 1
+                return self.shared_name, False
+            for name, bound in self.excl.items():          # reuse the run's own slot
+                if bound == run_id:
+                    return name, False
+            for name, bound in self.excl.items():          # else take a free slot
+                if bound is None:
+                    self.excl[name] = run_id
+                    return name, True
+            return None
+
+    def release(self, job, slot, run_state):
+        """Free/keep the slot per the outcome's run_state. shared_clean always frees; an
+        exclusive slot stays bound while running/parked and unbinds on a terminal state
+        (done/failed/cancelled) or a revoke (run_state=None)."""
+        with self.lock:
+            if job["isolation"] == "shared_clean":
+                self.shared_used = max(0, self.shared_used - 1)
+                return
+            if run_state in ("running", "parked"):
+                return
+            self.excl[slot] = None
 
 
 def blocked(card):
