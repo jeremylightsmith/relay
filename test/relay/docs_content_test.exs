@@ -38,4 +38,18 @@ defmodule Relay.DocsContentTest do
     assert html =~ "RELAY_API_KEY"
     assert html =~ "Authorization: Bearer"
   end
+
+  test "the agent-integration and CLI pages describe the current runner, not the retired one" do
+    # RLY-139: `relay watch` / `relay_config.json` / `relay pull` / `relay layout` are
+    # deleted — the live public docs must not send an operator after them.
+    agent_integration = read("agent-integration.md")
+    cli = read("cli.md")
+
+    assert agent_integration =~ "bin/relay execute"
+    refute agent_integration =~ "relay watch"
+    refute agent_integration =~ "relay_config.json"
+
+    refute cli =~ "bin/relay pull"
+    refute cli =~ "bin/relay layout"
+  end
 end

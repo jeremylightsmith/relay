@@ -149,11 +149,13 @@ defmodule RelayWeb.BoardRunnersLiveTest do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
 
     assert has_element?(view, "#runners-empty", "No runners connected")
-    assert has_element?(view, "#runner-start-command", "bin/relay watch")
+    assert has_element?(view, "#runner-start-command", "bin/relay execute")
     assert has_element?(view, "#copy-start-command")
     assert has_element?(view, "#runners-empty", "Waiting for a heartbeat…")
     # deliberate deviation from the artboard: the real command, not npx relay-runner
     refute render(view) =~ "npx relay-runner"
+    # RLY-139: the legacy watcher this empty state used to point at is deleted
+    refute render(view) =~ "bin/relay watch"
   end
 
   test "board settings gains an ENGINE rail group linking to runners", %{conn: conn, board: board} do

@@ -771,13 +771,14 @@ defmodule Relay.Cards do
   @doc """
   Minimal Retry for a dead agent (RLY-148, decision 2): appends a "retry requested"
   `:action` entry (history never cleared — the newest entry is no longer a `:failure`,
-  so `health/1` leaves `:stopped`), ensures the card's status is `:working` so the
-  `relay watch` poller re-picks it on its next poll, and broadcasts
-  `{:card_log_appended, card_id, [entry]}` exactly like the runner's own appends so
-  every open board's strip updates in place. Deliberately **no eager dispatch** — no
-  new machinery; the poller is the re-dispatcher. Attributed to `actor`
-  (`:agent | {:user, user_id}`, defaults to `:agent`). Returns `{:ok, card}` with
-  owners preloaded or `{:error, changeset}`.
+  so `health/1` leaves `:stopped`), ensures the card's status is `:working` (clearing
+  `:needs_input` so `Relay.Runs.Scheduler` no longer skips it) so it is re-dispatched
+  on the scheduler's next reconcile (event-driven, ~60s tick as backstop — RLY-139),
+  and broadcasts `{:card_log_appended, card_id, [entry]}` exactly like the runner's
+  own appends so every open board's strip updates in place. Deliberately **no eager
+  dispatch** — no new machinery; the scheduler is the re-dispatcher. Attributed to
+  `actor` (`:agent | {:user, user_id}`, defaults to `:agent`). Returns `{:ok, card}`
+  with owners preloaded or `{:error, changeset}`.
   """
   def retry(%Card{} = card, actor \\ :agent) do
     # ensure_working/2 first so the "retry requested" entry lands with a strictly
