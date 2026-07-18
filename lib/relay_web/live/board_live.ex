@@ -234,6 +234,7 @@ defmodule RelayWeb.BoardLive do
                   revealed={if(stage.id == @terminal_stage_id, do: @done_revealed)}
                   questions={@needs_input_questions}
                   health={@health_by_card}
+                  runs={@face_runs}
                   cards={Map.fetch!(@streams, stream_name(stage.id))}
                   composing={@composing_stage_id == stage.id}
                   compose_form={@compose_form}
@@ -467,6 +468,8 @@ defmodule RelayWeb.BoardLive do
     end
 
     cards = Cards.list_cards(board)
+    flows = Flows.list_flows(board)
+    run_summaries = Runs.run_summaries_for_board(board)
     cards_by_stage = Enum.group_by(cards, & &1.stage_id)
 
     socket =
@@ -495,8 +498,9 @@ defmodule RelayWeb.BoardLive do
       |> assign(:members, Members.list_members(board))
       |> assign(:reassign_open, false)
       |> assign(:body_loading?, false)
-      |> assign(:flows, Flows.list_flows(board))
-      |> assign(:run_summaries, Runs.run_summaries_for_board(board))
+      |> assign(:flows, flows)
+      |> assign(:run_summaries, run_summaries)
+      |> assign(:face_runs, face_runs(cards, flows, run_summaries))
       |> stream_configure(:conversation, dom_id: &conversation_dom_id/1)
       |> stream_configure(:activity, dom_id: &activity_dom_id/1)
 
@@ -1268,6 +1272,7 @@ defmodule RelayWeb.BoardLive do
        |> upsert_card_stream(card, cards_by_stage)
        |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, cards_by_stage))
        |> assign_archived_count()
+       |> refresh_face_runs(cards_by_stage)
        |> maybe_refresh_drawer(card)}
     else
       # The card sits in a stage this socket hasn't loaded yet (e.g. a
@@ -1278,7 +1283,13 @@ defmodule RelayWeb.BoardLive do
 
   def handle_info({:card_moved, %Card{} = moved, from_stage_id}, socket) do
     if find_stage_by_id(socket, moved.stage_id) do
-      {:noreply, socket |> refresh_card_health(moved.id) |> apply_move(from_stage_id, moved)}
+      cards_by_stage = socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
+
+      {:noreply,
+       socket
+       |> refresh_card_health(moved.id)
+       |> apply_move(from_stage_id, moved)
+       |> refresh_face_runs(cards_by_stage)}
     else
       {:noreply, reload_board(socket)}
     end
@@ -1312,8 +1323,32 @@ defmodule RelayWeb.BoardLive do
   # RLY-137 — coarse run-progress signal: refetch rather than patch state from the
   # payload. Refreshes every card face's summary, and — when the changed run belongs
   # to the open drawer's card — that card's own run timeline.
+  #
+  # The changed card's row lives inside a `phx-update="stream"` container, which only
+  # re-renders on stream_insert/stream_delete — an unrelated assign like :face_runs
+  # changing does NOT repaint it (AGENTS.md streams rule). So beyond rebuilding
+  # :face_runs (read by every future stream render), the changed card is explicitly
+  # re-streamed to pick up its new face now.
   def handle_info({:run_changed, card_id}, socket) do
-    socket = assign(socket, :run_summaries, Runs.run_summaries_for_board(socket.assigns.board))
+    cards_by_stage = socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
+
+    socket =
+      socket
+      |> assign(:run_summaries, Runs.run_summaries_for_board(socket.assigns.board))
+      |> refresh_face_runs(cards_by_stage)
+
+    socket =
+      case Cards.get_card(socket.assigns.board, card_id) do
+        %Card{} = card ->
+          if is_nil(card.archived_at) and find_stage_by_id(socket, card.stage_id) do
+            stream_insert(socket, stream_name(card.stage_id), card)
+          else
+            socket
+          end
+
+        nil ->
+          socket
+      end
 
     socket =
       case socket.assigns.selected_card do
@@ -1434,6 +1469,22 @@ defmodule RelayWeb.BoardLive do
 
   defp health_state(health_by_card, card_id) do
     health_by_card |> Map.get(card_id, %{}) |> Map.get(:state, :none)
+  end
+
+  # RLY-137 — the board-face run affordance per card, rebuilt from a fresh card list
+  # whenever one is on hand (mount, card_upserted, card_moved, reload_board) rather
+  # than patched incrementally like health: face_summary/4 is cheap (pure map lookups
+  # over already-loaded :flows / :run_summaries) and a card's stage/status/owner can
+  # all move its face at once (e.g. into the queued or review states).
+  defp face_runs(cards, flows, summaries) do
+    Map.new(cards, fn card ->
+      {card.id, Runs.face_summary(card, Cards.active_owner_type(card), flows, summaries)}
+    end)
+  end
+
+  defp refresh_face_runs(socket, cards_by_stage) do
+    cards = cards_by_stage |> Map.values() |> List.flatten()
+    assign(socket, :face_runs, face_runs(cards, socket.assigns.flows, socket.assigns.run_summaries))
   end
 
   # A new newest entry arrived ({:card_log_appended, …}): store it, recompute,
@@ -2026,6 +2077,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
       |> assign_board_derivations(board)
       |> assign_archived_count()
+      |> refresh_face_runs(cards_by_stage)
 
     board.stages
     |> Enum.reduce(socket, fn stage, acc ->

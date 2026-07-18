@@ -823,16 +823,19 @@ defmodule RelayWeb.RunComponents do
       <.face_queued :if={@state == :queued} flow={run_summary(@run)} />
       <.face_done :if={@state == :done} summary={run_summary(@run)} />
       <.face_cancelled :if={@state == :cancelled} summary={run_summary(@run)} />
+      <.face_review :if={@state == :review} summary={run_summary(@run)} />
     </div>
     """
   end
 
+  def face_state({:review, _summary}), do: :review
   def face_state({:queued, _flow}), do: :queued
   def face_state({:run, %{status: :done}}), do: :done
   def face_state({:run, %{status: status}}), do: status
 
   defp run_summary({:run, summary}), do: summary
   defp run_summary({:queued, flow}), do: flow
+  defp run_summary({:review, summary}), do: summary
 
   attr :summary, :map, required: true
 
@@ -971,6 +974,28 @@ defmodule RelayWeb.RunComponents do
           stopped at {@summary.current_node} · resumable
         </div>
       </div>
+    </div>
+    """
+  end
+
+  # RLY-137 Task 4: a :done run on an :in_review card — the run landed the card in the
+  # review lane and it's now human territory (docs/designs/Relay Board Run Affordances.dc.html
+  # panel D). board_card/1 computes the {:review, summary} shape; the face tuple alone
+  # can't tell (it doesn't know the card's current status).
+  attr :summary, :map, required: true
+
+  defp face_review(assigns) do
+    ~H"""
+    <div
+      class="run-face-badge run-face-review"
+      style="display:flex;align-items:center;gap:6px;background:oklch(0.97 0.02 250);border:1px solid oklch(0.89 0.04 250);border-radius:6px;padding:6px 8px;"
+    >
+      <span style="width:15px;height:15px;border-radius:50%;background:oklch(0.60 0.14 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex:0 0 auto;">
+        ✓
+      </span>
+      <span style="font-size:10.5px;font-weight:600;letter-spacing:0.03em;color:oklch(0.44 0.13 250);font-family:var(--font-mono);">
+        READY FOR YOUR REVIEW
+      </span>
     </div>
     """
   end

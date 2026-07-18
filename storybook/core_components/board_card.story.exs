@@ -126,6 +126,99 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
           log_at: DateTime.add(DateTime.utc_now(), -2 * 60, :second),
           owners: [%{actor_type: :agent}]
         }
+      },
+      %Variation{
+        id: :run_running,
+        attributes: %{
+          id: "story-card-run-running",
+          ref: "RLY-13",
+          title: "CSV export of the board",
+          status: :working,
+          active_owner: :ai,
+          owners: [%{actor_type: :agent}],
+          run:
+            {:run,
+             %{
+               status: :running,
+               node_index: 2,
+               node_count: 4,
+               current_node: "implement",
+               flow_key: "code",
+               flow_version: 3,
+               attempts: 2
+             }}
+        }
+      },
+      %Variation{
+        id: :run_parked,
+        attributes: %{
+          id: "story-card-run-parked",
+          ref: "RLY-14",
+          title: "Pick the target locale list",
+          status: :needs_input,
+          question: "Full text?",
+          active_owner: :ai,
+          owners: [%{actor_type: :agent}],
+          run: {:run, %{status: :parked, current_node: "brainstorm", flow_key: "spec", flow_version: 2, attempts: 1}}
+        }
+      },
+      %Variation{
+        id: :run_failed,
+        attributes: %{
+          id: "story-card-run-failed",
+          ref: "RLY-15",
+          title: "Bulk move cards between stages",
+          status: :working,
+          active_owner: :ai,
+          owners: [%{actor_type: :agent}],
+          run: {:run, %{status: :failed, current_node: "quality_review", flow_key: "code", flow_version: 3, attempts: 3}}
+        }
+      },
+      %Variation{
+        id: :run_queued,
+        attributes: %{
+          id: "story-card-run-queued",
+          ref: "RLY-16",
+          title: "Bulk move cards between stages",
+          status: :ready,
+          run: {:queued, %{key: "code"}}
+        }
+      },
+      %Variation{
+        id: :run_done,
+        attributes: %{
+          id: "story-card-run-done",
+          ref: "RLY-17",
+          title: "Ship the landing page",
+          status: :ready,
+          owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}],
+          run:
+            {:run,
+             %{status: :done, duration_s: 581, cost: Decimal.new("0.38"), flow_key: "code", flow_version: 3, attempts: 4}}
+        }
+      },
+      %Variation{
+        id: :run_cancelled,
+        attributes: %{
+          id: "story-card-run-cancelled",
+          ref: "RLY-18",
+          title: "Generate the API client",
+          status: :working,
+          active_owner: :ai,
+          owners: [%{actor_type: :agent}],
+          run: {:run, %{status: :cancelled, current_node: "implement", flow_key: "code", flow_version: 3, attempts: 1}}
+        }
+      },
+      %Variation{
+        id: :run_review,
+        attributes: %{
+          id: "story-card-run-review",
+          ref: "RLY-19",
+          title: "Card drawer keyboard shortcuts",
+          status: :in_review,
+          owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}],
+          run: {:run, %{status: :done, duration_s: 581, cost: nil, flow_key: "code", flow_version: 3, attempts: 4}}
+        }
       }
     ]
   end

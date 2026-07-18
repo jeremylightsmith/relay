@@ -909,7 +909,21 @@ defmodule RelayWeb.CoreComponents do
     default: nil,
     doc: "the stage's category — cosmetic only (accent is keyed on status, not category)"
 
+  attr :run, :any,
+    default: nil,
+    doc: "{:run, summary} | {:queued, flow} — run affordances replace the legacy strip when set (RLY-137 decision 3)"
+
   def board_card(assigns) do
+    # RLY-137: a :done run on an :in_review card is the review-blue treatment — the face
+    # tuple alone can't tell (it doesn't know the card's status), so the override lives here.
+    run =
+      if match?({:run, %{status: :done}}, assigns.run) and assigns.status == :in_review do
+        {:review, elem(assigns.run, 1)}
+      else
+        assigns.run
+      end
+
+    assigns = assign(assigns, :run, run)
     accent_class = card_accent_class(assigns)
 
     assigns =
@@ -941,15 +955,16 @@ defmodule RelayWeb.CoreComponents do
         {@title}
       </span>
       <span class="card-ref sr-only">{@ref}</span>
+      <RunComponents.run_face :if={@run} run={@run} ref={@ref} />
       <div
-        :if={@status == :working and @progress != nil}
+        :if={@status == :working and @progress != nil and is_nil(@run)}
         style="height:5px;border-radius:3px;background:oklch(0.93 0.02 292);overflow:hidden;"
       >
         <div style={"height:100%;width:#{@progress || 0}%;background:var(--color-secondary);border-radius:3px;"}>
         </div>
       </div>
       <div
-        :if={@health != :none}
+        :if={@health != :none and is_nil(@run)}
         id={"card-#{@ref}-log-strip"}
         class="card-log-strip"
         data-health={@health}
@@ -987,7 +1002,7 @@ defmodule RelayWeb.CoreComponents do
         </button>
       </div>
       <div
-        :if={@status == :needs_input}
+        :if={@status == :needs_input and is_nil(@run)}
         class="card-needs-input"
         style="display:flex;align-items:center;gap:6px;background:oklch(0.97 0.03 75);border:1px solid oklch(0.87 0.07 75);border-radius:6px;padding:6px 8px;"
       >
@@ -998,7 +1013,7 @@ defmodule RelayWeb.CoreComponents do
         </span>
       </div>
       <p
-        :if={@status == :needs_input && @question}
+        :if={@status == :needs_input && @question && is_nil(@run)}
         class="card-question-preview truncate"
         style="font-size:11px;line-height:1.3;color:oklch(0.50 0.04 65);margin:0;"
       >
@@ -1006,7 +1021,7 @@ defmodule RelayWeb.CoreComponents do
       </p>
       <div style="display:flex;align-items:center;gap:7px;">
         <span
-          :if={@status == :working and @health == :none}
+          :if={@status == :working and @health == :none and is_nil(@run)}
           class="card-status"
           data-status={@status}
           style="font-size:11px;font-family:var(--font-mono);color:oklch(0.52 0.10 292);"
@@ -1054,6 +1069,23 @@ defmodule RelayWeb.CoreComponents do
   # RLY-148 (supersedes the 2026-07-16 RLY-112 rejection): a dead agent DOES recolor
   # the card — health :stale/:stopped beats the status accent (artboard §02 card
   # chrome). Every other health state leaves the RLY-48 status accent as-is.
+  #
+  # RLY-137: run affordances take precedence over both health and status (decision
+  # 3 — the run strip replaces the legacy strip entirely), so these clauses match
+  # first, above health.
+  defp card_accent_class(%{run: {:queued, _flow}}), do: "border-l-base-300"
+  defp card_accent_class(%{run: {:review, _summary}}), do: "border-l-primary"
+
+  defp card_accent_class(%{run: {:run, %{status: status}}}) do
+    case status do
+      :running -> "border-l-secondary"
+      :parked -> "border-l-warning"
+      :failed -> "border-l-error"
+      :done -> "border-l-success"
+      :cancelled -> "border-l-base-300"
+    end
+  end
+
   defp card_accent_class(%{health: :stale}), do: "border-l-warning"
   defp card_accent_class(%{health: :stopped}), do: "border-l-error"
   defp card_accent_class(%{status: :needs_input}), do: "border-l-warning"
@@ -1065,6 +1097,14 @@ defmodule RelayWeb.CoreComponents do
   defp card_accent_color("border-l-warning"), do: "var(--color-warning)"
   defp card_accent_color("border-l-secondary"), do: "var(--color-secondary)"
   defp card_accent_color("border-l-base-300"), do: "var(--color-base-300)"
+  defp card_accent_color("border-l-primary"), do: "var(--color-primary)"
+  defp card_accent_color("border-l-success"), do: "var(--color-success)"
+
+  # RLY-137: a live run must not keep the RLY-148 amber/rose health escalation shell —
+  # the run affordance is the source of truth for what's going on, so the shell goes
+  # back to quiet. Leading clause, matched before the health-keyed ones.
+  defp card_shell_style(%{run: run}) when run != nil,
+    do: "border:1px solid var(--color-base-300);box-shadow:0 1px 2px oklch(0.55 0.03 255/0.05);"
 
   # RLY-148: the card shell escalates with health (artboard §02) — amber-tinted
   # border + shadow when stale, rose when stopped, the quiet RLY-48 shell otherwise.
@@ -2958,6 +2998,10 @@ defmodule RelayWeb.CoreComponents do
     default: %{},
     doc: "RLY-112 card_id => %{state:, entry:}, from BoardLive's :health_by_card assign"
 
+  attr :runs, :map,
+    default: %{},
+    doc: "RLY-137 card_id => run face tuple, from BoardLive's :face_runs assign"
+
   def stage_column(assigns) do
     sublanes = Enum.map(assigns.sublanes, &Map.put_new(&1, :collapsed, false))
     total_count = (assigns.count || 0) + Enum.sum(Enum.map(sublanes, & &1.count))
@@ -3188,6 +3232,7 @@ defmodule RelayWeb.CoreComponents do
                       active_owner={Cards.active_owner_type(card)}
                       lane={:main}
                       category={@category}
+                      run={Map.get(@runs, card.id)}
                     />
                   </div>
                   <%!--
@@ -3297,6 +3342,7 @@ defmodule RelayWeb.CoreComponents do
                   active_owner={Cards.active_owner_type(card)}
                   lane={sub.lane}
                   category={@category}
+                  run={Map.get(@runs, card.id)}
                 />
               </div>
             </div>
