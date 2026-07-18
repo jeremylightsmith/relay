@@ -441,7 +441,13 @@ defmodule RelayWeb.FlowEditorLive do
         </div>
 
         <%!-- Canvas + inspector --%>
-        <div class="flex" style="flex:1;overflow:hidden;">
+        <div
+          id="flow-editor-canvas"
+          class="flex"
+          style="flex:1;overflow:hidden;"
+          phx-window-keydown={if @connecting, do: "cancel_connect"}
+          phx-key="escape"
+        >
           <div style="flex:1;overflow:auto;background:oklch(0.975 0.004 250);padding:16px;">
             <FlowGraphComponents.flow_graph
               nodes={@working.nodes}

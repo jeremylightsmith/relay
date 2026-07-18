@@ -150,6 +150,16 @@ defmodule RelayWeb.FlowEditorLiveTest do
     refute has_element?(view, "#toolbar-connect-edge", "Cancel")
   end
 
+  test "Connect edge: pressing Esc cancels connect mode", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    view |> element("#toolbar-connect-edge") |> render_click()
+    assert has_element?(view, "#toolbar-connect-edge", "Cancel")
+
+    view |> element("#flow-editor-canvas") |> render_keydown(%{"key" => "Escape"})
+    refute has_element?(view, "#toolbar-connect-edge", "Cancel")
+  end
+
   test "renaming a node rewrites its key and every edge endpoint referencing it", %{conn: conn, board: board} do
     {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
     view |> element(~s([data-node="branch"])) |> render_click()
