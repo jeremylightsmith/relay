@@ -8,7 +8,7 @@ description: Use when the user says one or more mockups (artboards) were updated
 ## Overview
 Turn updated mockups into a reviewed list of app-vs-design differences, then file the
 approved ones as Backlog intake cards. Core principle: **detect and file only** — never
-design or implement here (that is `/brainstorm` → `/write-plan` → `/exec-plan`), and never
+design or implement here (that is `/brainstorm` → `/write-plan` → the Code flow), and never
 card a difference the human has not confirmed is the *app's* bug (mockups drift from the
 shipped app just as often as the app drifts from them).
 

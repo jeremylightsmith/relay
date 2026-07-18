@@ -863,9 +863,9 @@ class StreamClaudeJobTest(unittest.TestCase):
         self.assertNotIn("--agent", seen["cmd"])
 
     def test_lifts_the_default_background_wait_ceiling_so_long_runs_do_not_get_cut_off(self):
-        """claude -p caps a background workflow's wait at 10 minutes by default; /exec-plan
-        runs far longer, so without lifting the cap -p would exit mid-run and the executor
-        would report a partial plan as succeeded."""
+        """claude -p caps a background workflow's wait at 10 minutes by default; a long agent
+        node (implement, final_review) runs far longer, so without lifting the cap -p would
+        exit mid-run and the executor would report a partial result as succeeded."""
         seen = {}
         relay.subprocess.Popen = lambda cmd, *a, **k: (
             seen.update(env=k.get("env", {})) or _FakePopen([], code=0))

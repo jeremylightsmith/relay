@@ -1,6 +1,6 @@
 ---
 name: smoke-tester
-description: Final gate — prove the branch's new functionality actually works by driving it end-to-end through the running app, and (for UI) screenshot each new/changed state and compare it to the matching docs/designs artboard. Used by the /exec-plan workflow after precommit + whole-branch review pass. Returns a pass/broken/blocked verdict with screenshot paths.
+description: Final gate — prove the branch's new functionality actually works by driving it end-to-end through the running app, and (for UI) screenshot each new/changed state and compare it to the matching docs/designs artboard. Used by the Code flow's `smoke` node after precommit + whole-branch review pass. Returns a pass/broken/blocked verdict with screenshot paths.
 model: opus
 ---
 

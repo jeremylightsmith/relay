@@ -25,8 +25,13 @@ defmodule Relay.PlanSkillsTest do
       assert doc =~ "bin/relay plan"
     end
 
-    test "points onward to /exec-plan", %{doc: doc} do
-      assert doc =~ "/exec-plan"
+    test "no longer points onward to the retired /exec-plan command", %{doc: doc} do
+      refute doc =~ "/exec-plan"
+    end
+
+    test "explains that the Code flow now picks the card up automatically", %{doc: doc} do
+      assert doc =~ "Plan:Done"
+      assert doc =~ "Settings"
     end
 
     test "points back to /brainstorm when the card has no approved spec", %{doc: doc} do

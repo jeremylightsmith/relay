@@ -45,7 +45,7 @@ npm-debug.log
 # Claude Code local (non-shared) settings.
 .claude/settings.local.json
 
-# Throwaway per-feature plan handed to /exec-plan (regenerated each run).
+# Throwaway per-feature plan materialized by the Code flow's `branch` node (regenerated each run).
 /plan.md
 
 # Uploaded files (dev/local).

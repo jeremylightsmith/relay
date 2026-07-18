@@ -1,5 +1,5 @@
 ---
-description: Turn a card's approved spec into the plan stored on that card for /exec-plan to run.
+description: Turn a card's approved spec into the plan stored on that card for the Code flow to run.
 ---
 
 Run `/write-plan <ref>`. The card ref comes from `$ARGUMENTS`; the **card is the source of
@@ -30,8 +30,8 @@ context, so authoring in-context is how those decisions reach the plan.
    repo / `git log` / `git diff main...` for this card's branch) to see what shipped; (c) write a
    plan covering **only the delta** — the fix the note asks for plus any genuine gaps — never
    re-planning or rebuilding work that already shipped and passed. Because the plan then contains
-   only the new work, the branch diff matches the plan and `/exec-plan`'s `final-reviewer` needs
-   no special-casing.
+   only the new work, the branch diff matches the plan and the Code flow's `final_review` node
+   needs no special-casing.
 2. **Author the plan** in-context, following the guidance below.
 3. **Self-review** (checklist at the end), fixing inline.
 4. **Write the plan to the card.** Save it to a temp file and attach it so it travels with the
@@ -39,16 +39,19 @@ context, so authoring in-context is how those decisions reach the plan.
 
        ./bin/relay plan <ref> @<tmpfile>
 
-   Then summarize the task breakdown to the user and point them to `/exec-plan <ref>`. Do NOT
-   launch `/exec-plan` — approval is a separate, human-gated step.
+   Then summarize the task breakdown to the user. There is no runner command to launch by hand
+   anymore (RLY-139): once the card is approved into `Plan:Done`, the Code flow
+   (`docs/designs/flows/code.jsonc`, if enabled for this board in Settings › Flows) picks it up
+   automatically — dispatch is server-side. Do NOT move or approve the card yourself — that's a
+   separate, human-gated step.
 
 ---
 
 ## Plan authoring guidance
 
-You are writing an implementation plan to be executed autonomously by `/exec-plan` (the
-Claude Workflow engine). Assume the executing engineer has zero repo context and needs
-every detail.
+You are writing an implementation plan to be executed autonomously by the Code flow (the
+server-side flow engine, ADR 0006 — `docs/designs/flows/code.jsonc`). Assume the executing
+engineer has zero repo context and needs every detail.
 
 ### Input
 The approved spec, read from the card's `spec` field (`./bin/relay card <ref> --json`). Read
@@ -63,8 +66,8 @@ existing design system.
 ### Task right-sizing
 Prefer **~3 coarse, vertical-slice tasks** for a typical MMF (measured cheaper: fewer tasks =
 fewer per-task review passes, no retry spike). A task is a coherent slice that ends in an
-independently testable deliverable and is worth a fresh reviewer's gate — `/exec-plan` spec-
-and quality-reviews each task independently. **Merge** tightly-coupled steps: schema +
+independently testable deliverable and is worth a fresh reviewer's gate — the Code flow's
+`spec_review` and `quality_review` nodes review each task independently. **Merge** tightly-coupled steps: schema +
 migration + context + factory for one area belong in ONE task, not split; fold
 setup/config/scaffolding/docs into the task whose deliverable needs them. **Split** only when
 a task crosses an independent module boundary, would be a very large diff, or is a risky
@@ -131,8 +134,9 @@ values in the task and its tests); and **type/signature consistency** across
 tasks (a function defined as `clear_layers/1` in Task 3 but called as `clear_full_layers/1`
 in Task 7 is a bug — the Consumes/Produces names must match exactly). Fix inline. Then write
 the plan to the card (`./bin/relay plan <ref> @<tmpfile>`), summarize the task breakdown, and
-point the user to `/exec-plan <ref>`. Do NOT launch `/exec-plan` yourself — that's a separate,
-human-gated step.
+tell the user the Code flow picks the card up automatically once it's approved into
+`Plan:Done` (Settings › Flows) — there is no runner command to launch by hand. Do NOT move or
+approve the card yourself — that's a separate, human-gated step.
 
 ## Headless / runner use (no human to dialogue with)
 
@@ -145,9 +149,10 @@ the loop. The node's `run` is a bare `/write-plan {ref}`, so every operational r
   pushes, no stage moves. The only write you make is the plan on the card you were given
   (`./bin/relay plan <ref> @<tmpfile>`).
 - **Terminal STOP.** When the plan is on the card, you are done — stop. Explicitly do **NOT**
-  run `/exec-plan`, and do not start implementing. The interactive steps above say approval is
-  "a separate, human-gated step"; headless this is a hard stop, because there is no human
-  standing at that gate to be asked.
+  start implementing, and do not move or approve the card into `Plan:Done` yourself — the Code
+  flow's dispatch is automatic and server-side (RLY-139) once a human does that. The
+  interactive steps above say approval is "a separate, human-gated step"; headless this is a
+  hard stop, because there is no human standing at that gate to be asked.
 - **No approved spec → raise `needs-input`, never a silent stop.** Step 1 tells the interactive
   path to stop and tell the user. Headless there is no user to tell, and a silent stop reads to
   the engine as `succeeded` — the card would land on `Plan:Done` carrying no plan, and the Code

@@ -10,9 +10,15 @@ third column: same job, their vocabulary.
 > The compiled translation the app seeds from lives at
 > `lib/relay/flows/default_library.ex` (RLY-131) — edit the jsonc files first, then mirror there.
 
+> **Historical design record.** This doc was written for RLY-131/132, before the ADR 0006
+> columns below were real. All three stages are now cut over (RLY-139 retired `relay_config.json`,
+> `execute-plan.js` and `/exec-plan`) — the **ADR 0006** column is what actually runs today; the
+> **Pre-cutover (Relay)** column is deleted history, kept here for the design rationale. See
+> [`docs/architecture/runner.md`](../../architecture/runner.md) for the current state.
+
 ## File inventory — where each piece lives
 
-| What | Today (Relay) | Fabro's version | ADR 0006 |
+| What | Pre-cutover (Relay) | Fabro's version | ADR 0006 |
 | --- | --- | --- | --- |
 | Macro pipeline (stage → stage) | `relay_config.json` `pipeline` | board is derived; graph chains via `house` sub-workflow nodes | the board itself + each flow's `trigger` |
 | Spec behavior | `.claude/skills/brainstorm` | first half of `implement-issue`'s `plan` node | [`spec.jsonc`](spec.jsonc) → same repo skill |
@@ -66,7 +72,7 @@ flowchart LR
 
 ## Node-by-node — Code flow, three ways
 
-| `code.jsonc` node | Type / model | Today's mechanism | Fabro's analog (`implement-plan`) |
+| `code.jsonc` node | Type / model | Pre-cutover mechanism | Fabro's analog (`implement-plan`) |
 | --- | --- | --- | --- |
 | `branch` | shell | `relay_config.json` shell step 1 | `toolchain` + `preflight_*` parallelograms |
 | *(gone)* | — | **Execute phase** — a haiku agent picks the next unchecked task | *(none — plan handled whole)* |
@@ -98,6 +104,13 @@ flowchart LR
 2. **Reviewer findings reaching the implementer.** Today the workflow engine threads
    findings into the next implement prompt; here the failed review's detail must travel
    with the `failed` edge (node output as re-entry context — RLY-132/134 contract).
-3. **Mid-run rebase.** Today a sync agent + `rebaser` handle origin/main drift per task;
-   the flow above rebases only at `branch`. If drift bites, add a `rebase` agent node on
-   `merge` failure.
+3. **Mid-run rebase.** Pre-cutover, a sync agent + `rebaser` handled origin/main drift per
+   task; the flow above rebases only at `branch`. If drift bites, add a `rebase` agent node on
+   `merge` failure. **Still unresolved post-RLY-139** — no Code node names `rebaser` yet.
+
+**Resolved by RLY-139:** question 1 above shipped as a real engine `foreach` loop head +
+guarded edges (`quality_review`'s two `succeeded` edges keyed on `foreach_remaining` /
+`foreach_exhausted`), not the `next_task` grep-gate this doc originally proposed — see
+[`code.jsonc`](code.jsonc) and [`docs/architecture/domain.md`](../../architecture/domain.md)
+for what actually shipped. Question 2 shipped as node output carried on the `failed` edge into
+the next `implement` iteration's prompt, per the plan-implementer agent's contract.
