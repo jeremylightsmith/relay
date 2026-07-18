@@ -15,9 +15,11 @@
 import Ecto.Query
 
 alias Ecto.Changeset
+alias Relay.Accounts
 alias Relay.Boards
 alias Relay.Cards
 alias Relay.Flows
+alias Relay.Members
 alias Relay.Repo
 alias Schemas.Board
 alias Schemas.CardRejection
@@ -57,10 +59,22 @@ case_result =
 
 board = Repo.preload(case_result, :stages)
 
+# /dev/login (the only local auth) mints a fixed dev@relay.local user, distinct
+# from the seed owner above — add it as a member so the board is reachable via
+# /dev/login out of the box.
+dev_user = Accounts.ensure_dev_user!()
+
+case Members.invite(board, dev_user.email) do
+  {:ok, _membership} -> :ok
+  {:error, :already_member} -> :ok
+end
+
 stage = fn name -> Enum.find(board.stages, &(&1.name == name)) || hd(board.stages) end
 
 {:ok, code_flow} = board |> Flows.get_flow!("code") |> Flows.enable_flow()
-{:ok, _spec_flow} = board |> Flows.get_flow!("spec") |> Flows.enable_flow()
+{:ok, spec_flow} = board |> Flows.get_flow!("spec") |> Flows.enable_flow()
+
+flows_by_key = %{code_flow.key => code_flow, spec_flow.key => spec_flow}
 
 new_card = fn stage_name, title ->
   {:ok, card} = Cards.create_card(stage.(stage_name), %{title: title})
@@ -81,7 +95,11 @@ add_run = fn card, attrs ->
     started_at: minutes_ago.(10)
   }
 
-  Repo.insert!(struct!(Run, Map.merge(defaults, attrs)))
+  merged = Map.merge(defaults, attrs)
+  flow = Map.fetch!(flows_by_key, merged.flow_key)
+  merged = Map.put(merged, :flow_id, flow.id)
+
+  Repo.insert!(struct!(Run, merged))
 end
 
 # `node:`/`duration_s:` are this seed script's shorthand, not real

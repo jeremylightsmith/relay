@@ -128,6 +128,9 @@ defmodule RelayWeb.RunComponents do
   defp clock(_now, nil), do: ""
   defp clock(now, at), do: run_duration(max(DateTime.diff(now, at, :second), 0))
 
+  defp times_label(1), do: "1 time"
+  defp times_label(n), do: "#{n} times"
+
   defp ago(_now, nil), do: ""
 
   defp ago(now, at) do
@@ -589,7 +592,7 @@ defmodule RelayWeb.RunComponents do
         {@rejection.note}
       </blockquote>
       <div style="font-size:12px;color:oklch(0.50 0.02 255);">
-        rejected from {@rejection.from_stage_name} {ago(DateTime.utc_now(), @rejection.rejected_at)} ago
+        rejected from {@rejection.from_stage_name} {ago(DateTime.utc_now(), @rejection.rejected_at)}
       </div>
       <div style="font-size:12px;color:oklch(0.50 0.04 250);margin-top:4px;">
         the run reads this note before implement
@@ -643,7 +646,7 @@ defmodule RelayWeb.RunComponents do
         ⊗ CIRCUIT BREAKER TRIPPED
       </div>
       <p style="font-size:13px;color:oklch(0.34 0.02 255);margin:0 0 8px 0;">
-        <strong>{@tripped}</strong> returned failed {@repeats} times
+        <strong>{@tripped}</strong> returned failed {times_label(@repeats)}
       </p>
       <pre style="background:oklch(0.20 0.02 255);color:oklch(0.94 0.006 255);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0 0 10px 0;"><%= @detail %></pre>
       <div style="display:flex;gap:18px;">
@@ -678,7 +681,7 @@ defmodule RelayWeb.RunComponents do
           ?
         </span>
         <span style="font-family:var(--font-mono);font-size:12px;color:oklch(0.50 0.02 255);">
-          Parked {ago(DateTime.utc_now(), @run.started_at)} ago
+          Parked {ago(DateTime.utc_now(), @run.started_at)}
         </span>
       </div>
     </div>
@@ -766,7 +769,7 @@ defmodule RelayWeb.RunComponents do
             {history_title(entry)}
           </span>
           <span style="margin-left:auto;font-size:11px;color:oklch(0.55 0.02 255);">
-            {ago(DateTime.utc_now(), entry.run.finished_at)} ago
+            {ago(DateTime.utc_now(), entry.run.finished_at)}
           </span>
           <span style="color:oklch(0.60 0.02 255);">⌄</span>
         </summary>
