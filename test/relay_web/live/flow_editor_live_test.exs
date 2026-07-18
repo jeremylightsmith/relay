@@ -18,6 +18,14 @@ defmodule RelayWeb.FlowEditorLiveTest do
     assert has_element?(view, "#flow-graph")
   end
 
+  test "renders full-bleed (wide) chrome, not the narrow centered column", %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    # RLY-143: without `wide` the graph editor gets clipped to Layouts.app's default
+    # mx-auto max-w-2xl centered column.
+    refute has_element?(view, "main div.max-w-2xl")
+    assert has_element?(view, "#top-bar-crumb-boards")
+  end
+
   test "404s on an unknown flow key", %{conn: conn, board: board} do
     assert {:error, {:live_redirect, %{to: to}}} = live(conn, ~p"/board/#{board.slug}/flows/nope")
     assert to =~ "/board/#{board.slug}/settings"
@@ -83,6 +91,41 @@ defmodule RelayWeb.FlowEditorLiveTest do
     |> render_change(%{"field" => "run", "value" => "new prompt"})
 
     assert has_element?(view, "#flow-editor-unsaved-bar")
+  end
+
+  test "clicking a model chip in the inspector selects it (RLY-143 phx-value-v regression)", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="implement"])) |> render_click()
+
+    view |> element("#inspector-model-opus") |> render_click()
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+
+    view |> element("#flow-editor-save") |> render_click()
+    view |> element("#flow-save-confirm") |> render_click()
+
+    assert %Schemas.FlowVersion{nodes: nodes} = Flows.get_version(Flows.get_flow!(board, "code"), 2)
+    assert Enum.any?(nodes, &(&1.key == "implement" and &1.model == "opus"))
+  end
+
+  test "clicking an effort chip in the inspector selects it (RLY-143 phx-value-v regression)", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="implement"])) |> render_click()
+
+    # "implement" ships with effort: "high"
+    view |> element("#inspector-effort-medium") |> render_click()
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+
+    view |> element("#flow-editor-save") |> render_click()
+    view |> element("#flow-save-confirm") |> render_click()
+
+    assert %Schemas.FlowVersion{nodes: nodes} = Flows.get_version(Flows.get_flow!(board, "code"), 2)
+    assert Enum.any?(nodes, &(&1.key == "implement" and &1.effort == "medium"))
   end
 
   test "deleting the start edge blocks save with an inline error naming the problem", %{conn: conn, board: board} do

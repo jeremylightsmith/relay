@@ -165,6 +165,10 @@ defmodule RelayWeb.FlowEditorComponents do
           <span style="font-size:10px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
             MODEL
           </span>
+          <%!-- phx-value-v, not phx-value-value: "value" collides with the button's intrinsic
+          DOM .value property (empty for a value-less <button>), which wins over the
+          phx-value-* attribute when a real browser serializes the click — silently sending ""
+          instead of the picked model. See board_live.ex's answer_select for the same fix. --%>
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
             <button
               :for={model <- @models}
@@ -173,7 +177,7 @@ defmodule RelayWeb.FlowEditorComponents do
               phx-click="edit_node_field"
               phx-value-key={@node.key}
               phx-value-field="model"
-              phx-value-value={if model == "inherit", do: "", else: model}
+              phx-value-v={if model == "inherit", do: "", else: model}
               disabled={@read_only?}
               style={chip_style(model_selected?(@node, model))}
             >
@@ -194,7 +198,7 @@ defmodule RelayWeb.FlowEditorComponents do
               phx-click="edit_node_field"
               phx-value-key={@node.key}
               phx-value-field="effort"
-              phx-value-value={effort}
+              phx-value-v={effort}
               disabled={@read_only?}
               style={segment_style(@node.effort == effort)}
             >
@@ -215,7 +219,7 @@ defmodule RelayWeb.FlowEditorComponents do
                 phx-click="edit_node_field"
                 phx-value-key={@node.key}
                 phx-value-field="max_retries"
-                phx-value-value={stepper_value(@node.max_retries, -1)}
+                phx-value-v={stepper_value(@node.max_retries, -1)}
                 disabled={@read_only?}
                 style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:oklch(0.55 0.02 255);font-size:16px;border:0;background:oklch(1 0 0);"
               >
@@ -230,7 +234,7 @@ defmodule RelayWeb.FlowEditorComponents do
                 phx-click="edit_node_field"
                 phx-value-key={@node.key}
                 phx-value-field="max_retries"
-                phx-value-value={stepper_value(@node.max_retries, 1)}
+                phx-value-v={stepper_value(@node.max_retries, 1)}
                 disabled={@read_only?}
                 style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:oklch(0.55 0.02 255);font-size:16px;border:0;background:oklch(1 0 0);"
               >
@@ -361,7 +365,7 @@ defmodule RelayWeb.FlowEditorComponents do
             phx-click="edit_edge"
             phx-value-index={@index}
             phx-value-field="max_loops"
-            phx-value-value={stepper_value(@edge.max_loops, -1)}
+            phx-value-v={stepper_value(@edge.max_loops, -1)}
             disabled={@read_only?}
             style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:oklch(0.55 0.02 255);font-size:16px;border:0;background:oklch(1 0 0);"
           >
@@ -376,7 +380,7 @@ defmodule RelayWeb.FlowEditorComponents do
             phx-click="edit_edge"
             phx-value-index={@index}
             phx-value-field="max_loops"
-            phx-value-value={stepper_value(@edge.max_loops, 1)}
+            phx-value-v={stepper_value(@edge.max_loops, 1)}
             disabled={@read_only?}
             style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:oklch(0.55 0.02 255);font-size:16px;border:0;background:oklch(1 0 0);"
           >
@@ -545,7 +549,7 @@ defmodule RelayWeb.FlowEditorComponents do
 
   # Valid values are nil ("no limit") or a positive integer (schemas require
   # `greater_than: 0`). Stepping below 1 clears the field to nil rather than landing on the
-  # invalid 0 — returns "" (not nil) so the `phx-value-value` attribute isn't dropped from the
+  # invalid 0 — returns "" (not nil) so the `phx-value-v` attribute isn't dropped from the
   # markup; `cast_node_value/2` and `cast_edge_value/2` already treat "" as nil.
   defp stepper_value(current, delta) do
     next = (current || 0) + delta

@@ -188,10 +188,14 @@ defmodule RelayWeb.FlowEditorLive do
     {:noreply, apply_working(socket, &Map.put(&1, key, id))}
   end
 
-  # low-level working-copy node-field edit (the inspector form/chips/steppers emit this)
-  def handle_event("edit_node_field", %{"key" => key, "field" => field, "value" => value}, socket) do
+  # low-level working-copy node-field edit (the inspector form/chips/steppers emit this).
+  # The inspector's textarea/input forms submit the new value under "value"; the model/effort
+  # chips and the max-retries stepper are plain buttons that submit it under phx-value-v
+  # instead, since "value" collides with a <button>'s intrinsic DOM .value property (see the
+  # phx-value-v comment in flow_editor_components.ex).
+  def handle_event("edit_node_field", %{"key" => key, "field" => field} = params, socket) do
     field = String.to_existing_atom(field)
-    value = cast_node_value(field, value)
+    value = cast_node_value(field, param_value(params))
 
     {:noreply,
      apply_working(socket, fn w ->
@@ -200,10 +204,10 @@ defmodule RelayWeb.FlowEditorLive do
      end)}
   end
 
-  def handle_event("edit_edge", %{"index" => i, "field" => field, "value" => value}, socket) do
+  def handle_event("edit_edge", %{"index" => i, "field" => field} = params, socket) do
     i = String.to_integer(i)
     field = String.to_existing_atom(field)
-    value = cast_edge_value(field, value)
+    value = cast_edge_value(field, param_value(params))
 
     {:noreply, apply_working(socket, fn w -> %{w | edges: List.update_at(w.edges, i, &Map.put(&1, field, value))} end)}
   end
@@ -338,6 +342,10 @@ defmodule RelayWeb.FlowEditorLive do
     end
   end
 
+  # phx-value-v (buttons) takes precedence when present; form paths send "value".
+  defp param_value(%{"v" => v}), do: v
+  defp param_value(%{"value" => v}), do: v
+
   defp cast_node_value(f, v) when f in [:max_retries, :timeout_minutes] do
     case Integer.parse(v || "") do
       {n, _} -> n
@@ -385,8 +393,11 @@ defmodule RelayWeb.FlowEditorLive do
     assigns = assign(assigns, :layout, FlowLayout.layout(assigns.working.nodes, assigns.working.edges))
 
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="flex flex-col" style="height:calc(100vh - 0px);">
+    <Layouts.app flash={@flash} current_scope={@current_scope} wide crumb>
+      <%!-- RLY-143 fix-up: `wide` puts this below Layouts.app's 53px chrome header (see
+      board_live.ex's `h-[calc(100dvh_-_53px)]` for the sibling full-page pattern); without
+      subtracting it here the editor overshoots the viewport by 53px. --%>
+      <div class="flex flex-col" style="height:calc(100vh - 53px);">
         <%!-- Top bar --%>
         <div style="height:52px;display:flex;align-items:center;gap:12px;padding:0 18px;border-bottom:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);">
           <nav style="font-size:13px;display:flex;align-items:center;gap:7px;">
