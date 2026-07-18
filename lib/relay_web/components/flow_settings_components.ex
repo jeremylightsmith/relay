@@ -3,12 +3,13 @@ defmodule RelayWeb.FlowSettingsComponents do
   Function components for the board settings **Flows** pane (RLY-142),
   matching `docs/designs/Relay Flows.dc.html`. Page-specific — no storybook
   entry; all events live on `RelayWeb.BoardSettingsLive`. Recorded artboard
-  deviations (no "+ New flow" button, no VERSION column until RLY-152,
-  kebab-carried origin, inlined cutover ritual, engine note) are pinned in
-  the card's spec.
+  deviations (no "+ New flow" button, kebab-carried origin, inlined cutover
+  ritual, engine note) are pinned in the card's spec. Editing a flow's
+  definition now navigates to the full-page editor (`RelayWeb.FlowEditorLive`,
+  RLY-143); the row meta line shows the current version.
   """
 
-  use Phoenix.Component
+  use RelayWeb, :html
 
   alias Schemas.Flow
 
@@ -16,7 +17,8 @@ defmodule RelayWeb.FlowSettingsComponents do
   def flow_name(%Flow{key: key}), do: key |> String.replace("-", " ") |> String.capitalize()
 
   attr :rows, :list, required: true, doc: "%{flow: %Flow{}, customized?: bool, resettable?: bool} maps"
-  attr :panel, :any, required: true, doc: "nil | {flow_id, :confirm}"
+  attr :panel, :any, required: true, doc: "nil | {flow_id, :confirm} | {flow_id, :reset}"
+  attr :slug, :string, required: true, doc: "the board slug, for the Edit item's editor link"
 
   def flows_pane(assigns) do
     ~H"""
@@ -43,7 +45,7 @@ defmodule RelayWeb.FlowSettingsComponents do
       <%= if @rows != [] do %>
         <.first_run_banner :if={Enum.all?(@rows, &(not &1.flow.enabled))} rows={@rows} />
         <.legend />
-        <.flows_table rows={@rows} panel={@panel} />
+        <.flows_table rows={@rows} panel={@panel} slug={@slug} />
         <p
           id="flows-footer-note"
           style="font-size:12px;line-height:1.55;color:oklch(0.58 0.02 255);margin:16px 2px 0 2px;max-width:640px;"
@@ -109,6 +111,7 @@ defmodule RelayWeb.FlowSettingsComponents do
 
   attr :rows, :list, required: true
   attr :panel, :any, required: true
+  attr :slug, :string, required: true
 
   defp flows_table(assigns) do
     ~H"""
@@ -141,7 +144,9 @@ defmodule RelayWeb.FlowSettingsComponents do
                   class="font-mono"
                   style="display:flex;align-items:center;gap:8px;font-size:11px;color:oklch(0.60 0.02 255);"
                 >
-                  <span id={"flow-#{row.flow.id}-nodes-count"}>{nodes_label(row.flow)}</span>
+                  <span id={"flow-#{row.flow.id}-nodes-count"}>
+                    v{row.flow.version} · {nodes_label(row.flow)}
+                  </span>
                   <span
                     :if={row.customized?}
                     id={"flow-#{row.flow.id}-customized"}
@@ -204,14 +209,12 @@ defmodule RelayWeb.FlowSettingsComponents do
                   </summary>
                   <ul class="menu dropdown-content z-10 w-48 rounded-box bg-base-100 p-1 shadow">
                     <li>
-                      <button
-                        type="button"
+                      <.link
+                        navigate={~p"/board/#{@slug}/flows/#{row.flow.key}"}
                         id={"flow-#{row.flow.id}-edit"}
-                        phx-click="flow_open_definition"
-                        phx-value-flow-id={row.flow.id}
                       >
                         ✎ Edit flow
-                      </button>
+                      </.link>
                     </li>
                     <li>
                       <button
@@ -239,7 +242,6 @@ defmodule RelayWeb.FlowSettingsComponents do
             </div>
 
             <.toggle_confirm :if={@panel == {row.flow.id, :confirm}} flow={row.flow} />
-            <.definition_panel :if={@panel == {row.flow.id, :definition}} flow={row.flow} />
             <.reset_confirm :if={@panel == {row.flow.id, :reset}} flow={row.flow} />
           </div>
         </div>
@@ -394,59 +396,6 @@ defmodule RelayWeb.FlowSettingsComponents do
 
   attr :flow, Flow, required: true
 
-  # Read-only structured text (spec interview #2) — the real editor is RLY-143.
-  defp definition_panel(assigns) do
-    ~H"""
-    <div
-      id={"flow-#{@flow.id}-definition"}
-      style="margin:0 18px 16px 18px;background:oklch(0.985 0.004 255);border:1px solid oklch(0.92 0.006 255);border-radius:10px;padding:14px 16px;"
-    >
-      <div
-        class="font-mono"
-        style="font-size:10.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.55 0.02 255);margin-bottom:8px;"
-      >
-        NODES
-      </div>
-      <div style="display:flex;flex-direction:column;gap:4px;">
-        <div
-          :for={node <- @flow.nodes}
-          id={"flow-#{@flow.id}-node-#{node.key}"}
-          class="font-mono"
-          style="font-size:12px;line-height:1.5;color:oklch(0.38 0.02 255);"
-        >
-          <span style="font-weight:600;">{node.key}</span>
-          <span style="color:oklch(0.58 0.02 255);"> ·        {node.type}{node_meta(node)}</span>
-          <span :if={node.run} style="color:oklch(0.50 0.02 255);"> —        {node.run}</span>
-        </div>
-      </div>
-      <div
-        class="font-mono"
-        style="font-size:10.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.55 0.02 255);margin:12px 0 8px 0;"
-      >
-        EDGES
-      </div>
-      <div style="display:flex;flex-direction:column;gap:4px;">
-        <div
-          :for={{edge, index} <- Enum.with_index(@flow.edges)}
-          id={"flow-#{@flow.id}-edge-#{index}"}
-          class="font-mono"
-          style="font-size:12px;line-height:1.5;color:oklch(0.38 0.02 255);"
-        >
-          {edge_line(edge)}
-        </div>
-      </div>
-      <p
-        id={"flow-#{@flow.id}-definition-note"}
-        style="font-size:11.5px;color:oklch(0.58 0.02 255);margin:12px 0 0 0;"
-      >
-        Editing arrives with the flow editor (RLY-143).
-      </p>
-    </div>
-    """
-  end
-
-  attr :flow, Flow, required: true
-
   defp reset_confirm(assigns) do
     ~H"""
     <div
@@ -486,23 +435,5 @@ defmodule RelayWeb.FlowSettingsComponents do
       </div>
     </div>
     """
-  end
-
-  # " · sonnet/high · retries 3" — only the parts that are set.
-  defp node_meta(node) do
-    model_effort =
-      case Enum.reject([node.model, node.effort], &is_nil/1) do
-        [] -> ""
-        parts -> " · " <> Enum.join(parts, "/")
-      end
-
-    retries = if node.max_retries, do: " · retries #{node.max_retries}", else: ""
-    model_effort <> retries
-  end
-
-  defp edge_line(edge) do
-    on = if edge.on, do: " on #{edge.on}", else: ""
-    loops = if edge.max_loops, do: " (max_loops #{edge.max_loops})", else: ""
-    "#{edge.from} → #{edge.to}#{on}#{loops}"
   end
 end

@@ -590,6 +590,7 @@ defmodule RelayWeb.BoardSettingsLive do
               :if={@section == :flows}
               rows={@flow_rows}
               panel={@flow_panel}
+              slug={@board.slug}
             />
 
             <section :if={@section == :members} id="members-pane">
@@ -1144,10 +1145,6 @@ defmodule RelayWeb.BoardSettingsLive do
       end
 
     {:noreply, socket |> assign(:flow_panel, nil) |> assign_flows()}
-  end
-
-  def handle_event("flow_open_definition", %{"flow-id" => flow_id}, socket) do
-    {:noreply, assign(socket, :flow_panel, {parse_flow_id(flow_id), :definition})}
   end
 
   def handle_event("flow_duplicate", %{"flow-id" => flow_id}, socket) do

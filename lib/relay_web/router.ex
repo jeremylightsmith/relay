@@ -91,6 +91,7 @@ defmodule RelayWeb.Router do
       live "/board/:slug", BoardLive
       live "/board/:slug/settings", BoardSettingsLive
       live "/board/:slug/runners", BoardRunnersLive
+      live "/board/:slug/flows/:key", FlowEditorLive
 
       # RLY-87 — the native app's card host: BoardLive rendering the drawer alone.
       # Chromeless by construction (the :card mount forces embed: true), so it can
