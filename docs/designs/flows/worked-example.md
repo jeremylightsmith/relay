@@ -37,7 +37,7 @@ UNCHANGED IN BOTH WORLDS: .claude/skills/* (brainstorm, TDD, debugging, …),
 | Stage | What it does | Today's configuration | Tomorrow's configuration |
 | --- | --- | --- | --- |
 | **Spec** | Reads the card, asks the human clarifying questions (needs-input stepper), writes the spec + acceptance criteria back to the card | **Cut over (RLY-136):** no `relay_config.json` pipeline entry — runs as the enabled `spec` [Flow row ↓](#spec-stage) (22 lines) on the engine + [`brainstorm` skill](../../../.claude/skills/brainstorm/SKILL.md) | [Flow row ↓](#spec-stage) (22 lines) |
-| **Plan** | Turns the approved spec into the implementation plan stored on the card | [pipeline entry ↓](#plan-stage) + [`write-plan` command](../../../.claude/commands/write-plan.md) (135 lines) | [Flow row ↓](#plan-stage) (18 lines) |
+| **Plan** | Turns the approved spec into the implementation plan stored on the card | **Cut over (RLY-138):** no `relay_config.json` pipeline entry — runs as the enabled `plan` [Flow row ↓](#plan-stage) (18 lines) on the engine + [`write-plan` command](../../../.claude/commands/write-plan.md) | [Flow row ↓](#plan-stage) (18 lines) |
 | **Code** | Implements the plan task-by-task with TDD + two reviews each, then precommit, whole-branch review, smoke, acceptance, and PR + squash-merge | [pipeline entry ↓](#code-stage) + [`exec-plan` command](../../../.claude/commands/exec-plan.md) (119) + [`execute-plan.js`](../../../.claude/workflows/execute-plan.js) (485) + 8 agent files (533) | [Flow row ↓](#code-stage) (90 lines) |
 
 ### Spec stage
@@ -72,7 +72,13 @@ outcome contract; "then STOP, don't touch git" becomes node boundaries the engin
 
 ### Plan stage
 
-**Today** — `relay_config.json` entry, verbatim:
+**Today — cut over (RLY-138).** Plan no longer has a `relay_config.json` pipeline entry; it
+runs as the enabled `plan` Flow on the engine (see "Tomorrow" below, which is now *today's*
+reality for this stage). Code below is unchanged — still watcher-driven, still described by
+its live pipeline entry — until RLY-139 cuts it over the same way. See
+[`docs/runbooks/flow-cutover.md`](../../runbooks/flow-cutover.md) for the ritual.
+
+Historical record — the `relay_config.json` entry this replaced, now deleted:
 
 ```json
 {
@@ -87,7 +93,7 @@ outcome contract; "then STOP, don't touch git" becomes node boundaries the engin
 ```
 
 Files it pulls in: [`.claude/commands/write-plan.md`](../../../.claude/commands/write-plan.md)
-(135 lines — stays, developer-owned).
+(now carries the operational framing directly — RLY-138 — developer-owned).
 
 **Tomorrow** — the `Flow` row:
 
