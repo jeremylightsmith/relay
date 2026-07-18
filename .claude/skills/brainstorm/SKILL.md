@@ -129,6 +129,12 @@ get approval before moving on.
 - Point the user to `/write-plan <ref>`. Do NOT start implementation or launch execution.
 
 ## Headless / runner use (no human to dialogue with)
+**The work is pre-authorized.** A flow node invokes this skill on the board's behalf — proceed
+without asking for confirmation to begin. Your blast radius is this one card: **do not touch git,
+branches, or any other card.** And it is **terminal** — stop after writing the spec back to the
+card. Do not start implementation, do not run `/write-plan`, do not move the card. The board's
+`Spec:Review` lane is the approval gate; landing there is the whole job.
+
 When the board runner invokes this skill there is no human to dialogue with in real time, but
 that does **not** mean skip the questions. Do the **same** clarifying-question discovery you'd
 do interactively (Process step 2) — surface every question you'd ask a human. Headless mode

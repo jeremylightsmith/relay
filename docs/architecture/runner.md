@@ -56,6 +56,20 @@ Each tick (`poll_interval`, default 45s, plus a wake on any job finishing):
 Known sharp edges this design accepts (and ADR 0006 removes): stage-level granularity
 only, the `tmp/exec-plan-status` scratch-file merge gate, and prompt-enforced rules.
 
+## Dispatcher split during the ADR-0006 migration (RLY-136 → RLY-139)
+
+Two dispatchers coexist while stages migrate off the legacy watcher:
+
+- **Spec** is **engine-driven** (RLY-136): a card in *Next up* is dispatched by the server-side
+  `Relay.Runs.Scheduler` to the node-job engine (`Relay.Runs`), claimed by `relay execute` over
+  the node-job REST API. Its `relay_config.json` pipeline entry has been removed.
+- **Plan** and **Code** are still **watcher-driven**: `relay watch` reads their `relay_config.json`
+  pipeline entries and runs them the legacy way, until RLY-138 (Plan) and RLY-139 (Code) cut them
+  over.
+
+A stage is on exactly one dispatcher at a time. The cutover ritual that guarantees this — and why
+its order is fixed — is in [`../runbooks/flow-cutover.md`](../runbooks/flow-cutover.md).
+
 ## Node-job transport (RLY-134, ADR 0006 card 04)
 
 The first slice of ADR 0006's target shape: a pure REST transport on top of the runs engine

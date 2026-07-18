@@ -4,6 +4,7 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
   alias Relay.Cards
   alias Relay.Repo
   alias Relay.RunnerPresence
+  alias Relay.Runs.Capacity
 
   setup %{conn: conn} do
     board = insert(:board)
@@ -141,5 +142,26 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
     |> json_response(200)
 
     assert Repo.aggregate(Schemas.Executor, :count) == 0
+  end
+
+  test "an executor beat carrying name + capacity lands free slots in Relay.Runs.Capacity",
+       %{conn: conn, board: board} do
+    {:ok, %{id: exec_id}} =
+      Relay.Runs.upsert_executor(board, %{"name" => "exec-hb", "capacity" => %{"shared_clean" => 2}})
+
+    conn
+    |> put_req_header("content-type", "application/json")
+    |> post(
+      ~p"/api/board/heartbeat",
+      Jason.encode!(%{
+        "name" => "exec-hb",
+        "host" => "dev",
+        "interval" => 30,
+        "capacity" => %{"shared_clean" => 2, "exclusive" => 0}
+      })
+    )
+    |> json_response(200)
+
+    assert %{shared_clean: 2, exclusive: 0} = Map.get(Capacity.snapshot(), exec_id)
   end
 end

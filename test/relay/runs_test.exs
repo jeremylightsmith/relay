@@ -184,7 +184,7 @@ defmodule Relay.RunsTest do
       assert_receive {:run_finished, %Run{status: :done}}
     end
 
-    test "an unrouted outcome fails the run and parks the card :ready with the failure on its timeline",
+    test "an unrouted outcome fails the run and flags the card :needs_input with the failure on its timeline",
          %{board: board} do
       flow = enabled_spec_flow(board)
       card = card_in(board, "Next up")
@@ -201,8 +201,32 @@ defmodule Relay.RunsTest do
       assert_receive {:run_finished, %Run{status: :failed}}
 
       card = Relay.Cards.get_card(board, card.id)
-      assert card.status == :ready
+      # B1: the card blocks immediately (not silently :ready) and enters the needs-you rollup.
+      assert card.status == :needs_input
+      assert Relay.Cards.needs_you?(card, Relay.Boards.list_stages(board))
       assert Enum.any?(Relay.Activity.list_timeline(card), &match?(%Schemas.Activity{type: :failure}, &1))
+    end
+
+    test "a blank detail on the final failure still flags the card (falls back, doesn't crash)",
+         %{board: board} do
+      flow = enabled_spec_flow(board)
+      card = card_in(board, "Next up")
+      {:ok, _run} = Runs.start_run(card, flow)
+      assert_receive {:dispatched, job}
+
+      # A real executor can report an empty-string detail (bin/relay: `detail = "" if ok
+      # else ...`). "" is truthy in Elixir, so a naive `|| ` fallback chain never reaches
+      # the default message, request_input's Comment changeset rejects the blank body,
+      # and the hard `{:ok, _card} = ...` match in card_fail_effects/2 must not raise.
+      assert {:ok, %Run{status: :running}} = Runs.report_outcome(job, %{outcome: :failed, detail: ""})
+      assert_receive {:dispatched, retry_job}
+      assert {:ok, %Run{status: :failed}} = Runs.report_outcome(retry_job, %{outcome: :failed, detail: ""})
+
+      assert_receive {:run_finished, %Run{status: :failed}}
+
+      card = Relay.Cards.get_card(board, card.id)
+      assert card.status == :needs_input
+      assert Relay.Cards.needs_you?(card, Relay.Boards.list_stages(board))
     end
 
     test "needs_input parks the run, stores the session, and blocks the card idempotently",

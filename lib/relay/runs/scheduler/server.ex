@@ -101,16 +101,60 @@ defmodule Relay.Runs.Scheduler.Server do
   defp build_snapshot(state) do
     board = Boards.get_board_by_id!(state.board_id)
     cards = Cards.list_cards(board)
+    runs = state.engine.active_runs(state.board_id)
 
     snapshot = %Snapshot{
       stages: Enum.map(Boards.list_stages(board), &stage_snap/1),
       cards: Enum.map(cards, &card_snap(&1, board)),
       flows: Enum.map(Relay.Flows.list_enabled_flows(board), &flow_snap/1),
-      runs: state.engine.active_runs(state.board_id),
-      capacity: Capacity.snapshot()
+      runs: runs,
+      capacity: reserve_active_runs(Capacity.snapshot(), runs)
     }
 
     {snapshot, Map.new(cards, &{&1.id, &1})}
+  end
+
+  # A run that is :running is being worked on an executor right now, so it holds
+  # one slot of its isolation class until it finishes — even if the executor's
+  # next heartbeat hasn't yet reflected it. Subtract those held slots from the
+  # advertised capacity before planning (parked runs hold no slot; the pure
+  # planner's resume_runs consumes a slot only when it actually resumes one).
+  #
+  # NOTE (board-scoped vs. global): `runs` here is this board's active runs only
+  # (`state.engine.active_runs(state.board_id)`), but `Capacity.snapshot/0` is
+  # global — an executor shared across boards has its capacity debited only by
+  # the runs each board's own scheduler knows about. Two boards dispatching to
+  # the same executor at once can each believe a slot is free. Tracked as a
+  # follow-up; not a regression introduced here (there was no accounting at all
+  # before this change).
+  defp reserve_active_runs(capacity, runs) do
+    runs
+    |> Enum.filter(&(&1.status == :running))
+    |> Enum.reduce(capacity, fn run, cap -> reserve_slot(cap, run) end)
+  end
+
+  # Reuses Relay.Runs.Scheduler.take_slot/3 — the pure planner's own greedy
+  # placement arithmetic — instead of a second copy, so this subtraction can
+  # never drift out of sync with how the planner actually placed the run.
+  # `:none` (nothing to take, e.g. capacity already fully spent) leaves the
+  # snapshot unchanged rather than raising.
+  #
+  # Always targets `:any`, even for `:exclusive` runs: executor-affinity pinning
+  # is unimplemented (`pinned_executor_id` is always nil — RLY-139), so a
+  # `{:pinned, nil}` target would be permanently unfree and this debit would be
+  # a silent no-op — exactly the isolation class where an unaccounted running
+  # run is most damaging (two exclusive runs sharing one worktree). Debiting
+  # greedily may charge the wrong executor's slot, but it keeps the aggregate
+  # slot count correct, which is what this accounting exists to protect. This
+  # mirrors `Relay.Runs.Scheduler.place_fresh/4`, which already places every
+  # fresh pull — exclusive included — against `:any`.
+  defp reserve_slot(cap, %{isolation: nil}), do: cap
+
+  defp reserve_slot(cap, run) do
+    case Scheduler.take_slot(cap, run.isolation, :any) do
+      :none -> cap
+      {_executor_id, updated} -> updated
+    end
   end
 
   defp stage_snap(stage) do

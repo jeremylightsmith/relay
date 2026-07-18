@@ -55,8 +55,9 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     )
   end
 
-  # A board with one enabled shared_clean flow: queue → work → done. Returns the pulls-from card.
-  defp board_with_flow(card_status) do
+  # A board with one enabled flow (shared_clean by default): queue → work → done. Returns the
+  # pulls-from card.
+  defp board_with_flow(card_status, isolation \\ :shared_clean) do
     board = insert(:board)
     pulls = insert(:stage, board: board, position: 1, type: :queue)
     works = insert(:stage, board: board, position: 2, type: :work)
@@ -67,7 +68,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
         board: board,
         key: "spec",
         enabled: true,
-        isolation: :shared_clean,
+        isolation: isolation,
         pulls_from_stage_id: pulls.id,
         works_in_stage_id: works.id,
         lands_on_stage_id: lands.id
@@ -114,6 +115,74 @@ defmodule Relay.Runs.Scheduler.ServerTest do
 
     assert_receive {:resume_run, 99, 7}, 500
     refute_receive {:start_run, _, _, _}, 50
+  end
+
+  test "an in-flight :running run holds its capacity slot across reconciles (B3 accounting)" do
+    %{board: board, pulls: pulls} = board_with_flow(:ready)
+    other_card = insert(:card, stage: pulls, status: :ready)
+
+    # A running run (on some other card) already holds the board's only advertised
+    # shared_clean slot — the executor's next heartbeat hasn't caught up yet.
+    start_engine([
+      %{id: 55, card_id: -1, status: :running, flow_key: "spec", isolation: :shared_clean, pinned_executor_id: nil}
+    ])
+
+    pid = start_server(board.id)
+    :ok = Capacity.put(7, %{shared_clean: 1, exclusive: 0})
+    :ok = Server.reconcile_now(pid)
+
+    refute_receive {:start_run, _, _, _}, 50
+    assert Repo.get!(Card, other_card.id).status == :queued
+  end
+
+  test "a :parked run holds no capacity slot — only :running runs are debited" do
+    %{board: board, card: card} = board_with_flow(:ready)
+
+    start_engine([
+      %{id: 55, card_id: -1, status: :parked, flow_key: "spec", isolation: :shared_clean, pinned_executor_id: nil}
+    ])
+
+    pid = start_server(board.id)
+    :ok = Capacity.put(7, %{shared_clean: 1, exclusive: 0})
+    :ok = Server.reconcile_now(pid)
+
+    assert_receive {:start_run, card_id, "spec", 7}, 500
+    assert card_id == card.id
+  end
+
+  test "an in-flight :exclusive run also debits a slot (greedy :any — pinning is unimplemented, RLY-139)" do
+    %{board: board, pulls: pulls} = board_with_flow(:ready, :exclusive)
+    other_card = insert(:card, stage: pulls, status: :ready)
+
+    # An exclusive run holds the board's only advertised exclusive slot. Pinning
+    # derivation doesn't exist yet (pinned_executor_id is always nil), so this must
+    # still debit greedily against :any — the aggregate slot count is what matters,
+    # even though the debited executor may not be the run's actual holder.
+    start_engine([
+      %{id: 55, card_id: -1, status: :running, flow_key: "spec", isolation: :exclusive, pinned_executor_id: nil}
+    ])
+
+    pid = start_server(board.id)
+    :ok = Capacity.put(7, %{shared_clean: 0, exclusive: 1})
+    :ok = Server.reconcile_now(pid)
+
+    refute_receive {:start_run, _, _, _}, 50
+    assert Repo.get!(Card, other_card.id).status == :queued
+  end
+
+  test "a :running run whose flow was deleted (isolation: nil) leaves capacity untouched" do
+    %{board: board, card: card} = board_with_flow(:ready)
+
+    start_engine([
+      %{id: 55, card_id: -1, status: :running, flow_key: "gone", isolation: nil, pinned_executor_id: nil}
+    ])
+
+    pid = start_server(board.id)
+    :ok = Capacity.put(7, %{shared_clean: 1, exclusive: 0})
+    :ok = Server.reconcile_now(pid)
+
+    assert_receive {:start_run, card_id, "spec", 7}, 500
+    assert card_id == card.id
   end
 
   test "disabling the flow unqueues a previously :queued card (criterion 5)" do

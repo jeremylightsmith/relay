@@ -48,6 +48,35 @@ defmodule Relay.Runs do
   @doc "The run with `id`; raises when absent."
   def get_run!(id), do: Repo.get!(Run, id)
 
+  @doc "The run with `id`, or nil."
+  def get_run(id), do: Repo.get(Run, id)
+
+  @doc """
+  The board's active runs (`status in [:running, :parked]`) as `Snapshot.run`
+  maps — the shape `Relay.Runs.Scheduler.plan/1` reads. `isolation` comes from
+  the live flow row (left-joined, so a run whose flow was deleted still appears
+  and excludes its card from fresh pulls, with `isolation: nil` → undispatchable
+  until the run fails on its next transition). `pinned_executor_id` is always
+  nil: executor-affinity pinning (deriving which executor already holds an
+  `:exclusive` run's worktree) is UNIMPLEMENTED (RLY-139), not merely unused.
+  Every board can enable an `:exclusive`-isolation flow today (e.g. the seeded
+  `code` flow, toggleable from board settings) — until RLY-139 lands, a parked
+  run from one never resumes (`Scheduler.resume_runs/2`'s `{:pinned, nil}`
+  target is never free), so enabling such a flow is not yet safe.
+  """
+  def active_runs(board_id) do
+    from(r in Run,
+      join: c in Card,
+      on: c.id == r.card_id,
+      left_join: f in Flow,
+      on: f.id == r.flow_id,
+      where: c.board_id == ^board_id and r.status in ^@active_statuses,
+      select: %{id: r.id, card_id: r.card_id, status: r.status, flow_key: r.flow_key, isolation: f.isolation}
+    )
+    |> Repo.all()
+    |> Enum.map(&Map.put(&1, :pinned_executor_id, nil))
+  end
+
   @doc "The card's single active (running or parked) run, or nil — backed by the partial unique index."
   def active_run(%Card{id: card_id}) do
     Repo.one(from r in Run, where: r.card_id == ^card_id and r.status in [:running, :parked])

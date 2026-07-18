@@ -1,10 +1,19 @@
 defmodule Relay.Runs.Capacity do
   @moduledoc """
   The executor-capacity seam (ADR 0006 / RLY-133): a GenServer owning a public
-  named ETS table of the current **free** capacity each connected executor
-  advertises per isolation class — `%{executor_id => %{shared_clean: n,
+  named ETS table of the **advertised** capacity each connected executor
+  carries per isolation class — `%{executor_id => %{shared_clean: n,
   exclusive: n}}`. Mirrors `Relay.RunnerPresence`: beats and reads never hop
   through the process, and state is lost on restart by design.
+
+  **Contract: this is the executor's configured per-class slot count, not a
+  live free count.** The heartbeat (`BoardController.heartbeat/2`) advertises
+  the same total on every beat; it does not decrement as jobs run. In-flight
+  `:running` runs are debited server-side, in
+  `Relay.Runs.Scheduler.Server.build_snapshot/1`, before the snapshot reaches
+  the planner — so a running run holds its slot across reconciles without the
+  executor having to re-advertise a decremented count (which would be racy
+  across reconciles).
 
   Global (not board-scoped): capacity is keyed by executor and read by every
   board's scheduler. Every `put/2`/`clear/1` broadcasts
@@ -32,8 +41,9 @@ defmodule Relay.Runs.Capacity do
   def subscribe, do: Phoenix.PubSub.subscribe(@pubsub, @topic)
 
   @doc """
-  Sets/replaces `executor_id`'s advertised free slots (missing classes default
-  to 0, negatives floor to 0) and broadcasts the change. Fire-and-forget: `:ok`.
+  Sets/replaces `executor_id`'s advertised (configured, not live-free) slots
+  (missing classes default to 0, negatives floor to 0) and broadcasts the
+  change. Fire-and-forget: `:ok`.
   """
   def put(executor_id, slots) when is_map(slots) do
     :ets.insert(@table, {executor_id, normalize(slots)})

@@ -87,12 +87,15 @@ sharing behavior.
   `DynamicSupervisor`) assembles the snapshot, calls `plan/1`, and delegates each decision
   to the injectable `Relay.Runs.Scheduler.Engine` behaviour (`active_runs/1`,
   `start_run/3`, `resume_run/2` — `config :relay, :runs_engine`; default
-  `Relay.Runs.Scheduler.NoopEngine` until a real adapter onto the run-execution engine
-  above is wired up). The scheduler writes no `Run` rows and moves no cards into
-  works-in — it owns only the `ready ↔ queued` marking; the engine owns the rest. It
-  reacts to the board's `Relay.Events` topic and `Relay.Runs.Capacity`'s
-  `runs:capacity` topic (an executor-keyed ETS store of advertised free capacity per
-  isolation class, empty until W9), with a slow ~60s tick as backstop. Cross-board
+  `Relay.Runs.Scheduler.RunsEngine`, the adapter onto `Relay.Runs.start_run/3` /
+  `resume_run/2` (`NoopEngine` remains for tests that inject it)). The scheduler writes no
+  `Run` rows and moves no cards into works-in — it owns only the `ready ↔ queued`
+  marking; the engine owns the rest. It reacts to the board's `Relay.Events` topic
+  and `Relay.Runs.Capacity`'s `runs:capacity` topic (an executor-keyed ETS store of
+  advertised capacity per isolation class, fed by the executor heartbeat's `name` +
+  `capacity` branch (`BoardController.heartbeat/2`); the scheduler's snapshot subtracts
+  each in-flight `:running` run's isolation class before planning, so a running run holds
+  its slot across reconciles), with a slow ~60s tick as backstop. Cross-board
   capacity is global by executor — a stale/contended view can over-assign; the
   executor's own live capacity is the final backstop (YAGNI: no multi-board reservation
   yet). `Relay.Runs.SchedulerSupervisor.start_all/0` boot-starts one scheduler per board
