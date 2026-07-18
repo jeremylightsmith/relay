@@ -56,4 +56,45 @@ defmodule RelayWeb.BoardLiveRunRealtimeTest do
 
     assert has_element?(view, "#card-drawer-tab-panel-run", "implement")
   end
+
+  # RLY-137 — the live engine (Relay.Runs.Listener, Relay.Runs.RunServer) broadcasts
+  # these fine-grained events on the same `board:<id>:runs` topic during ordinary
+  # board use (claim/park, answer/resume, rejection re-entry, every node transition).
+  # BoardLive previously only matched the coarse {:run_changed, card_id} used by
+  # tests, so any of these crashed the LiveView with a FunctionClauseError.
+  test "surviving the engine's :run_started event on the runs topic", %{conn: conn, board: board, card: card, run: run} do
+    assert_survives_run_event(conn, board, card, {:run_started, run})
+  end
+
+  test "surviving the engine's :run_parked event on the runs topic", %{conn: conn, board: board, card: card, run: run} do
+    assert_survives_run_event(conn, board, card, {:run_parked, run})
+  end
+
+  test "surviving the engine's :run_resumed event on the runs topic", %{conn: conn, board: board, card: card, run: run} do
+    assert_survives_run_event(conn, board, card, {:run_resumed, run})
+  end
+
+  test "surviving the engine's :run_finished event on the runs topic", %{conn: conn, board: board, card: card, run: run} do
+    assert_survives_run_event(conn, board, card, {:run_finished, run})
+  end
+
+  test "surviving the engine's :node_started event on the runs topic",
+       %{conn: conn, board: board, card: card, run: run, ne: ne} do
+    assert_survives_run_event(conn, board, card, {:node_started, run, ne})
+  end
+
+  test "surviving the engine's :node_finished event on the runs topic",
+       %{conn: conn, board: board, card: card, run: run, ne: ne} do
+    assert_survives_run_event(conn, board, card, {:node_finished, run, ne})
+  end
+
+  defp assert_survives_run_event(conn, board, card, message) do
+    ref = Cards.ref(board, card)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
+    render_async(view)
+
+    send(view.pid, message)
+
+    assert has_element?(view, "#card-drawer")
+  end
 end

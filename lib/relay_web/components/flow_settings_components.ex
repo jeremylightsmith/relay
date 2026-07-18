@@ -415,8 +415,8 @@ defmodule RelayWeb.FlowSettingsComponents do
           style="font-size:12px;line-height:1.5;color:oklch(0.38 0.02 255);"
         >
           <span style="font-weight:600;">{node.key}</span>
-          <span style="color:oklch(0.58 0.02 255);"> ·    {node.type}{node_meta(node)}</span>
-          <span :if={node.run} style="color:oklch(0.50 0.02 255);"> —    {node.run}</span>
+          <span style="color:oklch(0.58 0.02 255);"> ·     {node.type}{node_meta(node)}</span>
+          <span :if={node.run} style="color:oklch(0.50 0.02 255);"> —     {node.run}</span>
         </div>
       </div>
       <div

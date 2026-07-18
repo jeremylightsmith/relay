@@ -31,6 +31,7 @@ defmodule RelayWeb.BoardLive do
   alias Relay.Runs
   alias Schemas.Board
   alias Schemas.Card
+  alias Schemas.Run
   alias Schemas.Stage
 
   require Logger
@@ -1358,6 +1359,21 @@ defmodule RelayWeb.BoardLive do
 
     {:noreply, socket}
   end
+
+  # RLY-137 — the engine's fine-grained run events (Relay.Runs.Listener and
+  # Relay.Runs.RunServer both broadcast on the same `board:<id>:runs` topic as
+  # {:run_changed, card_id}) all carry the %Run{} that changed. Route each to the
+  # same card-scoped refetch rather than duplicating it.
+  def handle_info({:run_started, %Run{card_id: card_id}}, socket), do: handle_info({:run_changed, card_id}, socket)
+  def handle_info({:run_parked, %Run{card_id: card_id}}, socket), do: handle_info({:run_changed, card_id}, socket)
+  def handle_info({:run_resumed, %Run{card_id: card_id}}, socket), do: handle_info({:run_changed, card_id}, socket)
+  def handle_info({:run_finished, %Run{card_id: card_id}}, socket), do: handle_info({:run_changed, card_id}, socket)
+
+  def handle_info({:node_started, %Run{card_id: card_id}, _execution}, socket),
+    do: handle_info({:run_changed, card_id}, socket)
+
+  def handle_info({:node_finished, %Run{card_id: card_id}, _execution}, socket),
+    do: handle_info({:run_changed, card_id}, socket)
 
   # RLY-10 — a board rename (this or another session): retitle live. The
   # broadcast board carries no preloaded stages, so merge just the name onto

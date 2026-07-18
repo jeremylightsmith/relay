@@ -763,7 +763,7 @@ defmodule RelayWeb.RunComponents do
             {history_status_label(entry.run.status)}
           </span>
           <span style="font-size:13px;font-weight:600;color:oklch(0.28 0.02 255);">
-            Run #{entry.number} · v{entry.run.flow_version}
+            {history_title(entry)}
           </span>
           <span style="margin-left:auto;font-size:11px;color:oklch(0.55 0.02 255);">
             {ago(DateTime.utc_now(), entry.run.finished_at)} ago
@@ -787,6 +787,9 @@ defmodule RelayWeb.RunComponents do
     </div>
     """
   end
+
+  defp history_title(%{number: number, run: %{flow_version: nil}}), do: "Run ##{number}"
+  defp history_title(%{number: number, run: %{flow_version: v}}), do: "Run ##{number} · v#{v}"
 
   defp history_status_label(:done), do: "completed"
   defp history_status_label(status), do: Atom.to_string(status)

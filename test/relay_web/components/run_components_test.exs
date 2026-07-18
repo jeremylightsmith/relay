@@ -296,6 +296,23 @@ defmodule RelayWeb.RunComponentsTest do
       assert html =~ "ATTEMPTS"
       assert html =~ "$6.20"
     end
+
+    test "omits the dangling '· v' when flow_version is nil (RLY-152 pending)" do
+      html =
+        render_component(&RunComponents.run_history/1,
+          runs: [
+            %{
+              run: run(%{status: :done, flow_version: nil, finished_at: DateTime.utc_now()}),
+              number: 2,
+              node_executions: [ne("implement", 1, :succeeded)],
+              totals: %{duration_s: 120, nodes: 1, attempts: 1, cost: Decimal.new("0.10")}
+            }
+          ]
+        )
+
+      assert html =~ "Run #2"
+      refute html =~ "Run #2 · v"
+    end
   end
 
   describe "run_face/1" do
