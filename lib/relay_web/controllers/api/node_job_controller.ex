@@ -34,9 +34,9 @@ defmodule RelayWeb.Api.NodeJobController do
   """
   def claim(conn, params) do
     board = conn.assigns.current_board
-    exec_attrs = Map.put(Map.get(params, "executor", %{}), "capacity", Map.get(params, "capacity"))
 
-    with {:ok, executor} <- Runs.upsert_executor(board, exec_attrs) do
+    with {:ok, exec_attrs} <- executor_attrs(params),
+         {:ok, executor} <- Runs.upsert_executor(board, exec_attrs) do
       case Runs.claim_next_job(executor) do
         {:ok, nil} -> maybe_wait(conn, board, executor, params)
         {:ok, job} -> json(conn, claim_payload(job))
@@ -69,9 +69,9 @@ defmodule RelayWeb.Api.NodeJobController do
   """
   def heartbeat(conn, params) do
     board = conn.assigns.current_board
-    exec_attrs = Map.put(Map.get(params, "executor", %{}), "capacity", Map.get(params, "capacity"))
 
-    with {:ok, executor} <- Runs.upsert_executor(board, exec_attrs) do
+    with {:ok, exec_attrs} <- executor_attrs(params),
+         {:ok, executor} <- Runs.upsert_executor(board, exec_attrs) do
       running = Map.get(params, "running", [])
       advertise_capacity(executor, Map.get(params, "capacity"))
       # Recover the other direction too (RLY-170): a job this executor still HOLDS but is no
@@ -80,6 +80,19 @@ defmodule RelayWeb.Api.NodeJobController do
       # reaper (this executor is alive). The absence of a job from `running` is the signal.
       :ok = Runs.requeue_orphaned_jobs(board, executor, running)
       json(conn, %{revoked: Runs.revoked_among(board, running)})
+    end
+  end
+
+  # RLY-162: `Map.get/3` returns whatever the client sent, so a non-map `executor` made
+  # `Map.put/3` raise BadMapError → a 500 on the executor's front door. Reject the shape
+  # here (a request-shape concern) rather than in Runs, which normalizes permissively.
+  defp executor_attrs(params) do
+    case Map.get(params, "executor", %{}) do
+      executor when is_map(executor) ->
+        {:ok, Map.put(executor, "capacity", Map.get(params, "capacity"))}
+
+      _ ->
+        {:error, :invalid_executor}
     end
   end
 
