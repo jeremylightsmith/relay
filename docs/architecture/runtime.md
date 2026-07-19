@@ -44,6 +44,42 @@ One flat `one_for_one` supervisor (`Relay.Supervisor`, started by `Relay.Applica
 | `Relay.Runs.ExecutorReaper` | inside `Relay.Runs.Supervisor` — periodic (30s) sweep calling `Relay.Runs.reclaim_stale_executors/0`: requeues a dead executor's `shared_clean` jobs, parks its `exclusive` runs (`parked_reason: :executor_gone`). No new PubSub topic — the claim long-poll (`POST /api/node-jobs/claim`) reuses `board:<id>:runs` below. |
 | `RelayWeb.Endpoint` | Bandit HTTP server, WebSockets |
 
+## Session lifetime
+
+The browser session is a signed cookie (`_relay_key`, no server-side record). Its policy is
+**7 days, sliding** (RLY-127), and it lives in three places that must agree:
+
+| Piece | Where | Role |
+| --- | --- | --- |
+| `RelayWeb.SessionPolicy` | `lib/relay_web/session_policy.ex` | the only copy of the numbers: `max_age/0` = 7 days, `refresh_after/0` = 1 day |
+| `max_age` on `@session_options` | `lib/relay_web/endpoint.ex` | makes `_relay_key` persistent so it survives tab eviction / browser restart. Also reaches the LiveView socket via `connect_info` |
+| `:session_refreshed_at` in the session | `RelayWeb.Auth` | the server-side window |
+
+The cookie attribute is a **client-side hint only** — `Plug.Session.COOKIE.get/3` does no age
+check, so a client can replay an arbitrarily old cookie. `RelayWeb.Auth` therefore enforces the
+window itself:
+
+- `fetch_current_scope/2` (the `:browser` and `:native_user_auth` pipelines) **expires** a session stamped past
+  `max_age/0` and **re-stamps** one older than `refresh_after/0`. The re-stamp is a session
+  write, and `Plug.Session` only emits `Set-Cookie` on a write — that is what slides the
+  cookie's `Max-Age` forward. Throttling to once a day is what keeps `Set-Cookie` off every
+  response.
+- `mount_current_scope/2` (the `on_mount` hooks) **expires only** — a LiveView mount has no
+  `conn` and cannot write a cookie. It closes the hole where a stale cookie mounts a LiveView
+  on socket reconnect without passing through the plug pipeline.
+- `NativeAuthController.me/2` **expires and re-stamps**: it rejects a session past the window
+  with 401 and mints no bearer token — `me/2` is the only server-side check a replayed native
+  cookie ever meets (the `:native_auth` pipeline does not run `fetch_current_scope/2`), and
+  `mint_token/1` hands back a bearer that outlives the session it came from. On success it
+  re-stamps: the Flutter shell's launch-time verify is the native app's only touch point, and
+  `_restore()` writes the refreshed cookie back to the Keychain.
+- A session with **no** stamp (predating RLY-127) is re-stamped, never expired — expiring them
+  would sign out every existing user on deploy.
+
+There is no revocation: invalidating a session today means rotating `SECRET_KEY_BASE`, which
+signs out everyone everywhere. Server-side session records and "sign out of all devices" are
+tracked as a separate follow-up.
+
 ## PubSub topics
 
 | Topic | Broadcaster | Events | Subscribers |

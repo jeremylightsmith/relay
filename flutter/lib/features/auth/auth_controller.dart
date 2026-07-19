@@ -96,6 +96,10 @@ class AuthController extends Notifier<AuthState> {
           resp.data['success'] == true;
 
       if (ok) {
+        // /me slides the 7-day session window (RLY-127) and answers with a fresh
+        // `_relay_key`. The jar has it; write it back to the Keychain or the next
+        // cold start restores the older cookie and the window never really slides.
+        await persistSession();
         state = AuthState(
           status: AuthStatus.signedIn,
           user: Map<String, dynamic>.from(resp.data['user'] as Map),

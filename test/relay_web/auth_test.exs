@@ -35,6 +35,95 @@ defmodule RelayWeb.AuthTest do
     end
   end
 
+  describe "session_expired?/1 and session_stale?/1" do
+    test "a missing stamp is stale but never expired (pre-RLY-127 sessions)" do
+      # Grandfathering: expiring these would sign out every existing user on deploy.
+      assert Auth.session_stale?(%{"user_id" => 1})
+      refute Auth.session_expired?(%{"user_id" => 1})
+    end
+
+    test "a fresh stamp is neither stale nor expired" do
+      session = %{"session_refreshed_at" => System.system_time(:second)}
+
+      refute Auth.session_stale?(session)
+      refute Auth.session_expired?(session)
+    end
+
+    test "a stamp older than a day is stale but not expired" do
+      session = %{"session_refreshed_at" => System.system_time(:second) - (60 * 60 * 24 + 60)}
+
+      assert Auth.session_stale?(session)
+      refute Auth.session_expired?(session)
+    end
+
+    test "a stamp older than the 7-day window is expired" do
+      session = %{"session_refreshed_at" => System.system_time(:second) - (60 * 60 * 24 * 7 + 60)}
+
+      assert Auth.session_expired?(session)
+    end
+  end
+
+  describe "fetch_current_scope/2 session window" do
+    setup do
+      %{user: insert(:user)}
+    end
+
+    test "a session stamped inside the throttle is not re-stamped", %{conn: conn, user: user} do
+      stamp = System.system_time(:second) - 60
+
+      conn =
+        conn
+        |> put_session(:user_id, user.id)
+        |> put_session(:session_refreshed_at, stamp)
+        |> Auth.fetch_current_scope([])
+
+      assert conn.assigns.current_scope.user.id == user.id
+      # Unchanged stamp == no session write == no Set-Cookie on this response.
+      assert get_session(conn, :session_refreshed_at) == stamp
+    end
+
+    test "a session stamped over a day ago is re-stamped", %{conn: conn, user: user} do
+      stale = System.system_time(:second) - (60 * 60 * 24 + 60)
+
+      conn =
+        conn
+        |> put_session(:user_id, user.id)
+        |> put_session(:session_refreshed_at, stale)
+        |> Auth.fetch_current_scope([])
+
+      assert conn.assigns.current_scope.user.id == user.id
+      assert get_session(conn, :session_refreshed_at) > stale
+    end
+
+    test "a session with no stamp is grandfathered in and stamped", %{conn: conn, user: user} do
+      conn = conn |> put_session(:user_id, user.id) |> Auth.fetch_current_scope([])
+
+      assert conn.assigns.current_scope.user.id == user.id
+      assert is_integer(get_session(conn, :session_refreshed_at))
+    end
+
+    test "a session stamped past the window is rejected and cleared", %{conn: conn, user: user} do
+      expired = System.system_time(:second) - (60 * 60 * 24 * 7 + 60)
+
+      conn =
+        conn
+        |> put_session(:user_id, user.id)
+        |> put_session(:session_refreshed_at, expired)
+        |> Auth.fetch_current_scope([])
+
+      assert conn.assigns.current_scope == nil
+      refute get_session(conn, :user_id)
+    end
+
+    test "an anonymous session is left untouched", %{conn: conn} do
+      conn = Auth.fetch_current_scope(conn, [])
+
+      assert conn.assigns.current_scope == nil
+      # Stamping anonymous visitors would put a Set-Cookie on every marketing page.
+      refute get_session(conn, :session_refreshed_at)
+    end
+  end
+
   describe "require_authenticated/2" do
     test "halts and redirects to the sign-in page without a current scope", %{conn: conn} do
       conn =
@@ -68,6 +157,14 @@ defmodule RelayWeb.AuthTest do
       assert get_session(conn, :user_id) == user.id
       refute conn.halted
       assert conn.status == nil
+    end
+
+    test "stamps the session refresh time at sign-in", %{conn: conn} do
+      user = insert(:user)
+
+      conn = Auth.put_user_session(conn, user)
+
+      assert_in_delta get_session(conn, :session_refreshed_at), System.system_time(:second), 5
     end
 
     test "resolves pending invites for the user's email", %{conn: conn} do
@@ -109,6 +206,41 @@ defmodule RelayWeb.AuthTest do
 
       refute get_session(conn, :user_id)
       assert redirected_to(conn) == ~p"/"
+    end
+  end
+
+  describe "on_mount :mount_current_scope session window" do
+    test "assigns the scope for a session inside the window" do
+      user = insert(:user)
+      session = %{"user_id" => user.id, "session_refreshed_at" => System.system_time(:second)}
+
+      {:cont, socket} = Auth.on_mount(:mount_current_scope, %{}, session, %Socket{})
+
+      assert socket.assigns.current_scope.user.id == user.id
+    end
+
+    test "still mounts a session with no stamp (grandfathered, expiry-only path)" do
+      user = insert(:user)
+
+      {:cont, socket} = Auth.on_mount(:mount_current_scope, %{}, %{"user_id" => user.id}, %Socket{})
+
+      # A mount has no conn and cannot re-stamp, so a missing stamp must still mount.
+      assert socket.assigns.current_scope.user.id == user.id
+    end
+
+    test "refuses a session stamped past the window" do
+      user = insert(:user)
+
+      session = %{
+        "user_id" => user.id,
+        "session_refreshed_at" => System.system_time(:second) - (60 * 60 * 24 * 7 + 60)
+      }
+
+      # Closes the hole where a stale cookie mounts a LiveView on socket reconnect
+      # without ever passing through the plug pipeline.
+      {:cont, socket} = Auth.on_mount(:mount_current_scope, %{}, session, %Socket{})
+
+      assert socket.assigns.current_scope == nil
     end
   end
 

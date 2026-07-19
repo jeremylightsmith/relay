@@ -7,13 +7,21 @@ import 'package:dio/dio.dart';
 /// push_service_test's RecordingAdapter (the repo's structural-seam convention),
 /// but lets a test choose the status/body or fail the request outright.
 class StubAdapter implements HttpClientAdapter {
-  StubAdapter({this.statusCode = 200, this.body = const {}, this.failure});
+  StubAdapter({
+    this.statusCode = 200,
+    this.body = const {},
+    this.failure,
+    this.headers = const {},
+  });
 
   final int statusCode;
   final Map<String, dynamic> body;
 
   /// When set, every request throws this instead of answering — the network-error path.
   final Object? failure;
+
+  /// Extra response headers, e.g. a `set-cookie` the jar should pick up.
+  final Map<String, List<String>> headers;
 
   final List<RequestOptions> requests = [];
 
@@ -30,6 +38,7 @@ class StubAdapter implements HttpClientAdapter {
       statusCode,
       headers: {
         Headers.contentTypeHeader: [Headers.jsonContentType],
+        ...headers,
       },
     );
   }

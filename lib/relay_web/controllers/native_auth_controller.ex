@@ -47,22 +47,33 @@ defmodule RelayWeb.NativeAuthController do
   mysterious 401 deep inside a webview.
   """
   def me(conn, _params) do
-    case conn |> get_session(:user_id) |> fetch_user() do
-      nil ->
-        conn
-        |> put_status(:unauthorized)
-        |> json(%{success: false, error: "Not signed in"})
+    session = get_session(conn)
 
-      user ->
-        case mint_token(user) do
-          {:ok, token} ->
-            json(conn, %{success: true, user: user_json(user), token: token})
+    # A cookie stamped past the 7-day window must not mint a token here — this is
+    # the only server-side check that ever runs for a replayed native cookie, and
+    # `mint_token/1` hands back a bearer that outlives the session it came from
+    # (RLY-127). Checked before user lookup so an expired cookie takes the same
+    # clean-sign-out 401 path as a missing/gone session.
+    with true <- fresh_session?(session),
+         user when not is_nil(user) <- fetch_user(session["user_id"]),
+         {:ok, token} <- mint_token(user) do
+      # The native shell's launch-time verify is its only touch point, so this is
+      # where its 7-day window slides forward (RLY-127). Without it a native
+      # session would quietly age out while the shell still believed it was
+      # signed in, and the embedded webview would bounce to sign-in.
+      conn
+      |> Auth.refresh_session()
+      |> json(%{success: true, user: user_json(user), token: token})
+    else
+      {:error, _} ->
+        conn |> put_status(:internal_server_error) |> json(%{success: false, error: "Could not mint a token"})
 
-          {:error, _} ->
-            conn |> put_status(:internal_server_error) |> json(%{success: false, error: "Could not mint a token"})
-        end
+      _not_signed_in ->
+        conn |> put_status(:unauthorized) |> json(%{success: false, error: "Not signed in"})
     end
   end
+
+  defp fresh_session?(session), do: not Auth.session_expired?(session)
 
   defp fetch_user(nil), do: nil
   defp fetch_user(user_id), do: Accounts.get_user(user_id)

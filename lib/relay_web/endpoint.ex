@@ -4,11 +4,16 @@ defmodule RelayWeb.Endpoint do
   # The session will be stored in the cookie and signed,
   # this means its contents can be read but not tampered with.
   # Set :encryption_salt if you would also like to encrypt it.
+  # `max_age` makes `_relay_key` a persistent cookie so it survives tab eviction and
+  # a browser restart (RLY-127). It is a client-side hint only — `RelayWeb.Auth`
+  # enforces the same window server-side. `@session_options` is also handed to the
+  # LiveView socket `connect_info` below, so the socket picks this up for free.
   @session_options [
     store: :cookie,
     key: "_relay_key",
     signing_salt: "qdt1bkDB",
-    same_site: "Lax"
+    same_site: "Lax",
+    max_age: RelayWeb.SessionPolicy.max_age()
   ]
 
   # `:user_agent` carries the Ecto sandbox metadata for browser acceptance tests
