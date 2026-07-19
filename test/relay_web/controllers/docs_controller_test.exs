@@ -35,6 +35,80 @@ defmodule RelayWeb.DocsControllerTest do
     assert_error_sent 404, fn -> get(conn, "/docs/does-not-exist") end
   end
 
+  test "every architecture page returns 200 signed out", %{conn: conn} do
+    pages = [
+      {"/docs/architecture", "Relay architecture"},
+      {"/docs/architecture-domain", "Domain model"},
+      {"/docs/architecture-runtime", "Runtime"},
+      {"/docs/architecture-runner", "runner"},
+      {"/docs/architecture-state", "State reference"},
+      {"/docs/architecture-deps", "Dependencies"}
+    ]
+
+    for {path, needle} <- pages do
+      html = conn |> get(path) |> html_response(200)
+      assert html =~ needle, "expected #{path} to render #{inspect(needle)}"
+    end
+  end
+
+  test "the sidebar carries an Architecture section", %{conn: conn} do
+    html = conn |> get(~p"/docs") |> html_response(200)
+
+    assert html =~ "Architecture"
+    assert html =~ ~s(href="/docs/architecture-state")
+  end
+
+  test "the state reference documents all four state machines", %{conn: conn} do
+    html = conn |> get(~p"/docs/architecture-state") |> html_response(200)
+
+    for value <- ~w(running parked cancelled queued claimed revoked succeeded partial) do
+      assert html =~ value, "state reference is missing #{value}"
+    end
+  end
+
+  test "the get-started orientation page links to the state reference", %{conn: conn} do
+    html = conn |> get(~p"/docs/statuses-and-outcomes") |> html_response(200)
+
+    assert html =~ "Statuses"
+    assert html =~ ~s(href="/docs/architecture-state")
+  end
+
+  # This is the guard that keeps dead links from shipping: on the public site a *relative*
+  # link whose href still ends in .md points at a file nobody can fetch. An absolute GitHub
+  # blob URL legitimately ends in .md too — that's the documented fallback (constraint 5) and
+  # it does resolve, just off-site, so it is not "dead" and is excluded here.
+  test "no rendered architecture page carries a relative href ending in .md", %{conn: conn} do
+    for path <- [
+          "/docs/architecture",
+          "/docs/architecture-domain",
+          "/docs/architecture-runtime",
+          "/docs/architecture-runner",
+          "/docs/architecture-state",
+          "/docs/architecture-deps"
+        ] do
+      html = conn |> get(path) |> html_response(200)
+
+      hrefs =
+        ~r/href="([^"]+)"/
+        |> Regex.scan(html)
+        |> Enum.map(fn [_, href] -> href end)
+
+      dead =
+        hrefs
+        |> Enum.reject(&String.starts_with?(&1, "http"))
+        |> Enum.filter(&String.ends_with?(&1, ".md"))
+
+      assert dead == [], "#{path} ships dead markdown links: #{inspect(dead)}"
+    end
+  end
+
+  test "architecture links resolve on-site or to GitHub", %{conn: conn} do
+    html = conn |> get(~p"/docs/architecture") |> html_response(200)
+
+    assert html =~ ~s(href="/docs/architecture-domain")
+    assert html =~ "https://github.com/jeremylightsmith/relay/blob/main/docs/vision.md"
+  end
+
   test "the sidebar lists all seven pages grouped into the two sections", %{conn: conn} do
     html = conn |> get(~p"/docs") |> html_response(200)
 
@@ -107,7 +181,7 @@ defmodule RelayWeb.DocsControllerTest do
     refute first =~ "docs-pager-prev"
     assert first =~ "docs-pager-next"
 
-    last = conn |> get(~p"/docs/api") |> html_response(200)
+    last = conn |> get(~p"/docs/architecture-deps") |> html_response(200)
     assert last =~ "docs-pager-prev"
     refute last =~ "docs-pager-next"
   end
@@ -156,5 +230,18 @@ defmodule RelayWeb.DocsControllerTest do
       |> LazyHTML.text()
 
     assert eyebrow =~ "GET STARTED"
+  end
+
+  test "mermaid fences reach the page as language-mermaid for the client to render", %{conn: conn} do
+    html = conn |> get(~p"/docs/architecture-runtime") |> html_response(200)
+
+    assert html =~ ~s(class="language-mermaid")
+    assert html =~ "flowchart LR"
+  end
+
+  test "the docs layout loads the docs-only bundle", %{conn: conn} do
+    html = conn |> get(~p"/docs/architecture-runtime") |> html_response(200)
+
+    assert html =~ "/assets/js/docs.js"
   end
 end

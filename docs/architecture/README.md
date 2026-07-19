@@ -55,6 +55,9 @@ LiveView UI serves web and mobile — the mobile apps are thin native shells aro
 | [runner.md](runner.md) | How does work physically get done by agents? |
 | [deps.md](deps.md) | What do modules and the app depend on, internally and externally? |
 
+- [State reference](state.md) — card status, run status, node-job state and the four node
+  outcomes, with their transitions and the seams between them.
+
 ---
 *Sources of truth: `lib/relay.ex`, `lib/relay_web.ex`, `lib/schemas.ex`,
 `docs/adr/0001`, `docs/adr/0002`, `fly.toml`.*

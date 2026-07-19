@@ -142,4 +142,62 @@ defmodule Relay.MarkdownTest do
       assert Markdown.table_of_contents(nil) == []
     end
   end
+
+  describe "to_docs_html/2 with :rewrite_links" do
+    @slugs %{
+      "docs/architecture/domain.md" => "architecture-domain",
+      "docs/architecture/runtime.md" => "architecture-runtime"
+    }
+
+    defp render_arch(markdown) do
+      {:safe, html} =
+        Markdown.to_docs_html(markdown,
+          rewrite_links: {"docs/architecture", @slugs}
+        )
+
+      html
+    end
+
+    test "an intra-architecture link becomes a /docs path" do
+      assert render_arch("See [domain](domain.md).") =~ ~s(href="/docs/architecture-domain")
+    end
+
+    test "an anchor survives the rewrite" do
+      assert render_arch("See [domain](domain.md#contexts).") =~
+               ~s(href="/docs/architecture-domain#contexts")
+    end
+
+    test "an unpublished file becomes a GitHub blob URL" do
+      html = render_arch("See [ADR 0006](../adr/0006-workflow-orchestration.md).")
+
+      assert html =~
+               ~s(href="https://github.com/jeremylightsmith/relay/blob/main/docs/adr/0006-workflow-orchestration.md")
+    end
+
+    test "an absolute URL is left alone" do
+      assert render_arch("See [boundary](https://hexdocs.pm/boundary).") =~
+               ~s(href="https://hexdocs.pm/boundary")
+    end
+
+    test "a link inside a fenced code block is not mangled" do
+      html = render_arch("```elixir\n# see [domain](domain.md)\n```")
+
+      assert html =~ "[domain](domain.md)"
+      refute html =~ "/docs/architecture-domain"
+    end
+
+    test "a mermaid fence still reaches the HTML as language-mermaid" do
+      html = render_arch("```mermaid\nflowchart LR\n  a --> b\n```")
+
+      assert html =~ ~s(class="language-mermaid")
+      assert html =~ "flowchart LR"
+    end
+
+    test "without the option, output is identical to to_docs_html/1" do
+      markdown = "See [domain](domain.md) and [x](https://example.com).\n\n## Heading\n"
+
+      assert Markdown.to_docs_html(markdown) ==
+               Markdown.to_docs_html(markdown, [])
+    end
+  end
 end

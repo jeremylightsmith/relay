@@ -122,12 +122,20 @@ defmodule Relay.MixProject do
       # otherwise the hooks under test run against a stale bundle.
       "test.browser": ["assets.build", "test --only playwright"],
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
-      "assets.build": ["compile", "tailwind relay", "tailwind storybook", "esbuild relay", "esbuild storybook"],
+      "assets.build": [
+        "compile",
+        "tailwind relay",
+        "tailwind storybook",
+        "esbuild relay",
+        "esbuild storybook",
+        "esbuild docs"
+      ],
       "assets.deploy": [
         "tailwind relay --minify",
         "tailwind storybook --minify",
         "esbuild relay --minify",
         "esbuild storybook --minify",
+        "esbuild docs --minify",
         "phx.digest"
       ],
       precommit: [

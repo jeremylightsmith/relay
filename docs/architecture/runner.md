@@ -18,6 +18,22 @@ the board-key REST API.
 
 ## Dispatch is server-side
 
+A sketch of a Code flow in this model (edges labeled with the outcome that routes them):
+
+```mermaid
+flowchart LR
+    start([start]) --> impl["agent: implement task<br/>(runs repo skills)"]
+    impl -- succeeded --> review["agent: spec + quality review"]
+    review -- failed --> impl
+    review -- succeeded --> pre{"gate: mix precommit"}
+    pre -- failed --> impl
+    pre -- succeeded --> smoke["agent: smoke test"]
+    smoke -- needs_input --> human{{"human answers<br/>(implicit pause — card blocked)"}}
+    human --> smoke
+    smoke -- succeeded --> merge["shell: push · PR · squash-merge"]
+    merge -- succeeded --> done([done])
+```
+
 A card in any AI-enabled stage is dispatched by `Relay.Runs.Scheduler` (folding over every
 enabled `Flow` on the board, rightmost `works_in` stage position first) straight to the
 node-job engine (`Relay.Runs`) — no per-stage config file, no board-runner poll loop.
@@ -78,7 +94,8 @@ that stays server-side.
 - `POST /api/node-jobs/:id/outcome` (`.outcome/2`) — `Relay.Runs.get_claimed_job/2` (board-
   scoped, 409 `conflict` if the job isn't `claimed`/`running`), then
   `Relay.Runs.report_outcome/2` against the closed outcome set (422 `unknown_outcome`
-  otherwise).
+  otherwise). The four outcomes and what each does to the run and the card are tabulated in
+  the [state reference](state.md).
 - **Executor heartbeat superset.** `BoardController.heartbeat/2`'s `/api/board/heartbeat`
   route carries an independent, additive branch: a beat carrying `name` + `capacity` calls
   `Relay.Runs.upsert_executor/2`, writing/refreshing a durable `Schemas.Executor` row

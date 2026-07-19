@@ -2,6 +2,26 @@
 
 ## Supervision tree
 
+```mermaid
+flowchart LR
+    subgraph fly["Phoenix app (Fly)"]
+        engine["Flow engine<br/>Relay.Flows / Relay.Runs"]
+        db[("Postgres<br/>flows · runs · node outcomes")]
+        board["Board UI (LiveView)<br/>live run state on the card"]
+        engine --- db
+        engine -- "PubSub run events" --> board
+    end
+    subgraph dev["Developer machine (or future cloud sandbox)"]
+        exec["bin/relay executor<br/>(thin: claim job, run, report)"]
+        agent["claude -p<br/>one agent node"]
+        repo["project checkout + worktrees<br/>CLAUDE.md · .claude/skills · MCP<br/>(developer-owned)"]
+        exec --> agent
+        agent --- repo
+    end
+    engine -- "node-jobs" --> exec
+    exec -- "output stream + typed outcome" --> engine
+```
+
 One flat `one_for_one` supervisor (`Relay.Supervisor`, started by `Relay.Application`):
 
 | Child | Purpose |
