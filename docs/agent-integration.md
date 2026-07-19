@@ -139,6 +139,12 @@ never wrote a clean outcome:
    `final_review` reach `merge`.) Rule 1 still covers the legitimate "I stopped to ask a
    human" case, so a skill that parks on a question needs no outcome file.
 
+Agents declare their outcome by running **`relay outcome <outcome> [--detail TEXT|@file]`**
+(RLY-175) rather than writing the file by hand: `json.dump` does the writing, so a `detail`
+containing quotes or newlines cannot produce invalid JSON. A drill run died exactly that way —
+a review's outcome file failed to parse, the node was correctly reported `failed`, and the
+parse error was handed to the fixer as its findings list.
+
 Because rule 3 now fails a silent node, the executor **appends the outcome-contract
 instruction to every agent node's prompt automatically** (`OUTCOME_CONTRACT` in `bin/relay`) —
 the requirement travels with every invocation rather than depending on each flow's node prompt

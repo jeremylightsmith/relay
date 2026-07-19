@@ -936,16 +936,19 @@ def check_branch_attached(slot_path, isolation, branch, cmd):
 OUTCOME_CONTRACT = """
 
 ---
-BEFORE YOU FINISH — declare your outcome (required). Write JSON to the file named by the
-$RELAY_NODE_OUTCOME environment variable:
+BEFORE YOU FINISH — declare your outcome (required). Run:
 
-    {"outcome": "succeeded|failed|partial", "detail": "one line on what you did or what is wrong"}
+    {relay} outcome succeeded --detail "one line on what you did"
+    {relay} outcome failed    --detail @/tmp/findings.md
 
-`detail` is handed to the next node as {prior.detail}, so make it useful — for a review, the
-findings; for a failure, why. If you need a human instead, run `relay needs-input <ref> --questions @<file>`
-and stop; that parks the run and you need not write this file. Exiting without either is
-reported as `failed`, because a node that declares nothing cannot be distinguished from one
-that did nothing."""
+Valid outcomes: succeeded | failed | partial. Use `--detail @file` for anything long or
+containing quotes or newlines — do NOT hand-write the JSON yourself; this command writes it.
+
+`detail` is handed to the next node as {prior.detail}, so make it useful: for a review, the
+actual findings; for a failure, why. If you need a human instead, run
+`{relay} needs-input <ref> --questions @<file>` and stop — that parks the run and you need not
+declare an outcome. Exiting without either is reported as `failed`, because a node that
+declares nothing cannot be distinguished from one that did nothing."""
 
 
 def run_node_job(job, slot_path, control):
@@ -985,7 +988,7 @@ def run_node_job(job, slot_path, control):
         outcome_path = os.path.join(outcome_dir, "outcome.json")
         try:
             ok, session_id = _stream_claude_job(
-                cmd + OUTCOME_CONTRACT, cwd=slot_path, tag=tag,
+                cmd + render(OUTCOME_CONTRACT, vars), cwd=slot_path, tag=tag,
                 session_id=job.get("resume_session"),
                 outcome_path=outcome_path, on_proc=control.register, agent=job.get("agent"))
             outcome, detail = determine_agent_outcome(job, ok, outcome_path)
@@ -1187,6 +1190,34 @@ def cmd_execute(args):
         FORWARDER.stop()
 
 
+NODE_OUTCOMES = ("succeeded", "failed", "partial", "needs_input")
+
+
+def cmd_outcome(args):
+    """Declare this node's outcome by writing $RELAY_NODE_OUTCOME (RLY-175).
+
+    RLY-163 requires every agent node to declare an outcome — a node that writes nothing is
+    reported `failed`, because a `claude -p` that exits 0 having done nothing is
+    indistinguishable from one that did the work. But that made every agent hand-write JSON
+    through a shell heredoc, and a long `detail` containing a quote or a newline produces
+    invalid JSON. That is precisely how a drill run died: final_review's outcome file failed to
+    parse, the executor correctly reported `failed`, and the PARSE ERROR was handed to
+    final_fix as its findings list.
+
+    So the JSON is written by json.dump here, and the agent only has to name an outcome and
+    hand over text. `detail` accepts TEXT, "-" (stdin) or "@path", like every other text arg.
+    """
+    if args.outcome not in NODE_OUTCOMES:
+        die(f"outcome must be one of {', '.join(NODE_OUTCOMES)} (got {args.outcome!r})")
+    path = os.environ.get("RELAY_NODE_OUTCOME")
+    if not path:
+        die("RELAY_NODE_OUTCOME is not set — `relay outcome` only runs inside an agent node")
+    detail = read_arg(args.detail) if args.detail else ""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"outcome": args.outcome, "detail": detail}, f)
+    return {"outcome": args.outcome}
+
+
 # ============================ argparse ============================
 
 def build_parser():
@@ -1205,6 +1236,8 @@ def build_parser():
     bd = add("board", cmd_board, json_flag=True)
     bd.add_argument("--include-done", action="store_true")
     add("card", cmd_card, "ref", json_flag=True)
+    oc = add("outcome", cmd_outcome, "outcome")
+    oc.add_argument("--detail")
     c = add("create", cmd_create, "title", json_flag=True)
     c.add_argument("--stage")
     c.add_argument("--description")
