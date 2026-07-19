@@ -1712,5 +1712,96 @@ class ExecutorHeartbeatCapacityTest(unittest.TestCase):
         hb._beat()
         self.assertEqual(killed, ["nj-7"])
 
+
+class RealGitWorktreeTest(unittest.TestCase):
+    """RLY-173, and a deliberate change of testing style.
+
+    Every executor/server bug found during the first live cutover (RLY-163, 165, 166, 170, and
+    a regression in my own RLY-166 guard) shared one cause: each side was tested against its
+    OWN IMAGINED version of the other's contract. The W10 review named it — 'the tests
+    hand-build job dicts in the executor's imagined shape, so they pass while the real
+    integration cannot work'. Mocking `subprocess.run` here would test beliefs about git.
+
+    So these tests drive a REAL git repository in a temp dir. If the executor's idea of what
+    `git checkout` does is wrong, this fails; a mock would happily agree with the mistake.
+    """
+
+    def setUp(self):
+        import tempfile, shutil
+        self.dir = tempfile.mkdtemp(prefix="relay-git-test-")
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.email", "t@example.com")
+        self.git("config", "user.name", "T")
+        self.write("seed.txt", "seed")
+        self.git("add", "-A"); self.git("commit", "-qm", "seed")
+        self.control = relay.JobControl()
+
+    def git(self, *args):
+        return relay.subprocess.run(["git", *args], cwd=self.dir, capture_output=True, text=True)
+
+    def write(self, name, text):
+        with open(os.path.join(self.dir, name), "w") as f:
+            f.write(text)
+
+    def head_ref(self):
+        return self.git("symbolic-ref", "-q", "HEAD").stdout.strip()
+
+    def test_an_exclusive_job_reattaches_a_detached_worktree_to_its_branch(self):
+        """The RLY-170 drill's exact end state: the orphan is requeued and re-claimed, but the
+        restart left the worktree detached, so the guard refused forever. The run's commits are
+        still on the branch — HEAD just needs pointing back at them."""
+        branch = "rly-1-feature"
+        self.git("checkout", "-q", "-b", branch)
+        self.write("work.txt", "committed before the interruption")
+        self.git("add", "-A"); self.git("commit", "-qm", "run work")
+        wanted = self.git("rev-parse", "HEAD").stdout.strip()
+
+        # What reset_worktree() leaves behind: detached, branch ref intact.
+        self.git("checkout", "-q", "--detach", "main")
+        self.assertEqual(self.head_ref(), "", "precondition: worktree is detached")
+
+        job = {"id": "nj-1", "run_id": "r1", "node_type": "shell", "run": "true",
+               "isolation": "exclusive", "vars": {"ref": "RLY-1", "branch": branch}}
+        outcome, detail, sha, _session = relay.run_node_job(job, self.dir, self.control)
+
+        self.assertEqual(outcome, "succeeded", detail)
+        self.assertEqual(self.head_ref(), "refs/heads/" + branch)
+        self.assertEqual(sha, wanted, "the pre-interruption commit must still be HEAD")
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "work.txt")),
+                        "work committed before the interruption must be restored")
+
+    def test_the_guard_still_refuses_when_no_such_branch_exists(self):
+        """Re-attaching must not weaken RLY-166: a detached worktree with NO matching branch is
+        still the dangerous case, because commits there would reach nothing."""
+        self.git("checkout", "-q", "--detach", "main")
+        job = {"id": "nj-2", "run_id": "r1", "node_type": "shell", "run": "true",
+               "isolation": "exclusive", "vars": {"ref": "RLY-1", "branch": "never-created"}}
+        outcome, detail, _sha, _session = relay.run_node_job(job, self.dir, self.control)
+
+        self.assertEqual(outcome, "failed")
+        self.assertIn("detached", detail)
+
+    def test_shared_clean_is_left_detached_on_purpose(self):
+        """exec-clean is created --detach deliberately and never commits. Re-attaching it (or
+        guarding it) is what broke every Spec and Plan node when the guard first shipped."""
+        self.git("checkout", "-q", "--detach", "main")
+        job = {"id": "nj-3", "run_id": "r1", "node_type": "shell", "run": "true",
+               "isolation": "shared_clean", "vars": {"ref": "RLY-1", "branch": "rly-1-feature"}}
+        outcome, _detail, _sha, _session = relay.run_node_job(job, self.dir, self.control)
+
+        self.assertEqual(outcome, "succeeded")
+        self.assertEqual(self.head_ref(), "", "shared_clean must stay detached")
+
+    def test_a_job_already_on_its_branch_is_untouched(self):
+        branch = "rly-1-feature"
+        self.git("checkout", "-q", "-b", branch)
+        job = {"id": "nj-4", "run_id": "r1", "node_type": "shell", "run": "true",
+               "isolation": "exclusive", "vars": {"ref": "RLY-1", "branch": branch}}
+        outcome, _detail, _sha, _session = relay.run_node_job(job, self.dir, self.control)
+
+        self.assertEqual(outcome, "succeeded")
+        self.assertEqual(self.head_ref(), "refs/heads/" + branch)
+
 if __name__ == "__main__":
     unittest.main()
