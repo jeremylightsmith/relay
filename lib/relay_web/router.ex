@@ -171,6 +171,7 @@ defmodule RelayWeb.Router do
     get "/cards", CardController, :index
     post "/cards", CardController, :create
     get "/cards/:ref", CardController, :show
+    get "/cards/:ref/diagnosis", DiagnosisController, :show
     patch "/cards/:ref", CardController, :update
     patch "/cards/:ref/sub-tasks/:id", CardController, :toggle_sub_task
     post "/cards/:ref/move", CardController, :move
