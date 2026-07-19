@@ -12,8 +12,8 @@ reference — request bodies, response shapes, and error codes — see the
 ## Get a board API key
 
 1. **Mint the key.** Open your board's **Settings → API keys** (at
-   `/board/:slug/settings`) and **Generate** a key. It is shown once — copy it then.
-   Regenerating replaces the previous key.
+   `/board/:slug/settings`) and click **+ Create new key**. It is shown once — copy it
+   then. If a key already exists, **Regenerate** replaces it.
 2. **Point your agent's shell at the board.** Set two environment variables (for example in
    a gitignored `.envrc.local`):
 

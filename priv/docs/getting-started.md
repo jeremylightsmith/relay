@@ -30,8 +30,9 @@ appears in every board URL below.
 
 ## 2. Get a board API key
 
-Open **Settings → API keys** on your board (`/board/<slug>/settings`) and **Generate** a
-key. It is shown **once** — copy it now. Regenerating replaces the previous key.
+Open **Settings → API keys** on your board (`/board/<slug>/settings`) and click **+ Create
+new key**. It is shown **once** — copy it now. If a key already exists, **Regenerate**
+replaces it.
 
 Point your shell at the board with two environment variables:
 
@@ -101,8 +102,9 @@ Flows are seeded **disabled**, so nothing dispatches until you turn one on. Open
 **Settings › Flows** on your board and enable the **Spec** flow — it is the cheapest one
 to start with, and it is the first stage a new card meets.
 
-The toggle warns you if no executor is advertising capacity. If you completed step 4, it
-should be satisfied.
+The confirm dialog reminds you that a runner must be connected and advertising capacity
+before cards will move — it does not check for you, so confirm that yourself on the
+**Runners** view (step 4).
 
 Read [Enabling a flow safely](/docs/runbook-flow-cutover) before you enable a flow on a
 board that already has cards moving through it — the ordering there is what keeps two
