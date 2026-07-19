@@ -10,6 +10,9 @@ defmodule Schemas.Executor do
   executor can resolve by name — `%{"agents" => [...], "skills" => [...]}` — or
   `nil` when it has never reported one (RLY-182). All fields are set
   programmatically by `Relay.Runs`.
+
+  `version` is the `EXECUTOR_VERSION` the running `bin/relay` declares (RLY-184); `nil` means
+  an executor predating that card, which `Relay.Runs.executor_outdated?/1` treats as behind.
   """
   use Ecto.Schema
 
@@ -25,6 +28,7 @@ defmodule Schemas.Executor do
     # No default: nil means "never reported its inventory" and is deliberately distinct
     # from %{} ("reported, and empty"). Preflight branches on that difference.
     field :capabilities, :map
+    field :version, :integer
     field :last_heartbeat, :utc_datetime
 
     belongs_to :board, Schemas.Board
@@ -35,7 +39,7 @@ defmodule Schemas.Executor do
   @doc "Validates a programmatically-built executor row."
   def changeset(executor, attrs) do
     executor
-    |> cast(attrs, [:board_id, :name, :host, :interval, :capacity, :capabilities, :last_heartbeat])
+    |> cast(attrs, [:board_id, :name, :host, :interval, :capacity, :capabilities, :version, :last_heartbeat])
     |> validate_required([:board_id, :name, :last_heartbeat])
     |> foreign_key_constraint(:board_id)
     |> unique_constraint([:board_id, :name], name: :executors_board_id_name_index)
