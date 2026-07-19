@@ -94,6 +94,13 @@ defmodule RelayWeb.Api.FallbackController do
     )
   end
 
+  def call(conn, {:error, :invalid_executor}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid_executor", message: "executor must be an object")
+  end
+
   defp changeset_message(changeset) do
     changeset
     |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->

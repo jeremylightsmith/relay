@@ -128,6 +128,35 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert micros < 5_000_000
     end
 
+    test "a non-map executor is a 422, not a 500", %{conn: conn} do
+      # RLY-162: Map.put/3 on a string raised BadMapError → 500 + a stack trace, so a
+      # slightly-wrong client looked like a server outage on the executor's front door.
+      body =
+        conn
+        |> post(
+          ~p"/api/node-jobs/claim",
+          Jason.encode!(%{
+            "executor" => "not-a-map",
+            "capacity" => %{"shared_clean" => 1}
+          })
+        )
+        |> json_response(422)
+
+      assert body["error"]["code"] == "invalid_executor"
+      assert body["error"]["message"] =~ "executor"
+    end
+
+    test "an absent executor still renders the changeset 400, not the 422", %{conn: conn} do
+      # Behavior held constant: absent defaults to %{}, the Executor changeset rejects the
+      # blank name, and the fallback's existing `invalid` 400 answers.
+      body =
+        conn
+        |> post(~p"/api/node-jobs/claim", Jason.encode!(%{"capacity" => %{"shared_clean" => 1}}))
+        |> json_response(400)
+
+      assert body["error"]["code"] == "invalid"
+    end
+
     test "the long-poll ignores unrelated mailbox messages and still claims on the real run event",
          %{conn: conn, board: board} do
       flow = four_outcome_flow(board)
@@ -310,6 +339,25 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       # The id is unknown on THIS board; a cross-board leak would let one board's executor be
       # told to kill another's work.
       assert %{"revoked" => []} = json_response(conn, 200)
+    end
+
+    test "a non-map executor is a 422, not a 500", %{conn: conn} do
+      # `relay execute` beats every ~30s, so leaving heartbeat unfixed would rediscover
+      # RLY-162 twelve times an hour.
+      body =
+        conn
+        |> post(
+          ~p"/api/node-jobs/heartbeat",
+          Jason.encode!(%{
+            "executor" => "not-a-map",
+            "capacity" => %{"shared_clean" => 1},
+            "running" => []
+          })
+        )
+        |> json_response(422)
+
+      assert body["error"]["code"] == "invalid_executor"
+      assert body["error"]["message"] =~ "executor"
     end
   end
 end
