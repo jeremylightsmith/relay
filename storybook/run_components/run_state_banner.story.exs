@@ -50,6 +50,21 @@ defmodule Storybook.RunComponents.RunStateBanner do
           totals: %{duration_s: 552, cost: Decimal.new("2.28"), attempts: 3}
         }
       },
+      # The other failure modes (RLY-179): no invented breaker, just the engine's reason.
+      %Variation{
+        id: :failed,
+        attributes: %{
+          variant: :failed,
+          run: %{
+            status: :failed,
+            failure_detail:
+              "The flow has nowhere to go after `fixit` reported `failed`. (no_route_for_outcome: fixit → failed)"
+          },
+          card: nil,
+          node_executions: [ne("fixit", 1, :failed, %{detail: "Could not fix the failing spec: 2 assertions still red."})],
+          totals: %{duration_s: 91, cost: Decimal.new("0.41"), attempts: 1}
+        }
+      },
       %Variation{
         id: :parked,
         attributes: %{

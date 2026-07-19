@@ -2166,9 +2166,21 @@ defmodule RelayWeb.CoreComponents do
                       card={@card}
                       claimer={human_owner_name(@card)}
                     />
+                    <%!-- RLY-179: the loud :circuit banner is only honest when the breaker
+                          actually tripped; every other failure mode gets the neutral one. --%>
                     <RunComponents.run_state_banner
-                      :if={@latest_run.status == :failed}
+                      :if={RunComponents.circuit_tripped?(run_map(@latest_run))}
                       variant={:circuit}
+                      run={run_map(@latest_run)}
+                      node_executions={@latest_run.node_executions}
+                      totals={run_totals(@latest_run)}
+                    />
+                    <RunComponents.run_state_banner
+                      :if={
+                        @latest_run.status == :failed and
+                          not RunComponents.circuit_tripped?(run_map(@latest_run))
+                      }
+                      variant={:failed}
                       run={run_map(@latest_run)}
                       node_executions={@latest_run.node_executions}
                       totals={run_totals(@latest_run)}
@@ -2772,7 +2784,10 @@ defmodule RelayWeb.CoreComponents do
       # `last_node` in `Relay.Runs.run_summaries_for_board/1`.
       last_node: Relay.Runs.last_node(run, run.node_executions || []),
       started_at: run.started_at,
-      finished_at: run.finished_at
+      finished_at: run.finished_at,
+      # The engine's failure reason, verbatim — it both names the cause in English
+      # and tells the Run tab whether the circuit breaker is what actually tripped.
+      failure_detail: Map.get(run, :failure_detail)
     }
   end
 
