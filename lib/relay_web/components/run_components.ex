@@ -581,11 +581,20 @@ defmodule RelayWeb.RunComponents do
   it is the honest discriminator. Gating the loud `:circuit` banner on bare
   `status == :failed` made it claim a breaker for every failure, then contradict
   itself one line down with "fixit returned failed 1 time".
+
+  Matched as a substring, not a prefix: the breaker reason is the one that leads
+  with its machine token, while every sibling reason at `Engine`'s
+  `no_route_reason/1` & co. is human-first with the token in parentheses. If the
+  breaker string is ever brought in line with that house style, a prefix match
+  would quietly stop recognising a real tripped breaker.
   """
   def circuit_tripped?(run) do
     case run do
-      %{status: :failed, failure_detail: "circuit_breaker:" <> _} -> true
-      _ -> false
+      %{status: :failed, failure_detail: detail} when is_binary(detail) ->
+        String.contains?(detail, "circuit_breaker:")
+
+      _ ->
+        false
     end
   end
 

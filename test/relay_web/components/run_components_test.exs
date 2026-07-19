@@ -225,6 +225,16 @@ defmodule RelayWeb.RunComponentsTest do
                })
              )
 
+      # The token is matched anywhere, not just as a prefix, so rewording the
+      # breaker reason into the human-first house style the sibling reasons use
+      # can't silently un-trip the banner.
+      assert RunComponents.circuit_tripped?(
+               run(%{
+                 status: :failed,
+                 failure_detail: "The same failure repeated 3 times. (circuit_breaker: the same failure repeated 3 times)"
+               })
+             )
+
       refute RunComponents.circuit_tripped?(run(%{status: :failed, failure_detail: nil}))
       refute RunComponents.circuit_tripped?(run(%{status: :running}))
       refute RunComponents.circuit_tripped?(Map.delete(run(%{status: :failed}), :failure_detail))
