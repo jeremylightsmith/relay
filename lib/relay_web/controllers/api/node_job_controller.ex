@@ -72,8 +72,14 @@ defmodule RelayWeb.Api.NodeJobController do
     exec_attrs = Map.put(Map.get(params, "executor", %{}), "capacity", Map.get(params, "capacity"))
 
     with {:ok, executor} <- Runs.upsert_executor(board, exec_attrs) do
+      running = Map.get(params, "running", [])
       advertise_capacity(executor, Map.get(params, "capacity"))
-      json(conn, %{revoked: Runs.revoked_among(board, Map.get(params, "running", []))})
+      # Recover the other direction too (RLY-170): a job this executor still HOLDS but is no
+      # longer running — because it restarted and lost its in-process job state — is stranded
+      # forever otherwise, invisible to both claim_next_job (queued-only) and the stale-executor
+      # reaper (this executor is alive). The absence of a job from `running` is the signal.
+      :ok = Runs.requeue_orphaned_jobs(board, executor, running)
+      json(conn, %{revoked: Runs.revoked_among(board, running)})
     end
   end
 
