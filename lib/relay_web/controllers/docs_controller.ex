@@ -16,6 +16,7 @@ defmodule RelayWeb.DocsController do
   # `priv/docs/runbooks -> ../../docs/runbooks`, so `docs/architecture/` and `docs/runbooks/`
   # stay the single source of truth — there is no copy step and nothing to keep in sync.
   @pages_meta [
+    {"getting-started", "Getting started", "Get started", "getting-started.md"},
     {"introduction", "Introduction", "Get started", "introduction.md"},
     {"boards-and-stages", "Boards & stages", "Get started", "boards-and-stages.md"},
     {"cards-and-handoffs", "Cards & handoffs", "Get started", "cards-and-handoffs.md"},
@@ -33,7 +34,7 @@ defmodule RelayWeb.DocsController do
     {"architecture-deps", "Dependencies", "Architecture", "architecture/deps.md"}
   ]
 
-  @default_slug "introduction"
+  @default_slug "getting-started"
 
   for {_slug, _title, _section, file} <- @pages_meta do
     @external_resource Application.app_dir(:relay, "priv/docs/#{file}")
@@ -89,7 +90,8 @@ defmodule RelayWeb.DocsController do
           sidebar: @sidebar,
           sections: @sections,
           active_slug: page.slug,
-          page_title: page.title
+          page_title: page.title,
+          default_slug: @default_slug
         )
     end
   end

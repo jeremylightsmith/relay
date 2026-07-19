@@ -1,11 +1,75 @@
 defmodule RelayWeb.DocsControllerTest do
   use RelayWeb.ConnCase, async: true
 
-  test "GET /docs renders the Introduction, logged out", %{conn: conn} do
+  test "GET /docs renders the getting-started path, logged out", %{conn: conn} do
     html = conn |> get(~p"/docs") |> html_response(200)
-    assert html =~ "Introduction"
-    assert html =~ "baton"
+    assert html =~ "Getting started"
     assert html =~ ~s(id="docs")
+    refute html =~ "docs-pager-prev"
+  end
+
+  test "the getting-started path names every step of the journey", %{conn: conn} do
+    html = conn |> get(~p"/docs") |> html_response(200)
+
+    for needle <- [
+          "Create a board",
+          "RELAY_URL",
+          "RELAY_API_KEY",
+          "relay init",
+          "relay execute",
+          "Settings",
+          "Next up"
+        ] do
+      assert html =~ needle, "the getting-started page never mentions #{inspect(needle)}"
+    end
+  end
+
+  # Order is asserted on the step HEADINGS only. Non-heading needles are unreliable for
+  # ordering because the "on this page" TOC renders every heading ahead of the article
+  # body, so a word that appears in a late heading precedes body text from an early step.
+  # The headings themselves are monotonic in both the TOC and the body.
+  test "the seven steps are numbered and rendered in order", %{conn: conn} do
+    html = conn |> get(~p"/docs") |> html_response(200)
+
+    headings = [
+      "1. Create a board",
+      "2. Get a board API key",
+      "3. Get the CLI and scaffold your project",
+      "4. Start the executor",
+      "5. Enable a flow",
+      "6. Move a card into",
+      "7. When a card does not move"
+    ]
+
+    offsets =
+      Enum.map(headings, fn heading ->
+        case :binary.match(html, heading) do
+          {at, _} -> at
+          :nomatch -> flunk("the getting-started page is missing step #{inspect(heading)}")
+        end
+      end)
+
+    assert offsets == Enum.sort(offsets),
+           "steps are out of order: #{inspect(Enum.zip(headings, offsets))}"
+  end
+
+  test "the unbuilt CLI-install step is flagged with a callout, not papered over",
+       %{conn: conn} do
+    html = conn |> get(~p"/docs") |> html_response(200)
+
+    assert html =~ "RLY-181"
+    assert html =~ "not available yet"
+    # The intended interface is still shown, so the page is correct the day RLY-181 lands.
+    assert html =~ "/install"
+    assert html =~ "relay init"
+  end
+
+  test "the getting-started page needs no repo access and links the runbook", %{conn: conn} do
+    html = conn |> get(~p"/docs") |> html_response(200)
+
+    assert html =~ ~s(href="/docs/runbook-flow-cutover")
+    refute html =~ "git clone"
+    refute html =~ "copy this file"
   end
 
   test "every registry page returns 200 and shows its title", %{conn: conn} do
@@ -244,7 +308,7 @@ defmodule RelayWeb.DocsControllerTest do
       |> LazyHTML.text()
 
     assert breadcrumb =~ "Get started"
-    assert breadcrumb =~ "Introduction"
+    assert breadcrumb =~ "Getting started"
 
     eyebrow =
       html

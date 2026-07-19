@@ -145,6 +145,7 @@ defmodule RelayWeb.Layouts do
   attr :sidebar, :list, required: true, doc: "[%{slug, title, section}] in sidebar order"
   attr :sections, :list, required: true, doc: "ordered, de-duplicated section names"
   attr :active_slug, :string, required: true
+  attr :default_slug, :string, required: true, doc: "the slug served at bare `/docs`"
   attr :toc, :list, default: [], doc: "[%{level, text, anchor}] for the current page"
   slot :inner_block, required: true
 
@@ -175,7 +176,7 @@ defmodule RelayWeb.Layouts do
               <ul>
                 <li :for={page <- Enum.filter(@sidebar, &(&1.section == section))}>
                   <a
-                    href={docs_link(page)}
+                    href={docs_link(page, @default_slug)}
                     class={["docs-sidebar-link", page.slug == @active_slug && "is-active"]}
                     aria-current={page.slug == @active_slug && "page"}
                   >
@@ -203,11 +204,19 @@ defmodule RelayWeb.Layouts do
           <% prev = docs_adjacent(@sidebar, @active_slug, -1) %>
           <% next = docs_adjacent(@sidebar, @active_slug, 1) %>
           <nav :if={prev || next} class="docs-pager" aria-label="Page navigation">
-            <a :if={prev} href={docs_link(prev)} class="docs-pager-link docs-pager-prev">
+            <a
+              :if={prev}
+              href={docs_link(prev, @default_slug)}
+              class="docs-pager-link docs-pager-prev"
+            >
               <span class="docs-pager-label">← Previous</span>
               <span class="docs-pager-title">{prev.title}</span>
             </a>
-            <a :if={next} href={docs_link(next)} class="docs-pager-link docs-pager-next">
+            <a
+              :if={next}
+              href={docs_link(next, @default_slug)}
+              class="docs-pager-link docs-pager-next"
+            >
               <span class="docs-pager-label">Next →</span>
               <span class="docs-pager-title">{next.title}</span>
             </a>
@@ -227,8 +236,11 @@ defmodule RelayWeb.Layouts do
     """
   end
 
-  defp docs_link(%{slug: "introduction"}), do: ~p"/docs"
-  defp docs_link(%{slug: slug}), do: ~p"/docs/#{slug}"
+  # The landing page is reachable at bare `/docs`, so its sidebar and pager links point
+  # there rather than at its own slug. Which page that is comes from the controller's
+  # `@default_slug` — `@pages_meta` stays the single source.
+  defp docs_link(%{slug: slug}, default_slug) when slug == default_slug, do: ~p"/docs"
+  defp docs_link(%{slug: slug}, _default_slug), do: ~p"/docs/#{slug}"
 
   # The active page's own sidebar entry (title + section), for the breadcrumb and eyebrow
   # above the article.
