@@ -11,6 +11,7 @@ Executor-local config: .relay/executor.json (worktree namespace + capacity)
 
   relay execute [--once] [--dry-run] [--interval N]   # the executor
   relay board [--json]        relay card REF [--json]
+  relay why REF [--json]      # why isn't this card moving? — one plain-language answer
   relay comment REF TEXT      relay move REF STAGE        relay status REF STATUS
   relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF [Q] [--questions @file]
   relay own REF / release REF relay approve REF           relay reject REF NOTE
@@ -419,6 +420,16 @@ def print_card(c):
             print(f"  * {who} {e.get('type', '')} {e.get('meta', '')}")
 
 
+def print_why(d):
+    """The prose answer to "why isn't this card moving?" — one or two sentences, never a
+    JSON dump. `--json` is there for the full structure; this is what a human reads."""
+    print(f'{d.get("verdict", "?")}: {d.get("detail", "")}'.rstrip())
+    last = (d.get("evidence") or {}).get("last_execution") or {}
+    if last.get("detail"):
+        print(f'\n--- {last.get("node_key", "?")} ({last.get("outcome", "?")}) ---')
+        print(last["detail"])
+
+
 def emit(args, data, human):
     print(json.dumps(data, indent=2) if getattr(args, "json", False) else human)
 
@@ -446,6 +457,14 @@ def cmd_board(args):
 def cmd_card(args):
     c = get_card(args.ref)
     print(json.dumps(c, indent=2)) if args.json else print_card(c)
+
+
+def cmd_why(args):
+    d = api("GET", f"/api/cards/{args.ref}/diagnosis")["data"]
+    if getattr(args, "json", False):
+        print(json.dumps(d, indent=2))
+    else:
+        print_why(d)
 
 
 def cmd_create(args):
@@ -1252,6 +1271,7 @@ def build_parser():
     bd = add("board", cmd_board, json_flag=True)
     bd.add_argument("--include-done", action="store_true")
     add("card", cmd_card, "ref", json_flag=True)
+    add("why", cmd_why, "ref", json_flag=True)
     oc = add("outcome", cmd_outcome, "outcome")
     oc.add_argument("--detail")
     c = add("create", cmd_create, "title", json_flag=True)

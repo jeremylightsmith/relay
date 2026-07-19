@@ -2014,5 +2014,42 @@ class OutcomeCommandTest(unittest.TestCase):
         outcome, detail = relay.determine_agent_outcome({"vars": {"ref": "RLY-1"}}, True, self.path)
         self.assertEqual((outcome, detail), ("partial", 'half "done"'))
 
+
+class WhyCommandTest(unittest.TestCase):
+    def render(self, diagnosis):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            relay.print_why(diagnosis)
+        return buf.getvalue()
+
+    def test_it_prints_prose_with_no_json_braces(self):
+        out = self.render({
+            "verdict": "no_enabled_flow",
+            "detail": "There is no enabled flow that pulls from this card's stage.",
+            "evidence": {"flow_key": None},
+        })
+        self.assertIn("no enabled flow", out)
+        self.assertNotIn("{", out)
+        self.assertNotIn("}", out)
+
+    def test_it_leads_with_the_verdict(self):
+        out = self.render({"verdict": "awaiting_capacity", "detail": "No executor is connected.", "evidence": {}})
+        self.assertTrue(out.startswith("awaiting_capacity"))
+
+    def test_a_failed_run_appends_the_untruncated_failure_detail(self):
+        long_detail = "para one\n\n" + ("x" * 3000)
+        out = self.render({
+            "verdict": "run_failed",
+            "detail": "Run 7 failed at node final_review.",
+            "evidence": {"last_execution": {"node_key": "final_review", "outcome": "failed", "detail": long_detail}},
+        })
+        self.assertIn(long_detail, out)
+
+    def test_the_cli_wires_why_to_a_ref(self):
+        args = relay.build_parser().parse_args(["why", "RLY-12"])
+        self.assertEqual(args.ref, "RLY-12")
+        self.assertEqual(args.func, relay.cmd_why)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -28,6 +28,8 @@ defmodule Relay.Runs do
   alias Relay.Runs.Engine
   alias Relay.Runs.PlanTasks
   alias Relay.Runs.RunServer
+  alias Relay.Runs.Scheduler
+  alias Relay.Runs.Scheduler.Server, as: SchedulerServer
   alias Schemas.Board
   alias Schemas.Card
   alias Schemas.Executor
@@ -743,6 +745,143 @@ defmodule Relay.Runs do
         jobs: jobs
       }
     end)
+  end
+
+  ## Diagnosis (RLY-177)
+
+  # A job that has sat queued or claimed this long with nothing alive behind it is
+  # stranded, not merely slow. Deliberately well above the executor grace floor
+  # (`@executor_stale_floor_s`) so a single missed beat never reads as stranded.
+  @stranded_grace_s 300
+
+  @doc """
+  Why `card` is or is not moving: `%{verdict, detail, evidence}`.
+
+  The thin facade the web layer uses — `Relay.Runs` exports only `[Supervisor, Capacity,
+  SchedulerSupervisor]` (`use Boundary` above), so `RelayWeb` cannot reach
+  `Relay.Runs.Scheduler` and must not know it exists. The dispatch verdicts come from
+  `Scheduler.explain/2` over the **same snapshot the scheduler plans from**
+  (`Scheduler.Server.build_snapshot/2`); this function layers on the two verdicts that
+  need DB state the snapshot does not carry — `:run_failed` (the card has no active run
+  and its latest run failed) and `:job_stranded` (an active job past `@stranded_grace_s`
+  with no live executor).
+
+  Read-only: safe to call while a run is live. `now` is injectable for tests.
+  """
+  @spec diagnose(Board.t(), Card.t(), DateTime.t() | nil) :: %{verdict: atom(), detail: String.t(), evidence: map()}
+  def diagnose(%Board{} = board, %Card{} = card, now \\ nil) do
+    now = now || now()
+    {snapshot, _cards_by_id} = SchedulerServer.build_snapshot(board.id, SchedulerServer.configured_engine())
+
+    run = active_run(card)
+    last = latest_run(card)
+    job = run && active_job(run)
+
+    snapshot
+    |> Scheduler.explain(card.id)
+    |> put_evidence(:current_node, run && run.current_node)
+    |> put_evidence(:last_execution, last_execution_summary(last))
+    |> put_evidence(:job, job_summary(job))
+    |> override_verdict(run, last, job, board, now)
+  end
+
+  defp override_verdict(base, run, last, job, board, now) do
+    cond do
+      run != nil and stranded?(job, board, now) -> stranded_verdict(base, job)
+      run == nil and last != nil and last.status == :failed -> run_failed_verdict(base, last)
+      true -> base
+    end
+  end
+
+  defp stranded_verdict(base, job) do
+    %{
+      base
+      | verdict: :job_stranded,
+        detail:
+          "Job #{job.id} for node #{job.node_key} has been #{job.state} since " <>
+            "#{job.claimed_at || job.inserted_at} and no live executor#{executor_suffix(job.executor_name)}" <>
+            " is holding it — the run is stuck, not working."
+    }
+  end
+
+  defp executor_suffix(nil), do: ""
+  defp executor_suffix(name), do: " (#{name})"
+
+  defp run_failed_verdict(base, last) do
+    %{
+      base
+      | verdict: :run_failed,
+        detail:
+          "Run #{last.id} failed at node #{last_node(last) || "?"}. " <>
+            "The full failure detail is in evidence.last_execution.detail."
+    }
+  end
+
+  defp put_evidence(base, key, value), do: %{base | evidence: Map.put(base.evidence, key, value)}
+
+  # A job is stranded when it is old enough to rule out normal latency AND the executor
+  # named on it is stale (or nothing is named and nothing on this board is fresh).
+  # Reuses `executor_stale?/2` rather than inventing a second threshold, so "stranded"
+  # can never disagree with what the reclaim sweep would act on. A `:running` job is
+  # excluded: the executor is demonstrably alive enough to have started it, and the
+  # heartbeat's staleness is what the reclaim sweep is for.
+  defp stranded?(nil, _board, _now), do: false
+  defp stranded?(%NodeJob{state: :running}, _board, _now), do: false
+
+  defp stranded?(%NodeJob{} = job, board, now) do
+    age = DateTime.diff(now, job.claimed_at || job.inserted_at, :second)
+    age > @stranded_grace_s and not any_live_executor?(job, board, now)
+  end
+
+  defp any_live_executor?(%NodeJob{executor_name: nil}, board, now) do
+    Executor
+    |> where([e], e.board_id == ^board.id)
+    |> Repo.all()
+    |> Enum.any?(&(not executor_stale?(&1, now)))
+  end
+
+  defp any_live_executor?(%NodeJob{executor_name: name}, board, now) do
+    case Repo.get_by(Executor, board_id: board.id, name: name) do
+      nil -> false
+      executor -> not executor_stale?(executor, now)
+    end
+  end
+
+  defp last_execution_summary(%Run{node_executions: executions}) when is_list(executions) do
+    case List.last(executions) do
+      nil ->
+        nil
+
+      execution ->
+        %{
+          node_key: execution.node_key,
+          outcome: execution.outcome,
+          detail: execution.detail,
+          attempt: execution.attempt,
+          visit: execution.visit
+        }
+    end
+  end
+
+  defp last_execution_summary(_run), do: nil
+
+  defp last_node(run) do
+    case last_execution_summary(run) do
+      nil -> nil
+      %{node_key: node_key} -> node_key
+    end
+  end
+
+  defp job_summary(nil), do: nil
+
+  defp job_summary(%NodeJob{} = job) do
+    %{
+      id: job.id,
+      state: job.state,
+      node_key: job.node_key,
+      executor_name: job.executor_name,
+      claimed_at: job.claimed_at
+    }
   end
 
   # Every active job on this board that some executor is holding, grouped by `executor_name`.
