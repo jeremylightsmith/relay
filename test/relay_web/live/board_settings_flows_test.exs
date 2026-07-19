@@ -136,6 +136,54 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       assert has_element?(view, "#flows-first-run", "Code, Plan and Spec")
     end
 
+    test "the first-run banner names only the flows Relay ships, not user-created ones",
+         %{conn: conn, board: board} do
+      ids = stage_ids(board)
+
+      {:ok, _created} =
+        Flows.create_flow(board, %{
+          "key" => "smoke-gate",
+          "isolation" => "shared_clean",
+          "pulls_from_stage_id" => ids.pulls,
+          "works_in_stage_id" => ids.works,
+          "lands_on_stage_id" => ids.lands,
+          "nodes" => [],
+          "edges" => [%{"from" => "start", "to" => "done"}]
+        })
+
+      view = open_flows(conn, board)
+
+      # the user's flow is on the board …
+      assert has_element?(view, "#flows-table", "Smoke gate")
+      # … but the banner still describes only what Relay ships
+      assert has_element?(view, "#flows-first-run", "Code, Plan and Spec")
+      refute has_element?(view, "#flows-first-run", "Smoke gate")
+    end
+
+    test "the first-run banner is suppressed when no shipped flow is left on the board",
+         %{conn: conn, board: board} do
+      ids = stage_ids(board)
+
+      {:ok, _created} =
+        Flows.create_flow(board, %{
+          "key" => "smoke-gate",
+          "isolation" => "shared_clean",
+          "pulls_from_stage_id" => ids.pulls,
+          "works_in_stage_id" => ids.works,
+          "lands_on_stage_id" => ids.lands,
+          "nodes" => [],
+          "edges" => [%{"from" => "start", "to" => "done"}]
+        })
+
+      Repo.delete_all(from f in Flow, where: f.board_id == ^board.id and f.key in ["code", "plan", "spec"])
+
+      view = open_flows(conn, board)
+
+      # the page renders, the user's flow is listed, and no false "ships with" sentence
+      assert has_element?(view, "#flows-table", "Smoke gate")
+      refute has_element?(view, "#flows-first-run")
+    end
+
     test "the footer cutover note and the engine note are present", %{conn: conn, board: board} do
       view = open_flows(conn, board)
 

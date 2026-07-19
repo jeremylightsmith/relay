@@ -8,10 +8,14 @@ defmodule RelayWeb.FlowSettingsComponents do
   The artboard's "+ New flow" button ships as of RLY-158. Editing a flow's
   definition now navigates to the full-page editor (`RelayWeb.FlowEditorLive`,
   RLY-143); the row meta line shows the current version.
+
+  The first-run explainer names only the flows Relay ships (`Flows.default_key?/1`), never
+  every row on the board (RLY-160).
   """
 
   use RelayWeb, :html
 
+  alias Relay.Flows
   alias Schemas.Flow
 
   @doc ~S|Humanized flow name: "spec" → "Spec", "spec-copy" → "Spec copy".|
@@ -194,8 +198,12 @@ defmodule RelayWeb.FlowSettingsComponents do
   attr :rows, :list, required: true
 
   defp first_run_banner(assigns) do
+    assigns =
+      assign(assigns, :shipped_rows, Enum.filter(assigns.rows, &Flows.default_key?(&1.flow.key)))
+
     ~H"""
     <div
+      :if={@shipped_rows != []}
       id="flows-first-run"
       style="display:flex;align-items:flex-start;gap:12px;background:oklch(0.98 0.02 250);border:1px solid oklch(0.89 0.05 250);border-radius:12px;padding:15px 17px;margin-top:20px;"
     >
@@ -207,7 +215,7 @@ defmodule RelayWeb.FlowSettingsComponents do
           Flows are off until you turn them on
         </div>
         <p style="font-size:13px;line-height:1.55;color:oklch(0.44 0.04 250);margin:0;max-width:620px;">
-          This board ships with the {flow_names(@rows)} defaults, but nothing runs
+          This board ships with the {flow_names(@shipped_rows)} defaults, but nothing runs
           automatically yet — every card waits for a human. Turn a flow on to start handing
           its stage to the AI. Cut over one flow at a time; you can always turn it back off.
         </p>
