@@ -787,29 +787,34 @@ defmodule Relay.Runs do
 
   defp override_verdict(base, run, last, job, board, now) do
     cond do
-      run != nil and stranded?(job, board, now) ->
-        %{
-          base
-          | verdict: :job_stranded,
-            detail:
-              "Job #{job.id} for node #{job.node_key} has been #{job.state} since " <>
-                "#{job.claimed_at || job.inserted_at} and no live executor" <>
-                if(job.executor_name, do: " (#{job.executor_name})", else: "") <>
-                " is holding it — the run is stuck, not working."
-        }
-
-      run == nil and last != nil and last.status == :failed ->
-        %{
-          base
-          | verdict: :run_failed,
-            detail:
-              "Run #{last.id} failed at node #{last_node(last) || "?"}. " <>
-                "The full failure detail is in evidence.last_execution.detail."
-        }
-
-      true ->
-        base
+      run != nil and stranded?(job, board, now) -> stranded_verdict(base, job)
+      run == nil and last != nil and last.status == :failed -> run_failed_verdict(base, last)
+      true -> base
     end
+  end
+
+  defp stranded_verdict(base, job) do
+    %{
+      base
+      | verdict: :job_stranded,
+        detail:
+          "Job #{job.id} for node #{job.node_key} has been #{job.state} since " <>
+            "#{job.claimed_at || job.inserted_at} and no live executor#{executor_suffix(job.executor_name)}" <>
+            " is holding it — the run is stuck, not working."
+    }
+  end
+
+  defp executor_suffix(nil), do: ""
+  defp executor_suffix(name), do: " (#{name})"
+
+  defp run_failed_verdict(base, last) do
+    %{
+      base
+      | verdict: :run_failed,
+        detail:
+          "Run #{last.id} failed at node #{last_node(last) || "?"}. " <>
+            "The full failure detail is in evidence.last_execution.detail."
+    }
   end
 
   defp put_evidence(base, key, value), do: %{base | evidence: Map.put(base.evidence, key, value)}
