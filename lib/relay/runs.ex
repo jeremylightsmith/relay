@@ -576,6 +576,58 @@ defmodule Relay.Runs do
   end
 
   @doc """
+  Of the job ids an executor reports it is running, those the server no longer considers
+  live (RLY-164) — i.e. anything not in `@active_job_states` on THIS board, plus ids that
+  don't exist here at all.
+
+  Board-scoped on purpose: an id belonging to another board is not live *here*, so it comes
+  back as revoked-for-this-executor only if this board owns it. That prevents one board's
+  executor being told to kill another board's work, and it means a stale or malicious id is
+  harmless. Non-integer ids are ignored rather than raising — this is a heartbeat, and a
+  malformed beat must never 500 a liveness path.
+  """
+  def revoked_among(%Board{id: board_id}, running_ids) when is_list(running_ids) do
+    ids = for id <- running_ids, int = to_job_id(id), is_integer(int), do: int
+
+    case ids do
+      [] ->
+        []
+
+      ids ->
+        # Only ids this board actually owns are candidates. An id we don't own is NOT
+        # reported revoked: instructing an executor to kill work on the strength of an id
+        # we can't see would cross the board boundary, and a stale/garbage id would become
+        # a kill order. Jobs are never hard-deleted — they transition to :revoked/:done — so
+        # "exists here and is no longer active" covers every real revoke.
+        on_board =
+          Repo.all(
+            from j in NodeJob,
+              join: r in Run,
+              on: r.id == j.run_id,
+              join: c in Card,
+              on: c.id == r.card_id,
+              where: c.board_id == ^board_id and j.id in ^ids,
+              select: {j.id, j.state}
+          )
+
+        for {id, state} <- on_board, state not in @active_job_states, do: id
+    end
+  end
+
+  def revoked_among(_board, _running), do: []
+
+  defp to_job_id(id) when is_integer(id), do: id
+
+  defp to_job_id(id) when is_binary(id) do
+    case Integer.parse(id) do
+      {int, ""} -> int
+      _ -> nil
+    end
+  end
+
+  defp to_job_id(_), do: nil
+
+  @doc """
   The board's node-job `id` (integer or numeric string — the controller hands
   in a raw path param) when it is held by a live claim (`state in [:claimed,
   :running]`). `{:error, :not_found}` when no such job exists on the board or

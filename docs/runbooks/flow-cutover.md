@@ -39,31 +39,17 @@ dispatcher at all (the same "a stage nothing works" failure, from the opposite d
 4. **Start / confirm `relay execute`** is connected and advertising `exclusive` capacity — the
    Code flow's isolation class.
 
-   **Prerequisite this step depends on, not yet shipped by any binary:** `Relay.Runs.Capacity`
-   (what the scheduler reads to decide whether to dispatch) is fed from exactly one place — the
-   `name` + `capacity` branch of `POST /api/board/heartbeat`
-   (`RelayWeb.Api.BoardController.heartbeat/2`, `maybe_advertise_executor/2`). `relay execute`'s
-   own heartbeat posts to `/api/node-jobs/heartbeat` instead, with `{"executor", "running"}` only
-   — it never hits `/api/board/heartbeat` and never sends `name`/`capacity`. Until an
-   executor-side sender for that route ships, **manually POST it yourself** before this step is
-   considered done, e.g.:
+   `relay execute` advertises its **configured** capacity (`.relay/executor.json`'s
+   `capacity`) on its heartbeat to `POST /api/node-jobs/heartbeat`, beating once immediately at
+   startup and then every `heartbeat_interval`. That beat is the only thing feeding
+   `Relay.Runs.Capacity` — the store the scheduler reads to decide whether to dispatch — and
+   because that store is deliberately lost on every app restart, the repeating beat is what
+   makes dispatch resume by itself after a deploy. Nothing manual is required (RLY-164).
 
-   ```
-   curl -X POST https://<board-host>/api/board/heartbeat \
-     -H "Authorization: Bearer <board-key>" -H "Content-Type: application/json" \
-     -d '{"name": "<executor-name>", "capacity": {"shared_clean": <n>, "exclusive": <n>}}'
-   ```
+   Two things to know when diagnosing: the executor advertises its configured TOTAL, not a live
+   free count (the scheduler debits in-flight `:running` runs itself), and the `name` it beats
+   with is the same one it claims with, so capacity lands on the row doing the claiming.
 
-   Send the executor's **configured** total (the `capacity` you intend it to run, i.e.
-   `cfg["capacity"]`) — not `ExecutorPool.capacity()`'s live free count. The scheduler already
-   debits in-flight `:running` runs from the advertised total itself
-   (`Scheduler.Server.build_snapshot/1`); posting the already-decremented free count here would
-   double-debit every running run (see the TRAP comment at `board_controller.ex:57-61`).
-
-   **If this beat is never sent, the ritual silently fails**: `Capacity.snapshot()` stays empty,
-   the scheduler plans zero dispatches every tick, and `<Stage>` cards sit in *Next up* with no
-   dispatcher at all — exactly the "a stage nothing works" failure this runbook exists to avoid,
-   just one step later than the ordering hazard above.
 5. **Confirm a card actually dispatches**: watch the first `<Stage>` card in *Next up* pick up a
    `Run` row (see Verification below) rather than sitting idle.
 

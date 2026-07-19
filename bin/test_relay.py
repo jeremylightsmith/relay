@@ -1395,7 +1395,10 @@ class ExecutorHeartbeatTest(unittest.TestCase):
         calls, revoked = self._capture(hb)
         (method, path, body), = calls
         self.assertEqual((method, path), ("POST", "/api/node-jobs/heartbeat"))
+        # `capacity` rides on every beat now (RLY-164) — it is the only channel feeding the
+        # scheduler's capacity store, which is empty on every server restart.
         self.assertEqual(body, {"executor": {"name": "box", "host": "h"},
+                                "capacity": {},
                                 "running": ["nj-7", "nj-8"]})
         self.assertEqual(revoked, ["nj-7"])
 
@@ -1661,6 +1664,46 @@ class LegacyDispatcherRetiredTest(unittest.TestCase):
         for name in retired:
             self.assertFalse(hasattr(relay, name), f"relay.{name} should be gone (RLY-139)")
 
+
+
+class ExecutorHeartbeatCapacityTest(unittest.TestCase):
+    """RLY-164: the beat must advertise the executor's CONFIGURED capacity, not its live free
+    count. Relay.Runs.Capacity is what the scheduler reads, it is lost on app restart, and
+    Scheduler.Server debits in-flight :running runs itself — so posting the already-decremented
+    free count double-debits every running run. Before this, nothing fed Capacity at all and a
+    cutover needed a hand-run curl."""
+
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+
+    def test_the_beat_carries_the_configured_capacity_and_running_ids(self):
+        sent = {}
+
+        def fake_api(method, path, body=None, **kw):
+            sent["path"] = path
+            sent["body"] = body
+            return {"revoked": []}
+
+        relay.api = fake_api
+        hb = relay.ExecutorHeartbeat({"name": "exec-a", "host": "box"},
+                                     lambda: ["nj-1", "nj-2"],
+                                     lambda job_id: None,
+                                     capacity={"shared_clean": 3, "exclusive": 1})
+        hb._beat()
+
+        self.assertEqual(sent["path"], "/api/node-jobs/heartbeat")
+        self.assertEqual(sent["body"]["capacity"], {"shared_clean": 3, "exclusive": 1})
+        self.assertEqual(sent["body"]["running"], ["nj-1", "nj-2"])
+        self.assertEqual(sent["body"]["executor"]["name"], "exec-a")
+
+    def test_revoked_ids_in_the_reply_are_handed_to_on_revoke(self):
+        relay.api = lambda *a, **k: {"revoked": ["nj-7"]}
+        killed = []
+        hb = relay.ExecutorHeartbeat({"name": "e"}, lambda: ["nj-7"], killed.append,
+                                     capacity={"shared_clean": 1, "exclusive": 0})
+        hb._beat()
+        self.assertEqual(killed, ["nj-7"])
 
 if __name__ == "__main__":
     unittest.main()

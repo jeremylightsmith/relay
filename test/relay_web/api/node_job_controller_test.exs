@@ -4,6 +4,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
   import Ecto.Query
 
   alias Relay.Runs
+  alias Relay.Runs.Capacity
   alias Relay.Runs.FakeDispatcher
 
   setup %{conn: conn} do
@@ -230,6 +231,85 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert conn
              |> post(~p"/api/node-jobs/abc/outcome", Jason.encode!(%{"outcome" => "succeeded"}))
              |> json_response(404)
+    end
+  end
+
+  describe "POST /api/node-jobs/heartbeat (RLY-164)" do
+    test "advertises the executor's CONFIGURED capacity into the scheduler's store", %{conn: conn, board: board} do
+      # Before this route existed, Capacity was fed only by /api/board/heartbeat, which
+      # `relay execute` never calls — so starting an executor and enabling a flow dispatched
+      # nothing at all, and the first live cutover needed a hand-run curl.
+      Capacity.reset()
+
+      conn =
+        post(conn, ~p"/api/node-jobs/heartbeat", %{
+          "executor" => %{"name" => "exec-a", "host" => "box"},
+          "capacity" => %{"shared_clean" => 3, "exclusive" => 1},
+          "running" => []
+        })
+
+      assert %{"revoked" => []} = json_response(conn, 200)
+
+      executor = Relay.Repo.get_by!(Schemas.Executor, board_id: board.id, name: "exec-a")
+      assert Capacity.snapshot()[executor.id] == %{shared_clean: 3, exclusive: 1}
+    end
+
+    test "a job the executor still holds is NOT revoked", %{conn: conn, board: board} do
+      flow = four_outcome_flow(board)
+      {run, _job} = start_queued_job(board, flow)
+      {:ok, executor} = Runs.upsert_executor(board, %{"name" => "exec-a", "capacity" => %{"shared_clean" => 1}})
+      {:ok, claimed} = Runs.claim_next_job(executor)
+
+      conn =
+        post(conn, ~p"/api/node-jobs/heartbeat", %{
+          "executor" => %{"name" => "exec-a"},
+          "capacity" => %{"shared_clean" => 1},
+          "running" => [claimed.id]
+        })
+
+      assert %{"revoked" => []} = json_response(conn, 200)
+      assert Runs.get_run!(run.id).status == :running
+    end
+
+    test "a job revoked server-side comes back in the response so the executor can kill it",
+         %{conn: conn, board: board} do
+      # This is what makes the baton (ADR 0004) and the run panel's cancel actually stop an
+      # agent. Without it the executor only learns on its next outcome POST — 20+ minutes for
+      # a Code implement/smoke node.
+      flow = four_outcome_flow(board)
+      {run, _job} = start_queued_job(board, flow)
+      {:ok, executor} = Runs.upsert_executor(board, %{"name" => "exec-a", "capacity" => %{"shared_clean" => 1}})
+      {:ok, claimed} = Runs.claim_next_job(executor)
+
+      # A human takes the baton: the run parks and its live jobs are revoked.
+      :ok = Runs.revoke_active_jobs(run)
+
+      conn =
+        post(conn, ~p"/api/node-jobs/heartbeat", %{
+          "executor" => %{"name" => "exec-a"},
+          "capacity" => %{"shared_clean" => 1},
+          "running" => [claimed.id]
+        })
+
+      assert %{"revoked" => revoked} = json_response(conn, 200)
+      assert claimed.id in revoked
+    end
+
+    test "never reports another board's job as revoked", %{conn: conn} do
+      {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other Board"})
+      flow = four_outcome_flow(other)
+      {_run, job} = start_queued_job(other, flow)
+
+      conn =
+        post(conn, ~p"/api/node-jobs/heartbeat", %{
+          "executor" => %{"name" => "exec-a"},
+          "capacity" => %{"shared_clean" => 1},
+          "running" => [job.id]
+        })
+
+      # The id is unknown on THIS board; a cross-board leak would let one board's executor be
+      # told to kill another's work.
+      assert %{"revoked" => []} = json_response(conn, 200)
     end
   end
 end
