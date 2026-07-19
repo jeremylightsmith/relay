@@ -43,6 +43,20 @@ defmodule Relay.MarkdownTest do
       assert html =~ "<td>401</td>"
       refute html =~ "| HTTP | code |"
     end
+
+    test "renders a markdown image as an <img> with its src and alt intact" do
+      {:safe, html} = Markdown.to_html("![shot](/attachments/12)")
+
+      assert html =~ ~s(<img src="/attachments/12")
+      assert html =~ ~s(alt="shot")
+    end
+
+    test "keeps an <img> for an agent-posted attachment inside a comment body" do
+      {:safe, html} = Markdown.to_html("Here is the run:\n\n![run-1.png](/attachments/99)\n")
+
+      assert html =~ ~s(<img src="/attachments/99")
+      refute html =~ "&lt;img"
+    end
   end
 
   describe "to_docs_html/1" do
@@ -50,6 +64,13 @@ defmodule Relay.MarkdownTest do
       {:safe, html} = Markdown.to_docs_html("## Getting started")
       assert html =~ ~s(id="getting-started")
       assert html =~ ~s(href="#getting-started")
+    end
+
+    test "renders a markdown image as an <img> on the docs site too" do
+      {:safe, html} = Markdown.to_docs_html("![diagram](/images/logo_light_128.png)")
+
+      assert html =~ ~s(<img src="/images/logo_light_128.png")
+      assert html =~ ~s(alt="diagram")
     end
 
     test "renders a GitHub-style NOTE callout" do

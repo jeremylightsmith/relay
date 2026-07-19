@@ -223,6 +223,22 @@
   padding: 0.3em 0.6em;
 }
 
+/* Rendered images — screenshots posted by agents (comments, spec, plan, AI result) and
+   docs-site images. RLY-157: without a cap a 2560px screenshot renders at its natural
+   width and blows out the card drawer column. `cursor: zoom-in` is the ONLY visual hint
+   that the image opens the full-size viewer (assets/js/image_lightbox.js), so it is
+   required, not decoration. `.docs` is the docs site's content class — see
+   lib/relay_web/controllers/docs_html/show.html.heex. */
+.md img, .docs img {
+  max-width: 100%;
+  height: auto;
+  max-height: 24rem;
+  border-radius: var(--radius-box, 0.5rem);
+  border: 1px solid var(--color-base-300);
+  margin: 0.6em 0;
+  cursor: zoom-in;
+}
+
 /* --- Public docs site (RLY-64): chrome + content styles.
    Matches docs/designs/Relay Docs.dc.html (anchor: Relay Landing.dc.html + design system).
    MIRROR verbatim into assets/css/storybook.css. --- */

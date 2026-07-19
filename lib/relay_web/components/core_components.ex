@@ -1278,6 +1278,40 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
+  The full-size image viewer (RLY-157).
+
+  A single native `<dialog>` rendered **once** in the root layout, shared by every image
+  on the page. `showModal()` is driven client-side by `assets/js/image_lightbox.js`, which
+  delegates a `click` listener on `document` — markdown content re-renders constantly, so
+  per-image listeners would not survive a LiveView patch.
+
+  Native `<dialog>` is deliberate: Esc-to-close, focus trapping and backdrop rendering all
+  come from the platform, and the `<form method="dialog">` backdrop is
+  click-outside-to-close with no JS. Takes no attributes.
+
+  ## Examples
+
+      <.image_lightbox />
+  """
+  def image_lightbox(assigns) do
+    ~H"""
+    <dialog id="image-lightbox" class="modal">
+      <div class="modal-box max-w-[90vw] max-h-[90vh] bg-transparent p-0 shadow-none">
+        <img
+          id="image-lightbox-img"
+          src=""
+          alt=""
+          class="max-h-[90vh] max-w-full rounded object-contain"
+        />
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button aria-label="Close">close</button>
+      </form>
+    </dialog>
+    """
+  end
+
+  @doc """
   Renders the card detail drawer (daisyUI `drawer drawer-end`): a scrim
   plus a right-side panel with the card's stage chip (stage name in the
   Human/AI owner color), its ref, an editable title, the plain-text
@@ -1952,7 +1986,7 @@ defmodule RelayWeb.CoreComponents do
                           :if={screen["url"]}
                           src={screen["url"]}
                           alt={screen["caption"] || "Screenshot"}
-                          class="w-full rounded border border-base-300"
+                          class="w-full cursor-zoom-in rounded border border-base-300"
                         />
                         <div
                           :if={!screen["url"]}

@@ -31,5 +31,8 @@
   </head>
   <body>
     {@inner_content}
+    <%!-- RLY-157: one shared full-size image viewer for every page — LiveView board
+          pages and dead controller pages (docs, landing, legal) alike. --%>
+    <.image_lightbox />
   </body>
 </html>

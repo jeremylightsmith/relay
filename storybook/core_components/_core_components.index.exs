@@ -13,6 +13,7 @@ defmodule Storybook.CoreComponents do
   def entry("flash"), do: [icon: {:fa, "bolt", :thin}]
   def entry("header"), do: [icon: {:fa, "heading", :thin}]
   def entry("icon"), do: [icon: {:fa, "icons", :thin}]
+  def entry("image_lightbox"), do: [icon: {:fa, "magnifying-glass-plus", :thin}]
   def entry("input"), do: [icon: {:fa, "input-text", :thin}]
   def entry("list"), do: [icon: {:fa, "list", :thin}]
   def entry("member_stack"), do: [icon: {:fa, "people-group", :thin}]
