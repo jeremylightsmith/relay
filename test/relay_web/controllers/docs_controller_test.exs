@@ -53,15 +53,27 @@ defmodule RelayWeb.DocsControllerTest do
            "steps are out of order: #{inspect(Enum.zip(headings, offsets))}"
   end
 
-  test "the unbuilt CLI-install step is flagged with a callout, not papered over",
-       %{conn: conn} do
+  test "the bootstrap step is real, not flagged as unbuilt (RLY-181 shipped)", %{conn: conn} do
     html = conn |> get(~p"/docs") |> html_response(200)
 
-    assert html =~ "RLY-181"
-    assert html =~ "not available yet"
-    # The intended interface is still shown, so the page is correct the day RLY-181 lands.
-    assert html =~ "/install"
+    refute html =~ "RLY-181"
+    refute html =~ "not available yet"
+    assert html =~ "/install | sh"
     assert html =~ "relay init"
+  end
+
+  test "the CLI page documents init", %{conn: conn} do
+    html = conn |> get(~p"/docs/cli") |> html_response(200)
+
+    assert html =~ "bin/relay init"
+    assert html =~ "--force"
+  end
+
+  test "the runner architecture page lists the scaffold endpoints", %{conn: conn} do
+    html = conn |> get(~p"/docs/architecture-runner") |> html_response(200)
+
+    assert html =~ "/api/scaffold"
+    assert html =~ "/install/relay"
   end
 
   test "the getting-started page needs no repo access and links the runbook", %{conn: conn} do
