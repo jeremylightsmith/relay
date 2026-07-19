@@ -1,0 +1,88 @@
+{
+  "claim": {
+    "exclusive_shell": {
+      "agent": null,
+      "id": "<node-job-id>",
+      "isolation": "exclusive",
+      "node_id": "work",
+      "node_type": "shell",
+      "ref": "CTB-1",
+      "resume_session": null,
+      "run": "mix precommit",
+      "run_id": "<run-id>",
+      "vars": {
+        "branch": "ctb-1-contract-card",
+        "findings": null,
+        "prior_detail": null,
+        "ref": "CTB-1",
+        "sub_task": null
+      }
+    },
+    "resumed_agent": {
+      "agent": "plan-implementer",
+      "id": "<node-job-id>",
+      "isolation": "shared_clean",
+      "node_id": "work",
+      "node_type": "agent",
+      "ref": "CTA-1",
+      "resume_session": "<session-id>",
+      "run": "/write-plan {ref}",
+      "run_id": "<run-id>",
+      "vars": {
+        "branch": "cta-1-contract-card",
+        "findings": null,
+        "prior_detail": null,
+        "ref": "CTA-1",
+        "sub_task": null
+      }
+    },
+    "shared_clean_agent": {
+      "agent": "plan-implementer",
+      "id": "<node-job-id>",
+      "isolation": "shared_clean",
+      "node_id": "work",
+      "node_type": "agent",
+      "ref": "CTA-1",
+      "resume_session": null,
+      "run": "/write-plan {ref}",
+      "run_id": "<run-id>",
+      "vars": {
+        "branch": "cta-1-contract-card",
+        "findings": null,
+        "prior_detail": null,
+        "ref": "CTA-1",
+        "sub_task": null
+      }
+    }
+  },
+  "heartbeat": {
+    "request": {
+      "capacity": {
+        "exclusive": 1,
+        "shared_clean": 1
+      },
+      "executor": {
+        "host": "fixture-host",
+        "interval": 30,
+        "name": "fixture"
+      },
+      "running": []
+    },
+    "response": {
+      "revoked": []
+    }
+  },
+  "outcome": {
+    "request": {
+      "detail": "asked the human",
+      "git_sha": "0000000000000000000000000000000000000000",
+      "outcome": "needs_input",
+      "session_id": "<session-id>"
+    },
+    "response": {
+      "run_state": "parked",
+      "status": "ok"
+    }
+  },
+  "version": 1
+}
