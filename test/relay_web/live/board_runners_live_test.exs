@@ -10,7 +10,14 @@ defmodule RelayWeb.BoardRunnersLiveTest do
 
   setup %{user: user} do
     board = Boards.get_or_create_default_board(user)
-    %{board: board, stage: insert(:stage, board: board)}
+
+    # Reuse one of the board's OWN stages rather than inserting another. The default board
+    # already ships stages at positions 1..11, while `insert(:stage, ...)` draws `position`
+    # from a globally-shared ExMachina sequence that starts at 1 — so it collides on
+    # stages_board_id_position_index unless some earlier test file has already advanced the
+    # sequence past 11. That made this file pass in the full suite and fail 11/13 standalone
+    # (caught by the RLY-167 spec review). The tests only need somewhere to put a card.
+    %{board: board, stage: List.first(board.stages)}
   end
 
   defp executor(board, name, overrides \\ []) do
