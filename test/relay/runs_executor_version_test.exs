@@ -57,6 +57,31 @@ defmodule Relay.RunsExecutorVersionTest do
     end
   end
 
+  describe "list_executor_status/2" do
+    test "reports each runner's version and outdated verdict" do
+      board = insert(:board)
+      insert(:executor, board: board, name: "current", version: Runs.min_executor_version())
+      insert(:executor, board: board, name: "ancient", version: nil)
+
+      by_name = Map.new(Runs.list_executor_status(board), &{&1.name, &1})
+
+      assert by_name["current"].version == Runs.min_executor_version()
+      refute by_name["current"].outdated
+      assert is_nil(by_name["ancient"].version)
+      assert by_name["ancient"].outdated
+    end
+
+    test "outdated is orthogonal to freshness — a runner can be both fresh and outdated" do
+      board = insert(:board)
+      insert(:executor, board: board, name: "ancient", version: nil)
+
+      [runner] = Runs.list_executor_status(board)
+
+      assert runner.freshness == :fresh
+      assert runner.outdated
+    end
+  end
+
   describe "the minimum the server requires" do
     test "is never higher than the EXECUTOR_VERSION this checkout's bin/relay declares" do
       # A server requiring a version its own repo cannot supply refuses EVERY executor, and

@@ -2,8 +2,9 @@ defmodule RelayWeb.BoardRunnersLive do
   @moduledoc """
   Runners view (RLY-141) at `/board/:slug/runners` — the machine-centric instrument
   panel per `docs/designs/Relay Runners.dc.html`: one panel per connected runner
-  (freshness dot + FRESH/STALE/GONE pill, capacity chips with used/total pips,
-  WORKING NOW rows linking into the card drawer, dark streaming log tail), header
+  (freshness dot + FRESH/STALE/GONE pill, an additive OUTDATED badge and version line for an
+  executor below Relay.Runs.min_executor_version/0 (RLY-184), capacity chips with used/total
+  pips, WORKING NOW rows linking into the card drawer, dark streaming log tail), header
   summary chips, the at-risk note on a stale/gone runner with jobs, and the empty
   state naming the real `bin/relay execute` start command.
 
@@ -198,7 +199,24 @@ defmodule RelayWeb.BoardRunnersLive do
                   >
                     {pill_label(runner.freshness)}
                   </span>
+                  <%!-- RLY-184: additive to the freshness pill, never a replacement — a
+                        refused executor is FRESH and OUTDATED at once. --%>
+                  <span
+                    :if={runner.outdated}
+                    id={"runner-#{dom_id(runner)}-outdated"}
+                    class="badge badge-sm badge-error font-mono font-bold"
+                    style="font-size:9.5px;letter-spacing:0.06em;"
+                  >
+                    OUTDATED
+                  </span>
                   <span style="flex:1;"></span>
+                  <span
+                    id={"runner-#{dom_id(runner)}-version"}
+                    class="font-mono"
+                    style="font-size:11.5px;color:oklch(0.58 0.02 255);"
+                  >
+                    {version_label(runner)}
+                  </span>
                   <span class="font-mono" style="font-size:11.5px;color:oklch(0.58 0.02 255);">
                     {runner.host}
                   </span>
@@ -432,6 +450,16 @@ defmodule RelayWeb.BoardRunnersLive do
   defp pill_label(:fresh), do: "FRESH"
   defp pill_label(:stale), do: "STALE"
   defp pill_label(:gone), do: "GONE"
+
+  # `v1 · requires v2` when outdated, plain `v1` otherwise — the mismatch legible without
+  # hovering. "unversioned" rather than a bare `v`: a runner reporting nothing predates
+  # RLY-184, and naming that is more useful than an empty slot.
+  defp version_label(%{version: nil, outdated: true}), do: "unversioned · requires v#{Runs.min_executor_version()}"
+
+  defp version_label(%{version: version, outdated: true}), do: "v#{version} · requires v#{Runs.min_executor_version()}"
+
+  defp version_label(%{version: nil}), do: "unversioned"
+  defp version_label(%{version: version}), do: "v#{version}"
 
   defp name_color(:fresh), do: "oklch(0.24 0.02 255)"
   defp name_color(_freshness), do: "oklch(0.50 0.02 255)"

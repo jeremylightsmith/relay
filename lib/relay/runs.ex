@@ -801,6 +801,10 @@ defmodule Relay.Runs do
         interval: executor.interval || 30,
         last_heartbeat: executor.last_heartbeat,
         freshness: executor_freshness(executor, now),
+        version: executor.version,
+        # Orthogonal to `freshness` on purpose (RLY-184): a refused executor is perfectly
+        # healthy and beating normally — it is just running old code.
+        outdated: executor_outdated?(executor),
         pools: pools_for(executor, jobs),
         jobs: jobs
       }
