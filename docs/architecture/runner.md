@@ -96,6 +96,14 @@ that stays server-side.
   `Relay.Runs.report_outcome/2` against the closed outcome set (422 `unknown_outcome`
   otherwise). The four outcomes and what each does to the run and the card are tabulated in
   the [state reference](state.md).
+- **The wire contract is pinned by a fixture.** `test/fixtures/executor_contract.json` is
+  generated from these routes by
+  `test/relay_web/controllers/api/executor_contract_test.exs` (never hand-edited) and read by
+  `bin/test_relay.py`, so both suites assert against one shape instead of each side's idea of
+  the other (RLY-176). Renaming a claim field, or changing what the outcome/heartbeat bodies
+  carry, breaks CI on the next run. Regenerate with
+  `RELAY_WRITE_CONTRACT_FIXTURE=1 mix test test/relay_web/controllers/api/executor_contract_test.exs`,
+  which rewrites the file and still fails so the diff gets reviewed.
 - **Executor heartbeat superset.** `BoardController.heartbeat/2`'s `/api/board/heartbeat`
   route carries an independent, additive branch: a beat carrying `name` + `capacity` calls
   `Relay.Runs.upsert_executor/2`, writing/refreshing a durable `Schemas.Executor` row
