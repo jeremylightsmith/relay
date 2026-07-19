@@ -27,6 +27,7 @@ defmodule Relay.Runs do
   alias Relay.Repo
   alias Relay.Runs.Engine
   alias Relay.Runs.PlanTasks
+  alias Relay.Runs.Preflight
   alias Relay.Runs.RunServer
   alias Relay.Runs.Scheduler
   alias Relay.Runs.Scheduler.Server, as: SchedulerServer
@@ -916,6 +917,12 @@ defmodule Relay.Runs do
       claimed_at: job.claimed_at
     }
   end
+
+  @doc """
+  Readiness snapshot for `flow` — "if I turn this on, will it work?" (RLY-182). See
+  `Relay.Runs.Preflight` for the candidate rules; read-only, and safe on the render path.
+  """
+  defdelegate preflight_flow(flow, now \\ nil), to: Preflight, as: :run
 
   # Every active job on this board that some executor is holding, grouped by `executor_name`.
   # Same join shape as reclaim_executor/1 — NodeJob → Run → Card — scoped by board so one
