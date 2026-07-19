@@ -57,7 +57,9 @@ defmodule Relay.Runs.EngineTest do
     assert Engine.decide(two_node_flow(), [current], current) == {:finish, :done}
   end
 
-  test "no edge for the outcome fails the run — even for succeeded (gates never silently pass)" do
+  # Post-RLY-179 a non-:failed outcome with no matching edge degrades to the :failed
+  # edge first; this flow has neither, so it still fails outright.
+  test "no edge for the outcome and none to degrade to fails the run — even for succeeded" do
     flow = flow([[key: "gate", type: :gate]], [[from: "start", to: "gate"]])
     current = execution(node_key: "gate")
     assert {:fail, reason} = Engine.decide(flow, [current], current)

@@ -89,6 +89,21 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "card-tag"
       assert html =~ "#infra"
     end
+
+    test "a stopped card's log strip shows the failure detail, not the fallback phrase" do
+      html =
+        render_component(&CoreComponents.board_card/1,
+          id: "card-3",
+          ref: "RLY-5",
+          title: "Dead run",
+          status: :failed,
+          health: :stopped,
+          log_text: "mix precommit failed: 3 tests, 1 failure"
+        )
+
+      assert html =~ "mix precommit failed: 3 tests, 1 failure"
+      refute html =~ "the agent stopped"
+    end
   end
 
   describe "stage_column/1" do

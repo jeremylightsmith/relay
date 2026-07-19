@@ -1180,7 +1180,10 @@ defmodule Relay.Cards do
   Marks the card as the terminal victim of a failed run (RLY-179): sets status
   `:failed`, posts `detail` as a plain `kind: :comment`, and logs a `:failure`
   activity carrying the failing node's output in `meta["detail"]` — the durable
-  record the drawer and the API read without parsing a comment body.
+  record the drawer and the API read without parsing a comment body. The same
+  detail goes in `text`, because the board's log strip renders `entry.text` and
+  otherwise falls back to the generic phrase "the agent stopped", losing the
+  diagnosis on the card face.
 
   Deliberately NOT `request_input/3`: a dead run cannot be resumed by answering,
   so posting the failure as a `:question` invites an answer that does nothing and
@@ -1198,7 +1201,12 @@ defmodule Relay.Cards do
          {:ok, _comment} <-
            Activity.add_comment(updated, %{actor: actor, body: detail, kind: :comment}),
          {:ok, _entry} <-
-           Activity.log(updated, %{type: :failure, actor: actor, meta: %{"detail" => detail}}) do
+           Activity.log(updated, %{
+             type: :failure,
+             actor: actor,
+             text: detail,
+             meta: %{"detail" => detail}
+           }) do
       {:ok, updated}
     end
   end

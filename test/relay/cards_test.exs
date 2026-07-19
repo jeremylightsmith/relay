@@ -796,6 +796,18 @@ defmodule Relay.CardsTest do
              )
     end
 
+    # The board's log strip renders `entry.text` and falls back to the static phrase
+    # "the agent stopped" when it is blank, so a text-less :failure row would erase the
+    # failing node's output from the card face (RLY-179 review).
+    test "logs the detail as the entry's text, so the board strip shows it", %{card: card} do
+      detail = "The flow has nowhere to go after `final_fix` reported `failed`."
+
+      assert {:ok, updated} = Cards.mark_failed(card, detail)
+
+      assert %Schemas.Activity{text: ^detail} =
+               [updated.id] |> Relay.Activity.newest_per_card() |> Map.fetch!(updated.id)
+    end
+
     test "does not stamp blocked_since — a failed card is not waiting on an answer", %{card: card} do
       assert {:ok, updated} = Cards.mark_failed(card, "it died")
       assert is_nil(updated.blocked_since)
