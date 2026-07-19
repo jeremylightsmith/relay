@@ -500,7 +500,13 @@ defmodule Relay.Runs do
   Upserts the durable executor row keyed `{board_id, name}`, refreshing host,
   interval, capacity, and `last_heartbeat`. Called by the claim endpoint (claim
   doubles as a liveness touch) and by the extended heartbeat's capacity branch.
-  `attrs` is a STRING-keyed map (`"name"`, `"host"`, `"interval"`, `"capacity"`).
+  `attrs` is a STRING-keyed map (`"name"`, `"host"`, `"interval"`, `"capacity"`,
+  and optionally `"capabilities"`).
+
+  `capabilities` rides send-on-change (RLY-182), so most beats omit it. The replace
+  list is therefore built per-call: replacing with the insert's values would null out
+  a good row on every beat that didn't carry the key, and preflight would then report
+  a healthy executor as missing every agent.
   """
   def upsert_executor(%Board{id: board_id}, attrs) do
     params = %{
@@ -512,10 +518,20 @@ defmodule Relay.Runs do
       last_heartbeat: now()
     }
 
+    {params, replace} =
+      case normalize_capabilities(attrs["capabilities"]) do
+        nil ->
+          {params, [:host, :interval, :capacity, :last_heartbeat, :updated_at]}
+
+        capabilities ->
+          {Map.put(params, :capabilities, capabilities),
+           [:host, :interval, :capacity, :capabilities, :last_heartbeat, :updated_at]}
+      end
+
     %Executor{}
     |> Executor.changeset(params)
     |> Repo.insert(
-      on_conflict: {:replace, [:host, :interval, :capacity, :last_heartbeat, :updated_at]},
+      on_conflict: {:replace, replace},
       conflict_target: [:board_id, :name],
       returning: true
     )
@@ -530,6 +546,23 @@ defmodule Relay.Runs do
   end
 
   defp normalize_capacity(_cap), do: %{}
+
+  # nil = "this beat did not report an inventory" — the caller must then leave the stored
+  # value alone. A malformed payload is treated the same way rather than stored as junk.
+  defp normalize_capabilities(capabilities) when is_map(capabilities) do
+    %{
+      "agents" => normalize_names(capabilities["agents"]),
+      "skills" => normalize_names(capabilities["skills"])
+    }
+  end
+
+  defp normalize_capabilities(_capabilities), do: nil
+
+  defp normalize_names(names) when is_list(names) do
+    names |> Enum.filter(&is_binary/1) |> Enum.uniq() |> Enum.sort()
+  end
+
+  defp normalize_names(_names), do: []
 
   @doc """
   Atomically claims the next eligible `queued` job for `executor`, scoped to
