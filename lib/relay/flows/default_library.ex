@@ -137,7 +137,8 @@ defmodule Relay.Flows.DefaultLibrary do
           key: "merge",
           type: :shell,
           run:
-            "git push -u origin {branch} && url=$(gh pr create --fill --head {branch} --base main) && " <>
+            "git push origin HEAD:refs/heads/{branch} && " <>
+              "url=$(gh pr create --fill --head {branch} --base main) && " <>
               "{relay} pr {ref} \"$url\" && gh pr merge {branch} --squash"
         }
       ],

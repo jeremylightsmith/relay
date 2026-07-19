@@ -69,7 +69,7 @@
     // this node is simply unreachable unless every gate above routed `succeeded`.
     "merge": {
       "type": "shell",
-      "run": "git push -u origin {branch} && url=$(gh pr create --fill --head {branch} --base main) && {relay} pr {ref} \"$url\" && gh pr merge {branch} --squash"
+      "run": "git push origin HEAD:refs/heads/{branch} && url=$(gh pr create --fill --head {branch} --base main) && {relay} pr {ref} \"$url\" && gh pr merge {branch} --squash"
     }
   },
   "edges": [
