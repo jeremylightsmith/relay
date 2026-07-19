@@ -875,7 +875,7 @@ defmodule RelayWeb.CoreComponents do
     doc: "who holds the baton, derived from the owner list; nil when unowned"
 
   attr :status, :atom,
-    values: [:ready, :working, :needs_input, :in_review, nil],
+    values: [:ready, :working, :needs_input, :in_review, :failed, nil],
     default: nil
 
   attr :stage_type, :atom,
@@ -1090,9 +1090,9 @@ defmodule RelayWeb.CoreComponents do
     end
   end
 
+  defp card_accent_class(%{status: :failed}), do: "border-l-error"
   defp card_accent_class(%{health: :stale}), do: "border-l-warning"
   defp card_accent_class(%{health: :stopped}), do: "border-l-error"
-  defp card_accent_class(%{status: :failed}), do: "border-l-error"
   defp card_accent_class(%{status: :needs_input}), do: "border-l-warning"
   defp card_accent_class(%{status: :in_review}), do: "border-l-warning"
   defp card_accent_class(%{status: :working}), do: "border-l-secondary"

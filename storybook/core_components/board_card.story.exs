@@ -128,6 +128,20 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
         }
       },
       %Variation{
+        id: :failed,
+        attributes: %{
+          id: "story-card-failed",
+          ref: "RLY-20",
+          title: "Generate the API client",
+          active_owner: :ai,
+          status: :failed,
+          health: :stopped,
+          log_text: "npm install failed: ETARGET no matching version",
+          log_at: DateTime.add(DateTime.utc_now(), -2 * 60, :second),
+          owners: [%{actor_type: :agent}]
+        }
+      },
+      %Variation{
         id: :run_running,
         attributes: %{
           id: "story-card-run-running",
