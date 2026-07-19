@@ -50,6 +50,43 @@ FORWARDER = None
 RUN_IDS = {}   # ref -> run_id of the run currently working it (RLY-112)
 NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RLY-135)
 
+# ---- executor version (RLY-184) ----
+#
+# `bin/relay` is loaded into memory at process start, so a long-running `relay execute` keeps
+# serving whatever version it started with — forever, and silently — no matter how many times
+# this file is fixed and merged underneath it. Three cards died that way before anyone noticed.
+# So the executor DECLARES a version on every claim and heartbeat, the server declares the
+# minimum it will work with, and anything below that is refused work and visibly marked.
+#
+# Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
+# bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
+EXECUTOR_VERSION = 1
+EXECUTOR_FINGERPRINT = "87b52d931da29e2203d29b01e13ccc1c4e5e281a07deee348def8f8e134a7b3a"
+
+# The two constant lines above are masked out of the hash: satisfying the guard (bump the
+# integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
+# covered, so no behaviour change can slip through without a deliberate bump.
+FINGERPRINT_MASK = re.compile(r"(?m)^(EXECUTOR_VERSION|EXECUTOR_FINGERPRINT)\s*=.*$")
+
+
+def executor_fingerprint(source=None):
+    """sha256 of this file with the two version constants masked out (RLY-184).
+
+    No git dependency, so it behaves identically in a worktree, on a detached HEAD, or in CI."""
+    if source is None:
+        with open(HERE, encoding="utf-8") as f:
+            source = f.read()
+    masked = FINGERPRINT_MASK.sub(r"\1 = <masked>", source)
+    return hashlib.sha256(masked.encode()).hexdigest()
+
+
+def executor_ident(cfg):
+    """The `executor` dict on the wire, shared by claim_node_job and heartbeat_body (RLY-184).
+
+    Pure and named so bin/test_relay.py can pin `version` against
+    test/fixtures/executor_contract.json the same way outcome_body/heartbeat_body are pinned."""
+    return {"name": cfg["name"], "host": socket.gethostname(), "version": EXECUTOR_VERSION}
+
 
 def die(msg):
     print(f"relay: {msg}", file=sys.stderr)

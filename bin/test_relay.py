@@ -1982,6 +1982,65 @@ class ExecutorHeartbeatCapacityTest(unittest.TestCase):
         self.assertEqual(killed, ["nj-7"])
 
 
+class ExecutorFingerprintGuardTest(unittest.TestCase):
+    """RLY-184: any edit to bin/relay must come with an EXECUTOR_VERSION bump.
+
+    A doc line asking contributors to remember is not a rule; this is. `bin/relay` is loaded
+    into memory at process start, so a long-running `relay execute` serves whatever version it
+    started with — forever and silently — no matter how often the file is fixed underneath it.
+    The declared version is what lets the server refuse such a process, and it is only truthful
+    if bumping it is enforced rather than requested.
+
+    The two constant lines are masked out of the hash so that SATISFYING the guard (bump the
+    integer, paste the new fingerprint) does not itself re-break it.
+    """
+
+    def test_bin_relay_matches_its_declared_fingerprint(self):
+        computed = relay.executor_fingerprint()
+        self.assertEqual(
+            computed, relay.EXECUTOR_FINGERPRINT,
+            "\n\nbin/relay changed but EXECUTOR_VERSION was not bumped. Increment "
+            f"EXECUTOR_VERSION and set EXECUTOR_FINGERPRINT to:\n\n    {computed}\n")
+
+    def test_masking_makes_a_version_bump_fingerprint_stable(self):
+        with open(RELAY_PATH, encoding="utf-8") as f:
+            src = f.read()
+        bumped = src.replace(f"EXECUTOR_VERSION = {relay.EXECUTOR_VERSION}",
+                             f"EXECUTOR_VERSION = {relay.EXECUTOR_VERSION + 1}", 1)
+        self.assertNotEqual(bumped, src, "the bump substitution matched nothing")
+        self.assertEqual(relay.executor_fingerprint(bumped), relay.executor_fingerprint(src))
+
+    def test_a_fingerprint_paste_is_also_stable(self):
+        with open(RELAY_PATH, encoding="utf-8") as f:
+            src = f.read()
+        repasted = src.replace(f'EXECUTOR_FINGERPRINT = "{relay.EXECUTOR_FINGERPRINT}"',
+                               'EXECUTOR_FINGERPRINT = "0" * 64', 1)
+        self.assertNotEqual(repasted, src)
+        self.assertEqual(relay.executor_fingerprint(repasted), relay.executor_fingerprint(src))
+
+    def test_any_other_edit_changes_the_fingerprint(self):
+        with open(RELAY_PATH, encoding="utf-8") as f:
+            src = f.read()
+        self.assertNotEqual(relay.executor_fingerprint(src + "\n# a trailing comment\n"),
+                            relay.executor_fingerprint(src))
+
+
+class ExecutorIdentTest(unittest.TestCase):
+    """The `executor` dict both claim and heartbeat put on the wire. Pure and named for the
+    same reason outcome_body/heartbeat_body are: bin/test_relay.py pins it against the
+    contract fixture the ExUnit generator writes."""
+
+    def test_the_ident_carries_the_declared_version(self):
+        ident = relay.executor_ident({"name": "box"})
+        self.assertEqual(ident["version"], relay.EXECUTOR_VERSION)
+        self.assertIsInstance(relay.EXECUTOR_VERSION, int)
+
+    def test_the_ident_carries_the_configured_name_and_this_host(self):
+        ident = relay.executor_ident({"name": "mac-mini"})
+        self.assertEqual(ident["name"], "mac-mini")
+        self.assertEqual(ident["host"], relay.socket.gethostname())
+
+
 class RealGitWorktreeTest(unittest.TestCase):
     """RLY-173, and a deliberate change of testing style.
 
