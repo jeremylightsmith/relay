@@ -362,6 +362,17 @@ defmodule Relay.Boards do
   end
 
   @doc """
+  The **top-level** stage `stage` belongs to: itself for a main-lane
+  stage, its parent for a sub-lane child (loading the parent).
+
+  This is what the native inbox groups by (RLY-156) — a card sitting in
+  `Code · Review` files under `Code`, taking `Code`'s name and type, not
+  the sub-lane's `:review`.
+  """
+  def top_level_stage(%Stage{parent_id: nil} = stage), do: stage
+  def top_level_stage(%Stage{parent_id: parent_id}), do: Repo.get!(Stage, parent_id)
+
+  @doc """
   The human-facing label for `stage`: its own `name` for a main-lane
   stage, or `"<parent name> · Review|Done"` for a sub-lane child (loading
   the parent). Guards the same composite-name leak (`enable_lane/2`
@@ -369,13 +380,16 @@ defmodule Relay.Boards do
   drawer's move menu already sanitizes — route any other display of a
   stage name (e.g. the `:moved` activity phrase) through this instead of
   the raw `Stage.name`.
-  """
-  def stage_display_name(%Stage{parent_id: nil} = stage), do: stage.name
 
-  def stage_display_name(%Stage{parent_id: parent_id, type: type}) do
-    parent = Repo.get!(Stage, parent_id)
-    "#{parent.name} · #{lane_word(type)}"
-  end
+  Pass an already-resolved [`top_level_stage/1`](`top_level_stage/1`) as the second
+  argument when you need both — `RelayWeb.Api.FeedJSON` renders the display name and
+  the grouping stage from one lookup rather than two.
+  """
+  def stage_display_name(%Stage{} = stage), do: stage_display_name(stage, top_level_stage(stage))
+
+  def stage_display_name(%Stage{parent_id: nil} = stage, %Stage{}), do: stage.name
+
+  def stage_display_name(%Stage{type: type}, %Stage{} = top), do: "#{top.name} · #{lane_word(type)}"
 
   defp get_sublane(%Stage{} = parent, lane) do
     Repo.get_by(Stage, parent_id: parent.id, type: lane)

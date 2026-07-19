@@ -156,4 +156,26 @@ defmodule RelayWeb.Api.AllFeedTest do
     assert stages[Cards.ref(board, blocked)] == "Code"
     assert stages[Cards.ref(board, reviewing)] == "Code · Review"
   end
+
+  test "every row carries the top-level stage group it files under", %{conn: conn, user: user} do
+    board = member_board(user, "AAA", "alpha")
+    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
+    spec = insert(:stage, board: board, name: "Spec", type: :planning, ai_enabled: true, position: 2)
+    {:ok, review} = Boards.enable_lane(code, :review)
+
+    blocked = insert(:card, stage: spec, status: :needs_input)
+    {:ok, _} = Cards.request_input(blocked, "Which region?", :agent)
+    reviewing = insert(:card, stage: review, status: :in_review)
+
+    rows = Map.new(feed(conn)["data"], &{&1["ref"], &1})
+
+    assert rows[Cards.ref(board, blocked)]["stage_group"] == %{"name" => "Spec", "type" => "planning"}
+
+    # The sub-lane card files under its PARENT — not a "Code · Review" group of its own —
+    # and takes Code's :work type, not the sub-lane's :review.
+    assert rows[Cards.ref(board, reviewing)]["stage_group"] == %{"name" => "Code", "type" => "work"}
+
+    # The breadcrumb is untouched: `stage` stays the sub-lane display name.
+    assert rows[Cards.ref(board, reviewing)]["stage"] == "Code · Review"
+  end
 end

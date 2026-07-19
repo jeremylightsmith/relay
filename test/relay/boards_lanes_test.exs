@@ -58,4 +58,14 @@ defmodule Relay.BoardsLanesTest do
     assert {:error, :not_empty} = Boards.disable_lane(parent, :review)
     assert [%{type: :review}] = Boards.sublanes(parent)
   end
+
+  test "top_level_stage returns the stage itself for a main lane, the parent for a sub-lane" do
+    parent = main_stage()
+    {:ok, review} = Boards.enable_lane(parent, :review)
+
+    assert Boards.top_level_stage(parent).id == parent.id
+    assert Boards.top_level_stage(review).id == parent.id
+    assert Boards.top_level_stage(review).name == "Code"
+    assert Boards.top_level_stage(review).type == :work
+  end
 end
