@@ -31,6 +31,7 @@ FeedRow makeRow({
   String kind = 'in_review',
   String boardKey = 'RLY',
   DateTime? blockedAt,
+  FeedStageGroup? stageGroup,
 }) => FeedRow(
   ref: ref,
   title: title,
@@ -39,6 +40,7 @@ FeedRow makeRow({
   kind: kind,
   reason: 'Review',
   blockedAt: blockedAt ?? DateTime.utc(2026, 7, 15, 11, 56),
+  stageGroup: stageGroup,
 );
 
 Future<void> pumpInbox(
@@ -335,4 +337,63 @@ void main() {
       expect(avatar.constraints?.maxWidth, 32);
     },
   );
+
+  testWidgets('the inbox files rows under their top-level stage bar', (
+    tester,
+  ) async {
+    final repo = FakeFeedRepository(
+      page: FeedPage(
+        rows: [
+          makeRow(
+            ref: 'RLY-1',
+            stageGroup: const FeedStageGroup(name: 'Spec', type: 'planning'),
+          ),
+          makeRow(
+            ref: 'RLY-2',
+            stageGroup: const FeedStageGroup(name: 'Code', type: 'work'),
+          ),
+          // A sub-lane card: the server already resolved it to its PARENT group.
+          makeRow(
+            ref: 'RLY-3',
+            stageGroup: const FeedStageGroup(name: 'Code', type: 'work'),
+          ),
+        ],
+        meta: const FeedMeta(count: 3),
+      ),
+    );
+    await pumpInbox(tester, repo: repo);
+
+    expect(find.byKey(const Key('stage_group_Spec')), findsOneWidget);
+    expect(find.byKey(const Key('stage_group_Code')), findsOneWidget);
+    // One CODE bar for both Code rows — no separate CODE · REVIEW group.
+    expect(find.text('CODE'), findsOneWidget);
+
+    // Groups follow first appearance, so Spec's bar sits above Code's.
+    final spec = tester
+        .getTopLeft(find.byKey(const Key('stage_group_Spec')))
+        .dy;
+    final code = tester
+        .getTopLeft(find.byKey(const Key('stage_group_Code')))
+        .dy;
+    expect(spec, lessThan(code));
+  });
+
+  testWidgets('rows with no stage group still render, under one OTHER bar', (
+    tester,
+  ) async {
+    final repo = FakeFeedRepository(
+      page: FeedPage(
+        rows: [
+          makeRow(ref: 'RLY-1'),
+          makeRow(ref: 'RLY-2'),
+        ],
+        meta: const FeedMeta(count: 2),
+      ),
+    );
+    await pumpInbox(tester, repo: repo);
+
+    expect(find.byKey(const Key('stage_group_other')), findsOneWidget);
+    expect(find.byKey(const Key('inbox_row_RLY-1')), findsOneWidget);
+    expect(find.byKey(const Key('inbox_row_RLY-2')), findsOneWidget);
+  });
 }

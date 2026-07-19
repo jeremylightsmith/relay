@@ -46,6 +46,28 @@ class FeedQuestion {
   );
 }
 
+/// The **top-level** stage a row files under (RLY-156). A card in `Code · Review` and a
+/// card in `Code` both carry `{name: "Code", type: "work"}`, so sub-lane cards group with
+/// their parent rather than splitting into a group of their own.
+class FeedStageGroup {
+  const FeedStageGroup({required this.name, required this.type});
+
+  final String name;
+
+  /// The stage's behaviour type: `queue | work | planning | review | done`. Deliberately a
+  /// String, not an enum — a type added server-side must not break an older build. The
+  /// unknown case is handled by [RelayTheme.stageTypeColor]'s fallback.
+  final String type;
+
+  /// Null when the field is absent (an older server), malformed, or carries no name —
+  /// the inbox then files the row into its trailing unlabelled group rather than throwing.
+  static FeedStageGroup? fromJson(Map<String, dynamic>? json) {
+    final name = json?['name'] as String?;
+    if (name == null || name.isEmpty) return null;
+    return FeedStageGroup(name: name, type: json?['type'] as String? ?? '');
+  }
+}
+
 class FeedRow {
   const FeedRow({
     required this.ref,
@@ -58,6 +80,7 @@ class FeedRow {
     this.stage,
     this.reason,
     this.questions,
+    this.stageGroup,
   });
 
   final String ref;
@@ -67,6 +90,9 @@ class FeedRow {
 
   /// The stage's display name (`Code`, `Code · Review`) — INPUT-01's breadcrumb.
   final String? stage;
+
+  /// The top-level stage this row groups under (RLY-156). Null on an older server.
+  final FeedStageGroup? stageGroup;
 
   /// The card's status. Present for completeness; the two-type contract reads [kind].
   final String status;
@@ -100,6 +126,10 @@ class FeedRow {
     questions: (json['questions'] as List<dynamic>?)
         ?.map((e) => FeedQuestion.fromJson((e as Map).cast<String, dynamic>()))
         .toList(growable: false),
+    stageGroup: FeedStageGroup.fromJson(switch (json['stage_group']) {
+      final Map m => m.cast<String, dynamic>(),
+      _ => null,
+    }),
   );
 }
 
@@ -157,4 +187,55 @@ String formatAge(DateTime blockedAt, {DateTime? now}) {
   if (delta.inMinutes < 60) return '${delta.inMinutes}m';
   if (delta.inHours < 24) return '${delta.inHours}h';
   return '${delta.inDays}d';
+}
+
+/// One rendered group in the inbox: a stage bar and the rows filed under it (RLY-156).
+class InboxGroup {
+  const InboxGroup({required this.group, required this.rows});
+
+  /// Null for the trailing catch-all group — rows the server sent with no `stage_group`.
+  final FeedStageGroup? group;
+
+  final List<FeedRow> rows;
+}
+
+/// Regroup [rows] for rendering. **A stable regroup, not a re-sort** — server order is
+/// authoritative (most-recently-blocked first) and nothing moves relative to anything it
+/// was already behind within its own group:
+///
+/// - rows keep server order inside their group;
+/// - groups appear in order of **first appearance**, so the group holding the
+///   most-recently-blocked card comes first;
+/// - rows with a null [FeedRow.stageGroup] collect into one trailing unlabelled group, so
+///   an older server or an odd row still renders.
+///
+/// The feed spans **every** board the user belongs to, so same-named stages on different
+/// boards **merge into one group** — [InboxRow]'s board chip is what tells them apart, so
+/// no group is duplicated per board. If merged stages disagree on `type`, the first row's
+/// type wins: deterministic, and cosmetic only.
+List<InboxGroup> groupRowsByStage(List<FeedRow> rows) {
+  final order = <String>[];
+  final rowsByName = <String, List<FeedRow>>{};
+  final groupsByName = <String, FeedStageGroup>{};
+  final ungrouped = <FeedRow>[];
+
+  for (final row in rows) {
+    final group = row.stageGroup;
+    if (group == null) {
+      ungrouped.add(row);
+      continue;
+    }
+    if (!rowsByName.containsKey(group.name)) {
+      order.add(group.name);
+      rowsByName[group.name] = <FeedRow>[];
+      groupsByName[group.name] = group;
+    }
+    rowsByName[group.name]!.add(row);
+  }
+
+  return [
+    for (final name in order)
+      InboxGroup(group: groupsByName[name], rows: rowsByName[name]!),
+    if (ungrouped.isNotEmpty) InboxGroup(group: null, rows: ungrouped),
+  ];
 }

@@ -10,6 +10,7 @@ import 'feed_controller.dart';
 import 'models/feed_row.dart';
 import 'widgets/caught_up.dart';
 import 'widgets/inbox_row.dart';
+import 'widgets/stage_group_header.dart';
 import 'widgets/working_strip.dart';
 
 /// The "Needs you" inbox — HOME-01 / EMPTY-01 (docs/designs/Relay Mobile.dc.html).
@@ -221,15 +222,28 @@ class _Loaded extends ConsumerWidget {
             const CaughtUp()
           else
             // Server order is authoritative (most-recently-blocked first) — no re-sort.
-            ...state.rows.map(
-              (row) => Padding(
-                padding: const EdgeInsets.only(bottom: 14), // artboard 9
-                child: InboxRow(
-                  row: row,
-                  showBoardChip: state.multiBoard,
-                  onTap: () => onOpen(row),
+            // groupRowsByStage only *regroups* it (RLY-156): rows keep their order inside a
+            // group, and groups follow first appearance, so the group holding the newest
+            // block still comes first.
+            ...groupRowsByStage(state.rows).expand(
+              (group) => [
+                StageGroupHeader(
+                  name: group.group?.name ?? '',
+                  type: group.group?.type,
+                  count: group.rows.length,
                 ),
-              ),
+                ...group.rows.map(
+                  (row) => Padding(
+                    padding: const EdgeInsets.only(bottom: 14), // artboard 9
+                    child: InboxRow(
+                      row: row,
+                      showBoardChip: state.multiBoard,
+                      onTap: () => onOpen(row),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
             ),
           if (showWorking) ...[
             const SizedBox(height: 24),
