@@ -366,6 +366,11 @@
   background: var(--color-base-200); border: 1px solid var(--color-base-300);
   color: color-mix(in oklch, var(--color-secondary) 65%, var(--color-base-content) 35%);
   padding: 0.1em 0.4em; border-radius: 5px;
+  /* Inline code is often a long unbreakable token (a module path like
+     `lib/relay_web/controllers/api/node_job_controller.ex`). Without this it overflows a
+     phone viewport and drags the whole page into horizontal scroll. Block code is
+     unaffected: `pre`'s `white-space: pre` wins, so it keeps scrolling instead of wrapping. */
+  overflow-wrap: break-word;
 }
 .docs pre {
   background: var(--color-base-200); border: 1px solid var(--color-base-300);
@@ -374,9 +379,15 @@
 .docs pre code {
   background: none; border: none; color: inherit; padding: 0; font-size: 0.82rem;
 }
+/* Wide reference tables (e.g. the PubSub topic table) are wider than the 720px article
+   column and far wider than a phone viewport. `display: block` turns the table itself into
+   the scroll container so it scrolls internally instead of widening the page; `min-width:
+   100%` keeps narrow tables stretched full-width as before, `width: max-content` lets wide
+   ones keep their natural column widths behind the scroll. */
 .docs table {
-  border-collapse: separate; border-spacing: 0; width: 100%; margin: 1.1em 0; font-size: 0.92em;
-  border: 1px solid var(--color-base-300); border-radius: 10px; overflow: hidden;
+  border-collapse: separate; border-spacing: 0; margin: 1.1em 0; font-size: 0.92em;
+  display: block; overflow-x: auto; width: max-content; min-width: 100%; max-width: 100%;
+  border: 1px solid var(--color-base-300); border-radius: 10px;
 }
 .docs th, .docs td { padding: 0.5em 0.7em; text-align: left; }
 .docs th {
