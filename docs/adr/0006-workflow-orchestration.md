@@ -170,6 +170,15 @@ Everything in this section is **illustrative, not final** — the commitment is 
 | `partial` | retries exhausted but usable output, node opted in | follow `partial` edge | noted on card |
 | `needs_input` | agent asked the human a question | checkpoint + park the run | card → `needs_input`, drawer stepper; the answer re-enters the same node with its agent session resumed (`claude -p --resume`) |
 
+`partial` is **reportable but unrouted by default** — the agent outcome contract offers only
+`succeeded | failed`, and no seeded flow declares a `partial` edge. A hand-authored flow that
+wants a three-way branch must declare one; the schema, the API validator, and the flow editor
+all still accept it.
+
+**Unrouted outcomes degrade (RLY-179).** When a node reports an outcome it has no edge for, the
+engine follows that node's `:failed` edge instead — same guard preference, same `max_loops`
+budget, no extra loop allowance. Only a `:failed` that is itself unrouted fails the run.
+
 **Default flow library** (what Relay ships; each row replaces a `relay_config.json` entry —
 that file, and the `relay watch` dispatcher that read it, are now deleted; all three rows
 below are cut over)
