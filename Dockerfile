@@ -52,6 +52,11 @@ COPY priv priv
 
 COPY lib lib
 
+# priv/docs/architecture is a symlink into docs/; COPY priv copies it *as a symlink*, so
+# docs/ must be present before the compile that reads through it. Compile-time embedding
+# (@external_resource) means the runtime image needs neither.
+COPY docs docs
+
 # Compile the release
 RUN mix compile
 
