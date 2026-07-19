@@ -50,8 +50,9 @@ curl -fsSL https://<board-host>/install | sh
 ```
 
 That one line drops `bin/relay` into `bin/` and immediately runs `bin/relay init`, which
-fetches the project scaffold from your board and writes it — **no access to the Relay
-repository is needed**, the scaffold is served by your board, not cloned from anywhere:
+fetches the project scaffold from your board and writes it —
+**no access to the Relay repository is needed**, the scaffold is served by your board,
+not cloned from anywhere:
 
 - `.relay/executor.json` — how many jobs this machine will run at once, and in which
   isolation class;
@@ -64,7 +65,10 @@ directly (or export `RELAY_URL` first) — `init` needs a URL but deliberately *
 key, since it runs before a board key exists.
 
 `relay init` is safe to re-run: an unchanged file is reported `unchanged`, and a file you
-have edited is shown as a diff and left alone unless you pass `--force`.
+have edited is shown as a diff and left alone unless you pass `--force`. Two more flags:
+`--dry-run` reports what it *would* write and touches nothing, and `--no-self-update`
+suppresses the automatic `bin/relay` upgrade that otherwise fires when the board is
+serving a newer CLI than the one you have (it only ever upgrades, never downgrades).
 
 **Question for a human:** which project directory should agents work in? It must be a git
 repository, and it should be one you are willing to let agents create branches in.

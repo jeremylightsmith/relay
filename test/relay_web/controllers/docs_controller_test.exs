@@ -80,6 +80,8 @@ defmodule RelayWeb.DocsControllerTest do
     html = conn |> get(~p"/docs") |> html_response(200)
 
     assert html =~ ~s(href="/docs/runbook-flow-cutover")
+    # The sentence the whole scaffold-over-HTTP design exists to make true (plan goal).
+    assert html =~ "no access to the Relay repository"
     refute html =~ "git clone"
     refute html =~ "copy this file"
   end

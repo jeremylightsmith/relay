@@ -2630,6 +2630,28 @@ class InitTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             capture_ret(relay.cmd_init, self.args())
 
+    def test_a_non_utf8_file_on_disk_is_skipped_not_a_traceback(self):
+        self.stub()
+        path = os.path.join(self.tmp, "AGENTS.md")
+        with open(path, "wb") as f:
+            f.write(b"\xff\xfe binary junk, not utf-8\n")
+
+        out = capture(relay.cmd_init, self.args())
+
+        self.assertIn("skipped (differs)", out)
+        with open(path, "rb") as f:                  # left alone, exactly like a text diff
+            self.assertEqual(f.read(), b"\xff\xfe binary junk, not utf-8\n")
+
+    def test_force_overwrites_a_non_utf8_file(self):
+        self.stub()
+        with open(os.path.join(self.tmp, "AGENTS.md"), "wb") as f:
+            f.write(b"\xff\xfe binary junk\n")
+
+        buckets = capture_ret(relay.cmd_init, self.args(force=True))
+
+        self.assertEqual(buckets["overwritten"], ["AGENTS.md"])
+        self.assertEqual(self.read("AGENTS.md"), "conventions\n")
+
     def test_report_names_the_outstanding_human_steps(self):
         self.stub()
         out = capture(relay.cmd_init, self.args())

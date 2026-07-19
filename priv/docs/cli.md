@@ -13,7 +13,7 @@ exits non-zero.
 
 | Command | What it does |
 | --- | --- |
-| `bin/relay init` | Scaffold this project from the board: `.claude/` agents + skills, `.relay/executor.json`, `AGENTS.md`. Flags: `--url`, `--force`, `--dry-run`, `--no-self-update`. See [Getting started](/docs) |
+| `bin/relay init` | Scaffold this project from the board: `.claude/` agents + skills, `.relay/executor.json`, `AGENTS.md`. Flags: `--url` (board host, else `RELAY_URL`), `--force` (overwrite files you edited), `--dry-run` (report only, write nothing), `--no-self-update` (skip the upgrade-only `bin/relay` refresh). See [Getting started](/docs) |
 | `bin/relay board` | The board: stages with their cards |
 | `bin/relay card RLY-12` | One card: description, plan, branch, timeline |
 | `bin/relay create "Fix login" --stage Backlog` | Create a card (optional `--stage`/`--description`/`--tag`) |

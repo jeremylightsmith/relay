@@ -1452,8 +1452,16 @@ def _classify(path, content, force):
     differs is shown as a unified diff and left alone unless --force (RLY-181)."""
     if not os.path.exists(path):
         return "created", ""
-    with open(path, encoding="utf-8") as f:
-        existing = f.read()
+    try:
+        with open(path, encoding="utf-8") as f:
+            existing = f.read()
+    except UnicodeDecodeError:
+        # A binary/latin-1 file where a template goes. It cannot equal the template and
+        # cannot be diffed, so treat it like any other differing file: left alone unless
+        # --force. Uniform with every other handled failure path in cmd_init.
+        if force:
+            return "overwritten", ""
+        return "skipped", f"  (not valid UTF-8; cannot diff — {path})\n"
     if existing == content:
         return "unchanged", ""
     if force:
