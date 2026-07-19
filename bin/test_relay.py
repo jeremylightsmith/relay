@@ -2104,6 +2104,148 @@ class ClaimOutdatedTest(unittest.TestCase):
         self.assertTrue(seen["soft_conflict"])
 
 
+class FakeHeartbeat:
+    """Stand-in for ExecutorHeartbeat that records the capacity of every beat, so a test can
+    assert the loop flipped the advertised capacity to zero rather than inspecting a thread."""
+
+    instances = []
+
+    def __init__(self, executor, running_fn, on_revoke, interval=15, capacity=None):
+        self.executor = executor
+        self.capacity = capacity or {}
+        self.beats = []
+        FakeHeartbeat.instances.append(self)
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def _beat(self):
+        self.beats.append(dict(self.capacity))
+
+
+class ExecuteLoopOutdatedTest(unittest.TestCase):
+    """RLY-184: refused at claim, the executor stays ALIVE, marked and idle — it does not exit.
+
+    Exiting was the other candidate, rejected because a dead runner tells nobody anything. The
+    hazard of staying alive (cards queue behind an apparently-healthy runner) is answered by
+    advertising zero capacity, which is why that assertion is here and not decoration."""
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in
+                       ("load_executor_config", "claim_node_job", "run_node_job",
+                        "report_outcome", "reset_worktree", "refresh_worktree",
+                        "ExecutorHeartbeat", "FORWARDER", "env", "log", "DRY")}
+        self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+        self.addCleanup(relay.signal.signal, relay.signal.SIGINT,
+                        relay.signal.getsignal(relay.signal.SIGINT))
+        relay.DRY = False
+        relay.env = lambda name: "x"
+        self.logs = []
+        relay.log = lambda msg, **k: self.logs.append((msg, k.get("kind")))
+        relay.reset_worktree = lambda *a, **k: None
+        relay.refresh_worktree = lambda *a, **k: None
+        relay.run_node_job = lambda job, path, control: ("succeeded", "", "sha", None)
+        relay.report_outcome = lambda *a: "done"
+        relay.load_executor_config = lambda: {
+            "name": "box", "namespace": "exec",
+            "capacity": {"shared_clean": 2, "exclusive": 0},
+            "poll_timeout": 0.01, "heartbeat_interval": 60}
+        FakeHeartbeat.instances = []
+        relay.ExecutorHeartbeat = FakeHeartbeat
+        self.addCleanup(setattr, relay.ExecutorPool, "ensure", relay.ExecutorPool.ensure)
+        relay.ExecutorPool.ensure = lambda self: None
+        os.environ.setdefault("RELAY_URL", "http://example.test")
+        os.environ.setdefault("RELAY_API_KEY", "k")
+
+    def _interrupt_after(self, seconds):
+        t = threading.Timer(seconds, lambda: os.kill(os.getpid(), relay.signal.SIGINT))
+        t.daemon = True
+        self.addCleanup(t.cancel)
+        t.start()
+
+    def test_a_refusal_stops_all_further_claiming_but_keeps_the_process_alive(self):
+        calls = []
+        relay.claim_node_job = lambda e, c, t: (calls.append(c)
+                                                or relay.outdated_refusal(9))
+        self._interrupt_after(0.3)
+
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+
+        # poll_timeout is 0.01s over ~0.3s of running: without the flag this would be dozens.
+        self.assertEqual(len(calls), 1)
+
+    def test_a_refused_executor_advertises_zero_capacity_immediately(self):
+        relay.claim_node_job = lambda e, c, t: relay.outdated_refusal(9)
+        self._interrupt_after(0.3)
+
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+
+        hb = FakeHeartbeat.instances[0]
+        self.assertEqual(hb.capacity, {"shared_clean": 0, "exclusive": 0})
+        # Beat #1 is the startup beat with the real capacity; the last beat is post-refusal,
+        # sent at once rather than waiting a full heartbeat interval.
+        self.assertEqual(hb.beats[0], {"shared_clean": 2, "exclusive": 0})
+        self.assertEqual(hb.beats[-1], {"shared_clean": 0, "exclusive": 0})
+
+    def test_it_logs_once_naming_both_versions_and_the_remedy(self):
+        relay.claim_node_job = lambda e, c, t: relay.outdated_refusal(9)
+        self._interrupt_after(0.3)
+
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+
+        outdated = [m for m, kind in self.logs if "OUTDATED" in m]
+        self.assertEqual(len(outdated), 1, self.logs)   # once, not every poll
+        self.assertIn(f"version {relay.EXECUTOR_VERSION}", outdated[0])
+        self.assertIn("9", outdated[0])
+        self.assertIn("restart", outdated[0])
+        self.assertIn("error", [kind for m, kind in self.logs if "OUTDATED" in m])
+
+    def test_in_flight_work_still_reports_its_outcome_after_a_refusal(self):
+        gate = threading.Event()
+        reports = []
+        relay.report_outcome = lambda *a: (reports.append(a) or "done")
+
+        def blocking_run(job, path, control):
+            gate.wait(2)
+            return ("succeeded", "", "sha", None)
+
+        relay.run_node_job = blocking_run
+        claims = [job(node_type="shell", run="true", id="nj-1", run_id="r1",
+                      vars={"ref": "RLY-1"})]
+
+        def claim(e, c, t):
+            return claims.pop(0) if claims else relay.outdated_refusal(9)
+
+        relay.claim_node_job = claim
+        threading.Timer(0.3, gate.set).start()
+        self._interrupt_after(0.5)
+
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+
+        self.assertEqual(reports[0][:2], ("nj-1", "succeeded"))
+
+    def test_once_exits_non_zero_rather_than_idling(self):
+        relay.claim_node_job = lambda e, c, t: relay.outdated_refusal(9)
+
+        with self.assertRaises(SystemExit) as caught:
+            relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+
+        self.assertEqual(caught.exception.code, 1)
+
+    def test_a_normal_run_never_sets_the_flag(self):
+        relay.claim_node_job = lambda e, c, t: None      # 204 / long-poll timeout
+        self._interrupt_after(0.2)
+
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+
+        self.assertEqual([m for m, _k in self.logs if "OUTDATED" in m], [])
+        self.assertEqual(FakeHeartbeat.instances[0].capacity,
+                         {"shared_clean": 2, "exclusive": 0})
+
+
 class RealGitWorktreeTest(unittest.TestCase):
     """RLY-173, and a deliberate change of testing style.
 

@@ -61,7 +61,7 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
 EXECUTOR_VERSION = 1
-EXECUTOR_FINGERPRINT = "8343b011a69e0796493f6a3f1896fd5d748cb0120724e53207f5f8a633932d8d"
+EXECUTOR_FINGERPRINT = "d97464194a422dc787a7d7d7a3110562e568357047d14a651c298ea54a9b3e47"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1228,7 +1228,7 @@ def cmd_execute(args):
     cfg = load_executor_config()
     poll_timeout = args.interval or cfg["poll_timeout"]
     env("RELAY_URL"), env("RELAY_API_KEY")
-    executor = {"name": cfg["name"], "host": socket.gethostname()}
+    executor = executor_ident(cfg)
     pool = ExecutorPool(cfg)
     if not DRY:
         FORWARDER = LogForwarder()
@@ -1268,6 +1268,9 @@ def cmd_execute(args):
         except (Exception, SystemExit) as e:
             log(f"failed to report rejection for {job_id}: {e}", kind="error")
 
+    outdated = False        # RLY-184: one-way — nothing in-process can pick up new code
+    required_version = None
+
     hb = None
     if not DRY:
         hb = ExecutorHeartbeat(executor, running_ids, revoke,
@@ -1302,6 +1305,12 @@ def cmd_execute(args):
         + (" (dry-run)" if DRY else "") + (" — one job" if args.once else ""))
 
     while not stop.is_set():
+        if outdated:
+            # Refused by the server: stop claiming, but keep beating (zero capacity) so the
+            # process stays on the roster wearing its OUTDATED badge instead of vanishing.
+            wake.wait(poll_timeout)
+            wake.clear()
+            continue
         cap = pool.capacity()
         # No free slots → idle, UNLESS an exclusive slot is bound to a run: that
         # run's pinned resume/next job is claimable regardless of advertised
@@ -1322,6 +1331,19 @@ def cmd_execute(args):
                 break
             wake.wait(1)
             wake.clear()
+            continue
+        if isinstance(job, dict) and job.get("executor_outdated"):
+            outdated = True
+            required_version = job.get("required")
+            if hb:
+                hb.capacity = dict(ZERO_CAPACITY)
+                hb._beat()          # stop advertising room now, not one interval from now
+            log(f"OUTDATED: this executor is running version {EXECUTOR_VERSION} but the "
+                f"server requires {required_version} — restart `relay execute` to pick up "
+                "current code. No further jobs will be claimed; in-flight work will finish.",
+                kind="error")
+            if args.once:
+                break
             continue
         if job is None:                             # long-poll timeout / 204 → re-poll
             if args.once:
@@ -1359,6 +1381,12 @@ def cmd_execute(args):
         hb.stop()
     if FORWARDER and not DRY:
         FORWARDER.stop()
+
+    if outdated and args.once:
+        # No state to sit in for a single-job invocation — a non-zero exit is the right
+        # signal to whatever called it.
+        die(f"executor version {EXECUTOR_VERSION} is below the server's required "
+            f"{required_version} — restart to pick up current code")
 
 
 NODE_OUTCOMES = ("succeeded", "failed", "partial", "needs_input")
