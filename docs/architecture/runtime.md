@@ -59,7 +59,7 @@ The cookie attribute is a **client-side hint only** — `Plug.Session.COOKIE.get
 check, so a client can replay an arbitrarily old cookie. `RelayWeb.Auth` therefore enforces the
 window itself:
 
-- `fetch_current_scope/2` (the `:browser` pipeline) **expires** a session stamped past
+- `fetch_current_scope/2` (the `:browser` and `:native_user_auth` pipelines) **expires** a session stamped past
   `max_age/0` and **re-stamps** one older than `refresh_after/0`. The re-stamp is a session
   write, and `Plug.Session` only emits `Set-Cookie` on a write — that is what slides the
   cookie's `Max-Age` forward. Throttling to once a day is what keeps `Set-Cookie` off every
@@ -67,9 +67,12 @@ window itself:
 - `mount_current_scope/2` (the `on_mount` hooks) **expires only** — a LiveView mount has no
   `conn` and cannot write a cookie. It closes the hole where a stale cookie mounts a LiveView
   on socket reconnect without passing through the plug pipeline.
-- `NativeAuthController.me/2` **re-stamps** on success: the Flutter shell's launch-time verify
-  is the native app's only touch point, and `_restore()` writes the refreshed cookie back to
-  the Keychain.
+- `NativeAuthController.me/2` **expires and re-stamps**: it rejects a session past the window
+  with 401 and mints no bearer token — `me/2` is the only server-side check a replayed native
+  cookie ever meets (the `:native_auth` pipeline does not run `fetch_current_scope/2`), and
+  `mint_token/1` hands back a bearer that outlives the session it came from. On success it
+  re-stamps: the Flutter shell's launch-time verify is the native app's only touch point, and
+  `_restore()` writes the refreshed cookie back to the Keychain.
 - A session with **no** stamp (predating RLY-127) is re-stamped, never expired — expiring them
   would sign out every existing user on deploy.
 
