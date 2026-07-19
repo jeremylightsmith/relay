@@ -21,6 +21,16 @@ config :esbuild,
       ~w(js/storybook.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
     cd: Path.expand("../assets", __DIR__),
     env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
+  ],
+  # Docs-only bundle (mermaid). Kept out of the `relay` bundle so board pages never fetch it.
+  # Two entries, neither bundled: docs.js has no imports of its own, and vendor/mermaid.min.js
+  # must run as its own top-level classic script (not required into another module) for its
+  # `globalThis["mermaid"] = ...` assignment to land — see the comment in assets/js/docs.js.
+  # `--entry-names=[name]` flattens both outputs to the outdir root (no `js/`/`vendor/` nesting).
+  docs: [
+    args: ~w(js/docs.js vendor/mermaid.min.js --target=es2022 --outdir=../priv/static/assets/js --entry-names=[name]),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
   ]
 
 # ex_aws (S3 SigV4 signing for the prod attachment adapter) makes its HTTP

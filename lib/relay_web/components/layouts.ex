@@ -139,7 +139,8 @@ defmodule RelayWeb.Layouts do
   Public documentation layout: top nav (wordmark → `/`, "/ Docs" eyebrow, "Open the board"
   → `/board`), a left sidebar grouped by section with the active page highlighted, the article
   slot, and an "on this page" TOC rail. Public — never reads `current_scope`. Docs are static
-  controller pages, so links use plain `href`.
+  controller pages, so links use plain `href`. Loads the docs-only `docs.js` bundle (mermaid)
+  — deliberately not in `app.js`, so board pages never fetch it.
   """
   attr :sidebar, :list, required: true, doc: "[%{slug, title, section}] in sidebar order"
   attr :sections, :list, required: true, doc: "ordered, de-duplicated section names"
@@ -150,6 +151,10 @@ defmodule RelayWeb.Layouts do
   def docs(assigns) do
     ~H"""
     <div class="docs-shell">
+      <script defer phx-track-static type="text/javascript" src={~p"/assets/js/mermaid.min.js"}>
+      </script>
+      <script defer phx-track-static type="text/javascript" src={~p"/assets/js/docs.js"}>
+      </script>
       <header class="docs-nav">
         <a href={~p"/"} class="docs-nav-brand">
           <img src={~p"/images/logo_light_128.png"} width="22" alt="Relay" />

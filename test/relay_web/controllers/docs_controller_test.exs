@@ -231,4 +231,17 @@ defmodule RelayWeb.DocsControllerTest do
 
     assert eyebrow =~ "GET STARTED"
   end
+
+  test "mermaid fences reach the page as language-mermaid for the client to render", %{conn: conn} do
+    html = conn |> get(~p"/docs/architecture-runtime") |> html_response(200)
+
+    assert html =~ ~s(class="language-mermaid")
+    assert html =~ "flowchart LR"
+  end
+
+  test "the docs layout loads the docs-only bundle", %{conn: conn} do
+    html = conn |> get(~p"/docs/architecture-runtime") |> html_response(200)
+
+    assert html =~ "/assets/js/docs.js"
+  end
 end

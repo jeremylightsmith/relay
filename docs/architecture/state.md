@@ -91,6 +91,16 @@ target (the backstop under unlimited loops). Under a `foreach`, retry and loop b
 accounted **per iteration**, so a churny plan task cannot spend a later task's budget; the
 breaker deliberately keeps the whole run's history.
 
+A `needs_input` park and resume, shown against the Plan flow's brainstorm node:
+
+```mermaid
+flowchart LR
+    start([card pulled from Next up]) --> b["agent: brainstorm<br/>(repo skill)"]
+    b -- needs_input --> h{{"human answers<br/>in the drawer"}}
+    h -- resume --> b
+    b -- succeeded --> r([move to Spec:Review])
+```
+
 ## Where these meet
 
 - A node reporting `needs_input` moves **two** machines at once: the run parks and the card
