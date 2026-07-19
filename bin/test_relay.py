@@ -1294,8 +1294,18 @@ class RunNodeJobTest(unittest.TestCase):
         agent_job = {"id": "nj-9", "run_id": "r1", "node_type": "agent", "run": "review it",
                      "isolation": "exclusive", "vars": {"ref": "RLY-9"}}
         relay.run_node_job(agent_job, "/tmp/wt", self.control)
-        self.assertIn("RELAY_NODE_OUTCOME", seen["prompt"])
-        self.assertIn("succeeded", seen["prompt"])
+        # Assert the instruction the agent must actually follow, not an implementation detail:
+        # since RLY-175 the contract tells it to run `relay outcome`, not to write the file.
+        self.assertIn("outcome succeeded --detail", seen["prompt"])
+        self.assertIn("do NOT hand-write the JSON", seen["prompt"])
+        # The postamble is appended AFTER the node's own run string is rendered, so it must be
+        # rendered too — otherwise the agent is told to run a literal `{relay}`. This is exactly
+        # the unexpanded-placeholder bug RLY-135's review caught in run_node_job; appending an
+        # unrendered postamble would quietly reintroduce it.
+        self.assertNotIn("{relay}", seen["prompt"])
+        self.assertIn(relay.HERE, seen["prompt"])
+        # Explanatory placeholders that are NOT vars must survive verbatim.
+        self.assertIn("{prior.detail}", seen["prompt"])
 
         shell_job = {"id": "nj-10", "run_id": "r1", "node_type": "shell", "run": "true",
                      "isolation": "exclusive", "vars": {"ref": "RLY-10"}}
@@ -1802,6 +1812,83 @@ class RealGitWorktreeTest(unittest.TestCase):
 
         self.assertEqual(outcome, "succeeded")
         self.assertEqual(self.head_ref(), "refs/heads/" + branch)
+
+
+class OutcomeCommandTest(unittest.TestCase):
+    """RLY-175: agents must not hand-write JSON.
+
+    RLY-163 made every agent node declare an outcome, which was right — silent success was
+    shipping empty specs. But it also meant every agent writes JSON through a shell heredoc,
+    and a long `detail` containing a quote or newline produces invalid JSON. That is exactly
+    how the drill-3 run died: final_review's outcome file failed to parse, the executor
+    correctly reported `failed`, and the PARSE ERROR was handed to final_fix as its findings.
+
+    So the writing is done by code. These tests use real files and deliberately awkward text.
+    """
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp(prefix="relay-outcome-test-")
+        self.path = os.path.join(self.dir, "outcome.json")
+        self._env = os.environ.get("RELAY_NODE_OUTCOME")
+        os.environ["RELAY_NODE_OUTCOME"] = self.path
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        import shutil
+        if self._env is None:
+            os.environ.pop("RELAY_NODE_OUTCOME", None)
+        else:
+            os.environ["RELAY_NODE_OUTCOME"] = self._env
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def run_cli(self, *argv):
+        args = relay.build_parser().parse_args(list(argv))
+        return args.func(args)
+
+    def read(self):
+        with open(self.path) as f:
+            return json.load(f)
+
+    def test_writes_valid_json_with_outcome_and_detail(self):
+        self.run_cli("outcome", "succeeded", "--detail", "did the thing")
+        self.assertEqual(self.read(), {"outcome": "succeeded", "detail": "did the thing"})
+
+    def test_awkward_detail_round_trips_byte_for_byte(self):
+        # The shape that actually broke: quotes, an apostrophe, newlines, a backtick, a brace.
+        nasty = 'He said "no findings" — it\'s fine.\nLine two `backtick` {brace}\nTrailing'
+        self.run_cli("outcome", "failed", "--detail", nasty)
+        self.assertEqual(self.read()["detail"], nasty)
+
+    def test_detail_can_come_from_a_file(self):
+        src = os.path.join(self.dir, "findings.md")
+        body = '## Findings\n\n1. `foo/bar.ex:12` — "quoted" thing\n2. another\n'
+        with open(src, "w") as f:
+            f.write(body)
+        self.run_cli("outcome", "failed", "--detail", "@" + src)
+        self.assertEqual(self.read()["detail"], body)
+
+    def test_detail_is_optional(self):
+        self.run_cli("outcome", "succeeded")
+        self.assertEqual(self.read(), {"outcome": "succeeded", "detail": ""})
+
+    def test_rejects_an_outcome_outside_the_closed_set(self):
+        with self.assertRaises(SystemExit):
+            capture(self.run_cli, "outcome", "definitely-not-an-outcome", "--detail", "x")
+
+    def test_errors_clearly_when_the_env_var_is_missing(self):
+        os.environ.pop("RELAY_NODE_OUTCOME", None)
+        with self.assertRaises(SystemExit):
+            capture(self.run_cli, "outcome", "succeeded", "--detail", "x")
+
+    def test_the_written_file_is_what_determine_agent_outcome_reads(self):
+        """End-to-end on the contract: what the CLI writes is what the executor reports."""
+        self.run_cli("outcome", "partial", "--detail", 'half "done"')
+        saved = relay.get_card
+        relay.get_card = lambda ref: {"status": "working"}
+        self.addCleanup(setattr, relay, "get_card", saved)
+        outcome, detail = relay.determine_agent_outcome({"vars": {"ref": "RLY-1"}}, True, self.path)
+        self.assertEqual((outcome, detail), ("partial", 'half "done"'))
 
 if __name__ == "__main__":
     unittest.main()
