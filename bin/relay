@@ -849,6 +849,38 @@ def determine_agent_outcome(job, ok, outcome_path):
     return ("failed", "agent exited non-zero")
 
 
+def git_head_sha(path):
+    """The worktree's HEAD sha, or None when rev-parse fails."""
+    proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=path, capture_output=True, text=True)
+    return proc.stdout.strip() if proc.returncode == 0 else None
+
+
+def check_branch_attached(slot_path, branch, cmd):
+    """Returns a failure detail when this node must NOT run, else None (RLY-166).
+
+    `reset_worktree()` ends in `git checkout --detach` by design, and it runs mid-run on the
+    revoke/re-assign path. The `branch` node that ATTACHES HEAD only runs once, at the start of
+    a run — so after a mid-run reset every later commit lands on a detached HEAD while the
+    named branch ref stays behind. `merge` then pushes the branch ref, shipping a subset of the
+    run's work while every gate passes (the gates read the worktree, which is complete; only
+    the push reads the ref). The first live Code run merged half its reviewed work that way.
+
+    So: a job that carries a `branch` must run with HEAD actually on that branch. The one
+    exception is the node whose whole job is to create it — it legitimately starts detached.
+    """
+    if not branch or "checkout -B" in cmd:
+        return None
+    proc = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], cwd=slot_path,
+                          capture_output=True, text=True)
+    head = proc.stdout.strip() if proc.returncode == 0 else ""
+    if head == f"refs/heads/{branch}":
+        return None
+    where = head or "a detached HEAD"
+    return (f"refusing to run: worktree {slot_path} is on {where}, expected refs/heads/{branch}. "
+            f"Commits made here would not reach the branch and `merge` would ship a subset of "
+            f"this run's work (RLY-166). The run's commits are still in the worktree.")
+
+
 # Appended to EVERY agent node's prompt. The requirement to declare an outcome must not
 # depend on each flow's node prompt or each skill author remembering it — determine_agent_outcome
 # now fails a node that writes nothing, so a node never told about the file would always fail.
@@ -886,6 +918,12 @@ def run_node_job(job, slot_path, control):
     raw_vars.setdefault("url", os.environ.get("RELAY_URL", ""))
     vars = {k: v for k, v in raw_vars.items() if v is not None}
     cmd = render(job["run"], vars)
+
+    detached = check_branch_attached(slot_path, vars.get("branch"), cmd)
+    if detached:
+        log(f"  ⚠ {ref}: {detached}", ref=ref, kind="error")
+        return "failed", detached, git_head_sha(slot_path), None
+
     session_id = None
     if job.get("node_type") == "agent":
         # The outcome file must live OUTSIDE the checkout: reset_worktree() salvages any

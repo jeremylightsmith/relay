@@ -1028,6 +1028,76 @@ class RunNodeJobTest(unittest.TestCase):
             "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
         self.control = relay.JobControl()
 
+    # --- RLY-166: never run a node on a detached HEAD -----------------------------------
+    # reset_worktree() ends in `git checkout --detach` BY DESIGN, and it runs mid-run on the
+    # revoke/re-assign path. The `branch` node that attaches HEAD only runs once, at the start,
+    # so after a mid-run reset every later commit lands off-branch while the branch ref lags.
+    # `merge` then pushes the stale ref: the first live Code run shipped half its reviewed work
+    # to main and reported success. Catch it at the first node after the detachment instead.
+
+    def _git_head(self, symbolic_ref_stdout, returncode=0):
+        """subprocess.run fake that answers `git symbolic-ref` specifically."""
+        def fake_run(cmd, *a, **k):
+            if list(cmd)[:2] == ["git", "symbolic-ref"]:
+                return type("R", (), {"stdout": symbolic_ref_stdout, "returncode": returncode})()
+            return type("R", (), {"stdout": "deadbeef\n", "returncode": 0})()
+
+        relay.subprocess.run = fake_run
+
+    def test_a_detached_head_fails_the_node_without_running_it(self):
+        ran = []
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None: ran.append(cmd) or True
+        self._git_head("", returncode=1)  # detached: symbolic-ref exits non-zero
+
+        job = {"id": "nj-d", "run_id": "r1", "node_type": "shell", "run": "true",
+               "isolation": "exclusive", "vars": {"ref": "RLY-1", "branch": "feature-x"}}
+        outcome, detail, _sha, _session = relay.run_node_job(job, "/tmp/wt", self.control)
+
+        self.assertEqual(outcome, "failed")
+        self.assertIn("detached", detail)
+        self.assertEqual(ran, [], "the node must not run at all on a detached HEAD")
+
+    def test_a_head_on_the_wrong_branch_fails(self):
+        ran = []
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None: ran.append(cmd) or True
+        self._git_head("refs/heads/some-other-branch\n")
+
+        job = {"id": "nj-w", "run_id": "r1", "node_type": "shell", "run": "true",
+               "isolation": "exclusive", "vars": {"ref": "RLY-1", "branch": "feature-x"}}
+        outcome, detail, _sha, _session = relay.run_node_job(job, "/tmp/wt", self.control)
+
+        self.assertEqual(outcome, "failed")
+        self.assertIn("feature-x", detail)
+        self.assertEqual(ran, [])
+
+    def test_the_branch_creating_node_may_run_on_a_detached_head(self):
+        # The `branch` node is what ATTACHES HEAD, so it is the one node that must be allowed
+        # to start detached — otherwise no run could ever begin.
+        ran = []
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None: ran.append(cmd) or True
+        self._git_head("", returncode=1)
+
+        job = {"id": "nj-b", "run_id": "r1", "node_type": "shell",
+               "run": "git checkout -B {branch} origin/main",
+               "isolation": "exclusive", "vars": {"ref": "RLY-1", "branch": "feature-x"}}
+        outcome, _detail, _sha, _session = relay.run_node_job(job, "/tmp/wt", self.control)
+
+        self.assertEqual(outcome, "succeeded")
+        self.assertEqual(len(ran), 1)
+
+    def test_a_job_with_no_branch_var_is_unguarded(self):
+        # shared_clean nodes (spec/plan) carry no branch and never commit — unchanged.
+        ran = []
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None: ran.append(cmd) or True
+        self._git_head("", returncode=1)
+
+        job = {"id": "nj-n", "run_id": "r1", "node_type": "shell", "run": "true",
+               "isolation": "shared_clean", "vars": {"ref": "RLY-1"}}
+        outcome, _detail, _sha, _session = relay.run_node_job(job, "/tmp/wt", self.control)
+
+        self.assertEqual(outcome, "succeeded")
+        self.assertEqual(len(ran), 1)
+
     def test_shell_job_reports_succeeded_with_git_sha(self):
         relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None: True
         job = {"id": "nj-1", "run_id": "r1", "node_type": "shell", "run": "true",
