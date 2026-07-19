@@ -30,4 +30,4 @@ agents are peers on the same cards — and where the *shape of the board* is the
 
 - New to the model? Read [Boards & stages](/docs/boards-and-stages) and
   [Cards & handoffs](/docs/cards-and-handoffs).
-- Building an agent? Jump to [Setup](/docs/setup) and the [CLI](/docs/cli).
+- Building an agent? Jump to [Getting started](/docs/getting-started) and the [CLI](/docs/cli).

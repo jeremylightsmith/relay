@@ -6,7 +6,7 @@ exits non-zero.
 
 > [!NOTE]
 > Every write is attributed to the board's AI agent, **"Relay AI"**. Set `RELAY_URL` and
-> `RELAY_API_KEY` first — see [Setup](/docs/setup).
+> `RELAY_API_KEY` first — see [Authentication & API access](/docs/authentication).
 
 ## Commands
 

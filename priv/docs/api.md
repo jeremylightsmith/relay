@@ -1,4 +1,4 @@
-# API Reference
+# REST API reference
 
 Relay exposes a small JSON REST API scoped to a single **board**. It is the same
 entry point the `bin/relay` CLI uses, so anything the CLI does you can do directly.

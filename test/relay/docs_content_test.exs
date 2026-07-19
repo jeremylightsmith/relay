@@ -7,10 +7,10 @@ defmodule Relay.DocsContentTest do
     {"introduction.md", "# Introduction"},
     {"boards-and-stages.md", "# Boards & stages"},
     {"cards-and-handoffs.md", "# Cards & handoffs"},
-    {"setup.md", "# Setup"},
+    {"authentication.md", "# Authentication & API access"},
     {"cli.md", "# CLI (`bin/relay`)"},
     {"agent-integration.md", "# Agent integration"},
-    {"api.md", "# API Reference"}
+    {"api.md", "# REST API reference"}
   ]
 
   test "every docs page exists and starts with its expected h1" do
@@ -33,8 +33,8 @@ defmodule Relay.DocsContentTest do
     end
   end
 
-  test "setup.md still explains the API key + env vars" do
-    html = read("setup.md")
+  test "authentication.md still explains the API key + env vars" do
+    html = read("authentication.md")
     assert html =~ "RELAY_API_KEY"
     assert html =~ "Authorization: Bearer"
   end

@@ -1,15 +1,14 @@
 # Relay architecture — the system, today
 
-The current-state map of how Relay is built. The *why* behind these shapes lives in
-[`docs/adr/`](../adr/README.md); terms are defined in [`../glossary.md`](../glossary.md);
-the product north star is [`../vision.md`](../vision.md); UI truth is
-[`../designs/`](../designs/README.md); the agent-facing CLI/REST surface is
-[`../agent-integration.md`](../agent-integration.md).
+The current-state map of how Relay is built: what the pieces are, how a request and a card
+move through them, and where each piece's code lives. Start with the system map below, then
+follow the page that covers the layer you care about — the domain contexts, the runtime and
+its supervised processes, the executor, the state machines, or the dependencies.
 
-**Keeping this current is a gate, not a virtue** (see `AGENTS.md`): adding a context,
-PubSub topic, API endpoint, or supervised process means updating the matching page here in
-the same branch. Each page is capped at roughly two pages and ends with the modules it
-describes — if a page wants to grow past that, push detail into `@moduledoc` and link.
+The *why* behind these shapes lives in [`docs/adr/`](../adr/README.md); terms are defined in
+[`../glossary.md`](../glossary.md); the product north star is [`../vision.md`](../vision.md);
+UI truth is [`../designs/`](../designs/README.md); the agent-facing CLI/REST surface is
+[`../agent-integration.md`](../agent-integration.md).
 
 ## System map
 
@@ -61,3 +60,10 @@ LiveView UI serves web and mobile — the mobile apps are thin native shells aro
 ---
 *Sources of truth: `lib/relay.ex`, `lib/relay_web.ex`, `lib/schemas.ex`,
 `docs/adr/0001`, `docs/adr/0002`, `fly.toml`.*
+
+## Keeping these pages current
+
+**Keeping this current is a gate, not a virtue** (see `AGENTS.md`): adding a context,
+PubSub topic, API endpoint, or supervised process means updating the matching page here in
+the same branch. Each page is capped at roughly two pages and ends with the modules it
+describes — if a page wants to grow past that, push detail into `@moduledoc` and link.
