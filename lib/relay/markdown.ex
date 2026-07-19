@@ -36,6 +36,8 @@ defmodule Relay.Markdown do
     {:safe, html}
   end
 
+  @docs_extension [table: true, header_id_prefix: "", alerts: true]
+
   @doc """
   Render docs-site markdown to a sanitized `Phoenix.HTML.safe` value.
 
@@ -43,19 +45,40 @@ defmodule Relay.Markdown do
   (so the TOC can anchor to them) and GitHub-style alert callouts, and widens the sanitizer
   just enough to keep the heading `id` and the alert-title class. `nil` renders to an empty
   (safe) string.
-  """
-  @spec to_docs_html(String.t() | nil) :: Phoenix.HTML.safe()
-  def to_docs_html(nil), do: {:safe, ""}
 
-  def to_docs_html(markdown) when is_binary(markdown) do
+  ## Options
+
+    * `:rewrite_links` — `{source_dir, slug_by_path}`. When given, every link URL is passed
+      through `Relay.Markdown.Links.rewrite/3` over the parsed document, so repo-relative
+      markdown links resolve on the public site. URLs inside fenced code blocks are not
+      links in the AST, so they are left alone. Defaults to `nil` (no rewriting), which is
+      exactly today's behaviour.
+  """
+  @spec to_docs_html(String.t() | nil, keyword()) :: Phoenix.HTML.safe()
+  def to_docs_html(markdown, opts \\ [])
+
+  def to_docs_html(nil, _opts), do: {:safe, ""}
+
+  def to_docs_html(markdown, opts) when is_binary(markdown) do
     html =
-      MDEx.to_html!(markdown,
+      markdown
+      |> MDEx.parse_document!(extension: @docs_extension)
+      |> rewrite_links(Keyword.get(opts, :rewrite_links))
+      |> MDEx.to_html!(
         render: [unsafe: true],
-        extension: [table: true, header_id_prefix: "", alerts: true],
+        extension: @docs_extension,
         sanitize: docs_sanitize_options()
       )
 
     {:safe, html}
+  end
+
+  defp rewrite_links(document, nil), do: document
+
+  defp rewrite_links(document, {source_dir, slug_by_path}) do
+    MDEx.Document.update_nodes(document, MDEx.Link, fn link ->
+      %{link | url: Relay.Markdown.Links.rewrite(link.url, source_dir, slug_by_path)}
+    end)
   end
 
   @doc """
