@@ -51,6 +51,29 @@ defmodule RelayWeb.DocsControllerTest do
     end
   end
 
+  test "the flow-cutover runbook renders through the symlink signed out", %{conn: conn} do
+    html = conn |> get(~p"/docs/runbook-flow-cutover") |> html_response(200)
+
+    assert html =~ "Enabling a flow safely"
+    assert html =~ "Settings"
+    assert html =~ "capacity"
+  end
+
+  test "the runbook reads as general guidance, with Relay's own history at the end",
+       %{conn: conn} do
+    html = conn |> get(~p"/docs/runbook-flow-cutover") |> html_response(200)
+
+    # The Relay-specific cutover history is demoted to a closing note, not the body.
+    assert html =~ "How Relay itself cut over"
+    history_at = html |> :binary.match("How Relay itself cut over") |> elem(0)
+    guidance_at = html |> :binary.match("Turn the flow on") |> elem(0)
+    assert guidance_at < history_at, "the general guidance must precede the history note"
+
+    # The sidebar carries the new section.
+    assert html =~ "Operations"
+    assert html =~ ~s(href="/docs/runbook-flow-cutover")
+  end
+
   test "the sidebar carries an Architecture section", %{conn: conn} do
     html = conn |> get(~p"/docs") |> html_response(200)
 

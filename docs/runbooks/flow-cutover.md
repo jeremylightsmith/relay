@@ -1,91 +1,92 @@
-# Runbook: cutting a stage over to an engine-driven flow
+# Enabling a flow safely
 
-Moves one pipeline stage (`<Stage>`) onto the server-side scheduler + node-job engine
-(ADR 0006). Written once; W11 cut over **Spec**, W12 cut over **Plan**, W13 cut over **Code** —
-substitute `<Stage>` throughout. All three stages are now cut over; the legacy `relay watch`
-dispatcher and `relay_config.json` that Spec's and Plan's rituals moved a stage off of were
-deleted in the Code cutover PR (RLY-139) — see "Rollback" below for what that means for a
-revert.
+How to turn a board stage over to an engine-driven flow (ADR 0006) without either
+double-dispatching cards or stranding them with no dispatcher at all. Written for **any**
+stage on **any** board — substitute your stage for `<Stage>` throughout. Relay's own
+three-stage cutover is a historical note at the end.
 
-## Why the order is not negotiable
+## Why the order matters
 
-**For Spec and Plan (RLY-136, RLY-138), while `relay watch` still ran:** two dispatchers must
-never pull the same cards. The watcher loaded `relay_config.json` **once at startup**, so
-removing a stage from the file without restarting the watcher left it still pulling that stage.
-And the server-side flow is inert until deployed. So enabling the flow before restarting the
-watcher meant both dispatchers on the same cards (double dispatch); restarting the watcher
-before the deploy was live meant a stage nothing worked.
+Every failure mode here is a *dispatcher count* problem, and there are only two of them:
 
-**For Code (RLY-139), with the watcher gone:** the hazard is no longer double dispatch — there
-is only one dispatcher left. It is a **gap**: the flow must be enabled only once the deploy is
-live *and* an executor is advertising `exclusive` capacity, or *Plan:Done* cards sit with no
-dispatcher at all (the same "a stage nothing works" failure, from the opposite direction).
+- **Two dispatchers on the same cards.** If anything else is already pulling `<Stage>` —
+  another board's flow, a hand-run agent loop, a legacy watcher — enabling a flow on that
+  stage means both claim the same cards and stomp each other's branches.
+- **Zero dispatchers.** A flow definition is inert until it is deployed, and a deployed
+  flow still dispatches nothing unless an executor is advertising the isolation class the
+  flow's nodes ask for. Enable the flow before either is true and `<Stage>` cards simply
+  sit in *Next up* looking broken.
+
+The ritual below is ordered so neither window is ever open.
 
 ## The ritual (in order)
 
-1. **Merge and deploy.** The flow definition and any engine fix must be live server-side before
-   anything else changes. Confirm the deploy is healthy.
-2. **Code only (RLY-139):** there is no watcher left to restart — `relay watch`,
-   `relay_config.json`, `/exec-plan` and `execute-plan.js` were deleted in the cutover PR.
-   Confirm on the runner machine that no old `relay watch` process is still alive
-   (`pgrep -fl "relay watch"` → nothing); a stale one from before the deploy would still be
-   holding the retired config in memory and would double-dispatch Code cards.
-3. **Only now, enable the flow** in the board's **Settings › Flows** (RLY-142's toggle, which
-   shows a runner-readiness warning before turning on: make sure a runner (`bin/relay execute`)
-   is connected and advertising capacity, or cards will queue with no dispatcher to pick them
-   up — RLY-139 replaced the toggle's original double-dispatch warning with this, since the
-   legacy watcher it warned about is gone). No CLI or mix task — the UI toggle is the only
-   enable path.
-4. **Start / confirm `relay execute`** is connected and advertising `exclusive` capacity — the
-   Code flow's isolation class.
+1. **Deploy first.** The flow definition and any engine fix must be live server-side
+   before anything else changes. Confirm the deploy is healthy.
+
+2. **Confirm nothing else dispatches `<Stage>`.** No second flow enabled on the same
+   stage, and no hand-run agent loop or external process claiming its cards. A dispatcher
+   that loaded its configuration at startup will still be pulling the stage until it is
+   actually stopped — check the process, not the config file.
+
+3. **Turn the flow on** in the board's **Settings › Flows**. The toggle is the only enable
+   path — there is no CLI or mix task. It shows a runner-readiness warning before turning
+   on: if no executor is connected and advertising capacity, cards will queue with no
+   dispatcher to pick them up.
+
+4. **Confirm an executor is advertising the right capacity class.** Start (or check)
+   `relay execute` and open the board's **Runners** view at `/board/:slug/runners`. The
+   executor should show a **FRESH** pill and capacity chips for the class the flow's nodes
+   need — `exclusive` for a flow whose nodes take a dedicated worktree, `shared_clean` for
+   one that does not.
 
    `relay execute` advertises its **configured** capacity (`.relay/executor.json`'s
-   `capacity`) on its heartbeat to `POST /api/node-jobs/heartbeat`, beating once immediately at
-   startup and then every `heartbeat_interval`. That beat is the only thing feeding
-   `Relay.Runs.Capacity` — the store the scheduler reads to decide whether to dispatch — and
-   because that store is deliberately lost on every app restart, the repeating beat is what
-   makes dispatch resume by itself after a deploy. Nothing manual is required (RLY-164).
+   `capacity`) on its heartbeat, beating once immediately at startup and then every
+   `heartbeat_interval` seconds. That beat is the only thing feeding the capacity store the
+   scheduler reads, and because that store is deliberately lost on every app restart, the
+   repeating beat is what makes dispatch resume by itself after a deploy. Nothing manual is
+   required.
 
-   Two things to know when diagnosing: the executor advertises its configured TOTAL, not a live
-   free count (the scheduler debits in-flight `:running` runs itself), and the `name` it beats
-   with is the same one it claims with, so capacity lands on the row doing the claiming.
+   Two things to know when diagnosing: the executor advertises its configured **total**,
+   not a live free count (the scheduler debits in-flight runs itself), and the `name` it
+   beats with is the same one it claims with, so capacity lands on the row doing the
+   claiming.
 
-5. **Confirm a card actually dispatches**: watch the first `<Stage>` card in *Next up* pick up a
-   `Run` row (see Verification below) rather than sitting idle.
+5. **Confirm a card actually dispatches.** Watch the first `<Stage>` card in *Next up*
+   pick up a `Run` row rather than sitting idle.
 
 ## Verification — "it worked"
 
-- Exactly **one** dispatcher claims each `<Stage>` card (never both watch + engine).
-- A `Run` row appears on the card (its run panel / timeline shows the node starting) within one
-  scheduler tick of the capacity beat landing.
-- **Not yet available:** the runners view (`/board/:slug/runners`) does **not** show the engine
-  executor or its capacity — that page is backed by `Relay.RunnerPresence`, which only the legacy
-  watcher's heartbeat populates (`runner_id` field); `relay execute` sends no `runner_id` to that
-  route. Do not use the runners view to judge this cutover (tracked as B2, a follow-up). Use the
-  card's run panel instead.
-
-**Code dogfood (RLY-139 acceptance 11, human-verify):** after the ritual, move one real
-card from *Plan:Done* and watch its drawer Run tab through the run — the card should
-reach *Review* with a merged PR, and the Run tab should have shown live which task each
-`implement` node was working and which verdict each review returned. This cannot be
-checked in-suite (it needs a real `claude`, a real executor and a real deploy);
-`test/relay/runs/code_flow_e2e_test.exs` is its in-suite proxy.
+- Exactly **one** dispatcher claims each `<Stage>` card.
+- The executor shows **FRESH** with the expected capacity chips on `/board/:slug/runners`.
+- A `Run` row appears on the card — its run panel / timeline shows the node starting —
+  within one scheduler tick of the capacity beat landing.
+- Open the card's drawer **Run** tab and watch one real card through the flow end to end.
+  That is the only check that proves the agent nodes themselves work; it needs a real
+  executor and a real deploy, so it cannot be done in a test suite.
 
 ## Rollback
 
-For **Spec** and **Plan**, rollback is: disable the flow in Settings › Flows, restore the
-stage's `relay_config.json` entry, restart `relay watch`.
-
-For **Code (RLY-139) there is no legacy path left to fall back to** — the cutover PR
-deleted `relay watch`, `relay_config.json`, `/exec-plan` and `execute-plan.js`. The only
-lever is a revert:
-
-1. Disable the `code` flow in **Settings › Flows** (stops new dispatch immediately).
-2. `git revert <SHA>` — the pre-cutover commit is **646e7b6**
-   (`rly 158 w18 create a flow from scratch (#119)`), the last commit on `main` before
-   RLY-139 landed. Reverting *to* that state restores the legacy runner files.
-3. Deploy the revert, then work Code cards by hand (`/write-plan` output + a human at the
-   keyboard) until the engine path is fixed.
+1. **Disable the flow** in **Settings › Flows**. This stops new dispatch immediately and is
+   always the first move.
+2. Work `<Stage>` cards by hand until the flow is fixed.
+3. If the flow definition itself is at fault, revert the deploy that introduced it.
 
 **Not rolled back:** an in-flight run's `Run` / `NodeExecution` rows persist — cancel the
 run from the card's run panel if you need it gone.
+
+## How Relay itself cut over
+
+Historical, and kept only because the hazards it names are the ones the ritual above is
+shaped around. Relay moved three stages onto the engine in sequence: **Spec** (RLY-136),
+**Plan** (RLY-138), then **Code** (RLY-139).
+
+For Spec and Plan, a legacy `relay watch` dispatcher was still running, so the hazard was
+**double dispatch**: the watcher loaded `relay_config.json` once at startup, so removing a
+stage from that file without restarting the watcher left it still pulling the stage.
+
+For Code the watcher was gone, so the hazard inverted to a **gap**: with only one
+dispatcher left, enabling the flow before an executor advertised `exclusive` capacity meant
+*Plan:Done* cards sat with nothing to work them. The Code cutover PR deleted `relay watch`,
+`relay_config.json`, `/exec-plan` and `execute-plan.js`, so there is no legacy path left to
+fall back to — the only lever is the revert described under Rollback.

@@ -11,9 +11,10 @@ defmodule RelayWeb.DocsController do
   alias RelayWeb.DocsController.NotFoundError
 
   # {slug, title, section, filename}. Order defines sidebar order; the first entry is `/docs`.
-  # Files under `architecture/` are read through the committed symlink
-  # `priv/docs/architecture -> ../../docs/architecture`, so `docs/architecture/` stays the
-  # single source of truth — there is no copy step and nothing to keep in sync.
+  # Files under `architecture/` and `runbooks/` are read through the committed symlinks
+  # `priv/docs/architecture -> ../../docs/architecture` and
+  # `priv/docs/runbooks -> ../../docs/runbooks`, so `docs/architecture/` and `docs/runbooks/`
+  # stay the single source of truth — there is no copy step and nothing to keep in sync.
   @pages_meta [
     {"introduction", "Introduction", "Get started", "introduction.md"},
     {"boards-and-stages", "Boards & stages", "Get started", "boards-and-stages.md"},
@@ -23,6 +24,7 @@ defmodule RelayWeb.DocsController do
     {"cli", "CLI (bin/relay)", "Build with Relay", "cli.md"},
     {"agent-integration", "Agent integration", "Build with Relay", "agent-integration.md"},
     {"api", "REST API reference", "Build with Relay", "api.md"},
+    {"runbook-flow-cutover", "Enabling a flow safely", "Operations", "runbooks/flow-cutover.md"},
     {"architecture", "Overview", "Architecture", "architecture/README.md"},
     {"architecture-domain", "Domain", "Architecture", "architecture/domain.md"},
     {"architecture-runtime", "Runtime", "Architecture", "architecture/runtime.md"},
