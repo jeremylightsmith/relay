@@ -11,18 +11,21 @@ defmodule RelayWeb.DocsController do
   alias RelayWeb.DocsController.NotFoundError
 
   # {slug, title, section, filename}. Order defines sidebar order; the first entry is `/docs`.
-  # Files under `architecture/` are read through the committed symlink
-  # `priv/docs/architecture -> ../../docs/architecture`, so `docs/architecture/` stays the
-  # single source of truth — there is no copy step and nothing to keep in sync.
+  # Files under `architecture/` and `runbooks/` are read through the committed symlinks
+  # `priv/docs/architecture -> ../../docs/architecture` and
+  # `priv/docs/runbooks -> ../../docs/runbooks`, so `docs/architecture/` and `docs/runbooks/`
+  # stay the single source of truth — there is no copy step and nothing to keep in sync.
   @pages_meta [
+    {"getting-started", "Getting started", "Get started", "getting-started.md"},
     {"introduction", "Introduction", "Get started", "introduction.md"},
     {"boards-and-stages", "Boards & stages", "Get started", "boards-and-stages.md"},
     {"cards-and-handoffs", "Cards & handoffs", "Get started", "cards-and-handoffs.md"},
     {"statuses-and-outcomes", "Statuses & outcomes", "Get started", "statuses-and-outcomes.md"},
-    {"setup", "Setup", "Build with Relay", "setup.md"},
     {"cli", "CLI (bin/relay)", "Build with Relay", "cli.md"},
     {"agent-integration", "Agent integration", "Build with Relay", "agent-integration.md"},
     {"api", "REST API reference", "Build with Relay", "api.md"},
+    {"authentication", "Authentication & API access", "Build with Relay", "authentication.md"},
+    {"runbook-flow-cutover", "Enabling a flow safely", "Operations", "runbooks/flow-cutover.md"},
     {"architecture", "Overview", "Architecture", "architecture/README.md"},
     {"architecture-domain", "Domain", "Architecture", "architecture/domain.md"},
     {"architecture-runtime", "Runtime", "Architecture", "architecture/runtime.md"},
@@ -31,7 +34,7 @@ defmodule RelayWeb.DocsController do
     {"architecture-deps", "Dependencies", "Architecture", "architecture/deps.md"}
   ]
 
-  @default_slug "introduction"
+  @default_slug "getting-started"
 
   for {_slug, _title, _section, file} <- @pages_meta do
     @external_resource Application.app_dir(:relay, "priv/docs/#{file}")
@@ -87,7 +90,8 @@ defmodule RelayWeb.DocsController do
           sidebar: @sidebar,
           sections: @sections,
           active_slug: page.slug,
-          page_title: page.title
+          page_title: page.title,
+          default_slug: @default_slug
         )
     end
   end
