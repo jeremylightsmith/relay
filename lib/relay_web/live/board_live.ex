@@ -1652,10 +1652,13 @@ defmodule RelayWeb.BoardLive do
   # human; the :agent default on the Cards mutators is the API's (MMF 09).
   defp current_actor(socket), do: {:user, socket.assigns.current_scope.user.id}
 
-  # RLY-94 — the card-tap bridge payload. `kind` mirrors the push deep-link
-  # convention (Relay.Push.copy/1) so the shell renders the right native action
-  # bar without a fetch: "in_review" at a review gate, "needs_input" when blocked
-  # on a human, nil otherwise. An unknown ref is a silent no-op, like move_card.
+  # RLY-94 — the card-tap bridge payload. `kind` tells the shell which native
+  # action bar to render without a fetch: "in_review" at a review gate,
+  # "needs_input" when blocked on a human, "failed" for a dead run (RLY-179),
+  # nil otherwise. The first two mirror the push deep-link convention
+  # (Relay.Push.copy/1); "failed" has no push counterpart, since
+  # card_status_changed/3 never pushes for :failed. An unknown ref is a silent
+  # no-op, like move_card.
   defp push_card_tap(socket, ref) do
     case Cards.get_card_by_ref(socket.assigns.board, ref) do
       %Card{} = card ->
@@ -1672,6 +1675,7 @@ defmodule RelayWeb.BoardLive do
 
   defp card_tap_kind(%Card{status: :in_review}), do: "in_review"
   defp card_tap_kind(%Card{status: :needs_input}), do: "needs_input"
+  defp card_tap_kind(%Card{status: :failed}), do: "failed"
   defp card_tap_kind(%Card{}), do: nil
 
   defp find_stage(socket, stage_id) do

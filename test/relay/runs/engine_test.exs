@@ -57,10 +57,13 @@ defmodule Relay.Runs.EngineTest do
     assert Engine.decide(two_node_flow(), [current], current) == {:finish, :done}
   end
 
-  test "no edge for the outcome fails the run — even for succeeded (gates never silently pass)" do
+  # Post-RLY-179 a non-:failed outcome with no matching edge degrades to the :failed
+  # edge first; this flow has neither, so it still fails outright.
+  test "no edge for the outcome and none to degrade to fails the run — even for succeeded" do
     flow = flow([[key: "gate", type: :gate]], [[from: "start", to: "gate"]])
     current = execution(node_key: "gate")
-    assert {:fail, "no_route_for_outcome:" <> _} = Engine.decide(flow, [current], current)
+    assert {:fail, reason} = Engine.decide(flow, [current], current)
+    assert reason =~ "no_route_for_outcome:"
   end
 
   test "needs_input parks without consulting any edge" do
@@ -128,7 +131,8 @@ defmodule Relay.Runs.EngineTest do
     ]
 
     current = List.last(history)
-    assert {:fail, "loop_budget_exhausted:" <> _} = Engine.decide(flow, history, current)
+    assert {:fail, reason} = Engine.decide(flow, history, current)
+    assert reason =~ "loop_budget_exhausted:"
   end
 
   test "the visit cap fails a transition into an over-visited node" do
@@ -145,7 +149,8 @@ defmodule Relay.Runs.EngineTest do
       end)
 
     current = List.last(history)
-    assert {:fail, "visit_cap_exceeded:" <> _} = Engine.decide(flow, history, current, visit_cap: 2)
+    assert {:fail, reason} = Engine.decide(flow, history, current, visit_cap: 2)
+    assert reason =~ "visit_cap_exceeded:"
   end
 
   test "failure_signature normalizes: trim and truncate to 500 chars" do
@@ -235,8 +240,8 @@ defmodule Relay.Runs.EngineTest do
     history = [lap(1, 1), lap(1, 2), lap(1, 3), lap(1, 4)]
     current = List.last(history)
 
-    assert {:fail, "loop_budget_exhausted:" <> _} =
-             Engine.decide(lap_flow(), history, current, sub_task_id: 1, foreach_remaining: 1)
+    assert {:fail, reason} = Engine.decide(lap_flow(), history, current, sub_task_id: 1, foreach_remaining: 1)
+    assert reason =~ "loop_budget_exhausted:"
   end
 
   test "the visit cap is iteration-scoped the same way" do
@@ -289,6 +294,115 @@ defmodule Relay.Runs.EngineTest do
     ]
 
     current = List.last(history)
-    assert {:fail, "loop_budget_exhausted:" <> _} = Engine.decide(lap_flow(), history, current)
+    assert {:fail, reason} = Engine.decide(lap_flow(), history, current)
+    assert reason =~ "loop_budget_exhausted:"
+  end
+
+  describe "unrouted outcome degrades to the node's :failed edge (RLY-179)" do
+    @describetag :capture_log
+
+    test "an outcome with no edge follows the node's :failed edge instead of failing the run" do
+      flow =
+        flow([[key: "spec_review", type: :agent], [key: "implement", type: :agent]], [
+          [from: "start", to: "implement"],
+          [from: "implement", to: "spec_review", on: :succeeded],
+          [from: "spec_review", to: "implement", on: :failed, max_loops: 3]
+        ])
+
+      current = execution(node_key: "spec_review", outcome: :partial)
+      assert Engine.decide(flow, [current], current) == {:transition, "implement"}
+    end
+
+    test "the degrade spends the :failed edge's max_loops budget rather than resetting it" do
+      flow =
+        flow([[key: "spec_review", type: :agent], [key: "implement", type: :agent]], [
+          [from: "start", to: "implement"],
+          [from: "implement", to: "spec_review", on: :succeeded],
+          [from: "spec_review", to: "implement", on: :failed, max_loops: 1]
+        ])
+
+      # One prior :partial at spec_review already degraded onto (and spent) the
+      # :failed edge, so a second traversal — degraded or real — is over budget.
+      prior = execution(node_key: "spec_review", visit: 1, outcome: :partial)
+      current = execution(node_key: "spec_review", visit: 2, outcome: :failed)
+
+      assert {:fail, reason} = Engine.decide(flow, [prior, current], current)
+      assert reason =~ "loop_budget_exhausted:"
+    end
+
+    test "with no :failed edge at all the run still fails" do
+      flow = flow([[key: "solo", type: :agent]], [[from: "start", to: "solo"]])
+      current = execution(node_key: "solo", outcome: :partial)
+
+      assert {:fail, reason} = Engine.decide(flow, [current], current)
+      assert reason =~ "no_route_for_outcome: solo → partial"
+    end
+
+    test "a :failed outcome with no edge is NOT degraded — it has nowhere left to go" do
+      flow = flow([[key: "final_fix", type: :agent]], [[from: "start", to: "final_fix"]])
+      current = execution(node_key: "final_fix", outcome: :failed)
+
+      assert {:fail, reason} = Engine.decide(flow, [current], current)
+      assert reason =~ "no_route_for_outcome: final_fix → failed"
+    end
+
+    test "the degrade honors guard preference, taking the satisfied :failed edge" do
+      flow =
+        flow(
+          [[key: "quality_review", type: :agent], [key: "implement", type: :agent], [key: "precommit", type: :gate]],
+          [
+            [from: "start", to: "implement"],
+            [from: "implement", to: "quality_review", on: :succeeded],
+            [from: "quality_review", to: "implement", on: :failed, when: :foreach_remaining],
+            [from: "quality_review", to: "precommit", on: :failed, when: :foreach_exhausted]
+          ]
+        )
+
+      current = execution(node_key: "quality_review", outcome: :partial)
+
+      assert Engine.decide(flow, [current], current, foreach_remaining: 2) == {:transition, "implement"}
+      assert Engine.decide(flow, [current], current, foreach_remaining: 0) == {:transition, "precommit"}
+    end
+
+    test "a parked (:needs_input) execution in history does not spend the :failed edge's budget" do
+      flow =
+        flow([[key: "review", type: :agent], [key: "fix", type: :agent]], [
+          [from: "start", to: "review"],
+          [from: "review", to: "fix", on: :failed, max_loops: 1]
+        ])
+
+      # The park at visit 1 must not count as a :failed traversal, else the real
+      # :failed at visit 2 would already be over the max_loops 1 budget.
+      parked = execution(node_key: "review", visit: 1, outcome: :needs_input)
+      current = execution(node_key: "review", visit: 2, outcome: :failed)
+
+      assert Engine.decide(flow, [parked, current], current) == {:transition, "fix"}
+    end
+  end
+
+  describe "failure reasons read as English (RLY-179)" do
+    test "no-route leads with a sentence and keeps the machine token in parentheses" do
+      flow = flow([[key: "gate", type: :gate]], [[from: "start", to: "gate"]])
+      current = execution(node_key: "gate", outcome: :succeeded)
+
+      assert {:fail, reason} = Engine.decide(flow, [current], current)
+      assert reason =~ "The flow has nowhere to go after `gate` reported `succeeded`."
+      assert reason =~ "(no_route_for_outcome: gate → succeeded)"
+    end
+
+    test "loop-budget failure leads with a sentence and keeps its token" do
+      flow =
+        flow([[key: "a", type: :agent], [key: "b", type: :agent]], [
+          [from: "start", to: "a"],
+          [from: "a", to: "b", on: :succeeded, max_loops: 1]
+        ])
+
+      prior = execution(node_key: "a", visit: 1, outcome: :succeeded)
+      current = execution(node_key: "a", visit: 2, outcome: :succeeded)
+
+      assert {:fail, reason} = Engine.decide(flow, [prior, current], current)
+      assert reason =~ "looped back to `b` too many times"
+      assert reason =~ "(loop_budget_exhausted: a → b on succeeded (max_loops 1))"
+    end
   end
 end

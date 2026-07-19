@@ -22,6 +22,8 @@ defmodule Relay.Flows.DefaultLibrary do
       edges: [
         %{from: "start", to: "brainstorm"},
         # needs_input has no edge: the engine parks the run and resumes brainstorm on answer.
+        # brainstorm is the flow's only node: no `:failed` edge, so a failure ends the run
+        # (pinned by DefaultLibraryTest's @intentional_termini, RLY-179).
         %{from: "brainstorm", to: "done", on: :succeeded}
       ]
     }
@@ -37,6 +39,8 @@ defmodule Relay.Flows.DefaultLibrary do
       ],
       edges: [
         %{from: "start", to: "write_plan"},
+        # write_plan is the flow's only node: no `:failed` edge, so a failure ends the run
+        # (pinned by DefaultLibraryTest's @intentional_termini, RLY-179).
         %{from: "write_plan", to: "done", on: :succeeded}
       ]
     }
@@ -142,6 +146,10 @@ defmodule Relay.Flows.DefaultLibrary do
               "{relay} pr {ref} \"$url\" && gh pr merge {branch} --squash"
         }
       ],
+      # No `:failed` edge for implement / final_fix / smoke_fix / acceptance_fix / post — that
+      # is deliberate, not an omission: each is a last-resort worker, so a failure there ends
+      # the run for a human to pick up. The decision is pinned by
+      # test/relay/flows/default_library_test.exs's @intentional_termini allowlist (RLY-179).
       edges: [
         %{from: "start", to: "branch"},
         %{from: "branch", to: "implement", on: :succeeded},

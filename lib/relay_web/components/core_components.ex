@@ -501,6 +501,8 @@ defmodule RelayWeb.CoreComponents do
   (`working·61%`); `needs_input` renders the amber NEEDS INPUT treatment;
   `in_review` blue; `ready` neutral (Done is a derivation, not a status —
   see `Relay.Cards.done?/2` — and is rendered by callers, not this badge).
+  `failed` renders the red FAILED treatment (a dead run — RLY-179 — not an
+  answerable question).
 
   ## Examples
 
@@ -508,7 +510,7 @@ defmodule RelayWeb.CoreComponents do
       <.status_badge status={:needs_input} />
   """
   attr :status, :atom,
-    values: [:ready, :working, :needs_input, :in_review],
+    values: [:ready, :working, :needs_input, :in_review, :failed],
     required: true
 
   attr :progress, :integer, default: nil
@@ -529,12 +531,14 @@ defmodule RelayWeb.CoreComponents do
   defp status_badge_class(:working), do: "badge-secondary"
   defp status_badge_class(:needs_input), do: "badge-warning"
   defp status_badge_class(:in_review), do: "badge-primary"
+  defp status_badge_class(:failed), do: "badge-error"
 
   defp status_badge_label(:working, progress) when is_integer(progress), do: "working·#{progress}%"
   defp status_badge_label(:ready, _progress), do: "ready"
   defp status_badge_label(:working, _progress), do: "working"
   defp status_badge_label(:needs_input, _progress), do: "NEEDS INPUT"
   defp status_badge_label(:in_review, _progress), do: "in review"
+  defp status_badge_label(:failed, _progress), do: "FAILED"
 
   @doc """
   The one avatar (RLY-90). A person renders their photo when we have one
@@ -871,7 +875,7 @@ defmodule RelayWeb.CoreComponents do
     doc: "who holds the baton, derived from the owner list; nil when unowned"
 
   attr :status, :atom,
-    values: [:ready, :working, :needs_input, :in_review, nil],
+    values: [:ready, :working, :needs_input, :in_review, :failed, nil],
     default: nil
 
   attr :stage_type, :atom,
@@ -1086,6 +1090,7 @@ defmodule RelayWeb.CoreComponents do
     end
   end
 
+  defp card_accent_class(%{status: :failed}), do: "border-l-error"
   defp card_accent_class(%{health: :stale}), do: "border-l-warning"
   defp card_accent_class(%{health: :stopped}), do: "border-l-error"
   defp card_accent_class(%{status: :needs_input}), do: "border-l-warning"
@@ -2161,9 +2166,21 @@ defmodule RelayWeb.CoreComponents do
                       card={@card}
                       claimer={human_owner_name(@card)}
                     />
+                    <%!-- RLY-179: the loud :circuit banner is only honest when the breaker
+                          actually tripped; every other failure mode gets the neutral one. --%>
                     <RunComponents.run_state_banner
-                      :if={@latest_run.status == :failed}
+                      :if={RunComponents.circuit_tripped?(run_map(@latest_run))}
                       variant={:circuit}
+                      run={run_map(@latest_run)}
+                      node_executions={@latest_run.node_executions}
+                      totals={run_totals(@latest_run)}
+                    />
+                    <RunComponents.run_state_banner
+                      :if={
+                        @latest_run.status == :failed and
+                          not RunComponents.circuit_tripped?(run_map(@latest_run))
+                      }
+                      variant={:failed}
                       run={run_map(@latest_run)}
                       node_executions={@latest_run.node_executions}
                       totals={run_totals(@latest_run)}
@@ -2767,7 +2784,10 @@ defmodule RelayWeb.CoreComponents do
       # `last_node` in `Relay.Runs.run_summaries_for_board/1`.
       last_node: Relay.Runs.last_node(run, run.node_executions || []),
       started_at: run.started_at,
-      finished_at: run.finished_at
+      finished_at: run.finished_at,
+      # The engine's failure reason, verbatim — it both names the cause in English
+      # and tells the Run tab whether the circuit breaker is what actually tripped.
+      failure_detail: Map.get(run, :failure_detail)
     }
   end
 

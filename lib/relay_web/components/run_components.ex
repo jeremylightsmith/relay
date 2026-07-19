@@ -98,7 +98,10 @@ defmodule RelayWeb.RunComponents do
 
   defp strip_title(%{status: :running}), do: "Running"
   defp strip_title(%{status: :parked}), do: "Parked — waiting on your answer"
-  defp strip_title(%{status: :failed}), do: "Run failed — circuit breaker tripped"
+  # Neutral on purpose (RLY-179): the old copy claimed "circuit breaker tripped" for
+  # every failure mode, which was false for both reported incidents. The specific
+  # reason belongs to the failed-run panel (RLY-178).
+  defp strip_title(%{status: :failed}), do: "Run failed"
   defp strip_title(%{status: :done}), do: "Completed"
   defp strip_title(%{status: :cancelled}), do: "Run cancelled — claimed by a human"
 
@@ -568,7 +571,34 @@ defmodule RelayWeb.RunComponents do
 
   # ---------- run_state_banner ----------
 
-  attr :variant, :atom, required: true, values: [:reentry, :revoked, :circuit, :parked]
+  @doc """
+  Whether a run died because the circuit breaker actually tripped.
+
+  RLY-179: the breaker is ONE failure mode among several (`no_route_for_outcome`,
+  `loop_budget_exhausted`, `visit_cap_exceeded`, …). `runs.failure_detail` carries
+  the engine's reason verbatim (`RunServer.apply_decision/4` → `Runs.close_run!/3`),
+  and the `circuit_breaker:` token has exactly one producer — `Engine.decide/4` — so
+  it is the honest discriminator. Gating the loud `:circuit` banner on bare
+  `status == :failed` made it claim a breaker for every failure, then contradict
+  itself one line down with "fixit returned failed 1 time".
+
+  Matched as a substring, not a prefix: the breaker reason is the one that leads
+  with its machine token, while every sibling reason at `Engine`'s
+  `no_route_reason/1` & co. is human-first with the token in parentheses. If the
+  breaker string is ever brought in line with that house style, a prefix match
+  would quietly stop recognising a real tripped breaker.
+  """
+  def circuit_tripped?(run) do
+    case run do
+      %{status: :failed, failure_detail: detail} when is_binary(detail) ->
+        String.contains?(detail, "circuit_breaker:")
+
+      _ ->
+        false
+    end
+  end
+
+  attr :variant, :atom, required: true, values: [:reentry, :revoked, :circuit, :failed, :parked]
   attr :run, :map, default: nil
   attr :card, :any, default: nil
   attr :claimer, :string, default: nil
@@ -629,13 +659,12 @@ defmodule RelayWeb.RunComponents do
   def run_state_banner(%{variant: :circuit} = assigns) do
     tripped = tripped_node(assigns.run, assigns.node_executions)
     repeats = Enum.count(assigns.node_executions, &(&1.node_key == tripped and &1.outcome == :failed))
-    detail = assigns.node_executions |> Enum.filter(&(&1.outcome == :failed)) |> List.last() |> then(&(&1 && &1.detail))
 
     assigns =
       assigns
       |> assign(:tripped, tripped)
       |> assign(:repeats, repeats)
-      |> assign(:detail, detail)
+      |> assign(:detail, last_failure_detail(assigns.node_executions))
 
     ~H"""
     <div
@@ -649,11 +678,34 @@ defmodule RelayWeb.RunComponents do
         <strong>{@tripped}</strong> returned failed {times_label(@repeats)}
       </p>
       <pre style="background:oklch(0.20 0.02 255);color:oklch(0.94 0.006 255);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0 0 10px 0;"><%= @detail %></pre>
-      <div style="display:flex;gap:18px;">
-        <.stat label="ATTEMPTS" value={"#{@totals.attempts} · stopped"} value_c="oklch(0.52 0.16 22)" />
-        <.stat label="DURATION" value={run_duration(@totals.duration_s)} />
-        <.stat label="SPENT" value={run_cost(@totals.cost)} />
+      <.failure_stats totals={@totals} />
+    </div>
+    """
+  end
+
+  # The honest banner for every failure mode that ISN'T a tripped breaker. Same red
+  # frame, no invented cause: it leads with `runs.failure_detail` — the engine's
+  # human-first sentence, which the Run tab surfaced nowhere before RLY-179.
+  def run_state_banner(%{variant: :failed} = assigns) do
+    assigns =
+      assigns
+      |> assign(:reason, failure_reason(assigns.run))
+      |> assign(:detail, last_failure_detail(assigns.node_executions))
+
+    ~H"""
+    <div
+      class="run-banner run-banner-failed"
+      style="border-left:3px solid oklch(0.62 0.16 22);background:oklch(0.975 0.025 22);border-radius:8px;padding:14px 16px;"
+    >
+      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.52 0.16 22);margin-bottom:6px;">
+        ⊗ RUN FAILED
       </div>
+      <p style="font-size:13px;color:oklch(0.34 0.02 255);margin:0 0 8px 0;">{@reason}</p>
+      <pre
+        :if={@detail}
+        style="background:oklch(0.20 0.02 255);color:oklch(0.94 0.006 255);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0 0 10px 0;"
+      ><%= @detail %></pre>
+      <.failure_stats :if={@totals} totals={@totals} />
     </div>
     """
   end
@@ -687,6 +739,31 @@ defmodule RelayWeb.RunComponents do
     </div>
     """
   end
+
+  attr :totals, :map, required: true
+
+  defp failure_stats(assigns) do
+    ~H"""
+    <div style="display:flex;gap:18px;">
+      <.stat label="ATTEMPTS" value={"#{@totals.attempts} · stopped"} value_c="oklch(0.52 0.16 22)" />
+      <.stat label="DURATION" value={run_duration(@totals.duration_s)} />
+      <.stat label="SPENT" value={run_cost(@totals.cost)} />
+    </div>
+    """
+  end
+
+  defp last_failure_detail(node_executions) do
+    node_executions
+    |> Enum.filter(&(&1.outcome == :failed))
+    |> List.last()
+    |> then(&(&1 && &1.detail))
+  end
+
+  # `failure_detail` is the engine's human-first sentence; older runs (and any close
+  # path that didn't record one) fall back to plain, non-committal copy rather than
+  # guessing at a cause.
+  defp failure_reason(%{failure_detail: reason}) when is_binary(reason), do: reason
+  defp failure_reason(_run), do: "The run stopped before reaching the end of the flow."
 
   attr :label, :string, required: true
   attr :value, :string, required: true

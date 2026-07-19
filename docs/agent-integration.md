@@ -151,6 +151,11 @@ the requirement travels with every invocation rather than depending on each flow
 or each skill author remembering it. Shell and gate nodes are exempt: their exit code is
 already an unambiguous verdict.
 
+Valid outcomes: succeeded | failed. (RLY-179: an outcome with no matching edge no longer fails
+the run — the engine degrades onto the node's `:failed` edge instead — so the prompt contract
+stopped advertising `partial`, which no seeded flow routes. The schema, the API validator, and
+the flow editor still accept `partial` for a hand-authored flow that declares its own edge.)
+
 **Needs-input re-entry.** A `needs_input` outcome parks the run; when a human clears the card
 and the run resumes, the server hands the same node back with `resume_session` set to the
 `session_id` the executor captured and reported last time. The executor's `_stream_claude_job`

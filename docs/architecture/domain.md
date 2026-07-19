@@ -115,8 +115,10 @@ sharing behavior.
   more alarming, not less. Outside a `foreach` there is no `sub_task_id`, the filter is
   the identity function, and every budget is whole-run exactly as before (RLY-139).
 - **Cards** — the card lifecycle: create/edit/move/archive, status (`working`,
-  `needs_input`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject, needs-input
-  questions. Card state × stage validity is governed by
+  `needs_input`, `failed`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject,
+  needs-input questions. `failed` (RLY-179) is set only by `Relay.Cards.mark_failed/3` when a
+  run ends terminally — a separate path from `needs_input`'s genuine question. Card state ×
+  stage validity is governed by
   [ADR 0003](../adr/0003-card-state-stage-type-validity.md); ownership and the claim rule
   by [ADR 0004](../adr/0004-card-ownership-and-the-claim-rule.md); derived agent health
   (`Cards.health/1`, 90s `STALE_AFTER`) and the four-bucket needs-you rollup

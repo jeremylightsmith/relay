@@ -957,7 +957,7 @@ BEFORE YOU FINISH — declare your outcome (required). Run:
     {relay} outcome succeeded --detail "one line on what you did"
     {relay} outcome failed    --detail @/tmp/findings.md
 
-Valid outcomes: succeeded | failed | partial. Use `--detail @file` for anything long or
+Valid outcomes: succeeded | failed. Use `--detail @file` for anything long or
 containing quotes or newlines — do NOT hand-write the JSON yourself; this command writes it.
 
 `detail` is handed to the next node as {prior.detail}, so make it useful: for a review, the

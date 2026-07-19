@@ -152,6 +152,21 @@ defmodule RelayWeb.BoardLiveEmbedTest do
       assert_push_event(view, "card-tap", %{ref: ^ref, board: ^slug, kind: "in_review"})
     end
 
+    test "a failed card taps through with kind \"failed\" for the native bar",
+         %{conn: conn, board: board} do
+      [backlog | _rest] = board.stages
+      {:ok, card} = Cards.create_card(backlog, %{title: "Dead run"})
+      {:ok, _card} = Cards.set_status(card, %{"status" => "failed"})
+      ref = Cards.ref(board, card)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?embed=1")
+
+      view |> element(".board-card", "Dead run") |> render_click()
+
+      slug = board.slug
+      assert_push_event(view, "card-tap", %{ref: ^ref, board: ^slug, kind: "failed"})
+    end
+
     test "an archived-modal row tap bridges too", %{conn: conn, board: board, card: card, user: user} do
       {:ok, _archived} = Cards.archive_card(card, {:user, user.id})
 

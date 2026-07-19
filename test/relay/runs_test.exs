@@ -186,7 +186,7 @@ defmodule Relay.RunsTest do
       assert_receive {:run_finished, %Run{status: :done}}
     end
 
-    test "an unrouted outcome fails the run and flags the card :needs_input with the failure on its timeline",
+    test "an unrouted outcome fails the run and flags the card :failed with the failure on its timeline",
          %{board: board} do
       flow = enabled_spec_flow(board)
       card = card_in(board, "Next up")
@@ -203,10 +203,14 @@ defmodule Relay.RunsTest do
       assert_receive {:run_finished, %Run{status: :failed}}
 
       card = Relay.Cards.get_card(board, card.id)
-      # B1: the card blocks immediately (not silently :ready) and enters the needs-you rollup.
-      assert card.status == :needs_input
+      # RLY-179: a dead run leaves the card :failed — a distinct state from :needs_input,
+      # because answering cannot resume it. It still enters the needs-you rollup.
+      assert card.status == :failed
       assert Relay.Cards.needs_you?(card, Relay.Boards.list_stages(board))
       assert Enum.any?(Relay.Activity.list_timeline(card), &match?(%Schemas.Activity{type: :failure}, &1))
+      refute Enum.any?(Relay.Activity.list_timeline(card), &match?(%Schemas.Comment{kind: :question}, &1))
+      # exactly one :failure entry — mark_failed's, not a duplicate from log_failure_if_final
+      assert Enum.count(Relay.Activity.list_timeline(card), &match?(%Schemas.Activity{type: :failure}, &1)) == 1
     end
 
     test "a blank detail on the final failure still flags the card (falls back, doesn't crash)",
@@ -227,7 +231,7 @@ defmodule Relay.RunsTest do
       assert_receive {:run_finished, %Run{status: :failed}}
 
       card = Relay.Cards.get_card(board, card.id)
-      assert card.status == :needs_input
+      assert card.status == :failed
       assert Relay.Cards.needs_you?(card, Relay.Boards.list_stages(board))
     end
 

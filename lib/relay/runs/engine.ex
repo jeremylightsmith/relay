@@ -15,6 +15,8 @@ defmodule Relay.Runs.Engine do
 
   alias Schemas.Flow
 
+  require Logger
+
   @default_breaker_threshold 3
   @default_visit_cap 20
 
@@ -36,11 +38,14 @@ defmodule Relay.Runs.Engine do
     3. Retry: failed-outcome count in the current visit (including
        `current`) <= the node's `max_retries` (nil => 0) re-enters the
        same node.
-    4. Route on the unique `{from, on}` edge. No edge fails the run for
-       EVERY outcome — a `gate` failure with no `failed` edge fails,
-       never silently passes. An edge past its `max_loops` (nil =>
-       unlimited) fails the run; target `"done"` finishes; a target at
-       the visit cap fails the run (the backstop under unlimited loops).
+    4. Route on the unique `{from, on}` edge. An outcome with NO matching edge
+       degrades onto the node's `:failed` edge (RLY-179) and follows it exactly
+       as a real `:failed` would, including its `max_loops` budget; only an
+       unrouted `:failed` — nowhere left to fall back to — fails the run. A
+       `gate` failure with no `failed` edge still fails, never silently passes.
+       An edge past its `max_loops` (nil => unlimited) fails the run; target
+       `"done"` finishes; a target at the visit cap fails the run (the backstop
+       under unlimited loops).
 
   Under a `foreach`, budgets are accounted PER ITERATION: `opts[:sub_task_id]`
   filters the history before `max_loops` and the visit cap are counted, so a
@@ -119,12 +124,36 @@ defmodule Relay.Runs.Engine do
   end
 
   defp route(flow, history, current, opts) do
-    case select_edge(flow, current, Keyword.get(opts, :foreach_remaining, 0)) do
+    remaining = Keyword.get(opts, :foreach_remaining, 0)
+    visit_cap = Keyword.get(opts, :visit_cap, @default_visit_cap)
+
+    case select_edge(flow, current, remaining) do
+      nil -> degrade_to_failed(flow, history, current, remaining, visit_cap)
+      edge -> follow(flow, edge, history, visit_cap)
+    end
+  end
+
+  # RLY-179: an outcome the node declares no edge for is not automatically fatal.
+  # Fall back to the node's `:failed` edge and follow it EXACTLY as a real `:failed`
+  # would — same guard preference, same `max_loops` accounting (see
+  # `effective_outcome/3`, which is what stops the degrade buying extra budget).
+  # A `:failed` that is itself unrouted has nowhere left to fall back to, so it fails.
+  defp degrade_to_failed(_flow, _history, %{outcome: :failed} = current, _remaining, _visit_cap) do
+    {:fail, no_route_reason(current)}
+  end
+
+  defp degrade_to_failed(flow, history, current, remaining, visit_cap) do
+    case select_edge(flow, %{node_key: current.node_key, outcome: :failed}, remaining) do
       nil ->
-        {:fail, "no_route_for_outcome: #{current.node_key} → #{current.outcome}"}
+        {:fail, no_route_reason(current)}
 
       edge ->
-        follow(edge, history, current, Keyword.get(opts, :visit_cap, @default_visit_cap))
+        Logger.warning(
+          "run engine: node #{current.node_key} reported #{current.outcome}, which has no edge — " <>
+            "degrading onto its :failed edge #{edge.from} → #{edge.to} (RLY-179)"
+        )
+
+        follow(flow, edge, history, visit_cap)
     end
   end
 
@@ -140,29 +169,64 @@ defmodule Relay.Runs.Engine do
   defp guard_satisfied?(%{when: :foreach_exhausted}, remaining), do: remaining == 0
   defp guard_satisfied?(_unguarded, _remaining), do: false
 
-  defp follow(edge, history, current, visit_cap) do
+  defp follow(flow, edge, history, visit_cap) do
     cond do
-      loop_budget_exhausted?(edge, history, current) ->
-        {:fail, "loop_budget_exhausted: #{edge.from} → #{edge.to} on #{edge.on} (max_loops #{edge.max_loops})"}
+      loop_budget_exhausted?(flow, edge, history) ->
+        {:fail, loop_budget_reason(edge)}
 
       edge.to == "done" ->
         {:finish, :done}
 
       visit_count(history, edge.to) >= visit_cap ->
-        {:fail, "visit_cap_exceeded: #{edge.to} visited #{visit_cap} times"}
+        {:fail, visit_cap_reason(edge, visit_cap)}
 
       true ->
         {:transition, edge.to}
     end
   end
 
-  # Prior traversals = outcome-bearing executions of `from` with this
-  # outcome BEFORE the current one (history includes current, hence -1).
-  defp loop_budget_exhausted?(%{max_loops: nil}, _history, _current), do: false
+  # Prior traversals of this edge = outcome-bearing executions of `from` whose
+  # EFFECTIVE outcome routes along it, minus the current one (history includes
+  # current, and current always routes along the edge we just selected — directly
+  # or by degrade — so the -1 is unconditional).
+  defp loop_budget_exhausted?(_flow, %{max_loops: nil}, _history), do: false
 
-  defp loop_budget_exhausted?(edge, history, current) do
-    prior = Enum.count(history, &(&1.node_key == edge.from and &1.outcome == current.outcome)) - 1
+  defp loop_budget_exhausted?(flow, edge, history) do
+    prior =
+      Enum.count(history, fn row ->
+        row.node_key == edge.from and effective_outcome(flow, edge.from, row.outcome) == edge.on
+      end) - 1
+
     prior >= edge.max_loops
+  end
+
+  # The outcome an execution ACTUALLY routes on, after the RLY-179 degrade rule:
+  # its own outcome when the node declares an edge for it, else `:failed`. Loop
+  # accounting reads history through this, so a degraded traversal spends the
+  # `:failed` edge's budget instead of resetting it. `:needs_input` parks before
+  # routing is ever reached, so it never degrades.
+  defp effective_outcome(_flow, _node_key, :needs_input), do: :needs_input
+
+  defp effective_outcome(flow, node_key, outcome) do
+    if Enum.any?(flow.edges, &(&1.from == node_key and &1.on == outcome)), do: outcome, else: :failed
+  end
+
+  # Failure reasons are human-first with the machine token retained in parentheses:
+  # the sentence is what lands on the card in front of a person, the token is what
+  # tests and grep-based diagnosis match on. Do not reword the parentheticals.
+  defp no_route_reason(current) do
+    "The flow has nowhere to go after `#{current.node_key}` reported `#{current.outcome}`. " <>
+      "(no_route_for_outcome: #{current.node_key} → #{current.outcome})"
+  end
+
+  defp loop_budget_reason(edge) do
+    "`#{edge.from}` looped back to `#{edge.to}` too many times without getting past it. " <>
+      "(loop_budget_exhausted: #{edge.from} → #{edge.to} on #{edge.on} (max_loops #{edge.max_loops}))"
+  end
+
+  defp visit_cap_reason(edge, visit_cap) do
+    "The flow kept returning to `#{edge.to}` — it has been visited #{visit_cap} times, the run's cap. " <>
+      "(visit_cap_exceeded: #{edge.to} visited #{visit_cap} times)"
   end
 
   # A "visit" is any distinct visit number holding at least one

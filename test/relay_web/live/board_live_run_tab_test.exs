@@ -58,6 +58,62 @@ defmodule RelayWeb.BoardLiveRunTabTest do
     refute has_element?(view, "#card-drawer-tab-panel-run", "session resumed")
   end
 
+  # RLY-179 smoke regression: a run that died with nowhere to route is NOT a tripped
+  # breaker. The Run tab used to shout "CIRCUIT BREAKER TRIPPED" for every failure and
+  # then contradict itself on the next line with "fixit returned failed 1 time".
+  test "a non-breaker failure states its reason instead of claiming a circuit breaker", ctx do
+    card = ai_card(ctx.code, "Nowhere to go")
+    {:ok, card} = Cards.set_status(card, %{status: :failed})
+
+    run =
+      insert(:run,
+        card: card,
+        status: :failed,
+        current_node: nil,
+        finished_at: DateTime.utc_now(),
+        failure_detail:
+          "The flow has nowhere to go after `fixit` reported `failed`. (no_route_for_outcome: fixit → failed)"
+      )
+
+    insert(:node_execution, run: run, node: "fixit", outcome: :failed, duration_s: 30, detail: "could not fix the spec")
+
+    view = open(ctx.conn, ctx.board, Cards.ref(ctx.board, card))
+
+    refute has_element?(view, "#card-drawer-tab-panel-run", "CIRCUIT BREAKER")
+    assert has_element?(view, "#card-drawer-tab-panel-run", "RUN FAILED")
+    assert has_element?(view, "#card-drawer-tab-panel-run", "The flow has nowhere to go after")
+  end
+
+  test "a genuinely tripped breaker still gets the circuit banner", ctx do
+    card = ai_card(ctx.code, "Looped forever")
+    {:ok, card} = Cards.set_status(card, %{status: :failed})
+
+    run =
+      insert(:run,
+        card: card,
+        status: :failed,
+        current_node: nil,
+        finished_at: DateTime.utc_now(),
+        failure_detail: "circuit_breaker: the same failure repeated 3 times"
+      )
+
+    for attempt <- 1..3 do
+      insert(:node_execution,
+        run: run,
+        node: "quality_review",
+        attempt: attempt,
+        outcome: :failed,
+        duration_s: 30,
+        detail: "same finding"
+      )
+    end
+
+    view = open(ctx.conn, ctx.board, Cards.ref(ctx.board, card))
+
+    assert has_element?(view, "#card-drawer-tab-panel-run", "CIRCUIT BREAKER TRIPPED")
+    assert has_element?(view, "#card-drawer-tab-panel-run", "quality_review")
+  end
+
   test "a card with only terminal runs opens on Detail; Run tab still renders", ctx do
     card = ai_card(ctx.code, "Done before")
     insert(:run, card: card, status: :done, current_node: nil, finished_at: DateTime.utc_now())

@@ -772,6 +772,62 @@ defmodule Relay.CardsTest do
     end
   end
 
+  describe "mark_failed/3 (RLY-179)" do
+    setup do
+      board = insert(:board)
+      stage = insert(:stage, board: board, type: :work)
+      %{board: board, card: insert(:card, board: board, stage: stage)}
+    end
+
+    test "sets :failed, comments the detail, and logs a :failure activity carrying it", %{card: card} do
+      detail = "The flow has nowhere to go after `final_fix` reported `failed`."
+
+      assert {:ok, updated} = Cards.mark_failed(card, detail)
+      assert updated.status == :failed
+
+      timeline = Relay.Activity.list_timeline(updated)
+
+      assert Enum.any?(timeline, &match?(%Schemas.Comment{kind: :comment, body: ^detail}, &1))
+      refute Enum.any?(timeline, &match?(%Schemas.Comment{kind: :question}, &1))
+
+      assert Enum.any?(
+               timeline,
+               &match?(%Schemas.Activity{type: :failure, meta: %{"detail" => ^detail}}, &1)
+             )
+    end
+
+    # The board's log strip renders `entry.text` and falls back to the static phrase
+    # "the agent stopped" when it is blank, so a text-less :failure row would erase the
+    # failing node's output from the card face (RLY-179 review).
+    test "logs the detail as the entry's text, so the board strip shows it", %{card: card} do
+      detail = "The flow has nowhere to go after `final_fix` reported `failed`."
+
+      assert {:ok, updated} = Cards.mark_failed(card, detail)
+
+      assert %Schemas.Activity{text: ^detail} =
+               [updated.id] |> Relay.Activity.newest_per_card() |> Map.fetch!(updated.id)
+    end
+
+    test "does not stamp blocked_since — a failed card is not waiting on an answer", %{card: card} do
+      assert {:ok, updated} = Cards.mark_failed(card, "it died")
+      assert is_nil(updated.blocked_since)
+    end
+
+    test "entering :failed from :needs_input clears blocked_since", %{card: card} do
+      {:ok, blocked} = Cards.request_input(card, "which one?")
+      assert blocked.blocked_since
+
+      assert {:ok, updated} = Cards.mark_failed(blocked, "it died")
+      assert updated.status == :failed
+      assert is_nil(updated.blocked_since)
+    end
+
+    test "a failed card still counts as needing you", %{board: board, card: card} do
+      {:ok, updated} = Cards.mark_failed(card, "it died")
+      assert Cards.needs_you?(updated, Relay.Boards.list_stages(board))
+    end
+  end
+
   describe "owner management" do
     setup %{stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "Owned"})

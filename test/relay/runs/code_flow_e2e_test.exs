@@ -236,7 +236,8 @@ defmodule Relay.Runs.CodeFlowE2ETest do
       assert run.failure_detail =~ "loop_budget_exhausted"
 
       card = Cards.get_card(board, card.id)
-      assert card.status == :needs_input
+      # RLY-179: a dead run leaves the card :failed, not :needs_input.
+      assert card.status == :failed
 
       # The refuting reviewer's text reaches the card — not merely the engine's
       # reason string (decision 4).

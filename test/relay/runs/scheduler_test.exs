@@ -250,6 +250,19 @@ defmodule Relay.Runs.SchedulerTest do
       assert %Plan{dispatches: []} = Scheduler.plan(s)
     end
 
+    test "a :failed card is never resumed — recovery is a human's call (RLY-179)" do
+      s =
+        snap(
+          stages: [stage(1), stage(2, position: 2)],
+          cards: [card(20, 2, status: :failed)],
+          flows: [flow("f", 1, 2)],
+          runs: [run(99, 20)],
+          capacity: cap([{7, slots(1, 0)}])
+        )
+
+      assert %Plan{dispatches: []} = Scheduler.plan(s)
+    end
+
     test "a parked run whose card is human-owned stays parked" do
       s =
         snap(

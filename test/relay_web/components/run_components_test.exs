@@ -83,7 +83,8 @@ defmodule RelayWeb.RunComponentsTest do
 
       assert parked =~ "Parked — waiting on your answer"
       assert parked =~ "oklch(0.985 0.022 75)"
-      assert failed =~ "Run failed — circuit breaker tripped"
+      assert failed =~ "Run failed"
+      refute failed =~ "circuit breaker"
       assert failed =~ "was on v3"
     end
 
@@ -206,6 +207,74 @@ defmodule RelayWeb.RunComponentsTest do
       assert html =~ "3 · stopped"
       assert html =~ "$2.28"
       assert html =~ "oklch(0.975 0.025 22)"
+    end
+
+    # RLY-179: the breaker is ONE failure mode, not the only one. `failure_detail`
+    # carries the engine's reason verbatim, and `circuit_breaker:` is produced at
+    # exactly one place (Engine.decide/4), so it is the honest discriminator.
+    test "circuit_tripped? only accepts the engine's own circuit_breaker reason" do
+      assert RunComponents.circuit_tripped?(
+               run(%{status: :failed, failure_detail: "circuit_breaker: the same failure repeated 3 times"})
+             )
+
+      refute RunComponents.circuit_tripped?(
+               run(%{
+                 status: :failed,
+                 failure_detail:
+                   "The flow has nowhere to go after `fixit` reported `failed`. (no_route_for_outcome: fixit → failed)"
+               })
+             )
+
+      # The token is matched anywhere, not just as a prefix, so rewording the
+      # breaker reason into the human-first house style the sibling reasons use
+      # can't silently un-trip the banner.
+      assert RunComponents.circuit_tripped?(
+               run(%{
+                 status: :failed,
+                 failure_detail: "The same failure repeated 3 times. (circuit_breaker: the same failure repeated 3 times)"
+               })
+             )
+
+      refute RunComponents.circuit_tripped?(run(%{status: :failed, failure_detail: nil}))
+      refute RunComponents.circuit_tripped?(run(%{status: :running}))
+      refute RunComponents.circuit_tripped?(Map.delete(run(%{status: :failed}), :failure_detail))
+    end
+
+    test "failed variant states the reason without inventing a circuit breaker" do
+      html =
+        render_component(&RunComponents.run_state_banner/1,
+          variant: :failed,
+          run:
+            run(%{
+              status: :failed,
+              failure_detail:
+                "The flow has nowhere to go after `fixit` reported `failed`. (no_route_for_outcome: fixit → failed)"
+            }),
+          node_executions: [ne("fixit", 1, :failed, %{detail: "Could not fix the failing spec."})],
+          totals: %{duration_s: 91, cost: Decimal.new("0.41"), attempts: 1}
+        )
+
+      assert html =~ "RUN FAILED"
+      refute html =~ "CIRCUIT BREAKER"
+      # the English sentence from runs.failure_detail — surfaced nowhere before
+      assert html =~ "The flow has nowhere to go after"
+      assert html =~ "fixit"
+      assert html =~ "Could not fix the failing spec."
+      assert html =~ "1 · stopped"
+      assert html =~ "$0.41"
+    end
+
+    test "failed variant falls back to a plain sentence when failure_detail is absent" do
+      html =
+        render_component(&RunComponents.run_state_banner/1,
+          variant: :failed,
+          run: run(%{status: :failed, failure_detail: nil}),
+          node_executions: [ne("fixit", 1, :failed)],
+          totals: %{duration_s: 12, cost: nil, attempts: 1}
+        )
+
+      assert html =~ "RUN FAILED"
+      refute html =~ "CIRCUIT BREAKER"
     end
 
     test "parked variant frames the slot in amber with the paused-node row" do
