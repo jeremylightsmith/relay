@@ -75,7 +75,7 @@ class _CardScreenState extends ConsumerState<CardScreen> {
   // go_router's default page key is derived from the route *pattern*
   // (`/cards/:ref`), not the resolved path — advancing from RLY-A's card to
   // RLY-B's via pushReplacement reuses this State rather than remounting it
-  // (same trap AnswerScreen documents). didUpdateWidget is what notices the
+  // (the same trap a per-card stateful body always has). didUpdateWidget is what notices the
   // ref changed.
   @override
   void didUpdateWidget(covariant CardScreen oldWidget) {
@@ -121,7 +121,7 @@ class _CardScreenState extends ConsumerState<CardScreen> {
   }
 
   /// The banner belongs to the card just decided, shown over the one we land
-  /// on (same pattern as AnswerScreen._scheduleBanner) — the D1 replacement
+  /// on (the post-frame banner pattern) — the D1 replacement
   /// for the superseded CORE-06/CORE-08 confirmation screens.
   void _scheduleBanner() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
