@@ -1573,4 +1573,28 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ">G<"
     end
   end
+
+  describe "image_lightbox/1" do
+    test "renders a native dialog with a daisyUI modal backdrop and an empty img" do
+      html = render_component(&CoreComponents.image_lightbox/1, [])
+
+      assert html =~ ~s(<dialog)
+      assert html =~ ~s(id="image-lightbox")
+      # daisyUI modal primitives — the backdrop <form method="dialog"> is what
+      # gives click-outside-to-close for free.
+      assert html =~ "modal"
+      assert html =~ "modal-backdrop"
+      assert html =~ ~s(method="dialog")
+      # the JS swaps this element's src in; it must start empty so a stale
+      # image never flashes before the first open.
+      assert html =~ ~s(id="image-lightbox-img")
+      assert html =~ ~s(src="")
+    end
+
+    test "the dialog is labelled for assistive tech and has a close control" do
+      html = render_component(&CoreComponents.image_lightbox/1, [])
+
+      assert html =~ ~s(aria-label="Close")
+    end
+  end
 end

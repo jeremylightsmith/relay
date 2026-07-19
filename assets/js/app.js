@@ -29,6 +29,7 @@ import BoardPager from "./hooks/board_pager"
 import CommitField from "./hooks/commit_field"
 import SubmitOnCmdEnter from "./hooks/submit_on_cmd_enter"
 import SubmitOnEnter from "./hooks/submit_on_enter"
+import initImageLightbox from "./image_lightbox"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
@@ -56,6 +57,10 @@ window.addEventListener("phx:card-tap", ({detail}) => {
 
 // connect if there are any LiveViews on the page
 liveSocket.connect()
+
+// RLY-157 — click-to-enlarge for rendered images. Not a hook: it must also work on
+// dead controller pages (docs, landing, legal), which no LiveView drives.
+initImageLightbox()
 
 // expose liveSocket on window for web console debug logs and latency simulation:
 // >> liveSocket.enableDebug()
