@@ -514,8 +514,7 @@ defmodule Relay.Runs do
   which is definitionally behind. That flags every currently-running stale process the moment
   this ships — the desired outcome, not an edge case.
   """
-  def executor_outdated?(%Executor{version: version}) when is_integer(version),
-    do: version < @min_executor_version
+  def executor_outdated?(%Executor{version: version}) when is_integer(version), do: version < @min_executor_version
 
   def executor_outdated?(%Executor{}), do: true
 

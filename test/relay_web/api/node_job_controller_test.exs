@@ -62,7 +62,12 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       conn,
       ~p"/api/node-jobs/claim",
       Jason.encode!(%{
-        "executor" => %{"name" => "fake", "host" => "fake", "interval" => 30},
+        "executor" => %{
+          "name" => "fake",
+          "host" => "fake",
+          "interval" => 30,
+          "version" => Runs.min_executor_version()
+        },
         "capacity" => capacity
       })
     )
@@ -102,7 +107,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
           conn,
           ~p"/api/node-jobs/claim?wait=0",
           Jason.encode!(%{
-            "executor" => %{"name" => "idle"},
+            "executor" => %{"name" => "idle", "version" => Runs.min_executor_version()},
             "capacity" => %{"shared_clean" => 1}
           })
         )
@@ -117,7 +122,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
             conn,
             ~p"/api/node-jobs/claim",
             Jason.encode!(%{
-              "executor" => %{"name" => "zero-capacity"},
+              "executor" => %{"name" => "zero-capacity", "version" => Runs.min_executor_version()},
               "capacity" => %{"shared_clean" => 0, "exclusive" => 0}
             })
           )
@@ -169,6 +174,39 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
 
       assert body["node_id"] == "work"
       assert_received :some_unrelated_message
+    end
+
+    test "409 executor_outdated when the executor reports no version", %{conn: conn, board: board} do
+      # The load-bearing half of RLY-184: claim is the only call that hands out work, so an
+      # outdated executor cannot get a job even if every other check is missed. A version-less
+      # executor is running pre-RLY-184 code by definition.
+      flow = four_outcome_flow(board)
+      start_queued_job(board, flow)
+
+      body =
+        conn
+        |> post(
+          ~p"/api/node-jobs/claim",
+          Jason.encode!(%{
+            "executor" => %{"name" => "ancient", "host" => "old"},
+            "capacity" => %{"shared_clean" => 1}
+          })
+        )
+        |> json_response(409)
+
+      assert body["error"]["code"] == "executor_outdated"
+      assert body["error"]["required"] == Runs.min_executor_version()
+      assert body["error"]["running"] == nil
+      assert body["error"]["message"] =~ "restart"
+    end
+
+    test "a current executor still claims normally", %{conn: conn, board: board} do
+      flow = four_outcome_flow(board)
+      start_queued_job(board, flow)
+
+      body = conn |> claim() |> json_response(200)
+
+      assert body["id"]
     end
   end
 
@@ -358,6 +396,42 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
 
       assert body["error"]["code"] == "invalid_executor"
       assert body["error"]["message"] =~ "executor"
+    end
+
+    test "the beat still succeeds for an outdated executor and tells it so", %{conn: conn} do
+      # The beat is how a refused executor stays visible on the roster and how revokes still
+      # reach it — refusing it here would make it vanish, which is the opposite of the point.
+      body =
+        conn
+        |> post(
+          ~p"/api/node-jobs/heartbeat",
+          Jason.encode!(%{
+            "executor" => %{"name" => "ancient", "host" => "old"},
+            "capacity" => %{"shared_clean" => 1},
+            "running" => []
+          })
+        )
+        |> json_response(200)
+
+      assert body["executor_outdated"] == true
+      assert body["required_version"] == Runs.min_executor_version()
+      assert body["revoked"] == []
+    end
+
+    test "a current executor's beat reports it is not outdated", %{conn: conn} do
+      body =
+        conn
+        |> post(
+          ~p"/api/node-jobs/heartbeat",
+          Jason.encode!(%{
+            "executor" => %{"name" => "current", "host" => "new", "version" => Runs.min_executor_version()},
+            "capacity" => %{"shared_clean" => 1},
+            "running" => []
+          })
+        )
+        |> json_response(200)
+
+      assert body["executor_outdated"] == false
     end
   end
 end

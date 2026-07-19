@@ -55,6 +55,17 @@
       }
     }
   },
+  "claim_request": {
+    "capacity": {
+      "shared_clean": 1
+    },
+    "executor": {
+      "host": "fixture-host",
+      "interval": 30,
+      "name": "fixture",
+      "version": 1
+    }
+  },
   "heartbeat": {
     "request": {
       "capabilities": {
@@ -72,11 +83,14 @@
       "executor": {
         "host": "fixture-host",
         "interval": 30,
-        "name": "fixture"
+        "name": "fixture",
+        "version": 1
       },
       "running": []
     },
     "response": {
+      "executor_outdated": false,
+      "required_version": 1,
       "revoked": [],
       "want_capabilities": false
     }

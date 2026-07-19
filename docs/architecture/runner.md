@@ -91,6 +91,16 @@ that stays server-side.
   parked run whose holder advertises `exclusive: 0` can still be handed its own resume — the
   fix for the affinity deadlock; the executor keeps polling while it holds bound slots via
   `ExecutorPool.has_bound_slots/0`).
+- **Version negotiation (RLY-184).** Every claim and heartbeat carries `executor.version`, the
+  `EXECUTOR_VERSION` the running `bin/relay` declares. `claim/2` compares it against
+  `Relay.Runs.min_executor_version/0` and answers **409 `executor_outdated`** (with `required`
+  and `running`) instead of handing out work — claim is the only call that dispenses jobs, so
+  that is the load-bearing check. `nil` counts as outdated: an executor sending no version
+  predates the card. `heartbeat/2` deliberately still **succeeds** for an outdated executor —
+  the beat is how it stays on the roster and how revokes still reach it — and its reply carries
+  `executor_outdated` / `required_version`. A refused executor stays alive, advertises
+  `{"shared_clean": 0, "exclusive": 0}` so nothing queues behind it, finishes in-flight work,
+  and wears an `OUTDATED` badge on the runners view until a human restarts it.
 - `POST /api/node-jobs/:id/outcome` (`.outcome/2`) — `Relay.Runs.get_claimed_job/2` (board-
   scoped, 409 `conflict` if the job isn't `claimed`/`running`), then
   `Relay.Runs.report_outcome/2` against the closed outcome set (422 `unknown_outcome`

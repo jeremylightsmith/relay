@@ -37,6 +37,14 @@ defmodule RelayWeb.Api.NodeJobController do
 
     with {:ok, exec_attrs} <- executor_attrs(params),
          {:ok, executor} <- Runs.upsert_executor(board, exec_attrs) do
+      claim_for(conn, board, executor, params)
+    end
+  end
+
+  defp claim_for(conn, board, executor, params) do
+    if Runs.executor_outdated?(executor) do
+      refuse_outdated(conn, executor)
+    else
       case Runs.claim_next_job(executor) do
         {:ok, nil} -> maybe_wait(conn, board, executor, params)
         {:ok, job} -> json(conn, claim_payload(job))
@@ -70,6 +78,11 @@ defmodule RelayWeb.Api.NodeJobController do
       send-on-change, not every beat; the reply's `want_capabilities` asks for a resend when
       the server holds none.
 
+    * **Version.** The beat still succeeds for an outdated executor (RLY-184) — it is how that
+      process stays visible on the roster and how revokes still reach it. The reply carries
+      `executor_outdated` / `required_version` so an executor idling with nothing to claim
+      still learns why.
+
   Board-scoped throughout: an id belonging to another board is simply not live *here*, so one
   board's executor can never be told to kill another's work.
   """
@@ -93,7 +106,9 @@ defmodule RelayWeb.Api.NodeJobController do
         # predating this change), which would strand preflight on a permanent false
         # "missing agents" alarm. `upsert_executor/2` returns the post-upsert row, so a
         # beat that DID carry capabilities has already stored them and this reads false.
-        want_capabilities: is_nil(executor.capabilities)
+        want_capabilities: is_nil(executor.capabilities),
+        executor_outdated: Runs.executor_outdated?(executor),
+        required_version: Runs.min_executor_version()
       })
     end
   end
@@ -113,6 +128,28 @@ defmodule RelayWeb.Api.NodeJobController do
       _ ->
         {:error, :invalid_executor}
     end
+  end
+
+  # RLY-184. Rendered here rather than through FallbackController because the two version
+  # numbers are per-request data, not a static string — the executor logs both of them, and a
+  # message that cannot name the required version cannot tell anyone what to do about it.
+  # 409 (not 403): the request is well-formed, it conflicts with the server's current state.
+  defp refuse_outdated(conn, executor) do
+    required = Runs.min_executor_version()
+    running = executor.version || "none"
+
+    conn
+    |> put_status(:conflict)
+    |> json(%{
+      error: %{
+        code: "executor_outdated",
+        required: required,
+        running: executor.version,
+        message:
+          "executor version #{running} is below the required minimum #{required} — " <>
+            "restart it to pick up current code"
+      }
+    })
   end
 
   defp advertise_capacity(executor, capacity) when is_map(capacity) do

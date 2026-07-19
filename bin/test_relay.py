@@ -209,6 +209,21 @@ class ReverseContractTest(unittest.TestCase):
         # ExecutorHeartbeat._beat() hands each of these to on_revoke().
         self.assertIn("revoked", CONTRACT["heartbeat"]["response"])
 
+    def test_the_claim_request_carries_the_executor_version(self):
+        # RLY-184: the server refuses a claim whose executor has no version, so this key is
+        # the difference between working and 409 — pinned on both sides of the fixture.
+        self.assertIn("version", CONTRACT["claim_request"]["executor"])
+
+    def test_the_heartbeat_request_carries_the_executor_version(self):
+        self.assertIn("version", CONTRACT["heartbeat"]["request"]["executor"])
+
+    def test_the_executor_actually_sends_that_version(self):
+        self.assertIn("version", relay.executor_ident({"name": "box"}))
+
+    def test_the_heartbeat_response_carries_the_outdated_verdict(self):
+        self.assertIn("executor_outdated", CONTRACT["heartbeat"]["response"])
+        self.assertIn("required_version", CONTRACT["heartbeat"]["response"])
+
 
 class PrintCardTest(unittest.TestCase):
     def test_print_card_shows_changes_requested_banner_before_the_ref_line(self):

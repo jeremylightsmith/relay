@@ -39,7 +39,7 @@ defmodule RelayWeb.Api.ExecutorContractTest do
     # absence of a job from `running` as "this executor restarted and lost it" and requeues it,
     # which would yank the job out from under the claims below.
     heartbeat_request = %{
-      "executor" => %{"name" => "fixture", "host" => "fixture-host", "interval" => 30},
+      "executor" => executor_ident(),
       "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
       # RLY-182: optional, send-on-change. Present here so the fixture records the key
       # and its shape for bin/test_relay.py to build against.
@@ -83,6 +83,7 @@ defmodule RelayWeb.Api.ExecutorContractTest do
 
     document = %{
       "version" => 1,
+      "claim_request" => normalize(claim_body(%{"shared_clean" => 1})),
       "claim" => %{
         "shared_clean_agent" => normalize(shared_clean_agent),
         "exclusive_shell" => normalize(exclusive_shell),
@@ -100,6 +101,15 @@ defmodule RelayWeb.Api.ExecutorContractTest do
 
     assert_matches_fixture!(document)
   end
+
+  # One place builds the `executor` dict for both claim and heartbeat, mirroring bin/relay's
+  # executor_ident (RLY-184). The version tracks the server's own minimum so the fixture always
+  # depicts a CURRENT executor — a literal would start 409ing the moment the minimum moves.
+  defp executor_ident do
+    %{"name" => "fixture", "host" => "fixture-host", "interval" => 30, "version" => Runs.min_executor_version()}
+  end
+
+  defp claim_body(capacity), do: %{"executor" => executor_ident(), "capacity" => capacity}
 
   defp agent_node do
     %{key: "work", type: :agent, run: "/write-plan {ref}", agent: "plan-implementer"}
@@ -154,13 +164,7 @@ defmodule RelayWeb.Api.ExecutorContractTest do
   end
 
   defp claim(ctx, capacity) do
-    body =
-      Jason.encode!(%{
-        "executor" => %{"name" => "fixture", "host" => "fixture-host", "interval" => 30},
-        "capacity" => capacity
-      })
-
-    ctx.conn |> post(~p"/api/node-jobs/claim", body) |> json_response(200)
+    ctx.conn |> post(~p"/api/node-jobs/claim", Jason.encode!(claim_body(capacity))) |> json_response(200)
   end
 
   # UUIDs would make the file churn on every run. Everything else — including
