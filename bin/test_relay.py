@@ -15,6 +15,8 @@ import importlib.util
 import io
 import json
 import os
+import shutil
+import tempfile
 import threading
 import unittest
 import urllib.error
@@ -189,8 +191,15 @@ class ReverseContractTest(unittest.TestCase):
         self.assertIsNone(relay.outcome_body("succeeded", "done", "abc123")["session_id"])
 
     def test_heartbeat_body_key_set_matches_the_fixture(self):
+        # Omitted (steady-state) beats are a SUBSET of the fixture's request keys;
+        # `capabilities` is optional and send-on-change (RLY-182).
         body = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"])
-        self.assertEqual(set(body), set(CONTRACT["heartbeat"]["request"]))
+        self.assertTrue(set(body) <= set(CONTRACT["heartbeat"]["request"]))
+        # A beat that DOES carry the inventory matches the fixture's key set exactly.
+        full = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"],
+                                    {"agents": [], "skills": []})
+        self.assertEqual(set(full), set(CONTRACT["heartbeat"]["request"]))
+        self.assertIn("want_capabilities", CONTRACT["heartbeat"]["response"])
 
     def test_the_outcome_response_carries_the_run_state_the_executor_reads(self):
         # report_outcome() returns resp["run_state"]; ExecutorPool.release() branches on it.
@@ -1520,6 +1529,129 @@ class JobControlTest(unittest.TestCase):
         self.assertFalse(seen["kwargs"].get("start_new_session"))
 
 
+class ExecutorCapabilitiesTest(unittest.TestCase):
+    """What the executor can resolve by name, and the send-on-change transport (RLY-182).
+
+    The load-bearing case is `commands/`: /write-plan lives ONLY at
+    .claude/commands/write-plan.md on this very repo, so a resolver that checked skills/
+    alone would report the Plan flow broken here."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.orig_root = relay.ROOT
+        relay.ROOT = self.tmp
+        # Point the "user-level" tree at an empty dir so the developer's real ~/.claude
+        # can never make this test pass or fail.
+        self.orig_expanduser = os.path.expanduser
+        empty = os.path.join(self.tmp, "no-home")
+        os.makedirs(empty)
+        os.path.expanduser = lambda p: empty if p == "~/.claude" else self.orig_expanduser(p)
+
+    def tearDown(self):
+        relay.ROOT = self.orig_root
+        os.path.expanduser = self.orig_expanduser
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write(self, relpath, body="x"):
+        path = os.path.join(self.tmp, relpath)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(body)
+
+    def test_agents_come_from_files_plus_the_cli_builtins(self):
+        self._write(".claude/agents/smoke-tester.md")
+        self._write(".claude/agents/notes.txt")
+        caps = relay.collect_capabilities()
+        self.assertIn("smoke-tester", caps["agents"])
+        self.assertIn("general-purpose", caps["agents"])
+        self.assertNotIn("notes", caps["agents"])
+
+    def test_skills_come_from_both_skills_and_commands(self):
+        self._write(".claude/skills/brainstorm/SKILL.md")
+        self._write(".claude/commands/write-plan.md")
+        caps = relay.collect_capabilities()
+        self.assertIn("brainstorm", caps["skills"])
+        self.assertIn("write-plan", caps["skills"])
+
+    def test_a_skill_directory_without_SKILL_md_is_not_a_skill(self):
+        os.makedirs(os.path.join(self.tmp, ".claude", "skills", "half-built"))
+        self.assertNotIn("half-built", relay.collect_capabilities()["skills"])
+
+    def test_missing_directories_are_not_an_error(self):
+        caps = relay.collect_capabilities()
+        self.assertEqual(caps["skills"], [])
+        self.assertEqual(caps["agents"], sorted(relay.BUILTIN_AGENTS))
+
+    def test_names_are_sorted_and_deduped_and_the_hash_is_stable(self):
+        self._write(".claude/skills/brainstorm/SKILL.md")
+        first = relay.collect_capabilities()
+        self.assertEqual(first["skills"], sorted(set(first["skills"])))
+        self.assertEqual(relay.capabilities_hash(first),
+                         relay.capabilities_hash(relay.collect_capabilities()))
+
+    def test_the_hash_changes_when_the_tree_changes(self):
+        before = relay.capabilities_hash(relay.collect_capabilities())
+        self._write(".claude/agents/final-fixer.md")
+        self.assertNotEqual(before, relay.capabilities_hash(relay.collect_capabilities()))
+
+
+class ExecutorHeartbeatCapabilitiesTest(unittest.TestCase):
+    """Send-on-change: the first beat carries the inventory, steady-state beats don't, and
+    three things force a resend — a changed tree, a failed POST, and the server's
+    want_capabilities nudge (a recreated row, which would otherwise strand preflight on a
+    permanent false 'missing agents' alarm)."""
+
+    def setUp(self):
+        self.orig_api = relay.api
+        self.orig_collect = relay.collect_capabilities
+        self.sent = []
+        self.reply = {"revoked": []}
+        self.caps = {"agents": ["a"], "skills": ["s"]}
+        relay.collect_capabilities = lambda: self.caps
+        relay.api = lambda method, path, body=None, **kw: (self.sent.append(body) or self.reply)
+        self.hb = relay.ExecutorHeartbeat({"name": "box"}, lambda: [], lambda jid: None,
+                                          capacity={"shared_clean": 1})
+
+    def tearDown(self):
+        relay.api = self.orig_api
+        relay.collect_capabilities = self.orig_collect
+
+    def test_the_first_beat_carries_the_inventory(self):
+        self.hb._beat()
+        self.assertEqual(self.sent[0]["capabilities"], self.caps)
+
+    def test_a_steady_state_beat_omits_the_key_entirely(self):
+        self.hb._beat()
+        self.hb._beat()
+        self.assertNotIn("capabilities", self.sent[1])
+
+    def test_a_changed_tree_is_re_sent(self):
+        self.hb._beat()
+        self.caps = {"agents": ["a", "b"], "skills": ["s"]}
+        self.hb._beat()
+        self.assertEqual(self.sent[1]["capabilities"], self.caps)
+
+    def test_a_failed_post_does_not_advance_the_hash_so_the_next_beat_retries(self):
+        def boom(*a, **k):
+            raise SystemExit(1)
+
+        relay.api = boom
+        self.hb._beat()
+        relay.api = lambda method, path, body=None, **kw: (self.sent.append(body) or self.reply)
+        self.hb._beat()
+        self.assertEqual(self.sent[0]["capabilities"], self.caps)
+
+    def test_want_capabilities_forces_a_resend_on_the_next_beat(self):
+        self.reply = {"revoked": [], "want_capabilities": True}
+        self.hb._beat()
+        self.hb._beat()
+        self.assertEqual(self.sent[1]["capabilities"], self.caps)
+
+    def test_a_soft_404_reply_of_none_does_not_raise(self):
+        relay.api = lambda *a, **k: None
+        self.hb._beat()   # must not raise, exactly like every other beat error path
+
+
 class ExecutorHeartbeatTest(unittest.TestCase):
     """The per-executor heartbeat POSTs {executor, running:[…]} to /api/node-jobs/heartbeat
     and READS the revoked ids from the response (unlike the watcher's Heartbeat, which discards
@@ -1543,10 +1675,13 @@ class ExecutorHeartbeatTest(unittest.TestCase):
         (method, path, body), = calls
         self.assertEqual((method, path), ("POST", "/api/node-jobs/heartbeat"))
         # `capacity` rides on every beat now (RLY-164) — it is the only channel feeding the
-        # scheduler's capacity store, which is empty on every server restart.
-        self.assertEqual(body, {"executor": {"name": "box", "host": "h"},
-                                "capacity": {},
-                                "running": ["nj-7", "nj-8"]})
+        # scheduler's capacity store, which is empty on every server restart. `capabilities`
+        # (RLY-182) rides send-on-change, so it is present on this FIRST beat only; assert
+        # the stable keys explicitly rather than pinning the whole dict.
+        self.assertEqual(body["executor"], {"name": "box", "host": "h"})
+        self.assertEqual(body["capacity"], {})
+        self.assertEqual(body["running"], ["nj-7", "nj-8"])
+        self.assertEqual(set(body["capabilities"]), {"agents", "skills"})
         self.assertEqual(revoked, ["nj-7"])
 
     def test_a_beat_error_is_swallowed(self):

@@ -25,6 +25,7 @@ TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output.
 import argparse
 import base64
 import collections
+import hashlib
 import json
 import mimetypes
 import os
@@ -195,6 +196,55 @@ class LogForwarder:
                 self._send(batch)
 
 
+# Agent names the Claude CLI provides itself rather than as a file on disk. Best-effort
+# allowlist that tracks the CLI: its only failure mode is a MISSED warning (an agent we
+# forgot to list here would be reported missing), never a false alarm about a real agent.
+BUILTIN_AGENTS = {"general-purpose", "Explore", "Plan", "claude", "statusline-setup"}
+
+
+def _md_stems(directory):
+    """File stems of `<directory>/*.md`. A missing directory contributes nothing."""
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return []
+    return [n[:-len(".md")] for n in names if n.endswith(".md")]
+
+
+def _skill_dirs(directory):
+    """Names of `<directory>/*/SKILL.md` skill directories. A directory without a SKILL.md
+    is not a skill — the name would not resolve."""
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return []
+    return [n for n in names if os.path.isfile(os.path.join(directory, n, "SKILL.md"))]
+
+
+def collect_capabilities():
+    """What this executor can actually resolve BY NAME — the question only the executor can
+    answer, since the server never sees its filesystem (RLY-182).
+
+    Scans the repo checkout AND the user-level ~/.claude, so a developer with agents
+    installed globally is not reported as missing them. Two different directories back a
+    slash command: `.claude/skills/<name>/SKILL.md` and `.claude/commands/<name>.md` —
+    /write-plan lives ONLY in commands/ on this very repo, so a resolver that checked
+    skills/ alone would report the Plan flow broken here."""
+    homes = [os.path.join(ROOT, ".claude"), os.path.expanduser("~/.claude")]
+    agents, skills = set(BUILTIN_AGENTS), set()
+    for home in homes:
+        agents.update(_md_stems(os.path.join(home, "agents")))
+        skills.update(_skill_dirs(os.path.join(home, "skills")))
+        skills.update(_md_stems(os.path.join(home, "commands")))
+    return {"agents": sorted(agents), "skills": sorted(skills)}
+
+
+def capabilities_hash(capabilities):
+    """Stable digest of an inventory, so the beat can send only on change."""
+    blob = json.dumps(capabilities, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
+
+
 class ExecutorHeartbeat:
     """Per-executor heartbeat for `relay execute`. POSTs
     {executor, capacity, running:[job-ids]} to /api/node-jobs/heartbeat every `interval`s and
@@ -212,6 +262,10 @@ class ExecutorHeartbeat:
       * the reply's revoked ids — how taking the baton (ADR 0004) or cancelling from the run
         panel actually stops a live agent, instead of the executor finding out on its next
         outcome POST 20+ minutes later.
+      * `capabilities` — the agents and skills this machine can resolve by name, sent on
+        startup and whenever the inventory changes (never on every beat). It is what
+        Relay.Runs.preflight_flow/1 reads to tell a human whether enabling a flow will
+        actually work, before the first card moves.
 
     Best-effort by construction: swallows api()'s die() (SystemExit) and any other error, so a
     heartbeat can never stall or raise into a job. soft_404 is kept as belt-and-braces for an
@@ -223,6 +277,9 @@ class ExecutorHeartbeat:
         self.on_revoke = on_revoke
         self.interval = interval
         self.capacity = capacity or {}
+        # Last inventory hash the server ACKNOWLEDGED. None ⇒ send on the next beat, so the
+        # first beat after startup always carries it.
+        self._caps_hash = None
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
@@ -233,11 +290,25 @@ class ExecutorHeartbeat:
         self._stop.set()
 
     def _beat(self):
+        # A handful of listdir calls at the 15s interval — negligible, and it means a skill
+        # or agent added mid-session is reported without restarting the executor.
+        capabilities = collect_capabilities()
+        digest = capabilities_hash(capabilities)
+        send = capabilities if digest != self._caps_hash else None
         try:
             resp = api("POST", "/api/node-jobs/heartbeat",
-                       heartbeat_body(self.executor, self.capacity, self.running_fn()),
-                       soft_404=True)
-            for job_id in (resp or {}).get("revoked", []):
+                       heartbeat_body(self.executor, self.capacity, self.running_fn(), send),
+                       soft_404=True) or {}
+            # Only a SUCCESSFUL post advances the stored hash: a failed POST must leave it
+            # alone so the next beat retries.
+            if send is not None:
+                self._caps_hash = digest
+            # The server holds no inventory for this row (recreated row, or an executor
+            # predating RLY-182). Forget what we think it knows and resend next beat —
+            # without this nudge a recreated row shows a permanent, FALSE "missing agents".
+            if resp.get("want_capabilities"):
+                self._caps_hash = None
+            for job_id in resp.get("revoked", []):
                 self.on_revoke(job_id)
         except SystemExit:      # api() die()s on HTTP/network error
             pass
@@ -797,12 +868,17 @@ def outcome_body(outcome, detail, git_sha, session_id=None):
             "git_sha": git_sha, "session_id": session_id}
 
 
-def heartbeat_body(executor, capacity, running):
+def heartbeat_body(executor, capacity, running, capabilities=None):
     """The exact body POSTed to /api/node-jobs/heartbeat (RLY-164).
 
     Pure for the same reason as outcome_body: it is pinned against the fixture's
-    `heartbeat.request` (RLY-176)."""
-    return {"executor": executor, "capacity": capacity, "running": running}
+    `heartbeat.request` (RLY-176). `capabilities` is OPTIONAL and rides send-on-change
+    (RLY-182): the key is omitted entirely on a beat where nothing changed, and
+    Runs.upsert_executor/2 leaves the stored value alone when the key is absent."""
+    body = {"executor": executor, "capacity": capacity, "running": running}
+    if capabilities is not None:
+        body["capabilities"] = capabilities
+    return body
 
 
 def report_outcome(job_id, outcome, detail, git_sha, session_id=None):
