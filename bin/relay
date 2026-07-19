@@ -10,6 +10,7 @@ Config (env): RELAY_URL, RELAY_API_KEY  (a board key from /board/settings)
 Executor-local config: .relay/executor.json (worktree namespace + capacity)
 
   relay execute [--once] [--dry-run] [--interval N]   # the executor
+  relay init [--url URL] [--force] [--dry-run] [--no-self-update]   # scaffold a project
   relay board [--json]        relay card REF [--json]
   relay why REF [--json]      # why isn't this card moving? — one plain-language answer
   relay comment REF TEXT      relay move REF STAGE        relay status REF STATUS
@@ -25,6 +26,7 @@ TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output.
 import argparse
 import base64
 import collections
+import difflib
 import hashlib
 import json
 import mimetypes
@@ -1417,6 +1419,149 @@ def cmd_outcome(args):
     return {"outcome": args.outcome}
 
 
+# ============================ relay init ============================
+
+def _fetch(url, timeout=30):
+    """GET a URL with NO credentials, returning raw bytes. `init` runs before a board
+    key exists, so it deliberately bypasses api()'s bearer token — the scaffold
+    endpoints are public by design (RLY-181)."""
+    req = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read()
+
+
+def _init_url(args):
+    url = args.url or os.environ.get("RELAY_URL")
+    if not url:
+        die("no board URL — pass --url URL or set RELAY_URL")
+    return url.rstrip("/")
+
+
+def _safe_path(rel):
+    """Absolute path for a manifest entry, refusing anything that escapes ROOT. The
+    payload comes from our own server, but a scaffold that could write outside the
+    project is not a thing to leave to trust."""
+    path = os.path.normpath(os.path.join(ROOT, rel))
+    if path != ROOT and not path.startswith(ROOT + os.sep):
+        die(f"scaffold path escapes the project root: {rel!r}")
+    return path
+
+
+def _classify(path, content, force):
+    """One file against disk → (bucket, diff to print). No hash manifest: a file that
+    differs is shown as a unified diff and left alone unless --force (RLY-181)."""
+    if not os.path.exists(path):
+        return "created", ""
+    with open(path, encoding="utf-8") as f:
+        existing = f.read()
+    if existing == content:
+        return "unchanged", ""
+    if force:
+        return "overwritten", ""
+    diff = "".join(difflib.unified_diff(
+        existing.splitlines(keepends=True),
+        content.splitlines(keepends=True),
+        fromfile=f"{path} (yours)",
+        tofile=f"{path} (template)",
+    ))
+    return "skipped", diff
+
+
+def _write_file(path, content, mode):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    os.chmod(path, int(mode, 8))
+
+
+def _self_update(url, cli_version):
+    """Re-download bin/relay in place when the server advertises a NEWER one; returns
+    the new version, or None if it did not fire.
+
+    Only ever UPGRADES: pointing a checkout at an older deployment must not clobber
+    that checkout's CLI. An unwritable target is reported, never fatal — a read-only
+    install is still perfectly able to scaffold."""
+    if cli_version <= VERSION:
+        return None
+    try:
+        body = _fetch(url + "/install/relay")
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(HERE))
+        with os.fdopen(fd, "wb") as f:
+            f.write(body)
+        os.chmod(tmp, 0o755)
+        os.replace(tmp, HERE)
+    except OSError as e:
+        print(f"  ! could not update {HERE}: {e}")
+        return None
+    return cli_version
+
+
+def _env_report():
+    """The things `init` can check but must never install (ADR 0006 / RLY-181 scope)."""
+    return [
+        ("this is a git repository", os.path.isdir(os.path.join(ROOT, ".git"))),
+        ("`claude` is on PATH", shutil.which("claude") is not None),
+        ("RELAY_URL is set", bool(os.environ.get("RELAY_URL"))),
+        ("RELAY_API_KEY is set", bool(os.environ.get("RELAY_API_KEY"))),
+    ]
+
+
+def cmd_init(args):
+    """Scaffold this project from the board server so its flows can actually run.
+
+    Exit code is 0 whenever the scaffold is on disk (all-skipped included); non-zero
+    only for a failure that left the project unscaffolded."""
+    url = _init_url(args)
+    try:
+        doc = json.loads(_fetch(url + "/api/scaffold"))
+    except urllib.error.HTTPError as e:
+        die(f"GET {url}/api/scaffold failed: HTTP {e.code}")
+    except urllib.error.URLError as e:
+        die(f"GET {url}/api/scaffold failed: {e.reason}")
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        die(f"GET {url}/api/scaffold returned something that is not JSON: {e}")
+
+    updated = None
+    if not args.no_self_update and not args.dry_run:
+        updated = _self_update(url, doc.get("cli_version", 0))
+
+    buckets = collections.OrderedDict(
+        (b, []) for b in ("created", "unchanged", "overwritten", "skipped"))
+
+    for entry in doc.get("files", []):
+        rel = entry["path"]
+        path = _safe_path(rel)
+        bucket, diff = _classify(path, entry["content"], args.force)
+        buckets[bucket].append(rel)
+        if diff:
+            print(diff, end="")
+        if not args.dry_run and bucket in ("created", "overwritten"):
+            try:
+                _write_file(path, entry["content"], entry.get("mode", "644"))
+            except OSError as e:
+                die(f"could not write {rel}: {e}")
+
+    suffix = " (dry run — nothing written)" if args.dry_run else ""
+    print(f"\nrelay init — scaffold {doc.get('scaffold_version', '?')} "
+          f"from {url}{suffix}")
+    for bucket, paths in buckets.items():
+        if paths:
+            label = "skipped (differs)" if bucket == "skipped" else bucket
+            print(f"  {len(paths)} {label}: {', '.join(sorted(paths))}")
+    if updated:
+        print(f"  bin/relay updated: version {VERSION} → {updated} "
+              f"(re-run to use it)")
+
+    print("\nStill needed (relay init cannot do these for you):")
+    for label, ok in _env_report():
+        print(f"  [{'x' if ok else ' '}] {label}")
+    print(f"  [ ] mint a board API key: {url} → Settings → API keys")
+    print(f"  [ ] export RELAY_URL={url} and RELAY_API_KEY=<that key>")
+    print(f"  [ ] enable flows: {url} → Settings → Flows")
+    print("  then: bin/relay execute")
+    return buckets
+
+
 # ============================ argparse ============================
 
 def build_parser():
@@ -1470,6 +1615,11 @@ def build_parser():
     ex.add_argument("--once", action="store_true")
     ex.add_argument("--dry-run", action="store_true")
     ex.add_argument("--interval", type=int)
+    ini = add("init", cmd_init)
+    ini.add_argument("--url")
+    ini.add_argument("--force", action="store_true")
+    ini.add_argument("--dry-run", action="store_true")
+    ini.add_argument("--no-self-update", action="store_true")
     return p
 
 
