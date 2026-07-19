@@ -234,8 +234,7 @@ class ExecutorHeartbeat:
     def _beat(self):
         try:
             resp = api("POST", "/api/node-jobs/heartbeat",
-                       {"executor": self.executor, "capacity": self.capacity,
-                        "running": self.running_fn()},
+                       heartbeat_body(self.executor, self.capacity, self.running_fn()),
                        soft_404=True)
             for job_id in (resp or {}).get("revoked", []):
                 self.on_revoke(job_id)
@@ -769,13 +768,30 @@ def claim_node_job(executor, capacity, timeout):
     return resp or None
 
 
+def outcome_body(outcome, detail, git_sha, session_id=None):
+    """The exact body POSTed to /api/node-jobs/:id/outcome.
+
+    Pure and separate from the POST so bin/test_relay.py can pin its key set against
+    test/fixtures/executor_contract.json's `outcome.request` — the same body the ExUnit
+    generator posts at the real controller (RLY-176)."""
+    return {"outcome": outcome, "detail": detail,
+            "git_sha": git_sha, "session_id": session_id}
+
+
+def heartbeat_body(executor, capacity, running):
+    """The exact body POSTed to /api/node-jobs/heartbeat (RLY-164).
+
+    Pure for the same reason as outcome_body: it is pinned against the fixture's
+    `heartbeat.request` (RLY-176)."""
+    return {"executor": executor, "capacity": capacity, "running": running}
+
+
 def report_outcome(job_id, outcome, detail, git_sha, session_id=None):
     """POST the typed outcome; return the server-assigned run_state
     (running|parked|done|failed|cancelled) that tells the executor whether to keep or free an
     exclusive slot (§3)."""
     resp = api("POST", f"/api/node-jobs/{job_id}/outcome",
-               {"outcome": outcome, "detail": detail,
-                "git_sha": git_sha, "session_id": session_id})
+               outcome_body(outcome, detail, git_sha, session_id))
     return (resp or {}).get("run_state")
 
 

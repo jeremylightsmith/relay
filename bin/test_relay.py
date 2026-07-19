@@ -172,6 +172,35 @@ class ClaimContractKeysTest(unittest.TestCase):
         self.assertNotEqual(CONTRACT["claim"]["shared_clean_agent"]["vars"]["ref"], "MUT-1")
 
 
+class ReverseContractTest(unittest.TestCase):
+    """What the executor POSTs, checked against what the controller was proven to accept.
+
+    The ExUnit generator posts the fixture's outcome.request / heartbeat.request bodies at the
+    REAL routes, so if these key sets match the fixture, both directions are pinned by one
+    file: a controller that stops reading `git_sha`, or an executor that stops sending it, is
+    caught on the next run of either suite.
+    """
+
+    def test_outcome_body_key_set_matches_the_fixture(self):
+        body = relay.outcome_body("succeeded", "done", "abc123", "sess-1")
+        self.assertEqual(set(body), set(CONTRACT["outcome"]["request"]))
+
+    def test_outcome_body_defaults_session_id_to_none_rather_than_omitting_it(self):
+        self.assertIsNone(relay.outcome_body("succeeded", "done", "abc123")["session_id"])
+
+    def test_heartbeat_body_key_set_matches_the_fixture(self):
+        body = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"])
+        self.assertEqual(set(body), set(CONTRACT["heartbeat"]["request"]))
+
+    def test_the_outcome_response_carries_the_run_state_the_executor_reads(self):
+        # report_outcome() returns resp["run_state"]; ExecutorPool.release() branches on it.
+        self.assertIn("run_state", CONTRACT["outcome"]["response"])
+
+    def test_the_heartbeat_response_carries_the_revoked_ids_the_executor_reads(self):
+        # ExecutorHeartbeat._beat() hands each of these to on_revoke().
+        self.assertIn("revoked", CONTRACT["heartbeat"]["response"])
+
+
 class PrintCardTest(unittest.TestCase):
     def test_print_card_shows_changes_requested_banner_before_the_ref_line(self):
         card = {
