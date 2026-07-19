@@ -98,10 +98,18 @@ defmodule Relay.Runs.Scheduler.Server do
 
   # --- snapshot assembly (returns the loaded card structs so apply_marking can write status) ---
 
-  defp build_snapshot(state) do
-    board = Boards.get_board_by_id!(state.board_id)
+  @doc """
+  Assembles the dispatch snapshot for `board_id` against `engine`, returning it alongside
+  the loaded card structs (which `apply_marking/2` writes status through).
+
+  Public because `Relay.Runs.diagnose/3` (RLY-177) must diagnose against **byte-for-byte
+  the snapshot this server plans from** — including the `reserve_active_runs/2` debit for
+  in-flight runs. A second assembly path would be a second source of truth.
+  """
+  def build_snapshot(board_id, engine) do
+    board = Boards.get_board_by_id!(board_id)
     cards = Cards.list_cards(board)
-    runs = state.engine.active_runs(state.board_id)
+    runs = engine.active_runs(board_id)
 
     snapshot = %Snapshot{
       stages: Enum.map(Boards.list_stages(board), &stage_snap/1),
@@ -113,6 +121,11 @@ defmodule Relay.Runs.Scheduler.Server do
 
     {snapshot, Map.new(cards, &{&1.id, &1})}
   end
+
+  @doc "The app's configured engine — for callers with no injected one (e.g. `Runs.diagnose/3`)."
+  def configured_engine, do: default_engine()
+
+  defp build_snapshot(state), do: build_snapshot(state.board_id, state.engine)
 
   # A run that is :running is being worked on an executor right now, so it holds
   # one slot of its isolation class until it finishes — even if the executor's
