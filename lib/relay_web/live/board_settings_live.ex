@@ -32,6 +32,7 @@ defmodule RelayWeb.BoardSettingsLive do
   alias Relay.Events
   alias Relay.Flows
   alias Relay.Members
+  alias Relay.Runs
   alias RelayWeb.FlowSettingsComponents
   alias Schemas.Board
   alias Schemas.Membership
@@ -590,6 +591,7 @@ defmodule RelayWeb.BoardSettingsLive do
               :if={@section == :flows}
               rows={@flow_rows}
               panel={@flow_panel}
+              preflight={@flow_preflight}
               slug={@board.slug}
               stages={@flow_stages}
               read_only?={@read_only?}
@@ -882,6 +884,7 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:flow_rows, [])
      |> assign(:flow_stages, [])
      |> assign(:flow_panel, nil)
+     |> assign(:flow_preflight, nil)
      |> assign_members()
      |> refresh_stages()}
   end
@@ -1129,12 +1132,22 @@ defmodule RelayWeb.BoardSettingsLive do
 
   # RLY-142 — the toggle never flips directly: it opens the inline cutover
   # confirm; only the confirm CTA persists.
+  # RLY-182 — and the confirm carries a readiness preflight, computed HERE: on click, in
+  # the enable direction only. Disabling needs no readiness check, and computing on every
+  # render would cost a query per page load for an answer nobody asked for. It is a
+  # snapshot — it does not live-update while the banner is open.
   def handle_event("flow_toggle", %{"flow-id" => flow_id}, socket) do
-    {:noreply, assign(socket, :flow_panel, {parse_flow_id(flow_id), :confirm})}
+    flow = find_flow(socket, flow_id)
+    preflight = if flow.enabled, do: nil, else: Runs.preflight_flow(flow)
+
+    {:noreply,
+     socket
+     |> assign(:flow_panel, {flow.id, :confirm})
+     |> assign(:flow_preflight, preflight)}
   end
 
   def handle_event("flow_cancel_panel", _params, socket) do
-    {:noreply, assign(socket, :flow_panel, nil)}
+    {:noreply, close_flow_panel(socket)}
   end
 
   def handle_event("flow_confirm_toggle", %{"flow-id" => flow_id}, socket) do
@@ -1147,7 +1160,7 @@ defmodule RelayWeb.BoardSettingsLive do
         {:error, changeset} -> put_flash(socket, :error, "Could not update the flow: #{flow_errors(changeset)}.")
       end
 
-    {:noreply, socket |> assign(:flow_panel, nil) |> assign_flows()}
+    {:noreply, socket |> close_flow_panel() |> assign_flows()}
   end
 
   def handle_event("flow_duplicate", %{"flow-id" => flow_id}, socket) do
@@ -1157,11 +1170,11 @@ defmodule RelayWeb.BoardSettingsLive do
         {:error, changeset} -> put_flash(socket, :error, "Could not duplicate the flow: #{flow_errors(changeset)}.")
       end
 
-    {:noreply, socket |> assign(:flow_panel, nil) |> assign_flows()}
+    {:noreply, socket |> close_flow_panel() |> assign_flows()}
   end
 
   def handle_event("flow_reset", %{"flow-id" => flow_id}, socket) do
-    {:noreply, assign(socket, :flow_panel, {parse_flow_id(flow_id), :reset})}
+    {:noreply, socket |> assign(:flow_panel, {parse_flow_id(flow_id), :reset}) |> assign(:flow_preflight, nil)}
   end
 
   def handle_event("flow_confirm_reset", %{"flow-id" => flow_id}, socket) do
@@ -1172,7 +1185,7 @@ defmodule RelayWeb.BoardSettingsLive do
         {:error, changeset} -> put_flash(socket, :error, "Could not reset the flow: #{flow_errors(changeset)}.")
       end
 
-    {:noreply, socket |> assign(:flow_panel, nil) |> assign_flows()}
+    {:noreply, socket |> close_flow_panel() |> assign_flows()}
   end
 
   # RLY-158 — create from scratch. The panel is a {:new, form} variant of @flow_panel
@@ -1180,7 +1193,7 @@ defmodule RelayWeb.BoardSettingsLive do
   # the shared "flow_cancel_panel" event.
   def handle_event("flow_new", _params, socket) do
     form = new_flow_form(%{"key" => Flows.unique_key(socket.assigns.board, "new-flow")})
-    {:noreply, assign(socket, :flow_panel, {:new, form})}
+    {:noreply, socket |> assign(:flow_panel, {:new, form}) |> assign(:flow_preflight, nil)}
   end
 
   def handle_event("flow_create_validate", %{"flow" => params}, socket) do
@@ -1276,6 +1289,11 @@ defmodule RelayWeb.BoardSettingsLive do
   end
 
   defp parse_flow_id(flow_id), do: String.to_integer(flow_id)
+
+  # The preflight is a snapshot bound to one open confirm — it dies with the panel.
+  defp close_flow_panel(socket) do
+    socket |> assign(:flow_panel, nil) |> assign(:flow_preflight, nil)
+  end
 
   defp flow_errors(changeset) do
     changeset.errors

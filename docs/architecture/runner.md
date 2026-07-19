@@ -110,6 +110,21 @@ that stays server-side.
   (`{board_id, name}`, capacity map, `last_heartbeat`). It still calls
   `Relay.RunnerPresence.beat/2` exactly as before, feeding the Runners view (RLY-141). A
   capacity-less beat never touches the `Executor` table.
+- **Capability inventory (RLY-182).** The executor heartbeat may carry an optional
+  `capabilities` payload — `{"agents": [...], "skills": [...]}`, the names this machine can
+  actually resolve from its repo `.claude/`, the user-level `~/.claude/`, and the CLI's
+  built-in agents. `bin/relay`'s `collect_capabilities()` enumerates BOTH `skills/<name>/SKILL.md`
+  and `commands/<name>.md`, because a slash command can live in either (`/write-plan` lives
+  only in `commands/`). It rides **send-on-change, not every beat**: the executor hashes the
+  inventory each beat and includes the key only when the hash differs from the last
+  successfully-acknowledged send, so a failed POST retries on the next beat. The server
+  persists it on `executors.capabilities`, where **null means never reported** and is
+  deliberately distinct from `{}` (reported, and empty). Because a beat that omits the key
+  must never erase a stored value, `Relay.Runs.upsert_executor/2` builds its `on_conflict`
+  replace list dynamically. For the case where the server genuinely has none (recreated row,
+  or an executor predating this change), the heartbeat **response** carries
+  `want_capabilities: true`; the executor clears its cached hash and resends on the next beat.
+  `Relay.Runs.preflight_flow/1` reads the stored inventory.
 - **Executor liveness + reclaim.** `Relay.Runs.ExecutorReaper` (supervised, see
   [`runtime.md`](runtime.md)) periodically calls `Relay.Runs.reclaim_stale_executors/0`:
   a stale executor's (`Relay.Runs.executor_stale?/2`) in-flight `shared_clean` jobs go back

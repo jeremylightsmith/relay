@@ -53,6 +53,10 @@ sharing behavior.
   later read-only reuse by the run panel) laid out by the pure, unit-tested
   `RelayWeb.FlowLayout.layout/2` (a deterministic serpentine layout derived from graph
   structure alone — no stored coordinates, no dragging).
+  **Requirements (RLY-182):** `Flows.node_requirements/1` is a pure graph read — the agent
+  and skill names a flow's nodes name, with no executor knowledge. It lives here rather than
+  in Runs because `Flows` may not depend on `Runs` (a boundary cycle the compiler rejects);
+  `Runs` reads it to answer whether anyone can actually satisfy it.
 - **Runs** — the workflow execution engine (ADR 0006 card 02 / RLY-132): a run executes a
   flow graph against a card as a supervised, Postgres-backed state machine. Outcome routing
   on `succeeded/failed/partial/needs_input`, per-node `max_retries`, per-edge `max_loops`, a
@@ -114,6 +118,13 @@ sharing behavior.
   *unproductive* repetition — the identical failure recurring across task boundaries is
   more alarming, not less. Outside a `foreach` there is no `sub_task_id`, the filter is
   the identity function, and every budget is whole-run exactly as before (RLY-139).
+  **Preflight (RLY-182):** `Relay.Runs.preflight_flow/1` (`Relay.Runs.Preflight`) is the
+  read-only readiness snapshot behind the Flows enable confirm — a single fresh executor must
+  satisfy capacity *and* inventory (the agents/skills `Flows.node_requirements/1` names) for
+  the flow to be reported ready; a union across executors is deliberately not readiness, since
+  a run dispatches to one machine. A null `capabilities` on an executor is unknown, not
+  missing — it is surfaced as its own caveat rather than a false "missing agent" alarm. Both
+  seams are one-way, Runs → Flows, never the reverse.
 - **Cards** — the card lifecycle: create/edit/move/archive, status (`working`,
   `needs_input`, `failed`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject,
   needs-input questions. `failed` (RLY-179) is set only by `Relay.Cards.mark_failed/3` when a
