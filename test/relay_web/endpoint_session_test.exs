@@ -29,4 +29,22 @@ defmodule RelayWeb.EndpointSessionTest do
     assert conn.status == 200
     refute Map.has_key?(conn.resp_cookies, "_relay_key")
   end
+
+  test "a stale session is re-stamped with a fresh 7-day Set-Cookie", %{conn: conn} do
+    user = insert(:user)
+    stale = System.system_time(:second) - (60 * 60 * 24 + 60)
+
+    conn =
+      conn
+      |> Plug.Test.init_test_session(user_id: user.id, session_refreshed_at: stale)
+      |> get(~p"/privacy")
+
+    cookie = conn.resp_cookies["_relay_key"]
+
+    # This is the whole feature end-to-end: enforce_session_window/1 re-stamping
+    # the session is only useful because Plug.Session turns that write into a
+    # Set-Cookie carrying a fresh Max-Age — proven here through the real endpoint
+    # rather than assumed from the unit-level stamp assertion.
+    assert cookie.max_age == SessionPolicy.max_age()
+  end
 end

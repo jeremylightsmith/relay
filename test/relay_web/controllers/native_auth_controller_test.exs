@@ -152,6 +152,22 @@ defmodule RelayWeb.NativeAuthControllerTest do
       assert json_response(conn, 401) == %{"success" => false, "error" => "Not signed in"}
     end
 
+    test "with a session stamped past the 7-day window returns 401 and mints no token", %{conn: conn} do
+      user = insert(:user)
+      expired = System.system_time(:second) - (60 * 60 * 24 * 7 + 60)
+
+      conn =
+        conn
+        |> Plug.Test.init_test_session(user_id: user.id, session_refreshed_at: expired)
+        |> get(~p"/api/auth/native/me")
+
+      # Without this check, a replayed cookie older than the 7-day window would
+      # still mint a fresh, longer-lived bearer token for /api/all — defeating
+      # the whole point of the window (RLY-127).
+      assert json_response(conn, 401) == %{"success" => false, "error" => "Not signed in"}
+      refute Repo.get_by(Schemas.UserApiToken, user_id: user.id)
+    end
+
     test "returns the avatar_url so the photo survives an app restart", %{conn: conn} do
       user = insert(:user, avatar_url: "https://example.com/ada.png")
 
