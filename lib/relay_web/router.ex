@@ -108,6 +108,17 @@ defmodule RelayWeb.Router do
     get "/attachments/:id", AttachmentController, :show
   end
 
+  # RLY-181 — the public bootstrap surface `relay init` reads. Deliberately
+  # UNAUTHENTICATED and outside every pipeline: a fresh project has no board key yet, and
+  # the payload is the same content as the public repo. There is no `?path=` parameter, so
+  # there is no path-traversal surface. No pipeline, because these serve both JSON and
+  # text/plain and must not be constrained by the :api pipeline's `accepts ["json"]`.
+  scope "/", RelayWeb do
+    get "/api/scaffold", ScaffoldController, :scaffold
+    get "/install", ScaffoldController, :install
+    get "/install/relay", ScaffoldController, :cli
+  end
+
   scope "/admin", RelayWeb.Admin do
     pipe_through [:browser, :require_superadmin_user]
 
