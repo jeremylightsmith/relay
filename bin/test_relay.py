@@ -1085,14 +1085,21 @@ class RunNodeJobTest(unittest.TestCase):
         self.assertEqual(outcome, "succeeded")
         self.assertEqual(len(ran), 1)
 
-    def test_a_job_with_no_branch_var_is_unguarded(self):
-        # shared_clean nodes (spec/plan) carry no branch and never commit — unchanged.
+    def test_shared_clean_jobs_are_unguarded_even_though_they_carry_a_branch_var(self):
+        """The guard keys on ISOLATION, not on the presence of a branch var.
+
+        build_payload puts `branch` in vars for EVERY job, used or not, and the shared_clean
+        worktree (exec-clean) is created `--detach` ON PURPOSE so it never holds a branch.
+        Keying on the branch var therefore refused every Spec/Plan node the moment the guard
+        shipped — caught on the live board within minutes. shared_clean nodes never commit;
+        they write to the card over the API, so they have nothing to strand.
+        """
         ran = []
         relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None: ran.append(cmd) or True
         self._git_head("", returncode=1)
 
         job = {"id": "nj-n", "run_id": "r1", "node_type": "shell", "run": "true",
-               "isolation": "shared_clean", "vars": {"ref": "RLY-1"}}
+               "isolation": "shared_clean", "vars": {"ref": "RLY-1", "branch": "rly-1-something"}}
         outcome, _detail, _sha, _session = relay.run_node_job(job, "/tmp/wt", self.control)
 
         self.assertEqual(outcome, "succeeded")

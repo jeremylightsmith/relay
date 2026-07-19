@@ -870,7 +870,7 @@ def git_head_sha(path):
     return proc.stdout.strip() if proc.returncode == 0 else None
 
 
-def check_branch_attached(slot_path, branch, cmd):
+def check_branch_attached(slot_path, isolation, branch, cmd):
     """Returns a failure detail when this node must NOT run, else None (RLY-166).
 
     `reset_worktree()` ends in `git checkout --detach` by design, and it runs mid-run on the
@@ -883,7 +883,12 @@ def check_branch_attached(slot_path, branch, cmd):
     So: a job that carries a `branch` must run with HEAD actually on that branch. The one
     exception is the node whose whole job is to create it — it legitimately starts detached.
     """
-    if not branch or "checkout -B" in cmd:
+    # Keyed on ISOLATION, not on the branch var: build_payload puts `branch` in vars for every
+    # job whether the flow uses it or not, and the shared_clean worktree (exec-clean) is created
+    # `--detach` ON PURPOSE so it never holds a branch. Guarding on the var refused every
+    # Spec/Plan node the moment this shipped. Only `exclusive` runs commit to a branch and can
+    # therefore strand work.
+    if isolation != "exclusive" or not branch or "checkout -B" in cmd:
         return None
     proc = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], cwd=slot_path,
                           capture_output=True, text=True)
@@ -934,7 +939,7 @@ def run_node_job(job, slot_path, control):
     vars = {k: v for k, v in raw_vars.items() if v is not None}
     cmd = render(job["run"], vars)
 
-    detached = check_branch_attached(slot_path, vars.get("branch"), cmd)
+    detached = check_branch_attached(slot_path, job.get("isolation"), vars.get("branch"), cmd)
     if detached:
         log(f"  ⚠ {ref}: {detached}", ref=ref, kind="error")
         return "failed", detached, git_head_sha(slot_path), None
