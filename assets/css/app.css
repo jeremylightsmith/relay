@@ -209,6 +209,22 @@
   padding: 0.3em 0.6em;
 }
 
+/* Rendered images — screenshots posted by agents (comments, spec, plan, AI result) and
+   docs-site images. RLY-157: without a cap a 2560px screenshot renders at its natural
+   width and blows out the card drawer column. `cursor: zoom-in` is the ONLY visual hint
+   that the image opens the full-size viewer (assets/js/image_lightbox.js), so it is
+   required, not decoration. `.docs` is the docs site's content class — see
+   lib/relay_web/controllers/docs_html/show.html.heex. */
+.md img, .docs img {
+  max-width: 100%;
+  height: auto;
+  max-height: 24rem;
+  border-radius: var(--radius-box, 0.5rem);
+  border: 1px solid var(--color-base-300);
+  margin: 0.6em 0;
+  cursor: zoom-in;
+}
+
 /* The "Relay AI needs your input" panel renders the AI's question(s) as a
    markdown numbered list. The global .md list styling is deliberately compact
    (for dense spec/plan bodies), which leaves a multi-question ask cramped and
