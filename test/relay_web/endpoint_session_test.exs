@@ -13,4 +13,20 @@ defmodule RelayWeb.EndpointSessionTest do
     assert cookie.max_age == SessionPolicy.max_age()
     assert cookie.max_age == 604_800
   end
+
+  test "an already-fresh session gets no new Set-Cookie (the daily throttle)", %{conn: conn} do
+    # Request 1 signs in; request 2 consumes the sign-in flash, which is itself a
+    # session write. Request 3 is the one that must be silent.
+    conn =
+      conn
+      |> get(~p"/dev/login")
+      |> recycle()
+      |> get(~p"/privacy")
+      |> recycle()
+
+    conn = get(conn, ~p"/privacy")
+
+    assert conn.status == 200
+    refute Map.has_key?(conn.resp_cookies, "_relay_key")
+  end
 end
