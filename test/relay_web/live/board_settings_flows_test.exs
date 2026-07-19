@@ -184,11 +184,10 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       refute has_element?(view, "#flows-first-run")
     end
 
-    test "the footer cutover note and the engine note are present", %{conn: conn, board: board} do
+    test "the footer cutover note is present", %{conn: conn, board: board} do
       view = open_flows(conn, board)
 
       assert has_element?(view, "#flows-footer-note", "Disabling a flow is a cutover")
-      assert has_element?(view, "#flows-engine-note", "RLY-133")
     end
 
     test "a board with no flow rows shows the empty state", %{conn: conn, board: board} do
@@ -203,7 +202,7 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
   end
 
   describe "enable/disable cutover confirm" do
-    test "toggle opens the enable confirm naming the runner start command; cancel persists nothing",
+    test "toggle opens the enable confirm; cancel persists nothing",
          %{conn: conn, board: board} do
       spec = flow(board, "spec")
       view = open_flows(conn, board)
@@ -212,8 +211,6 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
 
       assert has_element?(view, "#flow-#{spec.id}-confirm", "Turn on the Spec flow?")
       assert has_element?(view, "#flow-#{spec.id}-confirm", "handed to the AI automatically")
-      assert has_element?(view, "#flow-#{spec.id}-confirm", "bin/relay execute")
-      assert has_element?(view, "#flow-#{spec.id}-confirm", "advertising capacity")
       refute has_element?(view, "#flow-#{spec.id}-confirm", "bin/relay watch")
       refute has_element?(view, "#flow-#{spec.id}-confirm", "relay_config.json")
       assert has_element?(view, "#flow-#{spec.id}-toggle[aria-pressed='false']")

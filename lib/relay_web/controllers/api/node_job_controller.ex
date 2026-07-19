@@ -64,6 +64,12 @@ defmodule RelayWeb.Api.NodeJobController do
       Code `implement` node. The beat reports the jobs it believes it is running; the reply
       names those the server no longer considers live, and the executor kills them.
 
+    * **Capabilities.** The beat may carry `capabilities` — what this executor can resolve
+      by name (`%{"agents" => [...], "skills" => [...]}`) — which `Relay.Runs.preflight_flow/1`
+      reads to answer "will this flow run here?" before a human enables it. It rides
+      send-on-change, not every beat; the reply's `want_capabilities` asks for a resend when
+      the server holds none.
+
   Board-scoped throughout: an id belonging to another board is simply not live *here*, so one
   board's executor can never be told to kill another's work.
   """
@@ -79,17 +85,30 @@ defmodule RelayWeb.Api.NodeJobController do
       # forever otherwise, invisible to both claim_next_job (queued-only) and the stale-executor
       # reaper (this executor is alive). The absence of a job from `running` is the signal.
       :ok = Runs.requeue_orphaned_jobs(board, executor, running)
-      json(conn, %{revoked: Runs.revoked_among(board, running)})
+
+      json(conn, %{
+        revoked: Runs.revoked_among(board, running),
+        # RLY-182: `capabilities` is send-on-change, so an executor that already sent one
+        # never sends it again — but the row can lose it (recreated row, or an executor
+        # predating this change), which would strand preflight on a permanent false
+        # "missing agents" alarm. `upsert_executor/2` returns the post-upsert row, so a
+        # beat that DID carry capabilities has already stored them and this reads false.
+        want_capabilities: is_nil(executor.capabilities)
+      })
     end
   end
 
   # RLY-162: `Map.get/3` returns whatever the client sent, so a non-map `executor` made
   # `Map.put/3` raise BadMapError → a 500 on the executor's front door. Reject the shape
   # here (a request-shape concern) rather than in Runs, which normalizes permissively.
+  # RLY-182: `capabilities` rides the same way — optional, and absent on every claim.
   defp executor_attrs(params) do
     case Map.get(params, "executor", %{}) do
       executor when is_map(executor) ->
-        {:ok, Map.put(executor, "capacity", Map.get(params, "capacity"))}
+        {:ok,
+         executor
+         |> Map.put("capacity", Map.get(params, "capacity"))
+         |> Map.put("capabilities", Map.get(params, "capabilities"))}
 
       _ ->
         {:error, :invalid_executor}

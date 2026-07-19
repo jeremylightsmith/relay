@@ -57,6 +57,14 @@
   },
   "heartbeat": {
     "request": {
+      "capabilities": {
+        "agents": [
+          "plan-implementer"
+        ],
+        "skills": [
+          "write-plan"
+        ]
+      },
       "capacity": {
         "exclusive": 1,
         "shared_clean": 1
@@ -69,7 +77,8 @@
       "running": []
     },
     "response": {
-      "revoked": []
+      "revoked": [],
+      "want_capabilities": false
     }
   },
   "outcome": {

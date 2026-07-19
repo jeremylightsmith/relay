@@ -6,7 +6,10 @@ defmodule Schemas.Executor do
   capacity per isolation class, a STRING-keyed map like
   `%{"shared_clean" => 3, "exclusive" => 1}`. `last_heartbeat` drives reclaim:
   an executor silent past `max(60s, 2 × interval)` is stale and its in-flight
-  jobs are recovered. All fields are set programmatically by `Relay.Runs`.
+  jobs are recovered. `capabilities` is the last-reported inventory of what this
+  executor can resolve by name — `%{"agents" => [...], "skills" => [...]}` — or
+  `nil` when it has never reported one (RLY-182). All fields are set
+  programmatically by `Relay.Runs`.
   """
   use Ecto.Schema
 
@@ -19,6 +22,9 @@ defmodule Schemas.Executor do
     field :host, :string
     field :interval, :integer, default: 30
     field :capacity, :map, default: %{}
+    # No default: nil means "never reported its inventory" and is deliberately distinct
+    # from %{} ("reported, and empty"). Preflight branches on that difference.
+    field :capabilities, :map
     field :last_heartbeat, :utc_datetime
 
     belongs_to :board, Schemas.Board
@@ -29,7 +35,7 @@ defmodule Schemas.Executor do
   @doc "Validates a programmatically-built executor row."
   def changeset(executor, attrs) do
     executor
-    |> cast(attrs, [:board_id, :name, :host, :interval, :capacity, :last_heartbeat])
+    |> cast(attrs, [:board_id, :name, :host, :interval, :capacity, :capabilities, :last_heartbeat])
     |> validate_required([:board_id, :name, :last_heartbeat])
     |> foreign_key_constraint(:board_id)
     |> unique_constraint([:board_id, :name], name: :executors_board_id_name_index)

@@ -3,7 +3,7 @@ defmodule RelayWeb.FlowSettingsComponents do
   Function components for the board settings **Flows** pane (RLY-142),
   matching `docs/designs/Relay Flows.dc.html`. Page-specific — no storybook
   entry; all events live on `RelayWeb.BoardSettingsLive`. Recorded artboard
-  deviations (kebab-carried origin, inlined cutover ritual, engine note, and the
+  deviations (kebab-carried origin, inlined cutover ritual, and the
   mockup-only Configured/First-run state switcher) are pinned in the card's spec.
   The artboard's "+ New flow" button ships as of RLY-158. Editing a flow's
   definition now navigates to the full-page editor (`RelayWeb.FlowEditorLive`,
@@ -23,6 +23,7 @@ defmodule RelayWeb.FlowSettingsComponents do
 
   attr :rows, :list, required: true, doc: "%{flow: %Flow{}, customized?: bool, resettable?: bool} maps"
   attr :panel, :any, required: true, doc: "nil | {flow_id, :confirm} | {flow_id, :reset} | {:new, form}"
+  attr :preflight, :any, default: nil, doc: "Runs.preflight_flow/1's snapshot for the open enable confirm, or nil"
   attr :slug, :string, required: true, doc: "the board slug, for the Edit item's editor link"
   attr :stages, :list, required: true, doc: "the board's stages, unfiltered, for the create form's pickers"
   attr :read_only?, :boolean, required: true, doc: "archived board — hides the create affordance"
@@ -86,20 +87,13 @@ defmodule RelayWeb.FlowSettingsComponents do
       <%= if @rows != [] do %>
         <.first_run_banner :if={Enum.all?(@rows, &(not &1.flow.enabled))} rows={@rows} />
         <.legend />
-        <.flows_table rows={@rows} panel={@panel} slug={@slug} />
+        <.flows_table rows={@rows} panel={@panel} preflight={@preflight} slug={@slug} />
         <p
           id="flows-footer-note"
           style="font-size:12px;line-height:1.55;color:oklch(0.58 0.02 255);margin:16px 2px 0 2px;max-width:640px;"
         >
           Disabling a flow is a cutover — cards stop being picked up at that transition and
           wait for a human. Enabling one starts handing new cards to the AI immediately.
-        </p>
-        <p
-          id="flows-engine-note"
-          style="font-size:12px;line-height:1.55;color:oklch(0.62 0.02 255);margin:6px 2px 0 2px;max-width:640px;"
-        >
-          The flow engine isn't dispatching yet: this switch records intent; server-side
-          dispatch arrives with the scheduler (RLY-133).
         </p>
       <% end %>
     </section>
@@ -245,6 +239,7 @@ defmodule RelayWeb.FlowSettingsComponents do
 
   attr :rows, :list, required: true
   attr :panel, :any, required: true
+  attr :preflight, :any, default: nil, doc: "Runs.preflight_flow/1's snapshot for the open enable confirm, or nil"
   attr :slug, :string, required: true
 
   defp flows_table(assigns) do
@@ -375,7 +370,11 @@ defmodule RelayWeb.FlowSettingsComponents do
               </div>
             </div>
 
-            <.toggle_confirm :if={@panel == {row.flow.id, :confirm}} flow={row.flow} />
+            <.toggle_confirm
+              :if={@panel == {row.flow.id, :confirm}}
+              flow={row.flow}
+              preflight={@preflight}
+            />
             <.reset_confirm :if={@panel == {row.flow.id, :reset}} flow={row.flow} />
           </div>
         </div>
@@ -385,6 +384,7 @@ defmodule RelayWeb.FlowSettingsComponents do
   end
 
   attr :flow, Flow, required: true
+  attr :preflight, :any, default: nil
 
   defp toggle_confirm(assigns) do
     ~H"""
@@ -399,9 +399,10 @@ defmodule RelayWeb.FlowSettingsComponents do
         <div style="font-size:13.5px;font-weight:600;color:oklch(0.42 0.10 65);margin-bottom:3px;">
           {confirm_title(@flow)}
         </div>
-        <p style="font-size:12.5px;line-height:1.5;color:oklch(0.44 0.05 65);margin:0 0 12px 0;max-width:560px;">
+        <p style="font-size:12.5px;line-height:1.5;color:oklch(0.44 0.05 65);margin:0 0 10px 0;max-width:560px;">
           {confirm_body(@flow)}
         </p>
+        <.preflight_list :if={@preflight} flow={@flow} preflight={@preflight} />
         <div style="display:flex;gap:8px;">
           <button
             type="button"
@@ -426,6 +427,146 @@ defmodule RelayWeb.FlowSettingsComponents do
     """
   end
 
+  attr :flow, Flow, required: true
+  attr :preflight, :map, required: true
+
+  # Reports, never blocks: the confirm CTA above stays live in every state a row can show.
+  defp preflight_list(assigns) do
+    assigns = assign(assigns, :rows, preflight_rows(assigns.flow, assigns.preflight))
+
+    ~H"""
+    <ul
+      id={"flow-#{@flow.id}-preflight"}
+      style="list-style:none;margin:0 0 12px 0;padding:0;display:flex;flex-direction:column;gap:5px;max-width:560px;"
+    >
+      <li
+        :for={row <- @rows}
+        id={row.id}
+        class={if row.ok?, do: "preflight-ok", else: "preflight-warn"}
+        style="display:flex;align-items:flex-start;gap:7px;font-size:12.5px;line-height:1.45;"
+      >
+        <.icon
+          name={if row.ok?, do: "hero-check-circle", else: "hero-exclamation-triangle"}
+          class={["w-4 h-4 shrink-0 mt-px", if(row.ok?, do: "text-success", else: "text-warning")]}
+        />
+        <span style="color:oklch(0.42 0.04 65);">{row.text}</span>
+      </li>
+    </ul>
+    """
+  end
+
+  # Pure: preflight map → the rendered rows, in a fixed order so the banner reads the same
+  # every time. Each row's id is stable and is what the LiveView tests assert on.
+  defp preflight_rows(flow, preflight) do
+    [
+      stages_row(flow, preflight),
+      executor_row(flow, preflight)
+    ] ++
+      capacity_rows(flow, preflight) ++
+      [
+        names_row(flow, preflight, :agents),
+        names_row(flow, preflight, :skills)
+      ] ++ unreported_rows(flow, preflight)
+  end
+
+  defp row(flow, check, ok?, text), do: %{id: "flow-#{flow.id}-preflight-#{check}", ok?: ok?, text: text}
+
+  defp stages_row(flow, %{stages: :ok}),
+    do: row(flow, "stages", true, "All three trigger stages still exist on this board.")
+
+  defp stages_row(flow, %{stages: {:missing, keys}}) do
+    names = Enum.map_join(keys, ", ", &String.replace(Atom.to_string(&1), "_", "-"))
+    row(flow, "stages", false, "Missing trigger stage: #{names}. The flow can't dispatch until it's set.")
+  end
+
+  defp executor_row(flow, %{executors: :none_connected}),
+    do: row(flow, "executor", false, "No runner is connected. Cards will queue with nothing to pick them up.")
+
+  defp executor_row(flow, %{executors: {:ok, name}}), do: row(flow, "executor", true, "Runner #{name} can run this flow.")
+
+  defp executor_row(flow, %{executors: {:no_candidate, details}}) do
+    # Per-executor, never a union: a run goes to ONE machine, so "between them they'd
+    # manage it" is not readiness.
+    row(flow, "executor", false, "#{count(details, "runner")} connected, but none satisfies this flow on its own.")
+  end
+
+  # No runner at all is one warning (the executor row above), not two — a capacity row here
+  # would only restate it for a different, misleading reason.
+  defp capacity_rows(_flow, %{executors: :none_connected}), do: []
+  defp capacity_rows(flow, preflight), do: [capacity_row(flow, preflight)]
+
+  defp capacity_row(flow, preflight) do
+    class = iso_label(flow.isolation)
+
+    if capacity_anywhere?(preflight) do
+      row(flow, "capacity", true, "A connected runner advertises #{class} capacity.")
+    else
+      row(flow, "capacity", false, "No connected runner advertises #{class} capacity — this flow will never dispatch.")
+    end
+  end
+
+  defp iso_label(:shared_clean), do: "shared-clean"
+  defp iso_label(:exclusive), do: "exclusive"
+
+  defp capacity_anywhere?(%{executors: {:ok, _name}}), do: true
+  defp capacity_anywhere?(%{executors: {:no_candidate, details}}), do: Enum.any?(details, & &1.capacity_ok?)
+
+  # Nothing connected means agents/skills are unchecked, not resolved — a green "OK" here
+  # would be the exact false alarm (in reverse) this feature exists to avoid.
+  defp names_row(flow, %{executors: :none_connected} = preflight, kind) do
+    label = if kind == :agents, do: "agent", else: "skill"
+    required = Map.fetch!(preflight.requires, kind)
+
+    if required == [] do
+      row(flow, kind, true, "This flow names no #{label}s.")
+    else
+      row(flow, kind, false, "Can't check #{label}s — no runner is connected.")
+    end
+  end
+
+  defp names_row(flow, preflight, kind) do
+    label = if kind == :agents, do: "agent", else: "skill"
+    required = Map.fetch!(preflight.requires, kind)
+    missing = missing_names(preflight, kind)
+
+    text =
+      cond do
+        required == [] -> "This flow names no #{label}s."
+        missing == [] -> "Every #{label} this flow names resolves on a connected runner."
+        true -> "Missing #{count(missing, label)}: #{Enum.join(missing, ", ")}."
+      end
+
+    row(flow, kind, missing == [], text)
+  end
+
+  # Union across executors HERE, deliberately and only for display: with no single
+  # candidate, what the developer wants is the full list of names to go install.
+  defp missing_names(%{executors: {:no_candidate, details}}, kind) do
+    key = if kind == :agents, do: :missing_agents, else: :missing_skills
+
+    details |> Enum.flat_map(&Map.fetch!(&1, key)) |> Enum.uniq() |> Enum.sort()
+  end
+
+  defp missing_names(_preflight, _kind), do: []
+
+  # Unknown ≠ missing (RLY-182): an executor that has never reported its inventory is not
+  # accused of lacking anything — it gets its own caveat line instead.
+  defp unreported_rows(_flow, %{unreported: []}), do: []
+
+  defp unreported_rows(flow, %{unreported: names}) do
+    [
+      row(
+        flow,
+        "unreported",
+        false,
+        "#{Enum.join(names, ", ")} hasn't reported what it can run yet, so its agents and skills couldn't be checked."
+      )
+    ]
+  end
+
+  defp count([_one], noun), do: "1 #{noun}"
+  defp count(list, noun), do: "#{length(list)} #{noun}s"
+
   attr :stage, :any, required: true, doc: "a preloaded %Schemas.Stage{} or nil (missing trigger)"
   attr :style, :string, required: true
 
@@ -444,16 +585,12 @@ defmodule RelayWeb.FlowSettingsComponents do
   defp confirm_title(%Flow{enabled: false} = flow), do: "Turn on the #{flow_name(flow)} flow?"
   defp confirm_title(%Flow{} = flow), do: "Turn off the #{flow_name(flow)} flow?"
 
-  # Enable body = the artboard's behavioral line (minus the version phrase,
-  # RLY-152) + the inlined runner-readiness ritual (spec interview #3). RLY-139
-  # retired the legacy bin/relay watch dispatcher (and relay_config.json with it),
-  # so the risk on enable is no longer double dispatch — it's a gap: no runner
-  # advertising capacity means cards queue with nothing to pick them up.
+  # Enable body = the artboard's behavioral line (minus the version phrase, RLY-152). The
+  # runner-readiness ritual that used to be inlined here is now <.preflight_list> (RLY-182),
+  # which answers the same question with facts instead of a reminder.
   defp confirm_body(%Flow{enabled: false} = flow) do
     "New cards reaching #{pulls_name(flow)} will be handed to the AI automatically. " <>
-      "Cards already sitting there won't move until you say so. Before turning this on, " <>
-      "make sure a runner (bin/relay execute) is connected and advertising capacity — " <>
-      "with none connected, cards will queue with no dispatcher to run them."
+      "Cards already sitting there won't move until you say so."
   end
 
   defp confirm_body(%Flow{} = flow) do

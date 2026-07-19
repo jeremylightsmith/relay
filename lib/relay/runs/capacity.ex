@@ -7,7 +7,7 @@ defmodule Relay.Runs.Capacity do
   through the process, and state is lost on restart by design.
 
   **Contract: this is the executor's configured per-class slot count, not a
-  live free count.** The heartbeat (`BoardController.heartbeat/2`) advertises
+  live free count.** The heartbeat (`RelayWeb.Api.NodeJobController.heartbeat/2`) advertises
   the same total on every beat; it does not decrement as jobs run. In-flight
   `:running` runs are debited server-side, in
   `Relay.Runs.Scheduler.Server.build_snapshot/1`, before the snapshot reaches

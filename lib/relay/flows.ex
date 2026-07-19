@@ -45,6 +45,45 @@ defmodule Relay.Flows do
     )
   end
 
+  # The leading slash-command token of a node's `run`, e.g. "/write-plan {ref}" → "write-plan".
+  @skill_token ~r/^\/([A-Za-z0-9_-]+)/
+
+  @doc """
+  What `flow`'s graph NAMES: the agents its nodes reference and the skills its agent nodes
+  invoke as a leading slash command. Pure, sorted, deduped.
+
+  Deliberately knows nothing about executors — whether any machine HAS these is
+  `Relay.Runs.preflight_flow/1`'s question. `Relay.Flows` may not depend on `Relay.Runs`
+  (which already depends on Flows); the reverse edge is a boundary cycle the compiler
+  rejects.
+
+  Only `type: :agent` nodes contribute a skill: a `shell`/`gate` node's `run` is a shell
+  command (`mix precommit`), and parsing it as a slash command would invent requirements
+  that can never be satisfied.
+  """
+  def node_requirements(%Flow{} = flow) do
+    nodes = flow.nodes || []
+
+    %{
+      agents: nodes |> Enum.map(& &1.agent) |> Enum.reject(&is_nil/1) |> Enum.uniq() |> Enum.sort(),
+      skills:
+        nodes
+        |> Enum.filter(&(&1.type == :agent))
+        |> Enum.flat_map(&skill_token(&1.run))
+        |> Enum.uniq()
+        |> Enum.sort()
+    }
+  end
+
+  defp skill_token(run) when is_binary(run) do
+    case Regex.run(@skill_token, run) do
+      [_full, name] -> [name]
+      nil -> []
+    end
+  end
+
+  defp skill_token(_run), do: []
+
   @doc "The board's flow with `key`, or nil."
   def get_flow(%Board{id: board_id}, key) when is_binary(key) do
     Repo.get_by(Flow, board_id: board_id, key: key)

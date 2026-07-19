@@ -41,6 +41,9 @@ defmodule RelayWeb.Api.ExecutorContractTest do
     heartbeat_request = %{
       "executor" => %{"name" => "fixture", "host" => "fixture-host", "interval" => 30},
       "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
+      # RLY-182: optional, send-on-change. Present here so the fixture records the key
+      # and its shape for bin/test_relay.py to build against.
+      "capabilities" => %{"agents" => ["plan-implementer"], "skills" => ["write-plan"]},
       "running" => []
     }
 
