@@ -245,6 +245,129 @@ defmodule Relay.Runs.Scheduler do
     end)
   end
 
+  # --- explain: why a given card is (not) dispatchable (RLY-177) ---
+
+  @doc """
+  The diagnosis sibling of `plan/1`: why `card_id` is or is not dispatchable on this
+  snapshot. Deliberately lives in this module and reuses `plan/1`'s own decision plus the
+  shared predicates (`fresh_eligible?/3`, `wip_full?/3`, `used/3`) — a separate
+  reimplementation would silently drift from the scheduler it claims to explain, which is
+  worse than no diagnosis at all (RLY-177).
+
+  `:dispatchable` is decided by running `plan/1` itself, never re-derived; only the
+  *reason* for a non-dispatch is walked, in the same order `plan/1` excludes cards.
+  Returns `%{verdict, detail, evidence}`; `detail` is the human sentence `relay why`
+  prints. Verdicts needing DB state beyond the snapshot (`:run_failed`, `:job_stranded`)
+  are layered on by `Relay.Runs.diagnose/3`.
+  """
+  @spec explain(Snapshot.t(), term()) :: %{verdict: atom(), detail: String.t(), evidence: map()}
+  def explain(%Snapshot{} = snapshot, card_id) do
+    case Enum.find(snapshot.cards, &(&1.id == card_id)) do
+      nil -> verdict(:unknown_card, "No card with id #{inspect(card_id)} is on this board.", %{})
+      card -> do_explain(snapshot, card)
+    end
+  end
+
+  defp do_explain(snapshot, card) do
+    run = Enum.find(snapshot.runs, &(&1.card_id == card.id))
+    flow = Enum.find(snapshot.flows, &(&1.pulls_from_stage_id == card.stage_id))
+    evidence = evidence(snapshot, card, run, flow)
+
+    cond do
+      dispatched?(snapshot, card) ->
+        verdict(:dispatchable, "This card would dispatch on the scheduler's next tick.", evidence)
+
+      card.active_owner == :human ->
+        verdict(:owned_by_human, "A human holds the baton on this card, so no flow will pick it up.", evidence)
+
+      card.status == :needs_input ->
+        verdict(:blocked_on_input, "This card is waiting on a human answer (status needs_input).", evidence)
+
+      run != nil ->
+        run_verdict(run, evidence)
+
+      flow == nil ->
+        verdict(
+          :no_enabled_flow,
+          "There is no enabled flow that pulls from this card's stage, so nothing will ever pick it up.",
+          evidence
+        )
+
+      not fresh_eligible?(card, MapSet.new(), %{}) ->
+        verdict(
+          :not_eligible,
+          "The #{flow.key} flow pulls from this card's stage, but the card's status is " <>
+            "#{card.status} — only ready or queued cards are pulled.",
+          evidence
+        )
+
+      wip_full?(evidence.wip_limit, evidence.wip_used, 0) ->
+        verdict(
+          :wip_full,
+          "The #{flow.key} flow's works-in column is at its WIP limit " <>
+            "(#{evidence.wip_used}/#{evidence.wip_limit}), so it is not pulling anything new.",
+          evidence
+        )
+
+      true ->
+        verdict(
+          :awaiting_capacity,
+          "The #{flow.key} flow would dispatch this card, but no executor is advertising a free " <>
+            "#{flow.isolation} slot — nothing is connected to run it.",
+          evidence
+        )
+    end
+  end
+
+  defp run_verdict(%{status: :parked} = run, evidence) do
+    verdict(
+      :awaiting_capacity,
+      "Run #{run.id} is parked and waiting for an executor with a free #{run.isolation} slot.",
+      evidence
+    )
+  end
+
+  defp run_verdict(run, evidence), do: verdict(:run_active, "Run #{run.id} is live and working.", evidence)
+
+  # `:dispatchable` is plan/1's own answer, not a re-derivation — this is the whole
+  # anti-drift property the agreement test pins.
+  defp dispatched?(snapshot, card) do
+    plan = plan(snapshot)
+    run_ids = for r <- snapshot.runs, r.card_id == card.id, do: r.id
+
+    Enum.any?(plan.dispatches, fn
+      {:start, card_id, _flow_key, _executor_id} -> card_id == card.id
+      {:resume, run_id, _executor_id} -> run_id in run_ids
+    end)
+  end
+
+  defp evidence(snapshot, card, run, flow) do
+    stage_by_id = Map.new(snapshot.stages, &{&1.id, &1})
+    children = children_index(snapshot.stages)
+    cards_by_stage = Enum.group_by(snapshot.cards, & &1.stage_id)
+    works_in = flow && flow.works_in_stage_id
+
+    %{
+      card_id: card.id,
+      card_ref: card.ref,
+      card_status: card.status,
+      stage_id: card.stage_id,
+      active_owner: card.active_owner,
+      flow_key: flow && flow.key,
+      isolation: flow && flow.isolation,
+      capacity: snapshot.capacity,
+      run_id: run && run.id,
+      run_status: run && run.status,
+      # Filled in by Relay.Runs.diagnose/3 — the Snapshot's run maps carry no
+      # current_node (snapshot.ex:44-51); only the DB row has it.
+      current_node: nil,
+      wip_limit: works_in && wip_limit(stage_by_id, works_in),
+      wip_used: works_in && used(children, cards_by_stage, works_in)
+    }
+  end
+
+  defp verdict(verdict, detail, evidence), do: %{verdict: verdict, detail: detail, evidence: evidence}
+
   # --- misc ---
 
   defp children_index(stages) do
