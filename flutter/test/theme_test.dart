@@ -81,4 +81,25 @@ void main() {
     // The lighter pill trio, not the existing needs-you amber it sits beside.
     expect(RelayTheme.relayNeedsInputText, isNot(RelayTheme.relayBlocked));
   });
+
+  test('stageTypeColor maps each stage type to its baton colour (RLY-156)', () {
+    expect(RelayTheme.stageTypeColor('work'), RelayTheme.relayHuman);
+    expect(RelayTheme.stageTypeColor('planning'), RelayTheme.relayAI);
+    expect(RelayTheme.stageTypeColor('review'), RelayTheme.relayBlocked);
+    expect(RelayTheme.stageTypeColor('done'), RelayTheme.relayDone);
+    expect(RelayTheme.stageTypeColor('queue'), RelayTheme.relayStageNeutral);
+  });
+
+  test(
+    'an unknown or absent stage type falls back to neutral, never throws',
+    () {
+      // A stage type added server-side must not crash an older build.
+      expect(
+        RelayTheme.stageTypeColor('teleportation'),
+        RelayTheme.relayStageNeutral,
+      );
+      expect(RelayTheme.stageTypeColor(null), RelayTheme.relayStageNeutral);
+      expect(RelayTheme.stageTypeColor(''), RelayTheme.relayStageNeutral);
+    },
+  );
 }

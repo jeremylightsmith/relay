@@ -146,4 +146,58 @@ void main() {
     expect(formatAge(DateTime.utc(2026, 7, 12, 12), now: now), '3d');
     expect(formatAge(DateTime.utc(2026, 7, 15, 11, 59, 30), now: now), 'now');
   });
+
+  test('parses stage_group, which groups a sub-lane card under its parent', () {
+    final row = FeedRow.fromJson({
+      ...reviewRowJson(),
+      'stage': 'Code · Review',
+      'stage_group': {'name': 'Code', 'type': 'work'},
+    });
+
+    expect(row.stage, 'Code · Review');
+    expect(row.stageGroup!.name, 'Code');
+    expect(row.stageGroup!.type, 'work');
+  });
+
+  test(
+    'an absent stage_group parses to null — an older server still renders',
+    () {
+      expect(FeedRow.fromJson(reviewRowJson()).stageGroup, isNull);
+      expect(
+        FeedRow.fromJson({...reviewRowJson(), 'stage_group': null}).stageGroup,
+        isNull,
+      );
+    },
+  );
+
+  test('a malformed stage_group parses to null rather than throwing', () {
+    // No name at all, an empty name, and a wholly wrong shape.
+    expect(
+      FeedRow.fromJson({
+        ...reviewRowJson(),
+        'stage_group': {'type': 'work'},
+      }).stageGroup,
+      isNull,
+    );
+    expect(
+      FeedRow.fromJson({
+        ...reviewRowJson(),
+        'stage_group': {'name': ''},
+      }).stageGroup,
+      isNull,
+    );
+    expect(
+      FeedRow.fromJson({...reviewRowJson(), 'stage_group': 'Code'}).stageGroup,
+      isNull,
+    );
+  });
+
+  test('a stage_group with no type parses with an empty type, not a throw', () {
+    final row = FeedRow.fromJson({
+      ...reviewRowJson(),
+      'stage_group': {'name': 'Code'},
+    });
+    expect(row.stageGroup!.name, 'Code');
+    expect(row.stageGroup!.type, '');
+  });
 }

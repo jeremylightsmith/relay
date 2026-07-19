@@ -199,33 +199,6 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
     }
   }
 
-  /// Answer the current item. [answers] for a structured question (the stepper's
-  /// positional picks), [text] for a legacy string one. Returns where to navigate, or
-  /// null to stay put. Shares `_settle` with approve, so the skip, the 401 sign-out
-  /// and the in-flight guard are the same code on both paths.
-  Future<String?> answerCurrent({
-    List<Map<String, String>>? answers,
-    String? text,
-  }) async {
-    final item = state.current;
-    if (item == null || state.inFlight) return null;
-
-    state = state.copyWith(inFlight: true, clearError: true);
-    try {
-      final result = await ref
-          .read(decisionApiProvider)
-          .answer(
-            ref: item.ref,
-            boardSlug: item.boardSlug,
-            answers: answers,
-            text: text,
-          );
-      return await _settle(result, item, okBanner: 'Answer sent · ${item.ref}');
-    } finally {
-      state = state.copyWith(inFlight: false);
-    }
-  }
-
   Future<String?> _settle(
     DecisionResult result,
     QueueItem item, {
@@ -237,7 +210,7 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
         return advanceAfter(banner: okBanner);
       // Someone cleared it on the web while we walked. Not a failure — and
       // either way the row no longer needs you, so it leaves the inbox too.
-      case DecisionFailed(code: 'not_in_review' || 'not_needs_input'):
+      case DecisionFailed(code: 'not_in_review'):
         _reconcileFeed(item);
         return advanceAfter(banner: 'Already handled · ${item.ref}');
       // The token expired or was revoked; the router sends a signed-out user to /welcome.
@@ -332,11 +305,12 @@ final reviewQueueProvider = NotifierProvider<ReviewQueue, ReviewQueueState>(
 /// (`needs_you_screen`) and the queue's own advance must agree, or opening a card and
 /// advancing to it would land on different screens.
 ///
-/// needs_input → RLY-89's native answer screen. in_review → the unified `/cards/:ref`
-/// card host (RLY-87), `board` and `kind` riding along so it picks its bottom bar.
-String routeFor(QueueItem item) => item.kind == 'needs_input'
-    ? '/card/${item.ref}/answer'
-    : '/cards/${item.ref}?board=${item.boardSlug}&kind=${item.kind}';
+/// RLY-156: **no longer branches.** Both kinds go to the unified `/cards/:ref` card host
+/// (RLY-87), `board` and `kind` riding along so it picks its bottom bar — and so a
+/// needs_input card is answered through the web stepper inside the host's webview, the
+/// same surface the Board tab opens. The native answer screen it used to fork to is gone.
+String routeFor(QueueItem item) =>
+    '/cards/${item.ref}?board=${item.boardSlug}&kind=${item.kind}';
 
 /// Applies a destination from [ReviewQueue]. `/needs-you` goes back to the shell tab;
 /// a card *replaces* the one just decided, so clearing a long queue never grows the

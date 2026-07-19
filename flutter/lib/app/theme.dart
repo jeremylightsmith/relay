@@ -111,6 +111,26 @@ class RelayTheme {
   static const Color relayHuman = relayHumanLight;
   static const Color relayAI = relayAILight;
 
+  // --- Stage-group bar · the mobile inbox's grouping colour (RLY-156) ---
+  /// `queue`, and every stage type this build doesn't know about. The board's own
+  /// band-header grey (`board_live.ex`), oklch(0.68 0.02 255) converted.
+  static const Color relayStageNeutral = Color(0xFF9CA3AC);
+
+  /// The colour of a stage group's bar, from the stage's behaviour `type`. Same baton
+  /// palette the board uses: work = Human blue, planning = AI violet, review = amber,
+  /// done = green. `done` is [relayDone], which already mirrors `--color-success` in
+  /// `assets/css/app.css` (both oklch 0.68 0.13 155) — no separate token for it.
+  ///
+  /// An unknown or null type falls back to [relayStageNeutral]. That is a real path, not
+  /// defensive padding: a stage type added server-side must not crash an older build.
+  static Color stageTypeColor(String? type) => switch (type) {
+    'work' => relayHuman,
+    'planning' => relayAI,
+    'review' => relayBlocked,
+    'done' => relayDone,
+    _ => relayStageNeutral,
+  };
+
   static ThemeData get light => ThemeData(
     useMaterial3: true,
     colorScheme: ColorScheme.fromSeed(
