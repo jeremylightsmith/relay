@@ -67,6 +67,10 @@ defmodule Relay.Runs.Preflight do
       from(e in Executor, where: e.board_id == ^flow.board_id, order_by: [asc: e.name])
       |> Repo.all()
       |> Enum.map(&detail(&1, flow, requires, capacity, now))
+      # A `:gone` row means the reaper has already requeued/parked its work (same predicate
+      # as `Runs.executor_stale?/2`) — it is not connected, and its stale inventory must not
+      # be unioned into "missing" or counted toward "hasn't reported yet".
+      |> Enum.reject(&(&1.freshness == :gone))
 
     stages = stage_check(flow)
     executors = verdict(details)

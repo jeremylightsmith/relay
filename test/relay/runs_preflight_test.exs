@@ -80,12 +80,26 @@ defmodule Relay.RunsPreflightTest do
   end
 
   test "a stale executor is not a candidate however complete it is", %{board: board, flow: flow} do
-    stale_at = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.add(-3600, :second)
+    # Between fresh (<=45s at the default 30s interval) and gone (>60s, `executor_stale?/2`'s
+    # own floor) — a beat that's late but not yet reaped.
+    stale_at = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.add(-50, :second)
     connect(board, capabilities: full(), last_heartbeat: stale_at)
     result = Runs.preflight_flow(flow)
 
     assert {:no_candidate, [detail]} = result.executors
-    refute detail.freshness == :fresh
+    assert detail.freshness == :stale
+    refute result.ready?
+  end
+
+  test "a gone executor is not connected at all", %{board: board, flow: flow} do
+    # Past `executor_stale?/2`'s floor — the reaper has already requeued/parked its work, so
+    # it must not be counted as connected, nor union its stale inventory into "missing".
+    gone_at = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.add(-3600, :second)
+    connect(board, capabilities: full(), last_heartbeat: gone_at)
+    result = Runs.preflight_flow(flow)
+
+    assert result.executors == :none_connected
+    assert result.unreported == []
     refute result.ready?
   end
 

@@ -460,11 +460,13 @@ defmodule RelayWeb.FlowSettingsComponents do
   defp preflight_rows(flow, preflight) do
     [
       stages_row(flow, preflight),
-      executor_row(flow, preflight),
-      capacity_row(flow, preflight),
-      names_row(flow, preflight, :agents),
-      names_row(flow, preflight, :skills)
-    ] ++ unreported_rows(flow, preflight)
+      executor_row(flow, preflight)
+    ] ++
+      capacity_rows(flow, preflight) ++
+      [
+        names_row(flow, preflight, :agents),
+        names_row(flow, preflight, :skills)
+      ] ++ unreported_rows(flow, preflight)
   end
 
   defp row(flow, check, ok?, text), do: %{id: "flow-#{flow.id}-preflight-#{check}", ok?: ok?, text: text}
@@ -488,8 +490,13 @@ defmodule RelayWeb.FlowSettingsComponents do
     row(flow, "executor", false, "#{count(details, "runner")} connected, but none satisfies this flow on its own.")
   end
 
+  # No runner at all is one warning (the executor row above), not two — a capacity row here
+  # would only restate it for a different, misleading reason.
+  defp capacity_rows(_flow, %{executors: :none_connected}), do: []
+  defp capacity_rows(flow, preflight), do: [capacity_row(flow, preflight)]
+
   defp capacity_row(flow, preflight) do
-    class = Atom.to_string(flow.isolation)
+    class = iso_label(flow.isolation)
 
     if capacity_anywhere?(preflight) do
       row(flow, "capacity", true, "A connected runner advertises #{class} capacity.")
@@ -498,9 +505,24 @@ defmodule RelayWeb.FlowSettingsComponents do
     end
   end
 
+  defp iso_label(:shared_clean), do: "shared-clean"
+  defp iso_label(:exclusive), do: "exclusive"
+
   defp capacity_anywhere?(%{executors: {:ok, _name}}), do: true
-  defp capacity_anywhere?(%{executors: :none_connected}), do: false
   defp capacity_anywhere?(%{executors: {:no_candidate, details}}), do: Enum.any?(details, & &1.capacity_ok?)
+
+  # Nothing connected means agents/skills are unchecked, not resolved — a green "OK" here
+  # would be the exact false alarm (in reverse) this feature exists to avoid.
+  defp names_row(flow, %{executors: :none_connected} = preflight, kind) do
+    label = if kind == :agents, do: "agent", else: "skill"
+    required = Map.fetch!(preflight.requires, kind)
+
+    if required == [] do
+      row(flow, kind, true, "This flow names no #{label}s.")
+    else
+      row(flow, kind, false, "Can't check #{label}s — no runner is connected.")
+    end
+  end
 
   defp names_row(flow, preflight, kind) do
     label = if kind == :agents, do: "agent", else: "skill"

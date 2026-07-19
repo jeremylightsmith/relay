@@ -31,7 +31,12 @@ defmodule RelayWeb.BoardSettingsFlowPreflightTest do
   # Phoenix.ConnTest.connect/2, and a same-arity local def conflicts with it.
   defp connect_executor(board, opts) do
     executor =
-      insert(:executor, board: board, name: opts[:name] || "mac-1", capabilities: opts[:capabilities])
+      insert(:executor,
+        board: board,
+        name: opts[:name] || "mac-1",
+        capabilities: opts[:capabilities],
+        last_heartbeat: opts[:last_heartbeat] || DateTime.truncate(DateTime.utc_now(), :second)
+      )
 
     Capacity.put(executor.id, opts[:capacity] || %{shared_clean: 1, exclusive: 1})
     executor
@@ -45,8 +50,29 @@ defmodule RelayWeb.BoardSettingsFlowPreflightTest do
     assert has_element?(view, "#flow-#{flow.id}-preflight-executor.preflight-warn")
     assert has_element?(view, "#flow-#{flow.id}-confirm-cta")
 
+    # The Plan flow requires the write-plan skill — with no runner connected, that can't be
+    # checked, so the skills row must read as unresolved rather than a false green.
+    assert has_element?(view, "#flow-#{flow.id}-preflight-skills.preflight-warn")
+    refute has_element?(view, "#flow-#{flow.id}-preflight-capacity")
+
     view |> element("#flow-#{flow.id}-confirm-cta") |> render_click()
     assert Flows.get_flow!(board, "plan").enabled
+  end
+
+  test "a runner silent long enough to be reaped reads as no runner connected, not a candidate",
+       %{conn: conn, board: board} do
+    gone_at = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.add(-3600, :second)
+
+    connect_executor(board,
+      capabilities: %{"agents" => [], "skills" => ["write-plan"]},
+      last_heartbeat: gone_at
+    )
+
+    {view, flow} = open_confirm(conn, board, "plan")
+
+    assert has_element?(view, "#flow-#{flow.id}-preflight-executor.preflight-warn")
+    assert has_element?(view, "#flow-#{flow.id}-preflight-skills.preflight-warn")
+    refute has_element?(view, "#flow-#{flow.id}-preflight-unreported")
   end
 
   test "an exclusive flow with no exclusive capacity fails the capacity check",
