@@ -705,6 +705,65 @@ defmodule Relay.Runs do
     end)
   end
 
+  @doc """
+  Requeues jobs this executor is holding but is no longer running (RLY-170).
+
+  An executor that restarts loses its in-flight job state — it lives in-process — while the
+  job stays `:claimed` server-side. Neither existing recovery path can see it:
+  `claim_next_job/1` only ever offers `:queued` jobs, and `reclaim_stale_executors/0` only
+  touches a **stale** executor, whereas a restarted one is alive and beating. So the job sat
+  stranded forever, the run stuck on that node, with nothing reporting a problem.
+
+  The heartbeat already tells us which jobs the executor IS running, so the **absence** of one
+  from that list is the signal. Two things make this safe:
+
+    * **A grace window.** A job claimed moments before a beat is legitimately not in `running`
+      yet; requeuing it would double-dispatch LIVE work, which is worse than the bug. Jobs
+      claimed more recently than `max(60s, 2 × interval)` — the same threshold shape as
+      `executor_stale?/2`, and provably longer than a beat — are left alone.
+    * **Exclusive jobs stay pinned.** The run's commits live in *that* machine's worktree, so
+      recovery must land back on the same executor. Keeping `executor_name` routes it there via
+      the pinned-claim path (RLY-135), which bypasses the advertised-capacity filter. Only
+      `shared_clean` jobs are unpinned, since any executor can pick those up.
+  """
+  def requeue_orphaned_jobs(%Board{id: board_id}, %Executor{} = executor, running_ids) do
+    held = for id <- running_ids, int = to_job_id(id), is_integer(int), do: int
+    cutoff = DateTime.add(now(), -orphan_grace_s(executor), :second)
+
+    from(j in NodeJob,
+      join: r in Run,
+      on: r.id == j.run_id,
+      join: c in Card,
+      on: c.id == r.card_id,
+      where: c.board_id == ^board_id,
+      where: j.executor_name == ^executor.name,
+      where: j.state in ^@active_job_states,
+      where: not is_nil(j.claimed_at) and j.claimed_at < ^cutoff,
+      select: {j, c.id}
+    )
+    |> Repo.all()
+    |> Enum.reject(fn {job, _card_id} -> job.id in held end)
+    |> Enum.each(fn {job, card_id} -> requeue_orphan(job, executor, board_id, card_id) end)
+
+    :ok
+  end
+
+  defp orphan_grace_s(%Executor{interval: interval}) do
+    max(@executor_stale_floor_s, 2 * (interval || 30))
+  end
+
+  defp requeue_orphan(%NodeJob{} = job, %Executor{name: name}, board_id, card_id) do
+    keep_pin = if job.payload["isolation"] == "exclusive", do: name
+
+    Repo.update_all(
+      from(j in NodeJob, where: j.id == ^job.id and j.state in ^@active_job_states),
+      set: [state: :queued, executor_name: keep_pin, claimed_at: nil]
+    )
+
+    broadcast_runs(board_id, {:run_changed, card_id})
+    :ok
+  end
+
   defp requeue_job(%NodeJob{} = job, board_id, card_id) do
     {1, _} =
       Repo.update_all(

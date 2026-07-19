@@ -866,4 +866,77 @@ defmodule Relay.RunsTest do
       refute Repo.exists?(from e in NodeExecution, join: r in Run, on: r.id == e.run_id, where: r.card_id == ^card.id)
     end
   end
+
+  describe "requeue_orphaned_jobs/3 (RLY-170)" do
+    # An executor that restarts loses its in-flight job state (it lives in-process). The job
+    # stays :claimed server-side, and NEITHER recovery path can see it: claim_next_job only
+    # offers :queued jobs, and reclaim_stale_executors only touches STALE executors — this one
+    # is alive and beating. The drill left a job stranded for an hour; it would have sat there
+    # forever. The heartbeat already reports which jobs the executor IS running, so the absence
+    # of a job from that list is the signal.
+    defp orphan_setup(board, flow_kind) do
+      flow = if flow_kind == :exclusive, do: exclusive_flow(board, "orph"), else: enabled_spec_flow(board)
+      {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
+      cap = if flow_kind == :exclusive, do: %{"exclusive" => 1}, else: %{"shared_clean" => 1}
+      {:ok, executor} = Runs.upsert_executor(board, %{"name" => "e1", "capacity" => cap})
+      {:ok, claimed} = Runs.claim_next_job(executor)
+      %{run: run, executor: executor, job: claimed}
+    end
+
+    defp backdate_claim(job, seconds) do
+      at = DateTime.utc_now() |> DateTime.add(-seconds, :second) |> DateTime.truncate(:second)
+      Relay.Repo.update_all(from(j in NodeJob, where: j.id == ^job.id), set: [claimed_at: at])
+    end
+
+    test "requeues a job the executor no longer reports running", %{board: board} do
+      %{executor: executor, job: job} = orphan_setup(board, :shared_clean)
+      backdate_claim(job, 600)
+
+      :ok = Runs.requeue_orphaned_jobs(board, executor, [])
+
+      requeued = Relay.Repo.get!(NodeJob, job.id)
+      assert requeued.state == :queued
+      assert requeued.claimed_at == nil
+    end
+
+    test "leaves a job the executor still reports running", %{board: board} do
+      %{executor: executor, job: job} = orphan_setup(board, :shared_clean)
+      backdate_claim(job, 600)
+
+      :ok = Runs.requeue_orphaned_jobs(board, executor, [job.id])
+
+      assert Relay.Repo.get!(NodeJob, job.id).state == :claimed
+    end
+
+    test "leaves a job claimed inside the grace window — the just-claimed race", %{board: board} do
+      # A job claimed microseconds before a beat is legitimately not in `running` yet.
+      # Requeuing it would double-dispatch LIVE work, which is worse than the bug being fixed.
+      %{executor: executor, job: job} = orphan_setup(board, :shared_clean)
+
+      :ok = Runs.requeue_orphaned_jobs(board, executor, [])
+
+      assert Relay.Repo.get!(NodeJob, job.id).state == :claimed
+    end
+
+    test "never touches another executor's job", %{board: board} do
+      %{job: job} = orphan_setup(board, :shared_clean)
+      backdate_claim(job, 600)
+      {:ok, other} = Runs.upsert_executor(board, %{"name" => "e2", "capacity" => %{"shared_clean" => 1}})
+
+      :ok = Runs.requeue_orphaned_jobs(board, other, [])
+
+      assert Relay.Repo.get!(NodeJob, job.id).state == :claimed
+    end
+
+    test "an exclusive orphan stays PINNED to its executor; a shared_clean one is unpinned",
+         %{board: board} do
+      # Exclusive affinity is what makes recovery correct rather than destructive: the run's
+      # commits live in THAT machine's worktree, so the job must go back to the same executor.
+      # RLY-135's pinned-claim path (which bypasses the capacity filter) is what re-delivers it.
+      %{executor: executor, job: excl} = orphan_setup(board, :exclusive)
+      backdate_claim(excl, 600)
+      :ok = Runs.requeue_orphaned_jobs(board, executor, [])
+      assert %{state: :queued, executor_name: "e1"} = Relay.Repo.get!(NodeJob, excl.id)
+    end
+  end
 end
