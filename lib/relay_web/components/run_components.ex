@@ -98,7 +98,10 @@ defmodule RelayWeb.RunComponents do
 
   defp strip_title(%{status: :running}), do: "Running"
   defp strip_title(%{status: :parked}), do: "Parked — waiting on your answer"
-  defp strip_title(%{status: :failed}), do: "Run failed — circuit breaker tripped"
+  # Neutral on purpose (RLY-179): the old copy claimed "circuit breaker tripped" for
+  # every failure mode, which was false for both reported incidents. The specific
+  # reason belongs to the failed-run panel (RLY-178).
+  defp strip_title(%{status: :failed}), do: "Run failed"
   defp strip_title(%{status: :done}), do: "Completed"
   defp strip_title(%{status: :cancelled}), do: "Run cancelled — claimed by a human"
 

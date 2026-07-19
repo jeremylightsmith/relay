@@ -1672,6 +1672,7 @@ defmodule RelayWeb.BoardLive do
 
   defp card_tap_kind(%Card{status: :in_review}), do: "in_review"
   defp card_tap_kind(%Card{status: :needs_input}), do: "needs_input"
+  defp card_tap_kind(%Card{status: :failed}), do: "failed"
   defp card_tap_kind(%Card{}), do: nil
 
   defp find_stage(socket, stage_id) do

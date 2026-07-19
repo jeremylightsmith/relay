@@ -474,6 +474,14 @@ defmodule RelayWeb.CoreComponentsTest do
 
       refute html =~ "%"
     end
+
+    test "a failed card renders the error badge and reads FAILED" do
+      html = render_component(&CoreComponents.status_badge/1, status: :failed)
+
+      assert html =~ "badge-error"
+      assert html =~ "FAILED"
+      assert html =~ ~s(data-status="failed")
+    end
   end
 
   describe "board_card/1 baton treatments" do
@@ -609,6 +617,20 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "card-needs-input"
       assert html =~ "card-question-preview"
       assert html =~ "Which locales ship first?"
+    end
+
+    test "failed paints the rose/error accent, no answer composer chips" do
+      html =
+        render_component(&CoreComponents.board_card/1, %{
+          id: "c",
+          ref: "RLY-5",
+          title: "T",
+          status: :failed
+        })
+
+      assert html =~ "border-l-error"
+      refute html =~ "card-needs-input"
+      refute html =~ "card-review-chip"
     end
 
     test "ready in a Done sub-lane shows the green ready chip" do

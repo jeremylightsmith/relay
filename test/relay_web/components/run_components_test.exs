@@ -83,7 +83,8 @@ defmodule RelayWeb.RunComponentsTest do
 
       assert parked =~ "Parked — waiting on your answer"
       assert parked =~ "oklch(0.985 0.022 75)"
-      assert failed =~ "Run failed — circuit breaker tripped"
+      assert failed =~ "Run failed"
+      refute failed =~ "circuit breaker"
       assert failed =~ "was on v3"
     end
 

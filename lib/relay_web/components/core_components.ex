@@ -501,6 +501,8 @@ defmodule RelayWeb.CoreComponents do
   (`working·61%`); `needs_input` renders the amber NEEDS INPUT treatment;
   `in_review` blue; `ready` neutral (Done is a derivation, not a status —
   see `Relay.Cards.done?/2` — and is rendered by callers, not this badge).
+  `failed` renders the red FAILED treatment (a dead run — RLY-179 — not an
+  answerable question).
 
   ## Examples
 
@@ -508,7 +510,7 @@ defmodule RelayWeb.CoreComponents do
       <.status_badge status={:needs_input} />
   """
   attr :status, :atom,
-    values: [:ready, :working, :needs_input, :in_review],
+    values: [:ready, :working, :needs_input, :in_review, :failed],
     required: true
 
   attr :progress, :integer, default: nil
@@ -529,12 +531,14 @@ defmodule RelayWeb.CoreComponents do
   defp status_badge_class(:working), do: "badge-secondary"
   defp status_badge_class(:needs_input), do: "badge-warning"
   defp status_badge_class(:in_review), do: "badge-primary"
+  defp status_badge_class(:failed), do: "badge-error"
 
   defp status_badge_label(:working, progress) when is_integer(progress), do: "working·#{progress}%"
   defp status_badge_label(:ready, _progress), do: "ready"
   defp status_badge_label(:working, _progress), do: "working"
   defp status_badge_label(:needs_input, _progress), do: "NEEDS INPUT"
   defp status_badge_label(:in_review, _progress), do: "in review"
+  defp status_badge_label(:failed, _progress), do: "FAILED"
 
   @doc """
   The one avatar (RLY-90). A person renders their photo when we have one
@@ -1088,6 +1092,7 @@ defmodule RelayWeb.CoreComponents do
 
   defp card_accent_class(%{health: :stale}), do: "border-l-warning"
   defp card_accent_class(%{health: :stopped}), do: "border-l-error"
+  defp card_accent_class(%{status: :failed}), do: "border-l-error"
   defp card_accent_class(%{status: :needs_input}), do: "border-l-warning"
   defp card_accent_class(%{status: :in_review}), do: "border-l-warning"
   defp card_accent_class(%{status: :working}), do: "border-l-secondary"
