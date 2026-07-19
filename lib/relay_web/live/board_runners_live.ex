@@ -7,12 +7,17 @@ defmodule RelayWeb.BoardRunnersLive do
   summary chips, the at-risk note on a stale/gone runner with jobs, and the empty
   state naming the real `bin/relay execute` start command.
 
-  Data comes from `Relay.RunnerPresence` (beats) and `Relay.AgentLog` (feed lines,
-  routed to the runner whose *latest beat* claimed the line's ref; unclaimed and
-  ref-less lines are dropped — the board's log sheet still shows everything). A ~10s
-  self-tick re-derives freshness/uptime/elapsed and refetches the list: a dead
-  runner emits no events, so the tick is what flips it STALE → GONE with no reload,
-  and what reflects prunes.
+  Data comes from `Relay.Runs.list_executor_status/2` (the durable `executors` rows plus
+  the board's active `node_jobs`) and `Relay.AgentLog` (feed lines, routed to the executor
+  holding the line's ref; unclaimed and ref-less lines are dropped — the board's log sheet
+  still shows everything). RLY-167 swapped the source off `Relay.RunnerPresence`, which lost
+  its only writer when RLY-139 deleted `relay watch`; because the roster is now a pure
+  function of Postgres, the page also survives an app restart (`Relay.Runs.Capacity` is ETS
+  and scheduler-only — a page backed by it would go blank on every deploy).
+
+  A ~10s self-tick is the ONLY refresh mechanism and is load-bearing, not laziness: an
+  executor going silent emits no event by definition, so freshness decay is observable only
+  by polling. A 10s tick against a 15–30s beat is ample.
 
   Log tails are a bounded per-runner ring buffer in assigns (last 30 lines per
   runner), NOT a LiveView stream — a deliberate, documented deviation from the
@@ -26,7 +31,7 @@ defmodule RelayWeb.BoardRunnersLive do
 
   alias Relay.AgentLog
   alias Relay.Boards
-  alias Relay.RunnerPresence
+  alias Relay.Runs
 
   @tick_every to_timeout(second: 10)
   @log_cap 30
@@ -185,7 +190,7 @@ defmodule RelayWeb.BoardRunnersLive do
                     class="font-mono"
                     style={"font-size:15px;font-weight:600;letter-spacing:-0.01em;color:#{name_color(runner.freshness)};"}
                   >
-                    {runner.host}
+                    {runner.name}
                   </span>
                   <span
                     class={["badge badge-sm font-mono font-bold", pill_class(runner.freshness)]}
@@ -195,10 +200,10 @@ defmodule RelayWeb.BoardRunnersLive do
                   </span>
                   <span style="flex:1;"></span>
                   <span class="font-mono" style="font-size:11.5px;color:oklch(0.58 0.02 255);">
-                    {runner.runner_id}
+                    {runner.host}
                   </span>
                   <span class="font-mono" style="font-size:11.5px;color:oklch(0.58 0.02 255);">
-                    {uptime_label(runner, @now)}
+                    {last_seen_label(runner, @now)}
                   </span>
                 </div>
                 <div style={"display:flex;align-items:stretch;#{if runner.freshness != :fresh, do: "opacity:0.92;"}"}>
@@ -240,7 +245,7 @@ defmodule RelayWeb.BoardRunnersLive do
                       </span>
                       <div
                         :for={job <- runner.jobs}
-                        id={"runner-#{dom_id(runner)}-job-#{job.ref}"}
+                        id={"runner-#{dom_id(runner)}-job-#{job.job_id}"}
                         style={job_row_style(runner.freshness)}
                       >
                         <span
@@ -256,17 +261,16 @@ defmodule RelayWeb.BoardRunnersLive do
                           {job.ref}
                         </.link>
                         <span style="font-size:12px;color:oklch(0.46 0.02 255);flex:1;min-width:0;">
-                          {job.stage}
+                          {job.title}
                         </span>
                         <span
-                          :if={job.pool}
                           class="font-mono"
                           style="font-size:9.5px;font-weight:600;color:oklch(0.50 0.02 255);background:oklch(0.96 0.004 255);border-radius:4px;padding:2px 6px;white-space:nowrap;"
                         >
-                          {job.pool}
+                          {job.node_key}
                         </span>
                         <span class="font-mono" style="font-size:11px;color:oklch(0.52 0.02 255);">
-                          {elapsed_label(job.started_at, @now)}
+                          {elapsed_label(job.claimed_at, @now)}
                         </span>
                       </div>
                       <%!-- At-risk note (spec's copy correction: shared requeues, exclusive
@@ -308,7 +312,7 @@ defmodule RelayWeb.BoardRunnersLive do
                       style="flex:1;padding:11px 13px;font-size:11px;line-height:1.7;overflow:hidden;"
                     >
                       <div
-                        :for={entry <- Enum.reverse(Map.get(@logs, runner.runner_id, []))}
+                        :for={entry <- Enum.reverse(Map.get(@logs, runner.name, []))}
                         style="white-space:pre-wrap;"
                       >
                         <span style="color:oklch(0.55 0.02 255);">
@@ -342,7 +346,6 @@ defmodule RelayWeb.BoardRunnersLive do
     board = Boards.get_board!(socket.assigns.current_scope.user, slug)
 
     if connected?(socket) do
-      RunnerPresence.subscribe(board.id)
       AgentLog.subscribe(board.id)
       Process.send_after(self(), :tick, @tick_every)
     end
@@ -356,8 +359,6 @@ defmodule RelayWeb.BoardRunnersLive do
   end
 
   @impl true
-  def handle_info({:runner_beat, _runner}, socket), do: {:noreply, assign_runners(socket)}
-
   def handle_info(:tick, socket) do
     Process.send_after(self(), :tick, @tick_every)
     {:noreply, assign_runners(socket)}
@@ -378,32 +379,28 @@ defmodule RelayWeb.BoardRunnersLive do
     end
   end
 
-  # Re-derives everything time- and presence-dependent in one place: the runner
-  # list (freshness-augmented), the summary counts, the ref → runner routing map,
-  # and drops log buffers for pruned runners. Cheap by construction — a board has
-  # a handful of runners.
+  # Re-derives everything time- and roster-dependent in one place: the executor list
+  # (freshness-augmented by the context), the summary counts, the ref → executor routing
+  # map, and drops log buffers for executors that fell off the roster. Two queries; a board
+  # has a handful of executors, not thousands.
   defp assign_runners(socket) do
     now = DateTime.utc_now()
-
-    runners =
-      socket.assigns.board.id
-      |> RunnerPresence.list()
-      |> Enum.map(&Map.put(&1, :freshness, RunnerPresence.freshness(&1, now)))
+    runners = Runs.list_executor_status(socket.assigns.board, now)
 
     counts = Enum.frequencies_by(runners, & &1.freshness)
-    ids = Enum.map(runners, & &1.runner_id)
+    names = Enum.map(runners, & &1.name)
 
     socket
     |> assign(:now, now)
     |> assign(:runners, runners)
     |> assign(:summary, %{fresh: counts[:fresh] || 0, stale: counts[:stale] || 0, gone: counts[:gone] || 0})
-    |> assign(:ref_owner, for(runner <- runners, ref <- runner.refs, into: %{}, do: {ref, runner.runner_id}))
-    |> update(:logs, &Map.take(&1, ids))
+    |> assign(:ref_owner, for(runner <- runners, job <- runner.jobs, into: %{}, do: {job.ref, runner.name}))
+    |> update(:logs, &Map.take(&1, names))
   end
 
-  # Hostnames can contain dots ("mbp.local"), which are legal in DOM ids but break
-  # CSS #id selectors — sanitize for the id only; @logs stays keyed by the raw id.
-  defp dom_id(%{runner_id: runner_id}), do: String.replace(runner_id, ~r/[^A-Za-z0-9_-]/, "-")
+  # Executor names can contain dots ("mac.local"), which are legal in DOM ids but break
+  # CSS #id selectors — sanitize for the id only; @logs stays keyed by the raw name.
+  defp dom_id(%{name: name}), do: String.replace(name, ~r/[^A-Za-z0-9_-]/, "-")
 
   defp streaming?(runner), do: runner.freshness == :fresh and runner.jobs != []
 
@@ -503,21 +500,12 @@ defmodule RelayWeb.BoardRunnersLive do
   defp log_color(:error), do: "oklch(0.68 0.14 22)"
   defp log_color(_kind), do: "oklch(0.78 0.02 255)"
 
-  defp uptime_label(%{freshness: :fresh} = runner, now),
-    do: "up " <> duration_label(DateTime.diff(now, runner.started_at))
-
-  defp uptime_label(runner, now), do: "last beat " <> beat_age(runner, now) <> " ago"
+  defp last_seen_label(runner, now), do: "last beat " <> beat_age(runner, now) <> " ago"
 
   defp beat_age(runner, now) do
-    seconds = max(DateTime.diff(now, runner.last_beat_at), 0)
+    seconds = max(DateTime.diff(now, runner.last_heartbeat), 0)
     "#{div(seconds, 60)}m #{String.pad_leading(Integer.to_string(rem(seconds, 60)), 2, "0")}s"
   end
-
-  defp duration_label(seconds) when seconds >= 86_400, do: "#{div(seconds, 86_400)}d #{div(rem(seconds, 86_400), 3600)}h"
-
-  defp duration_label(seconds) when seconds >= 3600, do: "#{div(seconds, 3600)}h #{div(rem(seconds, 3600), 60)}m"
-
-  defp duration_label(seconds), do: "#{div(max(seconds, 0), 60)}m"
 
   defp elapsed_label(nil, _now), do: "—"
 
