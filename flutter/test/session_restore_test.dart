@@ -77,6 +77,28 @@ void main() {
     },
   );
 
+  test('a cookie refreshed by /me is persisted for the next launch', () async {
+    final store = InMemorySessionStore('old-cookie');
+    final adapter = StubAdapter(
+      body: {'success': true, 'user': _user},
+      headers: {
+        'set-cookie': ['_relay_key=refreshed-cookie; Path=/; Max-Age=604800'],
+      },
+    );
+    final container = containerWith(store: store, adapter: adapter);
+
+    final state = await restore(container);
+
+    expect(state.status, AuthStatus.signedIn);
+    expect(
+      store.value,
+      'refreshed-cookie',
+      reason:
+          'the server slid the 7-day window (RLY-127); dropping the refreshed '
+          'cookie would let the Keychain copy age out anyway',
+    );
+  });
+
   test('a stored cookie that /me rejects is cleared, and signs out', () async {
     final store = InMemorySessionStore('stale-cookie');
     final adapter = StubAdapter(

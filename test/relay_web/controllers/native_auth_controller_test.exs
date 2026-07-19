@@ -194,5 +194,28 @@ defmodule RelayWeb.NativeAuthControllerTest do
 
       assert json_response(me, 200)["user"] == json_response(signed_in, 200)["user"]
     end
+
+    test "re-stamps the session so the native window slides on app launch", %{conn: conn} do
+      user = insert(:user)
+      stale = System.system_time(:second) - 60 * 60 * 24 * 3
+
+      conn =
+        conn
+        |> Plug.Test.init_test_session(user_id: user.id, session_refreshed_at: stale)
+        |> get(~p"/api/auth/native/me")
+
+      assert %{"success" => true} = json_response(conn, 200)
+      assert get_session(conn, :session_refreshed_at) > stale
+    end
+
+    test "does not re-stamp a session it rejects", %{conn: conn} do
+      conn =
+        conn
+        |> Plug.Test.init_test_session(user_id: -1)
+        |> get(~p"/api/auth/native/me")
+
+      assert json_response(conn, 401)
+      refute get_session(conn, :session_refreshed_at)
+    end
   end
 end

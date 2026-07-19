@@ -57,7 +57,13 @@ defmodule RelayWeb.NativeAuthController do
     with true <- fresh_session?(session),
          user when not is_nil(user) <- fetch_user(session["user_id"]),
          {:ok, token} <- mint_token(user) do
-      json(conn, %{success: true, user: user_json(user), token: token})
+      # The native shell's launch-time verify is its only touch point, so this is
+      # where its 7-day window slides forward (RLY-127). Without it a native
+      # session would quietly age out while the shell still believed it was
+      # signed in, and the embedded webview would bounce to sign-in.
+      conn
+      |> Auth.refresh_session()
+      |> json(%{success: true, user: user_json(user), token: token})
     else
       {:error, _} ->
         conn |> put_status(:internal_server_error) |> json(%{success: false, error: "Could not mint a token"})
