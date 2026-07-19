@@ -61,7 +61,7 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
 EXECUTOR_VERSION = 1
-EXECUTOR_FINGERPRINT = "87b52d931da29e2203d29b01e13ccc1c4e5e281a07deee348def8f8e134a7b3a"
+EXECUTOR_FINGERPRINT = "8343b011a69e0796493f6a3f1896fd5d748cb0120724e53207f5f8a633932d8d"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -125,7 +125,7 @@ def _retryable(method, err):
     return isinstance(err, urllib.error.URLError)
 
 
-def api(method, path, body=None, soft_404=False, timeout=None):
+def api(method, path, body=None, soft_404=False, soft_conflict=False, timeout=None):
     url = env("RELAY_URL").rstrip("/") + path
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
@@ -145,6 +145,13 @@ def api(method, path, body=None, soft_404=False, timeout=None):
         except urllib.error.HTTPError as e:
             if soft_404 and e.code == 404:
                 return None
+            if soft_conflict and e.code == 409:
+                # A verdict, not a transient error (RLY-184): hand the body to the caller
+                # rather than die()ing into the loop's generic retry.
+                try:
+                    return json.loads(e.read())
+                except Exception:
+                    return {"error": {"code": "conflict"}}
             if attempt < API_MAX_ATTEMPTS and _retryable(method, e):
                 log(f"API {e.code} on {method} {path}, retrying "
                     f"({attempt}/{API_MAX_ATTEMPTS - 1})", kind="error")
@@ -883,15 +890,31 @@ class JobControl:
             proc.terminate()   # best-effort fallback (e.g. no real pid/process group)
 
 
+ZERO_CAPACITY = {"shared_clean": 0, "exclusive": 0}
+
+
+def outdated_refusal(required):
+    """What claim_node_job returns on a 409 `executor_outdated` (RLY-184).
+
+    A dict with a key no claim payload has, so the loop tells it apart from a real job by key
+    alone — and it carries `required` so the log can name both numbers."""
+    return {"executor_outdated": True, "required": required}
+
+
 def claim_node_job(executor, capacity, timeout):
     """Long-poll claim: hold one request open (advertising free `capacity` per isolation class)
     up to `timeout`s. Returns a job dict, or None on a 204/empty body or a read timeout — both
-    mean 'no work', not an error (§7)."""
+    mean 'no work', not an error (§7). Returns outdated_refusal(required) when the server
+    refuses this executor's version (409 executor_outdated, RLY-184)."""
     try:
         resp = api("POST", "/api/node-jobs/claim",
-                   {"executor": executor, "capacity": capacity}, timeout=timeout)
+                   {"executor": executor, "capacity": capacity},
+                   soft_conflict=True, timeout=timeout)
     except socket.timeout:
         return None
+    error = resp.get("error") if isinstance(resp, dict) else None
+    if isinstance(error, dict) and error.get("code") == "executor_outdated":
+        return outdated_refusal(error.get("required"))
     return resp or None
 
 

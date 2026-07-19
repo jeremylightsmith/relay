@@ -2041,6 +2041,69 @@ class ExecutorIdentTest(unittest.TestCase):
         self.assertEqual(ident["host"], relay.socket.gethostname())
 
 
+class ApiSoftConflictTest(unittest.TestCase):
+    """RLY-184: api() die()s on any non-2xx after retries, and the claim loop catches that
+    SystemExit as a generic 'claim failed, will retry'. A 409 executor_outdated must NOT
+    disappear into that path — it is a verdict, not a transient error. `soft_conflict` mirrors
+    the existing `soft_404` idiom, and only claim_node_job passes it."""
+
+    def setUp(self):
+        self._urlopen = relay.urllib.request.urlopen
+        self.addCleanup(setattr, relay.urllib.request, "urlopen", self._urlopen)
+        os.environ["RELAY_URL"] = "http://example.test"
+        os.environ["RELAY_API_KEY"] = "k"
+
+    def _raise_409(self, body):
+        payload = json.dumps(body).encode()
+
+        def fake_urlopen(req, **kw):
+            raise urllib.error.HTTPError(
+                req.full_url, 409, "Conflict", {}, io.BytesIO(payload))
+
+        relay.urllib.request.urlopen = fake_urlopen
+
+    def test_a_409_returns_the_parsed_body_when_soft_conflict_is_set(self):
+        self._raise_409({"error": {"code": "executor_outdated", "required": 3, "running": 1}})
+        resp = relay.api("POST", "/api/node-jobs/claim", {}, soft_conflict=True)
+        self.assertEqual(resp["error"]["code"], "executor_outdated")
+        self.assertEqual(resp["error"]["required"], 3)
+
+    def test_a_409_still_dies_without_soft_conflict(self):
+        self._raise_409({"error": {"message": "This job is no longer held by your claim"}})
+        with self.assertRaises(SystemExit):
+            relay.api("POST", "/api/node-jobs/1/outcome", {})
+
+
+class ClaimOutdatedTest(unittest.TestCase):
+    """claim_node_job turns the server's refusal into a value the loop can branch on."""
+
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+
+    def test_a_refusal_becomes_an_outdated_marker_carrying_the_required_version(self):
+        relay.api = lambda *a, **k: {
+            "error": {"code": "executor_outdated", "required": 7, "running": 1}}
+        result = relay.claim_node_job({"name": "box"}, {"shared_clean": 1}, 1)
+        self.assertTrue(result["executor_outdated"])
+        self.assertEqual(result["required"], 7)
+
+    def test_a_normal_claim_is_returned_untouched(self):
+        j = job(id="nj-1")
+        relay.api = lambda *a, **k: j
+        self.assertEqual(relay.claim_node_job({"name": "box"}, {"shared_clean": 1}, 1), j)
+
+    def test_no_work_is_still_none(self):
+        relay.api = lambda *a, **k: {}
+        self.assertIsNone(relay.claim_node_job({"name": "box"}, {"shared_clean": 1}, 1))
+
+    def test_the_claim_passes_soft_conflict_so_the_409_is_not_a_die(self):
+        seen = {}
+        relay.api = lambda *a, **kw: seen.update(kw) or {}
+        relay.claim_node_job({"name": "box"}, {"shared_clean": 1}, 1)
+        self.assertTrue(seen["soft_conflict"])
+
+
 class RealGitWorktreeTest(unittest.TestCase):
     """RLY-173, and a deliberate change of testing style.
 
