@@ -297,6 +297,8 @@ defmodule Relay.Runs.EngineTest do
   end
 
   describe "unrouted outcome degrades to the node's :failed edge (RLY-179)" do
+    @describetag :capture_log
+
     test "an outcome with no edge follows the node's :failed edge instead of failing the run" do
       flow =
         flow([[key: "spec_review", type: :agent], [key: "implement", type: :agent]], [
@@ -358,6 +360,21 @@ defmodule Relay.Runs.EngineTest do
 
       assert Engine.decide(flow, [current], current, foreach_remaining: 2) == {:transition, "implement"}
       assert Engine.decide(flow, [current], current, foreach_remaining: 0) == {:transition, "precommit"}
+    end
+
+    test "a parked (:needs_input) execution in history does not spend the :failed edge's budget" do
+      flow =
+        flow([[key: "review", type: :agent], [key: "fix", type: :agent]], [
+          [from: "start", to: "review"],
+          [from: "review", to: "fix", on: :failed, max_loops: 1]
+        ])
+
+      # The park at visit 1 must not count as a :failed traversal, else the real
+      # :failed at visit 2 would already be over the max_loops 1 budget.
+      parked = execution(node_key: "review", visit: 1, outcome: :needs_input)
+      current = execution(node_key: "review", visit: 2, outcome: :failed)
+
+      assert Engine.decide(flow, [parked, current], current) == {:transition, "fix"}
     end
   end
 

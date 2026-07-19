@@ -328,6 +328,11 @@ defmodule Relay.Runs.RunServer do
   defp log_failure_if_final(_decision, _run, nil), do: :ok
   defp log_failure_if_final({:retry, _node}, _run, _execution), do: :ok
 
+  # A terminal failure's :failure entry belongs to Relay.Cards.mark_failed/3 — it
+  # carries the detail in `meta`, which the diagnosis surfaces read. Logging here
+  # too would double it in the timeline (RLY-179).
+  defp log_failure_if_final({:fail, _reason}, _run, _execution), do: :ok
+
   defp log_failure_if_final(_decision, run, %NodeExecution{outcome: :failed} = execution) do
     card = Repo.get!(Card, run.card_id)
     {:ok, _entry} = Relay.Activity.log(card, %{type: :failure, actor: :agent, text: execution.detail || "node failed"})
@@ -364,19 +369,18 @@ defmodule Relay.Runs.RunServer do
     :ok
   end
 
-  # Run failed → flag the card with the node's actual output so a human sees it
-  # at once: request_input blocks the card (:needs_input → amber, needs-you
-  # rollup) and the scheduler skips :needs_input cards by rule (it must not
-  # re-pull a card whose last run failed — a stronger guarantee than the old
-  # :ready-in-a-work-stage accident). B1 / RLY-136.
+  # Run failed → flag the card with the node's actual output so a human sees it at
+  # once. RLY-179: this is `mark_failed/3`, not `request_input/3` — the run is
+  # terminal, so a `:question` would invite an answer that cannot resume anything.
+  # The scheduler skips `:failed` cards by rule, so a card whose last run died is
+  # never silently re-pulled.
   #
   # Unlike bin/relay's flag() (which wraps the detail in "[auto] stage failed: …
-  # a human needs to look" framing), this posts the bare detail — plan-mandated
-  # (plan.md Task 2), not full parity. Revisit if a human later wants the framing.
+  # a human needs to look" framing), this posts the bare detail.
   defp card_fail_effects(run, execution) do
     card = Repo.get!(Card, run.card_id)
     detail = first_present([execution && execution.detail, run.failure_detail]) || "The agent's run failed."
-    {:ok, _card} = Relay.Cards.request_input(card, detail, :agent)
+    {:ok, _card} = Relay.Cards.mark_failed(card, detail, :agent)
     :ok
   end
 
@@ -385,11 +389,10 @@ defmodule Relay.Runs.RunServer do
   # hard match — this is what makes the blank-detail fallback actually reachable.
   defp first_present(candidates), do: Enum.find(candidates, &(is_binary(&1) and String.trim(&1) != ""))
 
-  # Terminal path shared with the no-flow branches: close the run, leave
-  # the failure on the card, flag the card :needs_input, broadcast.
+  # Terminal path shared with the no-flow branches: close the run, leave the
+  # failure on the card, mark the card :failed, broadcast.
   defp fail_effects(run, execution, reason) do
     run = Runs.close_run!(run, :failed, reason)
-    log_failure_if_final({:fail, reason}, run, execution)
     card_fail_effects(run, execution)
     Runs.broadcast_runs(Runs.board_id_of(run), {:run_finished, run})
     :ok

@@ -132,6 +132,10 @@ sequenceDiagram
     Note over R: runner sees the answer on its next scan and resumes the card
 ```
 
+A terminally failed run takes a different path — `card_fail_effects/2` →
+`Relay.Cards.mark_failed/3` → card status `:failed`, no question. `ensure_card_blocked/2` is
+reserved for the genuine question above; the two never overlap (RLY-179).
+
 ---
 *Sources of truth: `lib/relay/application.ex`, `lib/relay/events.ex`,
 `lib/relay/agent_log.ex`, `lib/relay/board_watch.ex`, `lib/relay/runner_presence.ex`,

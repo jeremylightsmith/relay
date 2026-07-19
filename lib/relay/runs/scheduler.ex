@@ -9,11 +9,13 @@ defmodule Relay.Runs.Scheduler do
   Ported semantics: process enabled flows **rightmost works-in stage first**
   (by stage `position`, descending — not config order); within a flow, resume
   parked runs before pulling fresh; WIP limits count a column **plus its
-  sub-lanes**; `:needs_input` cards are skipped; human-owned cards are off-limits
-  (ADR 0004); capacity and WIP are consumed as decisions are made, so a single
-  pass never over-dispatches. Extensions: every decision names an executor
-  (capacity consumed on that executor's isolation class); `exclusive` runs are
-  pinned to their affine executor (absolute — never reassigned mid-run).
+  sub-lanes**; `:needs_input` and `:failed` cards are skipped (a dead run is
+  never silently restarted — recovery is a human's call, RLY-179); human-owned
+  cards are off-limits (ADR 0004); capacity and WIP are consumed as decisions
+  are made, so a single pass never over-dispatches. Extensions: every decision
+  names an executor (capacity consumed on that executor's isolation class);
+  `exclusive` runs are pinned to their affine executor (absolute — never
+  reassigned mid-run).
   """
 
   alias Relay.Runs.Scheduler.Plan
@@ -77,7 +79,7 @@ defmodule Relay.Runs.Scheduler do
       cond do
         MapSet.member?(acc.decided, run.card_id) -> acc
         card.active_owner == :human -> acc
-        card.status == :needs_input -> acc
+        card.status in [:needs_input, :failed] -> acc
         true -> maybe_resume(acc, run)
       end
     end)

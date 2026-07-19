@@ -5,7 +5,7 @@ the seams between them are where the bugs are. This page brings them together.
 
 | Machine | Values | Owner |
 | --- | --- | --- |
-| Card status | `ready · queued · working · needs_input · in_review` | `Relay.Cards` |
+| Card status | `ready · queued · working · needs_input · in_review · failed` | `Relay.Cards` |
 | Run status | `running · parked · done · failed · cancelled` | `Relay.Runs` |
 | Node-job state | `queued · claimed · running · done · revoked` | `Relay.Runs.Dispatcher` |
 | Node outcome | `succeeded · failed · partial · needs_input` | the node itself |
@@ -19,7 +19,7 @@ status a card takes on entry.
 | Stage type | Valid statuses | Default on entry |
 | --- | --- | --- |
 | `queue` | `ready`, `queued` | `ready` |
-| `work` / `planning` | `working`, `ready`, `needs_input` | `working` |
+| `work` / `planning` | `working`, `ready`, `needs_input`, `failed` | `working` |
 | `review` | `in_review`, `ready` | `in_review` |
 | `done` | `ready`, `queued` | `ready` |
 
@@ -30,10 +30,11 @@ status a card takes on entry.
 | `working` | A run is executing a node against this card. | The run starts, or resumes after a park. |
 | `needs_input` | Blocked on a human. The card shows in the "needs you" rollup. | A node reports the `needs_input` outcome. |
 | `in_review` | Waiting at a review gate for a human to approve or reject. | The card lands on a `review` stage. |
+| `failed` | A run ended terminally. Set by `Relay.Cards.mark_failed/3`, never by a human. Valid in `work`/`planning` stages only. Distinct from `needs_input`: answering cannot resume a dead run, so the drawer offers no composer. `blocked_since` is not stamped; `needs_you?/2` counts it anyway. | A run fails terminally (no route left for its outcome, loop budget exhausted, visit cap exceeded, or the circuit breaker trips). |
 
 `needs_input` is the only status that both blocks the card **and** parks its run; the
-scheduler skips `needs_input` cards by rule, so nothing else can pick the card up while a
-question is outstanding.
+scheduler skips `needs_input` and `failed` cards by rule, so nothing else can pick the card up
+while a question is outstanding or a run has died.
 
 ## Run status
 
@@ -80,9 +81,16 @@ declared nothing cannot be distinguished from one that did nothing.
 | Outcome | What it does to the run | What it does to the card |
 | --- | --- | --- |
 | `succeeded` | Routes on the `{from, on: :succeeded}` edge. A target of `done` finishes the run. | Follows the target node's stage; stays `working` while the run continues. |
-| `failed` | Retries the same node while its `max_retries` budget lasts, then routes on the `failed` edge; with no `failed` edge, and when the circuit breaker trips on a repeated failure signature, the run **fails**. | Left where it is; on run failure the card is flagged `needs_input` with the failure detail recorded on it. |
-| `partial` | Routes on the `{from, on: :partial}` edge like any other outcome — it is *not* a failure and does not consume retry budget. With no matching edge, the run fails. | As for `succeeded`. |
+| `failed` | Retries the same node while its `max_retries` budget lasts, then routes on the `failed` edge; with no `failed` edge, and when the circuit breaker trips on a repeated failure signature, the run **fails**. | Left where it is; on run failure the card is marked `failed` with the failure detail recorded on it. |
+| `partial` | Routes on the `{from, on: :partial}` edge like any other outcome — it is *not* a failure and does not consume retry budget. | As for `succeeded`. |
 | `needs_input` | **Parks immediately — no edge is consulted.** The run becomes `parked` with `parked_reason: :needs_input` and resumes at the same node once answered. | Set to `needs_input`, which blocks it and surfaces it in the "needs you" rollup. |
+
+An outcome with no matching edge **degrades onto the node's `failed` edge** and follows it
+exactly as a real `failed` would, including that edge's `max_loops` budget — so a node that
+never declares a `partial` edge does not kill the run the first time it reports one. Only a
+`failed` outcome that is itself unrouted — nowhere left to fall back to — fails the run.
+`partial` is reportable but unrouted by default; a flow that wants a genuine three-way branch
+must declare a `partial` edge explicitly.
 
 Two engine-level guards sit above per-node routing, and both **fail the run** rather than
 loop it: the **failure-signature circuit breaker** (the same failure detail repeating N times
@@ -106,8 +114,11 @@ flowchart LR
 - A node reporting `needs_input` moves **two** machines at once: the run parks and the card
   blocks. Reconciliation self-heals either ordering, so neither write depends on the other
   landing first.
-- A run reaching `failed` flags the card `needs_input` — a failed run always ends up in front
-  of a human, never silently.
+- A run reaching `failed` marks the card `failed` (`Relay.Cards.mark_failed/3`) — a dead run
+  always ends up in front of a human, never silently, but never as an unanswerable question
+  either. This is a different path from `needs_input`: `ensure_card_blocked/2` handles the
+  genuine question, `card_fail_effects/2` handles the terminal failure, and the two never
+  overlap.
 - A revoked node-job produces no outcome at all, so the run's history stays clean and the
   node is simply re-dispatched.
 

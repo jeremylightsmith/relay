@@ -591,13 +591,15 @@ defmodule Relay.Cards do
   def ready_awaiting_human?(_card, _stages), do: false
 
   @doc """
-  The two-bucket "needs-you" fact: `:needs_input`/`:in_review` always count, plus
+  The two-bucket "needs-you" fact: `:needs_input`/`:in_review`/`:failed` always count, plus
   ready-awaiting-human. NOTE this is deliberately broader than the board's amber accent (which
   is `status in [:needs_input, :in_review]` only) — a ready-awaiting-human card counts in
-  rollups but is NOT painted amber (RLY-48 §2.3). Pure.
+  rollups but is NOT painted amber (RLY-48 §2.3). `:failed` counts because a dead run always
+  ends up in front of a human (RLY-179) — but it is NOT in `@feed_statuses`, because the
+  needs-you feed renders a *question*, and a failed card has none. Pure.
   """
   def needs_you?(%{status: status} = card, stages) do
-    status in [:needs_input, :in_review] or ready_awaiting_human?(card, stages)
+    status in [:needs_input, :in_review, :failed] or ready_awaiting_human?(card, stages)
   end
 
   # The stage that pulls a parked card next: its own stage when that is a work/planning stage
@@ -1170,6 +1172,33 @@ defmodule Relay.Cards do
              actor: actor,
              meta: %{"question" => flattened, "questions" => normalized}
            }) do
+      {:ok, updated}
+    end
+  end
+
+  @doc """
+  Marks the card as the terminal victim of a failed run (RLY-179): sets status
+  `:failed`, posts `detail` as a plain `kind: :comment`, and logs a `:failure`
+  activity carrying the failing node's output in `meta["detail"]` — the durable
+  record the drawer and the API read without parsing a comment body.
+
+  Deliberately NOT `request_input/3`: a dead run cannot be resumed by answering,
+  so posting the failure as a `:question` invites an answer that does nothing and
+  leaves card state and run state disagreeing. `blocked_since` is not stamped
+  either — it means "waiting on a human answer" (MMF 14), which a failed card is
+  not; `needs_you?/2` counts `:failed` on its own so triage still surfaces it.
+
+  Reuses `set_status`/`Relay.Activity`, so the usual `{:card_upserted}` /
+  `{:timeline_appended}` events fire.
+  """
+  def mark_failed(card, detail, actor \\ :agent)
+
+  def mark_failed(%Card{} = card, detail, actor) when is_binary(detail) do
+    with {:ok, updated} <- set_status(card, %{status: :failed}, actor),
+         {:ok, _comment} <-
+           Activity.add_comment(updated, %{actor: actor, body: detail, kind: :comment}),
+         {:ok, _entry} <-
+           Activity.log(updated, %{type: :failure, actor: actor, meta: %{"detail" => detail}}) do
       {:ok, updated}
     end
   end
