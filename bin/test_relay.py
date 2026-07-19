@@ -209,6 +209,21 @@ class ReverseContractTest(unittest.TestCase):
         # ExecutorHeartbeat._beat() hands each of these to on_revoke().
         self.assertIn("revoked", CONTRACT["heartbeat"]["response"])
 
+    def test_the_claim_request_carries_the_executor_version(self):
+        # RLY-184: the server refuses a claim whose executor has no version, so this key is
+        # the difference between working and 409 — pinned on both sides of the fixture.
+        self.assertIn("version", CONTRACT["claim_request"]["executor"])
+
+    def test_the_heartbeat_request_carries_the_executor_version(self):
+        self.assertIn("version", CONTRACT["heartbeat"]["request"]["executor"])
+
+    def test_the_executor_actually_sends_that_version(self):
+        self.assertIn("version", relay.executor_ident({"name": "box"}))
+
+    def test_the_heartbeat_response_carries_the_outdated_verdict(self):
+        self.assertIn("executor_outdated", CONTRACT["heartbeat"]["response"])
+        self.assertIn("required_version", CONTRACT["heartbeat"]["response"])
+
 
 class PrintCardTest(unittest.TestCase):
     def test_print_card_shows_changes_requested_banner_before_the_ref_line(self):
@@ -1980,6 +1995,270 @@ class ExecutorHeartbeatCapacityTest(unittest.TestCase):
                                      capacity={"shared_clean": 1, "exclusive": 0})
         hb._beat()
         self.assertEqual(killed, ["nj-7"])
+
+
+class ExecutorFingerprintGuardTest(unittest.TestCase):
+    """RLY-184: any edit to bin/relay must come with an EXECUTOR_VERSION bump.
+
+    A doc line asking contributors to remember is not a rule; this is. `bin/relay` is loaded
+    into memory at process start, so a long-running `relay execute` serves whatever version it
+    started with — forever and silently — no matter how often the file is fixed underneath it.
+    The declared version is what lets the server refuse such a process, and it is only truthful
+    if bumping it is enforced rather than requested.
+
+    The two constant lines are masked out of the hash so that SATISFYING the guard (bump the
+    integer, paste the new fingerprint) does not itself re-break it.
+    """
+
+    def test_bin_relay_matches_its_declared_fingerprint(self):
+        computed = relay.executor_fingerprint()
+        self.assertEqual(
+            computed, relay.EXECUTOR_FINGERPRINT,
+            "\n\nbin/relay changed but EXECUTOR_VERSION was not bumped. Increment "
+            f"EXECUTOR_VERSION and set EXECUTOR_FINGERPRINT to:\n\n    {computed}\n")
+
+    def test_masking_makes_a_version_bump_fingerprint_stable(self):
+        with open(RELAY_PATH, encoding="utf-8") as f:
+            src = f.read()
+        bumped = src.replace(f"EXECUTOR_VERSION = {relay.EXECUTOR_VERSION}",
+                             f"EXECUTOR_VERSION = {relay.EXECUTOR_VERSION + 1}", 1)
+        self.assertNotEqual(bumped, src, "the bump substitution matched nothing")
+        self.assertEqual(relay.executor_fingerprint(bumped), relay.executor_fingerprint(src))
+
+    def test_a_fingerprint_paste_is_also_stable(self):
+        with open(RELAY_PATH, encoding="utf-8") as f:
+            src = f.read()
+        repasted = src.replace(f'EXECUTOR_FINGERPRINT = "{relay.EXECUTOR_FINGERPRINT}"',
+                               'EXECUTOR_FINGERPRINT = "0" * 64', 1)
+        self.assertNotEqual(repasted, src)
+        self.assertEqual(relay.executor_fingerprint(repasted), relay.executor_fingerprint(src))
+
+    def test_any_other_edit_changes_the_fingerprint(self):
+        with open(RELAY_PATH, encoding="utf-8") as f:
+            src = f.read()
+        self.assertNotEqual(relay.executor_fingerprint(src + "\n# a trailing comment\n"),
+                            relay.executor_fingerprint(src))
+
+
+class ExecutorIdentTest(unittest.TestCase):
+    """The `executor` dict both claim and heartbeat put on the wire. Pure and named for the
+    same reason outcome_body/heartbeat_body are: bin/test_relay.py pins it against the
+    contract fixture the ExUnit generator writes."""
+
+    def test_the_ident_carries_the_declared_version(self):
+        ident = relay.executor_ident({"name": "box"})
+        self.assertEqual(ident["version"], relay.EXECUTOR_VERSION)
+        self.assertIsInstance(relay.EXECUTOR_VERSION, int)
+
+    def test_the_ident_carries_the_configured_name_and_this_host(self):
+        ident = relay.executor_ident({"name": "mac-mini"})
+        self.assertEqual(ident["name"], "mac-mini")
+        self.assertEqual(ident["host"], relay.socket.gethostname())
+
+
+class ApiSoftConflictTest(unittest.TestCase):
+    """RLY-184: api() die()s on any non-2xx after retries, and the claim loop catches that
+    SystemExit as a generic 'claim failed, will retry'. A 409 executor_outdated must NOT
+    disappear into that path — it is a verdict, not a transient error. `soft_conflict` mirrors
+    the existing `soft_404` idiom, and only claim_node_job passes it."""
+
+    def setUp(self):
+        self._urlopen = relay.urllib.request.urlopen
+        self.addCleanup(setattr, relay.urllib.request, "urlopen", self._urlopen)
+        os.environ["RELAY_URL"] = "http://example.test"
+        os.environ["RELAY_API_KEY"] = "k"
+
+    def _raise_409(self, body):
+        payload = json.dumps(body).encode()
+
+        def fake_urlopen(req, **kw):
+            raise urllib.error.HTTPError(
+                req.full_url, 409, "Conflict", {}, io.BytesIO(payload))
+
+        relay.urllib.request.urlopen = fake_urlopen
+
+    def test_a_409_returns_the_parsed_body_when_soft_conflict_is_set(self):
+        self._raise_409({"error": {"code": "executor_outdated", "required": 3, "running": 1}})
+        resp = relay.api("POST", "/api/node-jobs/claim", {}, soft_conflict=True)
+        self.assertEqual(resp["error"]["code"], "executor_outdated")
+        self.assertEqual(resp["error"]["required"], 3)
+
+    def test_a_409_still_dies_without_soft_conflict(self):
+        self._raise_409({"error": {"message": "This job is no longer held by your claim"}})
+        with self.assertRaises(SystemExit):
+            relay.api("POST", "/api/node-jobs/1/outcome", {})
+
+
+class ClaimOutdatedTest(unittest.TestCase):
+    """claim_node_job turns the server's refusal into a value the loop can branch on."""
+
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+
+    def test_a_refusal_becomes_an_outdated_marker_carrying_the_required_version(self):
+        relay.api = lambda *a, **k: {
+            "error": {"code": "executor_outdated", "required": 7, "running": 1}}
+        result = relay.claim_node_job({"name": "box"}, {"shared_clean": 1}, 1)
+        self.assertTrue(result["executor_outdated"])
+        self.assertEqual(result["required"], 7)
+
+    def test_a_normal_claim_is_returned_untouched(self):
+        j = job(id="nj-1")
+        relay.api = lambda *a, **k: j
+        self.assertEqual(relay.claim_node_job({"name": "box"}, {"shared_clean": 1}, 1), j)
+
+    def test_no_work_is_still_none(self):
+        relay.api = lambda *a, **k: {}
+        self.assertIsNone(relay.claim_node_job({"name": "box"}, {"shared_clean": 1}, 1))
+
+    def test_the_claim_passes_soft_conflict_so_the_409_is_not_a_die(self):
+        seen = {}
+        relay.api = lambda *a, **kw: seen.update(kw) or {}
+        relay.claim_node_job({"name": "box"}, {"shared_clean": 1}, 1)
+        self.assertTrue(seen["soft_conflict"])
+
+
+class FakeHeartbeat:
+    """Stand-in for ExecutorHeartbeat that records the capacity of every beat, so a test can
+    assert the loop flipped the advertised capacity to zero rather than inspecting a thread."""
+
+    instances = []
+
+    def __init__(self, executor, running_fn, on_revoke, interval=15, capacity=None):
+        self.executor = executor
+        self.capacity = capacity or {}
+        self.beats = []
+        FakeHeartbeat.instances.append(self)
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def _beat(self):
+        self.beats.append(dict(self.capacity))
+
+
+class ExecuteLoopOutdatedTest(unittest.TestCase):
+    """RLY-184: refused at claim, the executor stays ALIVE, marked and idle — it does not exit.
+
+    Exiting was the other candidate, rejected because a dead runner tells nobody anything. The
+    hazard of staying alive (cards queue behind an apparently-healthy runner) is answered by
+    advertising zero capacity, which is why that assertion is here and not decoration."""
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in
+                       ("load_executor_config", "claim_node_job", "run_node_job",
+                        "report_outcome", "reset_worktree", "refresh_worktree",
+                        "ExecutorHeartbeat", "FORWARDER", "env", "log", "DRY")}
+        self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+        self.addCleanup(relay.signal.signal, relay.signal.SIGINT,
+                        relay.signal.getsignal(relay.signal.SIGINT))
+        relay.DRY = False
+        relay.env = lambda name: "x"
+        self.logs = []
+        relay.log = lambda msg, **k: self.logs.append((msg, k.get("kind")))
+        relay.reset_worktree = lambda *a, **k: None
+        relay.refresh_worktree = lambda *a, **k: None
+        relay.run_node_job = lambda job, path, control: ("succeeded", "", "sha", None)
+        relay.report_outcome = lambda *a: "done"
+        relay.load_executor_config = lambda: {
+            "name": "box", "namespace": "exec",
+            "capacity": {"shared_clean": 2, "exclusive": 0},
+            "poll_timeout": 0.01, "heartbeat_interval": 60}
+        FakeHeartbeat.instances = []
+        relay.ExecutorHeartbeat = FakeHeartbeat
+        self.addCleanup(setattr, relay.ExecutorPool, "ensure", relay.ExecutorPool.ensure)
+        relay.ExecutorPool.ensure = lambda self: None
+        os.environ.setdefault("RELAY_URL", "http://example.test")
+        os.environ.setdefault("RELAY_API_KEY", "k")
+
+    def _interrupt_after(self, seconds):
+        t = threading.Timer(seconds, lambda: os.kill(os.getpid(), relay.signal.SIGINT))
+        t.daemon = True
+        self.addCleanup(t.cancel)
+        t.start()
+
+    def test_a_refusal_stops_all_further_claiming_but_keeps_the_process_alive(self):
+        calls = []
+        relay.claim_node_job = lambda e, c, t: (calls.append(c)
+                                                or relay.outdated_refusal(9))
+        self._interrupt_after(0.3)
+
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+
+        # poll_timeout is 0.01s over ~0.3s of running: without the flag this would be dozens.
+        self.assertEqual(len(calls), 1)
+
+    def test_a_refused_executor_advertises_zero_capacity_immediately(self):
+        relay.claim_node_job = lambda e, c, t: relay.outdated_refusal(9)
+        self._interrupt_after(0.3)
+
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+
+        hb = FakeHeartbeat.instances[0]
+        self.assertEqual(hb.capacity, {"shared_clean": 0, "exclusive": 0})
+        # Beat #1 is the startup beat with the real capacity; the last beat is post-refusal,
+        # sent at once rather than waiting a full heartbeat interval.
+        self.assertEqual(hb.beats[0], {"shared_clean": 2, "exclusive": 0})
+        self.assertEqual(hb.beats[-1], {"shared_clean": 0, "exclusive": 0})
+
+    def test_it_logs_once_naming_both_versions_and_the_remedy(self):
+        relay.claim_node_job = lambda e, c, t: relay.outdated_refusal(9)
+        self._interrupt_after(0.3)
+
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+
+        outdated = [m for m, kind in self.logs if "OUTDATED" in m]
+        self.assertEqual(len(outdated), 1, self.logs)   # once, not every poll
+        self.assertIn(f"version {relay.EXECUTOR_VERSION}", outdated[0])
+        self.assertIn("9", outdated[0])
+        self.assertIn("restart", outdated[0])
+        self.assertIn("error", [kind for m, kind in self.logs if "OUTDATED" in m])
+
+    def test_in_flight_work_still_reports_its_outcome_after_a_refusal(self):
+        gate = threading.Event()
+        reports = []
+        relay.report_outcome = lambda *a: (reports.append(a) or "done")
+
+        def blocking_run(job, path, control):
+            gate.wait(2)
+            return ("succeeded", "", "sha", None)
+
+        relay.run_node_job = blocking_run
+        claims = [job(node_type="shell", run="true", id="nj-1", run_id="r1",
+                      vars={"ref": "RLY-1"})]
+
+        def claim(e, c, t):
+            return claims.pop(0) if claims else relay.outdated_refusal(9)
+
+        relay.claim_node_job = claim
+        threading.Timer(0.3, gate.set).start()
+        self._interrupt_after(0.5)
+
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+
+        self.assertEqual(reports[0][:2], ("nj-1", "succeeded"))
+
+    def test_once_exits_non_zero_rather_than_idling(self):
+        relay.claim_node_job = lambda e, c, t: relay.outdated_refusal(9)
+
+        with self.assertRaises(SystemExit) as caught:
+            relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+
+        self.assertEqual(caught.exception.code, 1)
+
+    def test_a_normal_run_never_sets_the_flag(self):
+        relay.claim_node_job = lambda e, c, t: None      # 204 / long-poll timeout
+        self._interrupt_after(0.2)
+
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+
+        self.assertEqual([m for m, _k in self.logs if "OUTDATED" in m], [])
+        self.assertEqual(FakeHeartbeat.instances[0].capacity,
+                         {"shared_clean": 2, "exclusive": 0})
 
 
 class RealGitWorktreeTest(unittest.TestCase):

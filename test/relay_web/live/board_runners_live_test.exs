@@ -199,6 +199,60 @@ defmodule RelayWeb.BoardRunnersLiveTest do
     assert has_element?(view, "#runner-mac-mini-local", "mac.mini.local")
   end
 
+  test "an outdated runner shows OUTDATED alongside its FRESH pill, not instead of it",
+       %{conn: conn, board: board} do
+    # RLY-184: heartbeat freshness and code staleness are orthogonal axes — a refused executor
+    # is beating normally, so collapsing them into one pill would hide one of the two facts.
+    executor(board, "ancient", version: nil)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    assert has_element?(view, "#runner-ancient .badge-success", "FRESH")
+    assert has_element?(view, "#runner-ancient-outdated", "OUTDATED")
+  end
+
+  test "the OUTDATED badge reuses the artboard's pill styling", %{conn: conn, board: board} do
+    # docs/designs/Relay Runners.dc.html does not depict versioning at all, so there is no
+    # element to match — the requirement is that the new badge does not invent a second visual
+    # language next to the pill the artboard DOES specify (header row, lines ~72-79).
+    executor(board, "ancient", version: nil)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+    html = render(element(view, "#runner-ancient-outdated"))
+
+    assert html =~ "badge badge-sm"
+    assert html =~ "badge-error"
+    assert html =~ "font-size:9.5px;letter-spacing:0.06em;"
+  end
+
+  test "a current runner shows no OUTDATED badge and a plain version line",
+       %{conn: conn, board: board} do
+    executor(board, "mac-mini", version: Relay.Runs.min_executor_version())
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    refute has_element?(view, "#runner-mac-mini-outdated")
+    assert has_element?(view, "#runner-mac-mini-version", "v#{Relay.Runs.min_executor_version()}")
+  end
+
+  test "an outdated runner's version line names both versions", %{conn: conn, board: board} do
+    executor(board, "old-box", version: 0)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    label = render(element(view, "#runner-old-box-version"))
+    assert label =~ "v0"
+    assert label =~ "requires v#{Relay.Runs.min_executor_version()}"
+  end
+
+  test "a runner that reports no version says so rather than showing a bare v", %{conn: conn, board: board} do
+    executor(board, "ancient", version: nil)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    assert has_element?(view, "#runner-ancient-version", "unversioned")
+  end
+
   test "an executor silent for over a day drops off the roster", %{conn: conn, board: board} do
     executor(board, "ancient", last_heartbeat: DateTime.truncate(DateTime.add(DateTime.utc_now(), -25, :hour), :second))
 

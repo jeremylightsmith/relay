@@ -497,6 +497,27 @@ defmodule Relay.Runs do
 
   ## Executors (ADR 0006 card 04)
 
+  # The oldest `bin/relay` EXECUTOR_VERSION this server will hand work to (RLY-184). One
+  # module owns the number; the controller and the runners view read it through
+  # min_executor_version/0 rather than re-deriving it. Raise it only when running the old
+  # executor is genuinely worse than a stopped one — every executor below it is refused at
+  # claim until a human restarts it.
+  @min_executor_version 1
+
+  @doc "The minimum `bin/relay` EXECUTOR_VERSION this server will claim jobs to."
+  def min_executor_version, do: @min_executor_version
+
+  @doc """
+  Whether this executor is running code older than the server requires.
+
+  `nil` is outdated by construction: an executor that reports no version predates RLY-184,
+  which is definitionally behind. That flags every currently-running stale process the moment
+  this ships — the desired outcome, not an edge case.
+  """
+  def executor_outdated?(%Executor{version: version}) when is_integer(version), do: version < @min_executor_version
+
+  def executor_outdated?(%Executor{}), do: true
+
   @doc """
   Upserts the durable executor row keyed `{board_id, name}`, refreshing host,
   interval, capacity, and `last_heartbeat`. Called by the claim endpoint (claim
@@ -516,17 +537,18 @@ defmodule Relay.Runs do
       host: to_string(attrs["host"] || ""),
       interval: normalize_interval(attrs["interval"]),
       capacity: normalize_capacity(attrs["capacity"]),
+      version: normalize_version(attrs["version"]),
       last_heartbeat: now()
     }
 
     {params, replace} =
       case normalize_capabilities(attrs["capabilities"]) do
         nil ->
-          {params, [:host, :interval, :capacity, :last_heartbeat, :updated_at]}
+          {params, [:host, :interval, :capacity, :version, :last_heartbeat, :updated_at]}
 
         capabilities ->
           {Map.put(params, :capabilities, capabilities),
-           [:host, :interval, :capacity, :capabilities, :last_heartbeat, :updated_at]}
+           [:host, :interval, :capacity, :capabilities, :version, :last_heartbeat, :updated_at]}
       end
 
     %Executor{}
@@ -540,6 +562,10 @@ defmodule Relay.Runs do
 
   defp normalize_interval(i) when is_integer(i) and i > 0, do: i
   defp normalize_interval(_i), do: 30
+
+  # Non-integer / negative → nil, i.e. "outdated". Untrusted input must degrade, not raise.
+  defp normalize_version(v) when is_integer(v) and v >= 0, do: v
+  defp normalize_version(_v), do: nil
 
   # Keep only string-keyed non-negative integer counts; anything else → dropped.
   defp normalize_capacity(cap) when is_map(cap) do
@@ -775,6 +801,10 @@ defmodule Relay.Runs do
         interval: executor.interval || 30,
         last_heartbeat: executor.last_heartbeat,
         freshness: executor_freshness(executor, now),
+        version: executor.version,
+        # Orthogonal to `freshness` on purpose (RLY-184): a refused executor is perfectly
+        # healthy and beating normally — it is just running old code.
+        outdated: executor_outdated?(executor),
         pools: pools_for(executor, jobs),
         jobs: jobs
       }

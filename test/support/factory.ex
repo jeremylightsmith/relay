@@ -234,6 +234,7 @@ defmodule Relay.Factory do
       host: "mac.local",
       interval: 30,
       capacity: %{"shared_clean" => 3, "exclusive" => 1},
+      version: Relay.Runs.min_executor_version(),
       last_heartbeat: DateTime.truncate(DateTime.utc_now(), :second)
     }
 

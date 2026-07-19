@@ -26,7 +26,12 @@ defmodule Relay.Runs.Scheduler.ScriptedExecutor do
   def claim(conn, name, capacity) do
     conn =
       post(conn, "/api/node-jobs/claim?wait=0", %{
-        "executor" => %{"name" => name, "host" => "scripted", "interval" => 30},
+        "executor" => %{
+          "name" => name,
+          "host" => "scripted",
+          "interval" => 30,
+          "version" => Relay.Runs.min_executor_version()
+        },
         "capacity" => capacity
       })
 
