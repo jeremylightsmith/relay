@@ -223,6 +223,42 @@ defmodule Relay.Factory do
     node_execution |> merge_attributes(attrs) |> evaluate_lazy_attributes()
   end
 
+  # Full-control factory: `board` (when overridden) must be persisted. `last_heartbeat`
+  # defaults to now, so the row reads :fresh — backdate it to exercise :stale / :gone.
+  def executor_factory(attrs) do
+    {board, attrs} = Map.pop_lazy(attrs, :board, fn -> insert(:board) end)
+
+    executor = %Schemas.Executor{
+      board_id: board.id,
+      name: sequence(:executor_name, &"mac-#{&1}"),
+      host: "mac.local",
+      interval: 30,
+      capacity: %{"shared_clean" => 3, "exclusive" => 1},
+      last_heartbeat: DateTime.truncate(DateTime.utc_now(), :second)
+    }
+
+    executor |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
+
+  # Full-control factory: `node_execution` (when overridden) must be persisted — the job's
+  # `run_id` and `node_key` are derived from it so job, execution and run always agree.
+  def node_job_factory(attrs) do
+    {node_execution, attrs} =
+      Map.pop_lazy(attrs, :node_execution, fn -> insert(:node_execution) end)
+
+    node_job = %Schemas.NodeJob{
+      run_id: node_execution.run_id,
+      node_execution_id: node_execution.id,
+      node_key: node_execution.node_key,
+      state: :claimed,
+      executor_name: "mac-1",
+      payload: %{"isolation" => "shared_clean"},
+      claimed_at: DateTime.truncate(DateTime.utc_now(), :second)
+    }
+
+    node_job |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
+
   defp pop_first(attrs, [], default), do: {default, attrs}
 
   defp pop_first(attrs, [key | rest], default) do

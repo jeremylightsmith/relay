@@ -685,6 +685,120 @@ defmodule Relay.Runs do
     DateTime.diff(now, at, :second) > max(@executor_stale_floor_s, 2 * (interval || 30))
   end
 
+  @doc """
+  The executor's freshness at `now`: `:fresh | :stale | :gone`. Pure.
+
+  `:gone` is deliberately *the same predicate the reaper uses* (`executor_stale?/2`) rather
+  than a second invented threshold — so a `gone` row on the runners view means the executor's
+  in-flight work has been requeued or parked, not merely that a beat looks late.
+  """
+  def executor_freshness(%Executor{last_heartbeat: at, interval: interval} = executor, %DateTime{} = now) do
+    age = DateTime.diff(now, at, :second)
+
+    cond do
+      age <= 1.5 * (interval || 30) -> :fresh
+      executor_stale?(executor, now) -> :gone
+      true -> :stale
+    end
+  end
+
+  # Mirrors the retention RunnerPresence.prune/1 gave the runners view: a machine silent for
+  # a day is history, not roster. Display-only — the reaper owns row lifecycle, and this
+  # function deletes nothing.
+  @roster_window_s 86_400
+
+  @doc """
+  The runners-view roster for `board` at `now` — one map per executor, sorted by name, each
+  carrying its advertised capacity (with `used` counted from that executor's active jobs) and
+  the in-flight jobs attributed to it.
+
+  Pure w.r.t. the clock: `now` is injectable and defaults to the current time. Two queries,
+  no N+1. Reads only Postgres, so the page survives an app restart — unlike `Runs.Capacity`,
+  which is ETS and scheduler-only.
+  """
+  def list_executor_status(%Board{} = board, now \\ nil) do
+    now = now || now()
+    cutoff = DateTime.add(now, -@roster_window_s, :second)
+
+    executors =
+      Repo.all(
+        from e in Executor,
+          where: e.board_id == ^board.id and e.last_heartbeat > ^cutoff,
+          order_by: [asc: e.name]
+      )
+
+    jobs_by_executor = active_jobs_by_executor(board)
+
+    Enum.map(executors, fn executor ->
+      jobs = Map.get(jobs_by_executor, executor.name, [])
+
+      %{
+        id: executor.id,
+        name: executor.name,
+        host: executor.host,
+        interval: executor.interval || 30,
+        last_heartbeat: executor.last_heartbeat,
+        freshness: executor_freshness(executor, now),
+        pools: pools_for(executor, jobs),
+        jobs: jobs
+      }
+    end)
+  end
+
+  # Every active job on this board that some executor is holding, grouped by `executor_name`.
+  # Same join shape as reclaim_executor/1 — NodeJob → Run → Card — scoped by board so one
+  # executor name shared across boards never leaks work sideways.
+  defp active_jobs_by_executor(%Board{} = board) do
+    from(j in NodeJob,
+      join: r in Run,
+      on: r.id == j.run_id,
+      join: c in Card,
+      on: c.id == r.card_id,
+      where: c.board_id == ^board.id,
+      where: j.state in ^@active_job_states,
+      where: not is_nil(j.executor_name),
+      order_by: [asc: j.claimed_at, asc: j.id],
+      select: %{
+        executor_name: j.executor_name,
+        job_id: j.id,
+        ref_number: c.ref_number,
+        title: c.title,
+        node_key: j.node_key,
+        state: j.state,
+        isolation: fragment("?->>'isolation'", j.payload),
+        claimed_at: j.claimed_at
+      }
+    )
+    |> Repo.all()
+    |> Enum.group_by(& &1.executor_name, fn row ->
+      %{
+        job_id: row.job_id,
+        ref: Cards.ref(board, %Card{ref_number: row.ref_number}),
+        title: row.title,
+        node_key: row.node_key,
+        state: row.state,
+        isolation: row.isolation,
+        claimed_at: row.claimed_at
+      }
+    end)
+  end
+
+  # One chip per ADVERTISED class — we never invent a chip for capacity the executor never
+  # claimed to have. `used` counts that executor's active jobs in the class, treating any
+  # non-"exclusive" isolation as shared_clean (the same rule reclaim_executor/1 applies).
+  defp pools_for(%Executor{capacity: capacity}, jobs) do
+    used = Enum.frequencies_by(jobs, &isolation_class(&1.isolation))
+
+    capacity
+    |> Enum.sort_by(fn {name, _total} -> name end)
+    |> Enum.map(fn {name, total} ->
+      %{name: name, used: Map.get(used, name, 0), total: total}
+    end)
+  end
+
+  defp isolation_class("exclusive"), do: "exclusive"
+  defp isolation_class(_shared), do: "shared_clean"
+
   defp reclaim_executor(%Executor{board_id: board_id, name: name}) do
     rows =
       Repo.all(
