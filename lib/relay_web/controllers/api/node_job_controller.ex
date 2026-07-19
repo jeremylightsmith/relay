@@ -45,6 +45,54 @@ defmodule RelayWeb.Api.NodeJobController do
   end
 
   @doc """
+  The executor's periodic beat (RLY-164): advertises capacity and collects revokes.
+
+  This is the single place an executor announces itself. It does two jobs the pull model
+  otherwise has no channel for:
+
+    * **Capacity.** `Relay.Runs.Capacity` is what the scheduler reads to decide whether to
+      dispatch at all, and it is deliberately lost on app restart. Before this route existed
+      it was fed only by `/api/board/heartbeat`, which `relay execute` never calls — so
+      starting an executor and enabling a flow dispatched nothing, and the cutover needed a
+      hand-run `curl`. The `capacity` here is the executor's *configured* total, never a live
+      free count: `Scheduler.Server.build_snapshot/1` debits in-flight `:running` runs itself,
+      so a decremented count would double-debit every running run.
+
+    * **Revokes.** Under the pull model `dispatcher().revoke/1` is a no-op, so taking the
+      baton (ADR 0004, via `park_claimed/1`) or cancelling from the run panel could not stop a
+      running agent — the executor only found out on its next outcome POST, 20+ minutes for a
+      Code `implement` node. The beat reports the jobs it believes it is running; the reply
+      names those the server no longer considers live, and the executor kills them.
+
+  Board-scoped throughout: an id belonging to another board is simply not live *here*, so one
+  board's executor can never be told to kill another's work.
+  """
+  def heartbeat(conn, params) do
+    board = conn.assigns.current_board
+    exec_attrs = Map.put(Map.get(params, "executor", %{}), "capacity", Map.get(params, "capacity"))
+
+    with {:ok, executor} <- Runs.upsert_executor(board, exec_attrs) do
+      advertise_capacity(executor, Map.get(params, "capacity"))
+      json(conn, %{revoked: Runs.revoked_among(board, Map.get(params, "running", []))})
+    end
+  end
+
+  defp advertise_capacity(executor, capacity) when is_map(capacity) do
+    Runs.Capacity.put(executor.id, atomize_capacity(capacity))
+  end
+
+  defp advertise_capacity(_executor, _capacity), do: :ok
+
+  defp atomize_capacity(capacity) do
+    Map.new(capacity, fn
+      {"shared_clean", n} -> {:shared_clean, n}
+      {"exclusive", n} -> {:exclusive, n}
+      {k, n} when is_binary(k) -> {String.to_existing_atom(k), n}
+      pair -> pair
+    end)
+  end
+
+  @doc """
   Reports a node-job outcome, completing the job and waking the engine to route
   it. `outcome` must be in the closed set (else 422 `unknown_outcome`); the job
   must still be held by a live claim (else 409 `conflict`). Replies with the

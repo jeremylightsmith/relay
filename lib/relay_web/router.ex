@@ -180,6 +180,7 @@ defmodule RelayWeb.Router do
     post "/cards/:ref/approve", CardController, :approve
     post "/cards/:ref/reject", CardController, :reject
     post "/node-jobs/claim", NodeJobController, :claim
+    post "/node-jobs/heartbeat", NodeJobController, :heartbeat
     post "/node-jobs/:id/outcome", NodeJobController, :outcome
   end
 
