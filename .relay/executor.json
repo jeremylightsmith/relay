@@ -1,6 +1,9 @@
 {
   "namespace": "exec",
-  "capacity": { "shared_clean": 3, "exclusive": 1 },
+  "capacity": {
+    "shared_clean": 3,
+    "exclusive": 2
+  },
   "poll_timeout": 25,
   "heartbeat_interval": 15
 }

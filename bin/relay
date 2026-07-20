@@ -66,8 +66,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 11
-EXECUTOR_FINGERPRINT = "091b9f5ced1afd478784b6bdaec18b0eb8da6eb1ce371324c51464968531d9d9"
+EXECUTOR_VERSION = 12
+EXECUTOR_FINGERPRINT = "b70c4a9a8e7c4e52deebb3b94a3c04fcbc6d85122380550f77b4a8a24c488b8a"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -982,6 +982,24 @@ def _print_claude_event(ev, tag=""):
         forward("claude", line, ref)
 
 
+def _apply_node_env(child_env, partition, scratch):
+    """Set-or-CLEAR the per-node env on a child (RLY-216).
+
+    `partition`/`scratch` are per-job (RLY-213/214): a job that has one exports it, a job that
+    does NOT must see it *unset* — never inherit the parent's. Assigning only when non-None was
+    the RLY-213/214 bug: every node now runs with MIX_TEST_PARTITION/RELAY_NODE_SCRATCH exported,
+    so when such a node itself runs `bin/relay` (the precommit gate runs `bin/test_relay.py`,
+    whose own tests spawn partition-less child steps) the value leaked in, and the gate failed
+    for every Code run. Pop when None so the child's env reflects the JOB's config, not whatever
+    the executor process happened to carry.
+    """
+    for name, value in (("MIX_TEST_PARTITION", partition), ("RELAY_NODE_SCRATCH", scratch)):
+        if value is None:
+            child_env.pop(name, None)
+        else:
+            child_env[name] = value
+
+
 def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None):
     """Run a shell step with a live, tag-prefixed feed. Returns True on success.
 
@@ -1002,10 +1020,7 @@ def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scr
     `scratch`, if given, is exported as RELAY_NODE_SCRATCH (RLY-214) — the caller supplies
     `scratch_path(slot, ref, node)` so a gate step can write findings there too."""
     child_env = dict(os.environ)
-    if partition is not None:
-        child_env["MIX_TEST_PARTITION"] = partition
-    if scratch is not None:
-        child_env["RELAY_NODE_SCRATCH"] = scratch
+    _apply_node_env(child_env, partition, scratch)
     proc = subprocess.Popen(cmd, shell=True, cwd=cwd, text=True, bufsize=1, env=child_env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=on_proc is not None)
@@ -1147,10 +1162,7 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
     child_env.setdefault("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0")
     if outcome_path:
         child_env["RELAY_NODE_OUTCOME"] = outcome_path
-    if partition is not None:
-        child_env["MIX_TEST_PARTITION"] = partition
-    if scratch is not None:
-        child_env["RELAY_NODE_SCRATCH"] = scratch
+    _apply_node_env(child_env, partition, scratch)
     # Every caller is an executor node-job, which passes on_proc (a JobControl.register)
     # and so gets its own process group (start_new_session), since only a JobControl can
     # kill that group.
