@@ -16,6 +16,10 @@ exits non-zero.
 | `bin/relay init` | Scaffold this project from the board: `.claude/` agents + skills, `.relay/executor.json`, `AGENTS.md`. Flags: `--url` (board host, else `RELAY_URL`), `--force` (overwrite files you edited), `--dry-run` (report only, write nothing), `--no-self-update` (skip the upgrade-only `bin/relay` refresh). See [Getting started](/docs) |
 | `bin/relay board` | The board: stages with their cards |
 | `bin/relay card RLY-12` | One card: description, plan, branch, timeline |
+| `bin/relay why RLY-12` | **Why isn't this card moving?** One plain-language answer |
+| `bin/relay runs RLY-12` | The card's runs and node executions (failure detail in full) |
+| `bin/relay executors` | Who is connected, their capacity, and the jobs they hold |
+| `bin/relay version` | The git SHA the deployed app was built from |
 | `bin/relay create "Fix login" --stage Backlog` | Create a card (optional `--stage`/`--description`/`--tag`) |
 | `bin/relay comment RLY-12 "…"` | Post a comment (as Relay AI) |
 | `bin/relay move RLY-12 Code` | Move to a stage by name |
@@ -41,5 +45,8 @@ and plans can be piped in:
 bin/relay describe RLY-12 @spec.md
 git log -1 --format=%B | bin/relay comment RLY-12 -
 ```
+
+Every `--json` command also takes `--field PATH` to print a single dotted-path value bare —
+`bin/relay card RLY-12 --field status` prints `working`, with no quotes and no `jq`.
 
 For the autonomous runner and its operating rules, see [Agent integration](/docs/agent-integration).

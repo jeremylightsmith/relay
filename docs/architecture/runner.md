@@ -75,6 +75,13 @@ Read-only endpoints answering "why isn't this card moving?" without an `fly ssh 
 Ecto query, board-scoped like every other `/api` route (a ref/id on another board 404s,
 never 403s):
 
+- `GET /api/cards/:ref/diagnosis` (`RelayWeb.Api.DiagnosisController.show/2`) — one verdict
+  plus the evidence behind it, produced by `Relay.Runs.diagnose/3`, the boundary-safe facade
+  the web layer calls (`Relay.Runs`' exports list is unchanged by this surface, so
+  `docs/architecture/domain.md` needed no edit). It in turn calls
+  `Relay.Runs.Scheduler.explain/2`, which **replays** `Scheduler.plan/1`'s real dispatch
+  decision — sharing its predicate functions — rather than reimplementing it, so the verdict
+  cannot drift from what actually dispatches.
 - `GET /api/cards/:ref/runs` (`RelayWeb.Api.RunController.index/2`) — the card's runs
   newest-first with `node_executions` preloaded, composing `Relay.Runs.list_runs_for_card/1`.
   `detail` and `failure_detail` are serialized **in full, never truncated** — the exact text
@@ -83,8 +90,12 @@ never 403s):
   `Relay.Runs.list_executor_status/2` (no second executor read): advertised capacity per
   isolation class, last heartbeat, `stale?` (from the same `executor_stale?/2` predicate the
   reclaim sweep uses), and the jobs each executor currently holds.
-- CLI: `bin/relay runs REF` / `bin/relay executors`, documented in
-  [`../agent-integration.md`](../agent-integration.md).
+- `GET /api/version` (`RelayWeb.Api.VersionController.show/2`) — the git SHA the running app
+  was built from, baked in at image build time (`Dockerfile`'s `final` stage, fed by
+  `.github/workflows/ci.yml`'s `flyctl deploy --build-arg`). Unauthenticated, on the plain
+  `:api` pipeline — it leaks nothing a deploy does not.
+- CLI: `bin/relay why REF` / `bin/relay runs REF` / `bin/relay executors` /
+  `bin/relay version`, documented in [`../agent-integration.md`](../agent-integration.md).
 
 ## Bootstrap surface (RLY-181)
 

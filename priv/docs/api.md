@@ -195,6 +195,39 @@ curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application
   -d '{"note":"needs a test","to":"Plan"}' https://relay.example/api/cards/RLY-12/reject
 ```
 
+### GET /api/cards/:ref/diagnosis
+
+**Why isn't this card moving?** — one call, one plain-language verdict, plus the evidence
+behind it. Read-only and safe to hit while a run is live. The verdict is produced by
+replaying the real dispatch decision (`Relay.Runs.Scheduler.explain/2`, which shares its
+predicates with `plan/1`), not by a separate reimplementation, so it cannot drift from what
+actually dispatches.
+
+```
+curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-12/diagnosis
+```
+
+```json
+{ "data": { "verdict": "awaiting_capacity",
+  "detail": "The code flow would dispatch this card, but no executor is advertising a free shared_clean slot.",
+  "evidence": { "card_ref": "RLY-12", "card_status": "ready", "flow_key": "code", "run_id": null } } }
+```
+
+| verdict | means |
+| --- | --- |
+| `dispatchable` | would dispatch on the scheduler's next tick |
+| `no_enabled_flow` | no enabled flow pulls from this card's stage |
+| `awaiting_capacity` | a flow would dispatch; no executor advertises a free slot of the needed class |
+| `wip_full` | the works-in column (plus its sub-lanes) is at its WIP limit |
+| `owned_by_human` | a human holds the baton (ADR 0004) |
+| `blocked_on_input` | card status `needs_input`, or the run is parked `needs_input` |
+| `run_active` | a run is live; `evidence.current_node` names the node |
+| `not_eligible` | a flow pulls from this stage, but the card's status is not `ready`/`queued` |
+| `run_failed` | the card's last run failed; `evidence.last_execution.detail` carries the **full** failure text |
+| `job_stranded` | a job has sat `queued`/`claimed` past the grace with no live executor |
+
+CLI: `bin/relay why RLY-12`.
+
 ### GET /api/cards/:ref/runs
 
 The card's runs, newest first, each with its node-execution history. `detail` and
@@ -212,6 +245,8 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-1
   ] } ] }
 ```
 
+CLI: `bin/relay runs RLY-12`.
+
 ### GET /api/executors
 
 The board's connected executors: advertised capacity per isolation class, last
@@ -227,6 +262,24 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/executors
     { "id": 12, "ref": "RLY-9", "node_key": "implement", "state": "running" }
   ] } ] }
 ```
+
+CLI: `bin/relay executors`.
+
+### GET /api/version
+
+The git SHA the running app was built from. **Unauthenticated** — it leaks nothing a
+deploy does not. `sha` is `"unknown"` for any build made without the `GIT_SHA` build arg
+(a local `mix phx.server`, for instance): an honest "unknown" beats a misleading value.
+
+```
+curl https://relay.example/api/version
+```
+
+```json
+{ "sha": "0123456789abcdef0123456789abcdef01234567", "built_at": "2026-07-19T10:00:00Z", "version": "0.1.0" }
+```
+
+CLI: `bin/relay version`.
 
 ---
 

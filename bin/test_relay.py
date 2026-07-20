@@ -2863,5 +2863,19 @@ class FieldSelectorTest(unittest.TestCase):
         self.assertNotIn("print(json.dumps(", body)
 
 
+class DiscoverabilityTest(unittest.TestCase):
+    def test_the_module_docstring_lists_every_new_verb(self):
+        for verb in ("relay why", "relay runs", "relay executors", "relay version", "--field"):
+            self.assertIn(verb, relay.__doc__, f"the module docstring (relay --help) should list {verb}")
+
+    def test_agent_integration_documents_every_new_verb(self):
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "docs", "agent-integration.md")
+        with open(path, encoding="utf-8") as f:
+            doc = f.read()
+        for verb in ("bin/relay why", "bin/relay runs", "bin/relay executors", "bin/relay version", "--field"):
+            self.assertIn(verb, doc, f"docs/agent-integration.md should document {verb}")
+
+
 if __name__ == "__main__":
     unittest.main()

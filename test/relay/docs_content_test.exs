@@ -52,4 +52,32 @@ defmodule Relay.DocsContentTest do
     refute cli =~ "bin/relay pull"
     refute cli =~ "bin/relay layout"
   end
+
+  test "api.md documents every endpoint RLY-177 added" do
+    api = read("api.md")
+
+    for path <- [
+          "GET /api/cards/:ref/diagnosis",
+          "GET /api/cards/:ref/runs",
+          "GET /api/executors",
+          "GET /api/version"
+        ] do
+      assert api =~ path, "api.md should document `#{path}`"
+    end
+
+    # The verdict vocabulary is the contract `relay why` prints — an undocumented verdict
+    # is an operator staring at a word with no meaning.
+    for verdict <- ~w(dispatchable no_enabled_flow awaiting_capacity wip_full owned_by_human
+                      blocked_on_input run_active not_eligible run_failed job_stranded) do
+      assert api =~ verdict, "api.md should document the `#{verdict}` verdict"
+    end
+  end
+
+  test "cli.md lists every CLI verb RLY-177 added" do
+    cli = read("cli.md")
+
+    for verb <- ["bin/relay why", "bin/relay runs", "bin/relay executors", "bin/relay version", "--field"] do
+      assert cli =~ verb, "cli.md should mention `#{verb}`"
+    end
+  end
 end
