@@ -64,6 +64,17 @@ use them.
 - **The current-state architecture lives in [`docs/architecture/`](docs/architecture/README.md)** and staying current is a gate: if your branch adds or changes a **context, PubSub topic, API endpoint, or supervised process**, update the matching `docs/architecture/` page in the same branch. The whole-branch final review treats a stale page as a blocking finding.
 - **Architecture decisions live in [`docs/adr/`](docs/adr/README.md)** — read the index before changing cross-cutting structure. Notably [ADR 0001](docs/adr/0001-client-architecture.md) fixes the LiveView-first + thin-native-wrapper client strategy: keep UI and real-time logic in LiveView; do not stand up a parallel mobile client or API.
 - **Context boundaries are enforced by [`boundary`](https://hexdocs.pm/boundary)** (wired into the compiler). The web layer (`RelayWeb`) may only call the domain through `Relay`'s exported contexts; contexts may not reach into the web layer. Each context is its own sub-boundary declared in `lib/relay.ex` — when you add a context, give it `use Boundary` and add it to `Relay`'s `exports`. A boundary violation fails compilation.
+- **A magic value is defined exactly once.** Closed sets (statuses, outcomes, job states, node
+  kinds, isolation classes) and policy numbers (thresholds, caps, grace windows) live as ONE
+  named function/attribute on the module that owns the concept — the schema for a vocabulary
+  (e.g. `Schemas.Run.active_statuses/0`), the domain module for a policy — and every consumer
+  calls it. Never re-type a list literal (`in [:running, :parked]`) or partition (active vs
+  terminal) in a second module, the web layer, or a test when a source function exists; if none
+  exists, add it where the concept lives and call it from both places. Anything mirrored across
+  the wire into `bin/relay` must be pinned by the executor contract fixture
+  (`test/fixtures/executor_contract.json`, RLY-176) so drift breaks CI instead of shipping.
+  Nearly every recent engine bug reduced to "two copies of one fact disagreed" — reviews should
+  treat a duplicated closed set the way they treat a failing test.
 
 ### Phoenix v1.8 guidelines
 
