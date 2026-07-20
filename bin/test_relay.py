@@ -2808,5 +2808,60 @@ class TimelineTextRenderingTest(unittest.TestCase):
         self.assertIn("Code", out)
 
 
+class FieldSelectorTest(unittest.TestCase):
+    DATA = {"ref": "RLY-12", "status": "working", "done": False, "owners": [{"name": "Ada"}], "spec": None}
+
+    def test_a_top_level_field_prints_bare(self):
+        self.assertEqual(relay.render_field(relay.select_field(self.DATA, "status")), "working")
+
+    def test_a_dotted_path_walks_into_lists_and_dicts(self):
+        self.assertEqual(relay.render_field(relay.select_field(self.DATA, "owners.0.name")), "Ada")
+
+    def test_a_bool_prints_lowercase_json_style(self):
+        self.assertEqual(relay.render_field(relay.select_field(self.DATA, "done")), "false")
+
+    def test_null_prints_as_empty_rather_than_the_word_None(self):
+        self.assertEqual(relay.render_field(relay.select_field(self.DATA, "spec")), "")
+
+    def test_a_container_still_prints_as_json(self):
+        self.assertEqual(
+            relay.render_field(relay.select_field(self.DATA, "owners")),
+            json.dumps([{"name": "Ada"}], indent=2),
+        )
+
+    def test_an_unresolvable_path_exits_non_zero(self):
+        with self.assertRaises(SystemExit) as cm, contextlib.redirect_stderr(io.StringIO()):
+            relay.select_field(self.DATA, "nope.deeper")
+        self.assertNotEqual(cm.exception.code, 0)
+
+    def test_emit_prints_only_the_field_when_asked(self):
+        args = argparse.Namespace(json=False, field="status")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            relay.emit(args, self.DATA, "human output")
+        self.assertEqual(buf.getvalue(), "working\n")
+
+    def test_emit_accepts_a_callable_human_renderer(self):
+        args = argparse.Namespace(json=False, field=None)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            relay.emit(args, self.DATA, lambda: print("rendered"))
+        self.assertEqual(buf.getvalue(), "rendered\n")
+
+    def test_every_json_command_accepts_field(self):
+        parser = relay.build_parser()
+        for argv in (["card", "RLY-1"], ["board"], ["why", "RLY-1"], ["runs", "RLY-1"], ["executors"], ["version"]):
+            args = parser.parse_args(argv + ["--field", "status"])
+            self.assertEqual(args.field, "status", f"{argv[0]} should accept --field")
+
+    def test_no_cli_command_bypasses_emit(self):
+        # The prerequisite the spec calls out: a command that prints json.dumps directly
+        # would make --field work on some commands and not others.
+        with open(RELAY_PATH, encoding="utf-8") as f:
+            source = f.read()
+        body = source.split("# ============================ CLI commands")[1]
+        self.assertNotIn("print(json.dumps(", body)
+
+
 if __name__ == "__main__":
     unittest.main()

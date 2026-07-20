@@ -15,6 +15,7 @@ Executor-local config: .relay/executor.json (worktree namespace + capacity)
   relay why REF [--json]      # why isn't this card moving? — one plain-language answer
   relay runs REF [--json]     # the card's runs + node executions, detail untruncated
   relay executors [--json]    # who is connected, their capacity, and the jobs they hold
+  relay version [--json]      # the git SHA the deployed app was built from
   relay comment REF TEXT      relay move REF STAGE        relay status REF STATUS
   relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF [Q] [--questions @file]
   relay own REF / release REF relay approve REF           relay reject REF NOTE
@@ -23,7 +24,8 @@ Executor-local config: .relay/executor.json (worktree namespace + capacity)
   relay attach REF FILE [--caption TEXT] [--json]
   relay tag REF [VALUE]       # set the card's tag (omit VALUE to clear)
 
-TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output.
+TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output;
+--field PATH prints one value bare (e.g. `relay card RLY-12 --field status`).
 """
 import argparse
 import base64
@@ -64,8 +66,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 5
-EXECUTOR_FINGERPRINT = "32e4b922088da2badb6f475a67fdda261ecc991b4398f358558d5fd34f1b6149"
+EXECUTOR_VERSION = 6
+EXECUTOR_FINGERPRINT = "82c45d17fdb447bf8ea4b46ae46ee82e091a011d106c9580e3bf4afaba299aa5"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -586,8 +588,63 @@ def format_executors(executors):
     return "\n".join(out) if out else "(no executors connected)"
 
 
+def format_board(b):
+    by_stage = {}
+    for c in b["cards"]:
+        by_stage.setdefault(c["stage_id"], []).append(c)
+    out = [f'{b["board"]["name"]} ({b["board"]["key"]})\n']
+    for s in b["stages"]:
+        out.append(f'{s["name"]} ({s["type"]})')
+        cards = by_stage.get(s["id"]) or []
+        out.extend("  " + card_line(c) for c in cards)
+        if not cards:
+            out.append("  (empty)")
+        out.append("")
+    return "\n".join(out)
+
+
+def select_field(data, path):
+    """Resolve a dotted path (`status`, `owners.0.name`) against decoded JSON. Dies
+    non-zero on an unresolvable path — a silent empty line would read as "the field is
+    empty", which is exactly the ambiguity this exists to remove."""
+    cur = data
+    for part in path.split("."):
+        if isinstance(cur, list):
+            try:
+                cur = cur[int(part)]
+            except (ValueError, IndexError):
+                die(f"--field: no such path: {path}")
+        elif isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            die(f"--field: no such path: {path}")
+    return cur
+
+
+def render_field(value):
+    """Bare value, no quotes or braces: the whole point is that reading one value needs no
+    piping into `python3 -c` or `jq`. Containers still print as JSON — there is no sensible
+    bare rendering of a list."""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, indent=2)
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
 def emit(args, data, human):
-    print(json.dumps(data, indent=2) if getattr(args, "json", False) else human)
+    """`human` is a string, or a zero-arg callable for renderers that print directly."""
+    field = getattr(args, "field", None)
+    if field:
+        print(render_field(select_field(data, field)))
+    elif getattr(args, "json", False):
+        print(json.dumps(data, indent=2))
+    elif callable(human):
+        human()
+    else:
+        print(human)
 
 
 # ============================ CLI commands ============================
@@ -595,32 +652,17 @@ def emit(args, data, human):
 def cmd_board(args):
     path = "/api/board?include_done=1" if getattr(args, "include_done", False) else "/api/board"
     b = api("GET", path)
-    if args.json:
-        return print(json.dumps(b, indent=2))
-    by_stage = {}
-    for c in b["cards"]:
-        by_stage.setdefault(c["stage_id"], []).append(c)
-    print(f'{b["board"]["name"]} ({b["board"]["key"]})\n')
-    for s in b["stages"]:
-        print(f'{s["name"]} ({s["type"]})')
-        for c in by_stage.get(s["id"], []) or []:
-            print("  " + card_line(c))
-        if not by_stage.get(s["id"]):
-            print("  (empty)")
-        print()
+    emit(args, b, format_board(b))
 
 
 def cmd_card(args):
     c = get_card(args.ref)
-    print(json.dumps(c, indent=2)) if args.json else print_card(c)
+    emit(args, c, lambda: print_card(c))
 
 
 def cmd_why(args):
     d = api("GET", f"/api/cards/{args.ref}/diagnosis")["data"]
-    if getattr(args, "json", False):
-        print(json.dumps(d, indent=2))
-    else:
-        print_why(d)
+    emit(args, d, lambda: print_why(d))
 
 
 def cmd_retry(args):
@@ -648,6 +690,11 @@ def cmd_executors(args):
     emit(args, executors, format_executors(executors))
 
 
+def cmd_version(args):
+    v = api("GET", "/api/version")
+    emit(args, v, f'{v.get("sha", "unknown")}  built {v.get("built_at", "unknown")}  (v{v.get("version", "?")})')
+
+
 def cmd_create(args):
     card = create_card(
         args.title,
@@ -655,7 +702,7 @@ def cmd_create(args):
         description=read_arg(args.description) if args.description is not None else None,
         tag=args.tag,
     )
-    print(json.dumps(card, indent=2)) if args.json else print_card(card)
+    emit(args, card, lambda: print_card(card))
 
 
 def _simple(fn):
@@ -1647,6 +1694,10 @@ def build_parser():
             sp.add_argument(a)
         if json_flag:
             sp.add_argument("--json", action="store_true")
+            # --field rides alongside --json on every JSON-returning command: a selector
+            # available on only some of them is the inconsistency this card exists to kill.
+            sp.add_argument("--field", metavar="PATH",
+                            help="print one dotted-path value (e.g. status, owners.0.name)")
         sp.set_defaults(func=fn)
         return sp
 
@@ -1658,6 +1709,7 @@ def build_parser():
     rt.add_argument("--at")
     add("runs", cmd_runs, "ref", json_flag=True)
     add("executors", cmd_executors, json_flag=True)
+    add("version", cmd_version, json_flag=True)
     oc = add("outcome", cmd_outcome, "outcome")
     oc.add_argument("--detail")
     c = add("create", cmd_create, "title", json_flag=True)
