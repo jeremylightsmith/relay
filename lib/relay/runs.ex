@@ -1178,18 +1178,29 @@ defmodule Relay.Runs do
     if active?, do: {:error, :active_run_exists}, else: :ok
   end
 
-  defp resolve_retry_target(run, _flow, nil) do
+  defp resolve_retry_target(run, flow, nil) do
     case last_executed_node(run) do
       nil -> {:error, {:unknown_node, "(none)"}}
-      node -> {:ok, node, {:reenter, nil}}
+      node -> validate_node_in_flow(node, flow, {:reenter, nil})
     end
   end
 
   defp resolve_retry_target(_run, flow, at) when is_binary(at) do
-    if Enum.any?(flow.nodes, &(&1.key == at)) do
-      {:ok, at, {:reenter_new_visit, nil}}
+    validate_node_in_flow(at, flow, {:reenter_new_visit, nil})
+  end
+
+  # Flow definitions are mutable in place (`Relay.Flows.update_flow/2`,
+  # `save_definition/2`), so a node key that existed when this run failed can
+  # be gone by the time a human retries. Both retry targets — the recovered
+  # last-executed node and an explicit `--at` — must be checked against the
+  # CURRENT flow, or a revived run can enter `RunServer` pointed at a node
+  # that no longer exists and crash asynchronously after `{:ok, run}` already
+  # reported success.
+  defp validate_node_in_flow(node, flow, mode) do
+    if Enum.any?(flow.nodes, &(&1.key == node)) do
+      {:ok, node, mode}
     else
-      {:error, {:unknown_node, at}}
+      {:error, {:unknown_node, node}}
     end
   end
 
@@ -1276,6 +1287,10 @@ defmodule Relay.Runs do
 
   def retry_refusal_message(:no_flow) do
     "This run's flow no longer exists, so there is no node to re-enter."
+  end
+
+  def retry_refusal_message({:unknown_node, "(none)"}) do
+    "This run has no recorded node executions, so there is no node to retry."
   end
 
   def retry_refusal_message({:unknown_node, key}) do

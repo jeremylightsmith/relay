@@ -88,6 +88,29 @@ defmodule Relay.Runs.RetryTest do
     assert {:error, {:unknown_node, "done"}} = Runs.retry_run(run, at: "done")
   end
 
+  test "the failed node was removed from the flow since: refused, queues nothing, run stays failed", ctx do
+    run = failed_run(ctx.card, ctx.flow)
+
+    flow = Relay.Flows.get_flow!(ctx.board, "spec")
+    kept_nodes = Enum.reject(flow.nodes, &(&1.key == "brainstorm"))
+    flow |> Ecto.Changeset.change() |> Ecto.Changeset.put_embed(:nodes, kept_nodes) |> Repo.update!()
+
+    assert {:error, {:unknown_node, "brainstorm"} = reason} = Runs.retry_run(run)
+    assert Runs.retry_refusal_code(reason) == "unknown_node"
+    assert Runs.retry_refusal_message(reason) =~ "brainstorm"
+    assert Runs.get_run!(run.id).status == :failed
+    refute_receive {:dispatched, _job}, 100
+  end
+
+  test "a failed run with no recorded executions is refused, naming the missing history", ctx do
+    run = insert(:run, card: ctx.card, status: :failed, current_node: nil, flow_key: ctx.flow.key, flow_id: ctx.flow.id)
+
+    assert {:error, {:unknown_node, "(none)"} = reason} = Runs.retry_run(run)
+    assert Runs.retry_refusal_code(reason) == "unknown_node"
+    assert Runs.retry_refusal_message(reason) =~ "no recorded node executions"
+    refute_receive {:dispatched, _job}, 100
+  end
+
   test "a running run is refused, naming its status", ctx do
     {:ok, run} = Runs.start_run(ctx.card, ctx.flow)
     assert_receive {:dispatched, %NodeJob{}}
