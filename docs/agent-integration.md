@@ -198,6 +198,26 @@ table above, runs each in an executor-owned git worktree, and reports a typed ou
   advertises at once. Worktrees for both classes live under the `exec-*` namespace
   (`exec-clean`, `exec-work-1`, …), auto-created.
 
+- **Test database per slot (RLY-213).** `exclusive` capacity above 1 means multiple Code runs
+  execute concurrently, each in its own `exec-work-N` worktree — and each now gets its own
+  Postgres test database too, so two runs' `mix test` invocations (including the `precommit`
+  gate) don't truncate each other's rows. `bin/relay` derives `MIX_TEST_PARTITION` from the
+  slot name (`partition_for`) and exports it for every shell/agent step: `exec-work-N` ->
+  partition `N`, the shared `exec-clean` -> partition `0`. `config/test.exs` already reads
+  `MIX_TEST_PARTITION` into the database name (`relay_test$MIX_TEST_PARTITION`), so `mix test`
+  creates the database on first use — but on a cold machine it's faster to provision every
+  slot's database up front, once per slot you plan to allow:
+
+  ```sh
+  MIX_ENV=test MIX_TEST_PARTITION=1 mix ecto.create
+  MIX_ENV=test MIX_TEST_PARTITION=2 mix ecto.create
+  ```
+
+  Repeat up to your configured `exclusive` capacity (`MIX_TEST_PARTITION=1` .. `N`), plus
+  `MIX_TEST_PARTITION=0` for the shared `exec-clean` slot — each creates its own
+  `relay_test<N>` database (`psql -l` to confirm). This is belt-and-braces for a cold machine;
+  `mix test` creates a missing partition's database on first use regardless.
+
 - **Running it:** `bin/relay execute` runs the claim/execute/report loop until Ctrl-C (which
   stops claiming and waits for in-flight jobs to finish). `--once` drains a single
   claim→execute→report cycle and exits (useful for scripting/testing). `--dry-run` claims and
