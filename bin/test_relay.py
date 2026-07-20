@@ -1317,7 +1317,7 @@ class RunNodeJobTest(unittest.TestCase):
 
     def test_a_detached_head_fails_the_node_without_running_it(self):
         ran = []
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None: ran.append(cmd) or True
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None: ran.append(cmd) or True
         self._git_head("", returncode=1)  # detached: symbolic-ref exits non-zero
 
         j = job("exclusive_shell", vars={"ref": "RLY-1", "branch": "feature-x"}, run="true")
@@ -1329,7 +1329,7 @@ class RunNodeJobTest(unittest.TestCase):
 
     def test_a_head_on_the_wrong_branch_fails(self):
         ran = []
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None: ran.append(cmd) or True
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None: ran.append(cmd) or True
         self._git_head("refs/heads/some-other-branch\n")
 
         j = job("exclusive_shell", vars={"ref": "RLY-1", "branch": "feature-x"}, run="true")
@@ -1343,7 +1343,7 @@ class RunNodeJobTest(unittest.TestCase):
         # The `branch` node is what ATTACHES HEAD, so it is the one node that must be allowed
         # to start detached — otherwise no run could ever begin.
         ran = []
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None: ran.append(cmd) or True
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None: ran.append(cmd) or True
         self._git_head("", returncode=1)
 
         j = job("exclusive_shell", vars={"ref": "RLY-1", "branch": "feature-x"},
@@ -1362,7 +1362,7 @@ class RunNodeJobTest(unittest.TestCase):
         broken guard shipped green and refused every Spec/Plan node on the live board.
         """
         ran = []
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None: ran.append(cmd) or True
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None: ran.append(cmd) or True
         self._git_head("", returncode=1)
 
         j = job("shared_clean_agent", node_type="shell", run="true")
@@ -1373,13 +1373,13 @@ class RunNodeJobTest(unittest.TestCase):
         self.assertEqual(len(ran), 1)
 
     def test_shell_job_reports_succeeded_with_git_sha(self):
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None: True
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None: True
         j = job(node_type="shell", run="true", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
         outcome, detail, sha, session = relay.run_node_job(j, "/tmp/wt", self.control)
         self.assertEqual((outcome, sha, session), ("succeeded", "deadbeef", None))
 
     def test_shell_job_failure_carries_the_output_tail(self):
-        def fail(cmd, cwd, tag="", sink=None, on_proc=None, partition=None):
+        def fail(cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None):
             if sink is not None:
                 sink.extend(["boom line"])
             return False
@@ -1391,7 +1391,7 @@ class RunNodeJobTest(unittest.TestCase):
 
     def test_agent_job_captures_session_and_uses_the_contract(self):
         relay._stream_claude_job = lambda prompt, cwd, tag="", session_id=None, \
-            outcome_path=None, on_proc=None, agent=None, partition=None: (True, "sess-9")
+            outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None: (True, "sess-9")
         relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-2"})
@@ -1404,7 +1404,7 @@ class RunNodeJobTest(unittest.TestCase):
         <name> reaches `claude -p` (RLY-139 / W13 Task 4)."""
         seen = {}
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None):
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None):
             seen["agent"] = agent
             return True, "sess-9"
 
@@ -1420,7 +1420,7 @@ class RunNodeJobTest(unittest.TestCase):
         before: agent=None, so _stream_claude_job appends no --agent flag."""
         seen = {}
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None):
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None):
             seen["agent"] = agent
             return True, "sess-9"
 
@@ -1437,7 +1437,7 @@ class RunNodeJobTest(unittest.TestCase):
         read the former or the agent loses its prior conversation and restarts cold."""
         seen = {}
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None):
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None):
             seen["session_id"] = session_id
             return True, "sess-9"
 
@@ -1454,7 +1454,7 @@ class RunNodeJobTest(unittest.TestCase):
         would otherwise leave the next job's reset_worktree() logging a spurious salvage."""
         seen = {}
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None):
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None):
             seen["stream_path"] = outcome_path
             self.assertTrue(os.path.exists(os.path.dirname(outcome_path)))
             return True, "sess-9"
@@ -1477,7 +1477,7 @@ class RunNodeJobTest(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.dirname(seen["stream_path"])))
 
     def test_git_sha_is_none_when_rev_parse_fails(self):
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None: True
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None: True
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "", "returncode": 128})()
         j = job(node_type="shell", run="true", id="nj-5", run_id="r1", vars={"ref": "RLY-5"})
@@ -1490,7 +1490,7 @@ class RunNodeJobTest(unittest.TestCase):
         are not server-sent vars at all, so run_node_job must supply them itself, the same
         way work()'s vars dict does for `relay watch`."""
         seen = {}
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None: (
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None: (
             seen.__setitem__("cmd", cmd) or True)
         old_url = os.environ.get("RELAY_URL")
         os.environ["RELAY_URL"] = "https://relay.example"
@@ -1512,7 +1512,7 @@ class RunNodeJobTest(unittest.TestCase):
         when absent; render()'s str(v) would splice the literal string "None" into the
         command if those keys weren't filtered out first."""
         seen = {}
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None: (
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None: (
             seen.__setitem__("cmd", cmd) or True)
         j = job(node_type="shell", run="echo {ref}", id="nj-7", run_id="r1",
                 vars={"ref": "RLY-7", "prior_detail": None, "findings": None})
@@ -1523,7 +1523,7 @@ class RunNodeJobTest(unittest.TestCase):
     def test_agent_job_expands_placeholders_in_the_prompt(self):
         seen = {}
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None):
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None):
             seen["prompt"] = prompt
             return True, "sess-1"
 
@@ -1541,11 +1541,11 @@ class RunNodeJobTest(unittest.TestCase):
         their exit code IS an unambiguous verdict."""
         seen = {}
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None):
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None):
             seen["prompt"] = prompt
             return True, "sess-1"
 
-        def fake_shell(cmd, cwd, tag, sink=None, on_proc=None, partition=None):
+        def fake_shell(cmd, cwd, tag, sink=None, on_proc=None, partition=None, scratch=None):
             seen["cmd"] = cmd
             return True
 
@@ -3006,7 +3006,7 @@ class TestPartitionTest(unittest.TestCase):
         seen = {}
         _saved = {k: getattr(relay, k) for k in ("_stream_shell",)}
         _run = relay.subprocess.run
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None: (
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None: (
             seen.__setitem__("partition", partition) or True)
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
@@ -3026,7 +3026,7 @@ class TestPartitionTest(unittest.TestCase):
         _run = relay.subprocess.run
 
         def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None,
-                        on_proc=None, agent=None, partition=None):
+                        on_proc=None, agent=None, partition=None, scratch=None):
             seen["partition"] = partition
             return True, "sess-1"
 
@@ -3064,6 +3064,132 @@ class TestPartitionTest(unittest.TestCase):
             for k, v in _saved.items():
                 setattr(relay, k, v)
         self.assertEqual(seen["partition"], "1")
+
+
+class ScratchPathTest(unittest.TestCase):
+    """RLY-214: per-card scratch lives in the worktree at tmp/<REF>/<node>.md, so two
+    concurrent runs cannot read each other's findings, and a restarted executor resolves
+    the SAME path for a re-queued job."""
+
+    def test_path_is_namespaced_by_ref_and_node(self):
+        p = relay.scratch_path("/wt", "RLY-177", "acceptance")
+        self.assertEqual(p, "/wt/tmp/RLY-177/acceptance.md")
+
+    def test_different_cards_never_collide(self):
+        a = relay.scratch_path("/wt", "RLY-177", "acceptance")
+        b = relay.scratch_path("/wt", "RLY-190", "acceptance")
+        self.assertNotEqual(a, b)
+
+    def test_different_nodes_of_one_card_never_collide(self):
+        a = relay.scratch_path("/wt", "RLY-177", "acceptance")
+        b = relay.scratch_path("/wt", "RLY-177", "smoke")
+        self.assertNotEqual(a, b)
+
+    def test_path_is_stable_across_calls(self):
+        # the restart guarantee: same (ref, node) -> same path, no time/pid/attempt component
+        first = relay.scratch_path("/wt", "RLY-177", "acceptance")
+        second = relay.scratch_path("/wt", "RLY-177", "acceptance")
+        self.assertEqual(first, second)
+
+    def test_shell_step_exports_the_scratch_path(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "env.txt")
+            ok = relay._stream_shell(
+                f"printf '%s' \"$RELAY_NODE_SCRATCH\" > {out}", cwd=d, scratch="/wt/tmp/X/n.md")
+            self.assertTrue(ok)
+            with open(out) as f:
+                self.assertEqual(f.read(), "/wt/tmp/X/n.md")
+
+    def test_shell_step_without_a_scratch_path_leaves_the_env_unset(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "env.txt")
+            ok = relay._stream_shell(
+                f"printf '%s' \"${{RELAY_NODE_SCRATCH-unset}}\" > {out}", cwd=d)
+            self.assertTrue(ok)
+            with open(out) as f:
+                self.assertEqual(f.read(), "unset")
+
+    def test_claude_job_sets_the_scratch_path_in_the_child_env(self):
+        seen = {}
+
+        def fake_popen(cmd, *a, **k):
+            seen["env"] = k.get("env", {})
+            return _FakePopen([], code=0)
+
+        _popen = relay.subprocess.Popen
+        relay.subprocess.Popen = fake_popen
+        try:
+            capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt", scratch="/wt/tmp/X/n.md")
+        finally:
+            relay.subprocess.Popen = _popen
+        self.assertEqual(seen["env"].get("RELAY_NODE_SCRATCH"), "/wt/tmp/X/n.md")
+
+    def test_claude_job_without_a_scratch_path_leaves_the_env_unset(self):
+        seen = {}
+
+        def fake_popen(cmd, *a, **k):
+            seen["env"] = k.get("env", {})
+            return _FakePopen([], code=0)
+
+        _popen = relay.subprocess.Popen
+        relay.subprocess.Popen = fake_popen
+        try:
+            capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        finally:
+            relay.subprocess.Popen = _popen
+        self.assertNotIn("RELAY_NODE_SCRATCH", seen["env"])
+
+    def test_outcome_contract_names_no_literal_tmp_path(self):
+        self.assertNotIn("/tmp/findings.md", relay.OUTCOME_CONTRACT)
+        self.assertIn("RELAY_NODE_SCRATCH", relay.OUTCOME_CONTRACT)
+
+    def test_run_node_job_threads_the_scratch_path_into_a_shell_step(self):
+        seen = {}
+        _saved = {k: getattr(relay, k) for k in ("_stream_shell",)}
+        _run = relay.subprocess.run
+        relay._stream_shell = (
+            lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None: (
+                seen.__setitem__("scratch", scratch) or True))
+        relay.subprocess.run = lambda *a, **k: type(
+            "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
+        try:
+            j = job(node_type="shell", run="true", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
+            with tempfile.TemporaryDirectory() as slot:
+                relay.run_node_job(j, slot, relay.JobControl())
+                expected = os.path.join(slot, "tmp", "RLY-1", "work.md")
+                self.assertEqual(seen["scratch"], expected)
+                self.assertTrue(os.path.isdir(os.path.dirname(expected)))
+        finally:
+            for k, v in _saved.items():
+                setattr(relay, k, v)
+            relay.subprocess.run = _run
+
+    def test_run_node_job_threads_the_scratch_path_into_an_agent_step(self):
+        seen = {}
+        _saved = {k: getattr(relay, k) for k in
+                  ("_stream_claude_job", "determine_agent_outcome")}
+        _run = relay.subprocess.run
+
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None,
+                        on_proc=None, agent=None, partition=None, scratch=None):
+            seen["scratch"] = scratch
+            return True, "sess-1"
+
+        relay._stream_claude_job = fake_stream
+        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        relay.subprocess.run = lambda *a, **k: type(
+            "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
+        try:
+            j = job(node_type="agent", run="do it", id="nj-2", run_id="r1",
+                    vars={"ref": "RLY-2"})
+            with tempfile.TemporaryDirectory() as slot:
+                relay.run_node_job(j, slot, relay.JobControl())
+                expected = os.path.join(slot, "tmp", "RLY-2", "work.md")
+                self.assertEqual(seen["scratch"], expected)
+        finally:
+            for k, v in _saved.items():
+                setattr(relay, k, v)
+            relay.subprocess.run = _run
 
 
 if __name__ == "__main__":
