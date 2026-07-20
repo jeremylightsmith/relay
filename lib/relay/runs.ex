@@ -1131,6 +1131,173 @@ defmodule Relay.Runs do
     {:ok, run}
   end
 
+  @doc """
+  Re-enters a terminally FAILED run inside its flow (RLY-189), at the node that
+  died — or at `opts[:at]` — with the run's branch, worktree, history and
+  executor pin intact.
+
+  This revives the dead run rather than starting a new one, because re-entry
+  (`RunServer.handle_continue({:reenter, _})`) never consults the flow's start
+  edge: the Code flow's destructive `branch` node is unreachable from here by
+  construction, so finished commits cannot be thrown away. `close_run!/3` nils
+  `current_node` on every terminal close, so the default target is recovered
+  from the run's most recent `NodeExecution`.
+
+  `opts[:at]` re-enters a DIFFERENT node on a fresh visit at attempt 1 (a
+  same-visit re-entry would corrupt per-visit retry accounting). It must name a
+  node in the flow; `"start"`/`"done"` are edge sentinels, not nodes, so they
+  are refused like any unknown key.
+
+  Every cap the engine consults is raised by `retries` (see
+  `Relay.Runs.Engine`), so a retry buys exactly one more move — never a reset.
+
+  Refusals: `{:not_failed, status}`, `:active_run_exists`, `:no_flow`,
+  `{:unknown_node, key}`, `{:executor_unavailable, name}`. Each pairs with a
+  token from `retry_refusal_code/1` and a sentence from
+  `retry_refusal_message/1`.
+  """
+  def retry_run(%Run{} = run, opts \\ []) do
+    with :ok <- check_retryable(run),
+         :ok <- check_no_active_run(run),
+         {:ok, flow} <- load_flow(run),
+         {:ok, node, mode} <- resolve_retry_target(run, flow, Keyword.get(opts, :at)),
+         :ok <- check_retry_executor(run, flow) do
+      revive_run(run, node, mode, Keyword.get(opts, :actor, :agent))
+    end
+  end
+
+  defp check_retryable(%Run{status: :failed}), do: :ok
+  defp check_retryable(%Run{status: status}), do: {:error, {:not_failed, status}}
+
+  # The partial unique index runs_one_active_per_card_index would reject the revival
+  # anyway; refusing here turns a constraint error into a sentence a human can act on.
+  defp check_no_active_run(%Run{card_id: card_id, id: id}) do
+    active? =
+      Repo.exists?(from r in Run, where: r.card_id == ^card_id and r.id != ^id and r.status in [:running, :parked])
+
+    if active?, do: {:error, :active_run_exists}, else: :ok
+  end
+
+  defp resolve_retry_target(run, _flow, nil) do
+    case last_executed_node(run) do
+      nil -> {:error, {:unknown_node, "(none)"}}
+      node -> {:ok, node, {:reenter, nil}}
+    end
+  end
+
+  defp resolve_retry_target(_run, flow, at) when is_binary(at) do
+    if Enum.any?(flow.nodes, &(&1.key == at)) do
+      {:ok, at, {:reenter_new_visit, nil}}
+    else
+      {:error, {:unknown_node, at}}
+    end
+  end
+
+  defp last_executed_node(%Run{id: run_id}) do
+    Repo.one(from e in NodeExecution, where: e.run_id == ^run_id, order_by: [desc: e.id], limit: 1, select: e.node_key)
+  end
+
+  # Worktrees are executor-side state Phoenix cannot see, so the one thing the server
+  # CAN check is whether the machine holding this run's worktree is still there. An
+  # exclusive run pinned to an absent executor would queue a job nothing can claim.
+  defp check_retry_executor(%Run{} = run, %Flow{isolation: :exclusive} = _flow) do
+    case Repo.one(from j in NodeJob, where: j.run_id == ^run.id, order_by: [desc: j.id], limit: 1) do
+      %NodeJob{state: state, executor_name: name} when state != :revoked and is_binary(name) ->
+        check_executor_live(run, name)
+
+      _unpinned ->
+        :ok
+    end
+  end
+
+  defp check_retry_executor(_run, _flow), do: :ok
+
+  defp check_executor_live(run, name) do
+    board_id = board_id_of(run)
+
+    case Repo.get_by(Executor, board_id: board_id, name: name) do
+      nil -> {:error, {:executor_unavailable, name}}
+      executor -> if executor_stale?(executor, now()), do: {:error, {:executor_unavailable, name}}, else: :ok
+    end
+  end
+
+  defp revive_run(run, node, mode, actor) do
+    changeset =
+      run
+      |> Changeset.change(
+        status: :running,
+        parked_reason: nil,
+        current_node: node,
+        failure_detail: nil,
+        finished_at: nil,
+        retries: run.retries + 1
+      )
+      |> Run.changeset()
+
+    case Repo.update(changeset) do
+      {:ok, run} ->
+        clear_card_failure(run, actor)
+        broadcast_runs(board_id_of(run), {:run_resumed, run})
+        {:ok, _pid} = ensure_server(run, mode)
+        {:ok, run}
+
+      {:error, %Changeset{}} ->
+        {:error, :active_run_exists}
+    end
+  end
+
+  # RLY-179 marks the card :failed when a run dies, and the scheduler skips :failed
+  # cards — so a retry that left the card alone would put the board in permanent
+  # disagreement with a live run.
+  defp clear_card_failure(%Run{card_id: card_id}, actor) do
+    card = Repo.get!(Card, card_id)
+    if card.status == :failed, do: {:ok, _card} = Cards.clear_failure(card, actor)
+    :ok
+  end
+
+  @doc "The machine token for a `retry_run/2` refusal — what tests and the API's `error.code` match on."
+  def retry_refusal_code({:not_failed, _status}), do: "not_failed"
+  def retry_refusal_code(:active_run_exists), do: "active_run_exists"
+  def retry_refusal_code(:no_flow), do: "no_flow"
+  def retry_refusal_code({:unknown_node, _key}), do: "unknown_node"
+  def retry_refusal_code({:executor_unavailable, _name}), do: "executor_unavailable"
+
+  @doc """
+  The human sentence for a `retry_run/2` refusal — what a person reads when
+  retry says no, so each one names the specific thing that blocked it.
+  """
+  def retry_refusal_message({:not_failed, status}) do
+    "This run is #{status}, not failed — only a failed run can be retried."
+  end
+
+  def retry_refusal_message(:active_run_exists) do
+    "This card already has an active run. Let it finish, or cancel it, before retrying."
+  end
+
+  def retry_refusal_message(:no_flow) do
+    "This run's flow no longer exists, so there is no node to re-enter."
+  end
+
+  def retry_refusal_message({:unknown_node, key}) do
+    "`#{key}` is not a node in this run's flow."
+  end
+
+  def retry_refusal_message({:executor_unavailable, name}) do
+    "This run is pinned to executor `#{name}`, which is not connected. Its worktree is " <>
+      "unreachable, so the retry would queue a job nothing can claim."
+  end
+
+  @doc """
+  The most recent run of `card`, whatever its status — the resolution behind
+  `POST /api/cards/:ref/retry`. Deliberately NOT "the most recent FAILED run":
+  handing `retry_run/2` the newest run is what lets it refuse a running one by
+  name (`{:not_failed, :running}`) instead of 404-ing as though the card had
+  never run.
+  """
+  def latest_run_for_retry(%Card{id: card_id}) do
+    Repo.one(from r in Run, where: r.card_id == ^card_id, order_by: [desc: r.id], limit: 1)
+  end
+
   @doc false
   def park_claimed(%Run{} = run) do
     stop_server(run)
