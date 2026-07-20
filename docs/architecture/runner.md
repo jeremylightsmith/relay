@@ -286,6 +286,21 @@ nothing else — every board-specific fact lives server-side as flow data.
   (default `exec`), `capacity: {shared_clean, exclusive}`, `poll_timeout`,
   `heartbeat_interval`. Missing file → sensible defaults; capacity is the field a developer
   routinely edits.
+- **Single-process guarantee (RLY-193).** Exactly one `relay execute` may run per `{server,
+  name}` (the pair the server keys an `Executor` on, `name` defaulting to hostname) and per
+  worktree namespace. At startup `cmd_execute` takes two exclusive, non-blocking `fcntl.flock`
+  locks — an *identity* lock under `$RELAY_EXECUTOR_LOCK_DIR` or `~/.relay/locks` keyed on
+  `sha256(RELAY_URL + "\0" + name)` (machine-wide and checkout-independent, so two clones on
+  one host still collide), and a *namespace* lock at `<ROOT>/.claude/worktrees/.<namespace>.lock`
+  — held for the life of the process by keeping their fds open. A second process for a
+  colliding identity or a shared worktree namespace refuses to start (`relay: already
+  running: …`, naming the holder's pid) rather than registering as the same executor. Because
+  `flock` is released by the kernel on process death, a crashed executor leaves no stale lock
+  (this is why a flock and not a pidfile). This is what makes the RLY-170 orphan recovery above
+  sound: that recovery requeues a job the executor no longer reports running, which is only
+  correct because a single identity can no longer be split across two live processes each
+  beating a partial `running` list. Two executors on one host are therefore unsupported;
+  multi-executor-per-host capacity would be a separate card doing host+namespace identity work.
 - `bin/relay init [--url URL] [--force] [--dry-run] [--no-self-update]` scaffolds a
   project from `GET /api/scaffold`. It needs a **URL but no API key**. Idempotent:
   unchanged files are reported, edited ones are diffed and skipped unless `--force`.

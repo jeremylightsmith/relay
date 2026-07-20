@@ -510,7 +510,7 @@ defmodule Relay.Runs do
   # min_executor_version/0 rather than re-deriving it. Raise it only when running the old
   # executor is genuinely worse than a stopped one — every executor below it is refused at
   # claim until a human restarts it.
-  @min_executor_version 1
+  @min_executor_version 13
 
   @doc "The minimum `bin/relay` EXECUTOR_VERSION this server will claim jobs to."
   def min_executor_version, do: @min_executor_version

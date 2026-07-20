@@ -82,6 +82,18 @@ defmodule Relay.RunsExecutorVersionTest do
     end
   end
 
+  describe "the floor raised by RLY-193" do
+    test "an executor on the last pre-flock build (v12) is refused work" do
+      # RLY-193 raised @min_executor_version to the flock build: an executor without the
+      # single-process startup lock corrupts worktrees under RLY-170 double-dispatch, so it
+      # is genuinely worse than a stopped one and must be refused (the AGENTS.md floor-raise
+      # rule). Pinned to >= 13 so a later EXECUTOR_VERSION bump that leaves the floor alone
+      # does not break this, while v12 stays the concrete build we now refuse.
+      assert Runs.min_executor_version() >= 13
+      assert Runs.executor_outdated?(%Schemas.Executor{version: 12})
+    end
+  end
+
   describe "the minimum the server requires" do
     test "is never higher than the EXECUTOR_VERSION this checkout's bin/relay declares" do
       # A server requiring a version its own repo cannot supply refuses EVERY executor, and
