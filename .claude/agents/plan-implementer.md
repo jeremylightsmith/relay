@@ -38,7 +38,10 @@ It's always OK to stop — bad work is worse than no work, and escalating is nev
 Escalate (status BLOCKED or NEEDS_CONTEXT) when the task needs an architectural decision with
 multiple valid approaches, needs code understanding you can't reach, or asks for restructuring
 the plan didn't anticipate. Say what's stuck, what you tried, and what would unblock you. Never
-silently ship work you doubt.
+silently ship work you doubt. When you need a human's call rather than just noting a status
+word, run the `needs-input <ref> --questions @<file>` command exactly as it appears in the
+outcome contract at the end of your prompt, then stop without declaring an outcome — that parks
+the run for a human.
 
 ## If a reviewer sent you back
 The message carries the findings. Address EVERY one in a single pass, then re-run the tests
