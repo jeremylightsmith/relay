@@ -62,8 +62,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 1
-EXECUTOR_FINGERPRINT = "d97464194a422dc787a7d7d7a3110562e568357047d14a651c298ea54a9b3e47"
+EXECUTOR_VERSION = 2
+EXECUTOR_FINGERPRINT = "c91ab99da0ee62fdc55d5950ca94ab9ab9d1cce489bc49c1b5c9d90138ce01fd"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1489,7 +1489,7 @@ def _self_update(url, cli_version):
     Only ever UPGRADES: pointing a checkout at an older deployment must not clobber
     that checkout's CLI. An unwritable target is reported, never fatal — a read-only
     install is still perfectly able to scaffold."""
-    if cli_version <= VERSION:
+    if cli_version <= EXECUTOR_VERSION:
         return None
     try:
         body = _fetch(url + "/install/relay")
@@ -1557,7 +1557,7 @@ def cmd_init(args):
             label = "skipped (differs)" if bucket == "skipped" else bucket
             print(f"  {len(paths)} {label}: {', '.join(sorted(paths))}")
     if updated:
-        print(f"  bin/relay updated: version {VERSION} → {updated} "
+        print(f"  bin/relay updated: version {EXECUTOR_VERSION} → {updated} "
               f"(re-run to use it)")
 
     print("\nStill needed (relay init cannot do these for you):")

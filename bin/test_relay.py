@@ -2502,7 +2502,7 @@ class InitTest(unittest.TestCase):
     def stub(self, cli_version=None, files=None, cli_body=b"NEW CLI\n"):
         doc = json.dumps({
             "scaffold_version": "0.1.0",
-            "cli_version": relay.VERSION if cli_version is None else cli_version,
+            "cli_version": relay.EXECUTOR_VERSION if cli_version is None else cli_version,
             "files": self.FILES if files is None else files,
         }).encode()
 
@@ -2602,16 +2602,16 @@ class InitTest(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.tmp, ".claude")))
 
     def test_self_update_fires_on_a_newer_server_version(self):
-        self.stub(cli_version=relay.VERSION + 1)
+        self.stub(cli_version=relay.EXECUTOR_VERSION + 1)
         out = capture(relay.cmd_init, self.args())
 
         with open(self.here) as f:
             self.assertEqual(f.read(), "NEW CLI\n")
-        self.assertIn(f"{relay.VERSION} → {relay.VERSION + 1}", out)
+        self.assertIn(f"{relay.EXECUTOR_VERSION} → {relay.EXECUTOR_VERSION + 1}", out)
         self.assertTrue(os.access(self.here, os.X_OK))
 
     def test_self_update_never_downgrades(self):
-        self.stub(cli_version=relay.VERSION - 1)
+        self.stub(cli_version=relay.EXECUTOR_VERSION - 1)
         capture_ret(relay.cmd_init, self.args())
 
         with open(self.here) as f:
@@ -2619,7 +2619,7 @@ class InitTest(unittest.TestCase):
         self.assertNotIn("http://board.test/install/relay", self.fetched)
 
     def test_no_self_update_suppresses_it(self):
-        self.stub(cli_version=relay.VERSION + 1)
+        self.stub(cli_version=relay.EXECUTOR_VERSION + 1)
         capture_ret(relay.cmd_init, self.args(no_self_update=True))
 
         with open(self.here) as f:

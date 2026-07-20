@@ -95,11 +95,16 @@ defmodule RelayWeb.ScaffoldController do
   @external_resource @cli_path
   @cli_source File.read!(@cli_path)
 
-  # The CLI's own VERSION constant is the single source of truth for `cli_version`;
-  # parsing it here means the two can never drift. A missing constant fails the build.
-  @cli_version (case Regex.run(~r/^VERSION = (\d+)/m, @cli_source) do
+  # The CLI's own EXECUTOR_VERSION is the single source of truth for `cli_version`; parsing it
+  # here means the two can never drift. A missing constant fails the build.
+  #
+  # RLY-181 originally declared its own `VERSION` for this. RLY-184 landed `EXECUTOR_VERSION`
+  # (with a fingerprint guard test that forces a bump on ANY change to bin/relay) for the same
+  # concept — "which build of this file is this". Two constants meaning the same thing, only one
+  # of them guarded, is a drift surface, so they were merged onto the guarded one.
+  @cli_version (case Regex.run(~r/^EXECUTOR_VERSION = (\d+)/m, @cli_source) do
                   [_, v] -> String.to_integer(v)
-                  nil -> raise "bin/relay has no `VERSION = <int>` constant (RLY-181)"
+                  nil -> raise "bin/relay has no `EXECUTOR_VERSION = <int>` constant (RLY-181/184)"
                 end)
 
   # Evaluated at compile time, so Mix is available; the value is baked into the release.

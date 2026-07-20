@@ -78,7 +78,7 @@ defmodule RelayWeb.ScaffoldControllerTest do
       body = response(conn, 200)
 
       assert body =~ "#!/usr/bin/env python3"
-      assert body =~ ~r/^VERSION = \d+/m
+      assert body =~ ~r/^EXECUTOR_VERSION = \d+/m
       assert [version] = get_resp_header(conn, "x-relay-cli-version")
       assert String.to_integer(version) > 0
     end
