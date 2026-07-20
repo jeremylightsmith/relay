@@ -125,6 +125,26 @@ sharing behavior.
   a run dispatches to one machine. A null `capabilities` on an executor is unknown, not
   missing — it is surfaced as its own caveat rather than a false "missing agent" alarm. Both
   seams are one-way, Runs → Flows, never the reverse.
+  **Retry (RLY-189):** `retry_run/2` revives a terminally `failed` run *in place* — status back
+  to `:running`, `current_node` recovered from the run's most recent `NodeExecution` (`close_run!/3`
+  nils it on every terminal close), `failure_detail`/`finished_at` cleared, `retries` incremented
+  — then `ensure_server(run, {:reenter, nil})`, exactly as `resume_run/2` does for a parked run.
+  `opts[:at]` re-enters a different node of the flow via the new `{:reenter_new_visit, nil}` start
+  mode: a FRESH visit at attempt 1, matching a real `{:transition, node}`, because re-entering a
+  node on its old visit number would corrupt per-visit retry accounting. `resume_session` is
+  always `nil` — the point is to run the node again with the failure in front of it, not to
+  continue the conversation that produced it, and every re-entry now passes the last failed
+  execution's detail forward as `findings`. `Relay.Cards.clear_failure/2` (the inverse of
+  `mark_failed/3`) puts the card back to `:working` so the board and the scheduler stop reading
+  a live run as dead.
+
+  **The retry allowance.** `runs.retries` is the one counter column on a schema that otherwise
+  derives everything, and it is deliberate: it counts HUMAN interventions, which leave no trace
+  in execution history. `engine_opts/1` feeds it to `Engine.decide/4` as `bonus:`, which is added
+  to EVERY cap the engine consults — node `max_retries`, edge `max_loops` (unlimited stays
+  unlimited), the breaker threshold, and the visit cap. So a retried run can always make exactly
+  one more move than it just did, and a retry that changes nothing dies again immediately. No
+  automatic loop can obtain an allowance, because only `retry_run/2` increments the counter.
 - **Cards** — the card lifecycle: create/edit/move/archive, status (`working`,
   `needs_input`, `failed`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject,
   needs-input questions. `failed` (RLY-179) is set only by `Relay.Cards.mark_failed/3` when a

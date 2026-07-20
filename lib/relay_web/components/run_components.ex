@@ -679,6 +679,7 @@ defmodule RelayWeb.RunComponents do
       </p>
       <pre style="background:oklch(0.20 0.02 255);color:oklch(0.94 0.006 255);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0 0 10px 0;"><%= @detail %></pre>
       <.failure_stats totals={@totals} />
+      <.retry_button />
     </div>
     """
   end
@@ -706,6 +707,7 @@ defmodule RelayWeb.RunComponents do
         style="background:oklch(0.20 0.02 255);color:oklch(0.94 0.006 255);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0 0 10px 0;"
       ><%= @detail %></pre>
       <.failure_stats :if={@totals} totals={@totals} />
+      <.retry_button />
     </div>
     """
   end
@@ -737,6 +739,28 @@ defmodule RelayWeb.RunComponents do
         </span>
       </div>
     </div>
+    """
+  end
+
+  # RLY-189 — the minimal Retry control on a terminally failed run's banner.
+  #
+  # Deliberately not designed: RLY-178 owns the human surface for run failure and
+  # recovery. This ships the smallest usable affordance so the feature is usable
+  # the day it merges. There is no `--at` picker — the CLI covers that case.
+  #
+  # The `:circuit` and `:failed` variants are mutually exclusive (`circuit_tripped?/1`
+  # gates them), so the shared `run-retry` DOM id is never duplicated on a page.
+  defp retry_button(assigns) do
+    ~H"""
+    <button
+      id="run-retry"
+      type="button"
+      class="btn btn-sm btn-primary"
+      phx-click="retry_run"
+      style="margin-top:10px;"
+    >
+      Retry
+    </button>
     """
   end
 

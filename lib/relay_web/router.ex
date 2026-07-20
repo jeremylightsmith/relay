@@ -191,6 +191,8 @@ defmodule RelayWeb.Router do
     post "/cards/:ref/needs-input", CardController, :needs_input
     post "/cards/:ref/approve", CardController, :approve
     post "/cards/:ref/reject", CardController, :reject
+    post "/cards/:ref/retry", RunController, :retry_card
+    post "/runs/:id/retry", RunController, :retry
     post "/node-jobs/claim", NodeJobController, :claim
     post "/node-jobs/heartbeat", NodeJobController, :heartbeat
     post "/node-jobs/:id/outcome", NodeJobController, :outcome
