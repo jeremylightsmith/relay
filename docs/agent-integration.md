@@ -176,6 +176,29 @@ and the run resumes, the server hands the same node back with `resume_session` s
 inserts `--resume <session_id>` into the `claude -p` argv, so the agent picks the conversation
 back up with its prior context intact rather than starting the node over from scratch.
 
+### The `RELAY_NODE_SCRATCH` contract
+
+Before running every node — agent **and** shell/gate alike — the executor sets
+`RELAY_NODE_SCRATCH` to `tmp/<REF>/<node>.md` inside the node's own worktree
+(`scratch_path` in `bin/relay`), and creates the directory. It is **one file per card per
+node**: the path derives only from `(ref, node)`, both already known from the claim payload,
+so it stays stable across retries of the same node and across an executor restart — a
+re-queued job resolves the exact same path and sees whatever the earlier attempt left there
+(repeated attempts therefore share a file; that is intended, not a leak). The directory lives
+inside the checkout but is covered by the root `.gitignore`, so it survives `reset_worktree`'s
+salvage/stash/clean (none of which touch ignored paths) without ever being committed.
+
+`OUTCOME_CONTRACT` points every agent node at it for `outcome failed --detail
+@$RELAY_NODE_SCRATCH`, and any skill or command that needs a second scratch file (e.g. a
+structured `--questions` payload for `needs-input`) writes it as a sibling in the same
+directory, `$(dirname "$RELAY_NODE_SCRATCH")/<name>.json`.
+
+**Agents must not invent an absolute path of their own** (a literal hand-picked location
+outside the worktree) for scratch output. RLY-177 is the incident this closes: multiple
+nodes/cards once shared one hard-coded location, so one run's findings silently clobbered or
+were read by another run entirely. `$RELAY_NODE_SCRATCH` is namespaced per (ref, node)
+precisely so that can't happen again.
+
 ### `relay execute` — the executor runner mode
 
 `bin/relay execute` is **the runner mode**: it claims node-jobs from the endpoints in the

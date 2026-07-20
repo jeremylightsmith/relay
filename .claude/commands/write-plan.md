@@ -157,9 +157,13 @@ the loop. The node's `run` is a bare `/write-plan {ref}`, so every operational r
   path to stop and tell the user. Headless there is no user to tell, and a silent stop reads to
   the engine as `succeeded` — the card would land on `Plan:Done` carrying no plan, and the Code
   flow would then fail two stages downstream on `test -s plan.md` with a confusing error. So if
-  the card's `spec` field is empty or missing, park the card where the problem actually is:
+  the card's `spec` field is empty or missing, park the card where the problem actually is,
+  writing the questions to a scratch file under `$RELAY_NODE_SCRATCH`'s directory (never an
+  invented `/tmp` path — see
+  [`docs/agent-integration.md`](../../docs/agent-integration.md#the-relay_node_scratch-contract)):
 
-      cat > /tmp/questions.json <<'JSON'
+      questions_file="$(dirname "$RELAY_NODE_SCRATCH")/questions.json"
+      cat > "$questions_file" <<'JSON'
       [
         {
           "prompt": "**No approved spec.** This card has no `spec`, so there is nothing to plan from. How should I proceed?",
@@ -171,7 +175,7 @@ the loop. The node's `run` is a bare `/write-plan {ref}`, so every operational r
         }
       ]
       JSON
-      ./bin/relay needs-input <ref> --questions @/tmp/questions.json
+      ./bin/relay needs-input <ref> --questions @"$questions_file"
 
   Then stop. **Always the structured `--questions @<tmpfile>` JSON-array form** of
   `{prompt, options, allow_text}` objects — never a hand-numbered prose string. The drawer

@@ -50,7 +50,8 @@ report that declares success routes onward as success, and one that declares not
 reported as failed.
 
 ```bash
-cat > /tmp/escalation.json <<'JSON'
+escalation_file="$(dirname "$RELAY_NODE_SCRATCH")/escalation.json"
+cat > "$escalation_file" <<'JSON'
 [
   {
     "prompt": "**Stuck on <task name>.** <what is stuck, in one line>.\n\nWhat I tried: <what you did>.\n\nWhat would unblock me: <the decision or context you need>.",

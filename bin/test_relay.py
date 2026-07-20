@@ -15,7 +15,9 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -3190,6 +3192,37 @@ class ScratchPathTest(unittest.TestCase):
             for k, v in _saved.items():
                 setattr(relay, k, v)
             relay.subprocess.run = _run
+
+
+class NoHardcodedScratchPathTest(unittest.TestCase):
+    """RLY-214 Task 2: no doc, skill, or agent-definition file may hard-code an absolute /tmp
+    path an agent could copy-paste into a command. Every node already gets $RELAY_NODE_SCRATCH,
+    a real path unique to (ref, node); a literal `/tmp/whatever.json` an agent copies instead
+    collides across every card and node that runs the same instructions — the RLY-177 incident
+    this card fixes. Mirrors the sweep plan.md's Task 2 prescribes (`grep -rn "/tmp/" .claude/
+    docs/ bin/relay`), restricted to files git actually tracks so untracked worktree/scratch
+    clutter sitting on disk can't fail the suite. A bare `/tmp/` with nothing path-like after it
+    (e.g. prose explaining the directory is gitignored) isn't a copyable path and doesn't count.
+    """
+
+    HARD_CODED_TMP_PATH = re.compile(r"/tmp/[A-Za-z0-9_.-]")
+
+    def test_no_hardcoded_tmp_paths_survive_the_sweep(self):
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        tracked = subprocess.run(
+            ["git", "ls-files", "--", ".claude", "docs", "bin/relay"],
+            cwd=repo_root, capture_output=True, text=True, check=True,
+        ).stdout.splitlines()
+        hits = []
+        for rel in tracked:
+            with open(os.path.join(repo_root, rel), encoding="utf-8") as f:
+                for lineno, line in enumerate(f, start=1):
+                    if self.HARD_CODED_TMP_PATH.search(line):
+                        hits.append(f"{rel}:{lineno}: {line.strip()}")
+        self.assertEqual(
+            hits, [],
+            "hard-coded /tmp path(s) an agent could copy-paste — point at "
+            "$RELAY_NODE_SCRATCH's directory instead:\n" + "\n".join(hits))
 
 
 if __name__ == "__main__":
