@@ -66,30 +66,16 @@ defmodule RelayWeb.Api.BoardController do
 
   defp maybe_advertise_executor(board, %{"capacity" => capacity, "name" => name} = params)
        when is_map(capacity) and is_binary(name) and name != "" do
+    # RLY-201: the raw client map goes straight to the domain. Runs.Capacity.put/2 and
+    # Runs.upsert_executor/2 both normalize through Relay.Runs.Capacity.normalize/1, so
+    # the ETS store and the executor row cannot disagree about a malformed payload.
     case Runs.upsert_executor(board, params) do
-      {:ok, executor} -> Runs.Capacity.put(executor.id, atomize_capacity(capacity))
+      {:ok, executor} -> Runs.Capacity.put(executor.id, capacity)
       _error -> :ok
     end
   end
 
   defp maybe_advertise_executor(_board, _params), do: :ok
-
-  # JSON delivers string-keyed classes; Relay.Runs.Capacity keys on atoms. Only the
-  # two known isolation classes cross over; anything else is dropped (never String.to_atom
-  # on request data — memory-leak risk).
-  defp atomize_capacity(capacity) do
-    %{
-      shared_clean: capacity_int(capacity, "shared_clean"),
-      exclusive: capacity_int(capacity, "exclusive")
-    }
-  end
-
-  defp capacity_int(capacity, key) do
-    case Map.get(capacity, key) do
-      n when is_integer(n) and n >= 0 -> n
-      _ -> 0
-    end
-  end
 
   # RLY-67: the board index drops the top-level Done column unless ?include_done is set.
   defp index_cards(board, stages, params) do

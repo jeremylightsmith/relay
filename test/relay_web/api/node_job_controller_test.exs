@@ -321,6 +321,26 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert Capacity.snapshot()[executor.id] == %{shared_clean: 3, exclusive: 1}
     end
 
+    test "a beat with an unknown class and a garbage value degrades instead of 500ing",
+         %{conn: conn, board: board} do
+      # RLY-201: atomize_capacity/1 called String.to_existing_atom/1 on client keys, so
+      # {"gpu": 1} raised ArgumentError → 500 on the executor's liveness path.
+      Capacity.reset()
+
+      conn =
+        post(conn, ~p"/api/node-jobs/heartbeat", %{
+          "executor" => %{"name" => "exec-junk", "host" => "box"},
+          "capacity" => %{"gpu" => 1, "shared_clean" => "lots", "exclusive" => 2},
+          "running" => []
+        })
+
+      assert %{"revoked" => []} = json_response(conn, 200)
+
+      executor = Relay.Repo.get_by!(Schemas.Executor, board_id: board.id, name: "exec-junk")
+      assert Capacity.snapshot()[executor.id] == %{shared_clean: 0, exclusive: 2}
+      assert executor.capacity == %{"shared_clean" => 0, "exclusive" => 2}
+    end
+
     test "a job the executor still holds is NOT revoked", %{conn: conn, board: board} do
       flow = four_outcome_flow(board)
       {run, _job} = start_queued_job(board, flow)

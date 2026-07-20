@@ -152,20 +152,14 @@ defmodule RelayWeb.Api.NodeJobController do
     })
   end
 
+  # RLY-201: hand the raw client map straight to the domain. Runs.Capacity.put/2
+  # normalizes (unknown classes dropped, bad values zeroed) — the controller must not
+  # shape capacity itself, and must never atomize request keys.
   defp advertise_capacity(executor, capacity) when is_map(capacity) do
-    Runs.Capacity.put(executor.id, atomize_capacity(capacity))
+    Runs.Capacity.put(executor.id, capacity)
   end
 
   defp advertise_capacity(_executor, _capacity), do: :ok
-
-  defp atomize_capacity(capacity) do
-    Map.new(capacity, fn
-      {"shared_clean", n} -> {:shared_clean, n}
-      {"exclusive", n} -> {:exclusive, n}
-      {k, n} when is_binary(k) -> {String.to_existing_atom(k), n}
-      pair -> pair
-    end)
-  end
 
   @doc """
   Reports a node-job outcome, completing the job and waking the engine to route
