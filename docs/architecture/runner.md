@@ -254,6 +254,13 @@ nothing else — every board-specific fact lives server-side as flow data.
   jobs get a slot from a fixed `exec-work-1..N` pool, bound to a run from its first job
   until that run reaches a terminal `run_state` — the reset happens only on that first job,
   since a run's later nodes build on the diff its earlier nodes left in the worktree.
+- **Per-node scratch (RLY-214).** Alongside the worktree itself, every node gets
+  `RELAY_NODE_SCRATCH` (`scratch_path` in `bin/relay`): `tmp/<REF>/<node>.md` inside that same
+  worktree, keyed only on `(ref, node)` so a re-queued job after an executor restart resolves
+  the identical path. It sits under the checkout's own `.gitignore`, so it survives
+  `reset_worktree`'s salvage/stash/clean untouched and never gets committed. See
+  [`../agent-integration.md`](../agent-integration.md#the-relay_node_scratch-contract) for the
+  full contract, including why agents must not invent their own scratch path (RLY-177).
 - **Test database per slot (RLY-213).** Worktree isolation keeps two concurrent runs' files
   apart, but `mix test` for both would otherwise hit the same Postgres database — Ecto's SQL
   sandbox only isolates concurrent tests *within* one BEAM, not across two OS processes.

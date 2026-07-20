@@ -142,10 +142,13 @@ changes only *how* you deliver them, not *whether* you ask.
 
 - **If you have questions, ask them.** Collect *all* of them into a **single**
   `needs-input` call carrying a **structured** question array, then STOP. Do not
-  guess-and-write a spec when real questions remain. Write the array to a temp JSON file
+  guess-and-write a spec when real questions remain. Write the array to a scratch JSON file
+  under `$RELAY_NODE_SCRATCH`'s directory (never an invented `/tmp` path — see
+  [`docs/agent-integration.md`](../../../docs/agent-integration.md#the-relay_node_scratch-contract))
   and pass it with `--questions`:
 
-      cat > /tmp/questions.json <<'JSON'
+      questions_file="$(dirname "$RELAY_NODE_SCRATCH")/questions.json"
+      cat > "$questions_file" <<'JSON'
       [
         {
           "prompt": "**<Subject of the decision>.** <The question, stated plainly.>",
@@ -162,7 +165,7 @@ changes only *how* you deliver them, not *whether* you ask.
         }
       ]
       JSON
-      ./bin/relay needs-input <ref> --questions @/tmp/questions.json
+      ./bin/relay needs-input <ref> --questions @"$questions_file"
 
   The array **is** the batch — the drawer paginates it into a one-question-at-a-time
   stepper, so **never** hand-number questions into one big string. Prose gives the human
