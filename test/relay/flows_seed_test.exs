@@ -71,8 +71,8 @@ defmodule Relay.FlowsSeedTest do
     assert [%{key: "write_plan", type: :agent, run: "/write-plan {ref}", max_retries: 1}] = plan.nodes
 
     code = Flows.get_flow(ctx.board, "code")
-    assert length(code.nodes) == 13
-    assert length(code.edges) == 21
+    assert length(code.nodes) == 18
+    assert length(code.edges) == 30
 
     # The next_task grep-gate is gone: "which task is next" is engine-derived now.
     refute Enum.any?(code.nodes, &(&1.key == "next_task"))
@@ -93,7 +93,7 @@ defmodule Relay.FlowsSeedTest do
     assert %{to: "implement", when: :foreach_remaining} =
              Enum.find(code.edges, &(&1.from == "quality_review" and &1.when == :foreach_remaining))
 
-    assert %{to: "precommit", when: :foreach_exhausted} =
+    assert %{to: "sync", when: :foreach_exhausted} =
              Enum.find(code.edges, &(&1.from == "quality_review" and &1.when == :foreach_exhausted))
   end
 

@@ -18,7 +18,11 @@ defmodule Relay.Flows.DefaultLibraryTest do
     {"code", "smoke_fix"} => "A fixer that cannot fix what the smoke run proved broken has nothing left to try.",
     {"code", "acceptance_fix"} => "A fixer that cannot fix the failing criteria has nothing left to try.",
     {"code", "post"} =>
-      "Posting the checklist is the last step before merge; a failure there needs a human, not another node."
+      "Posting the checklist is the last step before merge; a failure there needs a human, not another node.",
+    {"code", "sync_fix"} =>
+      "A rebaser that can neither resolve the conflict nor get a human answer (it parks via needs-input) has nothing left to try.",
+    {"code", "resync_fix"} =>
+      "Same as sync_fix: the pre-merge rebaser parks via needs-input; a hard failure there ends the run for a human."
   }
 
   test "every agent/gate node either has an outgoing :failed edge or is a documented terminus" do
@@ -47,6 +51,67 @@ defmodule Relay.Flows.DefaultLibraryTest do
   test "every allowlisted terminus states a reason" do
     for {key, reason} <- @intentional_termini do
       assert is_binary(reason) and String.trim(reason) != "", "no reason given for #{inspect(key)}"
+    end
+  end
+
+  describe "code flow sync points (RLY-192)" do
+    defp code_flow, do: Enum.find(DefaultLibrary.all(), &(&1.key == "code"))
+    defp cf_node(flow, key), do: Enum.find(flow.nodes, &(&1.key == key))
+
+    defp edge?(flow, from, to, on, guard \\ nil) do
+      Enum.any?(flow.edges, fn e ->
+        e.from == from and e.to == to and Map.get(e, :on) == on and Map.get(e, :when) == guard
+      end)
+    end
+
+    test "sync / resync are identical cheap :shell rebases that abort before handing over" do
+      flow = code_flow()
+      rebase = "git fetch origin --prune && { git rebase origin/main || { git rebase --abort; exit 1; }; }"
+
+      for key <- ~w(sync resync) do
+        n = cf_node(flow, key)
+        assert n.type == :shell
+        assert n.run == rebase
+      end
+    end
+
+    test "sync_fix / resync_fix are :agent nodes running the rebaser on sonnet" do
+      flow = code_flow()
+
+      for key <- ~w(sync_fix resync_fix) do
+        n = cf_node(flow, key)
+        assert n.type == :agent
+        assert n.agent == "rebaser"
+        assert n.model == "sonnet"
+      end
+    end
+
+    test "reverify is a :gate running mix precommit" do
+      n = cf_node(code_flow(), "reverify")
+      assert n.type == :gate
+      assert n.run == "mix precommit"
+    end
+
+    test "sync point A replaces quality_review → precommit" do
+      flow = code_flow()
+      refute edge?(flow, "quality_review", "precommit", :succeeded, :foreach_exhausted)
+      assert edge?(flow, "quality_review", "sync", :succeeded, :foreach_exhausted)
+      assert edge?(flow, "sync", "precommit", :succeeded)
+      assert edge?(flow, "sync", "sync_fix", :failed)
+      assert edge?(flow, "sync_fix", "precommit", :succeeded)
+    end
+
+    test "sync point B sits between post and merge, gated by reverify, and merge can retry" do
+      flow = code_flow()
+      refute edge?(flow, "post", "merge", :succeeded)
+      assert edge?(flow, "post", "resync", :succeeded)
+      assert edge?(flow, "resync", "reverify", :succeeded)
+      assert edge?(flow, "resync", "resync_fix", :failed)
+      assert edge?(flow, "resync_fix", "reverify", :succeeded)
+      assert edge?(flow, "reverify", "resync_fix", :failed)
+      assert edge?(flow, "reverify", "merge", :succeeded)
+      assert edge?(flow, "merge", "done", :succeeded)
+      assert edge?(flow, "merge", "resync", :failed)
     end
   end
 end

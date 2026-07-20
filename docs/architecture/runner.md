@@ -30,9 +30,22 @@ flowchart LR
     pre -- succeeded --> smoke["agent: smoke test"]
     smoke -- needs_input --> human{{"human answers<br/>(implicit pause — card blocked)"}}
     human --> smoke
-    smoke -- succeeded --> merge["shell: push · PR · squash-merge"]
+    smoke -- succeeded --> acceptance["agent: acceptance"]
+    acceptance -- succeeded --> post["agent: post checklist"]
+    post -- succeeded --> resync["shell: rebase onto origin/main"]
+    resync -- succeeded --> reverify{"gate: mix precommit"}
+    resync -- failed --> resync_fix["agent: rebaser (parks on semantic conflict)"]
+    resync_fix -- succeeded --> reverify
+    reverify -- succeeded --> merge["shell: push · PR · squash-merge"]
+    reverify -- failed --> resync_fix
     merge -- succeeded --> done([done])
+    merge -- failed --> resync
 ```
+
+A run rebases onto `origin/main` twice — once before the expensive review/smoke/acceptance
+tail and once immediately before `merge`, each followed by `mix precommit` — so a busy board
+moving `main` under a long run no longer strands the work at `merge` (RLY-192); real conflicts
+route to the `rebaser` agent, which parks for a human on a semantic conflict.
 
 A card in any AI-enabled stage is dispatched by `Relay.Runs.Scheduler` (folding over every
 enabled `Flow` on the board, rightmost `works_in` stage position first) straight to the

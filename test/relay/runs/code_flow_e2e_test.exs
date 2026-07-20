@@ -131,7 +131,9 @@ defmodule Relay.Runs.CodeFlowE2ETest do
 
       claimed = drive(conn, %{})
 
-      # branch, 3 × (implement, spec_review, quality_review), then the tail.
+      # branch, 3 × (implement, spec_review, quality_review), then the tail —
+      # including the two RLY-192 sync points (sync before precommit, resync +
+      # reverify before merge).
       assert Enum.map(claimed, & &1["node_id"]) == [
                "branch",
                "implement",
@@ -143,11 +145,14 @@ defmodule Relay.Runs.CodeFlowE2ETest do
                "implement",
                "spec_review",
                "quality_review",
+               "sync",
                "precommit",
                "final_review",
                "smoke",
                "acceptance",
                "post",
+               "resync",
+               "reverify",
                "merge"
              ]
 
@@ -172,11 +177,14 @@ defmodule Relay.Runs.CodeFlowE2ETest do
                {"implement", Enum.at(ids, 2)},
                {"spec_review", Enum.at(ids, 2)},
                {"quality_review", Enum.at(ids, 2)},
+               {"sync", nil},
                {"precommit", nil},
                {"final_review", nil},
                {"smoke", nil},
                {"acceptance", nil},
                {"post", nil},
+               {"resync", nil},
+               {"reverify", nil},
                {"merge", nil}
              ]
 
@@ -289,7 +297,7 @@ defmodule Relay.Runs.CodeFlowE2ETest do
 
       # Walk the single iteration by hand up to the gate, so the assertion below
       # happens WHILE precommit is red rather than after final_fix has healed it.
-      for node <- ["branch", "implement", "spec_review", "quality_review"] do
+      for node <- ["branch", "implement", "spec_review", "quality_review", "sync"] do
         body = Exec.claim(conn, @executor_name, @capacity)
         assert body["node_id"] == node
         Exec.outcome(conn, body["id"], %{"outcome" => "succeeded", "detail" => "ok"})

@@ -1,7 +1,10 @@
 // Default flow: Code — replaces relay_config.json's "Code" entry AND the inside
 // of execute-plan.js (its 9 phases become nodes here). Cut over by RLY-139 (W13):
-// 13 nodes / 21 edges, `implement` is a foreach loop head, and quality_review's
+// 18 nodes / 30 edges, `implement` is a foreach loop head, and quality_review's
 // two guarded edges are what the next_task gate was faking. Model tiers preserved.
+// RLY-192 added two rebase sync points (`sync`+`sync_fix` before `precommit`,
+// `resync`+`resync_fix`+`reverify` before `merge`) so a busy board's `main`
+// moving under a long run no longer strands the work at `merge`.
 {
   "key": "code",
   "trigger": { "from": "Plan:Done", "stage": "Code", "done": "Review" },
@@ -35,6 +38,17 @@
       "type": "agent", "model": "opus", "agent": "quality-reviewer",
       "run": "Judge whether the change is well-built: clean, conventional, meaningfully tested."
     },
+    // RLY-192 sync point A: a cheap rebase onto origin/main before the expensive
+    // review/smoke/acceptance tail. Aborts a conflicted rebase before exiting
+    // nonzero so the branch is left clean and attached (RLY-166).
+    "sync": {
+      "type": "shell",
+      "run": "git fetch origin --prune && { git rebase origin/main || { git rebase --abort; exit 1; }; }"
+    },
+    "sync_fix": {
+      "type": "agent", "model": "sonnet", "agent": "rebaser",
+      "run": "Bring this branch onto current origin/main with `mix precommit` green: resolve any rebase conflict preserving both intents, and fix breakage the rebase caused. Escalate with needs-input rather than guessing when the resolution needs human judgement."
+    },
     // Today this is a haiku agent (execute-plan's "Final check"); a gate needs no agent.
     "precommit": { "type": "gate", "run": "mix precommit" },
     "final_review": {
@@ -65,6 +79,19 @@
       "type": "agent", "model": "sonnet",
       "run": "Post the acceptance checklist and smoke screenshots to card {ref} as one comment."
     },
+    // RLY-192 sync point B: rebase once more immediately before merge, gated by
+    // `reverify` (mix precommit again — two green branches don't always merge
+    // into a green branch), so a busy board moving `main` under a long run
+    // doesn't strand the work at `merge`.
+    "resync": {
+      "type": "shell",
+      "run": "git fetch origin --prune && { git rebase origin/main || { git rebase --abort; exit 1; }; }"
+    },
+    "resync_fix": {
+      "type": "agent", "model": "sonnet", "agent": "rebaser",
+      "run": "Bring this branch onto current origin/main with `mix precommit` green: resolve any rebase conflict preserving both intents, and fix breakage the rebase caused. Escalate with needs-input rather than guessing when the resolution needs human judgement."
+    },
+    "reverify": { "type": "gate", "run": "mix precommit" },
     // Replaces relay_config's four trailing shell steps AND tmp/exec-plan-status:
     // this node is simply unreachable unless every gate above routed `succeeded`.
     "merge": {
@@ -80,7 +107,10 @@
     { "from": "spec_review",    "to": "quality_review", "on": "succeeded" },
     { "from": "quality_review", "to": "implement",      "on": "failed", "max_loops": 3 },
     { "from": "quality_review", "to": "implement",      "on": "succeeded", "when": "foreach_remaining" },
-    { "from": "quality_review", "to": "precommit",      "on": "succeeded", "when": "foreach_exhausted" },
+    { "from": "quality_review", "to": "sync",           "on": "succeeded", "when": "foreach_exhausted" },
+    { "from": "sync",           "to": "precommit",      "on": "succeeded" },
+    { "from": "sync",           "to": "sync_fix",       "on": "failed" },
+    { "from": "sync_fix",       "to": "precommit",      "on": "succeeded" },
     { "from": "precommit",      "to": "final_fix",      "on": "failed", "max_loops": 2 },
     { "from": "precommit",      "to": "final_review",   "on": "succeeded" },
     { "from": "final_review",   "to": "final_fix",      "on": "failed", "max_loops": 2 },
@@ -92,7 +122,13 @@
     { "from": "acceptance",     "to": "acceptance_fix", "on": "failed", "max_loops": 2 },
     { "from": "acceptance_fix", "to": "acceptance",     "on": "succeeded" },
     { "from": "acceptance",     "to": "post",           "on": "succeeded" },
-    { "from": "post",           "to": "merge",          "on": "succeeded" },
-    { "from": "merge",          "to": "done",           "on": "succeeded" }
+    { "from": "post",           "to": "resync",         "on": "succeeded" },
+    { "from": "resync",         "to": "reverify",       "on": "succeeded" },
+    { "from": "resync",         "to": "resync_fix",     "on": "failed" },
+    { "from": "resync_fix",     "to": "reverify",       "on": "succeeded" },
+    { "from": "reverify",       "to": "resync_fix",     "on": "failed", "max_loops": 2 },
+    { "from": "reverify",       "to": "merge",          "on": "succeeded" },
+    { "from": "merge",          "to": "done",           "on": "succeeded" },
+    { "from": "merge",          "to": "resync",         "on": "failed", "max_loops": 2 }
   ]
 }

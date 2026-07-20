@@ -19,14 +19,15 @@ defmodule RelayWeb.FlowLayoutTest do
 
       # spine = branch → implement → ... following :succeeded edges, continuing
       # through quality_review's foreach_exhausted edge rather than looping
-      # back via its foreach_remaining edge — 6 nodes fill row 0 exactly.
+      # back via its foreach_remaining edge — 6 nodes fill row 0 exactly
+      # (RLY-192 inserts `sync` immediately before `precommit`).
       assert {0, 0} = cell(pos["branch"])
       assert {0, 1} = cell(pos["implement"])
-      assert {0, 4} = cell(pos["precommit"])
-      assert {0, 5} = cell(pos["final_review"])
-      # row 1 snakes back right→left: smoke sits at the far right (col 5)
-      assert {1, 5} = cell(pos["smoke"])
-      assert {1, _} = cell(pos["merge"])
+      assert {0, 5} = cell(pos["precommit"])
+      assert {1, 5} = cell(pos["final_review"])
+      # row 1 snakes back right→left: final_review sits at the far right (col 5)
+      assert {1, 4} = cell(pos["smoke"])
+      assert {2, _} = cell(pos["merge"])
     end
 
     test "fix nodes hang in a row below the spine, under their reviewer's column" do

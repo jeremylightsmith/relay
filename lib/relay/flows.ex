@@ -24,6 +24,8 @@ defmodule Relay.Flows do
   alias Schemas.FlowVersion
   alias Schemas.Stage
 
+  require Logger
+
   @trigger_fields [:pulls_from_stage_id, :works_in_stage_id, :lands_on_stage_id]
 
   @doc "The board's flows in stable `key` order, trigger stages preloaded."
@@ -305,6 +307,54 @@ defmodule Relay.Flows do
     end
   end
 
+  @doc """
+  Re-syncs every board's library-key flows to the CURRENT default library, so a library edit
+  (e.g. RLY-192's new sync nodes) reaches boards that already exist — not just newly created ones.
+  Called at deploy from `Relay.Release.migrate/0` and by `mix relay.flows.sync_defaults`.
+
+  A flow is upgraded only when it is **library-managed**, detected as `version == 1`: seeding
+  creates flows at v1 and the only path that bumps a flow past 1 is a human editing it in
+  Settings › Flows (`save_definition/2`). So `version > 1` means hand-edited — its edits are
+  preserved (skipped). A v1 flow already identical to the library is left untouched (unchanged).
+
+  Crucially the upgrade KEEPS the flow at version 1 (it does not route through `save_definition/2`,
+  which would bump to v2) so a *future* library edit still finds it at v1 and upgrades it again;
+  the v1 snapshot is refreshed in place to preserve the per-version snapshot invariant. Runs read
+  the live flow row (RLY-152), so overwriting it is what reaches new runs.
+
+  Returns and logs `%{upgraded: keys, skipped: keys, unchanged: keys}` where each key is a
+  `{board_id, flow_key}` tuple.
+  """
+  def sync_defaults! do
+    library = Map.new(DefaultLibrary.all(), &{&1.key, &1})
+    flows = Repo.all(from f in Flow, where: f.key in ^Map.keys(library))
+
+    summary =
+      Enum.reduce(flows, %{upgraded: [], skipped: [], unchanged: []}, fn flow, acc ->
+        key = {flow.board_id, flow.key}
+        default = Map.fetch!(library, flow.key)
+
+        cond do
+          flow.version > 1 ->
+            Map.update!(acc, :skipped, &[key | &1])
+
+          not customized?(flow) ->
+            Map.update!(acc, :unchanged, &[key | &1])
+
+          true ->
+            sync_flow_to_default!(flow, default)
+            Map.update!(acc, :upgraded, &[key | &1])
+        end
+      end)
+
+    Logger.info(
+      "Relay.Flows.sync_defaults!: upgraded=#{length(summary.upgraded)} " <>
+        "skipped=#{length(summary.skipped)} unchanged=#{length(summary.unchanged)}"
+    )
+
+    summary
+  end
+
   defp default_for(key), do: Enum.find(DefaultLibrary.all(), &(&1.key == key))
 
   # Embedded structs and the library's plain attr maps normalize to the same
@@ -349,6 +399,26 @@ defmodule Relay.Flows do
     |> Repo.insert!()
 
     flow
+  end
+
+  # Overwrite `flow`'s definition with the library `default`, KEEPING version at 1, and refresh the
+  # v1 snapshot so it matches. Deliberately NOT `save_definition/2`: that bumps the version, which
+  # would make the next library sync skip this flow (version > 1). Triggers/enabled are untouched;
+  # runs read the live row (RLY-152), so this row overwrite is what reaches new runs.
+  defp sync_flow_to_default!(flow, default) do
+    attrs = %{
+      isolation: default.isolation,
+      nodes: Enum.map(default.nodes, &Map.take(&1, @node_fields)),
+      edges: Enum.map(default.edges, &Map.take(&1, @edge_fields))
+    }
+
+    Repo.transaction(fn ->
+      updated = flow |> Flow.changeset(attrs) |> Repo.update!()
+      Repo.delete_all(from v in FlowVersion, where: v.flow_id == ^flow.id and v.version == 1)
+      snapshot!(updated)
+    end)
+
+    :ok
   end
 
   defp definition_changed?(%Flow{} = before, %Flow{} = now) do

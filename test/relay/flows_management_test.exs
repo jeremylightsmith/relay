@@ -322,4 +322,85 @@ defmodule Relay.FlowsManagementTest do
       assert Enum.map(Flows.list_enabled_flows(board), & &1.key) == ["spec"]
     end
   end
+
+  describe "sync_defaults!/0" do
+    # A minimal valid graph for the "code" key that LACKS the sync nodes — stands in for an old
+    # pre-RLY-192 default. update_flow/2 does not bump version, so this stays at v1.
+    defp stale_code_attrs do
+      %{
+        nodes: [%{key: "branch", type: :shell, run: "true"}],
+        edges: [%{from: "start", to: "branch"}, %{from: "branch", to: "done", on: :succeeded}]
+      }
+    end
+
+    test "upgrades a v1 flow that drifted from the library, reaching the existing board" do
+      board = seeded_board()
+      {:ok, stale} = Flows.update_flow(Flows.get_flow!(board, "code"), stale_code_attrs())
+      assert stale.version == 1
+      assert Flows.customized?(stale)
+
+      summary = Flows.sync_defaults!()
+
+      upgraded = Flows.get_flow!(board, "code")
+      keys = MapSet.new(upgraded.nodes, & &1.key)
+      assert MapSet.subset?(MapSet.new(~w(sync sync_fix resync resync_fix reverify)), keys)
+      refute Flows.customized?(upgraded)
+      assert {board.id, "code"} in summary.upgraded
+    end
+
+    test "upgrade keeps the flow at version 1 so a repeat sync still upgrades it" do
+      board = seeded_board()
+      {:ok, _} = Flows.update_flow(Flows.get_flow!(board, "code"), stale_code_attrs())
+
+      Flows.sync_defaults!()
+      once = Flows.get_flow!(board, "code")
+      assert once.version == 1
+
+      # Drift again (still v1) and re-sync: the version==1 gate must still fire.
+      {:ok, _} = Flows.update_flow(once, stale_code_attrs())
+      summary = Flows.sync_defaults!()
+      twice = Flows.get_flow!(board, "code")
+      assert twice.version == 1
+      refute Flows.customized?(twice)
+      assert {board.id, "code"} in summary.upgraded
+    end
+
+    test "preserves a hand-customized (version > 1) flow" do
+      board = seeded_board()
+      {:ok, edited} = Flows.save_definition(Flows.get_flow!(board, "code"), stale_code_attrs())
+      assert edited.version == 2
+
+      summary = Flows.sync_defaults!()
+
+      after_sync = Flows.get_flow!(board, "code")
+      assert after_sync.version == 2
+      assert [%{key: "branch"}] = after_sync.nodes
+      assert {board.id, "code"} in summary.skipped
+      refute {board.id, "code"} in summary.upgraded
+    end
+
+    test "leaves an already-current v1 flow untouched and reports it unchanged" do
+      board = seeded_board()
+      flow = Flows.get_flow!(board, "code")
+      refute Flows.customized?(flow)
+
+      summary = Flows.sync_defaults!()
+
+      after_sync = Flows.get_flow!(board, "code")
+      assert after_sync.version == 1
+      assert {board.id, "code"} in summary.unchanged
+      refute {board.id, "code"} in summary.upgraded
+    end
+
+    test "refreshes the v1 snapshot to match the upgraded definition" do
+      board = seeded_board()
+      {:ok, _} = Flows.update_flow(Flows.get_flow!(board, "code"), stale_code_attrs())
+
+      Flows.sync_defaults!()
+
+      upgraded = Flows.get_flow!(board, "code")
+      snap = Flows.get_version(upgraded, 1)
+      assert MapSet.new(snap.nodes, & &1.key) == MapSet.new(upgraded.nodes, & &1.key)
+    end
+  end
 end

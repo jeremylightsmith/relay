@@ -11,6 +11,13 @@ defmodule Relay.Release do
     for repo <- repos() do
       {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
     end
+
+    # After schema migrations, push the current default flow library onto existing boards so a
+    # flow-graph edit (e.g. RLY-192's sync nodes) reaches boards that already exist, not just
+    # newly created ones. Idempotent; preserves hand-customized flows (version > 1).
+    Relay.Flows.sync_defaults!()
+
+    :ok
   end
 
   def rollback(repo, version) do
