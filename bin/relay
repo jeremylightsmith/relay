@@ -31,6 +31,7 @@ import argparse
 import base64
 import collections
 import difflib
+import fcntl
 import hashlib
 import json
 import mimetypes
@@ -66,8 +67,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 12
-EXECUTOR_FINGERPRINT = "b70c4a9a8e7c4e52deebb3b94a3c04fcbc6d85122380550f77b4a8a24c488b8a"
+EXECUTOR_VERSION = 13
+EXECUTOR_FINGERPRINT = "c48e1477fe716eba8bc81722591b943cb47f4938877ef0d2d02e8896c1ae9506"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1426,6 +1427,97 @@ def execute_one(job, slot, reset, control, pool):
         pool.release(job, slot, None if (revoked or control.cancelled()) else run_state)
 
 
+# ---- Single-executor startup lock (RLY-193) --------------------------------
+# Two `relay execute` processes on one machine default to the same hostname, so the server
+# keys them to ONE Executor row — the exact state RLY-170 orphan recovery corrupts (each
+# process beats a partial `running` list and requeues the other's live jobs). We make that
+# state unreachable with two exclusive flocks taken at startup and held for the process's
+# life: an IDENTITY lock (server + name, machine-wide and checkout-independent so two clones
+# on one host still collide) and a WORKTREE-NAMESPACE lock (catches two processes sharing
+# worktrees even under different identities). flock is released by the kernel on process
+# death, so a crash never leaves a stale lock — which is why a flock and not a pidfile.
+_EXECUTOR_LOCKS = []   # held lock fds, kept open (and un-GC'd) for the process's life
+
+
+def _lock_dir():
+    d = os.environ.get("RELAY_EXECUTOR_LOCK_DIR") or os.path.expanduser("~/.relay/locks")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def identity_lock_path(cfg):
+    key = (env("RELAY_URL") + "\0" + cfg["name"]).encode("utf-8")
+    return os.path.join(_lock_dir(), f"exec-{hashlib.sha256(key).hexdigest()[:16]}.lock")
+
+
+def namespace_lock_path(cfg):
+    return os.path.join(WORKTREES_DIR, f".{cfg['namespace']}.lock")
+
+
+def _read_holder(fd):
+    try:
+        os.lseek(fd, 0, os.SEEK_SET)
+        raw = os.read(fd, 4096).decode("utf-8", "replace").strip()
+        return json.loads(raw) if raw else None
+    except (OSError, ValueError):
+        return None
+
+
+def _already_running_message(held, path):
+    if held and held.get("pid"):
+        started = held.get("started")
+        try:
+            when = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started)) if started else "unknown time"
+        except (TypeError, ValueError, OSError):
+            when = "unknown time"
+        return (f'already running: executor "{held.get("name", "?")}" is held by pid '
+                f'{held["pid"]} (started {when}, namespace "{held.get("namespace", "?")}", '
+                f'root {held.get("root", "?")}). Stop that process, or set a different '
+                '"name"/"namespace" in .relay/executor.json.')
+    return (f'already running: another executor holds {path} (holder info unreadable). '
+            'Stop that process, or set a different "name"/"namespace" in .relay/executor.json.')
+
+
+def acquire_singleton_lock(path, holder):
+    """Take an exclusive, non-blocking flock at `path`, held for the process's life.
+
+    On success the holder JSON line is (re)written and the fd stashed in _EXECUTOR_LOCKS. On
+    contention the existing holder line is read back and we die() with an actionable message.
+    """
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        held = _read_holder(fd)
+        os.close(fd)
+        die(_already_running_message(held, path))
+    _EXECUTOR_LOCKS.append(fd)
+    os.ftruncate(fd, 0)
+    os.write(fd, (json.dumps(holder) + "\n").encode("utf-8"))
+    os.fsync(fd)
+    return fd
+
+
+def acquire_executor_locks(cfg):
+    """Refuse a colliding second executor before any worktree or network work (RLY-193)."""
+    holder = {"pid": os.getpid(), "started": int(time.time()),
+              "namespace": cfg["namespace"], "name": cfg["name"], "root": ROOT}
+    acquire_singleton_lock(identity_lock_path(cfg), holder)
+    acquire_singleton_lock(namespace_lock_path(cfg), holder)
+
+
+def release_executor_locks():
+    """Best-effort unlock on normal shutdown; correctness does not depend on it (the kernel
+    releases every flock on process death)."""
+    for fd in _EXECUTOR_LOCKS:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    _EXECUTOR_LOCKS.clear()
+
+
 def cmd_execute(args):
     """The runner mode (ADR 0006): claim node-jobs from the server, run each in an executor
     worktree, and report a typed outcome."""
@@ -1434,6 +1526,7 @@ def cmd_execute(args):
     cfg = load_executor_config()
     poll_timeout = args.interval or cfg["poll_timeout"]
     env("RELAY_URL"), env("RELAY_API_KEY")
+    acquire_executor_locks(cfg)   # RLY-193: refuse a colliding second executor before any work
     executor = executor_ident(cfg)
     pool = ExecutorPool(cfg)
     if not DRY:
@@ -1587,6 +1680,7 @@ def cmd_execute(args):
         hb.stop()
     if FORWARDER and not DRY:
         FORWARDER.stop()
+    release_executor_locks()                        # RLY-193: best-effort; kernel frees on death
 
     if outdated and args.once:
         # No state to sit in for a single-job invocation — a non-zero exit is the right

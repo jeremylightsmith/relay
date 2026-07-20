@@ -2107,6 +2107,102 @@ class ExecutorHeartbeatCapacityTest(unittest.TestCase):
         self.assertEqual(killed, ["nj-7"])
 
 
+class ExecutorSingletonLockTest(unittest.TestCase):
+    """RLY-193: a second `relay execute` for the same identity or worktree namespace must
+    refuse to start, so RLY-170 orphan recovery can never see two live processes wearing one
+    identity. flock on two separate open fds of one file conflicts even in-process, so the
+    guarantee is unit-testable here; the real two-process case is acceptance criterion 1,
+    run by hand."""
+
+    def setUp(self):
+        self._dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self._dir, ignore_errors=True)
+        self._env = dict(os.environ)
+        self.addCleanup(lambda: (os.environ.clear(), os.environ.update(self._env)))
+        os.environ["RELAY_EXECUTOR_LOCK_DIR"] = os.path.join(self._dir, "locks")
+        os.environ["RELAY_URL"] = "https://a.example"
+        self._wt = relay.WORKTREES_DIR
+        self.addCleanup(setattr, relay, "WORKTREES_DIR", self._wt)
+        relay.WORKTREES_DIR = os.path.join(self._dir, "worktrees")
+        self.addCleanup(self._release_all)
+
+    def _release_all(self):
+        for fd in list(relay._EXECUTOR_LOCKS):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        relay._EXECUTOR_LOCKS.clear()
+
+    def _cfg(self, name="host.local", namespace="exec"):
+        return {"name": name, "namespace": namespace}
+
+    def _holder(self, cfg, pid=None):
+        return {"pid": pid or os.getpid(), "started": 1_700_000_000,
+                "namespace": cfg["namespace"], "name": cfg["name"], "root": relay.ROOT}
+
+    def test_second_acquire_of_same_identity_fails(self):
+        cfg = self._cfg()
+        relay.acquire_singleton_lock(relay.identity_lock_path(cfg), self._holder(cfg))
+        with self.assertRaises(SystemExit):
+            with contextlib.redirect_stderr(io.StringIO()):
+                relay.acquire_singleton_lock(relay.identity_lock_path(cfg), self._holder(cfg))
+
+    def test_refusal_message_names_the_holding_pid(self):
+        cfg = self._cfg()
+        relay.acquire_singleton_lock(relay.identity_lock_path(cfg), self._holder(cfg, pid=424242))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+            relay.acquire_singleton_lock(relay.identity_lock_path(cfg), self._holder(cfg))
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("already running", err.getvalue())
+        self.assertIn("424242", err.getvalue())
+
+    def test_releasing_lets_a_subsequent_acquire_succeed(self):
+        cfg = self._cfg()
+        fd = relay.acquire_singleton_lock(relay.identity_lock_path(cfg), self._holder(cfg))
+        relay._EXECUTOR_LOCKS.remove(fd)
+        os.close(fd)                                   # simulates the holder dying
+        relay.acquire_singleton_lock(relay.identity_lock_path(cfg), self._holder(cfg))
+
+    def test_unreadable_holder_line_still_refuses(self):
+        import fcntl
+        cfg = self._cfg()
+        path = relay.identity_lock_path(cfg)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+        self.addCleanup(os.close, fd)
+        os.write(fd, b"{ not json")                    # a live holder with a corrupt line
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            relay.acquire_singleton_lock(path, self._holder(cfg))
+        self.assertIn("already running", err.getvalue())
+        self.assertIn(path, err.getvalue())
+
+    def test_namespace_lock_is_keyed_on_namespace(self):
+        a, b = self._cfg(namespace="exec"), self._cfg(namespace="other")
+        relay.acquire_singleton_lock(relay.namespace_lock_path(a), self._holder(a))
+        # different namespace under the same ROOT → different lock, also acquires
+        relay.acquire_singleton_lock(relay.namespace_lock_path(b), self._holder(b))
+
+    def test_identity_lock_is_keyed_on_server_and_name(self):
+        cfg = self._cfg(name="same")
+        os.environ["RELAY_URL"] = "https://a.example"
+        relay.acquire_singleton_lock(relay.identity_lock_path(cfg), self._holder(cfg))
+        # same name, different server → different lock, also acquires
+        os.environ["RELAY_URL"] = "https://b.example"
+        relay.acquire_singleton_lock(relay.identity_lock_path(cfg), self._holder(cfg))
+
+    def test_acquire_executor_locks_takes_both_and_refuses_a_second(self):
+        cfg = self._cfg()
+        relay.acquire_executor_locks(cfg)
+        self.assertEqual(len(relay._EXECUTOR_LOCKS), 2)   # identity + namespace
+        with self.assertRaises(SystemExit):
+            with contextlib.redirect_stderr(io.StringIO()):
+                relay.acquire_executor_locks(cfg)
+
+
 class ExecutorFingerprintGuardTest(unittest.TestCase):
     """RLY-184: any edit to bin/relay must come with an EXECUTOR_VERSION bump.
 
