@@ -2785,5 +2785,28 @@ class RunsAndExecutorsRenderingTest(unittest.TestCase):
         self.assertEqual(parser.parse_args(["executors"]).func, relay.cmd_executors)
 
 
+class TimelineTextRenderingTest(unittest.TestCase):
+    def render(self, timeline):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            relay.print_card({"ref": "RLY-1", "title": "T", "timeline": timeline})
+        return buf.getvalue()
+
+    def test_an_action_row_prints_its_text_not_an_empty_meta(self):
+        out = self.render([{
+            "kind": "activity", "type": "action", "text": "implement: starting",
+            "meta": {}, "author": {"name": "Relay AI"},
+        }])
+        self.assertIn("implement: starting", out)
+        self.assertNotIn("action {}", out)
+
+    def test_a_row_with_meta_and_no_text_still_shows_its_meta(self):
+        out = self.render([{
+            "kind": "activity", "type": "moved", "text": None,
+            "meta": {"to_stage": "Code"}, "author": {"name": "Relay AI"},
+        }])
+        self.assertIn("Code", out)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -72,7 +72,8 @@ heavy fields:
   "spec": "…markdown…",
   "timeline": [
     { "kind": "comment", "body": "on it", "author": { "type": "agent", "name": "Relay AI" }, "inserted_at": "…" },
-    { "kind": "activity", "type": "moved", "meta": { "from_stage": "Spec", "to_stage": "Code" }, "author": { "type": "agent", "name": "Relay AI" }, "inserted_at": "…" }
+    { "kind": "activity", "type": "moved", "meta": { "from_stage": "Spec", "to_stage": "Code" }, "author": { "type": "agent", "name": "Relay AI" }, "inserted_at": "…" },
+    { "kind": "activity", "type": "action", "text": "implement: starting", "meta": {}, "author": { "type": "agent", "name": "Relay AI" }, "inserted_at": "…" }
   ]
 }
 ```

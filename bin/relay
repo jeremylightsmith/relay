@@ -536,7 +536,8 @@ def print_card(c):
         if e.get("kind") == "comment":
             print(f"  - {who}: {e.get('body', '')}")
         else:
-            print(f"  * {who} {e.get('type', '')} {e.get('meta', '')}")
+            detail = e.get("text") or e.get("meta") or ""
+            print(f"  * {who} {e.get('type', '')} {detail}".rstrip())
 
 
 def print_why(d):

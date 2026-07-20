@@ -94,8 +94,13 @@ defmodule RelayWeb.Api.CardJSON do
     %{kind: "comment", body: c.body, author: author(c), inserted_at: c.inserted_at}
   end
 
+  # `text` is the rendered line for :action rows (`Relay.Activity`'s :text doc,
+  # activity.ex:49) — `LogSink.row/2` writes the runner's real log line there while
+  # hardcoding `meta: %{}` (log_sink.ex:156). Dropping it here is what made timelines
+  # print `action {}`; `meta: %{}` is correct by design and is NOT the bug (RLY-177).
+  # Fixing it in the serializer also fixes rows already stored.
   defp entry(%Schemas.Activity{} = a) do
-    %{kind: "activity", type: a.type, meta: a.meta, author: author(a), inserted_at: a.inserted_at}
+    %{kind: "activity", type: a.type, text: a.text, meta: a.meta, author: author(a), inserted_at: a.inserted_at}
   end
 
   defp author(%{actor_type: :agent}), do: %{type: "agent", name: "Relay AI"}
