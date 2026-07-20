@@ -203,6 +203,36 @@ deleted fails there with a clear message. Neither half ever silently restarts fr
 CLI: `relay retry <ref> [--at NODE] [--json]`. On a refusal it prints the server's message to
 stderr and exits non-zero.
 
+## Scheduler / Listener authority split (RLY-200)
+
+A parked run has exactly one process allowed to resume it, keyed off `Schemas.Run`'s
+`parked_reason`:
+
+| `parked_reason`  | owner                    | resume shape                                |
+| ----------------- | ------------------------ | -------------------------------------------- |
+| `:needs_input`    | `Relay.Runs.Listener`    | same node, WITH the stored session (`--resume`) |
+| `:claimed`        | `Relay.Runs.Listener`    | fresh (a human may have changed anything)     |
+| `:executor_gone`  | `Relay.Runs.Scheduler`   | capacity-driven re-dispatch                   |
+| `nil` / unknown   | nobody                   | left untouched (mirrors the Listener's own fallback) |
+
+`Relay.Runs.Scheduler.resume_runs/5` filters on this before its existing human/needs-input
+guards, so it never even considers a Listener-owned park; `Scheduler.explain/2` mirrors the
+same split, surfacing `:awaiting_listener_resume` instead of `:awaiting_capacity` for a
+Listener-owned park so `relay why` stays honest. Without this split, both processes reacted
+to the same card event and whichever won decided whether a resumed agent kept its Claude
+session — the loser silently re-wrote the run underneath the winner.
+
+Every `running ↔ parked` writer (`Relay.Runs.resume_run/2`, `park_for_reclaim/1`,
+`park_claimed/1`) is a guarded `Repo.update_all` keyed on the run's current status (the same
+pattern `transition_job/3` already used for job-state writes), so a lost race — whichever
+process loses — returns a detected no-op (`{:error, :not_parked}` for resume) rather than a
+second silent write.
+
+**Listener boot sweep.** `Relay.Runs.Listener.init/1` reconciles every card holding a
+`:parked` run at startup (`{:continue, :boot_reconcile}`), so an answer or hand-back that
+arrived while the Listener was down is not lost — the scheduler is no longer a backstop for
+`:needs_input`/`:claimed` parks the way it was before this split.
+
 ## Executor mode (`relay execute`) (RLY-135, ADR 0006 card 05)
 
 `bin/relay execute` is **the only runner mode**: a thin, board-agnostic client of the
