@@ -263,6 +263,53 @@ it did before RLY-139.
 — `"Use the spec-reviewer subagent to review …"`. It works today with zero new plumbing
 and needs no schema change.
 
+#### Escalating a plan-mandated finding (RLY-190)
+
+A reviewer that finds a defect the code implements **faithfully because `plan.md` mandates it**
+does not return `failed` into the fix loop. The implementer is instructed to follow the plan, so
+neither side can yield: the loop burns its budget until `loop_budget_exhausted` or the circuit
+breaker ends the run with a message describing the symptom and not the cause. Instead the
+reviewer raises `needs-input` and stops **without declaring an outcome**, which parks the run for
+a human. `spec-reviewer`, `quality-reviewer` and `final-reviewer` each carry this as a third
+verdict beside Approve/Pass and Fix; `plan-implementer` uses the same route when the plan tells
+it to build something it can see is wrong.
+
+This needed **no engine change**. `needs_input` is decided before any edge is consulted
+(`Relay.Runs.Engine`), so it consumes no `max_loops` budget, does not increment the visit count,
+and is not degraded to `:failed`. The command itself reaches every agent node for free —
+`bin/relay` appends its outcome contract, already rendered, to every agent prompt.
+
+**The human's answer, not the plan, is authoritative for the remainder of the run.** This is a
+deliberate decision, and the tempting alternative — have the human edit the card's plan and treat
+the edited plan as authoritative — does not work:
+
+- `plan.md` is materialized **once**, by the Code flow's `branch` node
+  (`Relay.Flows.DefaultLibrary`), and no later node ever re-writes it.
+- `sub_tasks` are seeded from `card.plan` at **run start only**, and are deliberately never
+  re-materialized on re-entry so that done-state isn't wiped (`Relay.Runs`).
+- Re-entry replays the **same node, same visit, fresh attempt** with the agent's claude session
+  resumed (`RunServer.enter_same_node!`), and the prompt is byte-identical to the parked
+  attempt's — `build_payload` exposes no `answer` variable.
+
+So editing the plan mid-run changes nothing any node reads. The answer arrives as a **card
+comment** (`Cards.answer_input/3`) and the resumed reviewer reads it with `relay card <ref>`.
+`plan.md` and `card.plan` stay stale by design; any lasting plan correction is a **follow-up
+card**, not a mid-run mutation.
+
+Escalation is deliberately rare: Fix remains the default, and a reviewer may escalate only when
+it can quote the plan text that mandates the defect — the test being *"can the implementer act on
+this without contradicting the plan?"*. A reviewer that escalated because a finding was merely
+hard would convert a self-healing loop into a human queue. On resume the reviewer resolves rather
+than re-parking: "fix it anyway" returns Fix with the authorization quoted verbatim (which the
+implementer is instructed to treat as outranking `plan.md` for that task), "waive it" returns
+Approve with the waiver and follow-up recorded.
+
+The contract lives inline in each of the four `.claude/agents/*.md` files rather than in a shared
+reference file, because those files ship to other projects through the RLY-181 scaffold manifest
+as single files with no `references/` siblings.
+`test/relay/agents/escalation_contract_test.exs` pins the markers so an edit can't silently drop
+the contract.
+
 ---
 *Sources of truth: `bin/relay`, `.relay/executor.json`, `bin/test_relay.py`,
 `lib/relay_web/controllers/api/node_job_controller.ex`, `lib/relay/runs.ex`,

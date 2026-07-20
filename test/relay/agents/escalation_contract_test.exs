@@ -89,4 +89,24 @@ defmodule Relay.Agents.EscalationContractTest do
                "placeholder token would reach the model verbatim"
     end
   end
+
+  test "the runner architecture page records the escalation re-entry decision" do
+    runner = File.read!("docs/architecture/runner.md")
+    subsection = section(runner, "#### Escalating a plan-mandated finding")
+
+    assert subsection,
+           "runner.md must document the escalation contract under the agent-node section"
+
+    assert subsection =~ "needs-input"
+
+    assert subsection =~ "authoritative",
+           "it must state that the human's answer is authoritative for the rest of the run"
+
+    assert subsection =~ "`branch` node",
+           "it must give the reason the plan-edit path was rejected: plan.md is written once " <>
+             "by the branch node"
+
+    assert subsection =~ "sub_tasks",
+           "it must state that sub_tasks are seeded only at run start"
+  end
 end
