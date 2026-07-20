@@ -200,4 +200,26 @@ void main() {
     expect(row.stageGroup!.name, 'Code');
     expect(row.stageGroup!.type, '');
   });
+
+  test('stage_group carries the stage position the inbox orders groups by', () {
+    final row = FeedRow.fromJson({
+      ...reviewRowJson(),
+      'stage_group': {'name': 'Code', 'type': 'work', 'position': 2},
+    });
+
+    expect(row.stageGroup!.position, 2);
+  });
+
+  test(
+    'a stage_group with no position defaults to the unknown sentinel, not a throw',
+    () {
+      // A server between PR #137 and this change ships name+type but no position.
+      final row = FeedRow.fromJson({
+        ...reviewRowJson(),
+        'stage_group': {'name': 'Code', 'type': 'work'},
+      });
+
+      expect(row.stageGroup!.position, FeedStageGroup.unknownPosition);
+    },
+  );
 }

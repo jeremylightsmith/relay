@@ -8,6 +8,7 @@ FeedRow row(
   String ref, {
   String? group,
   String type = 'work',
+  int position = 0,
   String slug = 'relay',
 }) => FeedRow(
   ref: ref,
@@ -16,7 +17,9 @@ FeedRow row(
   status: 'in_review',
   kind: 'in_review',
   blockedAt: DateTime.utc(2026, 7, 15),
-  stageGroup: group == null ? null : FeedStageGroup(name: group, type: type),
+  stageGroup: group == null
+      ? null
+      : FeedStageGroup(name: group, type: type, position: position),
 );
 
 void main() {
@@ -32,18 +35,31 @@ void main() {
     expect(groups.single.rows.map((r) => r.ref), ['RLY-1', 'RLY-2', 'RLY-3']);
   });
 
-  test('groups appear in order of first appearance, not alphabetically', () {
-    // Server order is most-recently-blocked first, so the group holding the newest
-    // block comes first. Spec is in Code, but Code's first row is older.
+  test('groups render in stage-position order, not recency (RLY-156 re-plan)', () {
+    // Server order is most-recently-blocked first: Code's card was blocked more recently,
+    // so it arrives first. But Spec is the earlier board stage (position 1) and must render
+    // above Code (position 2).
     final groups = groupRowsByStage([
-      row('RLY-1', group: 'Spec', type: 'planning'),
-      row('RLY-2', group: 'Code'),
-      row('RLY-3', group: 'Spec', type: 'planning'),
+      row('RLY-1', group: 'Code', position: 2),
+      row('RLY-2', group: 'Spec', type: 'planning', position: 1),
+      row('RLY-3', group: 'Code', position: 2),
     ]);
 
     expect(groups.map((g) => g.group!.name), ['Spec', 'Code']);
-    expect(groups.first.rows.map((r) => r.ref), ['RLY-1', 'RLY-3']);
-    expect(groups.last.rows.map((r) => r.ref), ['RLY-2']);
+    // Rows still keep server order inside their group.
+    expect(groups.first.rows.map((r) => r.ref), ['RLY-2']);
+    expect(groups.last.rows.map((r) => r.ref), ['RLY-1', 'RLY-3']);
+  });
+
+  test('groups at the same position fall back to first appearance', () {
+    // Two different stages sharing a position — e.g. an older server sent none, so both
+    // tie on the sentinel — must stay deterministic: first seen, first shown.
+    final groups = groupRowsByStage([
+      row('RLY-1', group: 'Beta', position: 5),
+      row('RLY-2', group: 'Alpha', position: 5),
+    ]);
+
+    expect(groups.map((g) => g.group!.name), ['Beta', 'Alpha']);
   });
 
   test('same-named stages on different boards merge into one group', () {
@@ -65,6 +81,15 @@ void main() {
     ]);
 
     expect(groups.single.group!.type, 'work');
+  });
+
+  test('when merged stages disagree on position the first row wins', () {
+    final groups = groupRowsByStage([
+      row('AAA-1', group: 'Code', position: 2),
+      row('BBB-1', group: 'Code', position: 9),
+    ]);
+
+    expect(groups.single.group!.position, 2);
   });
 
   test('rows with no stage group sink into one trailing unlabelled group', () {

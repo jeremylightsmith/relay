@@ -338,24 +338,38 @@ void main() {
     },
   );
 
-  testWidgets('the inbox files rows under their top-level stage bar', (
+  testWidgets('the inbox files rows under their top-level stage bar, in board order', (
     tester,
   ) async {
     final repo = FakeFeedRepository(
       page: FeedPage(
         rows: [
-          makeRow(
-            ref: 'RLY-1',
-            stageGroup: const FeedStageGroup(name: 'Spec', type: 'planning'),
-          ),
+          // Server order is recency: the Code card was blocked most recently, so it
+          // arrives first. Board order still puts Spec (position 1) above Code (2).
           makeRow(
             ref: 'RLY-2',
-            stageGroup: const FeedStageGroup(name: 'Code', type: 'work'),
+            stageGroup: const FeedStageGroup(
+              name: 'Code',
+              type: 'work',
+              position: 2,
+            ),
           ),
-          // A sub-lane card: the server already resolved it to its PARENT group.
+          makeRow(
+            ref: 'RLY-1',
+            stageGroup: const FeedStageGroup(
+              name: 'Spec',
+              type: 'planning',
+              position: 1,
+            ),
+          ),
+          // A sub-lane card resolves to its PARENT group (Code), same position.
           makeRow(
             ref: 'RLY-3',
-            stageGroup: const FeedStageGroup(name: 'Code', type: 'work'),
+            stageGroup: const FeedStageGroup(
+              name: 'Code',
+              type: 'work',
+              position: 2,
+            ),
           ),
         ],
         meta: const FeedMeta(count: 3),
@@ -368,7 +382,8 @@ void main() {
     // One CODE bar for both Code rows — no separate CODE · REVIEW group.
     expect(find.text('CODE'), findsOneWidget);
 
-    // Groups follow first appearance, so Spec's bar sits above Code's.
+    // Groups render in stage-position order — Spec (1) above Code (2) — even though
+    // Code's row arrived first (RLY-156 re-plan).
     final spec = tester
         .getTopLeft(find.byKey(const Key('stage_group_Spec')))
         .dy;
