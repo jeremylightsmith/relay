@@ -742,17 +742,15 @@ defmodule RelayWeb.RunComponents do
     """
   end
 
-  @doc """
-  RLY-189 — the minimal Retry control on a terminally failed run's banner.
-
-  Deliberately not designed: RLY-178 owns the human surface for run failure and
-  recovery. This ships the smallest usable affordance so the feature is usable
-  the day it merges. There is no `--at` picker — the CLI covers that case.
-
-  The `:circuit` and `:failed` variants are mutually exclusive (`circuit_tripped?/1`
-  gates them), so the shared `run-retry` DOM id is never duplicated on a page.
-  """
-  def retry_button(assigns) do
+  # RLY-189 — the minimal Retry control on a terminally failed run's banner.
+  #
+  # Deliberately not designed: RLY-178 owns the human surface for run failure and
+  # recovery. This ships the smallest usable affordance so the feature is usable
+  # the day it merges. There is no `--at` picker — the CLI covers that case.
+  #
+  # The `:circuit` and `:failed` variants are mutually exclusive (`circuit_tripped?/1`
+  # gates them), so the shared `run-retry` DOM id is never duplicated on a page.
+  defp retry_button(assigns) do
     ~H"""
     <button
       id="run-retry"

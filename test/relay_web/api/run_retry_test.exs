@@ -76,6 +76,21 @@ defmodule RelayWeb.Api.RunRetryTest do
     assert Runs.get_run!(run.id).status == :failed
   end
 
+  test "a non-string at is 422, not a 500", ctx do
+    run = failed_run(ctx.card, ctx.flow)
+
+    for at <- [5, true, ["brainstorm"], %{"key" => "brainstorm"}] do
+      body =
+        ctx.conn
+        |> post(~p"/api/runs/#{run.id}/retry", %{"at" => at})
+        |> json_response(422)
+        |> Map.fetch!("error")
+
+      assert body["code"] == "unknown_node"
+      assert Runs.get_run!(run.id).status == :failed
+    end
+  end
+
   test "a running run is 422 naming its status", ctx do
     {:ok, run} = Runs.start_run(ctx.card, ctx.flow)
     assert_receive {:dispatched, %NodeJob{}}
@@ -106,9 +121,8 @@ defmodule RelayWeb.Api.RunRetryTest do
     assert ctx.conn |> post(~p"/api/runs/#{other_run.id}/retry", %{}) |> json_response(404)
   end
 
-  test "it requires a bearer token", %{board: board, card: card, flow: flow} do
+  test "it requires a bearer token", %{card: card, flow: flow} do
     run = failed_run(card, flow)
-    _ = board
 
     assert build_conn() |> post(~p"/api/runs/#{run.id}/retry", %{}) |> json_response(401)
   end

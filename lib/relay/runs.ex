@@ -1189,6 +1189,11 @@ defmodule Relay.Runs do
     validate_node_in_flow(at, flow, {:reenter_new_visit, nil})
   end
 
+  # `at` arrives straight off a JSON body, so it can be any term. Anything that
+  # is not a node key is refused with the same closed vocabulary the endpoint
+  # documents — never a raise, which `action_fallback` cannot turn into a 422.
+  defp resolve_retry_target(_run, _flow, at), do: {:error, {:unknown_node, inspect(at)}}
+
   # Flow definitions are mutable in place (`Relay.Flows.update_flow/2`,
   # `save_definition/2`), so a node key that existed when this run failed can
   # be gone by the time a human retries. Both retry targets — the recovered
