@@ -221,10 +221,10 @@ class _Loaded extends ConsumerWidget {
           if (state.caughtUp)
             const CaughtUp()
           else
-            // Server order is authoritative (most-recently-blocked first) — no re-sort.
-            // groupRowsByStage only *regroups* it (RLY-156): rows keep their order inside a
-            // group, and groups follow first appearance, so the group holding the newest
-            // block still comes first.
+            // Server order is authoritative *inside* a group (most-recently-blocked first) —
+            // rows are never re-sorted. groupRowsByStage only *regroups* and orders the groups
+            // by board position (RLY-156 re-plan): an earlier stage's bar sits above a later
+            // stage's even when the later stage holds the newest block.
             ...groupRowsByStage(state.rows).expand(
               (group) => [
                 StageGroupHeader(

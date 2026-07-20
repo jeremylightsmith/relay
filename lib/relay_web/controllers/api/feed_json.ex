@@ -25,10 +25,12 @@ defmodule RelayWeb.Api.FeedJSON do
       # INPUT-01's breadcrumb is "<Board> / <Stage>" (RLY-89). Cards.needs_you_feed/1 already
       # preloads :stage, and reason/1 already renders it for in_review rows.
       stage: stage_name,
-      # RLY-156: the TOP-LEVEL stage the native inbox groups by. A sub-lane card carries its
-      # parent's name and type, so `Code · Review` groups under CODE and takes Code's colour.
+      # RLY-156: the TOP-LEVEL stage the native inbox groups by, and the board-order
+      # `position` it renders those groups in. A sub-lane card carries its parent's
+      # name, type, AND position, so `Code · Review` groups under CODE, takes Code's
+      # colour, and sorts at Code's place in the board — not the sub-lane's high position.
       # Additive — `stage` above is still the breadcrumb and is unchanged.
-      stage_group: %{name: top.name, type: to_string(top.type)},
+      stage_group: %{name: top.name, type: to_string(top.type), position: top.position},
       tag: card.tag,
       status: card.status,
       # == status. Explicit, because the mobile two-type contract (needs_input | in_review)

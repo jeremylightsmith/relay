@@ -47,10 +47,14 @@ class FeedQuestion {
 }
 
 /// The **top-level** stage a row files under (RLY-156). A card in `Code · Review` and a
-/// card in `Code` both carry `{name: "Code", type: "work"}`, so sub-lane cards group with
-/// their parent rather than splitting into a group of their own.
+/// card in `Code` both carry `{name: "Code", type: "work", position: <Code's>}`, so
+/// sub-lane cards group with their parent — same name, same colour, same board place.
 class FeedStageGroup {
-  const FeedStageGroup({required this.name, required this.type});
+  const FeedStageGroup({
+    required this.name,
+    required this.type,
+    this.position = unknownPosition,
+  });
 
   final String name;
 
@@ -59,12 +63,26 @@ class FeedStageGroup {
   /// unknown case is handled by [RelayTheme.stageTypeColor]'s fallback.
   final String type;
 
+  /// The top-level stage's `position` — the board order the inbox renders groups in
+  /// (RLY-156 re-plan: a reviewer asked for stage order, not recency). [unknownPosition]
+  /// when the server sent no position (a build between PR #137 and this change): such
+  /// groups sort after positioned ones and fall back to first-appearance among themselves.
+  final int position;
+
+  /// Sentinel for "the server sent no position". Far above any real stage position
+  /// (top-level stages number 1..n), so unknown-position groups sink to the bottom.
+  static const int unknownPosition = 1 << 30;
+
   /// Null when the field is absent (an older server), malformed, or carries no name —
   /// the inbox then files the row into its trailing unlabelled group rather than throwing.
   static FeedStageGroup? fromJson(Map<String, dynamic>? json) {
     final name = json?['name'] as String?;
     if (name == null || name.isEmpty) return null;
-    return FeedStageGroup(name: name, type: json?['type'] as String? ?? '');
+    return FeedStageGroup(
+      name: name,
+      type: json?['type'] as String? ?? '',
+      position: json?['position'] as int? ?? unknownPosition,
+    );
   }
 }
 
@@ -199,22 +217,24 @@ class InboxGroup {
   final List<FeedRow> rows;
 }
 
-/// Regroup [rows] for rendering. **A stable regroup, not a re-sort** — server order is
-/// authoritative (most-recently-blocked first) and nothing moves relative to anything it
-/// was already behind within its own group:
+/// Regroup [rows] for rendering (RLY-156). **A stable re-sort of the groups, never of the
+/// rows** — server order (most-recently-blocked first) is authoritative *inside* a group:
 ///
 /// - rows keep server order inside their group;
-/// - groups appear in order of **first appearance**, so the group holding the
-///   most-recently-blocked card comes first;
+/// - **groups render in board order — the top-level stage's [FeedStageGroup.position]** —
+///   so an earlier stage sits above a later one even when the later one holds the more
+///   recently blocked card (a reviewer's re-plan ask). Ties — same position across two
+///   merged boards, or an older server that sent no position — fall back to first
+///   appearance, keeping the order deterministic;
 /// - rows with a null [FeedRow.stageGroup] collect into one trailing unlabelled group, so
 ///   an older server or an odd row still renders.
 ///
 /// The feed spans **every** board the user belongs to, so same-named stages on different
 /// boards **merge into one group** — [InboxRow]'s board chip is what tells them apart, so
-/// no group is duplicated per board. If merged stages disagree on `type`, the first row's
-/// type wins: deterministic, and cosmetic only.
+/// no group is duplicated per board. If merged rows disagree on `type` or `position`, the
+/// first row wins: deterministic, and cosmetic only.
 List<InboxGroup> groupRowsByStage(List<FeedRow> rows) {
-  final order = <String>[];
+  final order = <String>[]; // first-appearance order — the tie-breaker
   final rowsByName = <String, List<FeedRow>>{};
   final groupsByName = <String, FeedStageGroup>{};
   final ungrouped = <FeedRow>[];
@@ -228,13 +248,24 @@ List<InboxGroup> groupRowsByStage(List<FeedRow> rows) {
     if (!rowsByName.containsKey(group.name)) {
       order.add(group.name);
       rowsByName[group.name] = <FeedRow>[];
-      groupsByName[group.name] = group;
+      groupsByName[group.name] =
+          group; // first row wins — for type AND position
     }
     rowsByName[group.name]!.add(row);
   }
 
+  final names = [...order]
+    ..sort((a, b) {
+      final byPosition = groupsByName[a]!.position.compareTo(
+        groupsByName[b]!.position,
+      );
+      return byPosition != 0
+          ? byPosition
+          : order.indexOf(a).compareTo(order.indexOf(b));
+    });
+
   return [
-    for (final name in order)
+    for (final name in names)
       InboxGroup(group: groupsByName[name], rows: rowsByName[name]!),
     if (ungrouped.isNotEmpty) InboxGroup(group: null, rows: ungrouped),
   ];
