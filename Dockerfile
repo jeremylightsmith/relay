@@ -52,10 +52,13 @@ COPY priv priv
 
 COPY lib lib
 
-# priv/docs/architecture is a symlink into docs/; COPY priv copies it *as a symlink*, so
-# docs/ must be present before the compile that reads through it. Compile-time embedding
-# (@external_resource) means the runtime image needs neither.
+# priv/docs/architecture, priv/scaffold/claude and priv/scaffold/relay are symlinks out of
+# priv/; COPY priv copies them *as symlinks*, so their targets must be present before the
+# compile that reads through them. Compile-time embedding (@external_resource) means the
+# runtime image needs none of them.
 COPY docs docs
+COPY .claude .claude
+COPY bin bin
 
 # Compile the release
 RUN mix compile

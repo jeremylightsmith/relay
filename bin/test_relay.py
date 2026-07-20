@@ -2465,5 +2465,210 @@ class WhyCommandTest(unittest.TestCase):
         self.assertEqual(args.func, relay.cmd_why)
 
 
+class InitTest(unittest.TestCase):
+    """`relay init` against a stubbed scaffold endpoint, in a throwaway project root.
+
+    ROOT and HERE are both repointed at a temp dir: a test that scaffolds into the real
+    checkout would overwrite this repo's own .claude/ files."""
+
+    FILES = [
+        {"path": ".claude/agents/spec-reviewer.md", "mode": "644",
+         "content": "spec reviewer\n"},
+        {"path": ".relay/executor.json", "mode": "644",
+         "content": '{"namespace": "exec"}\n'},
+        {"path": "AGENTS.md", "mode": "644", "content": "conventions\n"},
+    ]
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+        self.addCleanup(setattr, relay, "ROOT", relay.ROOT)
+        relay.ROOT = self.tmp
+
+        self.here = os.path.join(self.tmp, "bin", "relay")
+        os.makedirs(os.path.dirname(self.here))
+        with open(self.here, "w") as f:
+            f.write("#!/usr/bin/env python3\nVERSION = 1\n")
+        self.addCleanup(setattr, relay, "HERE", relay.HERE)
+        relay.HERE = self.here
+
+        self.addCleanup(setattr, relay.urllib.request, "urlopen",
+                        relay.urllib.request.urlopen)
+        self.fetched = []
+        os.environ.pop("RELAY_URL", None)
+        os.environ.pop("RELAY_API_KEY", None)
+
+    def stub(self, cli_version=None, files=None, cli_body=b"NEW CLI\n"):
+        doc = json.dumps({
+            "scaffold_version": "0.1.0",
+            "cli_version": relay.EXECUTOR_VERSION if cli_version is None else cli_version,
+            "files": self.FILES if files is None else files,
+        }).encode()
+
+        def fake(req, *a, **k):
+            self.fetched.append(req.full_url)
+            if req.full_url.endswith("/install/relay"):
+                return _FakeResp(cli_body)
+            return _FakeResp(doc)
+
+        relay.urllib.request.urlopen = fake
+
+    def args(self, **over):
+        base = dict(url="http://board.test", force=False, dry_run=False,
+                    no_self_update=False)
+        base.update(over)
+        return argparse.Namespace(**base)
+
+    def read(self, rel):
+        with open(os.path.join(self.tmp, rel), encoding="utf-8") as f:
+            return f.read()
+
+    def test_fresh_scaffold_writes_every_file(self):
+        self.stub()
+        buckets = capture_ret(relay.cmd_init, self.args())
+
+        self.assertEqual(sorted(buckets["created"]),
+                         [".claude/agents/spec-reviewer.md", ".relay/executor.json",
+                          "AGENTS.md"])
+        self.assertEqual(buckets["unchanged"], [])
+        self.assertEqual(self.read(".claude/agents/spec-reviewer.md"), "spec reviewer\n")
+        self.assertEqual(json.loads(self.read(".relay/executor.json"))["namespace"],
+                         "exec")
+
+    def test_rerun_is_a_no_op(self):
+        self.stub()
+        capture_ret(relay.cmd_init, self.args())
+        buckets = capture_ret(relay.cmd_init, self.args())
+
+        self.assertEqual(len(buckets["unchanged"]), 3)
+        self.assertEqual(buckets["created"], [])
+        self.assertEqual(buckets["overwritten"], [])
+
+    def test_edited_file_is_diffed_and_survives(self):
+        self.stub()
+        capture_ret(relay.cmd_init, self.args())
+        path = os.path.join(self.tmp, ".claude/agents/spec-reviewer.md")
+        with open(path, "a") as f:
+            f.write("MY LOCAL EDIT\n")
+
+        out = capture(relay.cmd_init, self.args())
+
+        self.assertIn("MY LOCAL EDIT", self.read(".claude/agents/spec-reviewer.md"))
+        self.assertIn("--- ", out)          # a unified diff was printed
+        self.assertIn("-MY LOCAL EDIT", out)
+        self.assertIn("skipped (differs)", out)
+
+    def test_force_overwrites_the_edit(self):
+        self.stub()
+        capture_ret(relay.cmd_init, self.args())
+        with open(os.path.join(self.tmp, "AGENTS.md"), "a") as f:
+            f.write("MY LOCAL EDIT\n")
+
+        buckets = capture_ret(relay.cmd_init, self.args(force=True))
+
+        self.assertEqual(buckets["overwritten"], ["AGENTS.md"])
+        self.assertEqual(self.read("AGENTS.md"), "conventions\n")
+
+    def test_dry_run_writes_nothing(self):
+        self.stub()
+        buckets = capture_ret(relay.cmd_init, self.args(dry_run=True))
+
+        self.assertEqual(len(buckets["created"]), 3)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "AGENTS.md")))
+
+    def test_missing_url_exits_non_zero(self):
+        self.stub()
+        with self.assertRaises(SystemExit):
+            capture_ret(relay.cmd_init, self.args(url=None))
+
+    def test_url_falls_back_to_relay_url_env(self):
+        self.stub()
+        os.environ["RELAY_URL"] = "http://env.test/"
+        self.addCleanup(os.environ.pop, "RELAY_URL", None)
+
+        capture_ret(relay.cmd_init, self.args(url=None))
+
+        self.assertEqual(self.fetched[0], "http://env.test/api/scaffold")
+
+    def test_fetch_failure_exits_non_zero_and_leaves_nothing_behind(self):
+        def boom(req, *a, **k):
+            raise urllib.error.URLError("connection refused")
+
+        relay.urllib.request.urlopen = boom
+        with self.assertRaises(SystemExit):
+            capture_ret(relay.cmd_init, self.args())
+
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, ".claude")))
+
+    def test_self_update_fires_on_a_newer_server_version(self):
+        self.stub(cli_version=relay.EXECUTOR_VERSION + 1)
+        out = capture(relay.cmd_init, self.args())
+
+        with open(self.here) as f:
+            self.assertEqual(f.read(), "NEW CLI\n")
+        self.assertIn(f"{relay.EXECUTOR_VERSION} → {relay.EXECUTOR_VERSION + 1}", out)
+        self.assertTrue(os.access(self.here, os.X_OK))
+
+    def test_self_update_never_downgrades(self):
+        self.stub(cli_version=relay.EXECUTOR_VERSION - 1)
+        capture_ret(relay.cmd_init, self.args())
+
+        with open(self.here) as f:
+            self.assertIn("VERSION = 1", f.read())
+        self.assertNotIn("http://board.test/install/relay", self.fetched)
+
+    def test_no_self_update_suppresses_it(self):
+        self.stub(cli_version=relay.EXECUTOR_VERSION + 1)
+        capture_ret(relay.cmd_init, self.args(no_self_update=True))
+
+        with open(self.here) as f:
+            self.assertIn("VERSION = 1", f.read())
+
+    def test_a_path_escaping_the_project_root_is_refused(self):
+        self.stub(files=[{"path": "../evil.md", "mode": "644", "content": "no\n"}])
+        with self.assertRaises(SystemExit):
+            capture_ret(relay.cmd_init, self.args())
+
+    def test_a_non_utf8_file_on_disk_is_skipped_not_a_traceback(self):
+        self.stub()
+        path = os.path.join(self.tmp, "AGENTS.md")
+        with open(path, "wb") as f:
+            f.write(b"\xff\xfe binary junk, not utf-8\n")
+
+        out = capture(relay.cmd_init, self.args())
+
+        self.assertIn("skipped (differs)", out)
+        with open(path, "rb") as f:                  # left alone, exactly like a text diff
+            self.assertEqual(f.read(), b"\xff\xfe binary junk, not utf-8\n")
+
+    def test_force_overwrites_a_non_utf8_file(self):
+        self.stub()
+        with open(os.path.join(self.tmp, "AGENTS.md"), "wb") as f:
+            f.write(b"\xff\xfe binary junk\n")
+
+        buckets = capture_ret(relay.cmd_init, self.args(force=True))
+
+        self.assertEqual(buckets["overwritten"], ["AGENTS.md"])
+        self.assertEqual(self.read("AGENTS.md"), "conventions\n")
+
+    def test_report_names_the_outstanding_human_steps(self):
+        self.stub()
+        out = capture(relay.cmd_init, self.args())
+
+        self.assertIn("Still needed", out)
+        self.assertIn("Settings", out)
+        self.assertIn("RELAY_API_KEY", out)
+        self.assertIn("Flows", out)
+
+    def test_init_is_registered_with_its_flags(self):
+        args = relay.build_parser().parse_args(["init", "--force", "--dry-run"])
+
+        self.assertIs(args.func, relay.cmd_init)
+        self.assertTrue(args.force)
+        self.assertTrue(args.dry_run)
+        self.assertFalse(args.no_self_update)
+
+
 if __name__ == "__main__":
     unittest.main()

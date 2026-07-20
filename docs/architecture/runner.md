@@ -69,6 +69,31 @@ looks like the leftward flow is being starved. Pinned by
 - **Run ids**: each executor worker tags its log lines with the claimed job's `run_id`
   (RLY-112) so a card's timeline can group lines by run.
 
+## Bootstrap surface (RLY-181)
+
+Three **public, unauthenticated** endpoints, served by
+`RelayWeb.ScaffoldController`. They are the only Relay endpoints with no board key,
+deliberately: a fresh project has none yet, and the payload is the same content as the
+public repo.
+
+- `GET /api/scaffold` (`.scaffold/2`) — one JSON document,
+  `{scaffold_version, cli_version, files: [{path, mode, content}]}`, with **every file's
+  content inline**. There is no `?path=` parameter, so the endpoint has no
+  path-traversal surface. The file list is an explicit allowlist in the controller —
+  the seven Code-flow agents, the `brainstorm` skill and `write-plan` command the Spec
+  and Plan flows name, the four skills those invoke, `.relay/executor.json`, and a
+  starter `AGENTS.md`/`CLAUDE.md`. Relay-only files do not ship.
+- `GET /install/relay` (`.cli/2`) — `bin/relay` itself as `text/plain`, with an
+  `X-Relay-CLI-Version` header taken from the script's own `VERSION` constant.
+- `GET /install` (`.install/2`) — a POSIX `sh` bootstrap that curls the above into
+  `bin/relay` and runs `bin/relay init`. The host is interpolated from the request's own
+  URL, so a script fetched from a host always points back at that host.
+
+The payload is embedded at compile time through the committed symlinks
+`priv/scaffold/claude -> ../../.claude` and `priv/scaffold/relay -> ../../bin/relay`
+(the pattern `priv/docs/architecture -> ../../docs/architecture` established), so the
+repo's real files remain the single source of truth and there is no copy step.
+
 ## Node-job transport (RLY-134, ADR 0006 card 04)
 
 The first slice of ADR 0006's target shape: a pure REST transport on top of the runs engine
@@ -158,6 +183,11 @@ nothing else — every board-specific fact lives server-side as flow data.
   (default `exec`), `capacity: {shared_clean, exclusive}`, `poll_timeout`,
   `heartbeat_interval`. Missing file → sensible defaults; capacity is the field a developer
   routinely edits.
+- `bin/relay init [--url URL] [--force] [--dry-run] [--no-self-update]` scaffolds a
+  project from `GET /api/scaffold`. It needs a **URL but no API key**. Idempotent:
+  unchanged files are reported, edited ones are diffed and skipped unless `--force`.
+  When the server's `cli_version` exceeds the script's `VERSION` constant it re-downloads
+  `bin/relay` in place (upgrade-only) and says so.
 - **Worktree namespace.** `ExecutorPool` maps every job's `isolation` onto worktrees under
   the `exec-*` namespace. `shared_clean` jobs share one reused `exec-clean` worktree (never
   reset per-job, only fast-forwarded to base when every shared slot is idle). `exclusive`
@@ -206,4 +236,5 @@ and needs no schema change.
 ---
 *Sources of truth: `bin/relay`, `.relay/executor.json`, `bin/test_relay.py`,
 `lib/relay_web/controllers/api/node_job_controller.ex`, `lib/relay/runs.ex`,
-`lib/relay_web/controllers/api/board_controller.ex`.*
+`lib/relay_web/controllers/api/board_controller.ex`,
+`lib/relay_web/controllers/scaffold_controller.ex`.*

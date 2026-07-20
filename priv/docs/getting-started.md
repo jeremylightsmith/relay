@@ -7,12 +7,6 @@ access to Relay's own source repository.
 This page is written so an **agent** can follow it. Where you need a human to decide
 something, it is called out **as a question**.
 
-> [!WARNING]
-> **Step 3 is not available yet.** Serving the CLI from your board host and scaffolding a
-> project with `relay init` ships with **RLY-181**. Until then, steps 1, 2 and 5–7 work
-> today, and step 3 shows the interface it will have. Do not work around it by copying
-> files out of the Relay repository — that path is not supported.
-
 ## 1. Create a board
 
 Sign in at your board host and create a board. **That is the whole of setup.** Creating a
@@ -49,26 +43,32 @@ the error you get without it.
 
 ## 3. Get the CLI and scaffold your project
 
-> [!WARNING]
-> **Not available yet — ships with RLY-181.** The commands in this step are the interface
-> it will have.
-
-Install the CLI from your board host, then scaffold the project you want agents to work
-in:
+From the project directory you want agents to work in:
 
 ```bash
 curl -fsSL https://<board-host>/install | sh
-cd /path/to/your/project
-relay init
 ```
 
-`relay init` writes the files a board's flows expect to find in your project:
+That one line drops `bin/relay` into `bin/` and immediately runs `bin/relay init`, which
+fetches the project scaffold from your board and writes it —
+**no access to the Relay repository is needed**, the scaffold is served by your board,
+not cloned from anywhere:
 
 - `.relay/executor.json` — how many jobs this machine will run at once, and in which
   isolation class;
 - `.claude/agents/` — the agent definitions the flows invoke by name;
 - `.claude/skills/` — the skills the Spec and Plan flows run;
 - `AGENTS.md` — the project instructions every agent reads.
+
+Already have `bin/relay` on this machine? Run `bin/relay init --url https://<board-host>`
+directly (or export `RELAY_URL` first) — `init` needs a URL but deliberately **not** an API
+key, since it runs before a board key exists.
+
+`relay init` is safe to re-run: an unchanged file is reported `unchanged`, and a file you
+have edited is shown as a diff and left alone unless you pass `--force`. Two more flags:
+`--dry-run` reports what it *would* write and touches nothing, and `--no-self-update`
+suppresses the automatic `bin/relay` upgrade that otherwise fires when the board is
+serving a newer CLI than the one you have (it only ever upgrades, never downgrades).
 
 **Question for a human:** which project directory should agents work in? It must be a git
 repository, and it should be one you are willing to let agents create branches in.
