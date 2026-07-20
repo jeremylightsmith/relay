@@ -254,6 +254,14 @@ nothing else — every board-specific fact lives server-side as flow data.
   jobs get a slot from a fixed `exec-work-1..N` pool, bound to a run from its first job
   until that run reaches a terminal `run_state` — the reset happens only on that first job,
   since a run's later nodes build on the diff its earlier nodes left in the worktree.
+- **Test database per slot (RLY-213).** Worktree isolation keeps two concurrent runs' files
+  apart, but `mix test` for both would otherwise hit the same Postgres database — Ecto's SQL
+  sandbox only isolates concurrent tests *within* one BEAM, not across two OS processes.
+  `partition_for(slot)` (`bin/relay`) derives `MIX_TEST_PARTITION` from the same slot name at
+  the single point where a node's command launches (both `_stream_shell` and
+  `_stream_claude_job`), so every step of a run — including the `precommit` gate — sees the
+  same database: `exec-work-N` -> partition `N`, the shared `exec-clean` -> partition `0`.
+  `config/test.exs` already keys the database name off `MIX_TEST_PARTITION`.
 - **The claim/execute/report loop (`cmd_execute`).** Each iteration: advertise current free
   capacity per isolation class on a long-poll `POST /api/node-jobs/claim` (a read timeout is
   "no work", not an error); on a claim, hand the job to a worker thread bounded by the pool's
