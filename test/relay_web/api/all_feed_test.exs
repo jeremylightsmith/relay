@@ -169,11 +169,13 @@ defmodule RelayWeb.Api.AllFeedTest do
 
     rows = Map.new(feed(conn)["data"], &{&1["ref"], &1})
 
-    assert rows[Cards.ref(board, blocked)]["stage_group"] == %{"name" => "Spec", "type" => "planning"}
+    assert rows[Cards.ref(board, blocked)]["stage_group"] ==
+             %{"name" => "Spec", "type" => "planning", "position" => 2}
 
-    # The sub-lane card files under its PARENT — not a "Code · Review" group of its own —
-    # and takes Code's :work type, not the sub-lane's :review.
-    assert rows[Cards.ref(board, reviewing)]["stage_group"] == %{"name" => "Code", "type" => "work"}
+    # The sub-lane card files under its PARENT — Code's name, :work type, and Code's
+    # position (1), NOT the review sub-lane's own reserved high position.
+    assert rows[Cards.ref(board, reviewing)]["stage_group"] ==
+             %{"name" => "Code", "type" => "work", "position" => 1}
 
     # The breadcrumb is untouched: `stage` stays the sub-lane display name.
     assert rows[Cards.ref(board, reviewing)]["stage"] == "Code · Review"
