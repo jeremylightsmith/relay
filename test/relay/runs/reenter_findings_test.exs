@@ -7,6 +7,12 @@ defmodule Relay.Runs.ReenterFindingsTest do
   alias Schemas.NodeJob
 
   setup do
+    # Supervisor started FIRST, before any card/run exists: its boot-time
+    # `resume_all/0` reconciliation task queries `:running` runs exactly once,
+    # asynchronously. Starting it before this run exists means that query can
+    # only ever see zero rows — started after, it can race the still-in-flight
+    # `start_run` below and re-enter the same brand-new run a second time.
+    start_supervised!(Relay.Runs.Supervisor)
     FakeDispatcher.register(self())
 
     user = insert(:user)
@@ -14,7 +20,6 @@ defmodule Relay.Runs.ReenterFindingsTest do
     {:ok, flow} = board |> Relay.Flows.get_flow!("spec") |> Relay.Flows.enable_flow()
     stage = Enum.find(board.stages, &(&1.name == "Next up"))
     {:ok, card} = Relay.Cards.create_card(stage, %{title: "Carry the failure forward"})
-    start_supervised!(Relay.Runs.Supervisor)
     %{board: board, flow: flow, card: card}
   end
 
