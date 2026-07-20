@@ -100,13 +100,20 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     assert card_id == card.id
   end
 
-  test "an answered needs_input card resumes, not re-pulls (criterion 4)" do
+  test "a capacity-parked (:executor_gone) run resumes once its card is eligible, not re-pulled fresh (criterion 4, scoped to scheduler-owned parks)" do
     %{board: board, works: works} = board_with_flow(:ready)
-    # a card already back in works-in as :working (just answered), with a parked run
     resumed = insert(:card, stage: works, status: :working)
 
     start_engine([
-      %{id: 99, card_id: resumed.id, status: :parked, flow_key: "spec", isolation: :shared_clean, pinned_executor_id: nil}
+      %{
+        id: 99,
+        card_id: resumed.id,
+        status: :parked,
+        flow_key: "spec",
+        isolation: :shared_clean,
+        pinned_executor_id: nil,
+        parked_reason: :executor_gone
+      }
     ])
 
     pid = start_server(board.id)
@@ -115,6 +122,29 @@ defmodule Relay.Runs.Scheduler.ServerTest do
 
     assert_receive {:resume_run, 99, 7}, 500
     refute_receive {:start_run, _, _, _}, 50
+  end
+
+  test "a needs_input-parked run is left alone by the scheduler — the Listener owns it" do
+    %{board: board, works: works} = board_with_flow(:ready)
+    resumed = insert(:card, stage: works, status: :working)
+
+    start_engine([
+      %{
+        id: 99,
+        card_id: resumed.id,
+        status: :parked,
+        flow_key: "spec",
+        isolation: :shared_clean,
+        pinned_executor_id: nil,
+        parked_reason: :needs_input
+      }
+    ])
+
+    pid = start_server(board.id)
+    :ok = Capacity.put(7, %{shared_clean: 1, exclusive: 0})
+    :ok = Server.reconcile_now(pid)
+
+    refute_receive {:resume_run, _, _}, 50
   end
 
   test "an in-flight :running run holds its capacity slot across reconciles (B3 accounting)" do

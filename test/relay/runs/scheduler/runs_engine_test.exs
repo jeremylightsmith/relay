@@ -100,6 +100,7 @@ defmodule Relay.Runs.Scheduler.RunsEngineTest do
     assert got.flow_key == "spec"
     assert got.isolation == :shared_clean
     assert got.pinned_executor_id == nil
+    assert got.parked_reason == nil
   end
 
   test "resume_run/2 resumes a parked run and is a no-op on a non-parked run",

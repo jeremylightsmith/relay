@@ -76,7 +76,14 @@ defmodule Relay.Runs do
       left_join: f in Flow,
       on: f.id == r.flow_id,
       where: c.board_id == ^board_id and r.status in ^@active_statuses,
-      select: %{id: r.id, card_id: r.card_id, status: r.status, flow_key: r.flow_key, isolation: f.isolation}
+      select: %{
+        id: r.id,
+        card_id: r.card_id,
+        status: r.status,
+        flow_key: r.flow_key,
+        isolation: f.isolation,
+        parked_reason: r.parked_reason
+      }
     )
     |> Repo.all()
     |> Enum.map(&Map.put(&1, :pinned_executor_id, nil))

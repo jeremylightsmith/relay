@@ -47,7 +47,8 @@ defmodule Relay.Runs.SchedulerTest do
       status: Keyword.get(opts, :status, :parked),
       flow_key: Keyword.get(opts, :flow_key, "f"),
       isolation: Keyword.get(opts, :isolation, :shared_clean),
-      pinned_executor_id: Keyword.get(opts, :pinned_executor_id)
+      pinned_executor_id: Keyword.get(opts, :pinned_executor_id),
+      parked_reason: Keyword.get(opts, :parked_reason, :executor_gone)
     }
   end
 
@@ -224,7 +225,7 @@ defmodule Relay.Runs.SchedulerTest do
   end
 
   describe "resume rules" do
-    test "a parked run whose card just left :needs_input resumes (criterion 3)" do
+    test "a parked :executor_gone run resumes once its card is eligible again (criterion 3, scoped to scheduler-owned parks)" do
       s =
         snap(
           stages: [stage(1), stage(2, position: 2)],
@@ -235,6 +236,45 @@ defmodule Relay.Runs.SchedulerTest do
         )
 
       assert %Plan{dispatches: [{:resume, 99, 7}]} = Scheduler.plan(s)
+    end
+
+    test "a parked run with parked_reason: :needs_input is never resumed by the scheduler — the Listener owns it" do
+      s =
+        snap(
+          stages: [stage(1), stage(2, position: 2)],
+          cards: [card(20, 2, status: :working)],
+          flows: [flow("f", 1, 2)],
+          runs: [run(99, 20, parked_reason: :needs_input)],
+          capacity: cap([{7, slots(1, 0)}])
+        )
+
+      assert %Plan{dispatches: []} = Scheduler.plan(s)
+    end
+
+    test "a parked run with parked_reason: :claimed is never resumed by the scheduler — the Listener owns it" do
+      s =
+        snap(
+          stages: [stage(1), stage(2, position: 2)],
+          cards: [card(20, 2, status: :working, active_owner: :ai)],
+          flows: [flow("f", 1, 2)],
+          runs: [run(99, 20, parked_reason: :claimed)],
+          capacity: cap([{7, slots(1, 0)}])
+        )
+
+      assert %Plan{dispatches: []} = Scheduler.plan(s)
+    end
+
+    test "a parked run with no parked_reason (nil) is left untouched, mirroring the Listener's own fallback" do
+      s =
+        snap(
+          stages: [stage(1), stage(2, position: 2)],
+          cards: [card(20, 2, status: :working)],
+          flows: [flow("f", 1, 2)],
+          runs: [run(99, 20, parked_reason: nil)],
+          capacity: cap([{7, slots(1, 0)}])
+        )
+
+      assert %Plan{dispatches: []} = Scheduler.plan(s)
     end
 
     test "a parked run whose card is still :needs_input stays parked" do
