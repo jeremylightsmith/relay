@@ -405,4 +405,94 @@ defmodule Relay.Runs.EngineTest do
       assert reason =~ "(loop_budget_exhausted: a → b on succeeded (max_loops 1))"
     end
   end
+
+  # RLY-189 — a human retry buys exactly ONE more move on every cap the engine
+  # consults, uniformly. `bonus: 0` must reproduce today's behaviour byte for byte.
+  describe "bonus (RLY-189 retry allowance)" do
+    test "bonus: 0 changes nothing" do
+      flow = two_node_flow(work: [max_retries: 0])
+      current = failed(node_key: "work")
+
+      assert Engine.decide(flow, [current], current, bonus: 0) ==
+               Engine.decide(flow, [current], current)
+    end
+
+    test "bonus raises the node's max_retries by exactly the bonus" do
+      flow = two_node_flow(work: [max_retries: 0])
+      current = failed(node_key: "work")
+
+      assert Engine.decide(flow, [current], current) == {:transition, "fallback"}
+      assert Engine.decide(flow, [current], current, bonus: 1) == {:retry, "work"}
+    end
+
+    test "bonus raises the breaker threshold by exactly the bonus" do
+      flow = two_node_flow(work: [max_retries: 0])
+      first = failed(node_key: "work", detail: "same")
+      current = failed(node_key: "work", detail: "same")
+      history = [first, current]
+
+      assert {:fail, reason} = Engine.decide(flow, history, current, breaker_threshold: 2)
+      assert reason =~ "circuit_breaker:"
+
+      assert Engine.decide(flow, history, current, breaker_threshold: 2, bonus: 1) ==
+               {:transition, "fallback"}
+    end
+
+    test "bonus raises an edge's max_loops by exactly the bonus" do
+      flow =
+        flow([[key: "work", type: :agent, max_retries: 0], [key: "fix", type: :agent]], [
+          [from: "start", to: "work"],
+          [from: "work", to: "fix", on: :failed, max_loops: 2],
+          [from: "fix", to: "work", on: :succeeded],
+          [from: "work", to: "done", on: :succeeded]
+        ])
+
+      first = failed(node_key: "work", visit: 1, detail: "one")
+      second = failed(node_key: "work", visit: 2, detail: "two")
+      current = failed(node_key: "work", visit: 2, attempt: 2, detail: "three")
+      history = [first, second, current]
+
+      assert {:fail, reason} = Engine.decide(flow, history, current)
+      assert reason =~ "loop_budget_exhausted:"
+      assert Engine.decide(flow, history, current, bonus: 1) == {:transition, "fix"}
+    end
+
+    test "bonus raises the visit cap by exactly the bonus" do
+      flow =
+        flow([[key: "work", type: :agent, max_retries: 0], [key: "fix", type: :agent]], [
+          [from: "start", to: "work"],
+          [from: "work", to: "fix", on: :failed],
+          [from: "fix", to: "work", on: :succeeded],
+          [from: "work", to: "done", on: :succeeded]
+        ])
+
+      fixed = execution(node_key: "fix", visit: 1)
+      first = failed(node_key: "work", visit: 1, detail: "one")
+      current = failed(node_key: "work", visit: 1, attempt: 2, detail: "two")
+      history = [fixed, first, current]
+
+      assert {:fail, reason} = Engine.decide(flow, history, current, visit_cap: 1)
+      assert reason =~ "visit_cap_exceeded:"
+      assert Engine.decide(flow, history, current, visit_cap: 1, bonus: 1) == {:transition, "fix"}
+    end
+
+    test "an unlimited edge stays unlimited under a bonus" do
+      flow =
+        flow([[key: "work", type: :agent, max_retries: 0], [key: "fix", type: :agent]], [
+          [from: "start", to: "work"],
+          [from: "work", to: "fix", on: :failed],
+          [from: "fix", to: "work", on: :succeeded],
+          [from: "work", to: "done", on: :succeeded]
+        ])
+
+      # More failures than even the bonus-inflated retry budget (max_retries 0 + bonus
+      # 3 = 3) allows, so `work` is forced to ROUTE onto the failed edge rather than
+      # retry in place -- that's the case this test actually needs to exercise the
+      # edge's nil max_loops under a bonus.
+      history = for attempt <- 1..4, do: failed(node_key: "work", attempt: attempt, detail: "one")
+      current = List.last(history)
+
+      assert Engine.decide(flow, history, current, bonus: 3) == {:transition, "fix"}
+    end
+  end
 end

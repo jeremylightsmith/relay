@@ -11,6 +11,14 @@ defmodule Relay.Runs.Engine do
   count against `max_retries`, `max_loops`, the visit cap, or the breaker.
   Rows may be `Schemas.NodeExecution` structs or plain maps with
   `node_key`/`visit`/`outcome`/`failure_signature`.
+
+  `opts[:bonus]` (default 0, RLY-189) is added to EVERY cap this module
+  consults — the node's `max_retries`, the edge's `max_loops` (only when the
+  edge declares one; `nil` stays unlimited), the breaker threshold, and the
+  visit cap. It is the run's human-retry count, so a retried run can always
+  make exactly one more move than it just did without any counter being
+  reset. The engine stays pure: it receives the number, it never reads the
+  run.
   """
 
   alias Schemas.Flow
@@ -62,7 +70,8 @@ defmodule Relay.Runs.Engine do
   """
   @spec decide(Flow.t(), [map()], map(), keyword()) :: decision()
   def decide(%Flow{} = flow, history, current, opts \\ []) do
-    breaker_threshold = Keyword.get(opts, :breaker_threshold, @default_breaker_threshold)
+    bonus = Keyword.get(opts, :bonus, 0)
+    breaker_threshold = Keyword.get(opts, :breaker_threshold, @default_breaker_threshold) + bonus
     scoped = scope_to_iteration(history, Keyword.get(opts, :sub_task_id))
 
     cond do
@@ -73,11 +82,11 @@ defmodule Relay.Runs.Engine do
       current.outcome == :failed and breaker_tripped?(history, current, breaker_threshold) ->
         {:fail, "circuit_breaker: the same failure repeated #{breaker_threshold} times"}
 
-      current.outcome == :failed and retry_budget_left?(flow, scoped, current) ->
+      current.outcome == :failed and retry_budget_left?(flow, scoped, current, bonus) ->
         {:retry, current.node_key}
 
       true ->
-        route(flow, scoped, current, opts)
+        route(flow, scoped, current, opts, bonus)
     end
   end
 
@@ -106,14 +115,14 @@ defmodule Relay.Runs.Engine do
   # Failed count in the CURRENT visit including the current failure:
   # max_retries 1 => attempt 1's failure retries (1 <= 1), attempt 2's does
   # not (2 > 1).
-  defp retry_budget_left?(flow, history, current) do
+  defp retry_budget_left?(flow, history, current, bonus) do
     failed =
       Enum.count(
         history,
         &(&1.node_key == current.node_key and &1.visit == current.visit and &1.outcome == :failed)
       )
 
-    failed <= node_max_retries(flow, current.node_key)
+    failed <= node_max_retries(flow, current.node_key) + bonus
   end
 
   defp node_max_retries(flow, node_key) do
@@ -123,13 +132,13 @@ defmodule Relay.Runs.Engine do
     end
   end
 
-  defp route(flow, history, current, opts) do
+  defp route(flow, history, current, opts, bonus) do
     remaining = Keyword.get(opts, :foreach_remaining, 0)
-    visit_cap = Keyword.get(opts, :visit_cap, @default_visit_cap)
+    visit_cap = Keyword.get(opts, :visit_cap, @default_visit_cap) + bonus
 
     case select_edge(flow, current, remaining) do
-      nil -> degrade_to_failed(flow, history, current, remaining, visit_cap)
-      edge -> follow(flow, edge, history, visit_cap)
+      nil -> degrade_to_failed(flow, history, current, remaining, visit_cap, bonus)
+      edge -> follow(flow, edge, history, visit_cap, bonus)
     end
   end
 
@@ -138,11 +147,11 @@ defmodule Relay.Runs.Engine do
   # would — same guard preference, same `max_loops` accounting (see
   # `effective_outcome/3`, which is what stops the degrade buying extra budget).
   # A `:failed` that is itself unrouted has nowhere left to fall back to, so it fails.
-  defp degrade_to_failed(_flow, _history, %{outcome: :failed} = current, _remaining, _visit_cap) do
+  defp degrade_to_failed(_flow, _history, %{outcome: :failed} = current, _remaining, _visit_cap, _bonus) do
     {:fail, no_route_reason(current)}
   end
 
-  defp degrade_to_failed(flow, history, current, remaining, visit_cap) do
+  defp degrade_to_failed(flow, history, current, remaining, visit_cap, bonus) do
     case select_edge(flow, %{node_key: current.node_key, outcome: :failed}, remaining) do
       nil ->
         {:fail, no_route_reason(current)}
@@ -153,7 +162,7 @@ defmodule Relay.Runs.Engine do
             "degrading onto its :failed edge #{edge.from} → #{edge.to} (RLY-179)"
         )
 
-        follow(flow, edge, history, visit_cap)
+        follow(flow, edge, history, visit_cap, bonus)
     end
   end
 
@@ -169,9 +178,9 @@ defmodule Relay.Runs.Engine do
   defp guard_satisfied?(%{when: :foreach_exhausted}, remaining), do: remaining == 0
   defp guard_satisfied?(_unguarded, _remaining), do: false
 
-  defp follow(flow, edge, history, visit_cap) do
+  defp follow(flow, edge, history, visit_cap, bonus) do
     cond do
-      loop_budget_exhausted?(flow, edge, history) ->
+      loop_budget_exhausted?(flow, edge, history, bonus) ->
         {:fail, loop_budget_reason(edge)}
 
       edge.to == "done" ->
@@ -189,15 +198,15 @@ defmodule Relay.Runs.Engine do
   # EFFECTIVE outcome routes along it, minus the current one (history includes
   # current, and current always routes along the edge we just selected — directly
   # or by degrade — so the -1 is unconditional).
-  defp loop_budget_exhausted?(_flow, %{max_loops: nil}, _history), do: false
+  defp loop_budget_exhausted?(_flow, %{max_loops: nil}, _history, _bonus), do: false
 
-  defp loop_budget_exhausted?(flow, edge, history) do
+  defp loop_budget_exhausted?(flow, edge, history, bonus) do
     prior =
       Enum.count(history, fn row ->
         row.node_key == edge.from and effective_outcome(flow, edge.from, row.outcome) == edge.on
       end) - 1
 
-    prior >= edge.max_loops
+    prior >= edge.max_loops + bonus
   end
 
   # The outcome an execution ACTUALLY routes on, after the RLY-179 degrade rule:

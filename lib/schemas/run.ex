@@ -6,9 +6,13 @@ defmodule Schemas.Run do
   `flow_id` (the next transition then fails loudly with `no_flow`).
   `flow_key` is denormalized at start for history display after deletion.
 
-  No counter columns: retry counts, per-node visits, edge-loop counts, and
-  breaker signatures are all derived from `Schemas.NodeExecution` history —
-  one source of truth, restart-safe by construction. All fields are written
+  No ENGINE counter columns: retry attempts, per-node visits, edge-loop
+  counts, and breaker signatures are all derived from
+  `Schemas.NodeExecution` history — one source of truth, restart-safe by
+  construction. `retries` is the deliberate exception and is NOT an engine
+  counter: it counts HUMAN retry interventions (RLY-189), which leave no
+  trace in execution history and therefore cannot be derived from it. Only
+  `Relay.Runs.retry_run/2` ever increments it. All fields are written
   programmatically by `Relay.Runs`, never cast from input.
   """
 
@@ -25,6 +29,7 @@ defmodule Schemas.Run do
     field :current_node, :string
     field :context, :map, default: %{}
     field :failure_detail, :string
+    field :retries, :integer, default: 0
     field :started_at, :utc_datetime
     field :finished_at, :utc_datetime
 

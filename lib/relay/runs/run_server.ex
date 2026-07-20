@@ -17,8 +17,15 @@ defmodule Relay.Runs.RunServer do
       gone), enter the current node as a fresh attempt of the same visit.
       `resume_session` is non-nil only on the needs-input path — the only
       re-entry that resumes an AI session.
+    * `{:reenter_new_visit, resume_session}` — a human retry aimed at a
+      different node (`relay retry --at`, RLY-189): identical, except the
+      current node is entered on a FRESH visit at attempt 1, matching what a
+      real `{:transition, node}` does.
     * `:attach` — just serialize incoming reports (server was restarted
       or lazily started by `report_outcome/2`).
+
+  Both re-entry modes pass the last failed execution's detail forward as
+  `findings`, so a node re-entered after a failure sees why.
 
   Under a `foreach` node each execution carries the `sub_task_id` of the
   iteration it belongs to: entering the loop head resolves the first undone
@@ -66,6 +73,17 @@ defmodule Relay.Runs.RunServer do
   end
 
   def handle_continue({:reenter, resume_session}, state) do
+    reenter(state, &enter_same_node!(&1, &2, resume_session))
+  end
+
+  # RLY-189: a retry re-entering a DIFFERENT node (`relay retry --at`) must start a
+  # fresh visit of that node, attempt 1 — exactly like a real {:transition, node}.
+  # Re-entering it on its old visit number would corrupt per-visit retry accounting.
+  def handle_continue({:reenter_new_visit, resume_session}, state) do
+    reenter(state, &enter_new_visit!(&1, &2, resume_session))
+  end
+
+  defp reenter(state, enter_fun) do
     run = Repo.get!(Run, state.run_id)
 
     case Runs.load_flow(run) do
@@ -73,7 +91,7 @@ defmodule Relay.Runs.RunServer do
         {:ok, {execution, job}} =
           Repo.transaction(fn ->
             Runs.revoke_active_jobs(run)
-            enter_same_node!(run, flow, resume_session)
+            enter_fun.(run, flow)
           end)
 
         Runs.broadcast_runs(Runs.board_id_of(run), {:node_started, run, execution})
@@ -124,7 +142,7 @@ defmodule Relay.Runs.RunServer do
         history = outcome_history(run)
 
         opts =
-          Runs.engine_opts() ++
+          Runs.engine_opts(run) ++
             [sub_task_id: execution.sub_task_id, foreach_remaining: Runs.remaining_sub_tasks(run)]
 
         decision = Engine.decide(flow, history, execution, opts)
@@ -281,17 +299,48 @@ defmodule Relay.Runs.RunServer do
     node = run.current_node
     visit = max_for(run, node, :visit) || 1
     attempt = (max_in_visit(run, node, visit) || 0) + 1
+    enter!(run, flow, node, visit, attempt, resume_session)
+  end
+
+  # Retry --at re-entry: a fresh visit of the current node, attempt 1.
+  defp enter_new_visit!(run, flow, resume_session) do
+    node = run.current_node
+    enter!(run, flow, node, next_visit(run, node), 1, resume_session)
+  end
+
+  # RLY-189: every re-entry carries the last failure forward as `findings`, exactly as
+  # apply_decision({:retry, ...}) already does — a node re-entered after a failure must
+  # know why, and a plain re-entry used to start blind.
+  defp enter!(run, flow, node, visit, attempt, resume_session) do
     sub_task_id = current_sub_task_id(run, node)
     execution = Runs.insert_execution!(run, node, visit, attempt, sub_task_id)
 
-    job =
-      Runs.insert_job!(
-        run,
-        execution,
-        Runs.build_payload(run, flow, node, resume_session: resume_session, sub_task_id: sub_task_id)
+    opts = [
+      resume_session: resume_session,
+      sub_task_id: sub_task_id,
+      findings: last_failure_detail(run)
+    ]
+
+    job = Runs.insert_job!(run, execution, Runs.build_payload(run, flow, node, opts))
+    {execution, job}
+  end
+
+  # The detail of the run's most recent outcome-bearing execution, but ONLY when it
+  # failed: a re-entry after a park-on-question or a success carries no findings.
+  defp last_failure_detail(run) do
+    last =
+      Repo.one(
+        from e in NodeExecution,
+          where: e.run_id == ^run.id and not is_nil(e.outcome),
+          order_by: [desc: e.id],
+          limit: 1,
+          select: %{outcome: e.outcome, detail: e.detail}
       )
 
-    {execution, job}
+    case last do
+      %{outcome: :failed, detail: detail} -> detail
+      _other -> nil
+    end
   end
 
   defp outcome_history(run) do
