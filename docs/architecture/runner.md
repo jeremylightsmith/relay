@@ -69,6 +69,23 @@ looks like the leftward flow is being starved. Pinned by
 - **Run ids**: each executor worker tags its log lines with the claimed job's `run_id`
   (RLY-112) so a card's timeline can group lines by run.
 
+## Observability surface (RLY-177)
+
+Read-only endpoints answering "why isn't this card moving?" without an `fly ssh console`
+Ecto query, board-scoped like every other `/api` route (a ref/id on another board 404s,
+never 403s):
+
+- `GET /api/cards/:ref/runs` (`RelayWeb.Api.RunController.index/2`) — the card's runs
+  newest-first with `node_executions` preloaded, composing `Relay.Runs.list_runs_for_card/1`.
+  `detail` and `failure_detail` are serialized **in full, never truncated** — the exact text
+  a failing review's findings need to be readable for.
+- `GET /api/executors` (`RelayWeb.Api.ExecutorController.index/2`) — composes
+  `Relay.Runs.list_executor_status/2` (no second executor read): advertised capacity per
+  isolation class, last heartbeat, `stale?` (from the same `executor_stale?/2` predicate the
+  reclaim sweep uses), and the jobs each executor currently holds.
+- CLI: `bin/relay runs REF` / `bin/relay executors`, documented in
+  [`../agent-integration.md`](../agent-integration.md).
+
 ## Bootstrap surface (RLY-181)
 
 Three **public, unauthenticated** endpoints, served by
@@ -314,4 +331,6 @@ the contract.
 *Sources of truth: `bin/relay`, `.relay/executor.json`, `bin/test_relay.py`,
 `lib/relay_web/controllers/api/node_job_controller.ex`, `lib/relay/runs.ex`,
 `lib/relay_web/controllers/api/board_controller.ex`,
-`lib/relay_web/controllers/scaffold_controller.ex`.*
+`lib/relay_web/controllers/scaffold_controller.ex`,
+`lib/relay_web/controllers/api/run_controller.ex`,
+`lib/relay_web/controllers/api/executor_controller.ex`.*

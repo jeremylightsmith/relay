@@ -194,6 +194,39 @@ curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application
   -d '{"note":"needs a test","to":"Plan"}' https://relay.example/api/cards/RLY-12/reject
 ```
 
+### GET /api/cards/:ref/runs
+
+The card's runs, newest first, each with its node-execution history. `detail` and
+`failure_detail` are emitted **in full — never truncated**: this is the surface an
+operator reaches for instead of hand-writing an Ecto query over `fly ssh console`.
+
+```
+curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-12/runs
+```
+
+```json
+{ "data": [ { "id": 7, "flow_key": "code", "status": "failed", "current_node": null,
+  "failure_detail": "…", "node_executions": [
+    { "node_key": "final_review", "visit": 1, "attempt": 2, "outcome": "failed", "detail": "…" }
+  ] } ] }
+```
+
+### GET /api/executors
+
+The board's connected executors: advertised capacity per isolation class, last
+heartbeat, staleness, and the jobs each is currently holding.
+
+```
+curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/executors
+```
+
+```json
+{ "data": [ { "name": "mac", "host": "mac.local", "capacity": { "shared_clean": 3, "exclusive": 1 },
+  "last_heartbeat": "…", "stale?": false, "jobs": [
+    { "id": 12, "ref": "RLY-9", "node_key": "implement", "state": "running" }
+  ] } ] }
+```
+
 ---
 
 ## CLI

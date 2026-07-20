@@ -13,6 +13,8 @@ Executor-local config: .relay/executor.json (worktree namespace + capacity)
   relay init [--url URL] [--force] [--dry-run] [--no-self-update]   # scaffold a project
   relay board [--json]        relay card REF [--json]
   relay why REF [--json]      # why isn't this card moving? — one plain-language answer
+  relay runs REF [--json]     # the card's runs + node executions, detail untruncated
+  relay executors [--json]    # who is connected, their capacity, and the jobs they hold
   relay comment REF TEXT      relay move REF STAGE        relay status REF STATUS
   relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF [Q] [--questions @file]
   relay own REF / release REF relay approve REF           relay reject REF NOTE
@@ -62,8 +64,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 4
-EXECUTOR_FINGERPRINT = "74c36d0b9d097d710788db8ad5aebd16ad0d44b91c50157f35409d19bbdba7cd"
+EXECUTOR_VERSION = 5
+EXECUTOR_FINGERPRINT = "32e4b922088da2badb6f475a67fdda261ecc991b4398f358558d5fd34f1b6149"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -547,6 +549,42 @@ def print_why(d):
         print(last["detail"])
 
 
+def indent(text, prefix):
+    return "\n".join(prefix + line for line in text.splitlines())
+
+
+def format_runs(runs):
+    """The card's runs and every node execution, with detail printed IN FULL — truncating
+    it is what sent an operator to `fly ssh console` in the first place (RLY-177)."""
+    out = []
+    for r in runs:
+        out.append(f'run {r.get("id")}  {r.get("flow_key", "?")}  [{r.get("status", "?")}]'
+                   f'  node: {r.get("current_node") or "-"}'
+                   f'  {r.get("started_at") or ""} → {r.get("finished_at") or "…"}')
+        for e in r.get("node_executions") or []:
+            out.append(f'  - {e.get("node_key", "?")} '
+                       f'(visit {e.get("visit", "?")}, attempt {e.get("attempt", "?")}) '
+                       f'→ {e.get("outcome") or "running"}')
+            if e.get("detail"):
+                out.append(indent(e["detail"], "      "))
+        if r.get("failure_detail"):
+            out.append("  failure_detail:")
+            out.append(indent(r["failure_detail"], "      "))
+    return "\n".join(out) if out else "(no runs)"
+
+
+def format_executors(executors):
+    out = []
+    for e in executors:
+        caps = " ".join(f"{k}={v}" for k, v in sorted((e.get("capacity") or {}).items()))
+        flag = "  STALE" if e.get("stale?") else ""
+        out.append(f'{e.get("name", "?")} @ {e.get("host") or "?"}  {caps}  '
+                   f'heartbeat: {e.get("last_heartbeat") or "never"}{flag}')
+        for j in e.get("jobs") or []:
+            out.append(f'  - job {j.get("id")} {j.get("ref", "?")} {j.get("node_key", "?")} [{j.get("state", "?")}]')
+    return "\n".join(out) if out else "(no executors connected)"
+
+
 def emit(args, data, human):
     print(json.dumps(data, indent=2) if getattr(args, "json", False) else human)
 
@@ -597,6 +635,16 @@ def cmd_retry(args):
     else:
         log(f"{args.ref}: run {d['run_id']} re-entered at {d['node']} "
             f"(retry {d['retries']})")
+
+
+def cmd_runs(args):
+    runs = api("GET", f"/api/cards/{args.ref}/runs")["data"]
+    emit(args, runs, format_runs(runs))
+
+
+def cmd_executors(args):
+    executors = api("GET", "/api/executors")["data"]
+    emit(args, executors, format_executors(executors))
 
 
 def cmd_create(args):
@@ -1607,6 +1655,8 @@ def build_parser():
     add("why", cmd_why, "ref", json_flag=True)
     rt = add("retry", cmd_retry, "ref", json_flag=True)
     rt.add_argument("--at")
+    add("runs", cmd_runs, "ref", json_flag=True)
+    add("executors", cmd_executors, json_flag=True)
     oc = add("outcome", cmd_outcome, "outcome")
     oc.add_argument("--detail")
     c = add("create", cmd_create, "title", json_flag=True)

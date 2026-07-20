@@ -2726,5 +2726,64 @@ class InitTest(unittest.TestCase):
         self.assertFalse(args.no_self_update)
 
 
+class RunsAndExecutorsRenderingTest(unittest.TestCase):
+    RUNS = [{
+        "id": 7,
+        "flow_key": "code",
+        "status": "failed",
+        "current_node": None,
+        "failure_detail": "it broke",
+        "started_at": "2026-07-01T10:00:00Z",
+        "finished_at": "2026-07-01T10:30:00Z",
+        "node_executions": [
+            {"node_key": "implement", "visit": 1, "attempt": 1, "outcome": "succeeded", "detail": None},
+            {"node_key": "final_review", "visit": 1, "attempt": 2, "outcome": "failed",
+             "detail": "long findings\nsecond line"},
+        ],
+    }]
+
+    EXECUTORS = [{
+        "name": "mac",
+        "host": "mac.local",
+        "capacity": {"shared_clean": 3, "exclusive": 1},
+        "last_heartbeat": "2026-07-01T10:00:00Z",
+        "stale?": False,
+        "jobs": [{"id": 12, "ref": "RLY-9", "node_key": "implement", "state": "running"}],
+    }]
+
+    def test_runs_render_names_every_node_and_its_outcome(self):
+        out = relay.format_runs(self.RUNS)
+        self.assertIn("run 7", out)
+        self.assertIn("implement", out)
+        self.assertIn("final_review", out)
+        self.assertIn("failed", out)
+
+    def test_runs_render_shows_failure_detail_in_full(self):
+        out = relay.format_runs(self.RUNS)
+        self.assertIn("long findings", out)
+        self.assertIn("second line", out)
+
+    def test_runs_render_handles_a_card_with_no_runs(self):
+        self.assertEqual(relay.format_runs([]), "(no runs)")
+
+    def test_executors_render_shows_capacity_and_held_jobs(self):
+        out = relay.format_executors(self.EXECUTORS)
+        self.assertIn("mac", out)
+        self.assertIn("shared_clean=3", out)
+        self.assertIn("RLY-9", out)
+
+    def test_executors_render_flags_a_stale_executor(self):
+        stale = [dict(self.EXECUTORS[0], **{"stale?": True})]
+        self.assertIn("STALE", relay.format_executors(stale))
+
+    def test_executors_render_says_so_when_nothing_is_connected(self):
+        self.assertIn("no executors", relay.format_executors([]))
+
+    def test_the_cli_wires_runs_and_executors(self):
+        parser = relay.build_parser()
+        self.assertEqual(parser.parse_args(["runs", "RLY-12"]).func, relay.cmd_runs)
+        self.assertEqual(parser.parse_args(["executors"]).func, relay.cmd_executors)
+
+
 if __name__ == "__main__":
     unittest.main()

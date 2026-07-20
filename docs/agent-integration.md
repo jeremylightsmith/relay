@@ -38,6 +38,8 @@ Human output by default; add `--json` for machine output. Non-zero exit on any e
 |---|---|
 | `bin/relay board` | The board: stages with their cards |
 | `bin/relay card RLY-12` | One card: description, plan, branch, timeline |
+| `bin/relay runs RLY-12` | The card's runs + node executions, with detail untruncated |
+| `bin/relay executors` | Who is connected, their advertised capacity, and the jobs they hold |
 | `bin/relay create "Fix login" --stage Backlog` | Create a new card (title; optional `--stage`/`--description`/`--tag`) |
 | `bin/relay comment RLY-12 "…"` | Post a comment (as Relay AI) |
 | `bin/relay move RLY-12 Code` | Move to a stage (by name, e.g. `"Code:Review"`) |
