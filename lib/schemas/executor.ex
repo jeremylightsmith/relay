@@ -2,9 +2,11 @@ defmodule Schemas.Executor do
   @moduledoc """
   A durable executor registration (ADR 0006 card 04): the developer machine
   that pulls node-jobs. Keyed uniquely on `{board_id, name}` and refreshed on
-  every claim / executor heartbeat. `capacity` is the last-advertised free
-  capacity per isolation class, a STRING-keyed map like
-  `%{"shared_clean" => 3, "exclusive" => 1}`. `last_heartbeat` drives reclaim:
+  every claim / executor heartbeat. `capacity` is the last-advertised
+  **configured** slot count per isolation class (not a live free count — see
+  `Relay.Runs.Capacity`), normalized to the closed set and stored STRING-keyed:
+  `%{"shared_clean" => 3, "exclusive" => 1}`. Unknown classes never reach the
+  row (RLY-201). `last_heartbeat` drives reclaim:
   an executor silent past `max(60s, 2 × interval)` is stale and its in-flight
   jobs are recovered. `capabilities` is the last-reported inventory of what this
   executor can resolve by name — `%{"agents" => [...], "skills" => [...]}` — or

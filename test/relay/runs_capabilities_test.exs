@@ -44,7 +44,9 @@ defmodule Relay.RunsCapabilitiesTest do
     row = beat(board, %{"capacity" => %{"shared_clean" => 2}})
 
     assert row.capabilities == %{"agents" => ["final-fixer"], "skills" => []}
-    assert row.capacity == %{"shared_clean" => 2}
+    # RLY-201: missing classes are stored explicitly as 0 — the row now holds the
+    # canonical closed-set map, same as the ETS store.
+    assert row.capacity == %{"shared_clean" => 2, "exclusive" => 0}
   end
 
   test "a malformed capabilities payload is treated as not reported", %{board: board} do

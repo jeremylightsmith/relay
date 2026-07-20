@@ -336,8 +336,20 @@ defmodule Relay.RunsTest do
         Runs.upsert_executor(board, %{"name" => "jeremy-mbp", "capacity" => %{"shared_clean" => 1}})
 
       assert e2.id == e1.id
-      assert e2.capacity == %{"shared_clean" => 1}
+      # RLY-201: missing classes are stored explicitly as 0 — the row now holds the
+      # canonical closed-set map, same as the ETS store.
+      assert e2.capacity == %{"shared_clean" => 1, "exclusive" => 0}
       assert Relay.Repo.aggregate(Schemas.Executor, :count) == 1
+    end
+
+    test "upsert_executor/2 drops an unknown capacity class instead of storing it", %{board: board} do
+      {:ok, executor} =
+        Runs.upsert_executor(board, %{
+          "name" => "junk-cap",
+          "capacity" => %{"gpu" => 2, "shared_clean" => "lots", "exclusive" => 2}
+        })
+
+      assert executor.capacity == %{"shared_clean" => 0, "exclusive" => 2}
     end
   end
 
