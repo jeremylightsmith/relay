@@ -96,6 +96,14 @@ RUN chown nobody /app
 # set runner ENV
 ENV MIX_ENV="prod"
 
+# RLY-177: the deployed SHA, baked at image build time so GET /api/version can report it.
+# MUST be re-declared here — an ARG from the `builder` stage is invisible in `final`, which
+# copies only the release artifact.
+ARG GIT_SHA
+ARG BUILT_AT
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILT_AT=${BUILT_AT}
+
 # Only copy the final release from the build stage
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/relay ./
 

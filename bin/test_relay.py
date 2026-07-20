@@ -697,6 +697,58 @@ class ApiRetryTest(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
 
 
+class ApiAuthTest(unittest.TestCase):
+    """`GET /api/version` is unauthenticated by design (RLY-177) so "which release is
+    live?" is answerable before you have a board key — but the shared api() helper always
+    read RELAY_API_KEY and die()d without it, so the one CLI verb for that endpoint could
+    never actually exercise the property it exists to prove. api(auth=False) opts out of
+    the Authorization header (and the env read behind it) entirely."""
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in ("env", "_api_backoff", "log")}
+
+        def fake_env(name):
+            if name == "RELAY_URL":
+                return "http://example.test"
+            raise AssertionError(f"api(auth=False) must not read {name}")
+
+        relay.env = fake_env
+        relay._api_backoff = lambda attempt: None
+        relay.log = lambda *a, **k: None
+        self._urlopen = relay.urllib.request.urlopen
+        self.addCleanup(setattr, relay.urllib.request, "urlopen", self._urlopen)
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            setattr(relay, k, v)
+
+    def test_auth_false_sends_no_authorization_header_and_never_reads_the_key(self):
+        seen = {}
+
+        def fake(req, *a, **k):
+            seen["req"] = req
+            return _FakeResp(b'{"sha": "abc"}')
+
+        relay.urllib.request.urlopen = fake
+        result = relay.api("GET", "/api/version", auth=False)
+        self.assertEqual(result, {"sha": "abc"})
+        self.assertIsNone(seen["req"].get_header("Authorization"))
+
+    def test_auth_defaults_to_true_and_still_requires_the_key(self):
+        relay.urllib.request.urlopen = lambda req, *a, **k: _FakeResp(b"{}")
+        with self.assertRaises(AssertionError):
+            relay.api("GET", "/api/board")
+
+    def test_cmd_version_does_not_require_a_board_key(self):
+        relay.urllib.request.urlopen = lambda req, *a, **k: _FakeResp(
+            b'{"sha": "abc123", "built_at": "2026-07-01T00:00:00Z", "version": "1.2.3"}')
+        args = argparse.Namespace(json=True, field=None)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            relay.cmd_version(args)
+        self.assertIn('"sha": "abc123"', buf.getvalue())
+
+
 class ExecutorConfigTest(unittest.TestCase):
     def setUp(self):
         self._path = relay.EXECUTOR_CONFIG_PATH
@@ -2724,6 +2776,166 @@ class InitTest(unittest.TestCase):
         self.assertTrue(args.force)
         self.assertTrue(args.dry_run)
         self.assertFalse(args.no_self_update)
+
+
+class RunsAndExecutorsRenderingTest(unittest.TestCase):
+    RUNS = [{
+        "id": 7,
+        "flow_key": "code",
+        "status": "failed",
+        "current_node": None,
+        "failure_detail": "it broke",
+        "started_at": "2026-07-01T10:00:00Z",
+        "finished_at": "2026-07-01T10:30:00Z",
+        "node_executions": [
+            {"node_key": "implement", "visit": 1, "attempt": 1, "outcome": "succeeded", "detail": None},
+            {"node_key": "final_review", "visit": 1, "attempt": 2, "outcome": "failed",
+             "detail": "long findings\nsecond line"},
+        ],
+    }]
+
+    EXECUTORS = [{
+        "name": "mac",
+        "host": "mac.local",
+        "capacity": {"shared_clean": 3, "exclusive": 1},
+        "last_heartbeat": "2026-07-01T10:00:00Z",
+        "stale?": False,
+        "jobs": [{"id": 12, "ref": "RLY-9", "node_key": "implement", "state": "running"}],
+    }]
+
+    def test_runs_render_names_every_node_and_its_outcome(self):
+        out = relay.format_runs(self.RUNS)
+        self.assertIn("run 7", out)
+        self.assertIn("implement", out)
+        self.assertIn("final_review", out)
+        self.assertIn("failed", out)
+
+    def test_runs_render_shows_failure_detail_in_full(self):
+        out = relay.format_runs(self.RUNS)
+        self.assertIn("long findings", out)
+        self.assertIn("second line", out)
+
+    def test_runs_render_handles_a_card_with_no_runs(self):
+        self.assertEqual(relay.format_runs([]), "(no runs)")
+
+    def test_executors_render_shows_capacity_and_held_jobs(self):
+        out = relay.format_executors(self.EXECUTORS)
+        self.assertIn("mac", out)
+        self.assertIn("shared_clean=3", out)
+        self.assertIn("RLY-9", out)
+
+    def test_executors_render_flags_a_stale_executor(self):
+        stale = [dict(self.EXECUTORS[0], **{"stale?": True})]
+        self.assertIn("STALE", relay.format_executors(stale))
+
+    def test_executors_render_flags_an_outdated_executor_even_when_fresh(self):
+        # RLY-184: outdated is orthogonal to staleness — a beating-normally executor can
+        # still be refused work for running old code, and that's precisely the case an
+        # operator staring at "no STALE flag, still nothing dispatching" needs surfaced.
+        outdated = [dict(self.EXECUTORS[0], **{"stale?": False, "outdated": True})]
+        out = relay.format_executors(outdated)
+        self.assertIn("OUTDATED", out)
+        self.assertNotIn("STALE", out)
+
+    def test_executors_render_says_so_when_nothing_is_connected(self):
+        self.assertIn("no executors", relay.format_executors([]))
+
+    def test_the_cli_wires_runs_and_executors(self):
+        parser = relay.build_parser()
+        self.assertEqual(parser.parse_args(["runs", "RLY-12"]).func, relay.cmd_runs)
+        self.assertEqual(parser.parse_args(["executors"]).func, relay.cmd_executors)
+
+
+class TimelineTextRenderingTest(unittest.TestCase):
+    def render(self, timeline):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            relay.print_card({"ref": "RLY-1", "title": "T", "timeline": timeline})
+        return buf.getvalue()
+
+    def test_an_action_row_prints_its_text_not_an_empty_meta(self):
+        out = self.render([{
+            "kind": "activity", "type": "action", "text": "implement: starting",
+            "meta": {}, "author": {"name": "Relay AI"},
+        }])
+        self.assertIn("implement: starting", out)
+        self.assertNotIn("action {}", out)
+
+    def test_a_row_with_meta_and_no_text_still_shows_its_meta(self):
+        out = self.render([{
+            "kind": "activity", "type": "moved", "text": None,
+            "meta": {"to_stage": "Code"}, "author": {"name": "Relay AI"},
+        }])
+        self.assertIn("Code", out)
+
+
+class FieldSelectorTest(unittest.TestCase):
+    DATA = {"ref": "RLY-12", "status": "working", "done": False, "owners": [{"name": "Ada"}], "spec": None}
+
+    def test_a_top_level_field_prints_bare(self):
+        self.assertEqual(relay.render_field(relay.select_field(self.DATA, "status")), "working")
+
+    def test_a_dotted_path_walks_into_lists_and_dicts(self):
+        self.assertEqual(relay.render_field(relay.select_field(self.DATA, "owners.0.name")), "Ada")
+
+    def test_a_bool_prints_lowercase_json_style(self):
+        self.assertEqual(relay.render_field(relay.select_field(self.DATA, "done")), "false")
+
+    def test_null_prints_as_empty_rather_than_the_word_None(self):
+        self.assertEqual(relay.render_field(relay.select_field(self.DATA, "spec")), "")
+
+    def test_a_container_still_prints_as_json(self):
+        self.assertEqual(
+            relay.render_field(relay.select_field(self.DATA, "owners")),
+            json.dumps([{"name": "Ada"}], indent=2),
+        )
+
+    def test_an_unresolvable_path_exits_non_zero(self):
+        with self.assertRaises(SystemExit) as cm, contextlib.redirect_stderr(io.StringIO()):
+            relay.select_field(self.DATA, "nope.deeper")
+        self.assertNotEqual(cm.exception.code, 0)
+
+    def test_emit_prints_only_the_field_when_asked(self):
+        args = argparse.Namespace(json=False, field="status")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            relay.emit(args, self.DATA, "human output")
+        self.assertEqual(buf.getvalue(), "working\n")
+
+    def test_emit_accepts_a_callable_human_renderer(self):
+        args = argparse.Namespace(json=False, field=None)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            relay.emit(args, self.DATA, lambda: print("rendered"))
+        self.assertEqual(buf.getvalue(), "rendered\n")
+
+    def test_every_json_command_accepts_field(self):
+        parser = relay.build_parser()
+        for argv in (["card", "RLY-1"], ["board"], ["why", "RLY-1"], ["runs", "RLY-1"], ["executors"], ["version"]):
+            args = parser.parse_args(argv + ["--field", "status"])
+            self.assertEqual(args.field, "status", f"{argv[0]} should accept --field")
+
+    def test_no_cli_command_bypasses_emit(self):
+        # The prerequisite the spec calls out: a command that prints json.dumps directly
+        # would make --field work on some commands and not others.
+        with open(RELAY_PATH, encoding="utf-8") as f:
+            source = f.read()
+        body = source.split("# ============================ CLI commands")[1]
+        self.assertNotIn("print(json.dumps(", body)
+
+
+class DiscoverabilityTest(unittest.TestCase):
+    def test_the_module_docstring_lists_every_new_verb(self):
+        for verb in ("relay why", "relay runs", "relay executors", "relay version", "--field"):
+            self.assertIn(verb, relay.__doc__, f"the module docstring (relay --help) should list {verb}")
+
+    def test_agent_integration_documents_every_new_verb(self):
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "docs", "agent-integration.md")
+        with open(path, encoding="utf-8") as f:
+            doc = f.read()
+        for verb in ("bin/relay why", "bin/relay runs", "bin/relay executors", "bin/relay version", "--field"):
+            self.assertIn(verb, doc, f"docs/agent-integration.md should document {verb}")
 
 
 if __name__ == "__main__":

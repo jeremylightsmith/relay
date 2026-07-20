@@ -1,12 +1,17 @@
 defmodule RelayWeb.Api.RunController do
   @moduledoc """
-  Human-initiated run recovery (RLY-189). `POST /api/runs/:id/retry` is the
-  id-addressed route the card names; `POST /api/cards/:ref/retry` is the
-  ref-addressed alias the CLI uses, because every other `relay` verb is
-  ref-addressed and making the CLI discover a run id first would be a worse
-  surface for no gain. Both funnel into one private function.
+  Human-initiated run recovery (RLY-189) and run observability (RLY-177).
 
-  Board-scoped like the rest of this scope: a run on another board is a 404,
+  `POST /api/runs/:id/retry` is the id-addressed route the card names;
+  `POST /api/cards/:ref/retry` is the ref-addressed alias the CLI uses, because every
+  other `relay` verb is ref-addressed and making the CLI discover a run id first would
+  be a worse surface for no gain. Both funnel into one private function.
+
+  `GET /api/cards/:ref/runs` is the card's run history with **untruncated**
+  node-execution detail — the observability surface that replaces hand-written Ecto
+  queries over `fly ssh console`. Read-only.
+
+  Board-scoped like the rest of this scope: a run (or card) on another board is a 404,
   never a refusal that would confirm it exists.
   """
   use RelayWeb, :controller
@@ -16,6 +21,17 @@ defmodule RelayWeb.Api.RunController do
   alias RelayWeb.Api.ErrorJSON
 
   action_fallback RelayWeb.Api.FallbackController
+
+  def index(conn, %{"ref" => ref}) do
+    board = conn.assigns.current_board
+
+    # Re-queried scoped to this board: a ref belonging to another board must 404, never
+    # 403 — a 403 would confirm the card exists somewhere.
+    case Cards.get_card_by_ref(board, ref) do
+      %Schemas.Card{} = card -> render(conn, :index, runs: Runs.list_runs_for_card(card))
+      nil -> {:error, :not_found}
+    end
+  end
 
   def retry(conn, %{"id" => id} = params) do
     board = conn.assigns.current_board

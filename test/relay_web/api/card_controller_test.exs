@@ -359,4 +359,13 @@ defmodule RelayWeb.Api.CardControllerTest do
     body = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200) |> Map.fetch!("data")
     assert body["ai_result"] == %{"summary" => "done"}
   end
+
+  test "timeline activity entries carry their rendered text", %{conn: conn, board: board, stage: stage} do
+    card = insert(:card, stage: stage)
+    {:ok, _entry} = Activity.log(card, %{type: :action, actor: :agent, text: "implement: starting"})
+
+    body = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200) |> Map.fetch!("data")
+
+    assert Enum.any?(body["timeline"], &(&1["text"] == "implement: starting"))
+  end
 end

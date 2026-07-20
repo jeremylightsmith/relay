@@ -172,6 +172,14 @@ defmodule RelayWeb.Router do
     post "/cards/:ref/answer", AllController, :answer
   end
 
+  # Unauthenticated on purpose (RLY-177): the deployed SHA leaks nothing a deploy does not,
+  # and "which release is live?" must be answerable before you have a board key in hand.
+  scope "/api", RelayWeb.Api do
+    pipe_through :api
+
+    get "/version", VersionController, :show
+  end
+
   scope "/api", RelayWeb.Api do
     pipe_through [:api, :api_auth]
 
@@ -183,6 +191,8 @@ defmodule RelayWeb.Router do
     post "/cards", CardController, :create
     get "/cards/:ref", CardController, :show
     get "/cards/:ref/diagnosis", DiagnosisController, :show
+    get "/cards/:ref/runs", RunController, :index
+    get "/executors", ExecutorController, :index
     patch "/cards/:ref", CardController, :update
     patch "/cards/:ref/sub-tasks/:id", CardController, :toggle_sub_task
     post "/cards/:ref/move", CardController, :move

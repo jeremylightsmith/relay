@@ -38,6 +38,10 @@ Human output by default; add `--json` for machine output. Non-zero exit on any e
 |---|---|
 | `bin/relay board` | The board: stages with their cards |
 | `bin/relay card RLY-12` | One card: description, plan, branch, timeline |
+| `bin/relay why RLY-12` | **Why isn't this card moving?** One plain-language answer |
+| `bin/relay runs RLY-12` | The card's runs + node executions, with detail untruncated |
+| `bin/relay executors` | Who is connected, their advertised capacity, and the jobs they hold |
+| `bin/relay version` | The git SHA the deployed app was built from |
 | `bin/relay create "Fix login" --stage Backlog` | Create a new card (title; optional `--stage`/`--description`/`--tag`) |
 | `bin/relay comment RLY-12 "…"` | Post a comment (as Relay AI) |
 | `bin/relay move RLY-12 Code` | Move to a stage (by name, e.g. `"Code:Review"`) |
@@ -56,6 +60,15 @@ Human output by default; add `--json` for machine output. Non-zero exit on any e
 | `bin/relay retry RLY-12 [--at NODE]` | Retry the card's failed run in place — re-enters the last node it executed, or `--at NODE` to pick one |
 
 Text args accept `-` (stdin) or `@path` (file) for long content (specs, plans).
+
+**When a card isn't moving, start with `bin/relay why RLY-12`.** It answers in one or two
+sentences — no enabled flow for that stage, nothing connected to run it, blocked on a human,
+run failed at node X, job stranded — and `bin/relay runs RLY-12` prints the full,
+untruncated failure detail behind it. `bin/relay executors` shows what is connected, and
+`bin/relay version` shows which commit is deployed.
+
+Every `--json` command also takes `--field PATH` for a single value:
+`bin/relay card RLY-12 --field status` prints `working` — no `jq`, no inline `python3 -c`.
 
 **Done is derived, not a status.** The stored status vocabulary is just
 `ready | working | needs_input | in_review` — there is no `done` status to set. A card
