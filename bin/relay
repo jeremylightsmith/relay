@@ -15,7 +15,7 @@ Executor-local config: .relay/executor.json (worktree namespace + capacity)
   relay why REF [--json]      # why isn't this card moving? — one plain-language answer
   relay runs REF [--json]     # the card's runs + node executions, detail untruncated
   relay executors [--json]    # who is connected, their capacity, and the jobs they hold
-  relay version [--json]      # the git SHA the deployed app was built from
+  relay version [--json]      # the git SHA the deployed app was built from — no RELAY_API_KEY needed
   relay comment REF TEXT      relay move REF STAGE        relay status REF STATUS
   relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF [Q] [--questions @file]
   relay own REF / release REF relay approve REF           relay reject REF NOTE
@@ -66,8 +66,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 6
-EXECUTOR_FINGERPRINT = "82c45d17fdb447bf8ea4b46ae46ee82e091a011d106c9580e3bf4afaba299aa5"
+EXECUTOR_VERSION = 7
+EXECUTOR_FINGERPRINT = "cdab7c9d219ee8cdf4d7be5e064a3b77cbb3b378cb504b9ac3ac7ac8e44a710f"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -131,11 +131,12 @@ def _retryable(method, err):
     return isinstance(err, urllib.error.URLError)
 
 
-def api(method, path, body=None, soft_404=False, soft_conflict=False, timeout=None):
+def api(method, path, body=None, soft_404=False, soft_conflict=False, timeout=None, auth=True):
     url = env("RELAY_URL").rstrip("/") + path
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
-    req.add_header("Authorization", f"Bearer {env('RELAY_API_KEY')}")
+    if auth:
+        req.add_header("Authorization", f"Bearer {env('RELAY_API_KEY')}")
     if data is not None:
         req.add_header("Content-Type", "application/json")
     # Pass a read timeout only when asked (the long-poll claim): a bare urlopen keeps the
@@ -652,7 +653,7 @@ def emit(args, data, human):
 def cmd_board(args):
     path = "/api/board?include_done=1" if getattr(args, "include_done", False) else "/api/board"
     b = api("GET", path)
-    emit(args, b, format_board(b))
+    emit(args, b, lambda: print(format_board(b)))
 
 
 def cmd_card(args):
@@ -682,16 +683,18 @@ def cmd_retry(args):
 
 def cmd_runs(args):
     runs = api("GET", f"/api/cards/{args.ref}/runs")["data"]
-    emit(args, runs, format_runs(runs))
+    emit(args, runs, lambda: print(format_runs(runs)))
 
 
 def cmd_executors(args):
     executors = api("GET", "/api/executors")["data"]
-    emit(args, executors, format_executors(executors))
+    emit(args, executors, lambda: print(format_executors(executors)))
 
 
 def cmd_version(args):
-    v = api("GET", "/api/version")
+    # auth=False: /api/version is unauthenticated by design (RLY-177) so this is the one
+    # verb answerable with only RELAY_URL — no board key required.
+    v = api("GET", "/api/version", auth=False)
     emit(args, v, f'{v.get("sha", "unknown")}  built {v.get("built_at", "unknown")}  (v{v.get("version", "?")})')
 
 

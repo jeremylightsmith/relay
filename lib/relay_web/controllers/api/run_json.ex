@@ -28,7 +28,13 @@ defmodule RelayWeb.Api.RunJSON do
   end
 
   defp executions(executions) when is_list(executions), do: Enum.map(executions, &execution/1)
-  defp executions(_not_loaded), do: []
+
+  defp executions(%Ecto.Association.NotLoaded{}) do
+    raise ArgumentError,
+          "RunJSON requires :node_executions to be preloaded; a caller rendering a run " <>
+            "without it would silently drop the node execution history this endpoint exists " <>
+            "to surface"
+  end
 
   defp execution(%NodeExecution{} = e) do
     %{

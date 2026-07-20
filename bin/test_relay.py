@@ -697,6 +697,58 @@ class ApiRetryTest(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
 
 
+class ApiAuthTest(unittest.TestCase):
+    """`GET /api/version` is unauthenticated by design (RLY-177) so "which release is
+    live?" is answerable before you have a board key — but the shared api() helper always
+    read RELAY_API_KEY and die()d without it, so the one CLI verb for that endpoint could
+    never actually exercise the property it exists to prove. api(auth=False) opts out of
+    the Authorization header (and the env read behind it) entirely."""
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in ("env", "_api_backoff", "log")}
+
+        def fake_env(name):
+            if name == "RELAY_URL":
+                return "http://example.test"
+            raise AssertionError(f"api(auth=False) must not read {name}")
+
+        relay.env = fake_env
+        relay._api_backoff = lambda attempt: None
+        relay.log = lambda *a, **k: None
+        self._urlopen = relay.urllib.request.urlopen
+        self.addCleanup(setattr, relay.urllib.request, "urlopen", self._urlopen)
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            setattr(relay, k, v)
+
+    def test_auth_false_sends_no_authorization_header_and_never_reads_the_key(self):
+        seen = {}
+
+        def fake(req, *a, **k):
+            seen["req"] = req
+            return _FakeResp(b'{"sha": "abc"}')
+
+        relay.urllib.request.urlopen = fake
+        result = relay.api("GET", "/api/version", auth=False)
+        self.assertEqual(result, {"sha": "abc"})
+        self.assertIsNone(seen["req"].get_header("Authorization"))
+
+    def test_auth_defaults_to_true_and_still_requires_the_key(self):
+        relay.urllib.request.urlopen = lambda req, *a, **k: _FakeResp(b"{}")
+        with self.assertRaises(AssertionError):
+            relay.api("GET", "/api/board")
+
+    def test_cmd_version_does_not_require_a_board_key(self):
+        relay.urllib.request.urlopen = lambda req, *a, **k: _FakeResp(
+            b'{"sha": "abc123", "built_at": "2026-07-01T00:00:00Z", "version": "1.2.3"}')
+        args = argparse.Namespace(json=True, field=None)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            relay.cmd_version(args)
+        self.assertIn('"sha": "abc123"', buf.getvalue())
+
+
 class ExecutorConfigTest(unittest.TestCase):
     def setUp(self):
         self._path = relay.EXECUTOR_CONFIG_PATH
