@@ -42,8 +42,11 @@ defmodule Relay.Runs.Capacity do
 
   @doc """
   Sets/replaces `executor_id`'s advertised (configured, not live-free) slots
-  (missing classes default to 0, negatives floor to 0) and broadcasts the
-  change. Fire-and-forget: `:ok`.
+  and broadcasts the change. Fire-and-forget: `:ok`.
+
+  Takes the **raw** client map — string- or atom-keyed — and shapes it with
+  `normalize/1`: unknown classes dropped, bad values zeroed, missing classes 0.
+  Callers must not pre-atomize (RLY-201).
   """
   def put(executor_id, slots) when is_map(slots) do
     :ets.insert(@table, {executor_id, normalize(slots)})
@@ -73,11 +76,36 @@ defmodule Relay.Runs.Capacity do
     {:ok, %{}}
   end
 
-  defp normalize(slots) do
+  @doc """
+  The single capacity normalizer (RLY-201) — every path that shapes a capacity
+  map goes through here, so the closed set of isolation classes is defined
+  exactly once.
+
+  Total by construction: any term in, the canonical closed-set map
+  `%{shared_clean: n, exclusive: n}` out. Recognises string keys (a
+  JSON-decoded heartbeat) and atom keys (in-process callers); every other key
+  is **dropped**, and any value that is not a non-negative integer becomes 0.
+
+  Key recognition is a literal pattern match, never `String.to_atom/1` or
+  `String.to_existing_atom/1` — the latter is what made an unknown key
+  (`{"gpu": 1}`) raise `ArgumentError` and 500 the executor's liveness path.
+  Untrusted input degrades, never raises: a stray key from an older or newer
+  executor must not knock a working executor off the roster.
+  """
+  def normalize(slots) when is_map(slots) do
     %{
-      shared_clean: non_neg(Map.get(slots, :shared_clean, 0)),
-      exclusive: non_neg(Map.get(slots, :exclusive, 0))
+      shared_clean: non_neg(class(slots, :shared_clean, "shared_clean")),
+      exclusive: non_neg(class(slots, :exclusive, "exclusive"))
     }
+  end
+
+  def normalize(_slots), do: %{shared_clean: 0, exclusive: 0}
+
+  defp class(slots, atom_key, string_key) do
+    case Map.fetch(slots, atom_key) do
+      {:ok, n} -> n
+      :error -> Map.get(slots, string_key, 0)
+    end
   end
 
   defp non_neg(n) when is_integer(n) and n >= 0, do: n

@@ -25,6 +25,7 @@ defmodule Relay.Runs do
   alias Relay.Activity
   alias Relay.Cards
   alias Relay.Repo
+  alias Relay.Runs.Capacity
   alias Relay.Runs.Engine
   alias Relay.Runs.PlanTasks
   alias Relay.Runs.Preflight
@@ -567,12 +568,11 @@ defmodule Relay.Runs do
   defp normalize_version(v) when is_integer(v) and v >= 0, do: v
   defp normalize_version(_v), do: nil
 
-  # Keep only string-keyed non-negative integer counts; anything else → dropped.
-  defp normalize_capacity(cap) when is_map(cap) do
-    for {k, v} <- cap, is_binary(k), is_integer(v), v >= 0, into: %{}, do: {k, v}
-  end
-
-  defp normalize_capacity(_cap), do: %{}
+  # RLY-201: one normalizer. The row and the ETS store must agree on what a malformed
+  # payload means, so both go through Relay.Runs.Capacity.normalize/1. Ecto stringifies
+  # the atom keys on save, so the row reads back as
+  # %{"shared_clean" => n, "exclusive" => n}.
+  defp normalize_capacity(cap), do: Capacity.normalize(cap)
 
   # nil = "this beat did not report an inventory" — the caller must then leave the stored
   # value alone. A malformed payload is treated the same way rather than stored as junk.

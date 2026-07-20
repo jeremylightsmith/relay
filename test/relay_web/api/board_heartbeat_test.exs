@@ -164,4 +164,25 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
 
     assert %{shared_clean: 2, exclusive: 0} = Map.get(Capacity.snapshot(), exec_id)
   end
+
+  test "an executor beat with an unknown class and a garbage value degrades, never 500s",
+       %{conn: conn, board: board} do
+    # RLY-201: both heartbeat routes must shape capacity the same way — one normalizer.
+    conn
+    |> put_req_header("content-type", "application/json")
+    |> post(
+      ~p"/api/board/heartbeat",
+      Jason.encode!(%{
+        "name" => "exec-junk",
+        "host" => "dev",
+        "interval" => 30,
+        "capacity" => %{"gpu" => 1, "shared_clean" => "lots", "exclusive" => 2}
+      })
+    )
+    |> json_response(200)
+
+    executor = Repo.get_by!(Schemas.Executor, board_id: board.id, name: "exec-junk")
+    assert executor.capacity == %{"shared_clean" => 0, "exclusive" => 2}
+    assert Capacity.snapshot()[executor.id] == %{shared_clean: 0, exclusive: 2}
+  end
 end
