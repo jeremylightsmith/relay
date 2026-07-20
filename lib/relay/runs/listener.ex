@@ -8,6 +8,10 @@ defmodule Relay.Runs.Listener do
   broadcast self-heals on the next event, and reconciliation triggered by
   its own writes converges to a no-op.
 
+  A boot sweep (`init/1`'s `{:continue, :boot_reconcile}`) reconciles every card holding a
+  `:parked` run at startup, so an answer that arrived while this process was down is not lost
+  — the scheduler is no longer a backstop for `:needs_input`/`:claimed` parks (RLY-200).
+
   Rules, in order:
     * active `:running` run + human owner present → revoke the active job
       and park the run `:claimed` at its last checkpoint (the card is not
@@ -48,7 +52,18 @@ defmodule Relay.Runs.Listener do
     # parent's {:EXIT, ...} message stops it normally.
     Process.flag(:trap_exit, true)
     :ok = Relay.Events.subscribe_firehose()
-    {:ok, %{}}
+    {:ok, %{}, {:continue, :boot_reconcile}}
+  end
+
+  @impl true
+  def handle_continue(:boot_reconcile, state) do
+    Run
+    |> where([r], r.status == :parked)
+    |> select([r], r.card_id)
+    |> Repo.all()
+    |> Enum.each(&reconcile/1)
+
+    {:noreply, state}
   end
 
   @impl true
@@ -86,7 +101,7 @@ defmodule Relay.Runs.Listener do
 
   defp reconcile_card(card, %Run{status: :parked, parked_reason: :needs_input} = run) do
     if card.status != :needs_input do
-      {:ok, _run} = Runs.resume_run(run, resume_session: last_session(run))
+      _ = Runs.resume_run(run, resume_session: last_session(run))
     end
 
     :ok
@@ -94,7 +109,7 @@ defmodule Relay.Runs.Listener do
 
   defp reconcile_card(card, %Run{status: :parked, parked_reason: :claimed} = run) do
     if Relay.Cards.active_owner_type(card) == :ai do
-      {:ok, _run} = Runs.resume_run(run)
+      _ = Runs.resume_run(run)
     end
 
     :ok

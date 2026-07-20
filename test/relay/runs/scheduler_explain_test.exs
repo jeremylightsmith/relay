@@ -44,7 +44,8 @@ defmodule Relay.Runs.SchedulerExplainTest do
       status: Keyword.get(opts, :status, :parked),
       flow_key: Keyword.get(opts, :flow_key, "f"),
       isolation: Keyword.get(opts, :isolation, :shared_clean),
-      pinned_executor_id: Keyword.get(opts, :pinned_executor_id)
+      pinned_executor_id: Keyword.get(opts, :pinned_executor_id),
+      parked_reason: Keyword.get(opts, :parked_reason)
     }
   end
 
@@ -129,6 +130,37 @@ defmodule Relay.Runs.SchedulerExplainTest do
     assert %{verdict: :run_active, evidence: %{run_id: 5}} = Scheduler.explain(s, 10)
   end
 
+  test "a parked :executor_gone run is awaiting_capacity" do
+    s =
+      base(
+        cards: [card(10, 2)],
+        flows: [flow("code", 1, 2)],
+        runs: [run(5, 10, status: :parked, parked_reason: :executor_gone)],
+        # zero capacity, not slots(1, 0): with a free slot advertised the run would actually
+        # resume on plan/1's next pass, making explain/2 correctly answer :dispatchable instead
+        # (see "a flow that would pull but zero advertised capacity is awaiting_capacity" above
+        # for the same zero-capacity pattern).
+        capacity: %{}
+      )
+
+    assert %{verdict: :awaiting_capacity, evidence: %{run_id: 5}} = Scheduler.explain(s, 10)
+  end
+
+  test "a parked :needs_input run (already answered) is awaiting_listener_resume, not awaiting_capacity" do
+    s =
+      base(
+        cards: [card(10, 2, status: :working)],
+        flows: [flow("code", 1, 2)],
+        runs: [run(5, 10, status: :parked, parked_reason: :needs_input)],
+        capacity: %{"e1" => slots(1, 0)}
+      )
+
+    assert %{verdict: :awaiting_listener_resume, detail: detail, evidence: %{run_id: 5}} =
+             Scheduler.explain(s, 10)
+
+    assert detail =~ "Listener"
+  end
+
   test "a card in a trigger stage with a non-pullable status is not_eligible, not no_enabled_flow" do
     s =
       base(
@@ -156,7 +188,12 @@ defmodule Relay.Runs.SchedulerExplainTest do
           status <- [:ready, :queued, :working, :needs_input],
           owner <- [nil, :human],
           flows <- [[], [flow("code", 1, 2)]],
-          runs <- [[], [run(5, 11, status: :running)], [run(5, 11, status: :parked)]] do
+          runs <- [
+            [],
+            [run(5, 11, status: :running)],
+            [run(5, 11, status: :parked, parked_reason: :executor_gone)],
+            [run(5, 11, status: :parked, parked_reason: :needs_input)]
+          ] do
         snap(
           stages: stages,
           cards: [card(10, 1, status: status, active_owner: owner), card(11, 2)],

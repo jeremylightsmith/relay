@@ -55,4 +55,24 @@ defmodule Relay.Runs.ResumeTest do
     assert %Run{status: :parked, parked_reason: :needs_input} = Runs.get_run!(run.id)
     assert Registry.lookup(Relay.Runs.Registry, run.id) == []
   end
+
+  test "a second resume_run/2 on an already-resumed run is a detected no-op, not a silent re-write",
+       %{flow: flow, card: card} do
+    start_supervised!(Relay.Runs.Supervisor)
+    {:ok, _run} = Runs.start_run(card, flow)
+    assert_receive {:dispatched, job}
+    {:ok, parked} = Runs.report_outcome(job, %{outcome: :needs_input, detail: "?", session_id: "s1"})
+    assert_receive {:run_parked, _run}
+
+    assert {:ok, %Run{status: :running}} = Runs.resume_run(parked)
+    assert_receive {:run_resumed, %Run{status: :running}}
+    assert_receive {:dispatched, _job}
+
+    # `parked` is now a stale struct (still shows status: :parked in memory) — a second
+    # caller racing on it must be refused, not silently re-write the run or start a
+    # second RunServer entry.
+    assert {:error, :not_parked} = Runs.resume_run(parked)
+    refute_receive {:run_resumed, _}, 100
+    refute_receive {:dispatched, _}, 100
+  end
 end

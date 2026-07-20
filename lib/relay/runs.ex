@@ -77,7 +77,14 @@ defmodule Relay.Runs do
       left_join: f in Flow,
       on: f.id == r.flow_id,
       where: c.board_id == ^board_id and r.status in ^@active_statuses,
-      select: %{id: r.id, card_id: r.card_id, status: r.status, flow_key: r.flow_key, isolation: f.isolation}
+      select: %{
+        id: r.id,
+        card_id: r.card_id,
+        status: r.status,
+        flow_key: r.flow_key,
+        isolation: f.isolation,
+        parked_reason: r.parked_reason
+      }
     )
     |> Repo.all()
     |> Enum.map(&Map.put(&1, :pinned_executor_id, nil))
@@ -1112,9 +1119,11 @@ defmodule Relay.Runs do
 
     revoke_active_jobs(run)
 
-    if run.status == :running do
-      run = run |> Changeset.change(status: :parked, parked_reason: :executor_gone) |> Repo.update!()
-      broadcast_runs(board_id_of(run), {:run_parked, run})
+    query = from r in Run, where: r.id == ^run.id and r.status == :running, select: r
+
+    case Repo.update_all(query, set: [status: :parked, parked_reason: :executor_gone]) do
+      {1, [updated]} -> broadcast_runs(board_id_of(updated), {:run_parked, updated})
+      {0, _none} -> :ok
     end
 
     :ok
@@ -1124,11 +1133,18 @@ defmodule Relay.Runs do
   ## @doc false: internal engine plumbing, not public context API.
 
   @doc false
-  def resume_run(%Run{status: :parked} = run, opts \\ []) do
-    run = run |> Changeset.change(status: :running, parked_reason: nil) |> Repo.update!()
-    broadcast_runs(board_id_of(run), {:run_resumed, run})
-    {:ok, _pid} = ensure_server(run, {:reenter, Keyword.get(opts, :resume_session)})
-    {:ok, run}
+  def resume_run(%Run{id: id} = _run, opts \\ []) do
+    query = from r in Run, where: r.id == ^id and r.status == :parked, select: r
+
+    case Repo.update_all(query, set: [status: :running, parked_reason: nil]) do
+      {1, [updated]} ->
+        broadcast_runs(board_id_of(updated), {:run_resumed, updated})
+        {:ok, _pid} = ensure_server(updated, {:reenter, Keyword.get(opts, :resume_session)})
+        {:ok, updated}
+
+      {0, _none} ->
+        {:error, :not_parked}
+    end
   end
 
   @doc """
@@ -1323,10 +1339,15 @@ defmodule Relay.Runs do
     stop_server(run)
     run = Repo.get!(Run, run.id)
 
-    if run.status == :running do
-      revoke_active_jobs(run)
-      run = run |> Changeset.change(status: :parked, parked_reason: :claimed) |> Repo.update!()
-      broadcast_runs(board_id_of(run), {:run_parked, run})
+    query = from r in Run, where: r.id == ^run.id and r.status == :running, select: r
+
+    case Repo.update_all(query, set: [status: :parked, parked_reason: :claimed]) do
+      {1, [updated]} ->
+        revoke_active_jobs(updated)
+        broadcast_runs(board_id_of(updated), {:run_parked, updated})
+
+      {0, _none} ->
+        :ok
     end
 
     :ok

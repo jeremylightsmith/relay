@@ -11,8 +11,11 @@ defmodule Relay.Runs.Scheduler do
   parked runs before pulling fresh; WIP limits count a column **plus its
   sub-lanes**; `:needs_input` and `:failed` cards are skipped (a dead run is
   never silently restarted — recovery is a human's call, RLY-179); human-owned
-  cards are off-limits (ADR 0004); capacity and WIP are consumed as decisions
-  are made, so a single pass never over-dispatches. Extensions: every decision
+  cards are off-limits (ADR 0004); a parked run resumes through the scheduler
+  only when its `parked_reason` is `:executor_gone` — `:needs_input` and
+  `:claimed` parks are the run `Listener`'s territory and are left untouched
+  here (RLY-200, one authority per parked_reason); capacity and WIP are
+  consumed as decisions are made, so a single pass never over-dispatches. Extensions: every decision
   names an executor (capacity consumed on that executor's isolation class);
   `exclusive` runs are pinned to their affine executor (absolute — never
   reassigned mid-run).
@@ -78,6 +81,7 @@ defmodule Relay.Runs.Scheduler do
 
       cond do
         MapSet.member?(acc.decided, run.card_id) -> acc
+        run.parked_reason != :executor_gone -> acc
         card.active_owner == :human -> acc
         card.status in [:needs_input, :failed] -> acc
         true -> maybe_resume(acc, run)
@@ -321,10 +325,18 @@ defmodule Relay.Runs.Scheduler do
     end
   end
 
-  defp run_verdict(%{status: :parked} = run, evidence) do
+  defp run_verdict(%{status: :parked, parked_reason: reason} = run, evidence) when reason in [:executor_gone, nil] do
     verdict(
       :awaiting_capacity,
       "Run #{run.id} is parked and waiting for an executor with a free #{run.isolation} slot.",
+      evidence
+    )
+  end
+
+  defp run_verdict(%{status: :parked, parked_reason: reason} = run, evidence) when reason in [:needs_input, :claimed] do
+    verdict(
+      :awaiting_listener_resume,
+      "Run #{run.id} is parked (#{reason}) and will be resumed by the run Listener on the next card event.",
       evidence
     )
   end

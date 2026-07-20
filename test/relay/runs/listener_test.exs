@@ -4,6 +4,7 @@ defmodule Relay.Runs.ListenerTest do
   alias Relay.Runs
   alias Relay.Runs.FakeDispatcher
   alias Relay.Runs.Listener
+  alias Relay.Runs.Scheduler.Server
   alias Schemas.NodeJob
   alias Schemas.Run
 
@@ -122,5 +123,70 @@ defmodule Relay.Runs.ListenerTest do
     refute_receive {:DOWN, ^ref, :process, ^listener_pid, _reason}
 
     assert %Run{status: :parked, parked_reason: nil} = Runs.get_run!(run.id)
+  end
+
+  test "answering a needs-input card resumes with the stored session even when the scheduler reconciles first",
+       %{user: user, board: board, flow: flow, card: card} do
+    {:ok, run} = Runs.start_run(card, flow)
+    assert_receive {:dispatched, job}
+
+    {:ok, _run} =
+      Runs.report_outcome(job, %{outcome: :needs_input, detail: "Which auth model?", session_id: "s_race"})
+
+    assert_receive {:run_parked, _run}
+
+    start_supervised!(
+      {Server,
+       [
+         board_id: board.id,
+         engine: Relay.Runs.Scheduler.RunsEngine,
+         tick_ms: 3_600_000,
+         debounce_ms: 5,
+         name: :"race_sched_#{board.id}"
+       ]}
+    )
+
+    {:ok, _card} = Relay.Cards.answer_input(reload(board, card), "Use board keys", {:user, user.id})
+
+    # Force the scheduler to reconcile SYNCHRONOUSLY, ahead of the Listener's own async
+    # mailbox processing of the same card event — proving the authority split (the
+    # scheduler now refuses to touch a :needs_input park at all), not debounce timing, is
+    # what keeps this from double-resuming.
+    :ok = Server.reconcile_now(:"race_sched_#{board.id}")
+
+    assert_receive {:run_resumed, %Run{status: :running}}
+    assert_receive {:dispatched, %NodeJob{node_key: "brainstorm"} = fresh}
+    assert fresh.payload["resume_session"] == "s_race"
+    assert %Run{status: :running, current_node: "brainstorm"} = Runs.get_run!(run.id)
+
+    # Exactly one resume — no second broadcast from a scheduler-driven resume.
+    refute_receive {:run_resumed, _}, 100
+  end
+
+  test "boot sweep resumes a parked needs-input run whose answer arrived while the Listener was down",
+       %{user: user, board: board, flow: flow, card: card} do
+    {:ok, run} = Runs.start_run(card, flow)
+    assert_receive {:dispatched, job}
+
+    {:ok, _run} =
+      Runs.report_outcome(job, %{outcome: :needs_input, detail: "Which auth model?", session_id: "s_boot"})
+
+    assert_receive {:run_parked, _run}
+
+    # Take the whole engine tree down — the Listener is gone — then answer the card. In
+    # production this is "the answer arrived while nothing was listening".
+    stop_supervised!(Relay.Runs.Supervisor)
+    {:ok, _card} = Relay.Cards.answer_input(reload(board, card), "Use board keys", {:user, user.id})
+
+    refute_receive {:run_resumed, _}, 100
+
+    # Bring the engine tree back — the Listener's own boot sweep must self-heal without any
+    # new card event.
+    start_supervised!(Relay.Runs.Supervisor)
+
+    assert_receive {:run_resumed, %Run{status: :running}}
+    assert_receive {:dispatched, %NodeJob{node_key: "brainstorm"} = fresh}
+    assert fresh.payload["resume_session"] == "s_boot"
+    assert %Run{status: :running} = Runs.get_run!(run.id)
   end
 end

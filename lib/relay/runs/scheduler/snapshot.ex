@@ -12,7 +12,10 @@ defmodule Relay.Runs.Scheduler.Snapshot do
     * `flows` — **enabled** flows only: `[%{key, pulls_from_stage_id,
       works_in_stage_id, isolation}]`; `isolation` is `:shared_clean | :exclusive`.
     * `runs` — **active** runs only (`status in [:running, :parked]`):
-      `[%{id, card_id, status, flow_key, isolation, pinned_executor_id}]`.
+      `[%{id, card_id, status, flow_key, isolation, pinned_executor_id, parked_reason}]`.
+      `parked_reason` is `nil | :needs_input | :claimed | :executor_gone` — only a
+      `:executor_gone` park is the scheduler's to resume; `:needs_input` and `:claimed`
+      parks are the run `Listener`'s territory (RLY-200).
     * `capacity` — `%{executor_id => %{shared_clean: n, exclusive: n}}`: the
       **free** slots each connected executor advertises per isolation class.
   """
@@ -43,7 +46,8 @@ defmodule Relay.Runs.Scheduler.Snapshot do
           status: :running | :parked,
           flow_key: String.t(),
           isolation: :shared_clean | :exclusive,
-          pinned_executor_id: term() | nil
+          pinned_executor_id: term() | nil,
+          parked_reason: :needs_input | :claimed | :executor_gone | nil
         }
   @type capacity :: %{optional(term()) => %{shared_clean: non_neg_integer(), exclusive: non_neg_integer()}}
 
