@@ -60,6 +60,28 @@ defmodule Relay.Agents.EscalationContractTest do
     refute agent("final-reviewer") =~ "do not block the branch over it"
   end
 
+  test "the implementer declares only statuses the executor understands" do
+    body = agent("plan-implementer")
+
+    refute body =~ "BLOCKED",
+           "plan-implementer.md must not declare a BLOCKED status — the executor reads only " <>
+             "succeeded | failed | needs_input"
+
+    refute body =~ "NEEDS_CONTEXT",
+           "plan-implementer.md must not declare a NEEDS_CONTEXT status"
+  end
+
+  test "the implementer honours a human-authorized deviation from the plan" do
+    sent_back = section(agent("plan-implementer"), "## If a reviewer sent you back")
+    assert sent_back, "plan-implementer.md must have an `## If a reviewer sent you back` section"
+
+    assert sent_back =~ "authorization",
+           "it must say a finding carrying a quoted human authorization is special"
+
+    assert sent_back =~ "plan.md",
+           "it must say that authorization outranks plan.md for this task"
+  end
+
   test "no agent file contains an unrendered template token" do
     for path <- agent_files() do
       refute File.read!(path) =~ "{relay}",
