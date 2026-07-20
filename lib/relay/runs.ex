@@ -1356,6 +1356,9 @@ defmodule Relay.Runs do
     ]
   end
 
+  @doc false
+  def engine_opts(%Run{} = run), do: Keyword.put(engine_opts(), :bonus, run.retries)
+
   defp ensure_server(%Run{id: id}, mode) do
     case DynamicSupervisor.start_child(Relay.Runs.RunSupervisor, {RunServer, run_id: id, mode: mode}) do
       {:ok, pid} -> {:ok, pid}
