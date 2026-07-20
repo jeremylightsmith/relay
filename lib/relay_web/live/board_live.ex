@@ -1199,6 +1199,31 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("answer_submit", _params, socket), do: {:noreply, socket}
 
+  # RLY-189 — re-enter a terminally failed run at the node that died. Acts on the
+  # run this socket already has in `:card_runs` (the one whose banner is on screen)
+  # rather than re-querying "the latest run": a run started by someone else between
+  # render and click must surface as `retry_run/2`'s :active_run_exists refusal, not
+  # silently retry a run the human never looked at. The run's own {:run_resumed, _} /
+  # {:node_started, _} broadcasts refresh every OTHER session; the acting socket
+  # re-reads synchronously so the banner clears in the same round-trip.
+  def handle_event("retry_run", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    case List.first(socket.assigns.card_runs) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "This card has no run to retry.")}
+
+      run ->
+        case Runs.retry_run(run, actor: current_actor(socket)) do
+          {:ok, _run} ->
+            {:noreply, assign(socket, :card_runs, Runs.list_runs_for_card(card))}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, Runs.retry_refusal_message(reason))}
+        end
+    end
+  end
+
+  def handle_event("retry_run", _params, socket), do: {:noreply, socket}
+
   # MMF 15 — the drawer's green review panel: the four human review actions,
   # each a thin wrapper over an existing context transition (Cards.approve/
   # reject from MMF 13, set_status/add_owner from MMF 06), attributed to the

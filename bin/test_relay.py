@@ -301,6 +301,62 @@ class SetTagTest(unittest.TestCase):
         self.assertIsNone(args.value)
 
 
+class RetryTest(unittest.TestCase):
+    """relay retry REF [--at NODE] — POSTs the ref-addressed retry route."""
+
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+        self.sent = []
+        relay.api = lambda method, path, body=None, **k: (
+            self.sent.append((method, path, body)) or
+            {"data": {"status": "ok", "run_id": 7, "node": "precommit", "retries": 1}}
+        )
+
+    def _args(self, argv):
+        return relay.build_parser().parse_args(argv)
+
+    def test_it_posts_the_card_retry_route_with_an_empty_body(self):
+        relay.cmd_retry(self._args(["retry", "RLY-1"]))
+        self.assertEqual(self.sent, [("POST", "/api/cards/RLY-1/retry", {})])
+
+    def test_at_is_sent_in_the_body(self):
+        relay.cmd_retry(self._args(["retry", "RLY-1", "--at", "precommit"]))
+        self.assertEqual(self.sent, [("POST", "/api/cards/RLY-1/retry", {"at": "precommit"})])
+
+    def test_json_prints_the_payload(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            relay.cmd_retry(self._args(["retry", "RLY-1", "--json"]))
+        self.assertEqual(json.loads(buf.getvalue())["node"], "precommit")
+
+    def test_a_422_refusal_prints_the_server_message_and_exits_non_zero(self):
+        relay.api = self._api  # exercise the real transport's error handling
+
+        def boom(*_a, **_k):
+            raise urllib.error.HTTPError(
+                "http://x/api/cards/RLY-1/retry", 422, "Unprocessable", {},
+                io.BytesIO(json.dumps(
+                    {"error": {"code": "not_failed", "message": "This run is running, not failed"}}
+                ).encode()),
+            )
+
+        self._patch_urlopen(boom)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+            relay.cmd_retry(self._args(["retry", "RLY-1"]))
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("This run is running, not failed", err.getvalue())
+
+    def _patch_urlopen(self, fn):
+        import urllib.request
+        real = urllib.request.urlopen
+        self.addCleanup(setattr, urllib.request, "urlopen", real)
+        urllib.request.urlopen = fn
+        os.environ.setdefault("RELAY_URL", "http://x")
+        os.environ.setdefault("RELAY_API_KEY", "k")
+
+
 class NeedsInputBodyTest(unittest.TestCase):
     """needs_input_body builds the POST body: plain question vs. structured --questions JSON."""
 

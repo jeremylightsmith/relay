@@ -45,8 +45,13 @@ A run is one traversal of a flow for one card.
 | `running` | A node is executing, or the next one is about to be dispatched. | Any of the four below. |
 | `parked` | Suspended, carrying a `parked_reason`. Resumable. | The reason clearing — a human answers, an executor claims, an executor returns. |
 | `done` | The flow reached its `done` target. Terminal. | — |
-| `failed` | The engine decided the run cannot continue. Terminal. | — |
+| `failed` | The engine decided the run cannot continue. | A human retry (`Relay.Runs.retry_run/2`, RLY-189) — the only way back to `running`. |
 | `cancelled` | A human stopped the run. Terminal. | — |
+
+`failed` is the one non-terminal-looking terminal: nothing in the engine ever leaves it, but a
+human can. A retry revives the SAME run row rather than starting a new one, so the history rows
+stay append-only and "it failed here, then a human retried" is fully reconstructable from
+`node_executions` plus the `retries` counter.
 
 `parked_reason` says *why* a parked run is waiting:
 

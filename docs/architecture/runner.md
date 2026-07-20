@@ -173,6 +173,36 @@ that stays server-side.
 - The full outcome-file contract (`RELAY_NODE_OUTCOME`) executors must honor is documented in
   [`../agent-integration.md`](../agent-integration.md#node-job-protocol-adr-0006).
 
+## Run recovery surface (RLY-189)
+
+A terminally `failed` run can be re-entered by a human — the branch, worktree, execution
+history and executor pin all survive, because retry **revives the dead run in place** rather
+than starting a new one. Re-entry (`RunServer.handle_continue({:reenter, _})`) never consults
+the flow's start edge, so the Code flow's destructive `branch` node is unreachable from a
+retry by construction, and finished commits cannot be thrown away.
+
+- `POST /api/runs/:id/retry` (`RelayWeb.Api.RunController.retry/2`) — id-addressed.
+- `POST /api/cards/:ref/retry` (`.retry_card/2`) — ref-addressed alias resolving the card's
+  most recent run; what `relay retry <ref>` calls. Both take an optional `{"at": "<node_key>"}`
+  body and funnel into `Relay.Runs.retry_run/2`.
+
+Success is `200 {"data": {"status": "ok", "run_id", "node", "retries"}}`. A refusal is
+`422 {"error": {"code", "message"}}` where `code` is one of `not_failed`, `active_run_exists`,
+`no_flow`, `unknown_node`, `executor_unavailable` — the message names the specific status,
+node key or executor that blocked it. An unknown run/card, another board's run, or a card
+that has never run is `404`.
+
+The guard is split, because worktrees and branches are executor-side state Phoenix cannot
+see. Server-side, the endpoint refuses up front for the five reasons above — including an
+`exclusive` run whose pinned executor is absent or stale per `Relay.Runs.executor_stale?/2`,
+whose worktree is unreachable. Executor-side, branch existence stays with RLY-166's
+`check_branch_attached` and RLY-173's `reattach_branch`; a retried job whose branch was
+deleted fails there with a clear message. Neither half ever silently restarts from
+`origin/main`.
+
+CLI: `relay retry <ref> [--at NODE] [--json]`. On a refusal it prints the server's message to
+stderr and exits non-zero.
+
 ## Executor mode (`relay execute`) (RLY-135, ADR 0006 card 05)
 
 `bin/relay execute` is **the only runner mode**: a thin, board-agnostic client of the
