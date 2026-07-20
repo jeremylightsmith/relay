@@ -90,6 +90,24 @@ defmodule Relay.Agents.EscalationContractTest do
     end
   end
 
+  test "the escalation command the agent files point at renders a real ref" do
+    contract =
+      "bin/relay"
+      |> File.read!()
+      |> section("OUTCOME_CONTRACT = \"\"\"")
+
+    assert contract, "bin/relay must define OUTCOME_CONTRACT"
+    [contract | _] = String.split(contract, "\"\"\"", parts: 2)
+
+    assert contract =~ "needs-input {ref}",
+           "the outcome contract's needs-input command must interpolate {ref} — the agent " <>
+             "files tell agents to copy it verbatim, so a literal <ref> placeholder would " <>
+             "reach the model and the command would not run"
+
+    refute contract =~ "<ref>",
+           "the outcome contract must not carry an unrendered <ref> placeholder"
+  end
+
   test "the runner architecture page records the escalation re-entry decision" do
     runner = File.read!("docs/architecture/runner.md")
     subsection = section(runner, "#### Escalating a plan-mandated finding")

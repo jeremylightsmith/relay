@@ -62,8 +62,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 3
-EXECUTOR_FINGERPRINT = "9d627ccb1bd139756812d9a93aaa802cb7f5c5384da4d871b119b4d73317d30d"
+EXECUTOR_VERSION = 4
+EXECUTOR_FINGERPRINT = "74c36d0b9d097d710788db8ad5aebd16ad0d44b91c50157f35409d19bbdba7cd"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1134,7 +1134,7 @@ containing quotes or newlines — do NOT hand-write the JSON yourself; this comm
 
 `detail` is handed to the next node as {prior.detail}, so make it useful: for a review, the
 actual findings; for a failure, why. If you need a human instead, run
-`{relay} needs-input <ref> --questions @<file>` and stop — that parks the run and you need not
+`{relay} needs-input {ref} --questions @<file>` and stop — that parks the run and you need not
 declare an outcome. Exiting without either is reported as `failed`, because a node that
 declares nothing cannot be distinguished from one that did nothing."""
 
@@ -1153,6 +1153,7 @@ def run_node_job(job, slot_path, control):
     ref = (job.get("vars") or {}).get("ref") or job["id"]
     tag = f"[{ref}] "
     raw_vars = dict(job.get("vars") or {})
+    raw_vars.setdefault("ref", ref)
     raw_vars.setdefault("relay", HERE)
     raw_vars.setdefault("url", os.environ.get("RELAY_URL", ""))
     vars = {k: v for k, v in raw_vars.items() if v is not None}
