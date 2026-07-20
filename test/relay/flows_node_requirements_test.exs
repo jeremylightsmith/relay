@@ -56,7 +56,7 @@ defmodule Relay.FlowsNodeRequirementsTest do
     assert Flows.node_requirements(result).skills == []
   end
 
-  test "the shipped Code flow yields its seven agent names", %{} do
+  test "the shipped Code flow yields its eight agent names", %{} do
     board = insert(:board)
     :ok = Flows.seed_default_flows!(board)
     result = board |> Flows.get_flow!("code") |> Flows.node_requirements()
@@ -67,6 +67,7 @@ defmodule Relay.FlowsNodeRequirementsTest do
              "final-reviewer",
              "plan-implementer",
              "quality-reviewer",
+             "rebaser",
              "smoke-tester",
              "spec-reviewer"
            ]

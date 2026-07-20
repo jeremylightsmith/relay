@@ -11,6 +11,16 @@ defmodule Relay.Flows.DefaultLibrary do
   @doc ~S|The three default flow definitions ("spec", "plan", "code") as changeset-ready attrs.|
   def all, do: [spec_flow(), plan_flow(), code_flow()]
 
+  # The cheap sync path (RLY-192): fetch, rebase onto origin/main, and — critically — abort a
+  # conflicted rebase BEFORE exiting nonzero so the branch is left clean and attached for the
+  # next node (RLY-166). Identical in `sync` and `resync`.
+  @rebase_onto_main "git fetch origin --prune && { git rebase origin/main || { git rebase --abort; exit 1; }; }"
+
+  # Goal-state prompt for the rebaser agent nodes. Stated as a goal (not just "rebase") because
+  # resync_fix is also entered from a failed reverify, where the rebase already completed and the
+  # problem is breakage it caused.
+  @rebaser_run "Bring this branch onto current origin/main with `mix precommit` green: resolve any rebase conflict preserving both intents, and fix breakage the rebase caused. Escalate with needs-input rather than guessing when the resolution needs human judgement."
+
   defp spec_flow do
     %{
       key: "spec",
@@ -84,6 +94,8 @@ defmodule Relay.Flows.DefaultLibrary do
           agent: "quality-reviewer",
           run: "Judge whether the change is well-built: clean, conventional, meaningfully tested."
         },
+        %{key: "sync", type: :shell, run: @rebase_onto_main},
+        %{key: "sync_fix", type: :agent, model: "sonnet", agent: "rebaser", run: @rebaser_run},
         %{key: "precommit", type: :gate, run: "mix precommit"},
         %{
           key: "final_review",
@@ -137,6 +149,9 @@ defmodule Relay.Flows.DefaultLibrary do
           model: "sonnet",
           run: "Post the acceptance checklist and smoke screenshots to card {ref} as one comment."
         },
+        %{key: "resync", type: :shell, run: @rebase_onto_main},
+        %{key: "resync_fix", type: :agent, model: "sonnet", agent: "rebaser", run: @rebaser_run},
+        %{key: "reverify", type: :gate, run: "mix precommit"},
         %{
           key: "merge",
           type: :shell,
@@ -150,6 +165,9 @@ defmodule Relay.Flows.DefaultLibrary do
       # is deliberate, not an omission: each is a last-resort worker, so a failure there ends
       # the run for a human to pick up. The decision is pinned by
       # test/relay/flows/default_library_test.exs's @intentional_termini allowlist (RLY-179).
+      # sync/resync are :shell nodes, routed purely on exit code; sync_fix/resync_fix are
+      # rebaser agent nodes that park via needs-input rather than end the run, so they too have
+      # no outgoing :failed edge — pinned by the same @intentional_termini allowlist (RLY-192).
       edges: [
         %{from: "start", to: "branch"},
         %{from: "branch", to: "implement", on: :succeeded},
@@ -158,7 +176,10 @@ defmodule Relay.Flows.DefaultLibrary do
         %{from: "spec_review", to: "quality_review", on: :succeeded},
         %{from: "quality_review", to: "implement", on: :failed, max_loops: 3},
         %{from: "quality_review", to: "implement", on: :succeeded, when: :foreach_remaining},
-        %{from: "quality_review", to: "precommit", on: :succeeded, when: :foreach_exhausted},
+        %{from: "quality_review", to: "sync", on: :succeeded, when: :foreach_exhausted},
+        %{from: "sync", to: "precommit", on: :succeeded},
+        %{from: "sync", to: "sync_fix", on: :failed},
+        %{from: "sync_fix", to: "precommit", on: :succeeded},
         %{from: "precommit", to: "final_fix", on: :failed, max_loops: 2},
         %{from: "precommit", to: "final_review", on: :succeeded},
         %{from: "final_review", to: "final_fix", on: :failed, max_loops: 2},
@@ -170,8 +191,14 @@ defmodule Relay.Flows.DefaultLibrary do
         %{from: "acceptance", to: "acceptance_fix", on: :failed, max_loops: 2},
         %{from: "acceptance_fix", to: "acceptance", on: :succeeded},
         %{from: "acceptance", to: "post", on: :succeeded},
-        %{from: "post", to: "merge", on: :succeeded},
-        %{from: "merge", to: "done", on: :succeeded}
+        %{from: "post", to: "resync", on: :succeeded},
+        %{from: "resync", to: "reverify", on: :succeeded},
+        %{from: "resync", to: "resync_fix", on: :failed},
+        %{from: "resync_fix", to: "reverify", on: :succeeded},
+        %{from: "reverify", to: "resync_fix", on: :failed, max_loops: 2},
+        %{from: "reverify", to: "merge", on: :succeeded},
+        %{from: "merge", to: "done", on: :succeeded},
+        %{from: "merge", to: "resync", on: :failed, max_loops: 2}
       ]
     }
   end

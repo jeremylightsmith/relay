@@ -1,6 +1,6 @@
 ---
 name: rebaser
-description: Rebase the current feature branch onto origin/main and resolve conflicts preserving both intents, leaving the branch green (mix precommit) — or abort cleanly and escalate. Stays in the repo post-RLY-139, but no Code flow node names it yet (docs/designs/flows/worked-example.md); invoke by hand when a branch needs a conflict-safe rebase.
+description: Rebase the current feature branch onto origin/main and resolve conflicts preserving both intents, leaving the branch green (mix precommit) — or abort cleanly and escalate. The Code flow's `sync_fix` / `resync_fix` nodes name it (RLY-192); also invocable by hand for a conflict-safe rebase.
 model: sonnet
 ---
 
@@ -23,10 +23,37 @@ conflict — or abort cleanly and escalate. **Never commit a guessed resolution.
 - After the rebase completes, run `mix precommit`. The branch MUST be green post-rebase.
 
 ## Escalation guardrail (prefer halting over guessing)
-If a conflict can't be resolved with confidence, OR `mix precommit` can't be made green after
-the rebase, run `git rebase --abort` to leave the branch **exactly** as it was, and report
-failure with precise detail. Do NOT commit a guessed resolution — a halted run a human can
-resume beats a mangled branch.
+Resolve ordinary textual conflicts by preserving both intents. But some conflicts are semantic,
+not textual — e.g. both sides independently added a constant for one concept (RLY-181:
+`EXECUTOR_VERSION` vs `VERSION`), where the correct fix is to delete one and repoint its call
+sites, not to keep both hunks. When the resolution needs a human judgement, OR you cannot make
+`mix precommit` green after the rebase, do NOT guess:
+
+1. Run `git rebase --abort` so the branch is left **exactly** as it was — non-rebasing, commits
+   intact, HEAD attached to the branch (RLY-166).
+2. Park the run for a human. Write the questions to a scratch file, naming the conflicting
+   files, what each side intended, and the specific judgement being asked:
+
+       questions_file="$(dirname "$RELAY_NODE_SCRATCH")/rebase_questions.json"
+       cat > "$questions_file" <<'JSON'
+       [
+         {
+           "prompt": "Rebasing onto origin/main hit a conflict I should not resolve by guessing. Files: <files>. Our side: <intent>. Their side: <intent>. Which resolution is correct?",
+           "options": ["<option A>", "<option B>"],
+           "allow_text": true
+         }
+       ]
+       JSON
+
+   Then run the `needs-input <ref> --questions @"$questions_file"` command **exactly as it
+   appears in the outcome contract at the end of your prompt** — that copy is already rendered
+   with the right executable path for this run. Never retype a placeholder token you saw in a
+   flow definition: this file is a static system prompt and is not passed through the executor's
+   renderer, so a placeholder would reach the model literally. After posting the question,
+   **stop without declaring an outcome** — that is what parks the run. The engine resumes THIS
+   node with your Claude session intact when the human answers, so you come back with full
+   context. Do NOT commit a guessed resolution — a parked run a human can resume beats a mangled
+   branch.
 
 ## Report — return your structured verdict (`pass` + `findings`)
 - **`pass: true`** only when the rebase completed AND `mix precommit` is green. `findings` may
