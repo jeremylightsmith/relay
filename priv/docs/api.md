@@ -250,7 +250,15 @@ CLI: `bin/relay runs RLY-12`.
 ### GET /api/executors
 
 The board's connected executors: advertised capacity per isolation class, last
-heartbeat, staleness, and the jobs each is currently holding.
+heartbeat, freshness, version, and the jobs each is currently holding.
+
+`freshness` is `"fresh"`, `"stale"` (missed a beat), or `"gone"` (reclaimed by the reaper);
+`stale?` is a `freshness != "fresh"` convenience flag — check `freshness` when the
+distinction between "late" and "reclaimed" matters. `outdated` is **orthogonal to
+freshness**: an executor can be beating normally and still be running code below the
+server's minimum version, in which case it is refused work (409 `executor_outdated`) with
+no other visible symptom — this is the field that explains a healthy-looking executor that
+picks up nothing.
 
 ```
 curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/executors
@@ -258,7 +266,8 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/executors
 
 ```json
 { "data": [ { "name": "mac", "host": "mac.local", "capacity": { "shared_clean": 3, "exclusive": 1 },
-  "last_heartbeat": "…", "stale?": false, "jobs": [
+  "last_heartbeat": "…", "freshness": "fresh", "stale?": false, "version": 1, "outdated": false,
+  "jobs": [
     { "id": 12, "ref": "RLY-9", "node_key": "implement", "state": "running" }
   ] } ] }
 ```

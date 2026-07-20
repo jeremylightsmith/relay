@@ -2828,6 +2828,15 @@ class RunsAndExecutorsRenderingTest(unittest.TestCase):
         stale = [dict(self.EXECUTORS[0], **{"stale?": True})]
         self.assertIn("STALE", relay.format_executors(stale))
 
+    def test_executors_render_flags_an_outdated_executor_even_when_fresh(self):
+        # RLY-184: outdated is orthogonal to staleness — a beating-normally executor can
+        # still be refused work for running old code, and that's precisely the case an
+        # operator staring at "no STALE flag, still nothing dispatching" needs surfaced.
+        outdated = [dict(self.EXECUTORS[0], **{"stale?": False, "outdated": True})]
+        out = relay.format_executors(outdated)
+        self.assertIn("OUTDATED", out)
+        self.assertNotIn("STALE", out)
+
     def test_executors_render_says_so_when_nothing_is_connected(self):
         self.assertIn("no executors", relay.format_executors([]))
 

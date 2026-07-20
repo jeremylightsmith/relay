@@ -88,8 +88,10 @@ never 403s):
   a failing review's findings need to be readable for.
 - `GET /api/executors` (`RelayWeb.Api.ExecutorController.index/2`) — composes
   `Relay.Runs.list_executor_status/2` (no second executor read): advertised capacity per
-  isolation class, last heartbeat, `stale?` (from the same `executor_stale?/2` predicate the
-  reclaim sweep uses), and the jobs each executor currently holds.
+  isolation class, last heartbeat, the tri-state `freshness` (`Relay.Runs.executor_freshness/2`;
+  `stale?` is the `freshness != :fresh` convenience flag), `version`/`outdated`
+  (`Relay.Runs.executor_outdated?/1` — orthogonal to freshness, since a refused executor can
+  still be beating normally), and the jobs each executor currently holds.
 - `GET /api/version` (`RelayWeb.Api.VersionController.show/2`) — the git SHA the running app
   was built from, baked in at image build time (`Dockerfile`'s `final` stage, fed by
   `.github/workflows/ci.yml`'s `flyctl deploy --build-arg`). Unauthenticated, on the plain

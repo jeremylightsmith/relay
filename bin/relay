@@ -66,8 +66,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 7
-EXECUTOR_FINGERPRINT = "cdab7c9d219ee8cdf4d7be5e064a3b77cbb3b378cb504b9ac3ac7ac8e44a710f"
+EXECUTOR_VERSION = 9
+EXECUTOR_FINGERPRINT = "84de0b19d953fd6d809e67b207611a1390b7a6ca2d879b473db82b6998144161"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -581,9 +581,15 @@ def format_executors(executors):
     out = []
     for e in executors:
         caps = " ".join(f"{k}={v}" for k, v in sorted((e.get("capacity") or {}).items()))
-        flag = "  STALE" if e.get("stale?") else ""
+        # outdated is orthogonal to staleness (RLY-184): a beating-normally executor can
+        # still be refused work for running old code, so it gets its own flag rather than
+        # folding into STALE.
+        flags = "".join([
+            "  STALE" if e.get("stale?") else "",
+            "  OUTDATED" if e.get("outdated") else "",
+        ])
         out.append(f'{e.get("name", "?")} @ {e.get("host") or "?"}  {caps}  '
-                   f'heartbeat: {e.get("last_heartbeat") or "never"}{flag}')
+                   f'heartbeat: {e.get("last_heartbeat") or "never"}{flags}')
         for j in e.get("jobs") or []:
             out.append(f'  - job {j.get("id")} {j.get("ref", "?")} {j.get("node_key", "?")} [{j.get("state", "?")}]')
     return "\n".join(out) if out else "(no executors connected)"
@@ -674,11 +680,8 @@ def cmd_retry(args):
     command exists to prevent."""
     body = {"at": args.at} if getattr(args, "at", None) else {}
     d = api("POST", f"/api/cards/{args.ref}/retry", body)["data"]
-    if getattr(args, "json", False):
-        print(json.dumps(d, indent=2))
-    else:
-        log(f"{args.ref}: run {d['run_id']} re-entered at {d['node']} "
-            f"(retry {d['retries']})")
+    emit(args, d, lambda: log(f"{args.ref}: run {d['run_id']} re-entered at {d['node']} "
+                              f"(retry {d['retries']})"))
 
 
 def cmd_runs(args):

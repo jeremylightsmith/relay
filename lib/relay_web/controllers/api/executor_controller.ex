@@ -4,8 +4,10 @@ defmodule RelayWeb.Api.ExecutorController do
   is one call rather than an SSH session.
 
   Composes `Relay.Runs.list_executor_status/2` rather than adding a second executor read:
-  that function already board-scopes the `NodeJob → Run → Card` join and derives freshness
-  from the same `executor_stale?/2` predicate the reclaim sweep uses.
+  that function already board-scopes the `NodeJob → Run → Card` join and computes the
+  tri-state `freshness` (`Runs.executor_freshness/2`), whose `:gone` branch is deliberately
+  the same `executor_stale?/2` predicate the reclaim sweep uses — so a `gone` row here means
+  the reaper has already acted, not merely that a beat looks late.
   """
   use RelayWeb, :controller
 
