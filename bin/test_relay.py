@@ -2989,6 +2989,23 @@ class TestPartitionTest(unittest.TestCase):
             relay.subprocess.Popen = _popen
         self.assertEqual(seen["env"].get("MIX_TEST_PARTITION"), "3")
 
+    def test_partitionless_child_does_not_inherit_the_parents_var(self):
+        # RLY-216: every node now runs with MIX_TEST_PARTITION/RELAY_NODE_SCRATCH exported, so a
+        # partition-less child step (e.g. the precommit gate running bin/test_relay.py's own
+        # partition tests) must NOT inherit the parent's value — it must see it unset.
+        for name in ("MIX_TEST_PARTITION", "RELAY_NODE_SCRATCH"):
+            self.addCleanup(os.environ.pop, name, None)
+        os.environ["MIX_TEST_PARTITION"] = "7"
+        os.environ["RELAY_NODE_SCRATCH"] = "/leak/n.md"
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "env.txt")
+            ok = relay._stream_shell(
+                "printf '%s,%s' \"${MIX_TEST_PARTITION-unset}\" "
+                "\"${RELAY_NODE_SCRATCH-unset}\" > " + out, cwd=d)
+            self.assertTrue(ok)
+            with open(out) as f:
+                self.assertEqual(f.read(), "unset,unset")
+
     def test_claude_job_without_a_partition_leaves_the_env_unset(self):
         seen = {}
 
