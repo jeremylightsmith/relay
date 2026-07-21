@@ -864,6 +864,45 @@ class ExecutorPoolTest(unittest.TestCase):
         p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "done")
         self.assertEqual(p.capacity()["exclusive"], 2)
 
+    def test_idle_bound_run_ids_lists_bound_slots_without_a_live_job(self):
+        p = self.pool()
+        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        # while the job is live the slot is active → NOT reported as idle-bound
+        self.assertEqual(p.idle_bound_run_ids(), [])
+        # a parked release keeps the binding but clears the active mark → now idle-bound
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "parked")
+        self.assertEqual(p.idle_bound_run_ids(), ["r1"])
+
+    def test_idle_bound_run_ids_excludes_an_active_slot(self):
+        p = self.pool()
+        s1, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        p.release({"isolation": "exclusive", "run_id": "r1"}, s1, "parked")  # r1 idle-bound
+        p.assign({"isolation": "exclusive", "run_id": "r2"})                 # r2 has a live job
+        self.assertEqual(p.idle_bound_run_ids(), ["r1"])
+
+    def test_release_run_frees_a_terminal_runs_idle_slot(self):
+        p = self.pool()
+        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "parked")  # idle-bound, kept
+        self.assertEqual(p.capacity()["exclusive"], 1)
+        p.release_run("r1")                                    # server named it terminal
+        self.assertEqual(p.capacity()["exclusive"], 2)         # freed with no restart
+        self.assertFalse(p.has_bound_slots())
+
+    def test_release_run_skips_a_slot_with_a_live_job(self):
+        p = self.pool()
+        p.assign({"isolation": "exclusive", "run_id": "r1"})   # active, never released
+        p.release_run("r1")                                    # must NOT free an active slot
+        self.assertEqual(p.capacity()["exclusive"], 1)
+        self.assertEqual(p.idle_bound_run_ids(), [])
+
+    def test_release_run_on_an_unknown_run_id_is_a_noop(self):
+        p = self.pool()
+        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "parked")
+        p.release_run("nope")
+        self.assertEqual(p.idle_bound_run_ids(), ["r1"])       # r1 untouched
+
     def test_revoke_run_state_none_frees_the_slot(self):
         p = self.pool()
         slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
@@ -2383,9 +2422,12 @@ class FakeHeartbeat:
 
     instances = []
 
-    def __init__(self, executor, running_fn, on_revoke, interval=15, capacity=None):
+    def __init__(self, executor, running_fn, on_revoke, interval=15, capacity=None,
+                 bound_fn=None, on_release_run=None):
         self.executor = executor
         self.capacity = capacity or {}
+        self.bound_fn = bound_fn
+        self.on_release_run = on_release_run
         self.beats = []
         FakeHeartbeat.instances.append(self)
 
@@ -2462,6 +2504,17 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         # sent at once rather than waiting a full heartbeat interval.
         self.assertEqual(hb.beats[0], {"shared_clean": 2, "exclusive": 0})
         self.assertEqual(hb.beats[-1], {"shared_clean": 0, "exclusive": 0})
+
+    def test_the_loop_wires_the_pool_release_functions_into_the_heartbeat(self):
+        relay.claim_node_job = lambda e, c, t: None   # no work: just start, beat, idle
+        self._interrupt_after(0.2)
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        hb = FakeHeartbeat.instances[-1]
+        self.assertTrue(callable(hb.bound_fn))
+        self.assertTrue(callable(hb.on_release_run))
+        # the callbacks are the pool's own bound methods
+        self.assertEqual(hb.bound_fn.__name__, "idle_bound_run_ids")
+        self.assertEqual(hb.on_release_run.__name__, "release_run")
 
     def test_it_logs_once_naming_both_versions_and_the_remedy(self):
         relay.claim_node_job = lambda e, c, t: relay.outdated_refusal(9)
