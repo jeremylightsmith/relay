@@ -105,6 +105,38 @@ defmodule Relay.Runs.ListenerTest do
     assert fresh.payload["vars"]["changes_requested"] == "needs more detail"
   end
 
+  test "a reject re-enters even when the card's latest run is :failed (RLY-156 regression)",
+       %{user: user, board: board, flow: spec_flow, card: card} do
+    # Use the dead-end shape so a run can end :failed (the seeded spec flow parks instead).
+    {:ok, _} = Relay.Flows.disable_flow(spec_flow)
+    flow = dead_end_flow(board)
+
+    # Run once to success so the card lands in Spec:Review, then reject → re-entry #1.
+    {:ok, _run1} = Runs.start_run(card, flow)
+    assert_receive {:dispatched, job1}
+    {:ok, _run} = Runs.report_outcome(job1, %{outcome: :succeeded, detail: "v1"})
+    assert_receive {:run_finished, %Run{status: :done}}
+    {:ok, _card} = Relay.Cards.reject(reload(board, card), "redo it", {:user, user.id})
+    assert_receive {:run_started, _reentered}
+
+    # Fail the re-entered run so the card ends :failed while it sits in the works-in lane.
+    assert_receive {:dispatched, retry1}
+    {:ok, _run} = Runs.report_outcome(retry1, %{outcome: :failed, detail: "err-a"})
+    assert_receive {:dispatched, retry2}
+    {:ok, _run} = Runs.report_outcome(retry2, %{outcome: :failed, detail: "err-b"})
+    assert_receive {:run_finished, %Run{status: :failed}}
+    assert Relay.Cards.get_card(board, card.id).status == :failed
+
+    # Move the failed card back into a review stage and reject again: the latest run is
+    # :failed, but the reject re-sets the card to :ready — so re-entry MUST fire.
+    failed_card = reload(board, card)
+    review = Enum.find(board.stages, &(&1.name == "Spec:Review"))
+    {:ok, in_review} = Relay.Cards.move_card(failed_card, review, -1, {:user, user.id})
+    {:ok, _card} = Relay.Cards.reject(in_review, "try once more", {:user, user.id})
+
+    assert_receive {:run_started, %Run{context: %{"changes_requested" => "try once more"}}}
+  end
+
   test "no re-entry when the card's latest run failed — a human must intervene",
        %{user: user, board: board, flow: spec_flow, card: card} do
     # Swap the enabled "spec" flow for the dead-end shape: only one flow may be enabled
