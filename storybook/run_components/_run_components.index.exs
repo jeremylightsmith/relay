@@ -9,4 +9,5 @@ defmodule Storybook.RunComponents do
   def entry("run_node_timeline"), do: [icon: {:fa, "list-timeline", :thin}]
   def entry("run_state_banner"), do: [icon: {:fa, "flag", :thin}]
   def entry("run_history"), do: [icon: {:fa, "clock-rotate-left", :thin}]
+  def entry("run_status"), do: [icon: {:fa, "table-list", :thin}]
 end
