@@ -33,10 +33,11 @@ defmodule RelayWeb.FlowLayoutTest do
 
       # spine = branch → implement → ... following :succeeded edges, continuing
       # through quality_review's foreach_exhausted edge rather than looping back via its
-      # foreach_remaining edge, and through sync/sync_fix's shell/agent hop before precommit
-      # (RLY-192 inserts `sync` immediately before `precommit`).
+      # foreach_remaining edge (RLY-192 inserts `sync` immediately before `precommit`, and
+      # `resync`/`reverify` immediately before `merge`; their `sync_fix`/`resync_fix` partners
+      # are off-spine, side-column nodes like `final_fix`).
       spine =
-        ~w(branch implement spec_review quality_review sync precommit final_review smoke acceptance post merge)
+        ~w(branch implement spec_review quality_review sync precommit final_review smoke acceptance post resync reverify merge)
 
       types = Map.new(nodes, &{&1.key, &1.type})
 
