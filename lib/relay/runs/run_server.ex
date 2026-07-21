@@ -133,6 +133,8 @@ defmodule Relay.Runs.RunServer do
   # the checked-off id; the broadcast for that write still waits until after
   # commit, alongside every other card effect below.
   defp apply_outcome(run, flow, job, attrs, state) do
+    attrs = override_no_op_success(run, flow, job, attrs)
+
     {:ok, {decision, execution, next, checked_off_id}} =
       Repo.transaction(fn ->
         execution = Runs.finalize_job!(job, attrs)
@@ -323,6 +325,49 @@ defmodule Relay.Runs.RunServer do
 
     job = Runs.insert_job!(run, execution, Runs.build_payload(run, flow, node, opts))
     {execution, job}
+  end
+
+  # RLY-194: a node that must produce commits (expects_commits) but reported :succeeded
+  # with HEAD unmoved from before it ran did not do its work. Rewrite the outcome to
+  # :failed BEFORE finalize_job! — the seam is load-time deliberate: it is the only place
+  # with the flow node (expects_commits), the run (baseline sha) and the raw attrs before
+  # finalize_job! computes the failure_signature (which it does only for :failed). Fail
+  # open on nil: a missing sha on either side is not evidence of a lie.
+  defp override_no_op_success(run, flow, job, %{outcome: :succeeded, git_sha: sha} = attrs)
+       when is_binary(sha) do
+    node = Enum.find(flow.nodes, &(&1.key == job.node_key))
+
+    if node && node.expects_commits && baseline_sha(run) == sha do
+      Map.merge(attrs, %{outcome: :failed, detail: no_op_detail(job.node_key, sha)})
+    else
+      attrs
+    end
+  end
+
+  defp override_no_op_success(_run, _flow, _job, attrs), do: attrs
+
+  # The git_sha of this run's most recent prior outcome-bearing execution with a non-nil
+  # sha — the faithful proxy for "HEAD before this node ran" (the just-finalized row is
+  # not written yet, and even if it were it carries a nil git_sha until finalize). Not
+  # same-node: a spec_review between two implements reports the identical sha.
+  defp baseline_sha(run) do
+    Repo.one(
+      from e in NodeExecution,
+        where: e.run_id == ^run.id and not is_nil(e.git_sha),
+        order_by: [desc: e.id],
+        limit: 1,
+        select: e.git_sha
+    )
+  end
+
+  # Human sentence first, machine token in parens — the engine.ex convention. The 7-char
+  # short sha matches how a human reads HEAD on the card.
+  defp no_op_detail(node_key, sha) do
+    short = String.slice(sha, 0, 7)
+
+    "`#{node_key}` reported success but produced no commits — HEAD is still `#{short}`, " <>
+      "unchanged from before the node ran. A node that must produce commits and produced " <>
+      "none has not done its work. (no_op_success: #{node_key})"
   end
 
   # The detail of the run's most recent outcome-bearing execution, but ONLY when it
