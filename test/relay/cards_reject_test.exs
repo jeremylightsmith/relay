@@ -26,7 +26,7 @@ defmodule Relay.CardsRejectTest do
 
       assert {:ok, %Card{} = rejected} = Cards.reject(card, "Handle the empty case", :agent)
       assert rejected.stage_id == code.id
-      assert rejected.status == :working
+      assert rejected.status == :ready
 
       assert %Schemas.CardRejection{} = r = rejected.rejection
       assert r.note == "Handle the empty case"
@@ -51,7 +51,7 @@ defmodule Relay.CardsRejectTest do
 
       assert {:ok, rejected} = Cards.reject(card, "re-plan this", :agent)
       assert rejected.stage_id == plan.id
-      assert rejected.status == :working
+      assert rejected.status == :ready
       assert rejected.rejection.to_stage_id == plan.id
     end
 
@@ -63,9 +63,25 @@ defmodule Relay.CardsRejectTest do
 
       assert {:ok, rejected} = Cards.reject(card, "spec is wrong", :agent)
       assert rejected.stage_id == plan.id
-      assert rejected.status == :working
+      assert rejected.status == :ready
       assert rejected.rejection.from_stage_id == plan.id
       assert rejected.rejection.to_stage_id == plan.id
+    end
+
+    test "a reject onto a review-type destination is left snapped, not forced :ready",
+         %{board: board, review: review} do
+      # A second review-type stage used as review's reject_to target.
+      review2 =
+        insert(:stage, board: board, name: "Re-review", type: :review, category: :in_progress, position: 6)
+
+      {:ok, review} = Boards.update_stage(review, %{reject_to_stage_id: review2.id})
+      card = insert(:card, stage: review)
+      {:ok, card} = Cards.set_status(card, %{status: :in_review})
+
+      assert {:ok, rejected} = Cards.reject(card, "look again", :agent)
+      assert rejected.stage_id == review2.id
+      # :ready is invalid for a :review stage, so the move's snap (:in_review) stands.
+      assert rejected.status == :in_review
     end
 
     test "reject_target/1 exposes the derived destination without moving the card",

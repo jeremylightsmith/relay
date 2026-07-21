@@ -140,7 +140,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
 
     reloaded = Cards.get_card_by_ref(board, "RLY-1")
     assert reloaded.stage_id == code.id
-    assert reloaded.status == :working
+    assert reloaded.status == :ready
 
     timeline = Activity.list_timeline(reloaded)
     note = Enum.find(timeline, &match?(%Comment{body: "Tighten the error handling"}, &1))

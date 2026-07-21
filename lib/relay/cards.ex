@@ -1094,9 +1094,27 @@ defmodule Relay.Cards do
 
   defp move_and_reject(card, from_stage, target, note, actor) do
     with {:ok, moved} <- move_card(card, target, @append_index, actor),
-         :ok <- attach_note(moved, note, actor, :changes_requested) do
-      log_gate(moved, :rejected, actor, from_stage, target, note)
-      {:ok, put_rejection(moved, from_stage, target, note, actor)}
+         {:ok, ready} <- ready_for_rework(moved, target, actor),
+         :ok <- attach_note(ready, note, actor, :changes_requested) do
+      log_gate(ready, :rejected, actor, from_stage, target, note)
+      {:ok, put_rejection(ready, from_stage, target, note, actor)}
+    end
+  end
+
+  # RLY-216: a reject hands the card back for rework, so leave it in a distinguishable
+  # :ready state — the Listener re-enters a :ready card and refuses a :failed one. Only
+  # force :ready where it is valid for the destination type (queue/work/planning/done,
+  # never a review target) and not already :ready; otherwise keep move_card's snapped
+  # arrival status. This never produces an invalid status on an odd reject_to target and
+  # keeps the change scoped to the work/planning lanes flows actually re-enter — snap_status
+  # itself (which governs every move) is untouched.
+  defp ready_for_rework(%Card{status: :ready} = card, _target, _actor), do: {:ok, card}
+
+  defp ready_for_rework(%Card{} = card, %Stage{type: type}, actor) do
+    if Stage.valid_status?(:ready, type) do
+      set_status(card, %{status: :ready}, actor)
+    else
+      {:ok, card}
     end
   end
 

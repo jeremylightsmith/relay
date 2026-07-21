@@ -72,7 +72,7 @@ defmodule RelayWeb.Api.CardGatesTest do
       |> Map.fetch!("data")
 
     assert body["stage_id"] == code.id
-    assert body["status"] == "working"
+    assert body["status"] == "ready"
     assert Enum.any?(body["timeline"], &(&1["kind"] == "comment" and &1["body"] == "Handle the empty case"))
 
     rejected = Enum.find(body["timeline"], &(&1["kind"] == "activity" and &1["type"] == "rejected"))
