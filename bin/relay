@@ -67,8 +67,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 15
-EXECUTOR_FINGERPRINT = "a3b40e3887a27eaeb4097d4be7afef71bf0d905d95bf56ec31172b10506eec77"
+EXECUTOR_VERSION = 17
+EXECUTOR_FINGERPRINT = "d8794439b8164d62f4b84926dcf80688c14967b4654ba4392d3905622d15e51d"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -323,10 +323,16 @@ class ExecutorHeartbeat:
     heartbeat can never stall or raise into a job. soft_404 is kept as belt-and-braces for an
     executor pointed at an older server, but the route now exists."""
 
-    def __init__(self, executor, running_fn, on_revoke, interval=15, capacity=None):
+    def __init__(self, executor, running_fn, on_revoke, interval=15, capacity=None,
+                 bound_fn=None, on_release_run=None):
         self.executor = executor
         self.running_fn = running_fn
         self.on_revoke = on_revoke
+        # RLY-218: the run-scoped release channel, symmetric with on_revoke one level up.
+        # bound_fn -> the idle-bound run-ids to report; on_release_run(run_id) -> free that slot.
+        # Both default to safe no-ops so a heartbeat constructed without them still beats.
+        self.bound_fn = bound_fn or (lambda: [])
+        self.on_release_run = on_release_run or (lambda _run_id: None)
         self.interval = interval
         self.capacity = capacity or {}
         # Last inventory hash the server ACKNOWLEDGED. None ⇒ send on the next beat, so the
@@ -349,7 +355,8 @@ class ExecutorHeartbeat:
         send = capabilities if digest != self._caps_hash else None
         try:
             resp = api("POST", "/api/node-jobs/heartbeat",
-                       heartbeat_body(self.executor, self.capacity, self.running_fn(), send),
+                       heartbeat_body(self.executor, self.capacity, self.running_fn(),
+                                      self.bound_fn(), send),
                        soft_404=True) or {}
             # Only a SUCCESSFUL post advances the stored hash: a failed POST must leave it
             # alone so the next beat retries.
@@ -362,6 +369,8 @@ class ExecutorHeartbeat:
                 self._caps_hash = None
             for job_id in resp.get("revoked", []):
                 self.on_revoke(job_id)
+            for run_id in resp.get("release_runs", []):
+                self.on_release_run(run_id)
         except SystemExit:      # api() die()s on HTTP/network error
             pass
         except Exception:
@@ -894,6 +903,11 @@ class ExecutorPool:
         self.shared_used = 0
         # exclusive slot name -> run_id it is bound to (None = free)
         self.excl = {f"{self.ns}-work-{i}": None for i in range(1, self.cap_excl + 1)}
+        # RLY-218: slot names that currently have a LIVE job. A slot in `active` is never
+        # reported as idle-bound and is never freed by release_run — this keeps the run-scoped
+        # release path (idle runs) disjoint from the outcome/revoke path (live jobs) and makes
+        # the double-release race unreachable.
+        self.active = set()
         self.lock = threading.Lock()
 
     def capacity(self):
@@ -940,25 +954,50 @@ class ExecutorPool:
                 return self.shared_name, False
             for name, bound in self.excl.items():          # reuse the run's own slot
                 if bound == run_id:
+                    self.active.add(name)
                     return name, False
             for name, bound in self.excl.items():          # else take a free slot
                 if bound is None:
                     self.excl[name] = run_id
+                    self.active.add(name)
                     return name, True
             return None
 
     def release(self, job, slot, run_state):
         """Free/keep the slot per the outcome's run_state. shared_clean always frees; an
         exclusive slot stays bound while running/parked and unbinds on a terminal state
-        (done/failed/cancelled) or a revoke (run_state=None)."""
+        (done/failed/cancelled) or a revoke (run_state=None). Either way the slot no longer has
+        a live job, so it leaves `active` (RLY-218)."""
         with self.lock:
             if job["isolation"] == "shared_clean":
                 self.shared_used = max(0, self.shared_used - 1)
                 return
+            self.active.discard(slot)
             if run_state in ACTIVE_RUN_STATES:
                 return
             if slot in self.excl:
                 self.excl[slot] = None
+
+    def idle_bound_run_ids(self):
+        """Run-ids of exclusive slots that are BOUND but have no live job on this executor — what
+        the heartbeat sends as `bound_runs` (RLY-218). A slot with a live job (`name in
+        self.active`) is excluded: reporting it could let the server name a still-running run for
+        release and free its worktree out from under the job (the double-release race). Distinct:
+        a run holds at most one exclusive slot, but dedupe defensively."""
+        with self.lock:
+            return list({run_id for name, run_id in self.excl.items()
+                         if run_id is not None and name not in self.active})
+
+    def release_run(self, run_id):
+        """Unbind every IDLE slot bound to `run_id` — the server reported it terminal
+        (`release_runs`). The `not in self.active` guard is defense-in-depth: a slot with a live
+        job is never freed here (that run releases only through the outcome/revoke path), so the
+        double-release race is unreachable even if the server ever names a still-running run. No
+        worktree reset — deferred to the next run's first assign, matching the existing release."""
+        with self.lock:
+            for name, bound in self.excl.items():
+                if bound == run_id and name not in self.active:
+                    self.excl[name] = None
 
 
 def render(template, vars):
@@ -1122,14 +1161,16 @@ def outcome_body(outcome, detail, git_sha, session_id=None):
             "git_sha": git_sha, "session_id": session_id}
 
 
-def heartbeat_body(executor, capacity, running, capabilities=None):
-    """The exact body POSTed to /api/node-jobs/heartbeat (RLY-164).
+def heartbeat_body(executor, capacity, running, bound_runs, capabilities=None):
+    """The exact body POSTed to /api/node-jobs/heartbeat (RLY-164 / RLY-218).
 
     Pure for the same reason as outcome_body: it is pinned against the fixture's
-    `heartbeat.request` (RLY-176). `capabilities` is OPTIONAL and rides send-on-change
-    (RLY-182): the key is omitted entirely on a beat where nothing changed, and
-    Runs.upsert_executor/2 leaves the stored value alone when the key is absent."""
-    body = {"executor": executor, "capacity": capacity, "running": running}
+    `heartbeat.request` (RLY-176). `bound_runs` (RLY-218) is the run-ids of exclusive slots
+    this executor holds with no live job — the server replies with the subset it now considers
+    terminal (`release_runs`), which the executor releases. `capabilities` is OPTIONAL and rides
+    send-on-change (RLY-182): omitted on a beat where nothing changed."""
+    body = {"executor": executor, "capacity": capacity, "running": running,
+            "bound_runs": bound_runs}
     if capabilities is not None:
         body["capabilities"] = capabilities
     return body
@@ -1588,7 +1629,9 @@ def cmd_execute(args):
     if not DRY:
         hb = ExecutorHeartbeat(executor, running_ids, revoke,
                                interval=cfg["heartbeat_interval"],
-                               capacity=cfg["capacity"])
+                               capacity=cfg["capacity"],
+                               bound_fn=pool.idle_bound_run_ids,
+                               on_release_run=pool.release_run)
         # Beat once up front: Relay.Runs.Capacity is empty on a fresh server (it is lost on
         # every restart by design), and until it is fed the scheduler plans zero dispatches.
         # Waiting a full interval here would make "start the executor" look broken.

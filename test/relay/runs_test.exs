@@ -993,4 +993,38 @@ defmodule Relay.RunsTest do
       assert %{state: :queued, executor_name: "e1"} = Relay.Repo.get!(NodeJob, excl.id)
     end
   end
+
+  describe "terminal_among/2" do
+    test "returns on-board terminal run-ids, excluding active runs and other boards", %{board: board} do
+      flow = retry_flow(board)
+      {:ok, active} = Runs.start_run(card_in(board, "Next up", "active"), flow)
+
+      {:ok, cancelled} = Runs.start_run(card_in(board, "Next up", "cancelled"), flow)
+      {:ok, cancelled} = Runs.cancel_run(cancelled)
+
+      {:ok, done} = Runs.start_run(card_in(board, "Next up", "done"), flow)
+      {1, _} = Relay.Repo.update_all(from(r in Run, where: r.id == ^done.id), set: [status: :done])
+
+      # A terminal run on a DIFFERENT board must never come back (cross-board leak).
+      {:ok, other_board} = Relay.Boards.create_board(insert(:user), %{name: "Other"})
+      other_flow = retry_flow(other_board)
+      {:ok, elsewhere} = Runs.start_run(card_in(other_board, "Next up", "elsewhere"), other_flow)
+      {:ok, elsewhere} = Runs.cancel_run(elsewhere)
+
+      result = Runs.terminal_among(board, [active.id, cancelled.id, done.id, elsewhere.id])
+
+      assert cancelled.id in result
+      assert done.id in result
+      refute active.id in result
+      refute elsewhere.id in result
+    end
+
+    test "an empty list in returns an empty list", %{board: board} do
+      assert Runs.terminal_among(board, []) == []
+    end
+
+    test "a run-id this board does not own is not returned", %{board: board} do
+      assert Runs.terminal_among(board, [999_999]) == []
+    end
+  end
 end

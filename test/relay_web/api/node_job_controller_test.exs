@@ -399,6 +399,56 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert %{"revoked" => []} = json_response(conn, 200)
     end
 
+    test "a cancelled bound run comes back in release_runs so the executor frees its slot",
+         %{conn: conn, board: board} do
+      flow = four_outcome_flow(board)
+      {run, _job} = start_queued_job(board, flow)
+      {:ok, _} = Runs.cancel_run(run)
+
+      conn =
+        post(conn, ~p"/api/node-jobs/heartbeat", %{
+          "executor" => %{"name" => "exec-a"},
+          "capacity" => %{"exclusive" => 1},
+          "running" => [],
+          "bound_runs" => [run.id]
+        })
+
+      assert %{"release_runs" => release_runs} = json_response(conn, 200)
+      assert run.id in release_runs
+    end
+
+    test "a still-active bound run is NOT in release_runs", %{conn: conn, board: board} do
+      flow = four_outcome_flow(board)
+      {run, _job} = start_queued_job(board, flow)
+
+      conn =
+        post(conn, ~p"/api/node-jobs/heartbeat", %{
+          "executor" => %{"name" => "exec-a"},
+          "capacity" => %{"exclusive" => 1},
+          "running" => [],
+          "bound_runs" => [run.id]
+        })
+
+      assert %{"release_runs" => []} = json_response(conn, 200)
+    end
+
+    test "never reports another board's run in release_runs", %{conn: conn} do
+      {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other Board 2"})
+      flow = four_outcome_flow(other)
+      {run, _job} = start_queued_job(other, flow)
+      {:ok, _} = Runs.cancel_run(run)
+
+      conn =
+        post(conn, ~p"/api/node-jobs/heartbeat", %{
+          "executor" => %{"name" => "exec-a"},
+          "capacity" => %{"exclusive" => 1},
+          "running" => [],
+          "bound_runs" => [run.id]
+        })
+
+      assert %{"release_runs" => []} = json_response(conn, 200)
+    end
+
     test "a non-map executor is a 422, not a 500", %{conn: conn} do
       # `relay execute` beats every ~30s, so leaving heartbeat unfixed would rediscover
       # RLY-162 twelve times an hour.

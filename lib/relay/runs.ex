@@ -815,6 +815,38 @@ defmodule Relay.Runs do
 
   def revoked_among(_board, _running), do: []
 
+  @doc """
+  The subset of `bound_run_ids` whose run is TERMINAL (`status in Run.terminal_statuses()`) on
+  THIS board — the run-scoped analogue of `revoked_among/2`, one level up. The executor reports
+  the run-ids of exclusive slots it holds with no live job (`bound_runs`); this names the ones it
+  may now release, because the run has ended server-side.
+
+  Board-scoped and conservative for the same reason as `revoked_among/2`: a run-id this board does
+  not own is NOT returned (the slot stays bound rather than freeing on an id we cannot verify), and
+  a non-integer id is ignored rather than raising — a heartbeat must never 500. Empty in → empty out.
+  """
+  def terminal_among(%Board{id: board_id}, bound_run_ids) when is_list(bound_run_ids) do
+    ids = for id <- bound_run_ids, int = to_job_id(id), is_integer(int), do: int
+
+    case ids do
+      [] ->
+        []
+
+      ids ->
+        Repo.all(
+          from r in Run,
+            join: c in Card,
+            on: c.id == r.card_id,
+            where:
+              c.board_id == ^board_id and r.id in ^ids and
+                r.status in ^Run.terminal_statuses(),
+            select: r.id
+        )
+    end
+  end
+
+  def terminal_among(_board, _ids), do: []
+
   defp to_job_id(id) when is_integer(id), do: id
 
   defp to_job_id(id) when is_binary(id) do

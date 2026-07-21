@@ -195,10 +195,10 @@ class ReverseContractTest(unittest.TestCase):
     def test_heartbeat_body_key_set_matches_the_fixture(self):
         # Omitted (steady-state) beats are a SUBSET of the fixture's request keys;
         # `capabilities` is optional and send-on-change (RLY-182).
-        body = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"])
+        body = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"], [])
         self.assertTrue(set(body) <= set(CONTRACT["heartbeat"]["request"]))
         # A beat that DOES carry the inventory matches the fixture's key set exactly.
-        full = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"],
+        full = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"], [],
                                     {"agents": [], "skills": []})
         self.assertEqual(set(full), set(CONTRACT["heartbeat"]["request"]))
         self.assertIn("want_capabilities", CONTRACT["heartbeat"]["response"])
@@ -210,6 +210,15 @@ class ReverseContractTest(unittest.TestCase):
     def test_the_heartbeat_response_carries_the_revoked_ids_the_executor_reads(self):
         # ExecutorHeartbeat._beat() hands each of these to on_revoke().
         self.assertIn("revoked", CONTRACT["heartbeat"]["response"])
+
+    def test_the_heartbeat_request_carries_bound_runs(self):
+        # RLY-218: the executor reports its idle-bound run-ids so the server can name the
+        # terminal ones to release.
+        self.assertIn("bound_runs", CONTRACT["heartbeat"]["request"])
+
+    def test_the_heartbeat_response_carries_release_runs(self):
+        # ExecutorHeartbeat._beat() hands each of these to on_release_run().
+        self.assertIn("release_runs", CONTRACT["heartbeat"]["response"])
 
     def test_the_claim_request_carries_the_executor_version(self):
         # RLY-184: the server refuses a claim whose executor has no version, so this key is
@@ -854,6 +863,45 @@ class ExecutorPoolTest(unittest.TestCase):
         slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
         p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "done")
         self.assertEqual(p.capacity()["exclusive"], 2)
+
+    def test_idle_bound_run_ids_lists_bound_slots_without_a_live_job(self):
+        p = self.pool()
+        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        # while the job is live the slot is active → NOT reported as idle-bound
+        self.assertEqual(p.idle_bound_run_ids(), [])
+        # a parked release keeps the binding but clears the active mark → now idle-bound
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "parked")
+        self.assertEqual(p.idle_bound_run_ids(), ["r1"])
+
+    def test_idle_bound_run_ids_excludes_an_active_slot(self):
+        p = self.pool()
+        s1, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        p.release({"isolation": "exclusive", "run_id": "r1"}, s1, "parked")  # r1 idle-bound
+        p.assign({"isolation": "exclusive", "run_id": "r2"})                 # r2 has a live job
+        self.assertEqual(p.idle_bound_run_ids(), ["r1"])
+
+    def test_release_run_frees_a_terminal_runs_idle_slot(self):
+        p = self.pool()
+        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "parked")  # idle-bound, kept
+        self.assertEqual(p.capacity()["exclusive"], 1)
+        p.release_run("r1")                                    # server named it terminal
+        self.assertEqual(p.capacity()["exclusive"], 2)         # freed with no restart
+        self.assertFalse(p.has_bound_slots())
+
+    def test_release_run_skips_a_slot_with_a_live_job(self):
+        p = self.pool()
+        p.assign({"isolation": "exclusive", "run_id": "r1"})   # active, never released
+        p.release_run("r1")                                    # must NOT free an active slot
+        self.assertEqual(p.capacity()["exclusive"], 1)
+        self.assertEqual(p.idle_bound_run_ids(), [])
+
+    def test_release_run_on_an_unknown_run_id_is_a_noop(self):
+        p = self.pool()
+        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "parked")
+        p.release_run("nope")
+        self.assertEqual(p.idle_bound_run_ids(), ["r1"])       # r1 untouched
 
     def test_revoke_run_state_none_frees_the_slot(self):
         p = self.pool()
@@ -2106,6 +2154,29 @@ class ExecutorHeartbeatCapacityTest(unittest.TestCase):
         hb._beat()
         self.assertEqual(killed, ["nj-7"])
 
+    def test_the_beat_posts_bound_runs_from_bound_fn(self):
+        sent = {}
+
+        def fake_api(method, path, body=None, **kw):
+            sent["body"] = body
+            return {"revoked": []}
+
+        relay.api = fake_api
+        hb = relay.ExecutorHeartbeat({"name": "e"}, lambda: [], lambda jid: None,
+                                     capacity={"shared_clean": 1, "exclusive": 1},
+                                     bound_fn=lambda: [7, 9])
+        hb._beat()
+        self.assertEqual(sent["body"]["bound_runs"], [7, 9])
+
+    def test_release_runs_in_the_reply_are_handed_to_on_release_run(self):
+        relay.api = lambda *a, **k: {"revoked": [], "release_runs": [42, 43]}
+        released = []
+        hb = relay.ExecutorHeartbeat({"name": "e"}, lambda: [], lambda jid: None,
+                                     capacity={"shared_clean": 1, "exclusive": 1},
+                                     on_release_run=released.append)
+        hb._beat()
+        self.assertEqual(released, [42, 43])
+
 
 class ExecutorSingletonLockTest(unittest.TestCase):
     """RLY-193: a second `relay execute` for the same identity or worktree namespace must
@@ -2351,9 +2422,12 @@ class FakeHeartbeat:
 
     instances = []
 
-    def __init__(self, executor, running_fn, on_revoke, interval=15, capacity=None):
+    def __init__(self, executor, running_fn, on_revoke, interval=15, capacity=None,
+                 bound_fn=None, on_release_run=None):
         self.executor = executor
         self.capacity = capacity or {}
+        self.bound_fn = bound_fn
+        self.on_release_run = on_release_run
         self.beats = []
         FakeHeartbeat.instances.append(self)
 
@@ -2430,6 +2504,17 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         # sent at once rather than waiting a full heartbeat interval.
         self.assertEqual(hb.beats[0], {"shared_clean": 2, "exclusive": 0})
         self.assertEqual(hb.beats[-1], {"shared_clean": 0, "exclusive": 0})
+
+    def test_the_loop_wires_the_pool_release_functions_into_the_heartbeat(self):
+        relay.claim_node_job = lambda e, c, t: None   # no work: just start, beat, idle
+        self._interrupt_after(0.2)
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        hb = FakeHeartbeat.instances[-1]
+        self.assertTrue(callable(hb.bound_fn))
+        self.assertTrue(callable(hb.on_release_run))
+        # the callbacks are the pool's own bound methods
+        self.assertEqual(hb.bound_fn.__name__, "idle_bound_run_ids")
+        self.assertEqual(hb.on_release_run.__name__, "release_run")
 
     def test_it_logs_once_naming_both_versions_and_the_remedy(self):
         relay.claim_node_job = lambda e, c, t: relay.outdated_refusal(9)
