@@ -1,10 +1,14 @@
 // Default flow: Code — replaces relay_config.json's "Code" entry AND the inside
 // of execute-plan.js (its 9 phases become nodes here). Cut over by RLY-139 (W13):
-// 18 nodes / 30 edges, `implement` is a foreach loop head, and quality_review's
+// 18 nodes / 37 edges, `implement` is a foreach loop head, and quality_review's
 // two guarded edges are what the next_task gate was faking. Model tiers preserved.
 // RLY-192 added two rebase sync points (`sync`+`sync_fix` before `precommit`,
 // `resync`+`resync_fix`+`reverify` before `merge`) so a busy board's `main`
 // moving under a long run no longer strands the work at `merge`.
+// RLY-194 marked the four commit-producing nodes (implement, final_fix, smoke_fix,
+// acceptance_fix) expects_commits, gave implement a max_retries: 1, and added a
+// needs_input park edge to every agent node's :failed outcome (nine across the
+// library) so a hard failure parks for a human instead of dead-ending the run.
 {
   "key": "code",
   "trigger": { "from": "Plan:Done", "stage": "Code", "done": "Review" },
@@ -27,6 +31,7 @@
     // file and keep bare prompts.
     "implement": {
       "type": "agent", "model": "sonnet", "effort": "high",
+      "max_retries": 1, "expects_commits": true,
       "foreach": "card.sub_tasks", "agent": "plan-implementer",
       "run": "Implement the task named {sub_task} from the card's plan with strict red/green TDD. One task only — do not start the next one. If reviewer findings are attached, address them."
     },
@@ -56,7 +61,7 @@
       "run": "Whole-branch cross-cutting review — issues only visible across the whole diff. Includes the docs/architecture freshness check."
     },
     "final_fix": {
-      "type": "agent", "model": "opus", "agent": "final-fixer",
+      "type": "agent", "model": "opus", "agent": "final-fixer", "expects_commits": true,
       "run": "Fix every blocking finding from the review in one consolidated pass; keep the suite green."
     },
     "smoke": {
@@ -64,7 +69,7 @@
       "run": "Drive the new behavior end-to-end through the running app; screenshot each new/changed state against its docs/designs artboard."
     },
     "smoke_fix": {
-      "type": "agent", "model": "opus",
+      "type": "agent", "model": "opus", "expects_commits": true,
       "run": "Fix what the smoke run proved broken; keep the suite green."
     },
     "acceptance": {
@@ -72,7 +77,7 @@
       "run": "Run the card's acceptance criteria verbatim; return a per-criterion verdict (human-verify criteria don't block)."
     },
     "acceptance_fix": {
-      "type": "agent", "model": "opus",
+      "type": "agent", "model": "opus", "expects_commits": true,
       "run": "Fix the failing acceptance criteria; keep the suite green."
     },
     "post": {
@@ -129,6 +134,18 @@
     { "from": "reverify",       "to": "resync_fix",     "on": "failed", "max_loops": 2 },
     { "from": "reverify",       "to": "merge",          "on": "succeeded" },
     { "from": "merge",          "to": "done",           "on": "succeeded" },
-    { "from": "merge",          "to": "resync",         "on": "failed", "max_loops": 2 }
+    { "from": "merge",          "to": "resync",         "on": "failed", "max_loops": 2 },
+    // RLY-194: every agent node parks on a hard "failed" instead of dead-ending. implement
+    // carries max_retries: 1, so it retries once THEN parks; the fixers, post and the RLY-192
+    // rebasers park on their first hard failure (a fixer already sits under a max_loops fix
+    // cycle; a rebaser already escalates judgement calls via needs-input). branch/merge/sync/
+    // resync are shell nodes and deliberately stay unrouted.
+    { "from": "implement",      "to": "needs_input",   "on": "failed" },
+    { "from": "sync_fix",       "to": "needs_input",   "on": "failed" },
+    { "from": "final_fix",      "to": "needs_input",   "on": "failed" },
+    { "from": "smoke_fix",      "to": "needs_input",   "on": "failed" },
+    { "from": "acceptance_fix", "to": "needs_input",   "on": "failed" },
+    { "from": "resync_fix",     "to": "needs_input",   "on": "failed" },
+    { "from": "post",           "to": "needs_input",   "on": "failed" }
   ]
 }

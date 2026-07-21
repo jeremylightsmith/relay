@@ -64,15 +64,18 @@ defmodule Relay.FlowsSeedTest do
     spec = Flows.get_flow(ctx.board, "spec")
     assert [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref}", max_retries: 1, model: nil}] = spec.nodes
 
-    assert [%{from: "start", to: "brainstorm", on: nil}, %{from: "brainstorm", to: "done", on: :succeeded}] =
-             spec.edges
+    assert [
+             %{from: "start", to: "brainstorm", on: nil},
+             %{from: "brainstorm", to: "done", on: :succeeded},
+             %{from: "brainstorm", to: "needs_input", on: :failed}
+           ] = spec.edges
 
     plan = Flows.get_flow(ctx.board, "plan")
     assert [%{key: "write_plan", type: :agent, run: "/write-plan {ref}", max_retries: 1}] = plan.nodes
 
     code = Flows.get_flow(ctx.board, "code")
     assert length(code.nodes) == 18
-    assert length(code.edges) == 30
+    assert length(code.edges) == 37
 
     # The next_task grep-gate is gone: "which task is next" is engine-derived now.
     refute Enum.any?(code.nodes, &(&1.key == "next_task"))
