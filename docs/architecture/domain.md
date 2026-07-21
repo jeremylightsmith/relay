@@ -147,6 +147,22 @@ sharing behavior.
   unlimited), the breaker threshold, and the visit cap. So a retried run can always make exactly
   one more move than it just did, and a retry that changes nothing dies again immediately. No
   automatic loop can obtain an allowance, because only `retry_run/2` increments the counter.
+  **Stopped-work detection (RLY-191):** `Relay.Runs.Scheduler.Snapshot` also carries an
+  `executors` field (`%{executor_id => %{name, version, outdated, freshness}}`, built by
+  `Scheduler.Server.build_snapshot/2` from `Runs.list_board_executors/1` and the existing
+  `Runs.executor_outdated?/1` / `executor_freshness/2` predicates — never a second
+  computation). `Scheduler.capacity_diagnosis/1` reads that field and is the one function that
+  turns an empty/refusing/silent roster into `:no_executor` / `:executor_outdated` /
+  `:executor_gone` (vs. a legitimately busy `:awaiting_capacity`); both `explain/2`'s terminal
+  branch and `Relay.Runs.stopped_work/2` call it, so `relay why`, the diagnosis API, and the
+  board-level verdict can never disagree. `Runs.stopped_work/2` is the public, board-level
+  read: `nil` when the board is quiet, or `%{reason, detail, queued_count,
+  oldest_queued_age_s, evidence}` once at least one node-job has sat `:queued` unclaimed past
+  `@stopped_work_after_s` (120s) AND the roster reason is one of the three above. `diagnose/3`
+  also layers a roster-blocked override on top of `explain/2`'s `:run_active` verdict for a
+  live run whose current job isn't actually being worked (queued/unclaimed, or held by a
+  silent executor) while the roster is refusing/absent — the false-"working" signal the
+  original incident showed.
 - **Cards** — the card lifecycle: create/edit/move/archive, status (`working`,
   `needs_input`, `failed`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject,
   needs-input questions. `failed` (RLY-179) is set only by `Relay.Cards.mark_failed/3` when a

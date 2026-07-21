@@ -316,10 +316,36 @@ defmodule Relay.Runs.Scheduler do
         )
 
       true ->
+        capacity_verdict(snapshot, flow, evidence)
+    end
+  end
+
+  defp capacity_verdict(snapshot, flow, evidence) do
+    {reason, bits} = capacity_diagnosis(snapshot)
+    evidence = Map.merge(evidence, bits)
+
+    case reason do
+      :executor_outdated ->
+        verdict(
+          :executor_outdated,
+          "every connected executor is running old code and is being refused — " <>
+            "#{running_versions_phrase(bits)}, requires v#{bits.required_version}. " <>
+            "Restart it to pick up current code.",
+          evidence
+        )
+
+      reason when reason in [:no_executor, :executor_gone] ->
+        verdict(
+          :no_executor,
+          "no executor is connected — nothing is running node-jobs for this board.",
+          evidence
+        )
+
+      :awaiting_capacity ->
         verdict(
           :awaiting_capacity,
           "The #{flow.key} flow would dispatch this card, but no executor is advertising a free " <>
-            "#{flow.isolation} slot — nothing is connected to run it.",
+            "#{flow.isolation} slot — every connected executor is busy.",
           evidence
         )
     end
@@ -381,6 +407,55 @@ defmodule Relay.Runs.Scheduler do
   end
 
   defp verdict(verdict, detail, evidence), do: %{verdict: verdict, detail: detail, evidence: evidence}
+
+  @doc """
+  The roster-level reason no node-job is being claimed on this snapshot, shared by
+  `explain/2`'s terminal branch and `Relay.Runs.stopped_work/2` so the board banner, `relay
+  why`, and `GET /api/cards/:ref/diagnosis` all speak one diagnosis. `plan/1` never calls this;
+  it reads only `capacity`, so the plan/explain agreement property is untouched.
+
+    * `:no_executor` — the roster is empty.
+    * `:executor_gone` — the roster is non-empty but every executor has gone silent.
+    * `:executor_outdated` — every live (non-`:gone`) executor is running refused old code.
+    * `:awaiting_capacity` — at least one live, current executor exists; it is simply out of
+      free slots.
+
+  The evidence carries the required version and one `%{name, version}` per live executor, so
+  every consumer names the mismatch without a second query.
+  """
+  @spec capacity_diagnosis(Snapshot.t()) ::
+          {:executor_outdated | :no_executor | :executor_gone | :awaiting_capacity,
+           %{required_version: integer() | nil, running_versions: [%{name: String.t(), version: integer() | nil}]}}
+  def capacity_diagnosis(%Snapshot{executors: executors}) do
+    live = for {_id, e} <- executors, e.freshness != :gone, do: e
+
+    cond do
+      map_size(executors) == 0 -> {:no_executor, version_evidence([])}
+      live == [] -> {:executor_gone, version_evidence([])}
+      Enum.all?(live, & &1.outdated) -> {:executor_outdated, version_evidence(live)}
+      true -> {:awaiting_capacity, version_evidence([])}
+    end
+  end
+
+  defp version_evidence(live) do
+    %{
+      required_version: Relay.Runs.min_executor_version(),
+      running_versions: Enum.map(live, &%{name: &1.name, version: &1.version})
+    }
+  end
+
+  @doc false
+  def running_versions_phrase(%{running_versions: rvs}) do
+    labels =
+      rvs
+      |> Enum.map(fn
+        %{version: nil} -> "unversioned"
+        %{version: v} -> "v#{v}"
+      end)
+      |> Enum.uniq()
+
+    "running " <> Enum.join(labels, "/")
+  end
 
   # --- misc ---
 
