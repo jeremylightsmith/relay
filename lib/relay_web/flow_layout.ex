@@ -186,6 +186,10 @@ defmodule RelayWeb.FlowLayout do
 
   # ---- edge route kinds ----
 
+  # A bare start → done edge (a zero-node flow, e.g. a just-created scratch flow) is neither a
+  # spine entry nor exit — it connects the two virtual endpoints directly. It MUST be classified
+  # before the :enter/:exit clauses, whose handlers dereference a real node position.
+  defp route_kind(%{from: "start", to: "done"}, _grid), do: :enter_exit
   defp route_kind(%{from: "start"}, _grid), do: :enter
   defp route_kind(%{to: "done"}, _grid), do: :exit
   # RLY-194: "needs_input" is the third edge-endpoint sentinel — a park, not a node — so

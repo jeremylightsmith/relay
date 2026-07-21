@@ -490,6 +490,31 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       assert created.lands_on_stage_id == ids.lands
     end
 
+    test "creating a flow lands on an editor that actually renders (no crash on the empty graph)",
+         %{conn: conn, board: board} do
+      view = open_new_flow(conn, board)
+      ids = stage_ids(board)
+
+      assert {:error, {:live_redirect, %{to: to}}} =
+               view
+               |> form("#new-flow-form", %{
+                 "flow" => %{
+                   "key" => "deploy-gate",
+                   "isolation" => "shared_clean",
+                   "pulls_from_stage_id" => to_string(ids.pulls),
+                   "works_in_stage_id" => to_string(ids.works),
+                   "lands_on_stage_id" => to_string(ids.lands)
+                 }
+               })
+               |> render_submit()
+
+      assert to == "/board/#{board.slug}/flows/deploy-gate"
+
+      # Follow the redirect the shipped test never followed — the editor must mount and render.
+      {:ok, editor, _html} = live(conn, to)
+      assert has_element?(editor, "#flow-graph")
+    end
+
     test "the created flow's row shows 0 nodes and an off toggle",
          %{conn: conn, board: board} do
       view = open_new_flow(conn, board)

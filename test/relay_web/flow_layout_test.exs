@@ -201,6 +201,14 @@ defmodule RelayWeb.FlowLayoutTest do
 
       assert routes[idx.("implement", "needs_input")].kind == :exit
     end
+
+    test "a bare start → done edge (a zero-node flow) classifies as :enter_exit" do
+      %{routes: routes, positions: positions} =
+        FlowLayout.layout([], [%{from: "start", to: "done", on: nil}])
+
+      assert positions == %{}
+      assert routes[0].kind == :enter_exit
+    end
   end
 
   describe "the default Code flow lays out cleanly" do
