@@ -141,6 +141,26 @@ defmodule Relay.RunsReadSideTest do
       assert is_nil(summary.current_node)
       assert is_nil(summary.last_node)
     end
+
+    test "breaker_tripped? is true only for a failed run whose failure_detail carries the circuit_breaker token" do
+      user = insert(:user)
+      {:ok, board} = Relay.Boards.create_board(user, %{name: "Breaker"})
+      board = Relay.Repo.preload(board, :stages)
+      stage = hd(board.stages)
+
+      tripped_card = insert(:card, stage: stage)
+      tripped_run = insert(:run, card: tripped_card, flow_key: "code", current_node: "implement")
+      Runs.close_run!(tripped_run, :failed, "circuit_breaker: repeated 3 times")
+
+      other_card = insert(:card, stage: stage)
+      other_run = insert(:run, card: other_card, flow_key: "code", current_node: "implement")
+      Runs.close_run!(other_run, :failed, "(no_route_for_outcome: fixit → failed)")
+
+      summaries = Runs.run_summaries_for_board(board)
+
+      assert summaries[tripped_card.id].breaker_tripped?
+      refute summaries[other_card.id].breaker_tripped?
+    end
   end
 
   describe "last_node/2" do

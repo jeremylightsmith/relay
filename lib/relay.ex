@@ -35,6 +35,7 @@ defmodule Relay do
       RunnerPresence,
       Runs,
       Runs.Capacity,
+      Runs.RunDetail,
       Runs.SchedulerSupervisor,
       Runs.Supervisor
     ]

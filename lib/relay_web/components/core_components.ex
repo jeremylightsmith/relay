@@ -1545,6 +1545,7 @@ defmodule RelayWeb.CoreComponents do
       |> assign(:sub_task_progress, Cards.sub_task_progress(assigns.card))
       |> assign(:working_progress, board_card_progress(assigns.card))
       |> assign(:latest_run, latest)
+      |> assign(:latest_detail, latest && Relay.Runs.run_detail(latest, assigns.run_flow))
       |> assign(:parked_run, parked_run)
       |> assign(:show_run_tab?, assigns.runs != [] or assigns.queued_flow != nil)
 
@@ -2171,46 +2172,38 @@ defmodule RelayWeb.CoreComponents do
               <div id="card-drawer-tab-panel-run" class={[@drawer_tab != :run && "hidden"]}>
                 <%= if @latest_run do %>
                   <RunComponents.run_status_strip
-                    run={run_map(@latest_run)}
+                    detail={@latest_detail}
                     baton={baton_label(@latest_run, @card)}
                   />
                   <div style="padding:18px 22px 40px 22px;display:flex;flex-direction:column;gap:18px;">
                     <RunComponents.run_state_banner
-                      :if={@card.rejection && @latest_run.status == :running}
+                      :if={@card.rejection && @latest_detail.status == :running}
                       variant={:reentry}
                       card={@card}
                     />
                     <RunComponents.run_state_banner
-                      :if={@latest_run.status == :cancelled}
+                      :if={@latest_detail.status == :cancelled}
                       variant={:revoked}
-                      run={run_map(@latest_run)}
+                      detail={@latest_detail}
                       card={@card}
                       claimer={human_owner_name(@card)}
                     />
                     <%!-- RLY-179: the loud :circuit banner is only honest when the breaker
                           actually tripped; every other failure mode gets the neutral one. --%>
                     <RunComponents.run_state_banner
-                      :if={RunComponents.circuit_tripped?(run_map(@latest_run))}
+                      :if={@latest_detail.breaker_tripped?}
                       variant={:circuit}
-                      run={run_map(@latest_run)}
-                      node_executions={@latest_run.node_executions}
-                      totals={run_totals(@latest_run)}
+                      detail={@latest_detail}
                     />
                     <RunComponents.run_state_banner
-                      :if={
-                        @latest_run.status == :failed and
-                          not RunComponents.circuit_tripped?(run_map(@latest_run))
-                      }
+                      :if={@latest_detail.status == :failed and not @latest_detail.breaker_tripped?}
                       variant={:failed}
-                      run={run_map(@latest_run)}
-                      node_executions={@latest_run.node_executions}
-                      totals={run_totals(@latest_run)}
+                      detail={@latest_detail}
                     />
                     <RunComponents.run_state_banner
                       :if={@parked_run}
                       variant={:parked}
-                      run={run_map(@latest_run)}
-                      node_executions={@latest_run.node_executions}
+                      detail={@latest_detail}
                     >
                       <.needs_input_panel
                         card={@card}
@@ -2223,16 +2216,14 @@ defmodule RelayWeb.CoreComponents do
                       />
                     </RunComponents.run_state_banner>
                     <RunComponents.run_mini_graph
-                      :if={@latest_run.status == :running and @run_flow}
+                      :if={@latest_detail.status == :running and @run_flow}
                       path={Relay.Runs.happy_path(@run_flow)}
-                      run={run_map(@latest_run)}
+                      run={@latest_detail}
                       task_progress={drawer_task_progress(@card)}
                     />
                     <RunComponents.run_node_timeline
-                      :if={@latest_run.status in [:running, :failed, :cancelled]}
-                      run={run_map(@latest_run)}
-                      node_executions={@latest_run.node_executions}
-                      flow={@run_flow}
+                      :if={@latest_detail.status in [:running, :failed, :cancelled]}
+                      detail={@latest_detail}
                       task_progress={drawer_task_progress(@card)}
                     />
                     <RunComponents.run_history :if={length(@runs) > 1} runs={history_entries(@runs)} />
@@ -2790,65 +2781,16 @@ defmodule RelayWeb.CoreComponents do
 
   # ---------- RLY-137: Run tab helpers ----------
 
-  # `RunComponents` reads plain field access — a map, not the raw `%Schemas.Run{}`,
-  # decouples it from the engine's schema. `flow_version` is nil: the run points at
-  # the live flow row and carries no version column yet (RLY-152), mirroring
-  # `Relay.Runs.run_summaries_for_board/1`.
-  defp run_map(run) do
-    %{
-      status: run.status,
-      flow_key: run.flow_key,
-      flow_version: nil,
-      current_node: run.current_node,
-      # RLY-159: `close_run!/3` nils `current_node` on every terminal close, so the
-      # summary carries the last node the run was at — mirroring the SQL-derived
-      # `last_node` in `Relay.Runs.run_summaries_for_board/1`.
-      last_node: Relay.Runs.last_node(run, run.node_executions || []),
-      started_at: run.started_at,
-      finished_at: run.finished_at,
-      # The engine's failure reason, verbatim — it both names the cause in English
-      # and tells the Run tab whether the circuit breaker is what actually tripped.
-      failure_detail: Map.get(run, :failure_detail)
-    }
-  end
-
-  defp run_totals(run) do
-    executions = run.node_executions || []
-
-    %{
-      duration_s: executions |> Enum.map(&execution_duration_s/1) |> Enum.reject(&is_nil/1) |> Enum.sum(),
-      cost: sum_costs(Enum.map(executions, & &1.cost)),
-      nodes: executions |> Enum.map(& &1.node_key) |> Enum.uniq() |> length(),
-      attempts: length(executions)
-    }
-  end
-
-  # The schema stores no duration column — duration is the started_at/finished_at gap;
-  # an in-flight execution (`finished_at: nil`) contributes nothing.
-  defp execution_duration_s(%{started_at: s, finished_at: f}) when not is_nil(s) and not is_nil(f),
-    do: DateTime.diff(f, s)
-
-  defp execution_duration_s(_execution), do: nil
-
-  defp sum_costs(costs) do
-    case Enum.reject(costs, &is_nil/1) do
-      [] -> nil
-      present -> Enum.reduce(present, Decimal.new(0), &Decimal.add/2)
-    end
-  end
-
+  # RLY-207: prior runs are terminal, so a `nil` flow is behavior-neutral — the
+  # old history timeline passed no flow either, so no type tags and no pending
+  # tail render for history entries (same as before this read-model rewire).
   defp history_entries([_latest | prior]) do
     count = length(prior)
 
     prior
     |> Enum.with_index()
     |> Enum.map(fn {run, index} ->
-      %{
-        run: run_map(run),
-        number: count - index,
-        node_executions: run.node_executions,
-        totals: run_totals(run)
-      }
+      %{detail: Relay.Runs.run_detail(run, nil), number: count - index}
     end)
   end
 

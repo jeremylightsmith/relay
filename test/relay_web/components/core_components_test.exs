@@ -1469,9 +1469,11 @@ defmodule RelayWeb.CoreComponentsTest do
       assert failed =~ "border-l-error"
       assert queued =~ "QUEUED · CODE FLOW"
       assert queued =~ "border-l-base-300"
-      assert done =~ "merged · 9:41"
+      assert done =~ "Completed · 9:41"
+      refute done =~ "merged"
       assert done =~ "border-l-success"
-      assert cancelled =~ "CANCELLED · CLAIMED"
+      assert cancelled =~ "CANCELLED"
+      refute cancelled =~ "CLAIMED"
     end
 
     test "a done run on an in_review card shows the blue review treatment" do

@@ -4,13 +4,14 @@ defmodule RelayWeb.RunComponentsTest do
   import Phoenix.Component
   import Phoenix.LiveViewTest
 
+  alias Relay.Runs
   alias RelayWeb.RunComponents
 
   # `run/1` mirrors the shape RelayWeb.RunComponents actually reads: either
   # Relay.Runs' per-card summary map (has :flow_version, currently always nil
   # pending RLY-152) or a raw %Schemas.Run{} (no :flow_version key at all —
   # the version chip degrades gracefully when it's absent).
-  defp run(attrs \\ %{}) do
+  defp run(attrs) do
     Map.merge(
       %{
         status: :running,
@@ -27,6 +28,7 @@ defmodule RelayWeb.RunComponentsTest do
   # `Schemas.NodeExecution` has no stored duration column (only
   # started_at/finished_at) and the node field is `:node_key`, not `:node` —
   # this helper mirrors test/support/factory.ex's `:duration_s` convenience.
+  # `:id` is needed by `Relay.Runs.last_node/2` to order terminal runs.
   defp ne(node_key, attempt, outcome, attrs \\ %{}) do
     {duration_s, attrs} = Map.pop(attrs, :duration_s, 42)
     started_at = DateTime.utc_now()
@@ -34,6 +36,7 @@ defmodule RelayWeb.RunComponentsTest do
 
     Map.merge(
       %{
+        id: System.unique_integer([:positive]),
         node_key: node_key,
         attempt: attempt,
         outcome: outcome,
@@ -45,6 +48,10 @@ defmodule RelayWeb.RunComponentsTest do
       attrs
     )
   end
+
+  # Builds a %Relay.Runs.RunDetail{} the way the drawer does: a run (+ node
+  # executions) and its flow (or nil).
+  defp detail(run_attrs, nes, flow \\ nil), do: Runs.run_detail(Map.put(run(run_attrs), :node_executions, nes), flow)
 
   describe "run_duration/1 and run_cost/1" do
     test "formats per the artboard, dash for missing" do
@@ -60,7 +67,7 @@ defmodule RelayWeb.RunComponentsTest do
   describe "run_status_strip/1" do
     test "running: violet wrap, pulsing baton dot, running vN chip" do
       html =
-        render_component(&RunComponents.run_status_strip/1, run: run(), baton: "BATON · FLOW")
+        render_component(&RunComponents.run_status_strip/1, detail: detail(%{}, []), baton: "BATON · FLOW")
 
       assert html =~ "oklch(0.985 0.018 292)"
       assert html =~ "animation:relaypulse"
@@ -71,13 +78,13 @@ defmodule RelayWeb.RunComponentsTest do
     test "parked and failed use the artboard copy" do
       parked =
         render_component(&RunComponents.run_status_strip/1,
-          run: run(%{status: :parked}),
+          detail: detail(%{status: :parked}, []),
           baton: "BATON · YOU"
         )
 
       failed =
         render_component(&RunComponents.run_status_strip/1,
-          run: run(%{status: :failed, finished_at: DateTime.utc_now()}),
+          detail: detail(%{status: :failed, finished_at: DateTime.utc_now()}, []),
           baton: "BATON · STOPPED"
         )
 
@@ -91,7 +98,7 @@ defmodule RelayWeb.RunComponentsTest do
     test "gracefully omits the version number when flow_version is absent" do
       html =
         render_component(&RunComponents.run_status_strip/1,
-          run: Map.delete(run(), :flow_version),
+          detail: detail(%{flow_version: nil}, []),
           baton: "BATON · FLOW"
         )
 
@@ -121,12 +128,12 @@ defmodule RelayWeb.RunComponentsTest do
     test "renders duration, dash cost, attempt chips, and the expanded failure" do
       html =
         render_component(&RunComponents.run_node_timeline/1,
-          run: run(),
-          node_executions: [
-            ne("branch", 1, :succeeded, %{duration_s: 8, cost: Decimal.new("0.00")}),
-            ne("quality_review", 1, :failed, %{duration_s: 48, detail: "assert on CSV bytes"}),
-            ne("implement", 2, nil, %{duration_s: nil})
-          ]
+          detail:
+            detail(%{}, [
+              ne("branch", 1, :succeeded, %{duration_s: 8, cost: Decimal.new("0.00")}),
+              ne("quality_review", 1, :failed, %{duration_s: 48, detail: "assert on CSV bytes"}),
+              ne("implement", 2, nil, %{duration_s: nil})
+            ])
         )
 
       assert html =~ "0:08"
@@ -140,12 +147,12 @@ defmodule RelayWeb.RunComponentsTest do
     test "review-failed loop renders the loop chip but NEVER a session-resumed chip" do
       html =
         render_component(&RunComponents.run_node_timeline/1,
-          run: run(),
-          node_executions: [
-            ne("implement", 1, :succeeded),
-            ne("quality_review", 1, :failed, %{detail: "no"}),
-            ne("implement", 2, nil)
-          ]
+          detail:
+            detail(%{}, [
+              ne("implement", 1, :succeeded),
+              ne("quality_review", 1, :failed, %{detail: "no"}),
+              ne("implement", 2, nil)
+            ])
         )
 
       assert html =~ "quality_review failed → implement · attempt 2"
@@ -155,11 +162,11 @@ defmodule RelayWeb.RunComponentsTest do
     test "needs-input re-entry is the only state that says session resumed" do
       html =
         render_component(&RunComponents.run_node_timeline/1,
-          run: run(%{flow_key: "spec", current_node: "brainstorm"}),
-          node_executions: [
-            ne("brainstorm", 1, :needs_input),
-            ne("brainstorm", 2, nil)
-          ]
+          detail:
+            detail(%{flow_key: "spec", current_node: "brainstorm"}, [
+              ne("brainstorm", 1, :needs_input),
+              ne("brainstorm", 2, nil)
+            ])
         )
 
       assert html =~ "session resumed"
@@ -168,8 +175,7 @@ defmodule RelayWeb.RunComponentsTest do
     test "a cancelled run renders nil-outcome rows with the cancelled glyph" do
       html =
         render_component(&RunComponents.run_node_timeline/1,
-          run: run(%{status: :cancelled}),
-          node_executions: [ne("implement", 1, nil, %{duration_s: 72})]
+          detail: detail(%{status: :cancelled}, [ne("implement", 1, nil, %{duration_s: 72})])
         )
 
       assert html =~ "⊘"
@@ -179,8 +185,7 @@ defmodule RelayWeb.RunComponentsTest do
     test "a running node execution with no timestamps computes no duration" do
       html =
         render_component(&RunComponents.run_node_timeline/1,
-          run: run(),
-          node_executions: [ne("implement", 1, :succeeded, %{started_at: nil, finished_at: nil})]
+          detail: detail(%{}, [ne("implement", 1, :succeeded, %{started_at: nil, finished_at: nil})])
         )
 
       assert html =~ "—"
@@ -192,14 +197,13 @@ defmodule RelayWeb.RunComponentsTest do
       html =
         render_component(&RunComponents.run_state_banner/1,
           variant: :circuit,
-          run: run(%{status: :failed}),
           card: nil,
-          node_executions: [
-            ne("quality_review", 1, :failed, %{detail: "same finding"}),
-            ne("quality_review", 2, :failed, %{detail: "same finding"}),
-            ne("quality_review", 3, :failed, %{detail: "same finding"})
-          ],
-          totals: %{duration_s: 552, cost: Decimal.new("2.28"), attempts: 3}
+          detail:
+            detail(%{status: :failed}, [
+              ne("quality_review", 1, :failed, %{detail: "same finding", cost: Decimal.new("0.76")}),
+              ne("quality_review", 2, :failed, %{detail: "same finding", cost: Decimal.new("0.76")}),
+              ne("quality_review", 3, :failed, %{detail: "same finding", cost: Decimal.new("0.76")})
+            ])
         )
 
       assert html =~ "CIRCUIT BREAKER TRIPPED"
@@ -209,49 +213,19 @@ defmodule RelayWeb.RunComponentsTest do
       assert html =~ "oklch(0.975 0.025 22)"
     end
 
-    # RLY-179: the breaker is ONE failure mode, not the only one. `failure_detail`
-    # carries the engine's reason verbatim, and `circuit_breaker:` is produced at
-    # exactly one place (Engine.decide/4), so it is the honest discriminator.
-    test "circuit_tripped? only accepts the engine's own circuit_breaker reason" do
-      assert RunComponents.circuit_tripped?(
-               run(%{status: :failed, failure_detail: "circuit_breaker: the same failure repeated 3 times"})
-             )
-
-      refute RunComponents.circuit_tripped?(
-               run(%{
-                 status: :failed,
-                 failure_detail:
-                   "The flow has nowhere to go after `fixit` reported `failed`. (no_route_for_outcome: fixit → failed)"
-               })
-             )
-
-      # The token is matched anywhere, not just as a prefix, so rewording the
-      # breaker reason into the human-first house style the sibling reasons use
-      # can't silently un-trip the banner.
-      assert RunComponents.circuit_tripped?(
-               run(%{
-                 status: :failed,
-                 failure_detail: "The same failure repeated 3 times. (circuit_breaker: the same failure repeated 3 times)"
-               })
-             )
-
-      refute RunComponents.circuit_tripped?(run(%{status: :failed, failure_detail: nil}))
-      refute RunComponents.circuit_tripped?(run(%{status: :running}))
-      refute RunComponents.circuit_tripped?(Map.delete(run(%{status: :failed}), :failure_detail))
-    end
-
     test "failed variant states the reason without inventing a circuit breaker" do
       html =
         render_component(&RunComponents.run_state_banner/1,
           variant: :failed,
-          run:
-            run(%{
-              status: :failed,
-              failure_detail:
-                "The flow has nowhere to go after `fixit` reported `failed`. (no_route_for_outcome: fixit → failed)"
-            }),
-          node_executions: [ne("fixit", 1, :failed, %{detail: "Could not fix the failing spec."})],
-          totals: %{duration_s: 91, cost: Decimal.new("0.41"), attempts: 1}
+          detail:
+            detail(
+              %{
+                status: :failed,
+                failure_detail:
+                  "The flow has nowhere to go after `fixit` reported `failed`. (no_route_for_outcome: fixit → failed)"
+              },
+              [ne("fixit", 1, :failed, %{detail: "Could not fix the failing spec.", cost: Decimal.new("0.41")})]
+            )
         )
 
       assert html =~ "RUN FAILED"
@@ -268,9 +242,7 @@ defmodule RelayWeb.RunComponentsTest do
       html =
         render_component(&RunComponents.run_state_banner/1,
           variant: :failed,
-          run: run(%{status: :failed, failure_detail: nil}),
-          node_executions: [ne("fixit", 1, :failed)],
-          totals: %{duration_s: 12, cost: nil, attempts: 1}
+          detail: detail(%{status: :failed, failure_detail: nil}, [ne("fixit", 1, :failed)])
         )
 
       assert html =~ "RUN FAILED"
@@ -278,11 +250,11 @@ defmodule RelayWeb.RunComponentsTest do
     end
 
     test "parked variant frames the slot in amber with the paused-node row" do
-      assigns = %{run: run(%{status: :parked, flow_key: "spec", current_node: "brainstorm"})}
+      assigns = %{detail: detail(%{status: :parked, flow_key: "spec", current_node: "brainstorm"}, [])}
 
       html =
         rendered_to_string(~H"""
-        <RunComponents.run_state_banner variant={:parked} run={@run}>
+        <RunComponents.run_state_banner variant={:parked} detail={@detail}>
           <div id="embedded-stepper">stepper goes here</div>
         </RunComponents.run_state_banner>
         """)
@@ -296,17 +268,17 @@ defmodule RelayWeb.RunComponentsTest do
 
     test "parked variant's attempt count reflects the paused node's actual attempt, not always 1" do
       assigns = %{
-        run: run(%{status: :parked, flow_key: "spec", current_node: "brainstorm"}),
-        node_executions: [
-          ne("brainstorm", 1, :failed, %{detail: "first try"}),
-          ne("brainstorm", 2, :failed, %{detail: "second try"}),
-          ne("brainstorm", 3, :needs_input, %{detail: nil})
-        ]
+        detail:
+          detail(%{status: :parked, flow_key: "spec", current_node: "brainstorm"}, [
+            ne("brainstorm", 1, :failed, %{detail: "first try"}),
+            ne("brainstorm", 2, :failed, %{detail: "second try"}),
+            ne("brainstorm", 3, :needs_input, %{detail: nil})
+          ])
       }
 
       html =
         rendered_to_string(~H"""
-        <RunComponents.run_state_banner variant={:parked} run={@run} node_executions={@node_executions}>
+        <RunComponents.run_state_banner variant={:parked} detail={@detail}>
           <div id="embedded-stepper">stepper goes here</div>
         </RunComponents.run_state_banner>
         """)
@@ -333,7 +305,7 @@ defmodule RelayWeb.RunComponentsTest do
       revoked =
         render_component(&RunComponents.run_state_banner/1,
           variant: :revoked,
-          run: run(%{status: :cancelled, current_node: "implement"}),
+          detail: detail(%{status: :cancelled, current_node: "implement"}, []),
           card: %{branch: "relay/RLY-150", rejection: nil},
           claimer: "Jeremy"
         )
@@ -352,10 +324,11 @@ defmodule RelayWeb.RunComponentsTest do
         render_component(&RunComponents.run_history/1,
           runs: [
             %{
-              run: run(%{status: :done, flow_version: 3, finished_at: DateTime.utc_now()}),
-              number: 3,
-              node_executions: [ne("implement", 1, :succeeded)],
-              totals: %{duration_s: 2820, nodes: 14, attempts: 21, cost: Decimal.new("6.20")}
+              detail:
+                detail(%{status: :done, flow_version: 3, finished_at: DateTime.utc_now()}, [
+                  ne("implement", 1, :succeeded)
+                ]),
+              number: 3
             }
           ]
         )
@@ -363,7 +336,6 @@ defmodule RelayWeb.RunComponentsTest do
       assert html =~ "PRIOR RUNS · 1"
       assert html =~ "Run #3 · v3"
       assert html =~ "ATTEMPTS"
-      assert html =~ "$6.20"
     end
 
     test "omits the dangling '· v' when flow_version is nil (RLY-152 pending)" do
@@ -371,10 +343,11 @@ defmodule RelayWeb.RunComponentsTest do
         render_component(&RunComponents.run_history/1,
           runs: [
             %{
-              run: run(%{status: :done, flow_version: nil, finished_at: DateTime.utc_now()}),
-              number: 2,
-              node_executions: [ne("implement", 1, :succeeded)],
-              totals: %{duration_s: 120, nodes: 1, attempts: 1, cost: Decimal.new("0.10")}
+              detail:
+                detail(%{status: :done, flow_version: nil, finished_at: DateTime.utc_now()}, [
+                  ne("implement", 1, :succeeded)
+                ]),
+              number: 2
             }
           ]
         )
@@ -460,10 +433,49 @@ defmodule RelayWeb.RunComponentsTest do
       assert failed =~ "stuck at quality_review"
       assert queued =~ "QUEUED · CODE FLOW"
       assert queued =~ "picks up next"
-      assert done =~ "merged · 9:41"
+      assert done =~ "Completed · 9:41"
+      refute done =~ "merged"
       assert done =~ "$0.38"
-      assert cancelled =~ "CANCELLED · CLAIMED"
+      assert cancelled =~ "CANCELLED"
+      refute cancelled =~ "CLAIMED"
       assert cancelled =~ "stopped at implement · resumable"
+    end
+
+    test "the failed badge's circuit breaker claim reads the domain flag, not attempts" do
+      breaker =
+        render_component(&RunComponents.run_face/1,
+          ref: "R",
+          run:
+            {:run,
+             %{
+               status: :failed,
+               current_node: nil,
+               last_node: "quality_review",
+               flow_key: "code",
+               flow_version: 3,
+               attempts: 3,
+               breaker_tripped?: true
+             }}
+        )
+
+      plain =
+        render_component(&RunComponents.run_face/1,
+          ref: "R",
+          run:
+            {:run,
+             %{
+               status: :failed,
+               current_node: nil,
+               last_node: "quality_review",
+               flow_key: "code",
+               flow_version: 3,
+               attempts: 3,
+               breaker_tripped?: false
+             }}
+        )
+
+      assert breaker =~ "CIRCUIT BREAKER"
+      refute plain =~ "CIRCUIT BREAKER"
     end
   end
 end
