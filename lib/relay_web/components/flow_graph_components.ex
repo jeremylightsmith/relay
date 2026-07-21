@@ -3,7 +3,10 @@ defmodule RelayWeb.FlowGraphComponents do
   The shared flow-graph renderer: absolutely-positioned node divs + an SVG edge layer, laid out
   by `RelayWeb.FlowLayout`. Used interactively by the flow editor and (later, RLY-132) read-only
   by the run panel with live `node_states`. Concrete visual values match
-  docs/designs/Relay Flow Editor.dc.html (typeMeta lines ~366-395, edges ~310-363).
+  docs/designs/Relay Flow Editor.dc.html (typeMeta lines ~366-395, edges ~310-363) — the
+  artboard is authoritative for node shapes, colours, dashes, arrowheads and label pills, but
+  NOT for layout: node positions and edge paths are computed vertically by `FlowLayout` and
+  intentionally diverge from the artboard as of RLY-186.
 
   Nodes/edges may arrive either as `Schemas.Flow.Node`/`Edge` structs (always carry every
   field, nil when unset) or as plain maps straight from `Relay.Flows.DefaultLibrary` (which
@@ -11,6 +14,11 @@ defmodule RelayWeb.FlowGraphComponents do
   below goes through `Map.get/2` so both shapes render without raising.
   """
   use Phoenix.Component
+
+  alias RelayWeb.FlowLayout
+
+  # rounded-corner radius for orthogonal edge turns.
+  @corner 8
 
   # oklch tokens straight from the artboard, keyed by node type.
   @type_meta %{
@@ -78,8 +86,20 @@ defmodule RelayWeb.FlowGraphComponents do
     doc: "true mid connect-edge, once a source is picked — makes the `done` sentinel a clickable target"
 
   def flow_graph(assigns) do
-    {w, h} = assigns.layout.size
-    assigns = assign(assigns, width: w, height: h)
+    {w, base_h} = assigns.layout.size
+    # the "lands → <stage>" pill sits just below `done_point`; reserve room so it never spills
+    # past the canvas (and thus can't trigger a stray scrollbar) when it's shown.
+    h = if assigns.lands_on, do: base_h + 34, else: base_h
+    sizes = Map.new(assigns.nodes, &{&1.key, FlowLayout.node_size(&1.type)})
+
+    geos =
+      assigns.edges
+      |> Enum.with_index()
+      |> Enum.map(fn {edge, i} ->
+        %{edge: edge, index: i, geo: edge_geometry(edge, i, assigns.layout, sizes)}
+      end)
+
+    assigns = assign(assigns, width: w, height: h, geos: geos)
 
     ~H"""
     <div
@@ -106,29 +126,29 @@ defmodule RelayWeb.FlowGraphComponents do
           </marker>
         </defs>
         <path
-          :for={edge <- @edges}
-          d={edge_path(edge, @layout)}
-          stroke={edge_color(edge)}
+          :for={g <- @geos}
+          d={g.geo.d}
+          stroke={edge_color(g.edge)}
           stroke-width="2"
           fill="none"
-          stroke-dasharray={if edge_on(edge) == :failed, do: "5 4", else: nil}
-          marker-end={"url(#arw-#{edge_on(edge) || "start"})"}
+          stroke-dasharray={if edge_on(g.edge) == :failed, do: "5 4", else: nil}
+          marker-end={"url(#arw-#{edge_on(g.edge) || "start"})"}
         />
       </svg>
 
-      <%= for {edge, i} <- Enum.with_index(@edges), edge.from != "start" do %>
+      <%= for g <- @geos, g.edge.from != "start" do %>
         <button
           :if={@interactive?}
           type="button"
-          data-edge={i}
+          data-edge={g.index}
           phx-click="select_edge"
-          phx-value-index={i}
-          style={edge_label_style(edge, @layout) <> selected_ring(@selected, {:edge, i})}
+          phx-value-index={g.index}
+          style={edge_label_style(g.edge, g.geo) <> selected_ring(@selected, {:edge, g.index})}
         >
-          {edge_label(edge)}
+          {edge_label(g.edge)}
         </button>
-        <span :if={!@interactive?} data-edge={i} style={edge_label_style(edge, @layout)}>
-          {edge_label(edge)}
+        <span :if={!@interactive?} data-edge={g.index} style={edge_label_style(g.edge, g.geo)}>
+          {edge_label(g.edge)}
         </span>
       <% end %>
 
@@ -154,10 +174,7 @@ defmodule RelayWeb.FlowGraphComponents do
         </span>
       </div>
 
-      <div
-        :if={@lands_on}
-        style="position:absolute;left:2px;top:150px;display:flex;align-items:center;gap:6px;background:oklch(0.97 0.02 155);border:1px solid oklch(0.88 0.05 155);border-radius:20px;padding:7px 13px;font-size:11.5px;font-weight:600;font-family:ui-monospace,monospace;color:oklch(0.42 0.10 155);"
-      >
+      <div :if={@lands_on} style={lands_style(@layout)}>
         <span style="width:7px;height:7px;border-radius:50%;background:oklch(0.60 0.13 155);"></span>
         lands → {@lands_on}
       </div>
@@ -192,6 +209,8 @@ defmodule RelayWeb.FlowGraphComponents do
   defp position(node, layout), do: Map.fetch!(layout.positions, node.key)
 
   defp node_style(node, {x, y}, meta, selected, node_states) do
+    {w, h} = FlowLayout.node_size(node.type)
+
     base =
       "position:absolute;left:#{x}px;top:#{y}px;z-index:4;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;"
 
@@ -201,13 +220,13 @@ defmodule RelayWeb.FlowGraphComponents do
     shape =
       case node.type do
         :gate ->
-          "width:118px;height:76px;clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);background:#{meta.fill};box-shadow:inset 0 0 0 1.5px #{meta.border};"
+          "width:#{w}px;height:#{h}px;clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);background:#{meta.fill};box-shadow:inset 0 0 0 1.5px #{meta.border};"
 
         :human ->
-          "width:150px;height:56px;clip-path:polygon(14% 0,86% 0,100% 50%,86% 100%,14% 100%,0 50%);background:#{meta.fill};box-shadow:inset 0 0 0 1.5px #{meta.border};"
+          "width:#{w}px;height:#{h}px;clip-path:polygon(14% 0,86% 0,100% 50%,86% 100%,14% 100%,0 50%);background:#{meta.fill};box-shadow:inset 0 0 0 1.5px #{meta.border};"
 
         _ ->
-          "width:150px;height:56px;border-radius:11px;background:#{meta.fill};border:1.5px solid #{meta.border};border-left:4px solid #{meta.accent};"
+          "width:#{w}px;height:#{h}px;border-radius:11px;background:#{meta.fill};border:1.5px solid #{meta.border};border-left:4px solid #{meta.accent};"
       end
 
     base <> shape <> ring <> state
@@ -244,71 +263,145 @@ defmodule RelayWeb.FlowGraphComponents do
     end
   end
 
-  # Bezier/arc path between the two endpoints, chosen by the edge's route kind.
-  defp edge_path(edge, layout) do
-    {x1, y1} = endpoint(edge.from, layout, :out)
-    {x2, y2} = endpoint(edge.to, layout, :in)
+  # ---- orthogonal edge geometry ----
 
-    case edge_route(edge, layout) do
-      :arc ->
-        # loop-back: arc over the top
-        midy = min(y1, y2) - 46
-        "M #{x1} #{y1} C #{x1} #{midy}, #{x2} #{midy}, #{x2} #{y2}"
-
-      :drop ->
-        "M #{x1} #{y1} C #{x1} #{y1 + 40}, #{x2} #{y2 - 40}, #{x2} #{y2}"
-
-      :vertical ->
-        "M #{x1} #{y1} L #{x2} #{y2}"
-
-      _ ->
-        # horizontal / enter / exit / straight: gentle bezier
-        dx = round((x2 - x1) / 2)
-        "M #{x1} #{y1} C #{x1 + dx} #{y1}, #{x2 - dx} #{y2}, #{x2} #{y2}"
-    end
+  # Compute the SVG path `d` and the on-path label point together, from the route kind + lane
+  # that FlowLayout already assigned. One function so `d` and the label can never disagree.
+  defp edge_geometry(edge, index, layout, sizes) do
+    route = Map.fetch!(layout.routes, index)
+    points_and_label(route, edge, layout, sizes)
   end
 
-  # Recompute the route kind for this specific edge from positions. Mirrors
-  # FlowLayout.route_kind/2 for path selection only (kept independent of edge index ordering).
-  defp edge_route(%{from: "start"}, _), do: :enter
-  defp edge_route(%{to: "done"}, _), do: :exit
+  # start → first spine node: a straight vertical drop.
+  defp points_and_label(%{kind: :enter}, edge, layout, sizes) do
+    vgeom(layout.start_point, top_center(edge.to, layout, sizes))
+  end
 
-  defp edge_route(edge, layout) do
-    with {x1, y1} <- Map.get(layout.positions, edge.from),
-         {x2, y2} <- Map.get(layout.positions, edge.to) do
-      cond do
-        y2 > y1 -> :drop
-        y2 < y1 -> :arc
-        x2 < x1 -> :arc
-        x1 == x2 -> :vertical
-        true -> :horizontal
+  # last spine node → done: a straight vertical drop.
+  defp points_and_label(%{kind: :exit}, edge, layout, sizes) do
+    vgeom(bottom_center(edge.from, layout, sizes), layout.done_point)
+  end
+
+  # forward spine step: bottom-centre → top-centre (a short dogleg only if columns differ).
+  defp points_and_label(%{kind: :drop}, edge, layout, sizes) do
+    vgeom(bottom_center(edge.from, layout, sizes), top_center(edge.to, layout, sizes))
+  end
+
+  # spine → side node on the same row: horizontal run 10px ABOVE the pair's mid-height.
+  defp points_and_label(%{kind: :side_out}, edge, layout, sizes) do
+    {ax, ay} = right_center(edge.from, layout, sizes)
+    {bx, by} = left_center(edge.to, layout, sizes)
+    runy = div(ay + by, 2) - 10
+    pts = [{ax, ay}, {ax, runy}, {bx, runy}, {bx, by}]
+    %{d: ortho_path(pts), label: {div(ax + bx, 2), runy}}
+  end
+
+  # side node → spine on the same row: horizontal run 10px BELOW the pair's mid-height. The
+  # ±10 offsets keep the two antiparallel arrows of a rework detour off each other.
+  defp points_and_label(%{kind: :side_back}, edge, layout, sizes) do
+    {ax, ay} = left_center(edge.from, layout, sizes)
+    {bx, by} = right_center(edge.to, layout, sizes)
+    runy = div(ay + by, 2) + 10
+    pts = [{ax, ay}, {ax, runy}, {bx, runy}, {bx, by}]
+    %{d: ortho_path(pts), label: {div(ax + bx, 2), runy}}
+  end
+
+  # back-edge: leave the source's right, run out to its lane x, up/down to the target row, back
+  # in to the target's right. Label sits on the vertical lane segment, so labels never collide.
+  defp points_and_label(%{kind: :gutter, lane_x: lx}, edge, layout, sizes) do
+    {ax, ay} = right_center(edge.from, layout, sizes)
+    {bx, by} = right_center(edge.to, layout, sizes)
+    pts = [{ax, ay}, {lx, ay}, {lx, by}, {bx, by}]
+    %{d: ortho_path(pts), label: {lx, div(ay + by, 2)}}
+  end
+
+  # a vertical connector between two points sharing an x (straight); a symmetric dogleg if not.
+  defp vgeom({ax, ay}, {bx, by}) do
+    pts =
+      if ax == bx do
+        [{ax, ay}, {bx, by}]
+      else
+        midy = div(ay + by, 2)
+        [{ax, ay}, {ax, midy}, {bx, midy}, {bx, by}]
       end
-    else
-      _ -> :straight
-    end
+
+    %{d: ortho_path(pts), label: {ax, div(ay + by, 2)}}
   end
 
-  # anchor points: right-center for source, left-center for target (approx node box).
-  defp endpoint("start", _layout, _), do: {0, 60}
-  defp endpoint("done", layout, _), do: exit_point(layout)
+  # ---- node anchors ----
 
-  defp endpoint(key, layout, dir) do
-    case Map.get(layout.positions, key) do
-      {x, y} when dir == :out -> {x + 150, y + 28}
-      {x, y} -> {x, y + 28}
-      _ -> {0, 0}
-    end
+  defp box(key, layout, sizes) do
+    {x, y} = Map.fetch!(layout.positions, key)
+    {w, h} = Map.fetch!(sizes, key)
+    {x, y, w, h}
   end
 
-  defp exit_point(layout) do
-    {_w, h} = layout.size
-    {60, min(h - 40, 190)}
+  defp top_center(key, layout, sizes) do
+    {x, y, w, _h} = box(key, layout, sizes)
+    {x + div(w, 2), y}
+  end
+
+  defp bottom_center(key, layout, sizes) do
+    {x, y, w, h} = box(key, layout, sizes)
+    {x + div(w, 2), y + h}
+  end
+
+  defp left_center(key, layout, sizes) do
+    {x, y, _w, h} = box(key, layout, sizes)
+    {x, y + div(h, 2)}
+  end
+
+  defp right_center(key, layout, sizes) do
+    {x, y, w, h} = box(key, layout, sizes)
+    {x + w, y + div(h, 2)}
+  end
+
+  # ---- rounded orthogonal path builder ----
+
+  # Build "M … L … Q …" through axis-aligned points, rounding each interior corner. The corner
+  # radius is clamped to half the shorter adjacent segment so short stubs never blow past a turn.
+  defp ortho_path([{x0, y0} | _] = pts), do: "M #{x0} #{y0} " <> ortho_segments(pts)
+
+  defp ortho_segments([_last]), do: ""
+  defp ortho_segments([_a, {bx, by}]), do: "L #{bx} #{by}"
+
+  defp ortho_segments([a, b, c | rest]) do
+    r = min(@corner, min(div(dist(a, b), 2), div(dist(b, c), 2)))
+    {p1x, p1y} = toward(b, a, r)
+    {bx, by} = b
+    {p2x, p2y} = toward(b, c, r)
+    "L #{p1x} #{p1y} Q #{bx} #{by} #{p2x} #{p2y} " <> ortho_segments([b, c | rest])
+  end
+
+  # Manhattan distance — points are always axis-aligned, so this is the true segment length.
+  defp dist({x1, y1}, {x2, y2}), do: abs(x1 - x2) + abs(y1 - y2)
+
+  # A point r pixels from `b` toward `t` along their shared axis. Points are always axis-aligned,
+  # so at most one of dx/dy is non-zero — moving both by their sign lands on the right axis.
+  defp toward({bx, by}, {tx, ty}, r), do: {bx + sign(tx - bx) * r, by + sign(ty - by) * r}
+
+  defp sign(n) when n > 0, do: 1
+  defp sign(n) when n < 0, do: -1
+  defp sign(0), do: 0
+
+  # Flow-level "lands → <stage>" pill. Anchored to the layout's `done_point` (centred just below
+  # where the exit edge lands) rather than a fixed coordinate — the flow "lands" on that stage
+  # when it reaches `done`, so this reads naturally under the exit arrow and can never collide
+  # with a spine node the way a hardcoded top/left did once FlowLayout went vertical (RLY-186).
+  defp lands_style(layout) do
+    {x, y} = layout.done_point
+
+    "position:absolute;left:#{x}px;top:#{y + 8}px;transform:translateX(-50%);z-index:4;" <>
+      "display:flex;align-items:center;gap:6px;white-space:nowrap;" <>
+      "background:oklch(0.97 0.02 155);border:1px solid oklch(0.88 0.05 155);border-radius:20px;" <>
+      "padding:7px 13px;font-size:11.5px;font-weight:600;font-family:ui-monospace,monospace;" <>
+      "color:oklch(0.42 0.10 155);"
   end
 
   # Clickable "done" sentinel — only rendered mid connect-edge (picking a target), so it never
   # competes with real-node selection but is reachable as a valid connect target (RLY-143).
   defp done_marker_style(layout) do
-    {x, y} = exit_point(layout)
+    {x, y} = layout.done_point
 
     "position:absolute;left:#{x}px;top:#{y}px;transform:translate(-50%,-50%);z-index:5;" <>
       "font-size:10px;font-weight:700;font-family:ui-monospace,monospace;border-radius:20px;" <>
@@ -316,20 +409,14 @@ defmodule RelayWeb.FlowGraphComponents do
       "background:oklch(0.97 0.02 155);color:oklch(0.42 0.10 155);"
   end
 
-  defp edge_label_style(edge, layout) do
-    {x, y} = label_pos(edge, layout)
+  defp edge_label_style(edge, geo) do
+    {x, y} = geo.label
     {color, bg} = label_colors(edge_on(edge))
 
     "position:absolute;left:#{x}px;top:#{y}px;transform:translate(-50%,-50%);z-index:3;" <>
       "font-size:9.5px;font-weight:600;font-family:ui-monospace,monospace;border-radius:5px;" <>
       "padding:2px 6px;white-space:nowrap;border:0;cursor:pointer;" <>
       "box-shadow:0 0 0 3px oklch(0.975 0.004 250);color:#{color};background:#{bg};"
-  end
-
-  defp label_pos(edge, layout) do
-    {x1, y1} = endpoint(edge.from, layout, :out)
-    {x2, y2} = endpoint(edge.to, layout, :in)
-    {div(x1 + x2, 2), div(y1 + y2, 2)}
   end
 
   defp label_colors(:succeeded), do: {"oklch(0.42 0.11 155)", "oklch(0.97 0.03 155)"}
