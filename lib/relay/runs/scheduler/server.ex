@@ -110,17 +110,32 @@ defmodule Relay.Runs.Scheduler.Server do
     board = Boards.get_board_by_id!(board_id)
     cards = Cards.list_cards(board)
     runs = engine.active_runs(board_id)
+    executors = executor_snap(board_id)
 
     snapshot = %Snapshot{
       stages: Enum.map(Boards.list_stages(board), &stage_snap/1),
       cards: Enum.map(cards, &card_snap(&1, board)),
       flows: Enum.map(Relay.Flows.list_enabled_flows(board), &flow_snap/1),
       runs: runs,
-      capacity: reserve_active_runs(Capacity.snapshot(), runs),
-      executors: executor_snap(board_id)
+      capacity: Capacity.snapshot() |> reserve_active_runs(runs) |> drop_gone_capacity(executors),
+      executors: executors
     }
 
     {snapshot, Map.new(cards, &{&1.id, &1})}
+  end
+
+  # A `:gone` executor's advertised capacity is void — its slots died with the machine, and the
+  # reaper has already requeued/parked its in-flight work. Drop it here (AFTER reserve_active_runs,
+  # so a not-yet-reaped :running run still debits the machine it's stuck on before the machine
+  # leaves the map) so the pure planner never resumes or starts onto an executor it can't reach.
+  # Without this, an exclusive run pinned to a dead machine oscillates forever — the scheduler
+  # keeps resuming it onto the lingering capacity and the reaper keeps re-parking it (RLY-199) —
+  # and `explain/2` reports "dispatchable" instead of naming the awaited machine. `:gone` is the
+  # reaper's own predicate (`executor_stale?/2`), so this is exactly the roster it has given up on.
+  defp drop_gone_capacity(capacity, executors) do
+    Map.reject(capacity, fn {executor_id, _slots} ->
+      match?(%{freshness: :gone}, Map.get(executors, executor_id))
+    end)
   end
 
   # Reuses Relay.Runs.executor_outdated?/1 and executor_freshness/2 — the same truth the

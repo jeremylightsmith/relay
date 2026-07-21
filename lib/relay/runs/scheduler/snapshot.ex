@@ -20,7 +20,10 @@ defmodule Relay.Runs.Scheduler.Snapshot do
       when unpinned); `pinned_executor_name` is the same pin's human-readable name for the
       `explain` path (RLY-199).
     * `capacity` — `%{executor_id => %{shared_clean: n, exclusive: n}}`: the
-      **free** slots each connected executor advertises per isolation class.
+      **free** slots each connected executor advertises per isolation class. A
+      `:gone` executor's advertised capacity is dropped during assembly
+      (`Server.build_snapshot/2`), so the planner never places work onto a
+      machine the reaper has given up on (RLY-199).
     * `executors` — `%{executor_id => %{name, version, outdated, freshness}}`: the durable
       executor rows, `outdated` from `Relay.Runs.executor_outdated?/1` and `freshness` from
       `Relay.Runs.executor_freshness/2` (not a second computation). `plan/1` ignores this

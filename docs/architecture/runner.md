@@ -214,7 +214,10 @@ that stays server-side.
   a stale executor's (`Relay.Runs.executor_stale?/2`) in-flight `shared_clean` jobs go back
   to `queued`; its `exclusive` runs are parked (`Relay.Runs.park_for_reclaim/1`,
   `parked_reason: :executor_gone`) rather than requeued, since exclusive runs are pinned to
-  one executor's worktree.
+  one executor's worktree. A `:gone` executor's advertised capacity is also dropped from the
+  scheduler snapshot (`Scheduler.Server.build_snapshot/2`), so the planner never resumes a
+  pinned run onto a machine the reaper has given up on — without this a parked exclusive run
+  oscillates resume↔reap forever and `relay why` misreports it as "dispatchable" (RLY-199).
 - **Log `node_job_id` convergence.** `POST /api/board/logs` entries may carry an optional
   `node_job_id` alongside `run_id` — same nullable-string shape, not an FK. It rides through
   `Relay.AgentLog.stamp/1` → `Relay.Activity.LogSink.row/2` → `activities.node_job_id`, kept

@@ -70,15 +70,34 @@ defmodule Relay.Runs.ExclusiveResumeTest do
   end
 
   test "a reaper-parked exclusive run resumes on the same executor when it returns", %{board: board} do
-    %{run: run, exec_a: exec_a} = park_pinned(board)
+    %{run: run} = park_pinned(board)
 
-    # exec-a returns: re-advertise a free exclusive slot keyed by its row id.
+    # exec-a genuinely returns: a fresh heartbeat refreshes last_heartbeat AND re-advertises
+    # its free exclusive slot — mirroring the heartbeat endpoint (upsert_executor + Capacity.put).
+    {:ok, exec_a} =
+      Runs.upsert_executor(board, %{"name" => "exec-a", "interval" => 30, "capacity" => %{"exclusive" => 1}})
+
     :ok = Capacity.put(exec_a.id, %{shared_clean: 0, exclusive: 1})
 
     {snapshot, _cards} = Server.build_snapshot(board.id, RunsEngine)
     plan = Scheduler.plan(snapshot)
 
     assert plan.dispatches == [{:resume, run.id, exec_a.id}]
+  end
+
+  test "a gone executor's lingering capacity does not resume the pinned run (no oscillation)", %{board: board} do
+    %{exec_a: exec_a} = park_pinned(board)
+
+    # exec-a is gone — its stale heartbeat is why the reaper parked the run — but its
+    # last-advertised exclusive slot still lingers in the capacity table (nothing cleared it).
+    # The planner must NOT resume onto a machine the reaper has already given up on, or the run
+    # oscillates forever: resume → reap → resume (RLY-199).
+    :ok = Capacity.put(exec_a.id, %{shared_clean: 0, exclusive: 1})
+
+    {snapshot, _cards} = Server.build_snapshot(board.id, RunsEngine)
+    plan = Scheduler.plan(snapshot)
+
+    assert plan.dispatches == []
   end
 
   test "a different executor with free exclusive capacity cannot take over the pinned run", %{board: board} do
@@ -93,5 +112,21 @@ defmodule Relay.Runs.ExclusiveResumeTest do
 
     # The pin is absolute: no resume is planned onto exec-b.
     assert plan.dispatches == []
+  end
+
+  test "relay why names the awaited machine even while the gone executor's capacity lingers", %{board: board} do
+    %{run: run, exec_a: exec_a} = park_pinned(board)
+
+    # The live-server symptom of the oscillation: exec-a is gone but its advertised slot still
+    # lingers, so `explain/2` used to see a planned resume and report "dispatchable", never
+    # naming exec-a. With the gone executor's capacity dropped, diagnose reaches run_verdict
+    # and names the machine the run waits for (criterion 3).
+    :ok = Capacity.put(exec_a.id, %{shared_clean: 0, exclusive: 1})
+
+    card = Relay.Cards.get_card(board, run.card_id)
+
+    assert %{verdict: :awaiting_capacity, detail: detail, evidence: evidence} = Runs.diagnose(board, card)
+    assert detail =~ ~s(executor "exec-a")
+    assert evidence.pinned_executor_name == "exec-a"
   end
 end
