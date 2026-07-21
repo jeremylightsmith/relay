@@ -41,6 +41,9 @@ defmodule Schemas.NodeExecution do
     timestamps(type: :utc_datetime)
   end
 
+  @doc "The closed set of node outcomes an executor may report."
+  def outcomes, do: [:succeeded, :failed, :partial, :needs_input]
+
   @doc "Validates a programmatically-built execution row."
   def changeset(execution) do
     execution

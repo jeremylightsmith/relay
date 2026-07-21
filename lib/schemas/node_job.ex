@@ -33,6 +33,16 @@ defmodule Schemas.NodeJob do
     timestamps(type: :utc_datetime)
   end
 
+  @doc "Job states where the dispatch unit is still live (queued, claimed, or running)."
+  def active_states, do: [:queued, :claimed, :running]
+
+  @doc ~S"""
+  Job states held by a LIVE claim (claimed or running) — excludes `:queued`, which nobody holds.
+  Deliberately distinct from `active_states/0`: `Relay.Runs.get_claimed_job/2` means "held," not
+  merely "active," so a future consumer must not reach for `active_states/0` when it means held.
+  """
+  def claimed_states, do: [:claimed, :running]
+
   @doc "Validates a programmatically-built job row."
   def changeset(job) do
     job
