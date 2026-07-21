@@ -199,30 +199,22 @@ defmodule RelayWeb.BoardRunnersLiveTest do
     assert has_element?(view, "#runner-mac-mini-local", "mac.mini.local")
   end
 
-  test "an outdated runner shows OUTDATED alongside its FRESH pill, not instead of it",
-       %{conn: conn, board: board} do
-    # RLY-184: heartbeat freshness and code staleness are orthogonal axes — a refused executor
-    # is beating normally, so collapsing them into one pill would hide one of the two facts.
+  test "an outdated runner shows the OUTDATED pill instead of FRESH", %{conn: conn, board: board} do
     executor(board, "ancient", version: nil)
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
 
-    assert has_element?(view, "#runner-ancient .badge-success", "FRESH")
-    assert has_element?(view, "#runner-ancient-outdated", "OUTDATED")
+    assert has_element?(view, "#runner-ancient .badge-error", "OUTDATED")
+    refute has_element?(view, "#runner-ancient .badge-success")
+    refute has_element?(view, "#runner-ancient-outdated")
   end
 
-  test "the OUTDATED badge reuses the artboard's pill styling", %{conn: conn, board: board} do
-    # docs/designs/Relay Runners.dc.html does not depict versioning at all, so there is no
-    # element to match — the requirement is that the new badge does not invent a second visual
-    # language next to the pill the artboard DOES specify (header row, lines ~72-79).
+  test "the OUTDATED pill uses badge-error", %{conn: conn, board: board} do
     executor(board, "ancient", version: nil)
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
-    html = render(element(view, "#runner-ancient-outdated"))
 
-    assert html =~ "badge badge-sm"
-    assert html =~ "badge-error"
-    assert html =~ "font-size:9.5px;letter-spacing:0.06em;"
+    assert render(element(view, "#runner-ancient .badge-error")) =~ "OUTDATED"
   end
 
   test "a current runner shows no OUTDATED badge and a plain version line",
@@ -283,5 +275,24 @@ defmodule RelayWeb.BoardRunnersLiveTest do
     assert has_element?(view, "#settings-rail", "ENGINE")
     assert has_element?(view, ~s|#settings-nav-runners[href="/board/#{board.slug}/runners"]|, "Runners")
     assert has_element?(view, "#settings-tab-runners")
+  end
+
+  describe "an outdated-but-beating executor (RLY-191)" do
+    test "renders the OUTDATED pill, a non-pulsing rose dot, no FRESH pill, and the version line",
+         %{conn: conn, board: board} do
+      insert(:executor, board: board, name: "old", version: 0, last_heartbeat: DateTime.utc_now())
+
+      {:ok, view, html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      # the freshness pill IS the state now — OUTDATED, not FRESH
+      assert html =~ "OUTDATED"
+      refute has_element?(view, "#runner-old .badge-success")
+      # non-pulsing dot: the header dot for this row must not carry animate-pulse
+      refute has_element?(view, "#runner-old .animate-pulse")
+      # the actionable version line survives
+      assert has_element?(view, "#runner-old-version", "requires v#{Relay.Runs.min_executor_version()}")
+      # header summary gains an N outdated chip
+      assert has_element?(view, "#summary-outdated")
+    end
   end
 end

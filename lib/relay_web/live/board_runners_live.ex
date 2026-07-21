@@ -2,11 +2,17 @@ defmodule RelayWeb.BoardRunnersLive do
   @moduledoc """
   Runners view (RLY-141) at `/board/:slug/runners` — the machine-centric instrument
   panel per `docs/designs/Relay Runners.dc.html`: one panel per connected runner
-  (freshness dot + FRESH/STALE/GONE pill, an additive OUTDATED badge and version line for an
-  executor below Relay.Runs.min_executor_version/0 (RLY-184), capacity chips with used/total
-  pips, WORKING NOW rows linking into the card drawer, dark streaming log tail), header
-  summary chips, the at-risk note on a stale/gone runner with jobs, and the empty
-  state naming the real `bin/relay execute` start command.
+  (dot + FRESH/STALE/GONE/OUTDATED pill, capacity chips with used/total pips, WORKING NOW rows
+  linking into the card drawer, dark streaming log tail), header summary chips, the at-risk
+  note on a stale/gone runner with jobs, and the empty state naming the real
+  `bin/relay execute` start command.
+
+  RLY-191: `OUTDATED` is a top-level `display_state` (precedence
+  `:gone > :stale > :outdated > :fresh`), replacing the FRESH pill/dot rather than sitting
+  beside it (RLY-184's additive badge) — a refusing executor must not read as healthy. This is
+  new design ground `docs/designs/Relay Runners.dc.html` does not cover (RLY-184 added the
+  version surface beyond the artboard; RLY-191 promotes it to a fourth freshness state) — filed
+  back to the Design project as a follow-up, not blocking here.
 
   Data comes from `Relay.Runs.list_executor_status/2` (the durable `executors` rows plus
   the board's active `node_jobs`) and `Relay.AgentLog` (feed lines, routed to the executor
@@ -171,6 +177,16 @@ defmodule RelayWeb.BoardRunnersLive do
                   </span>
                   {@summary.gone} gone
                 </span>
+                <span
+                  :if={@summary.outdated > 0}
+                  id="summary-outdated"
+                  class="font-mono"
+                  style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:oklch(0.52 0.16 22);background:oklch(0.97 0.03 22);border-radius:6px;padding:5px 10px;"
+                >
+                  <span style="width:7px;height:7px;border-radius:50%;background:oklch(0.62 0.16 22);">
+                  </span>
+                  {@summary.outdated} outdated
+                </span>
               </div>
             </div>
 
@@ -178,36 +194,26 @@ defmodule RelayWeb.BoardRunnersLive do
               <div
                 :for={runner <- @runners}
                 id={"runner-#{dom_id(runner)}"}
-                style={panel_style(runner.freshness)}
+                style={panel_style(runner.display_state)}
               >
                 <%!-- Panel header — artboard lines ~72-79. --%>
                 <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid oklch(0.94 0.005 255);">
                   <span
-                    class={["inline-block", runner.freshness == :fresh && "animate-pulse"]}
-                    style={fresh_dot_style(runner.freshness)}
+                    class={["inline-block", runner.display_state == :fresh && "animate-pulse"]}
+                    style={fresh_dot_style(runner.display_state)}
                   >
                   </span>
                   <span
                     class="font-mono"
-                    style={"font-size:15px;font-weight:600;letter-spacing:-0.01em;color:#{name_color(runner.freshness)};"}
+                    style={"font-size:15px;font-weight:600;letter-spacing:-0.01em;color:#{name_color(runner.display_state)};"}
                   >
                     {runner.name}
                   </span>
                   <span
-                    class={["badge badge-sm font-mono font-bold", pill_class(runner.freshness)]}
+                    class={["badge badge-sm font-mono font-bold", pill_class(runner.display_state)]}
                     style="font-size:9.5px;letter-spacing:0.06em;"
                   >
-                    {pill_label(runner.freshness)}
-                  </span>
-                  <%!-- RLY-184: additive to the freshness pill, never a replacement — a
-                        refused executor is FRESH and OUTDATED at once. --%>
-                  <span
-                    :if={runner.outdated}
-                    id={"runner-#{dom_id(runner)}-outdated"}
-                    class="badge badge-sm badge-error font-mono font-bold"
-                    style="font-size:9.5px;letter-spacing:0.06em;"
-                  >
-                    OUTDATED
+                    {pill_label(runner.display_state)}
                   </span>
                   <span style="flex:1;"></span>
                   <span
@@ -405,13 +411,18 @@ defmodule RelayWeb.BoardRunnersLive do
     now = DateTime.utc_now()
     runners = Runs.list_executor_status(socket.assigns.board, now)
 
-    counts = Enum.frequencies_by(runners, & &1.freshness)
+    counts = Enum.frequencies_by(runners, & &1.display_state)
     names = Enum.map(runners, & &1.name)
 
     socket
     |> assign(:now, now)
     |> assign(:runners, runners)
-    |> assign(:summary, %{fresh: counts[:fresh] || 0, stale: counts[:stale] || 0, gone: counts[:gone] || 0})
+    |> assign(:summary, %{
+      fresh: counts[:fresh] || 0,
+      stale: counts[:stale] || 0,
+      gone: counts[:gone] || 0,
+      outdated: counts[:outdated] || 0
+    })
     |> assign(:ref_owner, for(runner <- runners, job <- runner.jobs, into: %{}, do: {job.ref, runner.name}))
     |> update(:logs, &Map.take(&1, names))
   end
@@ -421,6 +432,10 @@ defmodule RelayWeb.BoardRunnersLive do
   defp dom_id(%{name: name}), do: String.replace(name, ~r/[^A-Za-z0-9_-]/, "-")
 
   defp streaming?(runner), do: runner.freshness == :fresh and runner.jobs != []
+
+  # `:outdated` shares :gone's rose border — a refusing executor must not read as healthy,
+  # even though (unlike :gone) it is genuinely beating.
+  defp panel_style(:outdated), do: panel_style(:gone)
 
   defp panel_style(freshness) do
     border =
@@ -437,6 +452,8 @@ defmodule RelayWeb.BoardRunnersLive do
   defp fresh_color(:fresh), do: @green
   defp fresh_color(:stale), do: @amber
   defp fresh_color(:gone), do: @rose
+  # RLY-191: rose, matching :gone's hue — no glow (fresh_dot_style/1 only glows for :fresh).
+  defp fresh_color(:outdated), do: @rose
 
   defp fresh_dot_style(freshness) do
     glow = if freshness == :fresh, do: "box-shadow:0 0 0 3px oklch(0.60 0.13 155 / 0.2);", else: ""
@@ -446,10 +463,12 @@ defmodule RelayWeb.BoardRunnersLive do
   defp pill_class(:fresh), do: "badge-success"
   defp pill_class(:stale), do: "badge-warning"
   defp pill_class(:gone), do: "badge-error"
+  defp pill_class(:outdated), do: "badge-error"
 
   defp pill_label(:fresh), do: "FRESH"
   defp pill_label(:stale), do: "STALE"
   defp pill_label(:gone), do: "GONE"
+  defp pill_label(:outdated), do: "OUTDATED"
 
   # `v1 · requires v2` when outdated, plain `v1` otherwise — the mismatch legible without
   # hovering. "unversioned" rather than a bare `v`: a runner reporting nothing predates
@@ -462,6 +481,8 @@ defmodule RelayWeb.BoardRunnersLive do
   defp version_label(%{version: version}), do: "v#{version}"
 
   defp name_color(:fresh), do: "oklch(0.24 0.02 255)"
+  # beating → the dark fresh-name colour, not the muted stale/gone one.
+  defp name_color(:outdated), do: "oklch(0.24 0.02 255)"
   defp name_color(_freshness), do: "oklch(0.50 0.02 255)"
 
   defp ref_color(:gone), do: "oklch(0.52 0.12 22)"

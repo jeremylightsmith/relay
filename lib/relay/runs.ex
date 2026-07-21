@@ -866,6 +866,8 @@ defmodule Relay.Runs do
 
     Enum.map(executors, fn executor ->
       jobs = Map.get(jobs_by_executor, executor.name, [])
+      freshness = executor_freshness(executor, now)
+      outdated = executor_outdated?(executor)
 
       %{
         id: executor.id,
@@ -873,16 +875,25 @@ defmodule Relay.Runs do
         host: executor.host,
         interval: executor.interval || 30,
         last_heartbeat: executor.last_heartbeat,
-        freshness: executor_freshness(executor, now),
+        freshness: freshness,
         version: executor.version,
         # Orthogonal to `freshness` on purpose (RLY-184): a refused executor is perfectly
         # healthy and beating normally — it is just running old code.
-        outdated: executor_outdated?(executor),
+        outdated: outdated,
+        # RLY-191: the single presentation state the runners view renders from. Precedence
+        # :gone > :stale > :outdated > :fresh — a silent executor's silence is the more urgent
+        # fact than its version. Derived, never stored; `freshness` keeps heartbeat truth.
+        display_state: display_state(freshness, outdated),
         pools: pools_for(executor, jobs),
         jobs: jobs
       }
     end)
   end
+
+  defp display_state(:gone, _outdated), do: :gone
+  defp display_state(:stale, _outdated), do: :stale
+  defp display_state(:fresh, true), do: :outdated
+  defp display_state(:fresh, false), do: :fresh
 
   @doc "The board's raw `Executor` rows — the lean read `Scheduler.Server` builds its snapshot's `executors` map from."
   def list_board_executors(board_id) do
