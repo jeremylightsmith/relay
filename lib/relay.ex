@@ -32,7 +32,6 @@ defmodule Relay do
       Markdown,
       Members,
       Push,
-      RunnerPresence,
       Runs,
       Runs.Capacity,
       Runs.RunDetail,

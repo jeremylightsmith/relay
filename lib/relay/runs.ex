@@ -862,9 +862,9 @@ defmodule Relay.Runs do
     end
   end
 
-  # Mirrors the retention RunnerPresence.prune/1 gave the runners view: a machine silent for
-  # a day is history, not roster. Display-only — the reaper owns row lifecycle, and this
-  # function deletes nothing.
+  # A machine silent for a day is history, not roster (the retention the runners view has
+  # always applied). Display-only — the reaper owns row lifecycle, and this function deletes
+  # nothing.
   @roster_window_s 86_400
 
   @doc """

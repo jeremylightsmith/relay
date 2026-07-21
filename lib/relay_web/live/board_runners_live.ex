@@ -17,8 +17,8 @@ defmodule RelayWeb.BoardRunnersLive do
   Data comes from `Relay.Runs.list_executor_status/2` (the durable `executors` rows plus
   the board's active `node_jobs`) and `Relay.AgentLog` (feed lines, routed to the executor
   holding the line's ref; unclaimed and ref-less lines are dropped — the board's log sheet
-  still shows everything). RLY-167 swapped the source off `Relay.RunnerPresence`, which lost
-  its only writer when RLY-139 deleted `relay watch`; because the roster is now a pure
+  still shows everything). RLY-167 swapped the source off the old ETS presence table, which
+  lost its only writer when RLY-139 deleted `relay watch`; because the roster is now a pure
   function of Postgres, the page also survives an app restart (`Relay.Runs.Capacity` is ETS
   and scheduler-only — a page backed by it would go blank on every deploy).
 
