@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.32 0.02 255);background:oklch(0.955 0.008 255);-webkit-font-smoothing:antialiased;}
+  a{color:oklch(0.60 0.14 250);text-decoration:none;} a:hover{text-decoration:underline;}
+  button{font-family:inherit;cursor:pointer;}
+  input,textarea{font-family:inherit;} textarea{resize:none;}
+  ::-webkit-scrollbar{width:9px;height:9px;}
+  ::-webkit-scrollbar-thumb{background:oklch(0.88 0.01 255);border-radius:6px;}
+  @keyframes pbrise{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+  @keyframes pbflash{0%{background:oklch(0.96 0.04 250);}100%{background:oklch(1 0 0);}}
+  @keyframes pbpop{0%{transform:scale(0.4);}60%{transform:scale(1.15);}100%{transform:scale(1);}}
+</style>
+</helmet>
+
+<div style="min-height:100vh;display:flex;flex-direction:column;">
+
+  <!-- ===== PUBLIC HEADER (minimal chrome) ===== -->
+  <div style="position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:12px;height:56px;padding:0 22px;background:oklch(1 0 0);border-bottom:1px solid oklch(0.92 0.006 255);">
+    <div style="width:24px;height:24px;border-radius:7px;background:oklch(0.60 0.14 250);display:flex;align-items:center;justify-content:center;position:relative;flex:0 0 auto;">
+      <div style="width:8px;height:8px;border-radius:50%;background:oklch(1 0 0);"></div>
+      <div style="position:absolute;right:3px;top:3px;width:4px;height:4px;border-radius:50%;background:oklch(0.60 0.14 250);box-shadow:0 0 0 1.5px oklch(1 0 0);"></div>
+    </div>
+    <span style="font-size:15px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.24 0.02 255);">Acme Analytics</span>
+    <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.50 0.02 255);background:oklch(0.955 0.006 255);border:1px solid oklch(0.91 0.006 255);padding:3px 8px;border-radius:6px;">PUBLIC ROADMAP</span>
+    <span style="flex:1;"></span>
+    <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.66 0.02 255);margin-right:4px;">relay.com/board/acme/public</span>
+    <sc-if value="{{ signedOut }}" hint-placeholder-val="{{ true }}">
+      <button onClick="{{ openSignin }}" style="background:transparent;border:none;color:oklch(0.50 0.13 250);font-size:13px;font-weight:600;padding:7px 10px;border-radius:8px;" style-hover="background:oklch(0.96 0.02 250);">Sign in</button>
+    </sc-if>
+    <sc-if value="{{ signedIn }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:12.5px;color:oklch(0.50 0.02 255);">You</span>
+        <div style="width:28px;height:28px;border-radius:50%;background:oklch(0.62 0.13 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;">YO</div>
+      </div>
+    </sc-if>
+  </div>
+
+  <!-- ===== INTRO ===== -->
+  <div style="padding:40px 22px 26px 22px;">
+    <div style="max-width:1140px;margin:0 auto;display:flex;align-items:flex-end;justify-content:space-between;gap:28px;flex-wrap:wrap;">
+      <div style="max-width:620px;">
+        <h1 style="font-size:32px;line-height:1.08;letter-spacing:-0.03em;font-weight:600;color:oklch(0.22 0.02 255);margin:0 0 10px 0;">What should we build next?</h1>
+        <p style="font-size:15px;line-height:1.6;color:oklch(0.48 0.02 255);margin:0;">This is our public roadmap. Upvote the ideas you want most, or post your own — the ones with the most support rise to the top.</p>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;flex:0 0 auto;">
+        <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">{{ totalLabel }}</span>
+        <button onClick="{{ openComposer }}" style="display:flex;align-items:center;gap:8px;background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:9px;padding:11px 18px;font-size:14px;font-weight:600;box-shadow:0 6px 18px -8px oklch(0.60 0.14 250/0.7);"><span style="font-size:17px;line-height:1;margin-top:-1px;">＋</span>Post an idea</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== BOARD ===== -->
+  <div style="flex:1;padding:0 22px 80px 22px;">
+    <div style="max-width:1140px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;align-items:start;">
+      <sc-for list="{{ columns }}" as="col" hint-placeholder-count="3">
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div style="display:flex;align-items:center;gap:9px;padding:2px 2px 0 2px;">
+            <span style="{{ col.dot }}"></span>
+            <span style="font-size:13.5px;font-weight:600;color:oklch(0.28 0.02 255);">{{ col.label }}</span>
+            <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);background:oklch(0.955 0.006 255);border:1px solid oklch(0.92 0.006 255);padding:1px 7px;border-radius:999px;">{{ col.count }}</span>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <sc-for list="{{ col.cards }}" as="card" hint-placeholder-count="4">
+              <div onClick="{{ card.onOpen }}" style="{{ card.cardStyle }}" style-hover="border-color:oklch(0.82 0.03 250);box-shadow:0 4px 14px -6px oklch(0.5 0.03 255/0.28);">
+                <div style="font-size:14px;font-weight:600;line-height:1.35;color:oklch(0.24 0.02 255);letter-spacing:-0.01em;">{{ card.title }}</div>
+
+                <sc-if value="{{ card.hasDesc }}" hint-placeholder-val="{{ true }}">
+                  <p style="font-size:12.5px;line-height:1.5;color:oklch(0.50 0.02 255);margin:8px 0 0 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">{{ card.desc }}</p>
+                </sc-if>
+
+                <sc-if value="{{ card.showAddDesc }}" hint-placeholder-val="{{ false }}">
+                  <button onClick="{{ card.onStartAddDesc }}" style="margin-top:8px;display:inline-flex;align-items:center;gap:5px;background:transparent;border:none;padding:0;font-size:12px;font-weight:600;color:oklch(0.55 0.11 250);">＋ Add a public description</button>
+                </sc-if>
+
+                <sc-if value="{{ card.editingDesc }}" hint-placeholder-val="{{ false }}">
+                  <div onClick="{{ stop }}" style="margin-top:9px;">
+                    <textarea value="{{ draftDesc }}" onInput="{{ onDraftDesc }}" placeholder="Describe this idea for the public — one or two lines." style="width:100%;min-height:62px;border:1px solid oklch(0.60 0.14 250);border-radius:8px;padding:8px 10px;font-size:12.5px;line-height:1.5;color:oklch(0.30 0.02 255);outline:none;background:oklch(1 0 0);box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);"></textarea>
+                    <div style="display:flex;gap:7px;margin-top:8px;">
+                      <button onClick="{{ card.onSaveDesc }}" style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:7px;padding:6px 13px;font-size:12px;font-weight:600;">Save</button>
+                      <button onClick="{{ cancelDesc }}" style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.01 255);color:oklch(0.46 0.02 255);border-radius:7px;padding:6px 12px;font-size:12px;font-weight:600;">Cancel</button>
+                    </div>
+                  </div>
+                </sc-if>
+
+                <div style="display:flex;align-items:center;gap:10px;margin-top:13px;">
+                  <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+                    <span style="font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.66 0.02 255);">{{ card.age }}</span>
+                    <sc-if value="{{ card.voted }}" hint-placeholder-val="{{ false }}">
+                      <span style="font-size:10px;font-weight:600;letter-spacing:0.04em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.48 0.10 250);background:oklch(0.96 0.03 250);padding:2px 7px;border-radius:5px;">YOU VOTED</span>
+                    </sc-if>
+                  </div>
+                  <button onClick="{{ card.onVote }}" style="{{ card.voteStyle }}"><span style="font-size:12px;line-height:1;">{{ card.arrow }}</span>{{ card.votes }}</button>
+                </div>
+              </div>
+            </sc-for>
+
+            <sc-if value="{{ col.empty }}" hint-placeholder-val="{{ false }}">
+              <div style="border:1px dashed oklch(0.88 0.008 255);border-radius:11px;padding:20px 14px;text-align:center;font-size:12px;color:oklch(0.60 0.02 255);">Nothing here yet.</div>
+            </sc-if>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- ===== CARD DETAIL MODAL ===== -->
+  <sc-if value="{{ detailOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeCard }}" style="position:fixed;inset:0;z-index:40;background:oklch(0.30 0.03 255/0.34);display:flex;align-items:flex-start;justify-content:center;padding:80px 20px;">
+      <div onClick="{{ stop }}" style="width:100%;max-width:480px;background:oklch(1 0 0);border-radius:15px;box-shadow:0 30px 70px -20px oklch(0.3 0.05 255/0.55);overflow:hidden;animation:pbrise 0.25s ease;">
+        <div style="padding:20px 24px 18px 24px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+            <span style="{{ detail.dot }}"></span>
+            <span style="font-size:11px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.52 0.02 255);">{{ detail.catLabel }}</span>
+          </div>
+          <div style="font-size:20px;font-weight:600;line-height:1.25;letter-spacing:-0.02em;color:oklch(0.20 0.02 255);">{{ detail.title }}</div>
+          <sc-if value="{{ detail.hasDesc }}" hint-placeholder-val="{{ true }}">
+            <p style="font-size:14px;line-height:1.6;color:oklch(0.42 0.02 255);margin:14px 0 0 0;white-space:pre-wrap;">{{ detail.desc }}</p>
+          </sc-if>
+          <sc-if value="{{ detail.noDesc }}" hint-placeholder-val="{{ false }}">
+            <p style="font-size:13px;line-height:1.55;color:oklch(0.64 0.02 255);margin:14px 0 0 0;font-style:italic;">No public description yet.</p>
+          </sc-if>
+
+          <div style="margin-top:20px;padding-top:16px;border-top:1px solid oklch(0.95 0.005 255);">
+            <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);margin-bottom:11px;">SUPPORTERS · {{ detail.count }}</div>
+            <sc-if value="{{ detail.showSupporters }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:9px;">
+                <sc-for list="{{ detail.supporters }}" as="sp" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <div style="{{ sp.avatar }}">{{ sp.initials }}</div>
+                    <span style="font-size:13px;color:oklch(0.34 0.02 255);{{ sp.nameWeight }}">{{ sp.name }}</span>
+                    <sc-if value="{{ sp.isYou }}" hint-placeholder-val="{{ false }}">
+                      <span style="font-size:10px;font-weight:600;letter-spacing:0.04em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.48 0.10 250);background:oklch(0.96 0.03 250);padding:2px 7px;border-radius:5px;">YOU</span>
+                    </sc-if>
+                  </div>
+                </sc-for>
+                <sc-if value="{{ detail.hasRest }}" hint-placeholder-val="{{ true }}">
+                  <button style="align-self:flex-start;background:transparent;border:none;padding:2px 0 0 2px;font-size:12px;font-weight:600;color:oklch(0.50 0.13 250);">{{ detail.restLabel }}</button>
+                </sc-if>
+              </div>
+            </sc-if>
+            <sc-if value="{{ detail.gateSupporters }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12.5px;line-height:1.5;color:oklch(0.56 0.02 255);">{{ detail.count }} people support this. <a href="#" onClick="{{ openSignin }}">Sign in</a> to see who.</div>
+            </sc-if>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:16px 24px;border-top:1px solid oklch(0.94 0.005 255);background:oklch(0.99 0.002 255);">
+          <div style="display:flex;align-items:center;gap:9px;flex:1;min-width:0;">
+            <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">{{ detail.votersLabel }}</span>
+            <sc-if value="{{ detail.voted }}" hint-placeholder-val="{{ false }}">
+              <span style="font-size:10px;font-weight:600;letter-spacing:0.04em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.48 0.10 250);background:oklch(0.96 0.03 250);padding:2px 7px;border-radius:5px;">YOU VOTED</span>
+            </sc-if>
+          </div>
+          <button onClick="{{ detail.onVote }}" style="{{ detail.voteStyle }}"><span style="font-size:13px;line-height:1;">↑</span>{{ detail.votes }}</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ===== COMPOSER MODAL ===== -->
+  <sc-if value="{{ composerOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeComposer }}" style="position:fixed;inset:0;z-index:40;background:oklch(0.30 0.03 255/0.34);display:flex;align-items:flex-start;justify-content:center;padding:80px 20px;">
+      <div onClick="{{ stop }}" style="width:100%;max-width:460px;background:oklch(1 0 0);border-radius:15px;box-shadow:0 30px 70px -20px oklch(0.3 0.05 255/0.55);overflow:hidden;animation:pbrise 0.25s ease;">
+        <div style="padding:20px 22px 16px 22px;border-bottom:1px solid oklch(0.94 0.005 255);">
+          <div style="font-size:18px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.22 0.02 255);">Post an idea</div>
+          <div style="font-size:12.5px;color:oklch(0.56 0.02 255);margin-top:3px;">It lands in Unstarted with your first vote on it.</div>
+        </div>
+        <div style="padding:18px 22px 22px 22px;">
+          <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);margin-bottom:6px;">YOUR IDEA</div>
+          <input value="{{ formTitle }}" onInput="{{ onFormTitle }}" placeholder="One line — what should we build?" style="width:100%;border:1px solid oklch(0.89 0.008 255);border-radius:9px;padding:10px 12px;font-size:13.5px;color:oklch(0.28 0.02 255);outline:none;background:oklch(0.995 0.002 255);" style-focus="border-color:oklch(0.60 0.14 250);box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);background:oklch(1 0 0);" />
+          <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);margin:15px 0 6px 0;">PUBLIC DESCRIPTION <span style="font-weight:400;color:oklch(0.68 0.02 255);">· optional</span></div>
+          <textarea value="{{ formDesc }}" onInput="{{ onFormDesc }}" placeholder="Add context so others understand and vote for it." style="width:100%;min-height:86px;border:1px solid oklch(0.89 0.008 255);border-radius:9px;padding:10px 12px;font-size:13px;line-height:1.5;color:oklch(0.28 0.02 255);outline:none;background:oklch(0.995 0.002 255);" style-focus="border-color:oklch(0.60 0.14 250);box-shadow:0 0 0 3px oklch(0.60 0.14 250/0.14);background:oklch(1 0 0);"></textarea>
+          <button onClick="{{ submitComposer }}" style="width:100%;background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:9px;padding:12px;font-size:14px;font-weight:600;margin-top:18px;">{{ composerCta }}</button>
+          <sc-if value="{{ signedOut }}" hint-placeholder-val="{{ true }}">
+            <div style="text-align:center;font-size:11px;color:oklch(0.60 0.02 255);margin-top:10px;">You'll sign in first, so we can credit your idea.</div>
+          </sc-if>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ===== SIGN-IN MODAL ===== -->
+  <sc-if value="{{ signinOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeSignin }}" style="position:fixed;inset:0;z-index:50;background:oklch(0.30 0.03 255/0.34);display:flex;align-items:center;justify-content:center;padding:20px;">
+      <div onClick="{{ stop }}" style="width:100%;max-width:380px;background:oklch(1 0 0);border-radius:15px;box-shadow:0 30px 70px -20px oklch(0.3 0.05 255/0.55);overflow:hidden;animation:pbrise 0.25s ease;padding:26px 24px 24px 24px;text-align:center;">
+        <div style="width:38px;height:38px;border-radius:11px;background:oklch(0.60 0.14 250);display:flex;align-items:center;justify-content:center;position:relative;margin:0 auto 14px auto;">
+          <div style="width:13px;height:13px;border-radius:50%;background:oklch(1 0 0);"></div>
+          <div style="position:absolute;right:6px;top:6px;width:6px;height:6px;border-radius:50%;background:oklch(0.60 0.14 250);box-shadow:0 0 0 2px oklch(1 0 0);"></div>
+        </div>
+        <div style="font-size:18px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.22 0.02 255);">{{ signinTitle }}</div>
+        <div style="font-size:13px;line-height:1.55;color:oklch(0.54 0.02 255);margin-top:6px;">Sign in so your vote sticks — you can change it any time.</div>
+        <div style="display:flex;flex-direction:column;gap:9px;margin-top:20px;">
+          <button onClick="{{ doSignin }}" style="display:flex;align-items:center;justify-content:center;gap:9px;width:100%;background:oklch(1 0 0);border:1px solid oklch(0.86 0.01 255);color:oklch(0.30 0.02 255);border-radius:10px;padding:11px;font-size:13.5px;font-weight:600;" style-hover="background:oklch(0.98 0.004 255);"><span style="width:16px;height:16px;border-radius:50%;background:conic-gradient(oklch(0.62 0.16 25) 0 25%,oklch(0.75 0.14 95) 25% 50%,oklch(0.62 0.14 145) 50% 75%,oklch(0.55 0.15 260) 75% 100%);"></span>Continue with Google</button>
+          <button onClick="{{ doSignin }}" style="width:100%;background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:10px;padding:11px;font-size:13.5px;font-weight:600;">Continue with email</button>
+        </div>
+        <div style="font-size:11px;color:oklch(0.62 0.02 255);margin-top:16px;">No account needed to browse — only to vote or post.</div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1200,&quot;height&quot;:900},&quot;sortBy&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;votes&quot;,&quot;new&quot;],&quot;default&quot;:&quot;votes&quot;,&quot;tsType&quot;:&quot;'votes'|'new'&quot;,&quot;section&quot;:&quot;Board&quot;},&quot;density&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;comfortable&quot;,&quot;compact&quot;],&quot;default&quot;:&quot;comfortable&quot;,&quot;tsType&quot;:&quot;'comfortable'|'compact'&quot;,&quot;section&quot;:&quot;Board&quot;},&quot;allowAnonVote&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Board&quot;}}">
+class Component extends DCLogic {
+  state = {
+    signedIn: false,
+    composerOpen: false, signinOpen: false, signinReason: 'vote',
+    pending: null,
+    formTitle: '', formDesc: '',
+    editingDescId: null, draftDesc: '',
+    openCardId: null,
+    youAppearance: 'name',
+    nextId: 100,
+    cards: [
+      { id: 1, title: 'Mobile app', cat: 'unstarted', votes: 156, publicDesc: 'A native iOS and Android app to check dashboards and get alerts on the go.', voted: false, seq: 1, isYours: false, isNew: false, voters: [{ hue: 15 }, { hue: 195 }, { hue: 155 }] },
+      { id: 2, title: 'Downloadable PDF reports', cat: 'unstarted', votes: 96, publicDesc: 'Export any dashboard as a clean, shareable PDF for stakeholders.', voted: false, seq: 2, isYours: false, isNew: false, voters: [{ hue: 250 }, { hue: 15 }] },
+      { id: 3, title: 'Export raw data to Google Sheets', cat: 'unstarted', votes: 41, publicDesc: 'Push the underlying rows straight into a live Google Sheet.', voted: false, seq: 3, isYours: false, isNew: false, voters: [{ hue: 155 }, { hue: 195 }] },
+      { id: 4, title: 'Embed dashboards in Notion', cat: 'unstarted', votes: 33, publicDesc: null, voted: false, seq: 4, isYours: false, isNew: false, voters: [{ hue: 250 }] },
+      { id: 5, title: 'Weekly summary emailed to me', cat: 'unstarted', votes: 24, publicDesc: 'A short Monday email with the key numbers and week-over-week deltas.', voted: false, seq: 5, isYours: false, isNew: false, voters: [{ hue: 15 }] },
+      { id: 6, title: 'Filter by UTM campaign', cat: 'unstarted', votes: 12, publicDesc: null, voted: false, seq: 6, isYours: false, isNew: false, voters: [{ hue: 195 }] },
+      { id: 7, title: 'Slack alerts for anomalies', cat: 'planning', votes: 88, publicDesc: 'Ping a Slack channel automatically when a metric spikes or drops.', voted: false, seq: 7, isYours: false, isNew: false, voters: [{ hue: 250 }, { hue: 155 }, { hue: 15 }] },
+      { id: 8, title: 'Role-based sharing permissions', cat: 'planning', votes: 72, publicDesc: 'Control who can view vs. edit each dashboard by role.', voted: false, seq: 8, isYours: false, isNew: false, voters: [{ hue: 195 }, { hue: 250 }] },
+      { id: 9, title: 'Scheduled email digests', cat: 'planning', votes: 63, publicDesc: null, voted: false, seq: 9, isYours: false, isNew: false, voters: [{ hue: 155 }] },
+      { id: 10, title: 'PNG / SVG chart export', cat: 'inprogress', votes: 128, publicDesc: 'Download any chart as a high-res PNG or vector SVG, not just CSV.', voted: false, seq: 10, isYours: false, isNew: false, voters: [{ hue: 250 }, { hue: 15 }, { hue: 195 }] },
+      { id: 11, title: 'Custom date-range presets', cat: 'inprogress', votes: 54, publicDesc: 'Save your own date ranges like "Last sprint" or "Fiscal Q3".', voted: false, seq: 11, isYours: false, isNew: false, voters: [{ hue: 155 }, { hue: 250 }] }
+    ]
+  };
+
+  // ---- helpers ----
+  _hueBg(h) { return `background:oklch(0.62 0.13 ${h});`; }
+  _segStyle(on) {
+    return on
+      ? 'font-size:11px;font-weight:600;padding:5px 11px;border:none;border-radius:6px;background:oklch(1 0 0);color:oklch(0.30 0.02 255);box-shadow:0 1px 2px oklch(0.5 0.03 255/0.14);'
+      : 'font-size:11px;font-weight:600;padding:5px 11px;border:none;border-radius:6px;background:transparent;color:oklch(0.52 0.02 255);';
+  }
+  _catDot(cat) {
+    if (cat === 'planning') return 'width:11px;height:11px;border-radius:50%;flex:0 0 auto;background:conic-gradient(oklch(0.55 0.15 305) 0 50%, oklch(0.88 0.05 305) 50% 100%);';
+    if (cat === 'inprogress') return 'width:11px;height:11px;border-radius:50%;flex:0 0 auto;background:conic-gradient(oklch(0.60 0.14 250) 0 50%, oklch(0.86 0.03 250) 50% 100%);';
+    return 'width:11px;height:11px;border-radius:50%;flex:0 0 auto;border:2px solid oklch(0.68 0.02 255);box-sizing:border-box;';
+  }
+
+  // ---- gating ----
+  _needsAuthToVote() { return !this.state.signedIn && !((this.props || {}).allowAnonVote ?? false); }
+
+  openSignin = () => this.setState({ signinOpen: true, signinReason: 'browse', pending: null });
+  closeSignin = () => this.setState({ signinOpen: false, pending: null });
+  doSignin = () => {
+    const pending = this.state.pending;
+    this.setState({ signedIn: true, signinOpen: false, pending: null }, () => {
+      if (!pending) return;
+      if (pending.type === 'vote') this._toggleVote(pending.id);
+      else if (pending.type === 'post') this.setState({ composerOpen: true });
+    });
+  };
+
+  stop = (e) => { e.stopPropagation(); };
+
+  // ---- card detail ----
+  openCard = (id) => this.setState({ openCardId: id });
+  closeCard = () => this.setState({ openCardId: null });
+  setYouAppearance = (v) => this.setState({ youAppearance: v });
+
+  // ---- voting ----
+  onVote = (id) => {
+    if (this._needsAuthToVote()) { this.setState({ signinOpen: true, signinReason: 'vote', pending: { type: 'vote', id } }); return; }
+    this._toggleVote(id);
+  };
+  _toggleVote = (id) => this.setState(s => ({
+    cards: s.cards.map(c => c.id === id ? { ...c, voted: !c.voted, votes: c.votes + (c.voted ? -1 : 1) } : c)
+  }));
+
+  // ---- composer ----
+  openComposer = () => {
+    if (!this.state.signedIn) { this.setState({ signinOpen: true, signinReason: 'post', pending: { type: 'post' } }); return; }
+    this.setState({ composerOpen: true });
+  };
+  closeComposer = () => this.setState({ composerOpen: false });
+  onFormTitle = (e) => { const v = e.target.value; this.setState({ formTitle: v }); };
+  onFormDesc = (e) => { const v = e.target.value; this.setState({ formDesc: v }); };
+  submitComposer = () => {
+    const title = this.state.formTitle.trim();
+    if (!title) return;
+    if (!this.state.signedIn) { this.setState({ signinOpen: true, signinReason: 'post', pending: { type: 'post' } }); return; }
+    this.setState(s => {
+      const id = s.nextId;
+      const card = { id, title, cat: 'unstarted', votes: 1, publicDesc: s.formDesc.trim() || null, voted: true, seq: id, isYours: true, isNew: true, voters: [] };
+      return { cards: [card, ...s.cards], nextId: id + 1, composerOpen: false, formTitle: '', formDesc: '' };
+    });
+  };
+
+  // ---- inline public-description add (on your own cards) ----
+  startAddDesc = (id) => this.setState({ editingDescId: id, draftDesc: '' });
+  onDraftDesc = (e) => { const v = e.target.value; this.setState({ draftDesc: v }); };
+  cancelDesc = () => this.setState({ editingDescId: null, draftDesc: '' });
+  saveDesc = (id) => {
+    const v = this.state.draftDesc.trim();
+    this.setState(s => ({
+      editingDescId: null, draftDesc: '',
+      cards: s.cards.map(c => c.id === id ? { ...c, publicDesc: v || c.publicDesc } : c)
+    }));
+  };
+
+  renderVals() {
+    const s = this.state;
+    const p = this.props || {};
+    const sortBy = p.sortBy ?? 'votes';
+    const compact = (p.density ?? 'comfortable') === 'compact';
+
+    const AGES = { 1: '3mo', 2: '6w', 3: '2mo', 4: '5w', 5: '3w', 6: '9d', 7: '2mo', 8: '7w', 9: '4w', 10: '5w', 11: '11d' };
+    const POOL = [
+      { name: 'Maya L.', initials: 'ML', hue: 195 }, { name: 'Dana K.', initials: 'DK', hue: 250 },
+      { name: 'Sam Y.', initials: 'SY', hue: 155 }, { name: 'Jordan R.', initials: 'JR', hue: 15 },
+      { name: 'Priya N.', initials: 'PN', hue: 300 }, { name: 'Tom A.', initials: 'TA', hue: 95 }
+    ];
+    const mapCard = (c) => {
+      const age = c.id >= 100 ? 'just now' : (AGES[c.id] || '');
+      const editing = s.editingDescId === c.id;
+      const hasDesc = !compact && !!c.publicDesc && !editing;
+      const showAddDesc = !compact && c.isYours && !c.publicDesc && !editing;
+
+      const cardStyle = `background:oklch(1 0 0);border:1px solid ${c.isNew ? 'oklch(0.80 0.08 250)' : 'oklch(0.92 0.006 255)'};border-radius:11px;padding:${compact ? '11px 13px' : '13px 14px'};box-shadow:0 1px 2px oklch(0.55 0.03 255/0.05);${c.isNew ? 'animation:pbflash 1.4s ease;' : ''}`;
+
+      return {
+        id: c.id, title: c.title, desc: c.publicDesc || '', hasDesc, showAddDesc, age,
+        editingDesc: editing, voted: c.voted,
+        cardStyle,
+        votes: ' ' + c.votes, arrow: c.voted ? '↑' : '↑',
+        voteStyle: (c.voted
+          ? 'display:inline-flex;align-items:center;gap:3px;font-family:\'JetBrains Mono\',ui-monospace,monospace;font-size:12px;font-weight:600;color:oklch(1 0 0);background:oklch(0.60 0.14 250);border:1px solid oklch(0.60 0.14 250);'
+          : 'display:inline-flex;align-items:center;gap:3px;font-family:\'JetBrains Mono\',ui-monospace,monospace;font-size:12px;font-weight:600;color:oklch(0.48 0.10 250);background:oklch(1 0 0);border:1px solid oklch(0.86 0.05 250);')
+          + 'border-radius:9px;padding:6px 11px;flex:0 0 auto;min-width:52px;justify-content:center;',
+        onOpen: () => this.openCard(c.id),
+        onVote: (e) => { e.stopPropagation(); this.onVote(c.id); },
+        onStartAddDesc: (e) => { e.stopPropagation(); this.startAddDesc(c.id); },
+        onSaveDesc: (e) => { e.stopPropagation(); this.saveDesc(c.id); }
+      };
+    };
+
+    // detail modal card
+    const oc = s.cards.find(c => c.id === s.openCardId);
+    let detail = null;
+    if (oc) {
+      const catLabel = oc.cat === 'planning' ? 'Planning' : (oc.cat === 'inprogress' ? 'In progress' : 'Unstarted');
+      const av = (label, hue) => `width:28px;height:28px;border-radius:50%;${this._hueBg(hue)}color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:600;flex:0 0 auto;`;
+      const PREVIEW = 5; // deliberate cap: show the 5 most-recent supporters, rest folds to "+N more"
+      const supporters = [];
+      if (oc.voted) supporters.push({ name: 'You', initials: 'YO', avatar: av('YO', 250), isYou: true, nameWeight: 'font-weight:600;' });
+      const nNamed = Math.min(PREVIEW - supporters.length, oc.votes - supporters.length, POOL.length);
+      for (let i = 0; i < nNamed; i++) {
+        const p = POOL[(oc.id + i) % POOL.length];
+        supporters.push({ name: p.name, initials: p.initials, avatar: av(p.initials, p.hue), isYou: false, nameWeight: '' });
+      }
+      const rest = Math.max(0, oc.votes - supporters.length);
+      detail = {
+        title: oc.title, desc: oc.publicDesc || '', hasDesc: !!oc.publicDesc, noDesc: !oc.publicDesc,
+        catLabel, dot: this._catDot(oc.cat), voted: oc.voted,
+        showSupporters: s.signedIn, gateSupporters: !s.signedIn, count: oc.votes,
+        supporters, hasRest: rest > 0, restLabel: 'Show all ' + oc.votes + ' supporters →',
+        votersLabel: oc.votes + (oc.votes === 1 ? ' person voted' : ' people voted'),
+        votes: ' ' + oc.votes,
+        voteStyle: (oc.voted
+          ? 'display:inline-flex;align-items:center;gap:4px;font-family:\'JetBrains Mono\',ui-monospace,monospace;font-size:13px;font-weight:600;color:oklch(1 0 0);background:oklch(0.60 0.14 250);border:1px solid oklch(0.60 0.14 250);'
+          : 'display:inline-flex;align-items:center;gap:4px;font-family:\'JetBrains Mono\',ui-monospace,monospace;font-size:13px;font-weight:600;color:oklch(0.48 0.10 250);background:oklch(1 0 0);border:1px solid oklch(0.86 0.05 250);')
+          + 'border-radius:10px;padding:9px 16px;flex:0 0 auto;',
+        onVote: () => this.onVote(oc.id)
+      };
+    }
+
+    const cols = [
+      { key: 'unstarted', label: 'Unstarted' },
+      { key: 'planning', label: 'Planning' },
+      { key: 'inprogress', label: 'In progress' }
+    ].map(col => {
+      let list = s.cards.filter(c => c.cat === col.key);
+      list = list.slice().sort((a, b) => sortBy === 'new' ? b.seq - a.seq : (b.votes - a.votes || b.seq - a.seq));
+      return {
+        label: col.label, dot: this._catDot(col.key),
+        count: list.length, empty: list.length === 0,
+        cards: list.map(mapCard)
+      };
+    });
+
+    return {
+      signedIn: s.signedIn, signedOut: !s.signedIn,
+      columns: cols,
+      detailOpen: !!detail, detail: detail || {}, closeCard: this.closeCard,
+      totalLabel: s.cards.length + ' ideas · sorted by ' + (sortBy === 'new' ? 'newest' : 'votes'),
+      openComposer: this.openComposer, openSignin: this.openSignin,
+      composerOpen: s.composerOpen, closeComposer: this.closeComposer,
+      formTitle: s.formTitle, formDesc: s.formDesc,
+      onFormTitle: this.onFormTitle, onFormDesc: this.onFormDesc, submitComposer: this.submitComposer,
+      composerCta: s.signedIn ? 'Post idea →' : 'Sign in & post →',
+      signinOpen: s.signinOpen, closeSignin: this.closeSignin, doSignin: this.doSignin,
+      signinTitle: s.signinReason === 'post' ? 'Sign in to post' : (s.signinReason === 'vote' ? 'Sign in to vote' : 'Sign in to Relay'),
+      draftDesc: s.draftDesc, onDraftDesc: this.onDraftDesc, cancelDesc: this.cancelDesc,
+      stop: this.stop
+    };
+  }
+}
+</script>
+</body>
+</html>
