@@ -547,7 +547,7 @@ defmodule RelayWeb.BoardLive do
       %Card{id: ^card_id} ->
         runs = Runs.list_runs_for_card(card)
         latest = List.first(runs)
-        default_tab = if latest && latest.status in [:running, :parked], do: :run, else: :detail
+        default_tab = if latest && latest.status in Run.active_statuses(), do: :run, else: :detail
 
         {:noreply,
          socket
@@ -1546,7 +1546,7 @@ defmodule RelayWeb.BoardLive do
     working = Runs.working_run_ids(board, now)
 
     meta =
-      for {card_id, s} <- run_summaries, s.status in [:running, :parked], into: %{} do
+      for {card_id, s} <- run_summaries, s.status in Run.active_statuses(), into: %{} do
         progress_at = Map.get(progress, s.run_id) || s.started_at
 
         {card_id,

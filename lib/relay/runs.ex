@@ -44,10 +44,6 @@ defmodule Relay.Runs do
 
   @pubsub Relay.PubSub
   @append_index 1_000_000
-  @supported_node_types [:agent, :shell, :gate]
-  @outcomes [:succeeded, :failed, :partial, :needs_input]
-  @active_job_states [:queued, :claimed, :running]
-  @active_statuses [:running, :parked]
 
   ## Reads
 
@@ -58,7 +54,7 @@ defmodule Relay.Runs do
   def get_run(id), do: Repo.get(Run, id)
 
   @doc """
-  The board's active runs (`status in [:running, :parked]`) as `Snapshot.run`
+  The board's active runs (`status in Run.active_statuses()`) as `Snapshot.run`
   maps — the shape `Relay.Runs.Scheduler.plan/1` reads. `isolation` comes from
   the live flow row (left-joined, so a run whose flow was deleted still appears
   and excludes its card from fresh pulls, with `isolation: nil` → undispatchable
@@ -76,7 +72,7 @@ defmodule Relay.Runs do
       on: c.id == r.card_id,
       left_join: f in Flow,
       on: f.id == r.flow_id,
-      where: c.board_id == ^board_id and r.status in ^@active_statuses,
+      where: c.board_id == ^board_id and r.status in ^Run.active_statuses(),
       select: %{
         id: r.id,
         card_id: r.card_id,
@@ -92,7 +88,7 @@ defmodule Relay.Runs do
 
   @doc "The card's single active (running or parked) run, or nil — backed by the partial unique index."
   def active_run(%Card{id: card_id}) do
-    Repo.one(from r in Run, where: r.card_id == ^card_id and r.status in [:running, :parked])
+    Repo.one(from r in Run, where: r.card_id == ^card_id and r.status in ^Run.active_statuses())
   end
 
   @doc "All of the card's runs, newest first."
@@ -107,7 +103,7 @@ defmodule Relay.Runs do
 
   @doc "The run's single queued/claimed/running job, or nil."
   def active_job(%Run{id: run_id}) do
-    Repo.one(from j in NodeJob, where: j.run_id == ^run_id and j.state in ^@active_job_states)
+    Repo.one(from j in NodeJob, where: j.run_id == ^run_id and j.state in ^NodeJob.active_states())
   end
 
   @doc "Subscribes the calling process to `board_id`'s runs topic (`board:<id>:runs`)."
@@ -343,7 +339,7 @@ defmodule Relay.Runs do
   baton with AI), and no active run exists. Pure — no scheduler/NodeJob read.
   """
   def queued_flow(%Card{} = card, active_owner, flows, summary) do
-    active_run? = summary != nil and summary.status in @active_statuses
+    active_run? = summary != nil and summary.status in Run.active_statuses()
 
     if card.status == :ready and active_owner == :ai and not active_run? do
       Enum.find(flows, &(&1.enabled and &1.pulls_from_stage_id == card.stage_id))
@@ -361,7 +357,7 @@ defmodule Relay.Runs do
     summary = Map.get(summaries, card.id)
 
     cond do
-      summary != nil and summary.status in @active_statuses ->
+      summary != nil and summary.status in Run.active_statuses() ->
         {:run, summary}
 
       summary != nil and terminal_still_relevant?(card, summary, flows) ->
@@ -417,7 +413,7 @@ defmodule Relay.Runs do
 
     cond do
       not flow.enabled -> {:error, :flow_disabled}
-      Enum.any?(flow.nodes, &(&1.type not in @supported_node_types)) -> {:error, :unsupported_node_type}
+      Enum.any?(flow.nodes, &(&1.type not in Flow.Node.runnable_types())) -> {:error, :unsupported_node_type}
       start_target == "done" -> {:error, :empty_flow}
       true -> do_start_run(card, flow, start_target, context)
     end
@@ -542,15 +538,19 @@ defmodule Relay.Runs do
   """
   def report_outcome(job, attrs)
 
-  def report_outcome(%NodeJob{} = job, %{outcome: outcome} = attrs) when outcome in @outcomes do
-    job = Repo.get!(NodeJob, job.id)
-    run = Repo.get!(Run, job.run_id)
+  def report_outcome(%NodeJob{} = job, %{outcome: outcome} = attrs) do
+    if outcome in NodeExecution.outcomes() do
+      job = Repo.get!(NodeJob, job.id)
+      run = Repo.get!(Run, job.run_id)
 
-    if job.state in @active_job_states and run.status == :running do
-      {:ok, pid} = ensure_server(run, :attach)
-      GenServer.call(pid, {:report_outcome, job.id, attrs}, :infinity)
+      if job.state in NodeJob.active_states() and run.status == :running do
+        {:ok, pid} = ensure_server(run, :attach)
+        GenServer.call(pid, {:report_outcome, job.id, attrs}, :infinity)
+      else
+        {:error, :job_not_active}
+      end
     else
-      {:error, :job_not_active}
+      {:error, :invalid_outcome}
     end
   end
 
@@ -582,7 +582,7 @@ defmodule Relay.Runs do
     stop_server(run)
     run = Repo.get!(Run, run.id)
 
-    if run.status in [:running, :parked] do
+    if run.status in Run.active_statuses() do
       revoke_active_jobs(run)
       run = close_run!(run, :cancelled, nil)
       card = Repo.get!(Card, run.card_id)
@@ -737,7 +737,7 @@ defmodule Relay.Runs do
 
   @doc """
   Of the job ids an executor reports it is running, those the server no longer considers
-  live (RLY-164) — i.e. anything not in `@active_job_states` on THIS board, plus ids that
+  live (RLY-164) — i.e. anything not in NodeJob.active_states() on THIS board, plus ids that
   don't exist here at all.
 
   Board-scoped on purpose: an id belonging to another board is not live *here*, so it comes
@@ -770,7 +770,7 @@ defmodule Relay.Runs do
               select: {j.id, j.state}
           )
 
-        for {id, state} <- on_board, state not in @active_job_states, do: id
+        for {id, state} <- on_board, state not in NodeJob.active_states(), do: id
     end
   end
 
@@ -815,7 +815,7 @@ defmodule Relay.Runs do
 
     cond do
       is_nil(job) -> {:error, :not_found}
-      job.state in [:claimed, :running] -> {:ok, job}
+      job.state in NodeJob.claimed_states() -> {:ok, job}
       true -> {:error, :conflict}
     end
   end
@@ -1190,7 +1190,7 @@ defmodule Relay.Runs do
       join: c in Card,
       on: c.id == r.card_id,
       where: c.board_id == ^board.id,
-      where: j.state in ^@active_job_states,
+      where: j.state in ^NodeJob.active_states(),
       where: not is_nil(j.executor_name),
       order_by: [asc: j.claimed_at, asc: j.id],
       select: %{
@@ -1242,7 +1242,7 @@ defmodule Relay.Runs do
           on: r.id == j.run_id,
           join: c in Card,
           on: c.id == r.card_id,
-          where: c.board_id == ^board_id and j.executor_name == ^name and j.state in ^@active_job_states,
+          where: c.board_id == ^board_id and j.executor_name == ^name and j.state in ^NodeJob.active_states(),
           select: {j, r, c.id}
       )
 
@@ -1286,7 +1286,7 @@ defmodule Relay.Runs do
       on: c.id == r.card_id,
       where: c.board_id == ^board_id,
       where: j.executor_name == ^executor.name,
-      where: j.state in ^@active_job_states,
+      where: j.state in ^NodeJob.active_states(),
       where: not is_nil(j.claimed_at) and j.claimed_at < ^cutoff,
       select: {j, c.id}
     )
@@ -1305,7 +1305,7 @@ defmodule Relay.Runs do
     keep_pin = if job.payload["isolation"] == "exclusive", do: name
 
     Repo.update_all(
-      from(j in NodeJob, where: j.id == ^job.id and j.state in ^@active_job_states),
+      from(j in NodeJob, where: j.id == ^job.id and j.state in ^NodeJob.active_states()),
       set: [state: :queued, executor_name: keep_pin, claimed_at: nil]
     )
 
@@ -1316,7 +1316,7 @@ defmodule Relay.Runs do
   defp requeue_job(%NodeJob{} = job, board_id, card_id) do
     {1, _} =
       Repo.update_all(
-        from(j in NodeJob, where: j.id == ^job.id and j.state in ^@active_job_states),
+        from(j in NodeJob, where: j.id == ^job.id and j.state in ^NodeJob.active_states()),
         set: [state: :queued, executor_name: nil, claimed_at: nil]
       )
 
@@ -1408,7 +1408,7 @@ defmodule Relay.Runs do
   # anyway; refusing here turns a constraint error into a sentence a human can act on.
   defp check_no_active_run(%Run{card_id: card_id, id: id}) do
     active? =
-      Repo.exists?(from r in Run, where: r.card_id == ^card_id and r.id != ^id and r.status in [:running, :parked])
+      Repo.exists?(from r in Run, where: r.card_id == ^card_id and r.id != ^id and r.status in ^Run.active_statuses())
 
     if active?, do: {:error, :active_run_exists}, else: :ok
   end
@@ -1713,7 +1713,7 @@ defmodule Relay.Runs do
 
   @doc false
   def revoke_active_jobs(%Run{id: run_id}) do
-    jobs = Repo.all(from j in NodeJob, where: j.run_id == ^run_id and j.state in ^@active_job_states)
+    jobs = Repo.all(from j in NodeJob, where: j.run_id == ^run_id and j.state in ^NodeJob.active_states())
 
     Enum.each(jobs, fn job ->
       revoked = job |> Changeset.change(state: :revoked, finished_at: now()) |> Repo.update!()

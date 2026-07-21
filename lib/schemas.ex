@@ -20,6 +20,7 @@ defmodule Schemas do
       DeviceToken,
       Executor,
       Flow,
+      Flow.Node,
       FlowVersion,
       Membership,
       NodeExecution,

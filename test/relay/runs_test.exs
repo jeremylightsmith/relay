@@ -302,6 +302,19 @@ defmodule Relay.RunsTest do
       assert_receive {:revoked, %NodeJob{state: :revoked}}
       assert Runs.report_outcome(job, %{outcome: :succeeded, detail: "late"}) == {:error, :job_not_active}
     end
+
+    test "an outcome outside the closed set is rejected without touching the job or run", %{board: board} do
+      flow = enabled_spec_flow(board)
+      card = card_in(board, "Next up")
+      {:ok, _run} = Runs.start_run(card, flow)
+      assert_receive {:dispatched, job}
+
+      assert Runs.report_outcome(job, %{outcome: :bogus, detail: "nope"}) == {:error, :invalid_outcome}
+
+      # A subsequent valid outcome still routes normally — the bad report left nothing behind.
+      assert {:ok, %Run{status: :parked}} =
+               Runs.report_outcome(job, %{outcome: :needs_input, detail: "ok?", session_id: "s_1"})
+    end
   end
 
   describe "claim_job/2 and start_job/1" do

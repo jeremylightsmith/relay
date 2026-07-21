@@ -19,13 +19,6 @@ defmodule RelayWeb.Api.NodeJobController do
   # must fall through rather than be silently swallowed by the long-poll.
   @run_event_tags [:run_started, :node_started, :node_finished, :run_finished, :run_changed, :run_parked, :run_resumed]
 
-  @outcomes %{
-    "succeeded" => :succeeded,
-    "failed" => :failed,
-    "partial" => :partial,
-    "needs_input" => :needs_input
-  }
-
   @doc """
   Claims the next node-job for the advertising executor. Upserts the executor
   (claim doubles as a liveness touch), then atomically claims an eligible job.
@@ -194,12 +187,17 @@ defmodule RelayWeb.Api.NodeJobController do
     end
   end
 
-  defp parse_outcome(value) do
-    case Map.fetch(@outcomes, value) do
-      {:ok, atom} -> {:ok, atom}
-      :error -> {:error, :unknown_outcome}
+  # RLY-203: the accepted outcome strings are derived from Schemas.NodeExecution.outcomes/0, so
+  # the transport can never name an outcome the domain lacks (or miss one). The set itself is
+  # pinned to the enum by the vocabulary exhaustiveness guard.
+  defp parse_outcome(value) when is_binary(value) do
+    case Enum.find(Schemas.NodeExecution.outcomes(), &(Atom.to_string(&1) == value)) do
+      nil -> {:error, :unknown_outcome}
+      outcome -> {:ok, outcome}
     end
   end
+
+  defp parse_outcome(_value), do: {:error, :unknown_outcome}
 
   defp maybe_wait(conn, board, executor, params) do
     cond do

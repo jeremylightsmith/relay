@@ -173,15 +173,19 @@ defmodule Relay.Runs.RunDetail do
 
   # ---- pending_tail (was RunComponents.pending_tail/3), returns node keys ----
 
-  defp pending_tail(%{status: status} = run, nes, %Flow{} = flow) when status in [:running, :parked] do
-    executed = MapSet.new(nes, & &1.node_key)
+  defp pending_tail(%{status: status} = run, nes, %Flow{} = flow) do
+    if status in Schemas.Run.active_statuses() do
+      executed = MapSet.new(nes, & &1.node_key)
 
-    remaining =
-      flow
-      |> Relay.Runs.happy_path()
-      |> Enum.reject(&(MapSet.member?(executed, &1) or &1 == Map.get(run, :current_node)))
+      remaining =
+        flow
+        |> Relay.Runs.happy_path()
+        |> Enum.reject(&(MapSet.member?(executed, &1) or &1 == Map.get(run, :current_node)))
 
-    if remaining == [], do: [], else: [%{kind: :pending, nodes: remaining}]
+      if remaining == [], do: [], else: [%{kind: :pending, nodes: remaining}]
+    else
+      []
+    end
   end
 
   defp pending_tail(_run, _nes, _flow), do: []
