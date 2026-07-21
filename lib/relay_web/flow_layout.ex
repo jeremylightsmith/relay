@@ -23,7 +23,10 @@ defmodule RelayWeb.FlowLayout do
 
   @spine_col 0
   @side_col 1
-  @col_w 185
+  # Column pitch. The gap between a spine node and its side (fix) node is @col_w − @node_w =
+  # 120px for a full-width reviewer; it must stay wide enough for the "failed · max N" edge label
+  # (~92px) to sit in it fully legible, clear of both opaque node boxes (RLY-186 acceptance #3).
+  @col_w 270
   @row_h 124
   @node_w 150
   @node_h 56

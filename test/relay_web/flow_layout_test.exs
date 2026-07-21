@@ -14,7 +14,7 @@ defmodule RelayWeb.FlowLayoutTest do
   @origin_x 8
   @origin_y 44
   @row_h 124
-  @col_w 185
+  @col_w 270
   @node_w 150
   defp row({_x, y}), do: div(y - @origin_y, @row_h)
 
@@ -100,6 +100,33 @@ defmodule RelayWeb.FlowLayoutTest do
       %{positions: pos} = FlowLayout.layout(nodes, edges)
       assert row(pos["orphan"]) > row(pos["a"])
       assert col(pos["orphan"], :shell) == 1
+    end
+
+    # RLY-186 acceptance #3: the "failed · max N" / "succeeded" labels on the short spine↔fix
+    # hops used to be centred in a ~35px gap between two opaque node boxes and were painted over
+    # (only fragments like "…ed · m…" rendered). The side column must sit far enough from the
+    # spine that the widest side label (~92px) fits fully inside the gap between the two boxes.
+    test "each spine reviewer sits far enough from its fix node for the edge label to fit" do
+      {nodes, edges} = code_flow()
+      %{positions: pos} = FlowLayout.layout(nodes, edges)
+      types = Map.new(nodes, &{&1.key, &1.type})
+
+      # widest side label ("failed · max 2") renders ~92px; require room with margin.
+      label_room = 100
+
+      for {reviewer, fix} <- [
+            {"precommit", "final_fix"},
+            {"smoke", "smoke_fix"},
+            {"acceptance", "acceptance_fix"}
+          ] do
+        {rx, _ry} = pos[reviewer]
+        {rw, _rh} = FlowLayout.node_size(types[reviewer])
+        {fx, _fy} = pos[fix]
+        gap = fx - (rx + rw)
+
+        assert gap >= label_room,
+               "#{reviewer}→#{fix} gap is #{gap}px, too tight for the edge label (need >= #{label_room})"
+      end
     end
   end
 
