@@ -188,6 +188,9 @@ defmodule RelayWeb.FlowLayout do
 
   defp route_kind(%{from: "start"}, _grid), do: :enter
   defp route_kind(%{to: "done"}, _grid), do: :exit
+  # RLY-194: "needs_input" is the third edge-endpoint sentinel — a park, not a node — so
+  # it never appears in `grid` either. Treat it like "done": it leaves the spine.
+  defp route_kind(%{to: "needs_input"}, _grid), do: :exit
 
   defp route_kind(e, grid) do
     {fr, fc} = Map.fetch!(grid, e.from)

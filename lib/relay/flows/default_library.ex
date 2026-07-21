@@ -31,10 +31,11 @@ defmodule Relay.Flows.DefaultLibrary do
       ],
       edges: [
         %{from: "start", to: "brainstorm"},
-        # needs_input has no edge: the engine parks the run and resumes brainstorm on answer.
-        # brainstorm is the flow's only node: no `:failed` edge, so a failure ends the run
-        # (pinned by DefaultLibraryTest's @intentional_termini, RLY-179).
-        %{from: "brainstorm", to: "done", on: :succeeded}
+        # needs_input OUTCOME has no edge: the engine parks before consulting any edge
+        # (Engine.decide/4 rule 1). The needs_input EDGE below is the other kind of park —
+        # an edge target reached when brainstorm reports :failed (RLY-194).
+        %{from: "brainstorm", to: "done", on: :succeeded},
+        %{from: "brainstorm", to: "needs_input", on: :failed}
       ]
     }
   end
@@ -49,9 +50,9 @@ defmodule Relay.Flows.DefaultLibrary do
       ],
       edges: [
         %{from: "start", to: "write_plan"},
-        # write_plan is the flow's only node: no `:failed` edge, so a failure ends the run
-        # (pinned by DefaultLibraryTest's @intentional_termini, RLY-179).
-        %{from: "write_plan", to: "done", on: :succeeded}
+        %{from: "write_plan", to: "done", on: :succeeded},
+        # A hard failure parks for a human rather than ending the run (RLY-194).
+        %{from: "write_plan", to: "needs_input", on: :failed}
       ]
     }
   end
@@ -74,6 +75,8 @@ defmodule Relay.Flows.DefaultLibrary do
           type: :agent,
           model: "sonnet",
           effort: "high",
+          max_retries: 1,
+          expects_commits: true,
           foreach: "card.sub_tasks",
           agent: "plan-implementer",
           run:
@@ -111,6 +114,7 @@ defmodule Relay.Flows.DefaultLibrary do
           type: :agent,
           model: "opus",
           agent: "final-fixer",
+          expects_commits: true,
           run: "Fix every blocking finding from the review in one consolidated pass; keep the suite green."
         },
         %{
@@ -126,6 +130,7 @@ defmodule Relay.Flows.DefaultLibrary do
           key: "smoke_fix",
           type: :agent,
           model: "opus",
+          expects_commits: true,
           run: "Fix what the smoke run proved broken; keep the suite green."
         },
         %{
@@ -141,6 +146,7 @@ defmodule Relay.Flows.DefaultLibrary do
           key: "acceptance_fix",
           type: :agent,
           model: "opus",
+          expects_commits: true,
           run: "Fix the failing acceptance criteria; keep the suite green."
         },
         %{
@@ -161,13 +167,6 @@ defmodule Relay.Flows.DefaultLibrary do
               "{relay} pr {ref} \"$url\" && gh pr merge {branch} --squash"
         }
       ],
-      # No `:failed` edge for implement / final_fix / smoke_fix / acceptance_fix / post — that
-      # is deliberate, not an omission: each is a last-resort worker, so a failure there ends
-      # the run for a human to pick up. The decision is pinned by
-      # test/relay/flows/default_library_test.exs's @intentional_termini allowlist (RLY-179).
-      # sync/resync are :shell nodes, routed purely on exit code; sync_fix/resync_fix are
-      # rebaser agent nodes that park via needs-input rather than end the run, so they too have
-      # no outgoing :failed edge — pinned by the same @intentional_termini allowlist (RLY-192).
       edges: [
         %{from: "start", to: "branch"},
         %{from: "branch", to: "implement", on: :succeeded},
@@ -198,7 +197,19 @@ defmodule Relay.Flows.DefaultLibrary do
         %{from: "reverify", to: "resync_fix", on: :failed, max_loops: 2},
         %{from: "reverify", to: "merge", on: :succeeded},
         %{from: "merge", to: "done", on: :succeeded},
-        %{from: "merge", to: "resync", on: :failed, max_loops: 2}
+        %{from: "merge", to: "resync", on: :failed, max_loops: 2},
+        # RLY-194: every agent node parks on a hard :failed instead of dead-ending. implement
+        # carries max_retries: 1, so it retries once THEN parks; the fixers, post and the RLY-192
+        # rebasers park on their first hard failure (a fixer already sits under a max_loops fix
+        # cycle; a rebaser already escalates judgement calls via needs-input). branch/merge/sync/
+        # resync are :shell and deliberately stay unrouted.
+        %{from: "implement", to: "needs_input", on: :failed},
+        %{from: "sync_fix", to: "needs_input", on: :failed},
+        %{from: "final_fix", to: "needs_input", on: :failed},
+        %{from: "smoke_fix", to: "needs_input", on: :failed},
+        %{from: "acceptance_fix", to: "needs_input", on: :failed},
+        %{from: "resync_fix", to: "needs_input", on: :failed},
+        %{from: "post", to: "needs_input", on: :failed}
       ]
     }
   end

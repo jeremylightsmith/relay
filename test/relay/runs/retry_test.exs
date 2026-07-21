@@ -11,11 +11,36 @@ defmodule Relay.Runs.RetryTest do
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Retry Board"})
-    {:ok, flow} = board |> Relay.Flows.get_flow!("spec") |> Relay.Flows.enable_flow()
+    flow = dead_end_flow(board)
     stage = Enum.find(board.stages, &(&1.name == "Next up"))
     {:ok, card} = Relay.Cards.create_card(stage, %{title: "Do not throw my work away"})
     start_supervised!(Relay.Runs.Supervisor)
     %{board: board, flow: flow, card: card, user: user}
+  end
+
+  # RLY-194 gave the seeded "spec" flow's brainstorm a :failed → needs_input park edge, so
+  # it no longer dead-ends a run on hard failure — it parks instead. This suite is about the
+  # generic retry-a-failed-run mechanism, not that library flow specifically, so it uses a
+  # custom flow shaped like the pre-RLY-194 "spec" flow: a single "brainstorm" node with
+  # max_retries: 1 and no :failed edge at all, so two failures still end the run :failed.
+  defp dead_end_flow(board) do
+    next_up = Enum.find(board.stages, &(&1.name == "Next up"))
+    spec = Enum.find(board.stages, &(&1.name == "Spec"))
+    review = Enum.find(board.stages, &(&1.name == "Spec:Review"))
+
+    {:ok, flow} =
+      Relay.Flows.create_flow(board, %{
+        key: "dead-end",
+        isolation: :shared_clean,
+        pulls_from_stage_id: next_up.id,
+        works_in_stage_id: spec.id,
+        lands_on_stage_id: review.id,
+        nodes: [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref}", max_retries: 1}],
+        edges: [%{from: "start", to: "brainstorm"}, %{from: "brainstorm", to: "done", on: :succeeded}]
+      })
+
+    {:ok, flow} = Relay.Flows.enable_flow(flow)
+    flow
   end
 
   # `brainstorm` has max_retries: 1 and no :failed edge, so two failures end the run.
@@ -91,7 +116,7 @@ defmodule Relay.Runs.RetryTest do
   test "the failed node was removed from the flow since: refused, queues nothing, run stays failed", ctx do
     run = failed_run(ctx.card, ctx.flow)
 
-    flow = Relay.Flows.get_flow!(ctx.board, "spec")
+    flow = Relay.Flows.get_flow!(ctx.board, "dead-end")
     kept_nodes = Enum.reject(flow.nodes, &(&1.key == "brainstorm"))
     flow |> Ecto.Changeset.change() |> Ecto.Changeset.put_embed(:nodes, kept_nodes) |> Repo.update!()
 

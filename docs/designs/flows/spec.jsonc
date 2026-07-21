@@ -15,8 +15,10 @@
   },
   "edges": [
     { "from": "start", "to": "brainstorm" },
-    { "from": "brainstorm", "to": "done", "on": "succeeded" }
-    // needs_input has no edge: the engine parks the run, blocks the card, and
-    // re-enters brainstorm with its session resumed when the human answers.
+    // needs_input OUTCOME has no edge: the engine parks before consulting any edge.
+    // The needs_input EDGE below is the other kind of park — reached when brainstorm
+    // reports "failed" (RLY-194).
+    { "from": "brainstorm", "to": "done", "on": "succeeded" },
+    { "from": "brainstorm", "to": "needs_input", "on": "failed" }
   ]
 }

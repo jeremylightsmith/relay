@@ -42,6 +42,33 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
   defp reload(card), do: Relay.Repo.get!(Card, card.id)
   defp stage_named(board, name), do: Enum.find(Relay.Boards.list_stages(board), &(&1.name == name))
 
+  # RLY-194 gave the seeded "spec" flow's brainstorm a :failed → needs_input park edge, so
+  # it no longer dead-ends a run on hard failure — it parks instead. The B1 test below is
+  # about the generic "a node that exhausts its retries fails the run" behavior, not that
+  # library flow specifically, so it swaps in a custom flow shaped like the pre-RLY-194
+  # "spec" flow: a single "brainstorm" node with no :failed edge at all, so two failures
+  # still end the run :failed. Same trigger stages as "spec" so the card still routes to it.
+  defp dead_end_flow(board) do
+    {:ok, _} = Relay.Flows.disable_flow(Relay.Flows.get_flow!(board, "spec"))
+    next_up = stage_named(board, "Next up")
+    spec = stage_named(board, "Spec")
+    review = stage_named(board, "Spec:Review")
+
+    {:ok, flow} =
+      Relay.Flows.create_flow(board, %{
+        key: "dead-end",
+        isolation: :shared_clean,
+        pulls_from_stage_id: next_up.id,
+        works_in_stage_id: spec.id,
+        lands_on_stage_id: review.id,
+        nodes: [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref}", max_retries: 1}],
+        edges: [%{from: "start", to: "brainstorm"}, %{from: "brainstorm", to: "done", on: :succeeded}]
+      })
+
+    {:ok, flow} = Relay.Flows.enable_flow(flow)
+    flow
+  end
+
   test "a card in Next up runs the Spec flow end to end: claim -> logs -> needs_input -> answer -> resume -> Spec:Review",
        %{board: board, exec: exec, human: human, next_up: next_up} do
     {:ok, card} = Cards.create_card(next_up, %{title: "Design the widget"})
@@ -147,6 +174,7 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
 
   test "a node that fails past its retries flags the card with the node's real output (B1)",
        %{board: board, exec: exec, next_up: next_up} do
+    dead_end_flow(board)
     {:ok, card} = Cards.create_card(next_up, %{title: "Doomed card"})
 
     Exec.heartbeat(exec, "exec-1", %{"shared_clean" => 1})
@@ -159,7 +187,8 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
     assert_receive {:node_started, %{id: first_run_id}, _first_execution}, 2_000
     assert first_run_id == run.id
 
-    # brainstorm has max_retries: 1 and no failed edge -> attempt 1 retries, attempt 2 fails.
+    # dead_end_flow's brainstorm has max_retries: 1 and no failed edge -> attempt 1 retries,
+    # attempt 2 fails.
     detail = "Traceback (most recent call last):\n  boom\nfatal: the node exploded"
 
     job1 = Exec.claim(exec, "exec-1", %{"shared_clean" => 1})

@@ -23,6 +23,32 @@ defmodule Relay.Runs.ListenerTest do
 
   defp reload(board, card), do: Relay.Cards.get_card(board, card.id)
 
+  # RLY-194 gave the seeded "spec" flow's brainstorm a :failed → needs_input park edge, so
+  # it no longer dead-ends a run on hard failure — it parks instead. The re-entry-after-failure
+  # test below is about the generic "a :failed run doesn't get auto re-entered" listener
+  # behavior, not that library flow specifically, so it uses a custom flow shaped like the
+  # pre-RLY-194 "spec" flow: a single "brainstorm" node with no :failed edge at all, so two
+  # failures still end the run :failed. Same trigger stages as "spec" so card events route to it.
+  defp dead_end_flow(board) do
+    next_up = Enum.find(board.stages, &(&1.name == "Next up"))
+    spec = Enum.find(board.stages, &(&1.name == "Spec"))
+    review = Enum.find(board.stages, &(&1.name == "Spec:Review"))
+
+    {:ok, flow} =
+      Relay.Flows.create_flow(board, %{
+        key: "dead-end",
+        isolation: :shared_clean,
+        pulls_from_stage_id: next_up.id,
+        works_in_stage_id: spec.id,
+        lands_on_stage_id: review.id,
+        nodes: [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref}", max_retries: 1}],
+        edges: [%{from: "start", to: "brainstorm"}, %{from: "brainstorm", to: "done", on: :succeeded}]
+      })
+
+    {:ok, flow} = Relay.Flows.enable_flow(flow)
+    flow
+  end
+
   test "answering a needs-input card resumes the same node with the stored session",
        %{user: user, board: board, flow: flow, card: card} do
     {:ok, run} = Runs.start_run(card, flow)
@@ -80,7 +106,12 @@ defmodule Relay.Runs.ListenerTest do
   end
 
   test "no re-entry when the card's latest run failed — a human must intervene",
-       %{user: user, board: board, flow: flow, card: card} do
+       %{user: user, board: board, flow: spec_flow, card: card} do
+    # Swap the enabled "spec" flow for the dead-end shape: only one flow may be enabled
+    # per trigger stage, so the seeded "spec" must be disabled first.
+    {:ok, _} = Relay.Flows.disable_flow(spec_flow)
+    flow = dead_end_flow(board)
+
     # Get a rejection onto the card, then fail the re-entered run.
     {:ok, _run1} = Runs.start_run(card, flow)
     assert_receive {:dispatched, job}

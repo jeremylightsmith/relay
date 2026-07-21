@@ -495,4 +495,39 @@ defmodule Relay.Runs.EngineTest do
       assert Engine.decide(flow, history, current, bonus: 3) == {:transition, "fix"}
     end
   end
+
+  describe "needs_input sentinel edge (RLY-194)" do
+    test "an edge whose to is \"needs_input\" parks the run" do
+      flow =
+        flow(
+          [[key: "work", type: :agent]],
+          [
+            [from: "start", to: "work"],
+            [from: "work", to: "needs_input", on: :failed]
+          ]
+        )
+
+      current = failed(node_key: "work")
+      assert Engine.decide(flow, [current], current) == {:park, :needs_input}
+    end
+
+    test "a park edge past its max_loops fails the run rather than parking" do
+      flow =
+        flow(
+          [[key: "work", type: :agent]],
+          [
+            [from: "start", to: "work"],
+            [from: "work", to: "needs_input", on: :failed, max_loops: 1]
+          ]
+        )
+
+      # Two failed traversals of work (distinct visits, distinct details so the breaker
+      # never trips): the second is one over the max_loops-1 budget.
+      h1 = failed(node_key: "work", visit: 1, detail: "boom-a")
+      h2 = failed(node_key: "work", visit: 2, detail: "boom-b")
+
+      assert {:fail, reason} = Engine.decide(flow, [h1, h2], h2)
+      assert reason =~ "loop_budget_exhausted"
+    end
+  end
 end

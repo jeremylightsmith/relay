@@ -52,8 +52,8 @@ defmodule Relay.Runs.Engine do
        unrouted `:failed` — nowhere left to fall back to — fails the run. A
        `gate` failure with no `failed` edge still fails, never silently passes.
        An edge past its `max_loops` (nil => unlimited) fails the run; target
-       `"done"` finishes; a target at the visit cap fails the run (the backstop
-       under unlimited loops).
+       `"done"` finishes; target `"needs_input"` parks (RLY-194); a target at
+       the visit cap fails the run (the backstop under unlimited loops).
 
   Under a `foreach`, budgets are accounted PER ITERATION: `opts[:sub_task_id]`
   filters the history before `max_loops` and the visit cap are counted, so a
@@ -185,6 +185,12 @@ defmodule Relay.Runs.Engine do
 
       edge.to == "done" ->
         {:finish, :done}
+
+      # RLY-194: a "needs_input" edge parks the run for a human. Positioned AFTER
+      # loop_budget (a park edge still respects max_loops) and BEFORE the visit-cap
+      # check (whose visit_count is meaningless for a non-node sentinel).
+      edge.to == "needs_input" ->
+        {:park, :needs_input}
 
       visit_count(history, edge.to) >= visit_cap ->
         {:fail, visit_cap_reason(edge, visit_cap)}

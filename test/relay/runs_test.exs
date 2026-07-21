@@ -58,6 +58,31 @@ defmodule Relay.RunsTest do
     flow
   end
 
+  # RLY-194 gave every default-library agent node a :failed route (to a fix, or the
+  # needs_input park sentinel), so the seeded "spec" flow can no longer produce a genuine
+  # no_route_for_outcome / run-ends-:failed scenario — it now parks instead. These two
+  # tests are about that engine-level dead-end behavior itself, so they need a custom flow
+  # that (like the old "spec") has a node with no :failed edge at all.
+  defp dead_end_flow(board) do
+    next_up = Enum.find(board.stages, &(&1.name == "Next up"))
+    spec = Enum.find(board.stages, &(&1.name == "Spec"))
+    review = Enum.find(board.stages, &(&1.name == "Spec:Review")) || spec
+
+    {:ok, flow} =
+      Relay.Flows.create_flow(board, %{
+        key: "dead-end",
+        isolation: :shared_clean,
+        pulls_from_stage_id: next_up.id,
+        works_in_stage_id: spec.id,
+        lands_on_stage_id: review.id,
+        nodes: [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref}", max_retries: 1}],
+        edges: [%{from: "start", to: "brainstorm"}, %{from: "brainstorm", to: "done", on: :succeeded}]
+      })
+
+    {:ok, flow} = Relay.Flows.enable_flow(flow)
+    flow
+  end
+
   defp exclusive_flow(board, key) do
     next_up = Enum.find(board.stages, &(&1.name == "Next up"))
     spec = Enum.find(board.stages, &(&1.name == "Spec"))
@@ -188,12 +213,12 @@ defmodule Relay.RunsTest do
 
     test "an unrouted outcome fails the run and flags the card :failed with the failure on its timeline",
          %{board: board} do
-      flow = enabled_spec_flow(board)
+      flow = dead_end_flow(board)
       card = card_in(board, "Next up")
       {:ok, _run} = Runs.start_run(card, flow)
       assert_receive {:dispatched, job}
 
-      # The seeded spec flow has no :failed edge and brainstorm max_retries 1:
+      # dead_end_flow's brainstorm has no :failed edge and max_retries 1:
       # two distinct failures exhaust retries, then fail the run.
       assert {:ok, %Run{status: :running}} = Runs.report_outcome(job, %{outcome: :failed, detail: "err-1"})
       assert_receive {:dispatched, retry_job}
@@ -215,7 +240,7 @@ defmodule Relay.RunsTest do
 
     test "a blank detail on the final failure still flags the card (falls back, doesn't crash)",
          %{board: board} do
-      flow = enabled_spec_flow(board)
+      flow = dead_end_flow(board)
       card = card_in(board, "Next up")
       {:ok, _run} = Runs.start_run(card, flow)
       assert_receive {:dispatched, job}

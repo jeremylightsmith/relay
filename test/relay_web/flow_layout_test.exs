@@ -193,6 +193,14 @@ defmodule RelayWeb.FlowLayoutTest do
       assert routes[idx.("final_fix", "precommit")].kind == :side_back
       assert routes[idx.("spec_review", "implement")].kind == :gutter
     end
+
+    test "an edge to the needs_input park sentinel classifies as :exit, like done (RLY-194)" do
+      {nodes, edges} = code_flow()
+      %{routes: routes} = FlowLayout.layout(nodes, edges)
+      idx = fn from, to -> Enum.find_index(edges, &(&1.from == from and &1.to == to)) end
+
+      assert routes[idx.("implement", "needs_input")].kind == :exit
+    end
   end
 
   describe "the default Code flow lays out cleanly" do

@@ -153,6 +153,15 @@ never wrote a clean outcome:
    `final_review` reach `merge`.) Rule 1 still covers the legitimate "I stopped to ask a
    human" case, so a skill that parks on a question needs no outcome file.
 
+**The twin no-op rule (RLY-194).** Silence is `failed`; so is a success claim the branch
+does not back up. A node marked `expects_commits` (the four commit-producing Code nodes:
+`implement`, `final_fix`, `smoke_fix`, `acceptance_fix`) that reports `succeeded` with a
+`git_sha` unchanged from the run's last known baseline is overridden by the server
+(`RunServer.apply_outcome/5`) to `failed` — a `no_op_success` detail — before the outcome is
+persisted. This is server-side only: `determine_agent_outcome` above is unaware of it, and no
+field is added to the outcome payload; an agent author should simply expect that a `succeeded`
+declaration on such a node is not honored unless it actually produced a commit.
+
 Agents declare their outcome by running **`relay outcome <outcome> [--detail TEXT|@file]`**
 (RLY-175) rather than writing the file by hand: `json.dump` does the writing, so a `detail`
 containing quotes or newlines cannot produce invalid JSON. A drill run died exactly that way —

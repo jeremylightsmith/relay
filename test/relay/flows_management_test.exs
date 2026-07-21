@@ -93,7 +93,11 @@ defmodule Relay.FlowsManagementTest do
       {:ok, flow} =
         Flows.update_flow(Flows.get_flow!(board, "spec"), %{
           nodes: [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref} --deep", max_retries: 2}],
-          edges: [%{from: "start", to: "brainstorm"}, %{from: "brainstorm", to: "done", on: :succeeded}]
+          edges: [
+            %{from: "start", to: "brainstorm"},
+            %{from: "brainstorm", to: "done", on: :succeeded},
+            %{from: "brainstorm", to: "needs_input", on: :failed}
+          ]
         })
 
       assert Flows.diff_from_default(flow) == %{
@@ -126,7 +130,11 @@ defmodule Relay.FlowsManagementTest do
                    {"gather", "draft", :succeeded},
                    {"start", "gather", nil}
                  ],
-                 removed: [{"start", "write_plan", nil}, {"write_plan", "done", :succeeded}]
+                 removed: [
+                   {"start", "write_plan", nil},
+                   {"write_plan", "done", :succeeded},
+                   {"write_plan", "needs_input", :failed}
+                 ]
                }
              }
     end

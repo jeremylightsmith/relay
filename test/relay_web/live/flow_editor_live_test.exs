@@ -209,8 +209,8 @@ defmodule RelayWeb.FlowEditorLiveTest do
     board: board
   } do
     {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
-    # "implement" has no max_retries set (nil == no limit, displayed as 0)
-    view |> element(~s([data-node="implement"])) |> render_click()
+    # "spec_review" has no max_retries set (nil == no limit, displayed as 0)
+    view |> element(~s([data-node="spec_review"])) |> render_click()
 
     # stepping down from unset must stay unset, not introduce an invalid 0
     view |> element("#inspector-max-retries-dec") |> render_click()

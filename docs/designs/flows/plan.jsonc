@@ -13,6 +13,8 @@
   },
   "edges": [
     { "from": "start", "to": "write_plan" },
-    { "from": "write_plan", "to": "done", "on": "succeeded" }
+    { "from": "write_plan", "to": "done", "on": "succeeded" },
+    // A hard failure parks for a human rather than ending the run (RLY-194).
+    { "from": "write_plan", "to": "needs_input", "on": "failed" }
   ]
 }

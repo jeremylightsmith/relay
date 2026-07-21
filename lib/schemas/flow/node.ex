@@ -14,6 +14,12 @@ defmodule Schemas.Flow.Node do
   `agent` (agent nodes only) names a `.claude/agents/<name>.md` definition: the
   executor appends `--agent <name>` to its `claude -p` call, so the file supplies
   the system prompt while `run` stays the user prompt. nil = today's invocation.
+
+  `expects_commits` (agent nodes only, default `false`, RLY-194) marks a node
+  that must produce commits to do its work — `RunServer` may override a
+  reported `:succeeded` back to `:failed` when HEAD didn't move. `"needs_input"`
+  is reserved alongside `"start"`/`"done"` as an edge-endpoint sentinel, so no
+  node may be keyed with it.
   """
 
   use Ecto.Schema
@@ -31,18 +37,31 @@ defmodule Schemas.Flow.Node do
     field :timeout_minutes, :integer
     field :foreach, :string
     field :agent, :string
+    field :expects_commits, :boolean, default: false
   end
 
   @doc "Validates one node; graph-level rules (key uniqueness) live on Schemas.Flow."
   def changeset(node, attrs) do
     node
-    |> cast(attrs, [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes, :foreach, :agent])
+    |> cast(attrs, [
+      :key,
+      :type,
+      :run,
+      :model,
+      :effort,
+      :max_retries,
+      :timeout_minutes,
+      :foreach,
+      :agent,
+      :expects_commits
+    ])
     |> validate_required([:key, :type])
-    |> validate_exclusion(:key, ["start", "done"], message: "is a reserved sentinel name")
+    |> validate_exclusion(:key, ["start", "done", "needs_input"], message: "is a reserved sentinel name")
     |> validate_number(:max_retries, greater_than: 0)
     |> validate_number(:timeout_minutes, greater_than: 0)
     |> validate_inclusion(:foreach, ["card.sub_tasks"], message: ~s(must be "card.sub_tasks"))
     |> validate_agent_only_on_agent_nodes()
+    |> validate_expects_commits_only_on_agent_nodes()
   end
 
   # `agent` names a `.claude/agents/<name>.md` definition the executor passes to
@@ -51,6 +70,17 @@ defmodule Schemas.Flow.Node do
   defp validate_agent_only_on_agent_nodes(changeset) do
     if get_field(changeset, :agent) && get_field(changeset, :type) != :agent do
       add_error(changeset, :agent, "is only valid on an agent node")
+    else
+      changeset
+    end
+  end
+
+  # RLY-194: expects_commits means "the server may override this node's success if it
+  # produced no commits". That only makes sense on an agent node — a shell/gate node
+  # marked expects_commits is a definition error, not a silent no-op.
+  defp validate_expects_commits_only_on_agent_nodes(changeset) do
+    if get_field(changeset, :expects_commits) && get_field(changeset, :type) != :agent do
+      add_error(changeset, :expects_commits, "is only valid on an agent node")
     else
       changeset
     end
