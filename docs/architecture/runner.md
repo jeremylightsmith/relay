@@ -72,13 +72,13 @@ looks like the leftward flow is being starved. Pinned by
 - **Log mirror**: every feed line is queued to a background `LogForwarder` thread that
   batches `POST /api/board/logs` (best-effort: drops on full queue, swallows all errors) —
   landing in `Activity.LogSink` → the card timeline, and `AgentLog` → the live log sheet.
-- **Executor heartbeat (client-side only)**: `ExecutorHeartbeat` posts `{executor,
-  running: [job-ids]}` to `POST /api/node-jobs/heartbeat` every `heartbeat_interval`s,
-  expecting `{revoked: [job-ids]}` back so it can terminate each revoked job's live
-  subprocess (see "Node-job transport" below) — but no server route exists yet
-  (`router.ex` registers only `/node-jobs/claim` and `/node-jobs/:id/outcome`), so the
-  POST 404s and no subprocess is ever terminated. Revoke is DB-state-only today
-  (`Relay.Runs.NoopDispatcher.revoke/1` → `:ok`); wiring the response is a follow-up.
+- **Executor heartbeat**: `ExecutorHeartbeat` posts `{executor, capacity,
+  running: [job-ids]}` to `POST /api/node-jobs/heartbeat` every `heartbeat_interval`s
+  (RLY-164) and reads back `{revoked: [job-ids], want_capabilities, executor_outdated,
+  required_version}`. It terminates each revoked job's live subprocess via its `JobControl`
+  (see "Node-job transport" and "Executor mode" below). The advertised `capacity` is the
+  executor's configured per-class total; `running` is the jobs it believes it holds, so the
+  server can name the ones it no longer considers live.
 - **Run ids**: each executor worker tags its log lines with the claimed job's `run_id`
   (RLY-112) so a card's timeline can group lines by run.
 
@@ -185,9 +185,8 @@ that stays server-side.
 - **Executor heartbeat superset.** `BoardController.heartbeat/2`'s `/api/board/heartbeat`
   route carries an independent, additive branch: a beat carrying `name` + `capacity` calls
   `Relay.Runs.upsert_executor/2`, writing/refreshing a durable `Schemas.Executor` row
-  (`{board_id, name}`, capacity map, `last_heartbeat`). It still calls
-  `Relay.RunnerPresence.beat/2` exactly as before, feeding the Runners view (RLY-141). A
-  capacity-less beat never touches the `Executor` table.
+  (`{board_id, name}`, capacity map, `last_heartbeat`) — the durable row is what feeds the
+  Runners view (RLY-167). A capacity-less beat never touches the `Executor` table.
 - **Capability inventory (RLY-182).** The executor heartbeat may carry an optional
   `capabilities` payload — `{"agents": [...], "skills": [...]}`, the names this machine can
   actually resolve from its repo `.claude/`, the user-level `~/.claude/`, and the CLI's
@@ -336,15 +335,12 @@ nothing else — every board-specific fact lives server-side as flow data.
   `--dry-run` claims and mutates nothing (it only logs the capacity it would advertise);
   `--interval` overrides the configured poll timeout; SIGINT stops claiming new work and waits
   for in-flight workers to finish.
-- **Heartbeat-borne revoke (not yet wired server-side).** `ExecutorHeartbeat` POSTs
-  `{executor, running: [job-ids]}` to `POST /api/node-jobs/heartbeat` every
-  `heartbeat_interval`s, expecting `{revoked: [job-ids]}` back so it can terminate each
-  one's live subprocess via its `JobControl`. **In reality no server route exists yet** —
-  the POST 404s, the client never sees a revoke list, and no subprocess is ever
-  terminated. Revoke is DB-state-only (`Relay.Runs.NoopDispatcher.revoke/1` → `:ok`, the
-  configured dispatcher per `config/config.exs:73`); the behavior described next is what
-  happens once the response is wired, not what happens today. A
-  revoked **exclusive** job resets its worktree (salvaging any leftovers via `git stash`,
+- **Heartbeat-borne revoke.** `ExecutorHeartbeat` POSTs `{executor, capacity,
+  running: [job-ids]}` to `POST /api/node-jobs/heartbeat` every `heartbeat_interval`s and
+  reads `{revoked: [job-ids]}` back (RLY-164), terminating each revoked job's live
+  subprocess via its `JobControl`. This is how taking the baton (ADR 0004, via
+  `park_claimed/1`) or cancelling from the run panel stops a running agent without waiting on
+  its next outcome POST. A revoked **exclusive** job resets its worktree (salvaging any leftovers via `git stash`,
   same as `reset_worktree` elsewhere), since that worktree is bound 1:1 to this job/run. A
   revoked **`shared_clean`** job leaves `exec-clean` untouched instead — that worktree is
   shared by other jobs still running concurrently, and resetting it would destroy their
