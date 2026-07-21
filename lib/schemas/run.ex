@@ -26,6 +26,7 @@ defmodule Schemas.Run do
     field :flow_key, :string
     field :status, Ecto.Enum, values: [:running, :parked, :done, :failed, :cancelled]
     field :parked_reason, Ecto.Enum, values: [:needs_input, :claimed, :executor_gone]
+    field :pinned_executor_name, :string
     field :current_node, :string
     field :context, :map, default: %{}
     field :failure_detail, :string
