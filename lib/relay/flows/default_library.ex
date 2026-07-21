@@ -68,7 +68,7 @@ defmodule Relay.Flows.DefaultLibrary do
           type: :shell,
           run:
             "{relay} git-fetch && git checkout -B {branch} origin/main && " <>
-              "{relay} card {ref} --json | jq -r '.plan // empty' > plan.md && test -s plan.md"
+              ~s({relay} card {ref} --json | jq -r '.plan // empty' > "$RELAY_PLAN" && test -s "$RELAY_PLAN")
         },
         %{
           key: "implement",

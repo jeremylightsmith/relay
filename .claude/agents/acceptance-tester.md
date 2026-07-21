@@ -16,7 +16,7 @@ criteria are the contract. Nothing else is.
 ## 1. Read the criteria off the card
 
 The card ref is in your task message. Read the criteria from the card — the card is the single
-source of truth, and they are deliberately NOT copied into `plan.md`:
+source of truth, and they are deliberately NOT copied into the plan (at `$RELAY_PLAN`):
 
 ```bash
 ./bin/relay card <ref> --json | jq -r '.acceptance_criteria // ""'

@@ -646,7 +646,13 @@ defmodule Relay.Runs do
   # min_executor_version/0 rather than re-deriving it. Raise it only when running the old
   # executor is genuinely worse than a stopped one — every executor below it is refused at
   # claim until a human restarts it.
-  @min_executor_version 13
+  # RLY-223 raised this to 19: the Code flow's `branch` node now writes the plan to the
+  # executor-exported $RELAY_PLAN, so a pre-19 executor (which never exports it) would write to
+  # an empty path and fail every Code run — genuinely worse than a stopped one (AGENTS.md).
+  # (RLY-224 landed EXECUTOR_VERSION 18 on main first, with git-fetch retry but no $RELAY_PLAN
+  # support, so 18 alone is NOT sufficient here — the floor must be the version that actually
+  # carries RELAY_PLAN, which is 19 once both changes are combined.)
+  @min_executor_version 19
 
   @doc "The minimum `bin/relay` EXECUTOR_VERSION this server will claim jobs to."
   def min_executor_version, do: @min_executor_version

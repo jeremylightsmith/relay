@@ -19,7 +19,7 @@ Inspect with `git log`/`git diff`/`git show` only. Do not touch the working tree
 or branch state. If you need a different revision, check it out into a temp worktree
 (`git worktree add`) — never move HEAD here.
 
-## Assess against `plan.md` (the spec for this work)
+## Assess against the plan (at `$RELAY_PLAN`, the spec for this work)
 - **Spec coverage:** every plan task / acceptance item actually implemented? List gaps.
 - **Design fidelity & consistency:** for any plan task that named a `docs/designs/*.dc.html`
   artboard, confirm the built UI matches the elements/states it called out, and that tasks

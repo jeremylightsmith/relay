@@ -14,7 +14,7 @@ Unit and integration tests already passed. You are not re-running them — you a
 confirm the feature demonstrably does what the plan says.
 
 ## 0. Which app — web (default) or mobile?
-Read `plan.md`'s **"## Verification" → `Smoke:`** directive first.
+Read the plan's **"## Verification" → `Smoke:`** directive first (the plan is at `$RELAY_PLAN`).
 - **No directive, or a web directive → the default web smoke** (§1–§3 below): the Phoenix
   LiveView app on `http://localhost:4003`, driven with Playwright.
 - **A mobile / iOS-simulator directive (a Flutter card) → the mobile smoke** (§M below)
@@ -35,7 +35,7 @@ Read `plan.md`'s **"## Verification" → `Smoke:`** directive first.
   setup — not a code defect), naming what's missing. Do not fail the card for that.
 
 ## 1. Understand what to exercise
-- Read `plan.md` (the branch's contract) and `git diff main...HEAD --stat` + the relevant
+- Read the plan at `$RELAY_PLAN` (the branch's contract) and `git diff main...HEAD --stat` + the relevant
   parts of `git diff main...HEAD`. Identify the user-visible or externally-observable behavior
   the branch adds, and the exact surface that exercises it (a LiveView route + interactions, an
   HTTP endpoint, an email path, a background job, a context function reachable through a page).

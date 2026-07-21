@@ -208,6 +208,21 @@ nodes/cards once shared one hard-coded location, so one run's findings silently 
 were read by another run entirely. `$RELAY_NODE_SCRATCH` is namespaced per (ref, node)
 precisely so that can't happen again.
 
+### The `RELAY_PLAN` contract
+
+Before running every node, the executor also exports `RELAY_PLAN` to `tmp/<REF>/plan.md` inside
+the node's own worktree (`plan_path` in `bin/relay`). Unlike `RELAY_NODE_SCRATCH` it is **per-REF,
+not per-node**: the Code flow's `branch` node writes the card's plan there, and every later node
+(`implement`, the reviewers, smoke/acceptance) reads the SAME file, because the path derives only
+from `(ref)`. It shares `tmp/<REF>/` with the scratch file, so it inherits the same `.gitignore`
+(`/tmp/`) coverage — it survives `reset_worktree` and is never committed.
+
+This closes RLY-194: a worktree-root `plan.md` is gitignored and so survives `git clean -fd`, so
+after a slot is reused (RLY-218 slot instability) a run's `implement` node could read the PREVIOUS
+run's plan. Namespacing the plan by `<ref>` makes two runs' plans different files — the cross-run
+leak is impossible by construction. (Set-or-clear like `RELAY_NODE_SCRATCH`, RLY-216: a node
+without a plan sees `RELAY_PLAN` unset, never inherited.)
+
 ### `relay execute` — the executor runner mode
 
 `bin/relay execute` is **the runner mode**: it claims node-jobs from the endpoints in the
@@ -288,8 +303,9 @@ build your own runner or agents, honor these:
 4. **Work travels *with the card*, not in shared repo files.** The **spec** is the card's
    `description`; the **acceptance criteria** are the card's `acceptance_criteria` field; the
    **plan** is the card's `plan` field. A step materializes these into the repo
-   just-in-time (inside the card's branch) and never relies on a shared `plan.md` that another card
-   will clobber. (This is why `Card` has `branch` + `plan` fields, API-read/writable.)
+   just-in-time (inside the card's branch, at the per-ref `$RELAY_PLAN` path) and never relies on
+   a shared worktree-root file that another card would clobber. (This is why `Card` has `branch` +
+   `plan` fields, API-read/writable.)
 
 5. **Readiness is positional and prioritized.** A card is *ready* when the column immediately to its
    right is an AI column (`Next up → Spec`, `Spec:Done → Plan`, `Plan:Done → Code`). Work
@@ -325,5 +341,5 @@ per-project via `.relay/flows.json` (RLY-140) without forking the library.
 To honor invariant 3, an agent/shell node's `run` should start by checking out the card's
 branch (from `vars.branch`) and end by committing. To honor invariant 4, the Plan flow writes
 the plan to the card's `plan` field, and the Code flow's `branch` node materializes it into the
-worktree as `plan.md` (see [`code.jsonc`](designs/flows/code.jsonc)'s `branch` node) for
+per-ref `$RELAY_PLAN` path (see [`code.jsonc`](designs/flows/code.jsonc)'s `branch` node) for
 `implement` to work through.
