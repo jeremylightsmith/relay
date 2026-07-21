@@ -548,7 +548,17 @@ defmodule Relay.Boards do
     {:ok, _} = enable_lane(spec, :review)
     {:ok, _} = enable_lane(spec, :done)
     {:ok, _} = enable_lane(plan, :done)
+    seed_review_reject_to!(board, plan)
     Flows.seed_default_flows!(board)
+  end
+
+  # RLY-216: a code reject routes to Review's reject_to; point it at Plan so a fresh
+  # board re-plans on reject out of the box. Default Review has no reject_to, which would
+  # route the reject to the previous main stage (Code) and re-run code instead of re-planning.
+  # New boards only; existing boards keep whatever they configured (no data migration — YAGNI).
+  defp seed_review_reject_to!(board, plan) do
+    review = Repo.get_by!(Stage, board_id: board.id, name: "Review")
+    {:ok, _} = update_stage(review, %{reject_to_stage_id: plan.id})
   end
 
   defp fetch_name(attrs), do: attrs[:name] || attrs["name"] || ""
