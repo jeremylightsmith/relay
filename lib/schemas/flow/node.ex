@@ -40,6 +40,13 @@ defmodule Schemas.Flow.Node do
     field :expects_commits, :boolean, default: false
   end
 
+  @doc ~S"""
+  The subset of node `type`s an executor actually runs (RLY-139). A strict subset of the type
+  enum — `:parallel` and `:human` are valid node types that do not dispatch — so this is
+  guarded as a subset, not a partition.
+  """
+  def runnable_types, do: [:agent, :shell, :gate]
+
   @doc "Validates one node; graph-level rules (key uniqueness) live on Schemas.Flow."
   def changeset(node, attrs) do
     node

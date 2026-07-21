@@ -82,7 +82,16 @@ defmodule RelayWeb.Api.ExecutorContractTest do
     {_run, exclusive_shell} = claim_one(exclusive, %{"exclusive" => 1})
 
     document = %{
-      "version" => 1,
+      "version" => 2,
+      "vocabulary" => %{
+        "run_states" => %{
+          "active" => stringify(Schemas.Run.active_statuses()),
+          "terminal" => stringify(Schemas.Run.terminal_statuses())
+        },
+        "outcomes" => stringify(Schemas.NodeExecution.outcomes()),
+        "isolation" => stringify(Schemas.Flow.isolation_classes()),
+        "node_types" => %{"runnable" => stringify(Schemas.Flow.Node.runnable_types())}
+      },
       "claim_request" => normalize(claim_body(%{"shared_clean" => 1})),
       "claim" => %{
         "shared_clean_agent" => normalize(shared_clean_agent),
@@ -110,6 +119,8 @@ defmodule RelayWeb.Api.ExecutorContractTest do
   end
 
   defp claim_body(capacity), do: %{"executor" => executor_ident(), "capacity" => capacity}
+
+  defp stringify(atoms), do: Enum.map(atoms, &Atom.to_string/1)
 
   defp agent_node do
     %{key: "work", type: :agent, run: "/write-plan {ref}", agent: "plan-implementer"}

@@ -142,6 +142,12 @@ defmodule Relay.RunDetailTest do
       detail = Runs.run_detail(r, code_flow())
       assert %{kind: :pending, nodes: ["quality_review"]} in detail.timeline
     end
+
+    test "pending tail is empty for a terminal status, even with unrun happy-path nodes" do
+      r = run(%{status: :done, current_node: "implement", node_executions: []})
+      detail = Runs.run_detail(r, code_flow())
+      refute Enum.any?(detail.timeline, &(&1.kind == :pending))
+    end
   end
 
   describe "run_detail/2 scalars" do

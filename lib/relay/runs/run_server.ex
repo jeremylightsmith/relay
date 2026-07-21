@@ -110,7 +110,7 @@ defmodule Relay.Runs.RunServer do
     run = Repo.get!(Run, state.run_id)
 
     cond do
-      job.state not in [:queued, :claimed, :running] or run.status != :running ->
+      job.state not in NodeJob.active_states() or run.status != :running ->
         {:reply, {:error, :job_not_active}, state}
 
       match?({:error, :no_flow}, Runs.load_flow(run)) ->

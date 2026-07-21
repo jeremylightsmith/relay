@@ -32,6 +32,9 @@ defmodule Schemas.Flow do
     timestamps(type: :utc_datetime)
   end
 
+  @doc "The closed set of flow isolation classes."
+  def isolation_classes, do: [:shared_clean, :exclusive]
+
   @doc """
   Validates a flow definition. `board_id` must already be set on the struct.
   Trigger-stage-belongs-to-board is validated in `Relay.Flows` — it needs

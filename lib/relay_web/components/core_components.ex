@@ -2221,6 +2221,10 @@ defmodule RelayWeb.CoreComponents do
                       run={@latest_detail}
                       task_progress={drawer_task_progress(@card)}
                     />
+                    <%!-- Display rule (RLY-203): show the node timeline for a run that is
+                          running or ended badly, but not parked and not cleanly done. This is an
+                          ad-hoc display predicate, NOT a domain partition — do not replace it
+                          with Schemas.Run.active_statuses/terminal_statuses. --%>
                     <RunComponents.run_node_timeline
                       :if={@latest_detail.status in [:running, :failed, :cancelled]}
                       detail={@latest_detail}

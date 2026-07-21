@@ -67,8 +67,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 14
-EXECUTOR_FINGERPRINT = "ee32feb1b99c2270d3e7e92003fd955a37a105fd7c0904316d486605d457b17e"
+EXECUTOR_VERSION = 15
+EXECUTOR_FINGERPRINT = "a3b40e3887a27eaeb4097d4be7afef71bf0d905d95bf56ec31172b10506eec77"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -864,6 +864,15 @@ def scratch_path(slot_path, ref, node):
     return os.path.join(slot_path, "tmp", ref, f"{node}.md")
 
 
+# Lifecycle vocabulary — pinned to the Elixir source (Schemas.*) through
+# test/fixtures/executor_contract.json and asserted by ExecutorVocabularyContractTest in
+# bin/test_relay.py (RLY-203). Change a member here only alongside the owning Ecto enum.
+# (NODE_OUTCOMES is defined near the CLI below and is pinned the same way.)
+ACTIVE_RUN_STATES = ("running", "parked")
+TERMINAL_RUN_STATES = ("done", "failed", "cancelled")
+ISOLATION_CLASSES = ("shared_clean", "exclusive")
+
+
 class ExecutorPool:
     """Executor-local worktree mapping (never sent to the server). Namespace-disjoint from the
     watcher's work pool so both runners run at once.
@@ -946,7 +955,7 @@ class ExecutorPool:
             if job["isolation"] == "shared_clean":
                 self.shared_used = max(0, self.shared_used - 1)
                 return
-            if run_state in ("running", "parked"):
+            if run_state in ACTIVE_RUN_STATES:
                 return
             if slot in self.excl:
                 self.excl[slot] = None

@@ -107,5 +107,35 @@
       "status": "ok"
     }
   },
-  "version": 1
+  "version": 2,
+  "vocabulary": {
+    "isolation": [
+      "shared_clean",
+      "exclusive"
+    ],
+    "node_types": {
+      "runnable": [
+        "agent",
+        "shell",
+        "gate"
+      ]
+    },
+    "outcomes": [
+      "succeeded",
+      "failed",
+      "partial",
+      "needs_input"
+    ],
+    "run_states": {
+      "active": [
+        "running",
+        "parked"
+      ],
+      "terminal": [
+        "done",
+        "failed",
+        "cancelled"
+      ]
+    }
+  }
 }

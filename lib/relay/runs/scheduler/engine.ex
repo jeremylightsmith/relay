@@ -13,7 +13,7 @@ defmodule Relay.Runs.Scheduler.Engine do
   `Relay.Runs.Scheduler.NoopEngine` is the production binding until a real
   adapter onto `Relay.Runs`'s run-execution engine is wired up.
 
-    * `active_runs/1` — the active runs (`status in [:running, :parked]`) for a
+    * `active_runs/1` — the active runs (`status in Schemas.Run.active_statuses()`) for a
       board, each as a `Snapshot.run` map.
     * `start_run/3` — start a run for `card_id` under `flow_key` on `executor_id`
       (engine moves the card to works-in and sets `:working`).

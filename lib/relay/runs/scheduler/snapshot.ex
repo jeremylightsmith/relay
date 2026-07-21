@@ -11,7 +11,7 @@ defmodule Relay.Runs.Scheduler.Snapshot do
       `active_owner` is `:ai | :human | nil` (from `Relay.Cards.active_owner_type/1`).
     * `flows` — **enabled** flows only: `[%{key, pulls_from_stage_id,
       works_in_stage_id, isolation}]`; `isolation` is `:shared_clean | :exclusive`.
-    * `runs` — **active** runs only (`status in [:running, :parked]`):
+    * `runs` — **active** runs only (`status in Schemas.Run.active_statuses()`):
       `[%{id, card_id, status, flow_key, isolation, pinned_executor_id, parked_reason}]`.
       `parked_reason` is `nil | :needs_input | :claimed | :executor_gone` — only a
       `:executor_gone` park is the scheduler's to resume; `:needs_input` and `:claimed`
