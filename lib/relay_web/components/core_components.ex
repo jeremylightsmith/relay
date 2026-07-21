@@ -541,6 +541,99 @@ defmodule RelayWeb.CoreComponents do
   defp status_badge_label(:failed, _progress), do: "FAILED"
 
   @doc """
+  The RLY-69 public-support badge. `variant: :pill` is the public board's interactive
+  vote pill (violet-filled when `voted`, outlined otherwise); `variant: :count` is the
+  internal card face's muted `↑ N` label. Presentational only — the caller wires
+  `phx-click` via the global `rest`.
+  """
+  attr :count, :integer, required: true
+  attr :voted, :boolean, default: false
+  attr :variant, :atom, values: [:pill, :count], default: :pill
+  attr :size, :atom, values: [:sm, :lg], default: :sm
+  attr :class, :string, default: nil
+  attr :rest, :global
+
+  def support_badge(%{variant: :count} = assigns) do
+    ~H"""
+    <span
+      class={@class}
+      style="display:inline-flex;align-items:center;gap:3px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:oklch(0.56 0.02 255);"
+      title="Public supporters"
+      data-support-count={@count}
+      {@rest}
+    >
+      <span style="font-size:11px;line-height:1;">↑</span>{@count}
+    </span>
+    """
+  end
+
+  def support_badge(assigns) do
+    ~H"""
+    <button
+      type="button"
+      class={@class}
+      style={support_pill_style(@voted, @size)}
+      data-voted={to_string(@voted)}
+      {@rest}
+    >
+      <span style={"font-size:#{if(@size == :lg, do: "13px", else: "12px")};line-height:1;"}>↑</span>{@count}
+    </button>
+    """
+  end
+
+  defp support_pill_style(voted, size) do
+    base =
+      if voted do
+        "color:oklch(1 0 0);background:oklch(0.60 0.14 250);border:1px solid oklch(0.60 0.14 250);"
+      else
+        "color:oklch(0.48 0.10 250);background:oklch(1 0 0);border:1px solid oklch(0.86 0.05 250);"
+      end
+
+    dims =
+      if size == :lg do
+        "border-radius:10px;padding:9px 16px;gap:4px;font-size:13px;"
+      else
+        "border-radius:9px;padding:6px 11px;gap:3px;font-size:12px;min-width:52px;justify-content:center;"
+      end
+
+    "display:inline-flex;align-items:center;font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;flex:0 0 auto;" <>
+      base <> dims
+  end
+
+  @doc """
+  The RLY-69 supporters row: a horizontal stack of supporter avatars (faces already
+  limited by the caller) plus the total count. Renders a muted "+ M more" line when
+  `total` exceeds the number of faces shown. Used by the internal drawer's PUBLIC
+  SUPPORT block.
+  """
+  attr :supporters, :list, required: true
+  attr :total, :integer, required: true
+  attr :class, :string, default: nil
+
+  def supporters_row(assigns) do
+    assigns = assign(assigns, :more, assigns.total - length(assigns.supporters))
+
+    ~H"""
+    <div class={@class} style="display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="display:flex;align-items:center;">
+          <span
+            :for={{sp, i} <- Enum.with_index(@supporters)}
+            style={"margin-left:#{if(i == 0, do: 0, else: -6)}px;"}
+          >
+            <.avatar name={sp[:name]} email={sp[:email]} src={sp[:src]} size={24} tint={:identity} />
+          </span>
+        </div>
+        <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);">
+          {@total} {if(@total == 1, do: "supporter", else: "supporters")}
+        </span>
+      </div>
+      <span :if={@more > 0} style="font-size:11.5px;color:oklch(0.60 0.02 255);">+ {@more} more</span>
+    </div>
+    """
+  end
+
+  @doc """
   The one avatar (RLY-90). A person renders their photo when we have one
   (`src`), white initials on a colored circle otherwise; the AI renders the
   violet dot mark and never a photo. Every people surface (top bar, card
