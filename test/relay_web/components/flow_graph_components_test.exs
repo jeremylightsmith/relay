@@ -101,6 +101,30 @@ defmodule RelayWeb.FlowGraphComponentsTest do
       assert html =~ "lands → Review"
       assert html =~ "oklch(0.42 0.10 155)"
     end
+
+    # RLY-186 regression: the pill used to be pinned at a hardcoded top:150px/left:2px, which the
+    # new vertical layout drew a spine node right on top of. It must instead be anchored to the
+    # layout's done_point so it lands below the last spine node, clear of every node.
+    test "end pill is anchored below done_point, not a fixed coordinate" do
+      nodes = [
+        %{key: "a", type: :agent, run: "one", model: nil, effort: nil},
+        %{key: "b", type: :agent, run: "two", model: nil, effort: nil}
+      ]
+
+      edges = [
+        %{from: "start", to: "a", on: nil},
+        %{from: "a", to: "b", on: :succeeded},
+        %{from: "b", to: "done", on: :succeeded}
+      ]
+
+      layout = FlowLayout.layout(nodes, edges)
+      {_dx, done_y} = layout.done_point
+      html = graph(nodes, edges, [])
+
+      [_, top] = Regex.run(~r/top:(-?\d+)px[^>]*>\s*<span[^>]*>\s*<\/span>\s*lands →/, html)
+      assert String.to_integer(top) == done_y + 8
+      refute html =~ "top:150px"
+    end
   end
 
   describe "interactivity" do

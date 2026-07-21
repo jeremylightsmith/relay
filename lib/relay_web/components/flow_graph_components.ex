@@ -86,7 +86,10 @@ defmodule RelayWeb.FlowGraphComponents do
     doc: "true mid connect-edge, once a source is picked — makes the `done` sentinel a clickable target"
 
   def flow_graph(assigns) do
-    {w, h} = assigns.layout.size
+    {w, base_h} = assigns.layout.size
+    # the "lands → <stage>" pill sits just below `done_point`; reserve room so it never spills
+    # past the canvas (and thus can't trigger a stray scrollbar) when it's shown.
+    h = if assigns.lands_on, do: base_h + 34, else: base_h
     sizes = Map.new(assigns.nodes, &{&1.key, FlowLayout.node_size(&1.type)})
 
     geos =
@@ -171,10 +174,7 @@ defmodule RelayWeb.FlowGraphComponents do
         </span>
       </div>
 
-      <div
-        :if={@lands_on}
-        style="position:absolute;left:2px;top:150px;display:flex;align-items:center;gap:6px;background:oklch(0.97 0.02 155);border:1px solid oklch(0.88 0.05 155);border-radius:20px;padding:7px 13px;font-size:11.5px;font-weight:600;font-family:ui-monospace,monospace;color:oklch(0.42 0.10 155);"
-      >
+      <div :if={@lands_on} style={lands_style(@layout)}>
         <span style="width:7px;height:7px;border-radius:50%;background:oklch(0.60 0.13 155);"></span>
         lands → {@lands_on}
       </div>
@@ -383,6 +383,20 @@ defmodule RelayWeb.FlowGraphComponents do
   defp sign(n) when n > 0, do: 1
   defp sign(n) when n < 0, do: -1
   defp sign(0), do: 0
+
+  # Flow-level "lands → <stage>" pill. Anchored to the layout's `done_point` (centred just below
+  # where the exit edge lands) rather than a fixed coordinate — the flow "lands" on that stage
+  # when it reaches `done`, so this reads naturally under the exit arrow and can never collide
+  # with a spine node the way a hardcoded top/left did once FlowLayout went vertical (RLY-186).
+  defp lands_style(layout) do
+    {x, y} = layout.done_point
+
+    "position:absolute;left:#{x}px;top:#{y + 8}px;transform:translateX(-50%);z-index:4;" <>
+      "display:flex;align-items:center;gap:6px;white-space:nowrap;" <>
+      "background:oklch(0.97 0.02 155);border:1px solid oklch(0.88 0.05 155);border-radius:20px;" <>
+      "padding:7px 13px;font-size:11.5px;font-weight:600;font-family:ui-monospace,monospace;" <>
+      "color:oklch(0.42 0.10 155);"
+  end
 
   # Clickable "done" sentinel — only rendered mid connect-edge (picking a target), so it never
   # competes with real-node selection but is reachable as a valid connect target (RLY-143).
