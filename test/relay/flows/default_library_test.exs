@@ -147,4 +147,25 @@ defmodule Relay.Flows.DefaultLibraryTest do
       refute cf_node(flow, "branch").run =~ "git fetch origin --prune"
     end
   end
+
+  describe "the branch node materializes the plan into the per-ref RELAY_PLAN path (RLY-223)" do
+    test "branch writes and probes $RELAY_PLAN, never a worktree-root plan.md" do
+      flow = Enum.find(DefaultLibrary.all(), &(&1.key == "code"))
+      branch = Enum.find(flow.nodes, &(&1.key == "branch"))
+
+      assert branch.run =~ ~s(> "$RELAY_PLAN"), "branch must write the plan to $RELAY_PLAN"
+      assert branch.run =~ ~s(test -s "$RELAY_PLAN"), "branch must probe $RELAY_PLAN is non-empty"
+      refute branch.run =~ "plan.md", "no bare worktree-root plan.md may remain in the branch command"
+    end
+
+    test "the executor floor is raised to refuse any pre-RELAY_PLAN executor (RLY-223)" do
+      # The new branch command requires the executor to export RELAY_PLAN; any executor built
+      # before that (the last such build was v17) would expand $RELAY_PLAN to empty and break
+      # every Code run, so it must be refused — the AGENTS.md floor-raise rule ("worse than a
+      # stopped one"). Pinned by behavior, not an exact literal, so a later unrelated bump that
+      # leaves the floor alone won't break it.
+      assert Relay.Runs.min_executor_version() >= 18
+      assert Relay.Runs.executor_outdated?(%Schemas.Executor{version: 17})
+    end
+  end
 end

@@ -17,11 +17,11 @@
   "trigger": { "from": "Plan:Done", "stage": "Code", "done": "Review" },
   "isolation": "exclusive",
   "nodes": {
-    // Also materializes plan.md from the card (replacing what /exec-plan used to do before
-    // RLY-139 retired it): implement works through it.
+    // Also materializes the plan from the card into the per-ref $RELAY_PLAN path (replacing
+    // what /exec-plan used to do before RLY-139) for `implement` to read.
     "branch": {
       "type": "shell",
-      "run": "{relay} git-fetch && git checkout -B {branch} origin/main && {relay} card {ref} --json | jq -r '.plan // empty' > plan.md && test -s plan.md"
+      "run": "{relay} git-fetch && git checkout -B {branch} origin/main && {relay} card {ref} --json | jq -r '.plan // empty' > \"$RELAY_PLAN\" && test -s \"$RELAY_PLAN\""
     },
     // execute-plan's per-task loop, now a real engine `foreach`: each entry begins
     // one iteration bound to one of the card's sub_tasks (parsed from the plan at
