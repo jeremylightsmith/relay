@@ -68,8 +68,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 18
-EXECUTOR_FINGERPRINT = "a33062a65c14440020f84726e7ea7078465433769ef5d8d54398f23c49869a68"
+EXECUTOR_VERSION = 19
+EXECUTOR_FINGERPRINT = "0" * 64
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -927,6 +927,25 @@ def scratch_path(slot_path, ref, node):
     return os.path.join(slot_path, "tmp", ref, f"{node}.md")
 
 
+def plan_path(slot_path, ref):
+    """Where the Code flow's `branch` node materializes the card's plan — RLY-223.
+
+    `tmp/<REF>/plan.md` inside the worktree. Unlike `scratch_path`, this is per-REF and
+    deliberately NODE-INDEPENDENT: the `branch` node writes it and the `implement` node (a
+    different node id) reads the SAME file, so the path derives only from (slot, ref).
+
+    This kills the RLY-194 cross-run leak by construction. A worktree-root `plan.md` is
+    gitignored and so survives `git clean -fd`; after a slot is reused (RLY-218 slot
+    instability) `implement` could then read the PREVIOUS run's plan. Namespacing by REF makes
+    two runs' plans different files, so slot reuse can never surface the wrong plan.
+
+    Shares `tmp/<REF>/` with `scratch_path`, so it inherits the same `.gitignore` (`/tmp/`)
+    coverage — the plan survives `reset_worktree` and is never committed — and the directory is
+    already created once per node in `run_node_job`.
+    """
+    return os.path.join(slot_path, "tmp", ref, "plan.md")
+
+
 # Lifecycle vocabulary — pinned to the Elixir source (Schemas.*) through
 # test/fixtures/executor_contract.json and asserted by ExecutorVocabularyContractTest in
 # bin/test_relay.py (RLY-203). Change a member here only alongside the owning Ecto enum.
@@ -1085,25 +1104,26 @@ def _print_claude_event(ev, tag=""):
         forward("claude", line, ref)
 
 
-def _apply_node_env(child_env, partition, scratch):
+def _apply_node_env(child_env, partition, scratch, plan):
     """Set-or-CLEAR the per-node env on a child (RLY-216).
 
-    `partition`/`scratch` are per-job (RLY-213/214): a job that has one exports it, a job that
-    does NOT must see it *unset* — never inherit the parent's. Assigning only when non-None was
-    the RLY-213/214 bug: every node now runs with MIX_TEST_PARTITION/RELAY_NODE_SCRATCH exported,
-    so when such a node itself runs `bin/relay` (the precommit gate runs `bin/test_relay.py`,
-    whose own tests spawn partition-less child steps) the value leaked in, and the gate failed
-    for every Code run. Pop when None so the child's env reflects the JOB's config, not whatever
-    the executor process happened to carry.
+    `partition`/`scratch`/`plan` are per-job (RLY-213/214/223): a job that has one exports it, a
+    job that does NOT must see it *unset* — never inherit the parent's. Assigning only when
+    non-None was the RLY-213/214 bug: every node runs with MIX_TEST_PARTITION/RELAY_NODE_SCRATCH/
+    RELAY_PLAN exported, so when such a node itself runs `bin/relay` (the precommit gate runs
+    `bin/test_relay.py`, whose own tests spawn env-less child steps) the value leaked in, and the
+    gate failed for every Code run. Pop when None so the child's env reflects the JOB's config,
+    not whatever the executor process happened to carry.
     """
-    for name, value in (("MIX_TEST_PARTITION", partition), ("RELAY_NODE_SCRATCH", scratch)):
+    for name, value in (("MIX_TEST_PARTITION", partition), ("RELAY_NODE_SCRATCH", scratch),
+                        ("RELAY_PLAN", plan)):
         if value is None:
             child_env.pop(name, None)
         else:
             child_env[name] = value
 
 
-def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None):
+def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None):
     """Run a shell step with a live, tag-prefixed feed. Returns True on success.
 
     On failure the tail of the output is appended to `sink` so the card can carry the
@@ -1121,9 +1141,12 @@ def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scr
     `precommit`, sees the slot's own test database.
 
     `scratch`, if given, is exported as RELAY_NODE_SCRATCH (RLY-214) — the caller supplies
-    `scratch_path(slot, ref, node)` so a gate step can write findings there too."""
+    `scratch_path(slot, ref, node)` so a gate step can write findings there too.
+
+    `plan`, if given, is exported as RELAY_PLAN (RLY-223) — the caller supplies
+    `plan_path(slot, ref)` so the branch node writes/probes the per-ref plan there."""
     child_env = dict(os.environ)
-    _apply_node_env(child_env, partition, scratch)
+    _apply_node_env(child_env, partition, scratch, plan)
     proc = subprocess.Popen(cmd, shell=True, cwd=cwd, text=True, bufsize=1, env=child_env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=on_proc is not None)
@@ -1240,7 +1263,7 @@ def report_outcome(job_id, outcome, detail, git_sha, session_id=None):
 
 
 def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None,
-                      agent=None, partition=None, scratch=None):
+                      agent=None, partition=None, scratch=None, plan=None):
     """Executor variant of _stream_claude. Runs `claude -p` (or `--resume <session_id>` on a
     needs-input re-entry), streams events, captures the claude session id from the stream-json
     events (init/result carry `session_id`), and sets $RELAY_NODE_OUTCOME so an agent node can
@@ -1250,7 +1273,8 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
     given, is exported as MIX_TEST_PARTITION (RLY-213) so a gate this agent runs sees its
     slot's own test database. `scratch`, if given, is exported as RELAY_NODE_SCRATCH
     (RLY-214) — the agent's own scratch file for this node, per `scratch_path(slot, ref,
-    node)`. Returns (ok, captured_session_id). `on_proc` receives the live Popen."""
+    node)`. `plan`, if given, is exported as RELAY_PLAN (RLY-223) — the per-ref materialized
+    plan the agent reads. Returns (ok, captured_session_id). `on_proc` receives the live Popen."""
     cmd = ["claude", "-p", prompt, "--dangerously-skip-permissions",
            "--verbose", "--output-format", "stream-json"]
     if session_id:
@@ -1267,7 +1291,7 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
     child_env.setdefault("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0")
     if outcome_path:
         child_env["RELAY_NODE_OUTCOME"] = outcome_path
-    _apply_node_env(child_env, partition, scratch)
+    _apply_node_env(child_env, partition, scratch, plan)
     # Every caller is an executor node-job, which passes on_proc (a JobControl.register)
     # and so gets its own process group (start_new_session), since only a JobControl can
     # kill that group.
@@ -1451,6 +1475,7 @@ def run_node_job(job, slot_path, control, partition=None):
     cmd = render(job["run"], vars)
 
     scratch = scratch_path(slot_path, ref, job["node_id"])
+    plan = plan_path(slot_path, ref)
     os.makedirs(os.path.dirname(scratch), exist_ok=True)
 
     # Restore the worktree before judging it: an interrupted run's branch still holds its
@@ -1474,14 +1499,14 @@ def run_node_job(job, slot_path, control, partition=None):
                 cmd + render(OUTCOME_CONTRACT, vars), cwd=slot_path, tag=tag,
                 session_id=job.get("resume_session"),
                 outcome_path=outcome_path, on_proc=control.register, agent=job.get("agent"),
-                partition=partition, scratch=scratch)
+                partition=partition, scratch=scratch, plan=plan)
             outcome, detail = determine_agent_outcome(job, ok, outcome_path)
         finally:
             shutil.rmtree(outcome_dir, ignore_errors=True)
     else:  # shell | gate
         tail = []
         ok = _stream_shell(cmd, slot_path, tag, sink=tail, on_proc=control.register,
-                           partition=partition, scratch=scratch)
+                           partition=partition, scratch=scratch, plan=plan)
         outcome = "succeeded" if ok else "failed"
         detail = "" if ok else "\n".join(tail).strip()
     sha_proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=slot_path,
