@@ -3,7 +3,6 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
 
   alias Relay.Cards
   alias Relay.Repo
-  alias Relay.RunnerPresence
   alias Relay.Runs.Capacity
 
   setup %{conn: conn} do
@@ -64,48 +63,15 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
     assert json_response(conn, 401)
   end
 
-  test "a runner_id payload registers presence with pools and jobs, and still stamps cards",
-       %{conn: conn, board: board, stage: stage} do
-    card = insert(:card, stage: stage, ref_number: 7)
-    :ok = RunnerPresence.subscribe(board.id)
-
-    conn =
-      conn
-      |> put_req_header("content-type", "application/json")
-      |> post(
-        ~p"/api/board/heartbeat",
-        Jason.encode!(%{
-          "runner_id" => "mbp-1-aaaa",
-          "host" => "mbp",
-          "started_at" => "2026-07-17T08:00:00Z",
-          "interval" => 30,
-          "pools" => [%{"name" => "clean", "mode" => "shared", "used" => 1, "total" => 3}],
-          "jobs" => [%{"ref" => "RLY-7", "stage" => "Code", "pool" => "clean", "started_at" => "2026-07-17T08:01:00Z"}],
-          "refs" => ["RLY-7"]
-        })
-      )
-
-    assert %{"stamped" => 1} = json_response(conn, 200)
-    assert Repo.get!(Schemas.Card, card.id).agent_heartbeat_at
-
-    assert_receive {:runner_beat, runner}
-    assert runner.runner_id == "mbp-1-aaaa"
-    assert [%{name: "clean", used: 1, total: 3}] = runner.pools
-    assert [%{ref: "RLY-7", stage: "Code"}] = runner.jobs
-  end
-
-  test "a legacy refs-only payload stamps cards and registers nothing",
-       %{conn: conn, board: board, stage: stage} do
+  test "a legacy refs-only payload stamps cards", %{conn: conn, stage: stage} do
     insert(:card, stage: stage, ref_number: 7)
 
     assert %{"stamped" => 1} = json_response(beat(conn, ["RLY-7"]), 200)
-    assert RunnerPresence.list(board.id) == []
   end
 
-  test "an executor beat (name + capacity) upserts an Executor row AND still feeds presence",
+  test "an executor beat (name + capacity) upserts an Executor row",
        %{conn: conn, board: board, stage: stage} do
     insert(:card, stage: stage, ref_number: 7)
-    :ok = RunnerPresence.subscribe(board.id)
 
     conn =
       conn
@@ -125,9 +91,6 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
       )
 
     assert %{"stamped" => 1} = json_response(conn, 200)
-    # Still appears in the existing Runners view (RLY-141) — zero UI change.
-    assert_receive {:runner_beat, %{runner_id: "mbp-1"}}
-    # And now upserts the durable executor row.
     executor = Repo.get_by!(Schemas.Executor, board_id: board.id, name: "jeremy-mbp")
     assert executor.capacity == %{"shared_clean" => 3, "exclusive" => 1}
   end

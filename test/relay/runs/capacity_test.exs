@@ -1,6 +1,6 @@
 defmodule Relay.Runs.CapacityTest do
   # Uses the application-started Relay.Runs.Capacity instance, isolated by unique executor ids
-  # (the RunnerPresence/BoardWatch test pattern).
+  # (the BoardWatch test pattern).
   use ExUnit.Case, async: true
 
   alias Relay.Runs.Capacity

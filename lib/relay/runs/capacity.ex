@@ -3,7 +3,7 @@ defmodule Relay.Runs.Capacity do
   The executor-capacity seam (ADR 0006 / RLY-133): a GenServer owning a public
   named ETS table of the **advertised** capacity each connected executor
   carries per isolation class — `%{executor_id => %{shared_clean: n,
-  exclusive: n}}`. Mirrors `Relay.RunnerPresence`: beats and reads never hop
+  exclusive: n}}`. Like `Relay.BoardWatch`, beats and reads never hop
   through the process, and state is lost on restart by design.
 
   **Contract: this is the executor's configured per-class slot count, not a
