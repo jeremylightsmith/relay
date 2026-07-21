@@ -169,6 +169,27 @@ defmodule Relay.FlowsTest do
       assert {:error, changeset} = Flows.create_flow(board, bad)
       assert %{nodes: [%{agent: ["is only valid on an agent node"]}]} = errors_on(changeset)
     end
+
+    test "expects_commits casts on an agent node, defaults false, and is rejected elsewhere" do
+      %{board: board} = board_with_stages()
+
+      ok = valid_attrs(%{nodes: [%{key: "work", type: :agent, run: "a", expects_commits: true}]})
+      assert {:ok, flow} = Flows.create_flow(board, ok)
+      assert %{expects_commits: true} = Enum.find(flow.nodes, &(&1.key == "work"))
+
+      default = valid_attrs(%{key: "custom-ec", nodes: [%{key: "work", type: :agent, run: "a"}]})
+      assert {:ok, flow} = Flows.create_flow(board, default)
+      assert %{expects_commits: false} = Enum.find(flow.nodes, &(&1.key == "work"))
+
+      bad =
+        valid_attrs(%{
+          key: "custom-ec2",
+          nodes: [%{key: "work", type: :gate, run: "true", expects_commits: true}]
+        })
+
+      assert {:error, changeset} = Flows.create_flow(board, bad)
+      assert %{nodes: [%{expects_commits: ["is only valid on an agent node"]}]} = errors_on(changeset)
+    end
   end
 
   describe "duplicate_flow/1 and save_definition/2 round-trip foreach/when (regression)" do
@@ -297,6 +318,46 @@ defmodule Relay.FlowsTest do
 
       assert {:error, changeset} = Flows.create_flow(board, attrs)
       assert ~s(edge to "start" does not name a node) in messages_on(changeset, :edges)
+    end
+
+    test "\"needs_input\" is a valid to-endpoint but never a from-endpoint" do
+      %{board: board} = board_with_stages()
+
+      ok =
+        valid_attrs(%{
+          nodes: [%{key: "work", type: :agent, run: "a"}],
+          edges: [
+            %{from: "start", to: "work"},
+            %{from: "work", to: "done", on: :succeeded},
+            %{from: "work", to: "needs_input", on: :failed}
+          ]
+        })
+
+      assert {:ok, _flow} = Flows.create_flow(board, ok)
+
+      bad_from =
+        valid_attrs(%{
+          key: "custom-ni",
+          edges: [%{from: "start", to: "work"}, %{from: "needs_input", to: "work", on: :succeeded}]
+        })
+
+      assert {:error, changeset} = Flows.create_flow(board, bad_from)
+      assert ~s(edge from "needs_input" does not name a node) in messages_on(changeset, :edges)
+    end
+
+    test "a node keyed \"needs_input\" is rejected as a reserved sentinel" do
+      %{board: board} = board_with_stages()
+
+      assert {:error, changeset} =
+               Flows.create_flow(
+                 board,
+                 valid_attrs(%{
+                   nodes: [%{key: "needs_input", type: :agent, run: "x"}],
+                   edges: [%{from: "start", to: "needs_input"}]
+                 })
+               )
+
+      assert [%{key: [_]}] = errors_on(changeset).nodes
     end
 
     test "rejects node keys named after a sentinel and duplicate node keys" do

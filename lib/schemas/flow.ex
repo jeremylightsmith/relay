@@ -4,9 +4,10 @@ defmodule Schemas.Flow do
   data. The trigger is three stage FKs stored as **ids** (names are display-
   only via the preloaded associations) with `on_delete: :nilify_all` —
   deleting a stage disarms the flow rather than blocking. Nodes and edges
-  are embedded jsonb; `"start"`/`"done"` are edge-endpoint sentinels, not
-  nodes. `board_id` and `enabled` are set programmatically by `Relay.Flows`,
-  never cast. `version` holds the current definition version;
+  are embedded jsonb; `"start"`/`"done"`/`"needs_input"` are edge-endpoint
+  sentinels, not nodes — `"needs_input"` (RLY-194) is `to`-only and parks
+  the run. `board_id` and `enabled` are set programmatically by
+  `Relay.Flows`, never cast. `version` holds the current definition version;
   `flow_versions` snapshots each one.
   """
 
@@ -62,8 +63,8 @@ defmodule Schemas.Flow do
   end
 
   # Every endpoint must be a node key or the correct sentinel: "start" may
-  # only appear as a `from`, "done" only as a `to` — a wrong-way sentinel
-  # falls through to "does not name a node" (node keys can never be
+  # only appear as a `from`, "done"/"needs_input" only as a `to` — a wrong-way
+  # sentinel falls through to "does not name a node" (node keys can never be
   # sentinels, see Schemas.Flow.Node).
   defp validate_edge_endpoints(changeset) do
     keys = changeset |> node_keys() |> MapSet.new()
@@ -75,7 +76,7 @@ defmodule Schemas.Flow do
         edge.from != "start" and not MapSet.member?(keys, edge.from) ->
           add_error(cs, :edges, ~s(edge from "#{edge.from}" does not name a node))
 
-        edge.to != "done" and not MapSet.member?(keys, edge.to) ->
+        edge.to not in ["done", "needs_input"] and not MapSet.member?(keys, edge.to) ->
           add_error(cs, :edges, ~s(edge to "#{edge.to}" does not name a node))
 
         true ->
