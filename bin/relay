@@ -69,7 +69,7 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
 EXECUTOR_VERSION = 19
-EXECUTOR_FINGERPRINT = "0" * 64
+EXECUTOR_FINGERPRINT = "9c3080c204813d0cd7cab93fdac7d43e63d69e44b2fa38b877eb6dc80ed80a31"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
