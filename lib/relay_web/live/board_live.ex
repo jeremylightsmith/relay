@@ -122,6 +122,15 @@ defmodule RelayWeb.BoardLive do
               Restore
             </button>
           </div>
+          <div
+            :if={@stopped_work}
+            id="stopped-work-banner"
+            class="mx-4 mb-2 mt-2 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm sm:mx-5"
+            style={stopped_work_banner_style(@stopped_work.reason)}
+          >
+            <.icon name="hero-exclamation-triangle" class="size-4" />
+            <span class="flex-1">{@stopped_work.detail}</span>
+          </div>
           <%!-- RLY-94 · BOARD-01 — phone-width pager nav: compact header + stage chip
                 strip. Hidden at ≥45rem; the BoardPager hook owns the data-active
                 highlight and chip-tap scrolling (see assets/js/hooks/board_pager.js). --%>
@@ -236,6 +245,7 @@ defmodule RelayWeb.BoardLive do
                   questions={@needs_input_questions}
                   health={@health_by_card}
                   runs={@face_runs}
+                  run_meta={@run_face_meta}
                   cards={Map.fetch!(@streams, stream_name(stage.id))}
                   composing={@composing_stage_id == stage.id}
                   compose_form={@compose_form}
@@ -502,6 +512,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:flows, flows)
       |> assign(:run_summaries, run_summaries)
       |> assign(:face_runs, face_runs(cards, flows, run_summaries))
+      |> assign_run_diagnostics(board, run_summaries)
       |> stream_configure(:conversation, dom_id: &conversation_dom_id/1)
       |> stream_configure(:activity, dom_id: &activity_dom_id/1)
 
@@ -1449,7 +1460,10 @@ defmodule RelayWeb.BoardLive do
 
     changed = Enum.filter(cards, &(health_state(fresh, &1.id) != health_state(previous, &1.id)))
 
-    socket = assign(socket, :health_by_card, fresh)
+    socket =
+      socket
+      |> assign(:health_by_card, fresh)
+      |> assign_run_diagnostics(socket.assigns.board, socket.assigns.run_summaries)
 
     {:noreply,
      Enum.reduce(changed, socket, fn card, acc ->
@@ -1522,6 +1536,33 @@ defmodule RelayWeb.BoardLive do
       {card.id, Runs.face_summary(card, Cards.active_owner_type(card), flows, summaries)}
     end)
   end
+
+  # RLY-191: the two board-level diagnostics recomputed on every :health_tick — the run-face
+  # age/stall map (keyed by card_id for the template) and the stopped-work banner. Both read
+  # the one diagnosis path in Relay.Runs; no re-derivation here.
+  defp assign_run_diagnostics(socket, board, run_summaries) do
+    now = DateTime.utc_now()
+    progress = Runs.last_progress_by_run(board)
+    working = Runs.working_run_ids(board, now)
+
+    meta =
+      for {card_id, s} <- run_summaries, s.status in [:running, :parked], into: %{} do
+        progress_at = Map.get(progress, s.run_id) || s.started_at
+
+        {card_id,
+         %{progress_at: progress_at, stalled?: Runs.run_stalled?(progress_at, MapSet.member?(working, s.run_id), now)}}
+      end
+
+    socket
+    |> assign(:run_face_meta, meta)
+    |> assign(:stopped_work, Runs.stopped_work(board, now))
+  end
+
+  defp stopped_work_banner_style(:executor_outdated),
+    do: "background:oklch(0.97 0.04 85);border:1px solid oklch(0.85 0.09 85);color:oklch(0.42 0.09 85);"
+
+  defp stopped_work_banner_style(_reason),
+    do: "background:oklch(0.97 0.03 22);border:1px solid oklch(0.88 0.07 22);color:oklch(0.48 0.13 22);"
 
   defp refresh_face_runs(socket, cards_by_stage) do
     cards = cards_by_stage |> Map.values() |> List.flatten()

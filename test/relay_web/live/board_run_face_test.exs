@@ -1,5 +1,7 @@
 defmodule RelayWeb.BoardRunFaceTest do
-  use RelayWeb.ConnCase, async: true
+  # RLY-191: the describe block below resets the global `Relay.Runs.Capacity` ETS table, so
+  # this module can no longer run concurrently with other async tests touching capacity.
+  use RelayWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
 
@@ -107,5 +109,82 @@ defmodule RelayWeb.BoardRunFaceTest do
     render_async(view)
 
     refute has_element?(view, "#card-#{ref}-run-face")
+  end
+
+  # RLY-191: the run face ages visibly and escalates to the amber stalled treatment. A
+  # fresh board (rather than the default board reused above) — explicit stage positions
+  # avoid colliding with the default board's own 1..11 sequence on `stages_board_id_position_index`.
+  describe "age and stall (RLY-191)" do
+    setup %{user: user} do
+      Relay.Runs.Capacity.reset()
+      board = insert(:board, owner: user)
+      insert(:membership, board: board, user: user)
+      works = insert(:stage, board: board, name: "Code", position: 1, type: :work, ai_enabled: true)
+      %{board: board, works: works}
+    end
+
+    defp face_ref(board, card), do: "#{board.key}-#{card.ref_number}"
+
+    test "a running run face shows an age", %{conn: conn, board: board, works: works} do
+      card = insert(:card, stage: works, status: :working)
+      run = insert(:run, card: card, status: :running, current_node: "implement")
+      insert(:node_execution, run: run, node_key: "implement", outcome: nil, finished_at: nil)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#card-#{face_ref(board, card)}-run-face")
+      assert has_element?(view, "#card-#{face_ref(board, card)}-run-age")
+    end
+
+    test "a run whose job is queued past the threshold gets the stalled treatment",
+         %{conn: conn, board: board, works: works} do
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      card = insert(:card, stage: works, status: :working)
+      run = insert(:run, card: card, status: :running, current_node: "implement")
+
+      exec =
+        insert(:node_execution,
+          run: run,
+          node_key: "implement",
+          outcome: nil,
+          finished_at: nil,
+          inserted_at: DateTime.add(now, -900, :second)
+        )
+
+      insert(:node_job, node_execution: exec, state: :queued, executor_name: nil, claimed_at: nil)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, ~s(#card-#{face_ref(board, card)}-run-face[data-stalled="true"]))
+    end
+
+    test "a claimed, running job stays neutral however old it is (the long-node case)",
+         %{conn: conn, board: board, works: works} do
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      insert(:executor, board: board, name: "live", last_heartbeat: now)
+      card = insert(:card, stage: works, status: :working)
+      run = insert(:run, card: card, status: :running, current_node: "implement")
+
+      exec =
+        insert(:node_execution,
+          run: run,
+          node_key: "implement",
+          outcome: nil,
+          finished_at: nil,
+          inserted_at: DateTime.add(now, -3600, :second)
+        )
+
+      insert(:node_job,
+        node_execution: exec,
+        state: :running,
+        executor_name: "live",
+        claimed_at: DateTime.add(now, -3600, :second)
+      )
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, ~s(#card-#{face_ref(board, card)}-run-face[data-stalled="false"]))
+      assert has_element?(view, "#card-#{face_ref(board, card)}-run-age")
+    end
   end
 end

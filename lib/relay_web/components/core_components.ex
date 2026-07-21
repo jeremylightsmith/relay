@@ -917,6 +917,9 @@ defmodule RelayWeb.CoreComponents do
     default: nil,
     doc: "{:run, summary} | {:queued, flow} — run affordances replace the legacy strip when set (RLY-137 decision 3)"
 
+  attr :progress_at, :any, default: nil, doc: "RLY-191 last-progress timestamp for the run face age"
+  attr :stalled?, :boolean, default: false, doc: "RLY-191 run face amber-stalls when its job is stuck"
+
   def board_card(assigns) do
     # RLY-137: a :done run on an :in_review card is the review-blue treatment — the face
     # tuple alone can't tell (it doesn't know the card's status), so the override lives here.
@@ -959,7 +962,13 @@ defmodule RelayWeb.CoreComponents do
         {@title}
       </span>
       <span class="card-ref sr-only">{@ref}</span>
-      <RunComponents.run_face :if={@run} run={@run} ref={@ref} />
+      <RunComponents.run_face
+        :if={@run}
+        run={@run}
+        ref={@ref}
+        progress_at={@progress_at}
+        stalled?={@stalled?}
+      />
       <div
         :if={@status == :working and @progress != nil and is_nil(@run)}
         style="height:5px;border-radius:3px;background:oklch(0.93 0.02 292);overflow:hidden;"
@@ -1080,6 +1089,9 @@ defmodule RelayWeb.CoreComponents do
   defp card_accent_class(%{run: {:queued, _flow}}), do: "border-l-base-300"
   defp card_accent_class(%{run: {:review, _summary}}), do: "border-l-primary"
 
+  # RLY-191: a stalled running run gets the amber accent, not the quiet violet.
+  defp card_accent_class(%{run: {:run, %{status: :running}}, stalled?: true}), do: "border-l-warning"
+
   defp card_accent_class(%{run: {:run, %{status: status}}}) do
     case status do
       :running -> "border-l-secondary"
@@ -1108,6 +1120,11 @@ defmodule RelayWeb.CoreComponents do
   # RLY-137: a live run must not keep the RLY-148 amber/rose health escalation shell —
   # the run affordance is the source of truth for what's going on, so the shell goes
   # back to quiet. Leading clause, matched before the health-keyed ones.
+  # RLY-191: a stalled live run re-earns the amber health escalation the RLY-137 quiet-shell
+  # otherwise suppresses — the run face is telling a stuck story, so the shell agrees.
+  defp card_shell_style(%{run: run, stalled?: true}) when run != nil,
+    do: "border:1px solid oklch(0.86 0.06 70);box-shadow:0 1px 3px oklch(0.6 0.08 70/0.12);"
+
   defp card_shell_style(%{run: run}) when run != nil,
     do: "border:1px solid var(--color-base-300);box-shadow:0 1px 2px oklch(0.55 0.03 255/0.05);"
 
@@ -1219,6 +1236,10 @@ defmodule RelayWeb.CoreComponents do
   # drawer's sentence. One helper, shared by the strip and the timeline.
   defp entry_text(%Activity{text: text}) when is_binary(text) and text != "", do: text
   defp entry_text(%Activity{} = entry), do: activity_phrase(entry)
+
+  # RLY-191: %{card_id => %{progress_at:, stalled?:}} -> board_card/1's two run-face attrs.
+  defp run_meta_at(meta, id), do: meta |> Map.get(id, %{}) |> Map.get(:progress_at)
+  defp run_meta_stalled?(meta, id), do: meta |> Map.get(id, %{}) |> Map.get(:stalled?, false)
 
   defp sublane_width(%{collapsed: true}), do: 34
   defp sublane_width(_sub), do: 178
@@ -3060,6 +3081,10 @@ defmodule RelayWeb.CoreComponents do
     default: %{},
     doc: "RLY-137 card_id => run face tuple, from BoardLive's :face_runs assign"
 
+  attr :run_meta, :map,
+    default: %{},
+    doc: "RLY-191 card_id => %{progress_at:, stalled?:}, from BoardLive's :run_face_meta assign"
+
   def stage_column(assigns) do
     sublanes = Enum.map(assigns.sublanes, &Map.put_new(&1, :collapsed, false))
     total_count = (assigns.count || 0) + Enum.sum(Enum.map(sublanes, & &1.count))
@@ -3291,6 +3316,8 @@ defmodule RelayWeb.CoreComponents do
                       lane={:main}
                       category={@category}
                       run={Map.get(@runs, card.id)}
+                      progress_at={run_meta_at(@run_meta, card.id)}
+                      stalled?={run_meta_stalled?(@run_meta, card.id)}
                     />
                   </div>
                   <%!--
@@ -3401,6 +3428,8 @@ defmodule RelayWeb.CoreComponents do
                   lane={sub.lane}
                   category={@category}
                   run={Map.get(@runs, card.id)}
+                  progress_at={run_meta_at(@run_meta, card.id)}
+                  stalled?={run_meta_stalled?(@run_meta, card.id)}
                 />
               </div>
             </div>

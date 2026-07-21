@@ -169,4 +169,43 @@ defmodule Relay.Runs.ExecutorStatusTest do
       assert [%{freshness: :fresh}] = Runs.list_executor_status(board)
     end
   end
+
+  describe "display_state (RLY-191)" do
+    setup %{board: board}, do: {:ok, board: board, now: DateTime.utc_now()}
+
+    test "a fresh, current executor is :fresh", %{board: board, now: now} do
+      insert(:executor, board: board, name: "a", version: Runs.min_executor_version(), last_heartbeat: now)
+      assert [%{display_state: :fresh, freshness: :fresh}] = Runs.list_executor_status(board, now)
+    end
+
+    test "a beating-but-outdated executor is :outdated, and freshness stays :fresh", %{board: board, now: now} do
+      insert(:executor, board: board, name: "a", version: 0, last_heartbeat: now)
+      assert [%{display_state: :outdated, freshness: :fresh, outdated: true}] = Runs.list_executor_status(board, now)
+    end
+
+    test "staleness outranks outdatedness — a silent, outdated executor is :stale", %{board: board, now: now} do
+      # older than 1.5×interval but not yet gone (2×interval / 60s floor)
+      insert(:executor,
+        board: board,
+        name: "a",
+        version: 0,
+        interval: 30,
+        last_heartbeat: DateTime.add(now, -50, :second)
+      )
+
+      assert [%{display_state: :stale}] = Runs.list_executor_status(board, now)
+    end
+
+    test "a gone executor is :gone regardless of version", %{board: board, now: now} do
+      insert(:executor,
+        board: board,
+        name: "a",
+        version: 0,
+        interval: 30,
+        last_heartbeat: DateTime.add(now, -61, :second)
+      )
+
+      assert [%{display_state: :gone}] = Runs.list_executor_status(board, now)
+    end
+  end
 end

@@ -18,11 +18,51 @@ defmodule Relay.Runs.DiagnoseTest do
     assert detail =~ "no enabled flow"
   end
 
-  test "a flow with no connected executor is awaiting_capacity", %{board: board, queue: queue, works: works} do
+  test "a flow with no connected executor is no_executor", %{board: board, queue: queue, works: works} do
     insert(:flow, board: board, key: "code", enabled: true, pulls_from_stage_id: queue.id, works_in_stage_id: works.id)
     card = insert(:card, stage: queue, status: :ready)
 
-    assert %{verdict: :awaiting_capacity, evidence: %{flow_key: "code"}} = Runs.diagnose(board, card)
+    assert %{verdict: :no_executor, evidence: %{flow_key: "code"}} = Runs.diagnose(board, card)
+  end
+
+  test "an outdated-only roster surfaces :executor_outdated through diagnose", %{board: board, queue: queue, works: works} do
+    insert(:flow, board: board, key: "code", enabled: true, pulls_from_stage_id: queue.id, works_in_stage_id: works.id)
+    insert(:executor, board: board, name: "old", version: 0)
+    card = insert(:card, stage: queue, status: :ready)
+
+    assert %{verdict: :executor_outdated, detail: detail, evidence: evidence} = Runs.diagnose(board, card)
+    assert detail =~ "requires v#{Runs.min_executor_version()}"
+    assert evidence.required_version == Runs.min_executor_version()
+  end
+
+  test ":job_stranded still overrides :executor_outdated", %{board: board, works: works} do
+    now = DateTime.truncate(DateTime.utc_now(), :second)
+    insert(:executor, board: board, name: "old", version: 0, last_heartbeat: DateTime.add(now, -3600, :second))
+    card = insert(:card, stage: works, status: :working)
+    run = insert(:run, card: card, status: :running, current_node: "implement")
+    execution = insert(:node_execution, run: run, node_key: "implement", outcome: nil, finished_at: nil)
+
+    insert(:node_job,
+      node_execution: execution,
+      state: :claimed,
+      executor_name: "old",
+      claimed_at: DateTime.add(now, -3600, :second)
+    )
+
+    assert %{verdict: :job_stranded} = Runs.diagnose(board, card, now)
+  end
+
+  test "a live run whose job is stuck behind an outdated executor diagnoses as :executor_outdated",
+       %{board: board, works: works} do
+    now = DateTime.truncate(DateTime.utc_now(), :second)
+    insert(:executor, board: board, name: "old", version: 0, last_heartbeat: now)
+    card = insert(:card, stage: works, status: :working)
+    run = insert(:run, card: card, status: :running, current_node: "implement")
+    exec = insert(:node_execution, run: run, node_key: "implement", outcome: nil, finished_at: nil)
+    insert(:node_job, node_execution: exec, state: :queued, executor_name: nil, claimed_at: nil)
+
+    assert %{verdict: :executor_outdated, detail: detail} = Runs.diagnose(board, card, now)
+    assert detail =~ "requires v#{Runs.min_executor_version()}"
   end
 
   test "a failed run names the node and carries the whole failure detail", %{board: board, works: works} do

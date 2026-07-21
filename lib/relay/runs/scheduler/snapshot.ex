@@ -18,6 +18,11 @@ defmodule Relay.Runs.Scheduler.Snapshot do
       parks are the run `Listener`'s territory (RLY-200).
     * `capacity` — `%{executor_id => %{shared_clean: n, exclusive: n}}`: the
       **free** slots each connected executor advertises per isolation class.
+    * `executors` — `%{executor_id => %{name, version, outdated, freshness}}`: the durable
+      executor rows, `outdated` from `Relay.Runs.executor_outdated?/1` and `freshness` from
+      `Relay.Runs.executor_freshness/2` (not a second computation). `plan/1` ignores this
+      field; only `explain/2` / `capacity_diagnosis/1` read it, so the plan/explain agreement
+      property is unaffected.
   """
 
   @type stage :: %{
@@ -50,14 +55,21 @@ defmodule Relay.Runs.Scheduler.Snapshot do
           parked_reason: :needs_input | :claimed | :executor_gone | nil
         }
   @type capacity :: %{optional(term()) => %{shared_clean: non_neg_integer(), exclusive: non_neg_integer()}}
+  @type executor_status :: %{
+          name: String.t(),
+          version: integer() | nil,
+          outdated: boolean(),
+          freshness: :fresh | :stale | :gone
+        }
 
   @type t :: %__MODULE__{
           stages: [stage()],
           cards: [card()],
           flows: [flow()],
           runs: [run()],
-          capacity: capacity()
+          capacity: capacity(),
+          executors: %{optional(term()) => executor_status()}
         }
 
-  defstruct stages: [], cards: [], flows: [], runs: [], capacity: %{}
+  defstruct stages: [], cards: [], flows: [], runs: [], capacity: %{}, executors: %{}
 end

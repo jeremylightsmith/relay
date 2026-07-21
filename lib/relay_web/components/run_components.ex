@@ -918,13 +918,26 @@ defmodule RelayWeb.RunComponents do
 
   attr :run, :any, required: true
   attr :ref, :string, required: true
+  attr :progress_at, :any, default: nil
+  attr :stalled?, :boolean, default: false
 
   def run_face(assigns) do
     assigns = assign(assigns, :state, face_state(assigns.run))
 
     ~H"""
-    <div id={"card-#{@ref}-run-face"} class="run-face" data-run-state={@state}>
-      <.face_running :if={@state == :running} summary={run_summary(@run)} />
+    <div
+      id={"card-#{@ref}-run-face"}
+      class="run-face"
+      data-run-state={@state}
+      data-stalled={to_string(@stalled?)}
+    >
+      <.face_running
+        :if={@state == :running}
+        summary={run_summary(@run)}
+        ref={@ref}
+        progress_at={@progress_at}
+        stalled?={@stalled?}
+      />
       <.face_parked :if={@state == :parked} summary={run_summary(@run)} />
       <.face_failed :if={@state == :failed} summary={run_summary(@run)} />
       <.face_queued :if={@state == :queued} flow={run_summary(@run)} />
@@ -945,20 +958,50 @@ defmodule RelayWeb.RunComponents do
   defp run_summary({:review, summary}), do: summary
 
   attr :summary, :map, required: true
+  attr :ref, :string, required: true
+  attr :progress_at, :any, default: nil
+  attr :stalled?, :boolean, default: false
 
   defp face_running(assigns) do
     ~H"""
-    <div class="run-face-running" style="display:flex;flex-direction:column;gap:6px;">
+    <div
+      class={["run-face-running", @stalled? && "run-face-stalled"]}
+      style={
+        "display:flex;flex-direction:column;gap:6px;" <>
+          if(@stalled?,
+            do: "background:oklch(0.97 0.03 75);border:1px solid oklch(0.88 0.06 75);border-radius:8px;padding:8px 10px;",
+            else: ""
+          )
+      }
+    >
       <div style="display:flex;gap:2px;">
         <span
           :for={i <- 1..(@summary.node_count || 1)}
           style={"flex:1;height:5px;border-radius:2px;#{face_segment_style(i, @summary)}"}
         />
       </div>
-      <div style="display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:oklch(0.44 0.12 292);">
-        <span style="width:6px;height:6px;border-radius:50%;background:var(--color-secondary);animation:relaypulse 1.6s ease-in-out infinite;" />
-        <span style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--color-secondary);animation:relayring 1.6s ease-out infinite;" />
-        node {@summary.node_index} of {@summary.node_count}
+      <div style={"display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:#{if(@stalled?, do: "oklch(0.48 0.11 65)", else: "oklch(0.44 0.12 292)")};"}>
+        <span style={"width:6px;height:6px;border-radius:50%;background:#{if(@stalled?, do: "var(--color-warning)", else: "var(--color-secondary)")};#{unless @stalled?, do: "animation:relaypulse 1.6s ease-in-out infinite;"}"} />
+        <span
+          :if={not @stalled?}
+          style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--color-secondary);animation:relayring 1.6s ease-out infinite;"
+        /> node {@summary.node_index} of {@summary.node_count}
+        <span style="flex:1;"></span>
+        <span
+          :if={@progress_at}
+          id={"card-#{@ref}-run-age"}
+          class="run-face-age"
+          style="color:oklch(0.55 0.02 255);"
+        >
+          {ago(DateTime.utc_now(), @progress_at)}
+        </span>
+      </div>
+      <div
+        :if={@stalled?}
+        class="run-face-stalled-note"
+        style="font-family:var(--font-mono);font-size:10.5px;color:oklch(0.50 0.10 65);"
+      >
+        Quiet for a while — may be stuck
       </div>
     </div>
     """

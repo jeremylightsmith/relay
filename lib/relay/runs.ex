@@ -188,6 +188,72 @@ defmodule Relay.Runs do
     end)
   end
 
+  # A live run whose node-job is stuck (queued/unclaimed/held by a silent executor) this long
+  # has stopped moving. Well above a legitimate long node's own claimed runtime — a 40-minute
+  # plan-implementer node is *running*, not stalled, and stays neutral (see run_stalled?/3).
+  @run_stale_after_s 300
+
+  @doc """
+  The run's last forward progress: the newest `node_executions.inserted_at`, falling back to the
+  run's `inserted_at`. Forward progress only — `node_jobs.updated_at` is bumped by the very
+  revoke/requeue loop that was the RLY-191 failure, so a run wedged in that loop (which makes no
+  new executions) keeps this clock running, which is the point.
+  """
+  @spec last_progress_at(Run.t()) :: DateTime.t()
+  def last_progress_at(%Run{id: run_id, inserted_at: inserted_at}) do
+    Repo.one(from ne in NodeExecution, where: ne.run_id == ^run_id, select: max(ne.inserted_at)) || inserted_at
+  end
+
+  @doc "Bulk `last_progress_at/1` for a board: `%{run_id => DateTime.t()}`, one grouped query (no N+1). Runs with no executions are absent (the caller falls back to run start)."
+  @spec last_progress_by_run(Board.t()) :: %{term() => DateTime.t()}
+  def last_progress_by_run(%Board{} = board) do
+    from(ne in NodeExecution,
+      join: r in Run,
+      on: r.id == ne.run_id,
+      join: c in Card,
+      on: c.id == r.card_id,
+      where: c.board_id == ^board.id,
+      group_by: ne.run_id,
+      select: {ne.run_id, max(ne.inserted_at)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
+  Run ids whose current node-job is actively `:running` on a non-stale executor at `now`. The
+  complement — queued, unclaimed, or held by a silent executor — is what BoardLive treats as a
+  candidate for the stalled run-face treatment. Reuses `executor_stale?/2`, so "working" can
+  never disagree with what the reclaim sweep would act on.
+  """
+  @spec working_run_ids(Board.t(), DateTime.t()) :: MapSet.t()
+  def working_run_ids(%Board{} = board, %DateTime{} = now) do
+    live_names =
+      board.id
+      |> list_board_executors()
+      |> Enum.reject(&executor_stale?(&1, now))
+      |> MapSet.new(& &1.name)
+
+    from(j in NodeJob,
+      join: r in Run,
+      on: r.id == j.run_id,
+      join: c in Card,
+      on: c.id == r.card_id,
+      where: c.board_id == ^board.id and j.state == :running,
+      select: {j.run_id, j.executor_name}
+    )
+    |> Repo.all()
+    |> Enum.reduce(MapSet.new(), fn {run_id, name}, acc ->
+      if MapSet.member?(live_names, name), do: MapSet.put(acc, run_id), else: acc
+    end)
+  end
+
+  @doc "Whether a run face should show the amber stalled treatment: not currently working AND its last progress is older than `@run_stale_after_s`. The single home of the 5-minute policy."
+  @spec run_stalled?(DateTime.t() | nil, boolean(), DateTime.t()) :: boolean()
+  def run_stalled?(nil, _working?, _now), do: false
+  def run_stalled?(_progress_at, true, _now), do: false
+  def run_stalled?(progress_at, false, now), do: DateTime.diff(now, progress_at, :second) > @run_stale_after_s
+
   @doc """
   The node the run was last at: `current_node` while the run is live, else the
   `node_key` of its most recent `NodeExecution`.
@@ -800,6 +866,8 @@ defmodule Relay.Runs do
 
     Enum.map(executors, fn executor ->
       jobs = Map.get(jobs_by_executor, executor.name, [])
+      freshness = executor_freshness(executor, now)
+      outdated = executor_outdated?(executor)
 
       %{
         id: executor.id,
@@ -807,15 +875,29 @@ defmodule Relay.Runs do
         host: executor.host,
         interval: executor.interval || 30,
         last_heartbeat: executor.last_heartbeat,
-        freshness: executor_freshness(executor, now),
+        freshness: freshness,
         version: executor.version,
         # Orthogonal to `freshness` on purpose (RLY-184): a refused executor is perfectly
         # healthy and beating normally — it is just running old code.
-        outdated: executor_outdated?(executor),
+        outdated: outdated,
+        # RLY-191: the single presentation state the runners view renders from. Precedence
+        # :gone > :stale > :outdated > :fresh — a silent executor's silence is the more urgent
+        # fact than its version. Derived, never stored; `freshness` keeps heartbeat truth.
+        display_state: display_state(freshness, outdated),
         pools: pools_for(executor, jobs),
         jobs: jobs
       }
     end)
+  end
+
+  defp display_state(:gone, _outdated), do: :gone
+  defp display_state(:stale, _outdated), do: :stale
+  defp display_state(:fresh, true), do: :outdated
+  defp display_state(:fresh, false), do: :fresh
+
+  @doc "The board's raw `Executor` rows — the lean read `Scheduler.Server` builds its snapshot's `executors` map from."
+  def list_board_executors(board_id) do
+    Repo.all(from e in Executor, where: e.board_id == ^board_id)
   end
 
   ## Diagnosis (RLY-177)
@@ -824,6 +906,78 @@ defmodule Relay.Runs do
   # stranded, not merely slow. Deliberately well above the executor grace floor
   # (`@executor_stale_floor_s`) so a single missed beat never reads as stranded.
   @stranded_grace_s 300
+
+  # A board with jobs queued unclaimed this long is stopped, not merely between claims —
+  # deliberately far below the ~20m the RLY-191 incident ran and far above a normal ~5s
+  # executor poll. Jobs queued only because every executor is legitimately busy return nil.
+  @stopped_work_after_s 120
+
+  @doc """
+  The board-level "work has stopped" verdict, or `nil` when the board is quiet. Non-`nil` only
+  when: at least one node-job is queued and unclaimed, the oldest has waited past
+  `@stopped_work_after_s`, AND the shared `Scheduler.capacity_diagnosis/1` blames the roster
+  (outdated / no executor / all gone) rather than a legitimately busy board. `now` is injectable.
+  """
+  @spec stopped_work(Board.t(), DateTime.t() | nil) ::
+          nil
+          | %{
+              reason: :executor_outdated | :no_executor | :executor_gone,
+              detail: String.t(),
+              queued_count: pos_integer(),
+              oldest_queued_age_s: pos_integer(),
+              evidence: map()
+            }
+  def stopped_work(%Board{} = board, now \\ nil) do
+    now = now || now()
+
+    case queued_jobs_summary(board) do
+      nil ->
+        nil
+
+      %{count: count, oldest_inserted_at: oldest} ->
+        age = DateTime.diff(now, oldest, :second)
+        {snapshot, _cards_by_id} = SchedulerServer.build_snapshot(board.id, SchedulerServer.configured_engine())
+        {reason, bits} = Scheduler.capacity_diagnosis(snapshot)
+
+        if age > @stopped_work_after_s and reason in [:executor_outdated, :no_executor, :executor_gone] do
+          %{
+            reason: reason,
+            detail: stopped_work_detail(reason, bits, age),
+            queued_count: count,
+            oldest_queued_age_s: age,
+            evidence: bits
+          }
+        end
+    end
+  end
+
+  defp queued_jobs_summary(%Board{} = board) do
+    row =
+      Repo.one(
+        from j in NodeJob,
+          join: r in Run,
+          on: r.id == j.run_id,
+          join: c in Card,
+          on: c.id == r.card_id,
+          where: c.board_id == ^board.id and j.state == :queued,
+          select: %{count: count(j.id), oldest: min(j.inserted_at)}
+      )
+
+    case row do
+      %{count: 0} -> nil
+      %{count: count, oldest: oldest} -> %{count: count, oldest_inserted_at: oldest}
+    end
+  end
+
+  defp stopped_work_detail(:executor_outdated, bits, age) do
+    "No jobs claimed in #{div(age, 60)}m · every connected executor is running old code and is " <>
+      "being refused — #{Scheduler.running_versions_phrase(bits)}, requires v#{bits.required_version}. " <>
+      "Restart it to pick up current code."
+  end
+
+  defp stopped_work_detail(reason, _bits, age) when reason in [:no_executor, :executor_gone] do
+    "No jobs claimed in #{div(age, 60)}m · no executor is connected to run this board's work."
+  end
 
   @doc """
   Why `card` is or is not moving: `%{verdict, detail, evidence}`.
@@ -847,21 +1001,61 @@ defmodule Relay.Runs do
     run = active_run(card)
     last = latest_run(card)
     job = run && active_job(run)
+    capacity = Scheduler.capacity_diagnosis(snapshot)
 
     snapshot
     |> Scheduler.explain(card.id)
     |> put_evidence(:current_node, run && run.current_node)
     |> put_evidence(:last_execution, last_execution_summary(last))
     |> put_evidence(:job, job_summary(job))
-    |> override_verdict(run, last, job, board, now)
+    |> override_verdict(run, last, job, board, now, capacity)
   end
 
-  defp override_verdict(base, run, last, job, board, now) do
+  defp override_verdict(base, run, last, job, board, now, capacity) do
     cond do
       run != nil and stranded?(job, board, now) -> stranded_verdict(base, job)
+      run != nil and roster_blocked?(job, board, now, capacity) -> roster_blocked_verdict(base, capacity)
       run == nil and last != nil and last.status == :failed -> run_failed_verdict(base, last)
       true -> base
     end
+  end
+
+  # A live run whose current job is NOT being worked (queued/unclaimed, or held by a silent
+  # executor) while the roster reason is "everyone refused / nobody connected" — the RLY-191
+  # false-"working" case explain/2 can't see, because run != nil short-circuits it to
+  # :run_active. A busy-but-healthy roster (:awaiting_capacity) is deliberately excluded.
+  defp roster_blocked?(job, board, now, {reason, _bits}) do
+    reason in [:executor_outdated, :no_executor, :executor_gone] and not job_working?(job, board, now)
+  end
+
+  defp job_working?(%NodeJob{state: :running, executor_name: name}, board, now) when is_binary(name) do
+    case Repo.get_by(Executor, board_id: board.id, name: name) do
+      nil -> false
+      executor -> not executor_stale?(executor, now)
+    end
+  end
+
+  defp job_working?(_job, _board, _now), do: false
+
+  defp roster_blocked_verdict(base, {:executor_outdated, bits}) do
+    %{
+      base
+      | verdict: :executor_outdated,
+        detail:
+          "This run's node-job is queued but unclaimed — every connected executor is running old " <>
+            "code and is being refused (#{Scheduler.running_versions_phrase(bits)}, " <>
+            "requires v#{bits.required_version}). Restart it to pick up current code.",
+        evidence: Map.merge(base.evidence, bits)
+    }
+  end
+
+  defp roster_blocked_verdict(base, {reason, bits}) when reason in [:no_executor, :executor_gone] do
+    %{
+      base
+      | verdict: :no_executor,
+        detail: "This run's node-job is queued but no executor is connected to claim it.",
+        evidence: Map.merge(base.evidence, bits)
+    }
   end
 
   defp stranded_verdict(base, job) do

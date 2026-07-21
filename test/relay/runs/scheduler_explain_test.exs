@@ -1,6 +1,7 @@
 defmodule Relay.Runs.SchedulerExplainTest do
   use ExUnit.Case, async: true
 
+  alias Relay.Runs
   alias Relay.Runs.Scheduler
   alias Relay.Runs.Scheduler.Snapshot
 
@@ -51,6 +52,16 @@ defmodule Relay.Runs.SchedulerExplainTest do
 
   defp slots(shared, excl), do: %{shared_clean: shared, exclusive: excl}
 
+  defp exec(id, opts \\ []) do
+    {id,
+     %{
+       name: Keyword.get(opts, :name, "e#{id}"),
+       version: Keyword.get(opts, :version, 1),
+       outdated: Keyword.get(opts, :outdated, false),
+       freshness: Keyword.get(opts, :freshness, :fresh)
+     }}
+  end
+
   defp base(opts) do
     snap(
       stages: [stage(1, position: 1), stage(2, position: 2)],
@@ -75,10 +86,10 @@ defmodule Relay.Runs.SchedulerExplainTest do
     assert evidence.flow_key == nil
   end
 
-  test "a flow that would pull but zero advertised capacity is awaiting_capacity" do
+  test "a flow that would pull but no executor at all is no_executor" do
     s = base(cards: [card(10, 1)], flows: [flow("code", 1, 2)], capacity: %{})
 
-    assert %{verdict: :awaiting_capacity, detail: detail, evidence: evidence} = Scheduler.explain(s, 10)
+    assert %{verdict: :no_executor, detail: detail, evidence: evidence} = Scheduler.explain(s, 10)
     assert detail =~ "no executor"
     assert evidence.flow_key == "code"
     assert evidence.capacity == %{}
@@ -175,6 +186,69 @@ defmodule Relay.Runs.SchedulerExplainTest do
 
   test "an unknown card id is reported, not raised" do
     assert %{verdict: :unknown_card} = Scheduler.explain(base(cards: []), 999)
+  end
+
+  describe "the terminal capacity branch (RLY-191)" do
+    # A card a flow would pull, but no free slot — the branch that used to be one
+    # undifferentiated :awaiting_capacity now splits on the roster.
+    defp blocked(executors) do
+      snap(
+        stages: [stage(1, position: 1), stage(2, position: 2)],
+        cards: [card(10, 1)],
+        flows: [flow("code", 1, 2)],
+        capacity: %{},
+        executors: executors
+      )
+    end
+
+    test "an empty roster is :no_executor, not :awaiting_capacity" do
+      assert %{verdict: :no_executor, detail: detail} = Scheduler.explain(blocked(%{}), 10)
+      assert detail =~ "no executor is connected"
+    end
+
+    test "every live executor outdated is :executor_outdated with the version pair" do
+      execs = Map.new([exec(1, outdated: true, version: nil), exec(2, outdated: true, version: 0)])
+
+      assert %{verdict: :executor_outdated, detail: detail, evidence: evidence} =
+               Scheduler.explain(blocked(execs), 10)
+
+      assert detail =~ "running old code"
+      assert detail =~ "requires v#{Runs.min_executor_version()}"
+      assert evidence.required_version == Runs.min_executor_version()
+      assert %{name: _, version: nil} = Enum.find(evidence.running_versions, &(&1.version == nil))
+      assert Enum.any?(evidence.running_versions, &(&1.version == 0))
+    end
+
+    test "a current-but-full roster stays :awaiting_capacity" do
+      execs = Map.new([exec(1, outdated: false, version: 1, freshness: :fresh)])
+
+      assert %{verdict: :awaiting_capacity, detail: detail} = Scheduler.explain(blocked(execs), 10)
+      assert detail =~ "busy"
+    end
+
+    test "a roster whose only executor has gone silent is :no_executor" do
+      execs = Map.new([exec(1, freshness: :gone)])
+
+      assert %{verdict: :no_executor} = Scheduler.explain(blocked(execs), 10)
+    end
+  end
+
+  describe "capacity_diagnosis/1" do
+    test "returns the reason atom and the version evidence" do
+      execs = Map.new([exec(1, outdated: true, version: 2)])
+      s = snap(cards: [], executors: execs)
+
+      assert {:executor_outdated, %{required_version: required, running_versions: [%{version: 2}]}} =
+               Scheduler.capacity_diagnosis(s)
+
+      assert required == Runs.min_executor_version()
+      assert {:no_executor, _} = Scheduler.capacity_diagnosis(snap(cards: [], executors: %{}))
+
+      assert {:executor_gone, _} =
+               Scheduler.capacity_diagnosis(snap(cards: [], executors: Map.new([exec(1, freshness: :gone)])))
+
+      assert {:awaiting_capacity, _} = Scheduler.capacity_diagnosis(snap(cards: [], executors: Map.new([exec(1)])))
+    end
   end
 
   describe "agreement with plan/1" do

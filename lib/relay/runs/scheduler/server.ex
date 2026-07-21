@@ -116,10 +116,30 @@ defmodule Relay.Runs.Scheduler.Server do
       cards: Enum.map(cards, &card_snap(&1, board)),
       flows: Enum.map(Relay.Flows.list_enabled_flows(board), &flow_snap/1),
       runs: runs,
-      capacity: reserve_active_runs(Capacity.snapshot(), runs)
+      capacity: reserve_active_runs(Capacity.snapshot(), runs),
+      executors: executor_snap(board_id)
     }
 
     {snapshot, Map.new(cards, &{&1.id, &1})}
+  end
+
+  # Reuses Relay.Runs.executor_outdated?/1 and executor_freshness/2 — the same truth the
+  # runners view and the reaper read — so the scheduler's "outdated" can never disagree with
+  # the roster's. `now` is read once for a consistent freshness pass.
+  defp executor_snap(board_id) do
+    now = DateTime.utc_now()
+
+    board_id
+    |> Relay.Runs.list_board_executors()
+    |> Map.new(fn e ->
+      {e.id,
+       %{
+         name: e.name,
+         version: e.version,
+         outdated: Relay.Runs.executor_outdated?(e),
+         freshness: Relay.Runs.executor_freshness(e, now)
+       }}
+    end)
   end
 
   @doc "The app's configured engine — for callers with no injected one (e.g. `Runs.diagnose/3`)."
