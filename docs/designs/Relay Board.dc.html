@@ -244,6 +244,9 @@
                                 <sc-if value="{{ card.showTag }}" hint-placeholder-val="{{ false }}">
                                   <span style="font-size:11px;color:oklch(0.60 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">#{{ card.tag }}</span>
                                 </sc-if>
+                                <sc-if value="{{ card.showVotes }}" hint-placeholder-val="{{ false }}">
+                                  <span style="{{ card.votesStyle }}" title="Public supporters">{{ card.votesLabel }}</span>
+                                </sc-if>
                                 <span style="flex:1;"></span>
                                 <div style="{{ card.clusterStyle }}">
                                   <sc-for list="{{ card.avatars }}" as="av" hint-placeholder-count="1">
@@ -284,6 +287,7 @@
         <button onClick="{{ onSecStages }}" style="{{ nav.stages }}">Stages</button>
         <button onClick="{{ onSecMembers }}" style="{{ nav.members }}">Members</button>
         <button onClick="{{ onSecKeys }}" style="{{ nav.keys }}">API keys</button>
+        <button onClick="{{ onSecPublic }}" style="{{ navPublic }}">Public board</button>
       </div>
 
       <!-- content -->
@@ -314,6 +318,46 @@
               <button style="background:oklch(0.98 0.015 15);border:1px solid oklch(0.86 0.06 15);color:oklch(0.52 0.16 15);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;">Archive board</button>
             </div>
           </div>
+        </sc-if>
+
+        <!-- PUBLIC BOARD -->
+        <sc-if value="{{ isPublicSec }}" hint-placeholder-val="{{ false }}">
+          <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 4px 0;color:oklch(0.24 0.02 255);">Public board</h1>
+          <p style="font-size:14px;line-height:1.55;color:oklch(0.52 0.02 255);margin:0 0 28px 0;max-width:560px;">Open a read-only version of this board to the public. Anyone can browse it, upvote ideas, and post their own — new posts arrive on your board as cards.</p>
+
+          <div style="display:flex;align-items:center;gap:16px;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px 18px;">
+            <div style="flex:1;">
+              <div style="font-size:14px;font-weight:600;color:oklch(0.28 0.02 255);">Enable public board</div>
+              <div style="font-size:12.5px;color:oklch(0.55 0.02 255);margin-top:2px;">When on, the public URL below is live.</div>
+            </div>
+            <button onClick="{{ onTogglePublic }}" style="{{ publicToggleStyle }}"><span style="{{ publicKnobStyle }}"></span></button>
+          </div>
+
+          <sc-if value="{{ publicEnabled }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;flex-direction:column;gap:26px;margin-top:24px;">
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <label style="font-size:12px;font-weight:600;color:oklch(0.40 0.02 255);">Public URL</label>
+                <div style="display:flex;align-items:center;gap:8px;max-width:460px;">
+                  <div style="flex:1;display:flex;align-items:center;border:1px solid oklch(0.90 0.006 255);border-radius:9px;padding:10px 12px;background:oklch(0.99 0.002 255);font-size:13.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.40 0.02 255);">{{ publicUrl }}</div>
+                  <a href="#" style="flex:0 0 auto;background:oklch(0.96 0.006 255);border:1px solid oklch(0.90 0.006 255);color:oklch(0.42 0.02 255);border-radius:9px;padding:10px 14px;font-size:13px;font-weight:600;">Open ↗</a>
+                </div>
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:10px;">
+                <label style="font-size:12px;font-weight:600;color:oklch(0.40 0.02 255);">New public ideas arrive in</label>
+                <p style="font-size:12.5px;line-height:1.5;color:oklch(0.55 0.02 255);margin:0 0 2px 0;max-width:520px;">When someone posts on the public board, Relay creates a card in this stage. Their title and public description become the card's title and description.</p>
+                <div style="display:flex;flex-direction:column;gap:6px;max-width:460px;">
+                  <sc-for list="{{ intakeStages }}" as="st" hint-placeholder-count="3">
+                    <div onClick="{{ st.onPick }}" style="{{ st.rowStyle }}">
+                      <span style="{{ st.dotStyle }}"></span>
+                      <span style="font-size:13.5px;color:oklch(0.32 0.02 255);flex:1;">{{ st.name }}</span>
+                      <sc-if value="{{ st.active }}" hint-placeholder-val="{{ false }}"><span style="font-size:13px;color:oklch(0.50 0.13 250);font-weight:600;">✓</span></sc-if>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+          </sc-if>
         </sc-if>
 
         <!-- STAGES -->
@@ -880,6 +924,23 @@
               <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:12px;color:oklch(0.55 0.02 255);">Created</span><span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.40 0.02 255);">{{ drawer.created }}</span></div>
               <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:12px;color:oklch(0.55 0.02 255);">Updated</span><span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.40 0.02 255);">{{ drawer.updated }}</span></div>
             </div>
+
+            <sc-if value="{{ drawer.hasVotes }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.62 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">PUBLIC SUPPORT</span>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <div style="display:flex;align-items:center;">
+                    <sc-for list="{{ drawer.supporterFaces }}" as="f" hint-placeholder-count="3">
+                      <div style="{{ f.style }}" title="{{ f.name }}">{{ f.initials }}</div>
+                    </sc-for>
+                  </div>
+                  <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);">{{ drawer.voteCountLabel }}</span>
+                </div>
+                <sc-if value="{{ drawer.supMoreShow }}" hint-placeholder-val="{{ false }}">
+                  <span style="font-size:11.5px;color:oklch(0.60 0.02 255);">{{ drawer.supMoreLabel }}</span>
+                </sc-if>
+              </div>
+            </sc-if>
           </div>
 
         </div>
@@ -940,17 +1001,17 @@ class Component extends DCLogic {
       return Object.assign({ id: 'c' + (++n), ref: 'RLY-' + (99 + n), tag: '', sub: 'ongoing', progress: 0, created: 'Mar 2', desc: '', spec: '', plan: '', checklist: [], comments: [], result: null, skipReview: false, skipStages: [], activity: [{ t: 'Created', ts: 'earlier' }] }, o, { owners, activeHuman: o.activeHuman || owners[0] });
     };
     const cards = [
-      c({ title: 'Add SSO for enterprise accounts', tag: 'auth', owners: ['dk'], stageId: 'backlog', desc: 'SAML + OIDC login for enterprise plans, with SCIM provisioning as a fast follow.' }),
+      c({ title: 'Add SSO for enterprise accounts', tag: 'auth', owners: ['dk'], stageId: 'backlog', votes: 128, desc: 'SAML + OIDC login for enterprise plans, with SCIM provisioning as a fast follow.' }),
       c({ title: 'Redesign the empty states', tag: 'design', owners: ['ml'], stageId: 'backlog', desc: 'Every empty board, column, and card list needs a purposeful empty state.' }),
-      c({ title: 'Bulk-edit for board cards', tag: 'product', owners: ['jr'], stageId: 'next', skipStages: ['spec'], desc: 'Select multiple cards and move, tag, or assign them at once.' }),
-      c({ title: 'Export the board to CSV', tag: 'product', owners: ['dk'], stageId: 'spec', sub: 'ongoing', desc: 'Let people export the whole board — one row per card, columns for stage, owner, tags.',
+      c({ title: 'Bulk-edit for board cards', tag: 'product', owners: ['jr'], stageId: 'next', skipStages: ['spec'], votes: 41, desc: 'Select multiple cards and move, tag, or assign them at once.' }),
+      c({ title: 'Export the board to CSV', tag: 'product', owners: ['dk'], stageId: 'spec', sub: 'ongoing', votes: 96, desc: 'Let people export the whole board — one row per card, columns for stage, owner, tags.',
         spec: '## Problem\nTeams want to pull board data into their own spreadsheets for reporting and offline review. Today the only way out is copy-paste, which loses stage, owner, and tag structure.\n\n## Scope (v1)\nA flat CSV export of the current board. One row per card. **No** nested sub-cards or comment history in this pass — that is a fast-follow.\n\n## Columns\n- Card title\n- Stage\n- Owner(s)\n- Tag\n- Sub-status (In progress / Review / Done)\n- Created date\n\n## Acceptance criteria\n- Export button lives in the board overflow menu\n- Respects the current filter (only exports visible cards)\n- File name is `board-name-YYYY-MM-DD.csv`\n- UTF-8 with a BOM so Excel opens accents correctly',
         checklist: [{ t: 'List required columns', done: true }, { t: 'Decide on nested sub-cards', done: false }, { t: 'Write acceptance criteria', done: false }],
         comments: [{ who: 'dk', text: 'Starting the spec — I think we scope v1 to a flat export, no sub-cards.', ts: '12m ago' }],
         activity: [{ t: 'You started the spec', ts: '12m ago' }] }),
-      c({ title: 'Slack notifications v2', tag: 'integrations', owners: ['ml'], stageId: 'spec', sub: 'done', desc: 'Per-channel routing and digest options for board events.',
+      c({ title: 'Slack notifications v2', tag: 'integrations', owners: ['ml'], stageId: 'spec', sub: 'done', votes: 63, desc: 'Per-channel routing and digest options for board events.',
         activity: [{ t: 'Spec finished — ready for Plan', ts: '5m ago' }] }),
-      c({ title: 'Realtime cursors on the board', tag: 'eng', owners: ['sy'], stageId: 'plan', sub: 'ongoing', progress: 44, desc: 'Show live cursors and selections as teammates move around the board.',
+      c({ title: 'Realtime cursors on the board', tag: 'eng', owners: ['sy'], stageId: 'plan', sub: 'ongoing', progress: 44, votes: 33, desc: 'Show live cursors and selections as teammates move around the board.',
         spec: '## Problem\nWhen several people work a board at once there is no sense of presence — you cannot tell who is looking at what, and two people editing the same card collide silently.\n\n## Scope\n- Live cursors with each person\u2019s name and color\n- Highlight the card a teammate has open\n- Presence list in the board header\n\n## Acceptance criteria\n- Cursor latency under 100ms on a normal connection\n- Gracefully degrades to \u201clast seen\u201d dots when a tab is backgrounded\n- No cursor rendering for the current user',
         plan: '## Approach\nBuild on **Phoenix Presence** over the existing board socket rather than standing up a new service. Presence already tracks join/leave; we extend the payload with cursor position.\n\n## Steps\n1. Extend the presence payload with `{ x, y, cardId }`, throttled to 20 updates/sec\n2. Add a `<CursorLayer>` that renders absolutely-positioned cursors from presence state\n3. Interpolate positions client-side so movement looks smooth between packets\n4. Reuse the member hue map for cursor color\n\n## Risks\n- Broadcast volume on large boards \u2014 mitigate with throttling + coalescing\n- Cursor drift on zoom/pan \u2014 store positions in board coordinates, not screen pixels',
         checklist: [{ t: 'Choose presence transport', done: true }, { t: 'Draft data model', done: false }],
@@ -990,7 +1051,7 @@ class Component extends DCLogic {
       c({ title: 'Dark mode polish', tag: 'design', owners: ['jr'], stageId: 'complete', progress: 100, desc: 'Fix the last contrast issues in dark mode.',
         activity: [{ t: 'Verified in prod', ts: 'Mon' }] }),
     ];
-    return { people, stages, cards, view: 'board', settingsSection: 'general', selectedId: null, dragOverKey: null, composeStage: null, composeText: '', answerText: '', commentText: '', rejectText: '', commentsExpanded: false, activityExpanded: false, rejectOpen: false, reassignOpen: false, dragging: false, forceOpen: {}, logs: [], pulses: {}, unseen: {}, logOpen: false, unseenLog: 0,
+    return { people, stages, cards, view: 'board', settingsSection: 'general', publicEnabled: true, publicIntakeStageId: 'backlog', selectedId: null, dragOverKey: null, composeStage: null, composeText: '', answerText: '', commentText: '', rejectText: '', commentsExpanded: false, activityExpanded: false, rejectOpen: false, reassignOpen: false, dragging: false, forceOpen: {}, logs: [], pulses: {}, unseen: {}, logOpen: false, unseenLog: 0,
       vw: (typeof window !== 'undefined' ? window.innerWidth : 1200),
       sendBackOpen: false, sendBackStage: null, sendBackText: '', longOpen: {}, longEdit: {}, editDesc: false, draft: {}, saveStatus: {}, typeMenuFor: null, titleEditing: false, titleDraft: '',
       boardName: 'Product workspace', slug: 'acme/product', inviteEmail: '', inviteRole: 'Member', copiedKeyId: null,
@@ -1115,6 +1176,15 @@ class Component extends DCLogic {
   closeDrawer() { this.setState({ selectedId: null }); }
   openSettings() { this.setState({ view: 'settings', selectedId: null }); }
   closeSettings() { this.setState({ view: 'board' }); }
+  togglePublic() { this.setState(s => ({ publicEnabled: !s.publicEnabled })); }
+  setIntake(id) { this.setState({ publicIntakeStageId: id }); }
+  supList(seed, votes, cap) {
+    const P = [{ n: 'Maya L.', i: 'ML', h: 195 }, { n: 'Dana K.', i: 'DK', h: 250 }, { n: 'Sam Y.', i: 'SY', h: 155 }, { n: 'Jordan R.', i: 'JR', h: 15 }, { n: 'Priya N.', i: 'PN', h: 300 }, { n: 'Tom A.', i: 'TA', h: 95 }];
+    const out = []; const nn = Math.min(cap, votes, P.length);
+    for (let i = 0; i < nn; i++) out.push(P[(seed + i) % P.length]);
+    return { list: out, more: Math.max(0, votes - out.length) };
+  }
+  supAvStyle(h, size, i) { return { width: size + 'px', height: size + 'px', borderRadius: '50%', background: 'oklch(0.62 0.13 ' + h + ')', color: 'oklch(1 0 0)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: (size <= 22 ? '8.5px' : '10px'), fontWeight: 600, border: '2px solid oklch(1 0 0)', marginLeft: (i ? '-7px' : '0'), flex: '0 0 auto' }; }
   openBoards() { this.setState({ view: 'boards', selectedId: null }); }
   selectBoard(id) { const b = this.state.boards.find(x => x.id === id); if (!b) return; this.setState(s => ({ view: 'board', selectedId: null, boardName: b.name, slug: b.slug, boards: s.boards.map(x => ({ ...x, current: x.id === id })) })); }
   newBoard() { const id = 'b' + Date.now(); this.setState(s => ({ boards: [...s.boards, { id, name: 'Untitled board', slug: 'acme/untitled', hue: 220, current: false, members: ['dk'], dist: [{ owner: 'human', n: 0 }, { owner: 'human', n: 0 }, { owner: 'ai', n: 0 }], counts: { total: 0, ai: 0, needs: 0, review: 0, done: 0 }, updated: 'just now' }] })); }
@@ -1340,6 +1410,8 @@ class Component extends DCLogic {
         pulseNode, unseenShow, unseenLabel: unseenN > 1 ? String(unseenN) : '',
         unseenStyle: { position: 'absolute', top: '-6px', right: '-6px', minWidth: '15px', height: '15px', padding: '0 4px', borderRadius: '8px', background: cueCol, color: 'oklch(1 0 0)', fontSize: '9.5px', fontWeight: 700, fontFamily: mono, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 0 2px oklch(1 0 0)', animation: 'relaybadgepop 0.3s ease-out', zIndex: 2 },
         id: card.id, title: card.title, tag: card.tag, showTag: !!card.tag && !working,
+        showVotes: (card.votes || 0) > 0, votesLabel: '\u2191 ' + (card.votes || 0),
+        votesStyle: { fontSize: '11px', fontFamily: mono, color: 'oklch(0.56 0.02 255)', display: 'flex', alignItems: 'center', gap: '3px' },
         style: { position: 'relative', background: 'oklch(1 0 0)', border: '1px solid oklch(0.92 0.006 255)', borderLeft: '3px solid ' + accent, borderRadius: '9px', padding: '10px 11px', display: 'flex', flexDirection: 'column', gap: '8px', cursor: 'grab', boxShadow: '0 1px 2px oklch(0.55 0.03 255/0.05)', userSelect: 'none' },
         showProgress: showProgress, progressStyle: { height: '100%', width: (card.progress || 0) + '%', background: VIOLET, borderRadius: '3px', transition: 'width 0.6s ease' },
         showLastLog,
@@ -1521,6 +1593,12 @@ class Component extends DCLogic {
       else settingsGroups.push({ cat: st.category, key: st.category + '-' + i, label: catMeta[st.category].label, dotStyle: catMeta[st.category].dotStyle, rows: [row], count: 1, onAdd: () => this.addStage(st.category) });
     });
 
+    // Public board settings
+    const intakeStages = s.stages.map(st => { const on = st.id === s.publicIntakeStageId; return { id: st.id, name: st.name, active: on, dotStyle: catMeta[st.category].dotStyle, onPick: () => this.setIntake(st.id), rowStyle: { display: 'flex', alignItems: 'center', gap: '9px', padding: '10px 12px', borderRadius: '9px', cursor: 'pointer', background: on ? 'oklch(0.97 0.02 250)' : 'oklch(1 0 0)', border: '1px solid ' + (on ? 'oklch(0.86 0.05 250)' : 'oklch(0.92 0.006 255)') } }; });
+    const publicOn = !!s.publicEnabled;
+    const publicToggleStyle = { width: '40px', height: '23px', borderRadius: '12px', border: 'none', padding: 0, position: 'relative', cursor: 'pointer', background: publicOn ? 'oklch(0.60 0.14 250)' : 'oklch(0.88 0.01 255)', transition: 'background 0.15s' };
+    const publicKnobStyle = { position: 'absolute', top: '2px', left: publicOn ? '19px' : '2px', width: '19px', height: '19px', borderRadius: '50%', background: 'oklch(1 0 0)', transition: 'left 0.15s', display: 'block' };
+
     // Board-settings: nav, members, keys
     const navItem = (active) => ({ textAlign: 'left', border: 'none', borderRadius: '8px', padding: '8px 10px', fontSize: '13.5px', fontWeight: active ? 600 : 500, background: active ? 'oklch(0.95 0.03 250)' : 'transparent', color: active ? 'oklch(0.42 0.13 250)' : 'oklch(0.44 0.02 255)', cursor: 'pointer' });
     const seg2 = (active) => ({ fontSize: '12px', fontWeight: 600, padding: '6px 13px', borderRadius: '6px', border: 'none', whiteSpace: 'nowrap', background: active ? 'oklch(1 0 0)' : 'transparent', color: active ? 'oklch(0.30 0.02 255)' : 'oklch(0.52 0.02 255)', boxShadow: active ? '0 1px 2px oklch(0.5 0.03 255/0.12)' : 'none', cursor: 'pointer' });
@@ -1668,6 +1746,10 @@ class Component extends DCLogic {
       const activityCollapsed = activityToggleShow && !s.activityExpanded;
       const activityView = activityCollapsed ? allActivity.slice(0, ACT_CAP) : allActivity;
       const activityHiddenCount = allActivity.length - ACT_CAP;
+      const supN = sel.votes || 0;
+      const supSeed = parseInt((sel.id || 'c0').slice(1)) || 0;
+      const supRes = this.supList(supSeed, supN, 4);
+      const supporterFaces = supRes.list.map((p, i) => ({ initials: p.i, name: p.n, style: this.supAvStyle(p.h, 24, i) }));
 
       drawer = {
         open: true, title: sel.title, cardRef: 'RLY-' + (100 + this.stageIndex(selStage.id) + sel.id.length),
@@ -1697,6 +1779,7 @@ class Component extends DCLogic {
         skipReviewKnobStyle: { position: 'absolute', top: '2px', left: srOn ? '18px' : '2px', width: '18px', height: '18px', borderRadius: '50%', background: 'oklch(1 0 0)', transition: 'left 0.15s', display: 'block' },
         hasSkipStages: downstream.length > 0, skipStages,
         hasTag: !!sel.tag, tag: sel.tag, created: sel.created || 'Mar 2', updated: lastTs,
+        hasVotes: supN > 0, voteCountLabel: supN + (supN === 1 ? ' supporter' : ' supporters'), supporterFaces, supMoreShow: supRes.more > 0, supMoreLabel: '+ ' + supRes.more + ' more',
         longSections,
         canSendBack: idx > 0 && !stCompleted, sendBackOpen: s.sendBackOpen, sendBackClosed: !s.sendBackOpen, backTargets, sendBackName, sendBackHasTarget: !!s.sendBackStage,
         bodyStyle: isMobile
@@ -1783,7 +1866,13 @@ class Component extends DCLogic {
       onInviteKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); this.invite(); } },
       onInviteMember: () => this.setState({ inviteRole: 'Member' }), onInviteAdmin: () => this.setState({ inviteRole: 'Admin' }),
       onInvite: () => this.invite(), onCreateKey: () => this.createKey(),
-      groups, settingsGroups,
+      groups, settingsGroups, intakeStages,
+      isPublicSec: s.settingsSection === 'public',
+      navPublic: navItem(s.settingsSection === 'public'),
+      onSecPublic: () => this.setState({ settingsSection: 'public' }),
+      publicEnabled: publicOn, onTogglePublic: () => this.togglePublic(),
+      publicToggleStyle, publicKnobStyle,
+      publicUrl: 'relay.com/board/' + s.slug + '/public',
       composeText: s.composeText, answerText: s.answerText,
       descText: (s.draft.desc != null ? s.draft.desc : (sel ? (sel.desc || '') : '')), commentText: s.commentText, rejectText: s.rejectText,
       onComposeInput: (e) => this.setState({ composeText: e.target.value }),
@@ -1837,4 +1926,3 @@ class Component extends DCLogic {
 </script>
 </body>
 </html>
-
