@@ -58,32 +58,38 @@ defmodule Relay.Runs do
   maps — the shape `Relay.Runs.Scheduler.plan/1` reads. `isolation` comes from
   the live flow row (left-joined, so a run whose flow was deleted still appears
   and excludes its card from fresh pulls, with `isolation: nil` → undispatchable
-  until the run fails on its next transition). `pinned_executor_id` is always
-  nil: executor-affinity pinning (deriving which executor already holds an
-  `:exclusive` run's worktree) is UNIMPLEMENTED (RLY-139), not merely unused.
-  Every board can enable an `:exclusive`-isolation flow today (e.g. the seeded
-  `code` flow, toggleable from board settings) — until RLY-139 lands, a parked
-  run from one never resumes (`Scheduler.resume_runs/2`'s `{:pinned, nil}`
-  target is never free), so enabling such a flow is not yet safe.
+  until the run fails on its next transition).
+
+  `pinned_executor_name` is the run's persisted exclusive-affinity pin (RLY-199,
+  set on claim, kept through an `:executor_gone` park, cleared by a human baton);
+  `pinned_executor_id` resolves it to that board's durable executor row id — the
+  key `Relay.Runs.Capacity` is keyed by — via a left join on `(board_id, name)`
+  (nil when unpinned or the executor row is absent). `Scheduler.resume_runs/2`
+  targets `{:pinned, pinned_executor_id}` for an exclusive resume, so an
+  `:exclusive` flow's parked run now resumes on the machine holding its worktree.
   """
   def active_runs(board_id) do
-    from(r in Run,
-      join: c in Card,
-      on: c.id == r.card_id,
-      left_join: f in Flow,
-      on: f.id == r.flow_id,
-      where: c.board_id == ^board_id and r.status in ^Run.active_statuses(),
-      select: %{
-        id: r.id,
-        card_id: r.card_id,
-        status: r.status,
-        flow_key: r.flow_key,
-        isolation: f.isolation,
-        parked_reason: r.parked_reason
-      }
+    Repo.all(
+      from(r in Run,
+        join: c in Card,
+        on: c.id == r.card_id,
+        left_join: f in Flow,
+        on: f.id == r.flow_id,
+        left_join: e in Executor,
+        on: e.board_id == c.board_id and e.name == r.pinned_executor_name,
+        where: c.board_id == ^board_id and r.status in ^Run.active_statuses(),
+        select: %{
+          id: r.id,
+          card_id: r.card_id,
+          status: r.status,
+          flow_key: r.flow_key,
+          isolation: f.isolation,
+          parked_reason: r.parked_reason,
+          pinned_executor_name: r.pinned_executor_name,
+          pinned_executor_id: e.id
+        }
+      )
     )
-    |> Repo.all()
-    |> Enum.map(&Map.put(&1, :pinned_executor_id, nil))
   end
 
   @doc "The card's single active (running or parked) run, or nil — backed by the partial unique index."
@@ -770,9 +776,21 @@ defmodule Relay.Runs do
 
       job ->
         {:ok, claimed} = claim_job(job, name)
+        maybe_pin_run(claimed, name)
         claimed
     end
   end
+
+  # On claiming an exclusive run's job, persist the holder on the run row so BOTH
+  # readers — the claim layer (exclusive_holder/2) and the scheduler (active_runs/1) —
+  # derive the same pin from ONE column (RLY-199). Idempotent: a re-claim by the same
+  # holder rewrites the same name. shared_clean runs are never pinned.
+  defp maybe_pin_run(%NodeJob{run_id: run_id, payload: %{"isolation" => "exclusive"}}, name) do
+    Repo.update_all(from(r in Run, where: r.id == ^run_id), set: [pinned_executor_name: name])
+    :ok
+  end
+
+  defp maybe_pin_run(_job, _name), do: :ok
 
   @doc """
   Of the job ids an executor reports it is running, those the server no longer considers
@@ -1104,15 +1122,53 @@ defmodule Relay.Runs do
     |> put_evidence(:current_node, run && run.current_node)
     |> put_evidence(:last_execution, last_execution_summary(last))
     |> put_evidence(:job, job_summary(job))
+    |> layer_pin_freshness(board, now)
     |> override_verdict(run, last, job, board, now, capacity)
   end
 
   defp override_verdict(base, run, last, job, board, now, capacity) do
     cond do
-      run != nil and stranded?(job, board, now) -> stranded_verdict(base, job)
-      run != nil and roster_blocked?(job, board, now, capacity) -> roster_blocked_verdict(base, capacity)
-      run == nil and last != nil and last.status == :failed -> run_failed_verdict(base, last)
-      true -> base
+      run != nil and stranded?(job, board, now) ->
+        stranded_verdict(base, job)
+
+      run != nil and roster_blocked?(run, job, board, now, capacity) ->
+        roster_blocked_verdict(base, capacity)
+
+      run == nil and last != nil and last.status == :failed ->
+        run_failed_verdict(base, last)
+
+      true ->
+        base
+    end
+  end
+
+  # For a parked pinned run, explain/2 has already named the awaited executor in the
+  # detail sentence and stamped evidence.pinned_executor_name. The snapshot can't know
+  # whether that machine is connected RIGHT NOW, so layer the live freshness on here —
+  # the same way current_node is layered from DB state the snapshot lacks.
+  defp layer_pin_freshness(%{evidence: %{pinned_executor_name: name}} = base, board, now) when is_binary(name) do
+    {label, sentence} = executor_freshness_note(board, name, now)
+
+    %{
+      base
+      | detail: base.detail <> " " <> sentence,
+        evidence: Map.put(base.evidence, :pinned_executor_freshness, label)
+    }
+  end
+
+  defp layer_pin_freshness(base, _board, _now), do: base
+
+  defp executor_freshness_note(board, name, now) do
+    case Repo.get_by(Executor, board_id: board.id, name: name) do
+      nil ->
+        {:absent, ~s(Executor "#{name}" is not currently connected.)}
+
+      executor ->
+        case executor_freshness(executor, now) do
+          :fresh -> {:fresh, ~s(Executor "#{name}" is connected and beating.)}
+          :stale -> {:stale, ~s(Executor "#{name}" is connected but a heartbeat is overdue.)}
+          :gone -> {:gone, ~s(Executor "#{name}" has gone silent past the stale threshold.)}
+        end
     end
   end
 
@@ -1120,7 +1176,14 @@ defmodule Relay.Runs do
   # executor) while the roster reason is "everyone refused / nobody connected" — the RLY-191
   # false-"working" case explain/2 can't see, because run != nil short-circuits it to
   # :run_active. A busy-but-healthy roster (:awaiting_capacity) is deliberately excluded.
-  defp roster_blocked?(job, board, now, {reason, _bits}) do
+  #
+  # A :parked run never hits this: run_verdict/2 already gives it the correct, specific
+  # verdict (never :run_active), so there is no "false working" claim to correct — and for
+  # a parked *pinned* run (RLY-199) that verdict names the awaited machine, which this
+  # generic roster message would otherwise clobber.
+  defp roster_blocked?(%{status: :parked}, _job, _board, _now, _capacity), do: false
+
+  defp roster_blocked?(_run, job, board, now, {reason, _bits}) do
     reason in [:executor_outdated, :no_executor, :executor_gone] and not job_working?(job, board, now)
   end
 
@@ -1631,7 +1694,7 @@ defmodule Relay.Runs do
 
     query = from r in Run, where: r.id == ^run.id and r.status == :running, select: r
 
-    case Repo.update_all(query, set: [status: :parked, parked_reason: :claimed]) do
+    case Repo.update_all(query, set: [status: :parked, parked_reason: :claimed, pinned_executor_name: nil]) do
       {1, [updated]} ->
         revoke_active_jobs(updated)
         broadcast_runs(board_id_of(updated), {:run_parked, updated})
@@ -1718,29 +1781,18 @@ defmodule Relay.Runs do
     |> Repo.insert!()
   end
 
-  # Exclusive runs have absolute executor affinity (ADR 0006 §5): once an
-  # executor claims a run's first job, every later job — the next node after an
-  # advance, or the same node re-entered after needs-input — is pinned to that
-  # same executor, so it lands on the machine holding the run's worktree. The
-  # first job has no prior holder (returns nil → unpinned), so any executor with
-  # exclusive capacity may start the run. `shared_clean` runs are never pinned.
-  # Without this, a parked exclusive run's resume job is unpinned and the holder
-  # (advertising exclusive: 0) can never reclaim it — the affinity deadlock.
-  #
-  # Affinity is read from the SINGLE most-recent job, and only while it isn't
-  # `:revoked`. A normal advance and a needs-input park both finalize the prior
-  # job to `:done` with the slot kept bound (the worktree survives) → pin. A
-  # revoke (human baton via `park_claimed`, or `executor_gone` reclaim) resets
-  # the worktree and unbinds the slot → the most-recent job is `:revoked` → do
-  # not pin, so the resume re-offers to any free executor with a fresh worktree.
-  # (Looking only at the most-recent job — not the newest non-nil `executor_name`
-  # — is what makes the multi-node revoke case correct: an earlier `:done` node's
-  # retained name must not resurrect affinity the revoke just voided.)
+  # Exclusive runs have absolute executor affinity (ADR 0006 §5): the machine that
+  # claims a run's first job is persisted as the run's `pinned_executor_name`
+  # (`maybe_pin_run/2`), and every later job — the next node after an advance, a
+  # needs-input re-entry, or an `executor_gone` resume — is pinned to that same column,
+  # so it lands on the machine holding the run's worktree. The first job of a fresh run
+  # reads nil (unpinned → any exclusive executor may start it). `park_claimed/1` (human
+  # baton) nils the column, so a baton resume re-offers to any free executor with a
+  # fresh worktree; `park_for_reclaim/1` (executor_gone) KEEPS it, so the resume returns
+  # to the holder. `shared_clean` runs are never pinned. One column, two readers (here
+  # and `active_runs/1`) — no second derivation to drift (RLY-199).
   defp exclusive_holder(%Run{id: run_id}, %{"isolation" => "exclusive"}) do
-    case Repo.one(from j in NodeJob, where: j.run_id == ^run_id, order_by: [desc: j.id], limit: 1) do
-      %NodeJob{state: state, executor_name: name} when state != :revoked -> name
-      _ -> nil
-    end
+    Repo.one(from r in Run, where: r.id == ^run_id, select: r.pinned_executor_name)
   end
 
   defp exclusive_holder(_run, _payload), do: nil

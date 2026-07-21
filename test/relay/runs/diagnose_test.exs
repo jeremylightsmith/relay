@@ -108,4 +108,45 @@ defmodule Relay.Runs.DiagnoseTest do
 
     assert %{verdict: :run_active, evidence: %{current_node: "implement"}} = Runs.diagnose(board, card, now)
   end
+
+  # A parked run (run != nil) short-circuits explain/2 to run_verdict before the flow
+  # lookup matters, so these tests need no flow — just the run + its pinned executor row.
+  test "a parked pinned run names the executor and its freshness", %{board: board, works: works} do
+    now = DateTime.truncate(DateTime.utc_now(), :second)
+    card = insert(:card, stage: works, status: :working)
+
+    insert(:run,
+      card: card,
+      status: :parked,
+      parked_reason: :executor_gone,
+      current_node: nil,
+      pinned_executor_name: "exec-a"
+    )
+
+    # exec-a's row exists but its last beat is long past the stale threshold → gone.
+    insert(:executor, board: board, name: "exec-a", last_heartbeat: DateTime.add(now, -3600, :second))
+
+    assert %{verdict: :awaiting_capacity, detail: detail, evidence: evidence} = Runs.diagnose(board, card, now)
+    assert detail =~ ~s(executor "exec-a")
+    assert detail =~ "gone"
+    assert evidence.pinned_executor_name == "exec-a"
+    assert evidence.pinned_executor_freshness == :gone
+  end
+
+  test "a parked pinned run whose executor row is absent says so", %{board: board, works: works} do
+    now = DateTime.truncate(DateTime.utc_now(), :second)
+    card = insert(:card, stage: works, status: :working)
+
+    insert(:run,
+      card: card,
+      status: :parked,
+      parked_reason: :executor_gone,
+      current_node: nil,
+      pinned_executor_name: "exec-ghost"
+    )
+
+    assert %{detail: detail, evidence: evidence} = Runs.diagnose(board, card, now)
+    assert detail =~ "not currently connected"
+    assert evidence.pinned_executor_freshness == :absent
+  end
 end

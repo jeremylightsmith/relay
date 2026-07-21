@@ -16,8 +16,14 @@ defmodule Relay.Runs.Scheduler.Snapshot do
       `parked_reason` is `nil | :needs_input | :claimed | :executor_gone` — only a
       `:executor_gone` park is the scheduler's to resume; `:needs_input` and `:claimed`
       parks are the run `Listener`'s territory (RLY-200).
+      `pinned_executor_id` is the executor row id an `:exclusive` run is pinned to (nil
+      when unpinned); `pinned_executor_name` is the same pin's human-readable name for the
+      `explain` path (RLY-199).
     * `capacity` — `%{executor_id => %{shared_clean: n, exclusive: n}}`: the
-      **free** slots each connected executor advertises per isolation class.
+      **free** slots each connected executor advertises per isolation class. A
+      `:gone` executor's advertised capacity is dropped during assembly
+      (`Server.build_snapshot/2`), so the planner never places work onto a
+      machine the reaper has given up on (RLY-199).
     * `executors` — `%{executor_id => %{name, version, outdated, freshness}}`: the durable
       executor rows, `outdated` from `Relay.Runs.executor_outdated?/1` and `freshness` from
       `Relay.Runs.executor_freshness/2` (not a second computation). `plan/1` ignores this
@@ -52,6 +58,7 @@ defmodule Relay.Runs.Scheduler.Snapshot do
           flow_key: String.t(),
           isolation: :shared_clean | :exclusive,
           pinned_executor_id: term() | nil,
+          pinned_executor_name: String.t() | nil,
           parked_reason: :needs_input | :claimed | :executor_gone | nil
         }
   @type capacity :: %{optional(term()) => %{shared_clean: non_neg_integer(), exclusive: non_neg_integer()}}

@@ -179,9 +179,22 @@ defmodule Relay.Runs.RetryTest do
   # NOTE: a module-level helper, NOT inside the describe block below — `defp` inside
   # `describe` is invalid Elixir. The shipped "code" flow is already `isolation:
   # :exclusive` (default_library.ex:52), so it needs no modification.
+  #
+  # RLY-199: affinity is now read off the run row's `pinned_executor_name` column
+  # (one column, two readers), not derived from the last job's `executor_name` —
+  # so the fixture pins the run directly.
   defp exclusive_failed_run(ctx, executor_name) do
     card = Repo.get!(Schemas.Card, ctx.card.id)
-    run = insert(:run, card: card, status: :failed, current_node: nil, flow_key: "code", flow_id: ctx.code_flow.id)
+
+    run =
+      insert(:run,
+        card: card,
+        status: :failed,
+        current_node: nil,
+        flow_key: "code",
+        flow_id: ctx.code_flow.id,
+        pinned_executor_name: executor_name
+      )
 
     execution = insert(:node_execution, run: run, node_key: "precommit", outcome: :failed, detail: "gate failed")
 

@@ -157,12 +157,15 @@ that stays server-side.
   job (`executor_name` nil) needs advertised free capacity in its isolation class, but a job
   *pinned* to the requesting executor (`executor_name` = its name) is claimable regardless of
   advertised capacity — the executor is already holding that run's bound worktree slot.
-  Pinning is set at enqueue: `Relay.Runs.insert_job!/3` pins every job of an `exclusive` run
-  after the first to the executor that claimed the first, so an `exclusive` run's later nodes
-  and its needs-input **resume** always return to the machine holding its worktree (and a
-  parked run whose holder advertises `exclusive: 0` can still be handed its own resume — the
-  fix for the affinity deadlock; the executor keeps polling while it holds bound slots via
-  `ExecutorPool.has_bound_slots/0`).
+  Pinning is persisted on the run: `runs.pinned_executor_name` is set when an executor claims
+  an `exclusive` run's job (`Relay.Runs.maybe_pin_run/2`), **kept** through an
+  `:executor_gone` park (so the resume returns to the holder), and **cleared** by a human-baton
+  park (`Relay.Runs.park_claimed/1`, so the hand-back resume re-offers anywhere).
+  `Relay.Runs.exclusive_holder/2` reads that column to pin each successive job, and
+  `Relay.Runs.active_runs/1` resolves it to the executor row id so the **scheduler** resumes a
+  parked exclusive run on its holder (RLY-199) — one column, two readers. (A parked run whose
+  holder advertises `exclusive: 0` can still be handed its own resume — the executor keeps
+  polling while it holds bound slots via `ExecutorPool.has_bound_slots/0`.)
 - **Version negotiation (RLY-184).** Every claim and heartbeat carries `executor.version`, the
   `EXECUTOR_VERSION` the running `bin/relay` declares. `claim/2` compares it against
   `Relay.Runs.min_executor_version/0` and answers **409 `executor_outdated`** (with `required`
@@ -211,7 +214,10 @@ that stays server-side.
   a stale executor's (`Relay.Runs.executor_stale?/2`) in-flight `shared_clean` jobs go back
   to `queued`; its `exclusive` runs are parked (`Relay.Runs.park_for_reclaim/1`,
   `parked_reason: :executor_gone`) rather than requeued, since exclusive runs are pinned to
-  one executor's worktree.
+  one executor's worktree. A `:gone` executor's advertised capacity is also dropped from the
+  scheduler snapshot (`Scheduler.Server.build_snapshot/2`), so the planner never resumes a
+  pinned run onto a machine the reaper has given up on — without this a parked exclusive run
+  oscillates resume↔reap forever and `relay why` misreports it as "dispatchable" (RLY-199).
 - **Log `node_job_id` convergence.** `POST /api/board/logs` entries may carry an optional
   `node_job_id` alongside `run_id` — same nullable-string shape, not an FK. It rides through
   `Relay.AgentLog.stamp/1` → `Relay.Activity.LogSink.row/2` → `activities.node_job_id`, kept

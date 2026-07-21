@@ -115,7 +115,11 @@ sharing behavior.
   to the injectable `Relay.Runs.Scheduler.Engine` behaviour (`active_runs/1`,
   `start_run/3`, `resume_run/2` — `config :relay, :runs_engine`; default
   `Relay.Runs.Scheduler.RunsEngine`, the adapter onto `Relay.Runs.start_run/3` /
-  `resume_run/2` (`NoopEngine` remains for tests that inject it)). The scheduler writes no
+  `resume_run/2` (`NoopEngine` remains for tests that inject it)). `active_runs/1` resolves
+  each run's persisted `pinned_executor_name` to that board's durable executor row id
+  (`pinned_executor_id`), so a parked `exclusive` run's scheduler-side resume is pinned to the
+  same machine the claim layer already pins its jobs to (RLY-199 — one column, two readers).
+  The scheduler writes no
   `Run` rows and moves no cards into works-in — it owns only the `ready ↔ queued`
   marking; the engine owns the rest. It reacts to the board's `Relay.Events` topic
   and `Relay.Runs.Capacity`'s `runs:capacity` topic (an executor-keyed ETS store of

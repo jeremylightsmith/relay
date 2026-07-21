@@ -46,6 +46,7 @@ defmodule Relay.Runs.SchedulerExplainTest do
       flow_key: Keyword.get(opts, :flow_key, "f"),
       isolation: Keyword.get(opts, :isolation, :shared_clean),
       pinned_executor_id: Keyword.get(opts, :pinned_executor_id),
+      pinned_executor_name: Keyword.get(opts, :pinned_executor_name),
       parked_reason: Keyword.get(opts, :parked_reason)
     }
   end
@@ -155,6 +156,28 @@ defmodule Relay.Runs.SchedulerExplainTest do
       )
 
     assert %{verdict: :awaiting_capacity, evidence: %{run_id: 5}} = Scheduler.explain(s, 10)
+  end
+
+  test "a parked :executor_gone run pinned to a machine names that machine" do
+    s =
+      base(
+        cards: [card(10, 2, status: :working)],
+        flows: [flow("f", 1, 2, isolation: :exclusive)],
+        runs: [
+          run(5, 10,
+            status: :parked,
+            parked_reason: :executor_gone,
+            isolation: :exclusive,
+            pinned_executor_name: "exec-a"
+          )
+        ],
+        capacity: %{}
+      )
+
+    assert %{verdict: :awaiting_capacity, detail: detail, evidence: evidence} = Scheduler.explain(s, 10)
+    assert detail =~ ~s(executor "exec-a")
+    assert detail =~ "exclusive affinity"
+    assert evidence.pinned_executor_name == "exec-a"
   end
 
   test "a parked :needs_input run (already answered) is awaiting_listener_resume, not awaiting_capacity" do

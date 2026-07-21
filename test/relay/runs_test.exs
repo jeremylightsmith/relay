@@ -480,8 +480,31 @@ defmodule Relay.RunsTest do
     end
   end
 
-  describe "exclusive executor affinity (insert_job!)" do
-    test "pins an exclusive run's subsequent job to the executor holding the run", %{board: board} do
+  describe "exclusive executor affinity via pinned_executor_name" do
+    test "an exclusive claim pins the run to the claiming executor", %{board: board} do
+      flow = exclusive_flow(board, "excl-set")
+      {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
+
+      # The first job is unpinned, so any exclusive executor may start the run.
+      assert Runs.get_run!(run.id).pinned_executor_name == nil
+
+      {:ok, e} = Runs.upsert_executor(board, %{"name" => "e", "capacity" => %{"exclusive" => 1}})
+      {:ok, _claimed} = Runs.claim_next_job(e)
+
+      assert Runs.get_run!(run.id).pinned_executor_name == "e"
+    end
+
+    test "a shared_clean claim never pins the run", %{board: board} do
+      flow = enabled_spec_flow(board)
+      {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
+
+      {:ok, e} = Runs.upsert_executor(board, %{"name" => "e", "capacity" => %{"shared_clean" => 1}})
+      {:ok, _claimed} = Runs.claim_next_job(e)
+
+      assert Runs.get_run!(run.id).pinned_executor_name == nil
+    end
+
+    test "a subsequent exclusive job pins to the holder read off the column", %{board: board} do
       flow = exclusive_flow(board, "excl-affinity")
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
 
@@ -507,51 +530,40 @@ defmodule Relay.RunsTest do
       assert next_job.executor_name == nil
     end
 
-    test "does not pin a resume job after the run's active job was revoked (worktree reset)",
-         %{board: board} do
-      # A revoke — human baton (park_claimed) or executor_gone reclaim — resets the
-      # run's worktree and unbinds the slot on the executor. Affinity is void: a
-      # resume pinned to the old holder would be handed to it by the capacity
-      # bypass and, if that executor is now busy on another run, rejected-as-failed
-      # (terminally failing a resumable run). So a revoked most-recent job must
-      # leave the next job unpinned — the resume re-offers to any free executor
-      # with a fresh worktree.
-      flow = exclusive_flow(board, "excl-revoke")
+    test "park_for_reclaim/1 KEEPS the pin, so the resume job returns to the holder", %{board: board} do
+      # The headline fix: an executor_gone park must not void affinity. The reaper
+      # revokes the active job, but the run's pinned_executor_name survives, so the
+      # resume job pins back to the same machine (which reclaims it via the pinned
+      # capacity-bypass in claim_next_job/1).
+      flow = exclusive_flow(board, "excl-gone")
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
       {:ok, e} = Runs.upsert_executor(board, %{"name" => "e", "capacity" => %{"exclusive" => 1}})
       {:ok, _claimed} = Runs.claim_next_job(e)
 
-      Runs.revoke_active_jobs(run)
+      :ok = Runs.park_for_reclaim(Runs.get_run!(run.id))
+      assert Runs.get_run!(run.id).pinned_executor_name == "e"
 
       execution = Runs.insert_execution!(run, "work", 1, 2)
-      next_job = Runs.insert_job!(run, execution, Runs.build_payload(run, flow, "work", []))
+      resume_job = Runs.insert_job!(run, execution, Runs.build_payload(run, flow, "work", []))
 
-      assert next_job.executor_name == nil
+      assert resume_job.executor_name == "e"
     end
 
-    test "a revoke voids affinity even when an earlier node still holds the executor name (multi-node)",
-         %{board: board} do
-      # Guards the multi-node case: reading the SINGLE most-recent job (not the
-      # newest non-nil executor_name) is what prevents an earlier :done node's
-      # retained name from resurrecting affinity a later revoke just voided.
-      flow = exclusive_flow(board, "excl-revoke-multi")
+    test "park_claimed/1 CLEARS the pin, so the resume re-offers anywhere", %{board: board} do
+      # Human baton: the worktree is reset and the hand-back resume must be claimable
+      # by any free executor — so the pin is nilled alongside the revoke.
+      flow = exclusive_flow(board, "excl-baton")
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
       {:ok, e} = Runs.upsert_executor(board, %{"name" => "e", "capacity" => %{"exclusive" => 1}})
+      {:ok, _claimed} = Runs.claim_next_job(e)
 
-      # node1 runs and completes on e (job stays :done with executor_name retained).
-      {:ok, job1} = Runs.claim_next_job(e)
-      Relay.Repo.update_all(from(j in NodeJob, where: j.id == ^job1.id), set: [state: :done])
+      :ok = Runs.park_claimed(Runs.get_run!(run.id))
+      assert Runs.get_run!(run.id).pinned_executor_name == nil
 
-      # node2 is enqueued (pinned to e), then revoked (human baton / reclaim).
-      exec2 = Runs.insert_execution!(run, "work", 1, 2)
-      job2 = Runs.insert_job!(run, exec2, Runs.build_payload(run, flow, "work", []))
-      assert job2.executor_name == "e"
-      Runs.revoke_active_jobs(run)
+      execution = Runs.insert_execution!(run, "work", 1, 2)
+      resume_job = Runs.insert_job!(run, execution, Runs.build_payload(run, flow, "work", []))
 
-      # The resume must NOT pin to e via node1's lingering name.
-      exec3 = Runs.insert_execution!(run, "work", 1, 3)
-      job3 = Runs.insert_job!(run, exec3, Runs.build_payload(run, flow, "work", []))
-      assert job3.executor_name == nil
+      assert resume_job.executor_name == nil
     end
   end
 
