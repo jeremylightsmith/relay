@@ -14,7 +14,7 @@ defmodule Relay.Flows.DefaultLibrary do
   # The cheap sync path (RLY-192): fetch, rebase onto origin/main, and — critically — abort a
   # conflicted rebase BEFORE exiting nonzero so the branch is left clean and attached for the
   # next node (RLY-166). Identical in `sync` and `resync`.
-  @rebase_onto_main "git fetch origin --prune && { git rebase origin/main || { git rebase --abort; exit 1; }; }"
+  @rebase_onto_main "{relay} git-fetch && { git rebase origin/main || { git rebase --abort; exit 1; }; }"
 
   # Goal-state prompt for the rebaser agent nodes. Stated as a goal (not just "rebase") because
   # resync_fix is also entered from a failed reverify, where the rebase already completed and the
@@ -67,7 +67,7 @@ defmodule Relay.Flows.DefaultLibrary do
           key: "branch",
           type: :shell,
           run:
-            "git fetch origin --prune && git checkout -B {branch} origin/main && " <>
+            "{relay} git-fetch && git checkout -B {branch} origin/main && " <>
               "{relay} card {ref} --json | jq -r '.plan // empty' > plan.md && test -s plan.md"
         },
         %{
@@ -201,15 +201,18 @@ defmodule Relay.Flows.DefaultLibrary do
         # RLY-194: every agent node parks on a hard :failed instead of dead-ending. implement
         # carries max_retries: 1, so it retries once THEN parks; the fixers, post and the RLY-192
         # rebasers park on their first hard failure (a fixer already sits under a max_loops fix
-        # cycle; a rebaser already escalates judgement calls via needs-input). branch/merge/sync/
-        # resync are :shell and deliberately stay unrouted.
+        # cycle; a rebaser already escalates judgement calls via needs-input). RLY-224 adds branch
+        # (a :shell node): a fetch race that survives git_fetch_with_retry's bounded retries (or
+        # any other branch failure, e.g. empty plan.md) parks too. merge/sync/resync stay
+        # unrouted :shell.
         %{from: "implement", to: "needs_input", on: :failed},
         %{from: "sync_fix", to: "needs_input", on: :failed},
         %{from: "final_fix", to: "needs_input", on: :failed},
         %{from: "smoke_fix", to: "needs_input", on: :failed},
         %{from: "acceptance_fix", to: "needs_input", on: :failed},
         %{from: "resync_fix", to: "needs_input", on: :failed},
-        %{from: "post", to: "needs_input", on: :failed}
+        %{from: "post", to: "needs_input", on: :failed},
+        %{from: "branch", to: "needs_input", on: :failed}
       ]
     }
   end

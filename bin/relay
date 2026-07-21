@@ -37,6 +37,7 @@ import json
 import mimetypes
 import os
 import queue
+import random
 import re
 import shutil
 import signal
@@ -67,8 +68,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 17
-EXECUTOR_FINGERPRINT = "d8794439b8164d62f4b84926dcf80688c14967b4654ba4392d3905622d15e51d"
+EXECUTOR_VERSION = 18
+EXECUTOR_FINGERPRINT = "a33062a65c14440020f84726e7ea7078465433769ef5d8d54398f23c49869a68"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -786,13 +787,66 @@ def worktree_path(name):
     return os.path.join(WORKTREES_DIR, name)
 
 
+# ---- ref-updating git fetch, with retry (RLY-224) ----
+#
+# Every exclusive worktree shares ONE .git object store and ref db (they are `git worktree`s
+# of one clone). Two runs' `branch` nodes fetching at once therefore race on
+# refs/remotes/origin/main and one dies with "cannot lock ref … unable to update local ref".
+# The race is transient — a rerun clears it — so retry ANY nonzero fetch a bounded number of
+# times with short jittered backoff, and surface the real captured stderr on the final attempt.
+# Retry is deliberately NOT gated on the lock message: those strings are git-version/locale
+# fragile, and a genuine bad-remote/auth failure costs only a few short backoffs before it
+# surfaces verbatim (RLY-224 AC #3).
+#
+# Future (RLY-224 direction #3, deferred): if retry proves flaky under load, serialize
+# ref-updating fetches across slots with RLY-193's flock instead of racing + retrying. Do NOT
+# give each worktree its own clone — that defeats the shared object store and balloons disk.
+GIT_FETCH_MAX_ATTEMPTS = 4  # one try + three retries; a ref-lock race clears well within this
+
+
+def _fetch_backoff(attempt):
+    """Sleep a short, jittered interval before fetch retry `attempt` (1-based). Jittered so two
+    racing slots don't resynchronize onto the same retry instant. Isolated in a named helper so
+    tests monkeypatch it to a no-op instead of actually waiting."""
+    time.sleep(random.uniform(0.1, 0.3) * attempt)
+
+
+def git_fetch_with_retry(cwd):
+    """`git fetch origin --prune` in `cwd`, retried on the shared-ref-db race (RLY-224).
+
+    Returns True on success. On final failure prints the captured stderr to sys.stderr and
+    returns False, so a genuinely broken fetch still surfaces its real error."""
+    last_err = ""
+    for attempt in range(1, GIT_FETCH_MAX_ATTEMPTS + 1):
+        proc = subprocess.run(["git", "fetch", "origin", "--prune"], cwd=cwd,
+                               capture_output=True, text=True)
+        if proc.returncode == 0:
+            return True
+        last_err = proc.stderr or proc.stdout or ""
+        if attempt < GIT_FETCH_MAX_ATTEMPTS:
+            _fetch_backoff(attempt)
+    sys.stderr.write(last_err)
+    return False
+
+
+def cmd_git_fetch(args):
+    """`relay git-fetch` — the shell-node entry point to git_fetch_with_retry (RLY-224).
+
+    Flow shell nodes (the `branch` node and the @rebase_onto_main sync/resync) call this so a
+    transient ref-lock race retries instead of killing the run; it exits nonzero on final
+    failure so the node's :failed edge still fires for a genuinely broken fetch."""
+    if not git_fetch_with_retry(ROOT):
+        sys.exit(1)
+
+
 def ensure_worktree(name, base):
     """Create <WORKTREES_DIR>/<name> as a DETACHED checkout at `base` if missing,
     so it never holds a branch and cannot collide with ROOT's checked-out branch."""
     path = worktree_path(name)
     if os.path.isdir(path):
         return path
-    subprocess.run(["git", "fetch", "origin", "--prune"], cwd=ROOT, check=True)
+    if not git_fetch_with_retry(ROOT):
+        die("git fetch failed while preparing a worktree")
     subprocess.run(["git", "worktree", "add", "--detach", path, base],
                    cwd=ROOT, check=True)
     return path
@@ -831,7 +885,7 @@ def refresh_worktree(name, base):
     path = worktree_path(name)
     if not os.path.isdir(path):
         return
-    subprocess.run(["git", "fetch", "origin", "--prune"], cwd=ROOT, check=False)
+    git_fetch_with_retry(ROOT)
     reset_worktree(path, base)
 
 
@@ -1953,6 +2007,7 @@ def build_parser():
     add("runs", cmd_runs, "ref", json_flag=True)
     add("executors", cmd_executors, json_flag=True)
     add("version", cmd_version, json_flag=True)
+    add("git-fetch", cmd_git_fetch)
     oc = add("outcome", cmd_outcome, "outcome")
     oc.add_argument("--detail")
     c = add("create", cmd_create, "title", json_flag=True)
