@@ -67,8 +67,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 13
-EXECUTOR_FINGERPRINT = "c48e1477fe716eba8bc81722591b943cb47f4938877ef0d2d02e8896c1ae9506"
+EXECUTOR_VERSION = 14
+EXECUTOR_FINGERPRINT = "ee32feb1b99c2270d3e7e92003fd955a37a105fd7c0904316d486605d457b17e"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1196,7 +1196,12 @@ def determine_agent_outcome(job, ok, outcome_path):
          so treating it as `succeeded` lets a node route past its own gate having produced
          nothing (RLY-163 — the RLY-159 dogfood landed a card in Spec:Review with an empty
          spec exactly this way, and the same hole would let a silent review reach `merge`).
-         Rule 1 still covers the legitimate "I stopped to ask a human" case."""
+         Rule 1 still covers the legitimate "I stopped to ask a human" case.
+      4. NOTE (RLY-194): the SERVER may additionally override a declared `succeeded` back to
+         `failed` for a node marked expects_commits that produced no commits (HEAD unchanged).
+         That rule is server-side only — the three rules above are unchanged, and no field is
+         added to the outcome payload — but an agent author reading only this docstring should
+         not be surprised to see a `succeeded` land as `failed` on such a node."""
     ref = (job.get("vars") or {}).get("ref")
     if ref:
         card = get_card(ref)
