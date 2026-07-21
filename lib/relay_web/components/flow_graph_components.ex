@@ -272,6 +272,12 @@ defmodule RelayWeb.FlowGraphComponents do
     points_and_label(route, edge, layout, sizes)
   end
 
+  # start → done with no nodes in between (a just-created scratch flow): a straight vertical
+  # drop between the two virtual endpoints. Touches `positions` for neither end.
+  defp points_and_label(%{kind: :enter_exit}, _edge, layout, _sizes) do
+    vgeom(layout.start_point, layout.done_point)
+  end
+
   # start → first spine node: a straight vertical drop.
   defp points_and_label(%{kind: :enter}, edge, layout, sizes) do
     vgeom(layout.start_point, top_center(edge.to, layout, sizes))

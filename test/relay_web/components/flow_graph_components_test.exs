@@ -194,4 +194,14 @@ defmodule RelayWeb.FlowGraphComponentsTest do
       assert FlowLayout.node_size(:human) == {150, 56}
     end
   end
+
+  describe "zero-node (scratch) flow" do
+    test "renders a bare start → done edge as a single straight connector without raising" do
+      html = graph([], [%{from: "start", to: "done", on: nil}], [])
+
+      ds = edge_ds(html)
+      assert length(ds) == 1
+      assert vertical?(hd(ds))
+    end
+  end
 end

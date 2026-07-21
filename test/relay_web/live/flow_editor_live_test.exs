@@ -56,6 +56,27 @@ defmodule RelayWeb.FlowEditorLiveTest do
     refute has_element?(view, "#flow-editor-errors")
   end
 
+  test "mounts and renders the editor for a just-created scratch flow (nodes: [], start → done)",
+       %{conn: conn, board: board} do
+    [pulls, works, lands | _] = Boards.list_stages(board)
+
+    {:ok, flow} =
+      Flows.create_flow(board, %{
+        key: "deploy-gate",
+        isolation: :shared_clean,
+        pulls_from_stage_id: pulls.id,
+        works_in_stage_id: works.id,
+        lands_on_stage_id: lands.id,
+        nodes: [],
+        edges: [%{from: "start", to: "done"}]
+      })
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/#{flow.key}")
+
+    assert has_element?(view, "#flow-graph")
+    assert has_element?(view, "#flow-editor-version-chip", "v1")
+  end
+
   test "editing a trigger stage marks dirty and saves without a version bump", %{conn: conn, board: board} do
     {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
     code = Flows.get_flow!(board, "code")
