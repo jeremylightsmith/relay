@@ -188,6 +188,72 @@ defmodule Relay.Runs do
     end)
   end
 
+  # A live run whose node-job is stuck (queued/unclaimed/held by a silent executor) this long
+  # has stopped moving. Well above a legitimate long node's own claimed runtime — a 40-minute
+  # plan-implementer node is *running*, not stalled, and stays neutral (see run_stalled?/3).
+  @run_stale_after_s 300
+
+  @doc """
+  The run's last forward progress: the newest `node_executions.inserted_at`, falling back to the
+  run's `inserted_at`. Forward progress only — `node_jobs.updated_at` is bumped by the very
+  revoke/requeue loop that was the RLY-191 failure, so a run wedged in that loop (which makes no
+  new executions) keeps this clock running, which is the point.
+  """
+  @spec last_progress_at(Run.t()) :: DateTime.t()
+  def last_progress_at(%Run{id: run_id, inserted_at: inserted_at}) do
+    Repo.one(from ne in NodeExecution, where: ne.run_id == ^run_id, select: max(ne.inserted_at)) || inserted_at
+  end
+
+  @doc "Bulk `last_progress_at/1` for a board: `%{run_id => DateTime.t()}`, one grouped query (no N+1). Runs with no executions are absent (the caller falls back to run start)."
+  @spec last_progress_by_run(Board.t()) :: %{term() => DateTime.t()}
+  def last_progress_by_run(%Board{} = board) do
+    from(ne in NodeExecution,
+      join: r in Run,
+      on: r.id == ne.run_id,
+      join: c in Card,
+      on: c.id == r.card_id,
+      where: c.board_id == ^board.id,
+      group_by: ne.run_id,
+      select: {ne.run_id, max(ne.inserted_at)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
+  Run ids whose current node-job is actively `:running` on a non-stale executor at `now`. The
+  complement — queued, unclaimed, or held by a silent executor — is what BoardLive treats as a
+  candidate for the stalled run-face treatment. Reuses `executor_stale?/2`, so "working" can
+  never disagree with what the reclaim sweep would act on.
+  """
+  @spec working_run_ids(Board.t(), DateTime.t()) :: MapSet.t()
+  def working_run_ids(%Board{} = board, %DateTime{} = now) do
+    live_names =
+      board.id
+      |> list_board_executors()
+      |> Enum.reject(&executor_stale?(&1, now))
+      |> MapSet.new(& &1.name)
+
+    from(j in NodeJob,
+      join: r in Run,
+      on: r.id == j.run_id,
+      join: c in Card,
+      on: c.id == r.card_id,
+      where: c.board_id == ^board.id and j.state == :running,
+      select: {j.run_id, j.executor_name}
+    )
+    |> Repo.all()
+    |> Enum.reduce(MapSet.new(), fn {run_id, name}, acc ->
+      if MapSet.member?(live_names, name), do: MapSet.put(acc, run_id), else: acc
+    end)
+  end
+
+  @doc "Whether a run face should show the amber stalled treatment: not currently working AND its last progress is older than `@run_stale_after_s`. The single home of the 5-minute policy."
+  @spec run_stalled?(DateTime.t() | nil, boolean(), DateTime.t()) :: boolean()
+  def run_stalled?(nil, _working?, _now), do: false
+  def run_stalled?(_progress_at, true, _now), do: false
+  def run_stalled?(progress_at, false, now), do: DateTime.diff(now, progress_at, :second) > @run_stale_after_s
+
   @doc """
   The node the run was last at: `current_node` while the run is live, else the
   `node_key` of its most recent `NodeExecution`.
