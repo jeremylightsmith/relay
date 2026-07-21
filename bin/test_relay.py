@@ -490,6 +490,84 @@ class ResetWorktreeTest(unittest.TestCase):
             self.assertEqual(cwd, "/tmp/wt", cmd)
 
 
+class GitFetchRetryTest(unittest.TestCase):
+    """RLY-224: exclusive worktrees share one .git ref db (they are `git worktree`s of one
+    clone), so two branch nodes fetching at once race on refs/remotes/origin/main and one
+    dies with "cannot lock ref … unable to update local ref". The fetch must retry the
+    transient race but still surface a genuinely broken fetch after a bounded number of tries."""
+
+    def setUp(self):
+        self.calls = []
+        real_run = relay.subprocess.run
+        self.addCleanup(setattr, relay.subprocess, "run", real_run)
+        # No real backoff sleeps in tests — record the attempt instead.
+        real_backoff = relay._fetch_backoff
+        relay._fetch_backoff = lambda attempt: self.calls.append(("backoff", attempt))
+        self.addCleanup(setattr, relay, "_fetch_backoff", real_backoff)
+
+    def _stub_fetch(self, results):
+        """`results`: list of (returncode, stderr) the stubbed `git fetch` yields in order."""
+        seq = iter(results)
+
+        def fake_run(cmd, **kw):
+            if cmd[:2] == ["git", "fetch"]:
+                code, err = next(seq)
+                self.calls.append(("fetch", kw.get("cwd")))
+                return argparse.Namespace(returncode=code, stdout="", stderr=err)
+            return argparse.Namespace(returncode=0, stdout="", stderr="")
+
+        relay.subprocess.run = fake_run
+
+    def _fetch_count(self):
+        return len([c for c in self.calls if c[0] == "fetch"])
+
+    def test_succeeds_after_transient_ref_lock_failures(self):
+        lock = ("error: cannot lock ref 'refs/remotes/origin/main': is at e0bad79 but "
+                "expected cf4a2b1\n ! cf4a2b1..e0bad79  main -> origin/main  "
+                "(unable to update local ref)")
+        self._stub_fetch([(1, lock), (1, lock), (0, "")])
+
+        ok = relay.git_fetch_with_retry("/repo")
+
+        self.assertTrue(ok)
+        self.assertEqual(self._fetch_count(), 3)  # two failures + the success
+        self.assertTrue(any(c[0] == "backoff" for c in self.calls))  # it actually backed off
+
+    def test_surfaces_the_real_error_after_the_cap(self):
+        real = "fatal: 'origin' does not appear to be a git repository"
+        self._stub_fetch([(128, real)] * relay.GIT_FETCH_MAX_ATTEMPTS)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            ok = relay.git_fetch_with_retry("/repo")
+
+        self.assertFalse(ok)
+        self.assertIn(real, buf.getvalue())            # real error is not masked
+        self.assertEqual(self._fetch_count(), relay.GIT_FETCH_MAX_ATTEMPTS)  # bounded, not forever
+
+    def test_fetch_runs_in_the_given_cwd(self):
+        self._stub_fetch([(0, "")])
+        relay.git_fetch_with_retry("/some/worktree")
+        self.assertEqual([c for c in self.calls if c[0] == "fetch"][0][1], "/some/worktree")
+
+    def test_git_fetch_subcommand_exits_nonzero_on_final_failure(self):
+        self._stub_fetch([(128, "fatal: boom")] * relay.GIT_FETCH_MAX_ATTEMPTS)
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as cm:
+                relay.cmd_git_fetch(argparse.Namespace())
+        self.assertEqual(cm.exception.code, 1)
+
+    def test_git_fetch_subcommand_returns_cleanly_on_success(self):
+        self._stub_fetch([(0, "")])
+        relay.cmd_git_fetch(argparse.Namespace())  # no SystemExit
+        self.assertEqual(self._fetch_count(), 1)
+
+    def test_git_fetch_subcommand_is_registered(self):
+        parser = relay.build_parser()
+        args = parser.parse_args(["git-fetch"])
+        self.assertIs(args.func, relay.cmd_git_fetch)
+
+
 class WorktreePathTest(unittest.TestCase):
     def test_worktree_path_is_under_dot_claude_worktrees(self):
         self.assertTrue(relay.worktree_path("work-1")
