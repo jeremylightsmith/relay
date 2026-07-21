@@ -2246,6 +2246,26 @@ class ExecutorFingerprintGuardTest(unittest.TestCase):
                             relay.executor_fingerprint(src))
 
 
+class ExecutorVocabularyContractTest(unittest.TestCase):
+    """RLY-203: bin/relay's lifecycle vocabularies are pinned to the Elixir source via the
+    contract fixture, so a Python-side drift breaks CI exactly as a field rename does."""
+
+    def setUp(self):
+        self.vocab = CONTRACT["vocabulary"]
+
+    def test_node_outcomes_match_the_fixture(self):
+        self.assertEqual(relay.NODE_OUTCOMES, tuple(self.vocab["outcomes"]))
+
+    def test_active_run_states_match_the_fixture(self):
+        self.assertEqual(relay.ACTIVE_RUN_STATES, tuple(self.vocab["run_states"]["active"]))
+
+    def test_terminal_run_states_match_the_fixture(self):
+        self.assertEqual(relay.TERMINAL_RUN_STATES, tuple(self.vocab["run_states"]["terminal"]))
+
+    def test_isolation_classes_match_the_fixture_order_insensitively(self):
+        self.assertEqual(set(relay.ISOLATION_CLASSES), set(self.vocab["isolation"]))
+
+
 class ExecutorIdentTest(unittest.TestCase):
     """The `executor` dict both claim and heartbeat put on the wire. Pure and named for the
     same reason outcome_body/heartbeat_body are: bin/test_relay.py pins it against the
