@@ -76,7 +76,7 @@ defmodule Relay.Runs.NoOpGuardTest do
     assert exec.outcome == :failed
     assert exec.detail =~ "no_op_success: impl"
     assert exec.detail =~ "produced no commits"
-    assert exec.failure_signature != nil
+    assert exec.failure_signature
   end
 
   test "an unmarked node reporting succeeded with an unchanged sha is left alone", ctx do
@@ -200,7 +200,15 @@ defmodule Relay.Runs.NoOpGuardTest do
     # Pure engine assertion against the DB-round-tripped code flow: quality_review has no
     # max_retries, so its :failed routes straight to implement (not a retry, not a park).
     code = Relay.Flows.get_flow!(ctx.board, "code")
-    current = %{node_key: "quality_review", visit: 1, attempt: 1, outcome: :failed, failure_signature: "sig", sub_task_id: nil}
+
+    current = %{
+      node_key: "quality_review",
+      visit: 1,
+      attempt: 1,
+      outcome: :failed,
+      failure_signature: "sig",
+      sub_task_id: nil
+    }
 
     assert Relay.Runs.Engine.decide(code, [current], current) == {:transition, "implement"}
   end

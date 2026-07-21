@@ -12,7 +12,12 @@ sharing behavior.
 - **Flows** — workflow definitions as declarative graph data (ADR 0006 / RLY-131): per-board
   rows in the `flows` table (`key`, `enabled`, `isolation`, `version`, three trigger stage FKs
   stored as ids with nilify-on-delete) with the node/edge graph embedded as jsonb; `"start"`/
-  `"done"` are edge sentinels; nodes carry an optional `timeout_minutes` (validated `> 0`).
+  `"done"`/`"needs_input"` are edge sentinels (`"needs_input"` is `to`-only and parks the run —
+  RLY-194); nodes carry an optional `timeout_minutes` (validated `> 0`) and an agent-only
+  `expects_commits` boolean (default `false`, RLY-194) marking a node whose reported success
+  `RunServer` may override if it produced no commits. The invariant that no `:agent`/`:gate`
+  node in any shipped flow leaves `:failed` unrouted is enforced by
+  `default_library_test.exs`.
   `Relay.Flows.seed_default_flows!/1` idempotently seeds the default spec/plan/code library
   (from `Relay.Flows.DefaultLibrary`, the compiled translation of `docs/designs/flows/*.jsonc`)
   — `Boards.create_board/2` calls it after enabling the `Spec:Review`/`Spec:Done`/`Plan:Done`
@@ -66,7 +71,14 @@ sharing behavior.
   `config :relay, Relay.Runs`), needs-input parking, restart resume, and baton interplay
   (claim parks, hand-back resumes, rejection re-enters with the note — via
   `Relay.Runs.Listener` on the Events firehose). A run points at the LIVE flow row (no
-  snapshot; versioning is RLY-152). Node execution goes through the
+  snapshot; versioning is RLY-152). **No-op guard (RLY-194):** `RunServer.apply_outcome/5`
+  rewrites a reported `:succeeded` to `:failed` (with a `no_op_success` detail) when the
+  node is `expects_commits` and its reported `git_sha` equals the run's last non-nil
+  baseline sha — fail-open on either sha being `nil`. The rewrite happens before
+  `Runs.finalize_job!/2` so the failure-signature circuit breaker sees it like any other
+  failure; a `"needs_input"` edge target is a third engine decision (alongside
+  `"done"`/a node key) that parks the run for a human rather than dead-ending it. Node
+  execution goes through the
   `Relay.Runs.Dispatcher` behaviour (`config :relay, :runs_dispatcher`; default
   `NoopDispatcher` — jobs sit `:queued` for card 04's pull transport). All card writes go
   through `Relay.Cards`, so ADR 0003/0004 rules apply automatically.

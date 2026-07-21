@@ -333,8 +333,7 @@ defmodule Relay.Runs.RunServer do
   # with the flow node (expects_commits), the run (baseline sha) and the raw attrs before
   # finalize_job! computes the failure_signature (which it does only for :failed). Fail
   # open on nil: a missing sha on either side is not evidence of a lie.
-  defp override_no_op_success(run, flow, job, %{outcome: :succeeded, git_sha: sha} = attrs)
-       when is_binary(sha) do
+  defp override_no_op_success(run, flow, job, %{outcome: :succeeded, git_sha: sha} = attrs) when is_binary(sha) do
     node = Enum.find(flow.nodes, &(&1.key == job.node_key))
 
     if node && node.expects_commits && baseline_sha(run) == sha do
