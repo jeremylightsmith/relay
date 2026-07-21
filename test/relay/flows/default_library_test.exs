@@ -5,8 +5,8 @@ defmodule Relay.Flows.DefaultLibraryTest do
 
   # RLY-194 inverted this from an allowlist to a law. Every :agent/:gate node in every
   # flow must route its :failed outcome — to a fix, or to the "needs_input" park sentinel.
-  # A failed node must never be a dead end. Only :shell nodes (branch/merge/sync/resync)
-  # stay unrouted, deliberately, and they are outside this test's scope.
+  # A failed node must never be a dead end. :shell nodes are outside this test's scope —
+  # merge/sync/resync deliberately stay unrouted; branch got a park edge too (RLY-224).
   test "no :agent or :gate node in any flow leaves :failed unrouted" do
     gaps =
       for flow <- DefaultLibrary.all(),
@@ -71,7 +71,7 @@ defmodule Relay.Flows.DefaultLibraryTest do
 
     test "sync / resync are identical cheap :shell rebases that abort before handing over" do
       flow = code_flow()
-      rebase = "git fetch origin --prune && { git rebase origin/main || { git rebase --abort; exit 1; }; }"
+      rebase = "{relay} git-fetch && { git rebase origin/main || { git rebase --abort; exit 1; }; }"
 
       for key <- ~w(sync resync) do
         n = cf_node(flow, key)
@@ -132,6 +132,19 @@ defmodule Relay.Flows.DefaultLibraryTest do
       n = cf_node(code_flow(), "implement")
       assert n.max_retries == 1
       assert n.expects_commits == true
+    end
+
+    test "branch routes :failed to needs_input so a transient fetch race parks, not dead-ends (RLY-224)" do
+      flow = code_flow()
+      assert cf_node(flow, "branch").type == :shell
+
+      assert edge?(flow, "branch", "needs_input", :failed),
+             "a branch failure surviving the fetch retries must park for a human, " <>
+               "not dead-end with no_route_for_outcome (RLY-224)"
+
+      # The branch node's fetch goes through the single retrying helper.
+      assert cf_node(flow, "branch").run =~ "{relay} git-fetch"
+      refute cf_node(flow, "branch").run =~ "git fetch origin --prune"
     end
   end
 end

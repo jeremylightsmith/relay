@@ -1,6 +1,6 @@
 // Default flow: Code — replaces relay_config.json's "Code" entry AND the inside
 // of execute-plan.js (its 9 phases become nodes here). Cut over by RLY-139 (W13):
-// 18 nodes / 37 edges, `implement` is a foreach loop head, and quality_review's
+// 18 nodes / 38 edges, `implement` is a foreach loop head, and quality_review's
 // two guarded edges are what the next_task gate was faking. Model tiers preserved.
 // RLY-192 added two rebase sync points (`sync`+`sync_fix` before `precommit`,
 // `resync`+`resync_fix`+`reverify` before `merge`) so a busy board's `main`
@@ -9,6 +9,9 @@
 // acceptance_fix) expects_commits, gave implement a max_retries: 1, and added a
 // needs_input park edge to every agent node's :failed outcome (nine across the
 // library) so a hard failure parks for a human instead of dead-ending the run.
+// RLY-224 routed branch/sync/resync's fetches through the single retrying
+// `{relay} git-fetch` helper (bin/relay) and gave branch a needs_input park edge too,
+// so a fetch race surviving the bounded retries parks instead of dead-ending.
 {
   "key": "code",
   "trigger": { "from": "Plan:Done", "stage": "Code", "done": "Review" },
@@ -18,7 +21,7 @@
     // RLY-139 retired it): implement works through it.
     "branch": {
       "type": "shell",
-      "run": "git fetch origin --prune && git checkout -B {branch} origin/main && {relay} card {ref} --json | jq -r '.plan // empty' > plan.md && test -s plan.md"
+      "run": "{relay} git-fetch && git checkout -B {branch} origin/main && {relay} card {ref} --json | jq -r '.plan // empty' > plan.md && test -s plan.md"
     },
     // execute-plan's per-task loop, now a real engine `foreach`: each entry begins
     // one iteration bound to one of the card's sub_tasks (parsed from the plan at
@@ -48,7 +51,7 @@
     // nonzero so the branch is left clean and attached (RLY-166).
     "sync": {
       "type": "shell",
-      "run": "git fetch origin --prune && { git rebase origin/main || { git rebase --abort; exit 1; }; }"
+      "run": "{relay} git-fetch && { git rebase origin/main || { git rebase --abort; exit 1; }; }"
     },
     "sync_fix": {
       "type": "agent", "model": "sonnet", "agent": "rebaser",
@@ -90,7 +93,7 @@
     // doesn't strand the work at `merge`.
     "resync": {
       "type": "shell",
-      "run": "git fetch origin --prune && { git rebase origin/main || { git rebase --abort; exit 1; }; }"
+      "run": "{relay} git-fetch && { git rebase origin/main || { git rebase --abort; exit 1; }; }"
     },
     "resync_fix": {
       "type": "agent", "model": "sonnet", "agent": "rebaser",
@@ -138,14 +141,16 @@
     // RLY-194: every agent node parks on a hard "failed" instead of dead-ending. implement
     // carries max_retries: 1, so it retries once THEN parks; the fixers, post and the RLY-192
     // rebasers park on their first hard failure (a fixer already sits under a max_loops fix
-    // cycle; a rebaser already escalates judgement calls via needs-input). branch/merge/sync/
-    // resync are shell nodes and deliberately stay unrouted.
+    // cycle; a rebaser already escalates judgement calls via needs-input). RLY-224 adds branch
+    // (a shell node): a fetch race that survives {relay} git-fetch's bounded retries (or any
+    // other branch failure, e.g. empty plan.md) parks too. merge/sync/resync stay unrouted.
     { "from": "implement",      "to": "needs_input",   "on": "failed" },
     { "from": "sync_fix",       "to": "needs_input",   "on": "failed" },
     { "from": "final_fix",      "to": "needs_input",   "on": "failed" },
     { "from": "smoke_fix",      "to": "needs_input",   "on": "failed" },
     { "from": "acceptance_fix", "to": "needs_input",   "on": "failed" },
     { "from": "resync_fix",     "to": "needs_input",   "on": "failed" },
-    { "from": "post",           "to": "needs_input",   "on": "failed" }
+    { "from": "post",           "to": "needs_input",   "on": "failed" },
+    { "from": "branch",         "to": "needs_input",   "on": "failed" }
   ]
 }

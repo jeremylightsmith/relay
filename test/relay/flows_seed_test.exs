@@ -75,7 +75,7 @@ defmodule Relay.FlowsSeedTest do
 
     code = Flows.get_flow(ctx.board, "code")
     assert length(code.nodes) == 18
-    assert length(code.edges) == 37
+    assert length(code.edges) == 38
 
     # The next_task grep-gate is gone: "which task is next" is engine-derived now.
     refute Enum.any?(code.nodes, &(&1.key == "next_task"))
