@@ -235,6 +235,36 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     assert card_id == card.id
   end
 
+  test "a pinned :exclusive run whose executor is gone falls back to debiting :any" do
+    # reserve_slot/2's `:none -> debit_any` branch: the run is pinned to executor 9, but 9
+    # advertises no capacity (it went away). take_slot({:pinned, 9}) returns :none, so the run
+    # falls back to a greedy :any debit and still consumes the one slot executor 7 has — leaving
+    # nothing for the fresh ready card, which must NOT dispatch. Without the fallback the pinned
+    # run would hold no slot and the ready card would wrongly dispatch on 7.
+    %{board: board} = board_with_flow(:ready, :exclusive)
+
+    start_engine([
+      %{
+        id: 55,
+        card_id: -1,
+        status: :running,
+        flow_key: "spec",
+        isolation: :exclusive,
+        pinned_executor_id: 9,
+        pinned_executor_name: "nine"
+      }
+    ])
+
+    pid = start_server(board.id)
+    # Only executor 7 advertises capacity; the pinned executor (9) is absent from the map.
+    :ok = Capacity.put(7, %{shared_clean: 0, exclusive: 1})
+    :ok = Server.reconcile_now(pid)
+
+    # The pinned run debits 7 via the :any fallback, so no exclusive slot remains for the ready
+    # card — it stays queued rather than dispatching.
+    refute_receive {:start_run, _card_id, _flow, _executor}, 300
+  end
+
   test "a :running run whose flow was deleted (isolation: nil) leaves capacity untouched" do
     %{board: board, card: card} = board_with_flow(:ready)
 
