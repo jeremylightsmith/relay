@@ -35,7 +35,8 @@ context, so authoring in-context is how those decisions reach the plan.
 2. **Author the plan** in-context, following the guidance below.
 3. **Self-review** (checklist at the end), fixing inline.
 4. **Write the plan to the card.** Save it to a temp file and attach it so it travels with the
-   card — do NOT leave a durable repo-root `plan.md`:
+   card — do NOT leave a durable repo-root `plan.md` (the Code flow materializes it per-run at
+   `$RELAY_PLAN`):
 
        ./bin/relay plan <ref> @<tmpfile>
 
@@ -156,7 +157,7 @@ the loop. The node's `run` is a bare `/write-plan {ref}`, so every operational r
 - **No approved spec → raise `needs-input`, never a silent stop.** Step 1 tells the interactive
   path to stop and tell the user. Headless there is no user to tell, and a silent stop reads to
   the engine as `succeeded` — the card would land on `Plan:Done` carrying no plan, and the Code
-  flow would then fail two stages downstream on `test -s plan.md` with a confusing error. So if
+  flow would then fail two stages downstream on `test -s "$RELAY_PLAN"` with a confusing error. So if
   the card's `spec` field is empty or missing, park the card where the problem actually is,
   writing the questions to a scratch file under `$RELAY_NODE_SCRATCH`'s directory (never an
   invented `/tmp` path — see

@@ -396,8 +396,8 @@ and is not degraded to `:failed`. The command itself reaches every agent node fo
 deliberate decision, and the tempting alternative — have the human edit the card's plan and treat
 the edited plan as authoritative — does not work:
 
-- `plan.md` is materialized **once**, by the Code flow's `branch` node
-  (`Relay.Flows.DefaultLibrary`), and no later node ever re-writes it.
+- the plan is materialized **once**, to the per-ref `$RELAY_PLAN` path, by the Code flow's
+  `branch` node (`Relay.Flows.DefaultLibrary`), and no later node ever re-writes it.
 - `sub_tasks` are seeded from `card.plan` at **run start only**, and are deliberately never
   re-materialized on re-entry so that done-state isn't wiped (`Relay.Runs`).
 - Re-entry replays the **same node, same visit, fresh attempt** with the agent's claude session
