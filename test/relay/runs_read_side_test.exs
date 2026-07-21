@@ -163,6 +163,61 @@ defmodule Relay.RunsReadSideTest do
     end
   end
 
+  describe "run_summary_for_card/1" do
+    setup do
+      user = insert(:user)
+      {:ok, board} = Relay.Boards.create_board(user, %{name: "OneCard"})
+      board = Relay.Repo.preload(board, :stages)
+      %{board: board, stage: hd(board.stages)}
+    end
+
+    test "matches that card's entry from run_summaries_for_board for an active run", %{board: board, stage: stage} do
+      card = insert(:card, stage: stage)
+      run = insert(:run, card: card, flow_key: "code", current_node: "implement")
+      insert(:node_execution, run: run, node: "branch", duration_s: 8, cost: Decimal.new("0.10"))
+      insert(:node_execution, run: run, node: "implement", attempt: 2, outcome: nil, duration_s: nil, cost: nil)
+
+      assert Runs.run_summary_for_card(card) == Runs.run_summaries_for_board(board)[card.id]
+    end
+
+    test "matches the board entry for a terminal, multi-attempt run", %{board: board, stage: stage} do
+      card = insert(:card, stage: stage)
+      run = insert(:run, card: card, flow_key: "code", current_node: "quality_review")
+      insert(:node_execution, run: run, node: "implement", attempt: 1, duration_s: 120, cost: Decimal.new("0.50"))
+      insert(:node_execution, run: run, node: "implement", attempt: 2, duration_s: 90, cost: Decimal.new("0.40"))
+
+      insert(:node_execution,
+        run: run,
+        node: "quality_review",
+        outcome: :failed,
+        duration_s: 30,
+        cost: Decimal.new("0.10")
+      )
+
+      Runs.close_run!(run, :failed, "boom")
+
+      assert Runs.run_summary_for_card(card) == Runs.run_summaries_for_board(board)[card.id]
+    end
+
+    test "returns nil for a card with no run", %{stage: stage} do
+      card = insert(:card, stage: stage)
+      assert Runs.run_summary_for_card(card) == nil
+    end
+
+    test "still summarizes when the flow row is gone (path [], node_count nil)", %{board: board, stage: stage} do
+      card = insert(:card, stage: stage)
+      run = insert(:run, card: card, flow_key: "ghost", current_node: "implement")
+      insert(:node_execution, run: run, node: "implement")
+
+      summary = Runs.run_summary_for_card(card)
+
+      assert summary.node_count == nil
+      assert summary.node_index == nil
+      assert summary.current_node == "implement"
+      assert summary == Runs.run_summaries_for_board(board)[card.id]
+    end
+  end
+
   describe "last_node/2" do
     test "prefers current_node, else the most recent execution (id breaks a same-second tie)" do
       now = DateTime.truncate(DateTime.utc_now(), :second)

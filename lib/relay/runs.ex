@@ -140,6 +140,10 @@ defmodule Relay.Runs do
   nothing to the sum. `flow_version` is nil — the run points at the live flow
   row and carries no version column yet (RLY-152).
   """
+  # The zero totals a run with no node executions contributes — the fallback for a run id absent
+  # from node_totals/1. Named once so both summary readers share it (AGENTS.md "a fact defined once").
+  @empty_totals %{duration_s: nil, cost: nil, nodes: 0, attempts: 0, last_node: nil}
+
   def run_summaries_for_board(%Board{id: board_id}) do
     latest =
       Repo.all(
@@ -160,29 +164,64 @@ defmodule Relay.Runs do
 
     Map.new(latest, fn run ->
       path = Map.get(paths, run.flow_key, [])
-      index = run.current_node && Enum.find_index(path, &(&1 == run.current_node))
-      tot = Map.get(totals, run.id, %{duration_s: nil, cost: nil, nodes: 0, attempts: 0, last_node: nil})
-
-      {run.card_id,
-       %{
-         run_id: run.id,
-         card_id: run.card_id,
-         status: run.status,
-         breaker_tripped?: breaker_tripped?(run),
-         flow_key: run.flow_key,
-         flow_version: nil,
-         current_node: run.current_node,
-         last_node: run.current_node || tot.last_node,
-         node_index: index && index + 1,
-         node_count: if(path == [], do: nil, else: length(path)),
-         started_at: run.started_at,
-         finished_at: run.finished_at,
-         duration_s: tot.duration_s,
-         cost: tot.cost,
-         nodes: tot.nodes,
-         attempts: tot.attempts
-       }}
+      tot = Map.get(totals, run.id, @empty_totals)
+      {run.card_id, build_summary(run, path, tot)}
     end)
+  end
+
+  @doc """
+  The card-face summary for a single card's latest run, or `nil` when the card has
+  no run — the one-card variant of `run_summaries_for_board/1` (RLY-204). BoardLive
+  calls this to refetch only the card a run event names, instead of re-aggregating
+  every run on the board. Both functions build each run's summary through the shared
+  private `build_summary/3`, so the summary map shape is defined exactly once.
+  """
+  def run_summary_for_card(%Card{} = card) do
+    case latest_run(card) do
+      nil ->
+        nil
+
+      run ->
+        totals = Map.get(node_totals([run.id]), run.id, @empty_totals)
+        build_summary(run, happy_path_for(card, run), totals)
+    end
+  end
+
+  # The one per-run summary map — built identically by run_summaries_for_board/1 (over the
+  # whole board) and run_summary_for_card/1 (one card), so the shape lives in exactly one
+  # place. `path` is the flow's happy path (drives node_index/node_count); `totals` is this
+  # run's node-execution aggregate, or @empty_totals when it has no executions yet.
+  defp build_summary(%Run{} = run, path, totals) do
+    index = run.current_node && Enum.find_index(path, &(&1 == run.current_node))
+
+    %{
+      run_id: run.id,
+      card_id: run.card_id,
+      status: run.status,
+      breaker_tripped?: breaker_tripped?(run),
+      flow_key: run.flow_key,
+      flow_version: nil,
+      current_node: run.current_node,
+      last_node: run.current_node || totals.last_node,
+      node_index: index && index + 1,
+      node_count: if(path == [], do: nil, else: length(path)),
+      started_at: run.started_at,
+      finished_at: run.finished_at,
+      duration_s: totals.duration_s,
+      cost: totals.cost,
+      nodes: totals.nodes,
+      attempts: totals.attempts
+    }
+  end
+
+  # The single-flow analog of run_summaries_for_board/1's `paths` map: the happy path of the
+  # flow this run points at (matched by key within the card's board, exactly as the board
+  # function matches), or [] when that flow row is gone.
+  defp happy_path_for(%Card{board_id: board_id}, %Run{flow_key: flow_key}) do
+    case Relay.Flows.get_flow(%Board{id: board_id}, flow_key) do
+      nil -> []
+      flow -> happy_path(flow)
+    end
   end
 
   @doc """
