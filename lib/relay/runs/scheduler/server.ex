@@ -169,21 +169,30 @@ defmodule Relay.Runs.Scheduler.Server do
   # Reuses Relay.Runs.Scheduler.take_slot/3 — the pure planner's own greedy
   # placement arithmetic — instead of a second copy, so this subtraction can
   # never drift out of sync with how the planner actually placed the run.
-  # `:none` (nothing to take, e.g. capacity already fully spent) leaves the
-  # snapshot unchanged rather than raising.
   #
-  # Always targets `:any`, even for `:exclusive` runs: executor-affinity pinning
-  # is unimplemented (`pinned_executor_id` is always nil — RLY-139), so a
-  # `{:pinned, nil}` target would be permanently unfree and this debit would be
-  # a silent no-op — exactly the isolation class where an unaccounted running
-  # run is most damaging (two exclusive runs sharing one worktree). Debiting
-  # greedily may charge the wrong executor's slot, but it keeps the aggregate
-  # slot count correct, which is what this accounting exists to protect. This
-  # mirrors `Relay.Runs.Scheduler.place_fresh/4`, which already places every
-  # fresh pull — exclusive included — against `:any`.
+  # A pinned :exclusive run (RLY-199) debits its pinned executor via
+  # `{:pinned, id}`, mirroring how resume_runs/2 will place its resume — so the
+  # accounting charges the executor that actually holds the run's slot. If that
+  # executor is absent from the capacity map (gone, or not yet re-advertised),
+  # `take_slot` returns `:none` and we fall back to a greedy `:any` debit, which
+  # keeps the AGGREGATE slot count correct (the property this accounting exists to
+  # protect) even if it charges the wrong executor. An unpinned run (a fresh
+  # pre-first-claim exclusive run, or any shared_clean run) debits `:any` directly,
+  # matching `Relay.Runs.Scheduler.place_fresh/4`. `:none` on the fallback leaves the
+  # snapshot unchanged rather than raising. A deleted-flow run (isolation nil) holds
+  # no slot.
   defp reserve_slot(cap, %{isolation: nil}), do: cap
 
-  defp reserve_slot(cap, run) do
+  defp reserve_slot(cap, %{pinned_executor_id: eid} = run) when not is_nil(eid) do
+    case Scheduler.take_slot(cap, run.isolation, {:pinned, eid}) do
+      :none -> debit_any(cap, run)
+      {_executor_id, updated} -> updated
+    end
+  end
+
+  defp reserve_slot(cap, run), do: debit_any(cap, run)
+
+  defp debit_any(cap, run) do
     case Scheduler.take_slot(cap, run.isolation, :any) do
       :none -> cap
       {_executor_id, updated} -> updated
