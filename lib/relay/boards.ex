@@ -55,6 +55,54 @@ defmodule Relay.Boards do
   end
 
   @doc """
+  Updates a board's RLY-69 public settings (enable toggle + intake stage). Validates
+  that `public_intake_stage_id`, when set, is a stage on this board. Broadcasts
+  `{:board_updated, board}`. Owner-gated by its only caller (the settings LiveView).
+  """
+  def update_public_settings(%Board{} = board, attrs) do
+    board
+    |> Board.public_settings_changeset(attrs)
+    |> validate_intake_stage(board)
+    |> Repo.update()
+    |> broadcast_board_updated(board.id)
+  end
+
+  @doc """
+  The board behind a public URL: returns `{:ok, board}` **only when
+  `public_enabled` is true**, `:error` otherwise (disabled or unknown slug). Stages
+  are preloaded in position order. Non-scoped — public visitors have no membership.
+  """
+  def get_public_board(slug) when is_binary(slug) do
+    case Repo.one(
+           from b in Board,
+             where: b.slug == ^slug and b.public_enabled == true,
+             preload: [stages: ^from(s in Stage, order_by: s.position)]
+         ) do
+      nil -> :error
+      %Board{} = board -> {:ok, board}
+    end
+  end
+
+  @doc """
+  The board's public-board cards: non-archived cards whose stage category is in
+  `Stage.public_categories/0` (i.e. not Done/Complete), stage preloaded, ordered
+  newest-first as a stable base. `RelayWeb.PublicBoardLive` groups these by category
+  and re-sorts each column by live vote count (so the sort lives with the counts, not
+  here — keeps this query independent of `Relay.Votes`).
+  """
+  def list_public_cards(%Board{id: board_id}) do
+    categories = Stage.public_categories()
+
+    Repo.all(
+      from c in Card,
+        join: s in assoc(c, :stage),
+        where: c.board_id == ^board_id and is_nil(c.archived_at) and s.category in ^categories,
+        order_by: [desc: c.inserted_at, desc: c.id],
+        preload: [stage: s]
+    )
+  end
+
+  @doc """
   Returns the user's board with `stages` preloaded in `position` order,
   creating the board (unique slug derived from the user) and seeding the
   default 8-stage pipeline, the `Spec:Review`/`Spec:Done`/`Plan:Done`
@@ -501,6 +549,20 @@ defmodule Relay.Boards do
   end
 
   defp broadcast_board_updated({:error, _changeset} = result, _board_id), do: result
+
+  defp validate_intake_stage(changeset, %Board{id: board_id}) do
+    case Changeset.get_change(changeset, :public_intake_stage_id) do
+      nil ->
+        changeset
+
+      stage_id ->
+        if Repo.exists?(from s in Stage, where: s.id == ^stage_id and s.board_id == ^board_id) do
+          changeset
+        else
+          Changeset.add_error(changeset, :public_intake_stage_id, "must be a stage on this board")
+        end
+    end
+  end
 
   defp lane_word(:review), do: "Review"
   defp lane_word(:done), do: "Done"

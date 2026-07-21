@@ -9,6 +9,9 @@ sharing behavior.
 
 - **Boards** — boards and their stage tree (stages, sub-lanes, review gates, WIP limits,
   `ai_enabled`). Stage/config semantics: [ADR 0003](../adr/0003-card-state-stage-type-validity.md).
+  Also holds the RLY-69 public-board settings (`public_enabled` + `public_intake_stage_id`,
+  written via `update_public_settings/2`) and `list_public_cards/1`, the public roadmap's
+  card query (non-archived, stage category in `Stage.public_categories/0`).
 - **Flows** — workflow definitions as declarative graph data (ADR 0006 / RLY-131): per-board
   rows in the `flows` table (`key`, `enabled`, `isolation`, `version`, three trigger stage FKs
   stored as ids with nilify-on-delete) with the node/edge graph embedded as jsonb; `"start"`/
@@ -221,6 +224,8 @@ sharing behavior.
 - **Attachments** — file uploads onto cards, served by `AttachmentController`.
 - **Push** — APNs notifications, dispatched off-caller via a `Task.Supervisor` so a status
   change never waits on Apple (RLY-81).
+- **Votes** — public upvotes (RLY-69): a unique `(card_id, user_id)` row; `toggle_vote/2`
+  toggles and broadcasts `{:vote_changed, card_id}`. A card's supporters are the voting users.
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
 
 Planned by [ADR 0006](../adr/0006-workflow-orchestration.md): the trigger scheduler (03), the
@@ -255,6 +260,8 @@ erDiagram
     Board ||--o{ ApiKey : "agent credentials"
     User ||--o{ UserApiToken : "mobile bearer"
     User ||--o{ DeviceToken : "push"
+    Card ||--o{ Vote : upvotes
+    User ||--o{ Vote : cast
 ```
 
 A `Stage` may point at a `parent` (sub-lanes like `Spec:Review`) and a `reject_to_stage`

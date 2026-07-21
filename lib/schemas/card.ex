@@ -18,7 +18,9 @@ defmodule Schemas.Card do
   boards. `ai_result` (RLY-18) carries the agent's structured result blob
   (summary/changes/screens/deploy_url), nullable, cast like `spec`;
   `sub_tasks` is the card's ordered checklist (RLY-18), written via
-  `Relay.Cards.set_sub_tasks/2`, never cast here.
+  `Relay.Cards.set_sub_tasks/2`, never cast here. `public_description`
+  (RLY-69) is the optional public-board copy, distinct from the internal
+  `description`; nullable, cast like `description`.
   """
 
   use Ecto.Schema
@@ -45,6 +47,7 @@ defmodule Schemas.Card do
     field :plan, :string
     field :pr_url, :string
     field :ai_result, :map
+    field :public_description, :string
 
     belongs_to :board, Schemas.Board
     belongs_to :stage, Schemas.Stage
@@ -57,15 +60,17 @@ defmodule Schemas.Card do
 
   @doc """
   Changeset for user/agent-supplied card attributes (`:title`,
-  `:description`, `:acceptance_criteria`, `:spec`, `:tag`, `:branch`,
-  `:plan`, `:pr_url`, `:ai_result`). `board_id`, `stage_id`, `position`, and
-  `ref_number` must already be set on the struct and are never cast.
+  `:description`, `:public_description`, `:acceptance_criteria`, `:spec`,
+  `:tag`, `:branch`, `:plan`, `:pr_url`, `:ai_result`). `board_id`,
+  `stage_id`, `position`, and `ref_number` must already be set on the
+  struct and are never cast.
   """
   def changeset(card, attrs) do
     card
     |> cast(attrs, [
       :title,
       :description,
+      :public_description,
       :acceptance_criteria,
       :spec,
       :tag,

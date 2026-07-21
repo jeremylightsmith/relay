@@ -79,6 +79,13 @@ defmodule Schemas.Stage do
   def valid_status?(status, :review), do: status == :in_review
   def valid_status?(status, :done), do: status in [:ready, :queued]
 
+  @doc """
+  The stage categories whose cards appear on the public board (RLY-69) — every
+  non-`:complete` band. The single source of truth for "shown publicly"; the
+  public-board query and its tests both call this (AGENTS.md magic-value rule).
+  """
+  def public_categories, do: [:unstarted, :planning, :in_progress]
+
   # ai_enabled only applies to work/planning; every other type zeroes it (create + type change).
   defp normalize_ai_enabled(changeset) do
     if get_field(changeset, :type) in [:work, :planning] do

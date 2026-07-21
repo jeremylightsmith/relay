@@ -30,6 +30,7 @@ defmodule Schemas do
       Stage,
       SubTask,
       User,
-      UserApiToken
+      UserApiToken,
+      Vote
     ]
 end
