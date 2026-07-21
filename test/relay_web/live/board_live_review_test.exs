@@ -12,14 +12,16 @@ defmodule RelayWeb.BoardLiveReviewTest do
 
   # Default 8-stage pipeline: Backlog | Next up | Spec | Plan | Code(:work, ai) |
   # Review(:review type) | Deploy(:work, ai) | Done. Review is a review-type stage by
-  # seed default, so it's already a gate — its reject target defaults to Code (the
-  # previous main stage); Code (type :work) is never itself a review-type stage.
+  # seed default, so it's already a gate — its reject target is seeded to Plan
+  # (RLY-216, so a code reject re-plans out of the box); Code (type :work) is
+  # never itself a review-type stage.
   setup %{user: user} do
     board = Boards.get_or_create_default_board(user)
     code = Enum.find(board.stages, &(&1.name == "Code"))
+    plan = Enum.find(board.stages, &(&1.name == "Plan"))
     review = Enum.find(board.stages, &(&1.name == "Review"))
     deploy = Enum.find(board.stages, &(&1.name == "Deploy"))
-    %{board: board, code: code, review: review, deploy: deploy}
+    %{board: board, code: code, plan: plan, review: review, deploy: deploy}
   end
 
   defp in_review_card(stage, title \\ "Review me") do
@@ -109,7 +111,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
   end
 
   test "Request changes expands in place, names the target, and routes back with the note",
-       %{conn: conn, user: user, board: board, code: code, review: review} do
+       %{conn: conn, user: user, board: board, plan: plan, review: review} do
     in_review_card(review)
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
@@ -117,13 +119,13 @@ defmodule RelayWeb.BoardLiveReviewTest do
 
     view |> element("#review-request-changes") |> render_click()
 
-    assert has_element?(view, "#review-reject-panel", "Code")
+    assert has_element?(view, "#review-reject-panel", "Plan")
     assert has_element?(view, "#review-request-note")
     refute has_element?(view, "#review-approve")
 
     assert has_element?(view, "#review-reject-panel", "Returns to")
-    assert has_element?(view, "#review-reject-panel", "Code")
-    assert has_element?(view, "#review-send-back", "Reject → Code")
+    assert has_element?(view, "#review-reject-panel", "Plan")
+    assert has_element?(view, "#review-send-back", "Reject → Plan")
     assert has_element?(view, ~s|#review-send-back[style*="oklch(0.62 0.14 65)"]|)
     refute has_element?(view, "#review-reject-target")
     refute has_element?(view, "#review-approve")
@@ -136,11 +138,11 @@ defmodule RelayWeb.BoardLiveReviewTest do
     assert_patch(view, ~p"/board/#{board.slug}")
     refute has_element?(view, "#card-drawer")
     refute has_element?(view, "#flash-info")
-    assert has_element?(view, "#stage-col-#{code.position}-cards .board-card", "Review me")
+    assert has_element?(view, "#stage-col-#{plan.position}-cards .board-card", "Review me")
 
     reloaded = Cards.get_card_by_ref(board, "RLY-1")
-    assert reloaded.stage_id == code.id
-    assert reloaded.status == :working
+    assert reloaded.stage_id == plan.id
+    assert reloaded.status == :ready
 
     timeline = Activity.list_timeline(reloaded)
     note = Enum.find(timeline, &match?(%Comment{body: "Tighten the error handling"}, &1))
@@ -149,7 +151,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     assert Enum.any?(timeline, &match?(%Schemas.Activity{type: :rejected}, &1))
   end
 
-  test "the reject panel shows the derived destination and offers no picker",
+  test "the reject panel shows the configured destination and offers no picker",
        %{conn: conn, board: board, review: review} do
     in_review_card(review)
 
@@ -158,7 +160,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     view |> element("#review-request-changes") |> render_click()
 
     assert has_element?(view, "#review-reject-panel", "the reject target set on this stage")
-    assert has_element?(view, "#review-send-back", "Reject → Code")
+    assert has_element?(view, "#review-send-back", "Reject → Plan")
     refute has_element?(view, "#review-reject-target")
   end
 

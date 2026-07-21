@@ -74,6 +74,16 @@ defmodule Relay.BoardsTest do
       refute board.id == other_board.id
       assert board.owner_id == user.id
     end
+
+    test "seeds Review.reject_to → Plan so a code reject re-plans (RLY-216)" do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+
+      review = Enum.find(board.stages, &(&1.name == "Review"))
+      plan = Enum.find(board.stages, &(&1.name == "Plan"))
+
+      assert review.reject_to_stage_id == plan.id
+    end
   end
 
   describe "update_board/2" do

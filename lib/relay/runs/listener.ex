@@ -21,11 +21,13 @@ defmodule Relay.Runs.Listener do
       (`claude -p --resume`; the only session-resuming re-entry).
     * parked `:claimed` + card AI-owned again (hand-back) → resume fresh
       (the human may have changed anything).
-    * no active run + open rejection + the card sits in the works-in stage
-      of an enabled flow + the card's latest run (if any) is `:done` →
-      start a new run with `context: %{"changes_requested" => note}`.
-      The latest-run guard keeps a failed re-entry from looping forever;
-      re-pulling after failure is a human call (03's scheduler rule).
+    * no active run + open rejection + card `:ready` (handed back for rework — a
+      reject leaves it `:ready`, a failure leaves it `:failed`) + AI-owned + the
+      card sits in the works-in stage of an enabled flow → start a new run with
+      `context: %{"changes_requested" => note}`. Keying re-entry off *card* status
+      (not the prior run's) lets a reject after a failed run re-enter while a genuine
+      `:failed` card is never auto-restarted (RLY-156/RLY-216) — mirroring the
+      scheduler's own `:failed` exclusion.
   """
 
   use GenServer
@@ -134,7 +136,7 @@ defmodule Relay.Runs.Listener do
 
   defp maybe_reenter_after_rejection(%Card{rejection: nil}), do: :ok
 
-  defp maybe_reenter_after_rejection(%Card{} = card) do
+  defp maybe_reenter_after_rejection(%Card{status: :ready} = card) do
     flow =
       Repo.one(
         from f in Flow,
@@ -143,17 +145,17 @@ defmodule Relay.Runs.Listener do
           limit: 1
       )
 
-    if flow && last_run_done?(card) do
+    if flow && Relay.Cards.active_owner_type(card) == :ai do
       _result = Runs.start_run(card, flow, context: %{"changes_requested" => card.rejection.note})
     end
 
     :ok
   end
 
-  defp last_run_done?(card) do
-    case Runs.list_runs(card) do
-      [] -> true
-      [latest | _rest] -> latest.status == :done
-    end
-  end
+  # Any other status — notably :failed — is never auto-restarted. RLY-156/RLY-179: the
+  # loop-guard now lives in *card* status. A reject leaves the card :ready
+  # (Relay.Cards.move_and_reject), a failure leaves it :failed, so the two are distinguishable;
+  # this mirrors the scheduler's own :failed exclusion. Recovery from a genuine failure is a
+  # human call.
+  defp maybe_reenter_after_rejection(%Card{}), do: :ok
 end

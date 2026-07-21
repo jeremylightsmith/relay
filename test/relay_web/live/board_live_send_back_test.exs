@@ -13,9 +13,10 @@ defmodule RelayWeb.BoardLiveSendBackTest do
   setup %{user: user} do
     board = Boards.get_or_create_default_board(user)
     code = Enum.find(board.stages, &(&1.name == "Code"))
+    plan = Enum.find(board.stages, &(&1.name == "Plan"))
     spec = Enum.find(board.stages, &(&1.name == "Spec"))
     review = Enum.find(board.stages, &(&1.name == "Review"))
-    %{board: board, spec: spec, code: code, review: review}
+    %{board: board, spec: spec, code: code, plan: plan, review: review}
   end
 
   test "the amber banner renders for a card with an open rejection and names the target", %{
@@ -32,7 +33,7 @@ defmodule RelayWeb.BoardLiveSendBackTest do
 
     assert has_element?(view, "#rejection-banner", "Changes requested")
     assert has_element?(view, "#rejection-banner", "Handle the empty case")
-    assert has_element?(view, "#rejection-banner", "Code")
+    assert has_element?(view, "#rejection-banner", "Plan")
   end
 
   test "no banner for a clean card", %{conn: conn, code: code, user: user} do
@@ -53,10 +54,10 @@ defmodule RelayWeb.BoardLiveSendBackTest do
     refute has_element?(view, "#send-back-panel")
   end
 
-  test "the gate reject panel is note-only and routes to the derived destination", %{
+  test "the gate reject panel is note-only and routes to the configured destination", %{
     conn: conn,
     board: board,
-    code: code,
+    plan: plan,
     review: review
   } do
     {:ok, card} = Cards.create_card(review, %{title: "Review me"})
@@ -67,14 +68,14 @@ defmodule RelayWeb.BoardLiveSendBackTest do
     view |> element("#review-request-changes") |> render_click()
 
     refute has_element?(view, "#review-reject-target")
-    assert has_element?(view, "#review-send-back", "Reject → Code")
+    assert has_element?(view, "#review-send-back", "Reject → Plan")
 
     view
     |> form("#review-reject-form", reject: %{note: "Tighten it"})
     |> render_submit()
 
     reloaded = Cards.get_card_by_ref(board, "RLY-1")
-    assert reloaded.stage_id == code.id
+    assert reloaded.stage_id == plan.id
     assert reloaded.rejection
   end
 end

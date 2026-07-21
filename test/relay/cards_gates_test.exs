@@ -183,14 +183,14 @@ defmodule Relay.CardsGatesTest do
   end
 
   describe "reject/3" do
-    test "routes to the previous main stage with arrival status, note comment, and :rejected entry",
+    test "routes to the previous main stage with :ready status, note comment, and :rejected entry",
          %{review: review, code: code} do
       card = insert(:card, stage: review)
       {:ok, card} = Cards.set_status(card, %{status: :in_review})
 
       assert {:ok, rejected} = Cards.reject(card, "Specs are missing edge cases", :agent)
       assert rejected.stage_id == code.id
-      assert rejected.status == :working
+      assert rejected.status == :ready
 
       timeline = Activity.list_timeline(card)
       assert Enum.any?(timeline, &(is_struct(&1, Schemas.Comment) and &1.body == "Specs are missing edge cases"))
