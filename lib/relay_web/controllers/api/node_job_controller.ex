@@ -94,6 +94,10 @@ defmodule RelayWeb.Api.NodeJobController do
 
       json(conn, %{
         revoked: Runs.revoked_among(board, running),
+        # RLY-218: the run-scoped analogue of `revoked`, one level up — the executor reports
+        # the run-ids of exclusive slots it holds with no live job (`bound_runs`), and this
+        # names the ones now terminal server-side so it can release those slots too.
+        release_runs: Runs.terminal_among(board, Map.get(params, "bound_runs", [])),
         # RLY-182: `capabilities` is send-on-change, so an executor that already sent one
         # never sends it again — but the row can lose it (recreated row, or an executor
         # predating this change), which would strand preflight on a permanent false

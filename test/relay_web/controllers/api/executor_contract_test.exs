@@ -44,7 +44,8 @@ defmodule RelayWeb.Api.ExecutorContractTest do
       # RLY-182: optional, send-on-change. Present here so the fixture records the key
       # and its shape for bin/test_relay.py to build against.
       "capabilities" => %{"agents" => ["plan-implementer"], "skills" => ["write-plan"]},
-      "running" => []
+      "running" => [],
+      "bound_runs" => []
     }
 
     heartbeat_response =

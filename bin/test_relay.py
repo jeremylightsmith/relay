@@ -195,10 +195,10 @@ class ReverseContractTest(unittest.TestCase):
     def test_heartbeat_body_key_set_matches_the_fixture(self):
         # Omitted (steady-state) beats are a SUBSET of the fixture's request keys;
         # `capabilities` is optional and send-on-change (RLY-182).
-        body = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"])
+        body = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"], [])
         self.assertTrue(set(body) <= set(CONTRACT["heartbeat"]["request"]))
         # A beat that DOES carry the inventory matches the fixture's key set exactly.
-        full = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"],
+        full = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"], [],
                                     {"agents": [], "skills": []})
         self.assertEqual(set(full), set(CONTRACT["heartbeat"]["request"]))
         self.assertIn("want_capabilities", CONTRACT["heartbeat"]["response"])
@@ -210,6 +210,15 @@ class ReverseContractTest(unittest.TestCase):
     def test_the_heartbeat_response_carries_the_revoked_ids_the_executor_reads(self):
         # ExecutorHeartbeat._beat() hands each of these to on_revoke().
         self.assertIn("revoked", CONTRACT["heartbeat"]["response"])
+
+    def test_the_heartbeat_request_carries_bound_runs(self):
+        # RLY-218: the executor reports its idle-bound run-ids so the server can name the
+        # terminal ones to release.
+        self.assertIn("bound_runs", CONTRACT["heartbeat"]["request"])
+
+    def test_the_heartbeat_response_carries_release_runs(self):
+        # ExecutorHeartbeat._beat() hands each of these to on_release_run().
+        self.assertIn("release_runs", CONTRACT["heartbeat"]["response"])
 
     def test_the_claim_request_carries_the_executor_version(self):
         # RLY-184: the server refuses a claim whose executor has no version, so this key is
@@ -2105,6 +2114,29 @@ class ExecutorHeartbeatCapacityTest(unittest.TestCase):
                                      capacity={"shared_clean": 1, "exclusive": 0})
         hb._beat()
         self.assertEqual(killed, ["nj-7"])
+
+    def test_the_beat_posts_bound_runs_from_bound_fn(self):
+        sent = {}
+
+        def fake_api(method, path, body=None, **kw):
+            sent["body"] = body
+            return {"revoked": []}
+
+        relay.api = fake_api
+        hb = relay.ExecutorHeartbeat({"name": "e"}, lambda: [], lambda jid: None,
+                                     capacity={"shared_clean": 1, "exclusive": 1},
+                                     bound_fn=lambda: [7, 9])
+        hb._beat()
+        self.assertEqual(sent["body"]["bound_runs"], [7, 9])
+
+    def test_release_runs_in_the_reply_are_handed_to_on_release_run(self):
+        relay.api = lambda *a, **k: {"revoked": [], "release_runs": [42, 43]}
+        released = []
+        hb = relay.ExecutorHeartbeat({"name": "e"}, lambda: [], lambda jid: None,
+                                     capacity={"shared_clean": 1, "exclusive": 1},
+                                     on_release_run=released.append)
+        hb._beat()
+        self.assertEqual(released, [42, 43])
 
 
 class ExecutorSingletonLockTest(unittest.TestCase):

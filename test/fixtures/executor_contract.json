@@ -68,6 +68,7 @@
   },
   "heartbeat": {
     "request": {
+      "bound_runs": [],
       "capabilities": {
         "agents": [
           "plan-implementer"
@@ -90,6 +91,7 @@
     },
     "response": {
       "executor_outdated": false,
+      "release_runs": [],
       "required_version": 13,
       "revoked": [],
       "want_capabilities": false
