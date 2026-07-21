@@ -73,12 +73,16 @@ looks like the leftward flow is being starved. Pinned by
   batches `POST /api/board/logs` (best-effort: drops on full queue, swallows all errors) —
   landing in `Activity.LogSink` → the card timeline, and `AgentLog` → the live log sheet.
 - **Executor heartbeat**: `ExecutorHeartbeat` posts `{executor, capacity,
-  running: [job-ids]}` to `POST /api/node-jobs/heartbeat` every `heartbeat_interval`s
-  (RLY-164) and reads back `{revoked: [job-ids], want_capabilities, executor_outdated,
-  required_version}`. It terminates each revoked job's live subprocess via its `JobControl`
-  (see "Node-job transport" and "Executor mode" below). The advertised `capacity` is the
-  executor's configured per-class total; `running` is the jobs it believes it holds, so the
-  server can name the ones it no longer considers live.
+  running: [job-ids], bound_runs: [run-ids]}` to `POST /api/node-jobs/heartbeat` every
+  `heartbeat_interval`s (RLY-164) and reads back `{revoked: [job-ids],
+  release_runs: [run-ids], want_capabilities, executor_outdated, required_version}`. It
+  terminates each revoked job's live subprocess via its `JobControl` (see "Node-job
+  transport" and "Executor mode" below). The advertised `capacity` is the executor's
+  configured per-class total; `running` is the jobs it believes it holds, so the server can
+  name the ones it no longer considers live. `bound_runs` (RLY-218) is the run-ids of
+  exclusive slots the executor holds *without* a live job; `release_runs` is the run-scoped
+  analogue of `revoked` — the subset now terminal server-side, so the executor frees those
+  idle-bound worktree slots within one heartbeat instead of waiting on a next outcome.
 - **Run ids**: each executor worker tags its log lines with the claimed job's `run_id`
   (RLY-112) so a card's timeline can group lines by run.
 
@@ -336,9 +340,13 @@ nothing else — every board-specific fact lives server-side as flow data.
   `--interval` overrides the configured poll timeout; SIGINT stops claiming new work and waits
   for in-flight workers to finish.
 - **Heartbeat-borne revoke.** `ExecutorHeartbeat` POSTs `{executor, capacity,
-  running: [job-ids]}` to `POST /api/node-jobs/heartbeat` every `heartbeat_interval`s and
-  reads `{revoked: [job-ids]}` back (RLY-164), terminating each revoked job's live
-  subprocess via its `JobControl`. This is how taking the baton (ADR 0004, via
+  running: [job-ids], bound_runs: [run-ids]}` to `POST /api/node-jobs/heartbeat` every
+  `heartbeat_interval`s and reads `{revoked: [job-ids], release_runs: [run-ids]}` back
+  (RLY-164), terminating each revoked job's live subprocess via its `JobControl`.
+  `release_runs` is the run-scoped analogue of `revoked` (RLY-218): the executor advertises
+  the run-ids of exclusive slots it holds with no live job (`bound_runs`), and the server
+  names the subset gone terminal server-side so the executor releases those idle-bound
+  worktree slots within one heartbeat. This is how taking the baton (ADR 0004, via
   `park_claimed/1`) or cancelling from the run panel stops a running agent without waiting on
   its next outcome POST. A revoked **exclusive** job resets its worktree (salvaging any leftovers via `git stash`,
   same as `reset_worktree` elsewhere), since that worktree is bound 1:1 to this job/run. A
