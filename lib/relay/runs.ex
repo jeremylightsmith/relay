@@ -17,7 +17,7 @@ defmodule Relay.Runs do
 
   use Boundary,
     deps: [Relay.Activity, Relay.Boards, Relay.Cards, Relay.Events, Relay.Flows, Relay.Repo, Schemas],
-    exports: [Supervisor, Capacity, SchedulerSupervisor]
+    exports: [Supervisor, Capacity, RunDetail, SchedulerSupervisor]
 
   import Ecto.Query
 
@@ -172,6 +172,7 @@ defmodule Relay.Runs do
          run_id: run.id,
          card_id: run.card_id,
          status: run.status,
+         breaker_tripped?: breaker_tripped?(run),
          flow_key: run.flow_key,
          flow_version: nil,
          current_node: run.current_node,
@@ -187,6 +188,30 @@ defmodule Relay.Runs do
        }}
     end)
   end
+
+  @doc """
+  Whether a run died because the circuit breaker actually tripped — the ONE
+  breaker signal (RLY-207, moved from `RunComponents.circuit_tripped?/1`).
+
+  `runs.failure_detail` carries the engine's reason verbatim and the
+  `circuit_breaker:` token has exactly one producer (`Engine.decide/4`), so it is
+  the honest discriminator. Matched as a substring, not a prefix, so bringing the
+  breaker reason in line with the human-first house style can't silently un-trip it.
+
+  RLY-194 will swap the internals here for a structured failure reason without
+  touching callers.
+  """
+  def breaker_tripped?(%{status: :failed, failure_detail: detail}) when is_binary(detail),
+    do: String.contains?(detail, "circuit_breaker:")
+
+  def breaker_tripped?(_run), do: false
+
+  @doc """
+  The run-visibility read model for one run: `%Relay.Runs.RunDetail{}` derived
+  purely from `run` (with `node_executions` preloaded) plus its `flow` (or nil).
+  The web layer renders this instead of re-folding raw executions (RLY-207).
+  """
+  def run_detail(run, flow), do: Relay.Runs.RunDetail.build(run, flow)
 
   # A live run whose node-job is stuck (queued/unclaimed/held by a silent executor) this long
   # has stopped moving. Well above a legitimate long node's own claimed runtime — a 40-minute
