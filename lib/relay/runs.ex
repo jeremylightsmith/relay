@@ -1122,15 +1122,53 @@ defmodule Relay.Runs do
     |> put_evidence(:current_node, run && run.current_node)
     |> put_evidence(:last_execution, last_execution_summary(last))
     |> put_evidence(:job, job_summary(job))
+    |> layer_pin_freshness(board, now)
     |> override_verdict(run, last, job, board, now, capacity)
   end
 
   defp override_verdict(base, run, last, job, board, now, capacity) do
     cond do
-      run != nil and stranded?(job, board, now) -> stranded_verdict(base, job)
-      run != nil and roster_blocked?(job, board, now, capacity) -> roster_blocked_verdict(base, capacity)
-      run == nil and last != nil and last.status == :failed -> run_failed_verdict(base, last)
-      true -> base
+      run != nil and stranded?(job, board, now) ->
+        stranded_verdict(base, job)
+
+      run != nil and roster_blocked?(run, job, board, now, capacity) ->
+        roster_blocked_verdict(base, capacity)
+
+      run == nil and last != nil and last.status == :failed ->
+        run_failed_verdict(base, last)
+
+      true ->
+        base
+    end
+  end
+
+  # For a parked pinned run, explain/2 has already named the awaited executor in the
+  # detail sentence and stamped evidence.pinned_executor_name. The snapshot can't know
+  # whether that machine is connected RIGHT NOW, so layer the live freshness on here —
+  # the same way current_node is layered from DB state the snapshot lacks.
+  defp layer_pin_freshness(%{evidence: %{pinned_executor_name: name}} = base, board, now) when is_binary(name) do
+    {label, sentence} = executor_freshness_note(board, name, now)
+
+    %{
+      base
+      | detail: base.detail <> " " <> sentence,
+        evidence: Map.put(base.evidence, :pinned_executor_freshness, label)
+    }
+  end
+
+  defp layer_pin_freshness(base, _board, _now), do: base
+
+  defp executor_freshness_note(board, name, now) do
+    case Repo.get_by(Executor, board_id: board.id, name: name) do
+      nil ->
+        {:absent, ~s(Executor "#{name}" is not currently connected.)}
+
+      executor ->
+        case executor_freshness(executor, now) do
+          :fresh -> {:fresh, ~s(Executor "#{name}" is connected and beating.)}
+          :stale -> {:stale, ~s(Executor "#{name}" is connected but a heartbeat is overdue.)}
+          :gone -> {:gone, ~s(Executor "#{name}" has gone silent past the stale threshold.)}
+        end
     end
   end
 
@@ -1138,7 +1176,14 @@ defmodule Relay.Runs do
   # executor) while the roster reason is "everyone refused / nobody connected" — the RLY-191
   # false-"working" case explain/2 can't see, because run != nil short-circuits it to
   # :run_active. A busy-but-healthy roster (:awaiting_capacity) is deliberately excluded.
-  defp roster_blocked?(job, board, now, {reason, _bits}) do
+  #
+  # A :parked run never hits this: run_verdict/2 already gives it the correct, specific
+  # verdict (never :run_active), so there is no "false working" claim to correct — and for
+  # a parked *pinned* run (RLY-199) that verdict names the awaited machine, which this
+  # generic roster message would otherwise clobber.
+  defp roster_blocked?(%{status: :parked}, _job, _board, _now, _capacity), do: false
+
+  defp roster_blocked?(_run, job, board, now, {reason, _bits}) do
     reason in [:executor_outdated, :no_executor, :executor_gone] and not job_working?(job, board, now)
   end
 

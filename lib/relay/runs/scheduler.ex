@@ -351,6 +351,16 @@ defmodule Relay.Runs.Scheduler do
     end
   end
 
+  defp run_verdict(%{status: :parked, parked_reason: :executor_gone, pinned_executor_name: name} = run, evidence)
+       when is_binary(name) do
+    verdict(
+      :awaiting_capacity,
+      ~s(Run #{run.id} is parked waiting for executor "#{name}" to return ) <>
+        "(exclusive affinity — its worktree lives there).",
+      Map.put(evidence, :pinned_executor_name, name)
+    )
+  end
+
   defp run_verdict(%{status: :parked, parked_reason: reason} = run, evidence) when reason in [:executor_gone, nil] do
     verdict(
       :awaiting_capacity,
