@@ -88,7 +88,11 @@ sharing behavior.
   (`status`, `flow_key`, `current_node`, `node_index`/`node_count` on the flow's
   happy path, `duration_s`/`cost`/`nodes`/`attempts` totals) in three queries for
   the board card face. `happy_path/1` linearizes a flow's `:succeeded`-edge chain
-  from `start` to `done`. `queued_flow/4` and `face_summary/4` are pure
+  from `start` to `done`. `run_summary_for_card/1` (RLY-204) is the one-card variant — the same
+  summary map for a single card's latest run (or nil), built through the shared `build_summary/3`
+  so the shape is defined once; BoardLive uses it to refetch only the card a run event names,
+  coalescing a burst behind a ~150 ms debounce rather than re-aggregating the whole board.
+  `queued_flow/4` and `face_summary/4` are pure
   derivations over a card + flows + summaries — no scheduler/NodeJob read — that
   decide what the board card face shows (`{:run, summary}`, `{:queued, flow}`, or
   `nil` → legacy strip). Callers refetch via the coarse
