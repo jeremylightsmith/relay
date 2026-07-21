@@ -47,6 +47,11 @@ defmodule RelayWeb.BoardLive do
   # is. Without this clock a card never goes amber until something unrelated re-renders it.
   @health_tick_ms to_timeout(second: 30)
 
+  # RLY-204: coalesce a burst of run events per socket into ONE scoped refetch. A board that
+  # gets N run events for a card in this window does one flush, not N whole-board refetches.
+  # Mirrors Relay.Runs.Scheduler.Server's Process.send_after + pending? debounce.
+  @run_flush_debounce_ms 150
+
   # RLY-112: bounds ONE render (distinct from Pruner's storage retention). The artboard
   # rules a filter/expand toggle out of v1, so without this a card mid-run would try to
   # paint thousands of :action rows into the drawer. 200 covers the readable recent history.
@@ -512,6 +517,9 @@ defmodule RelayWeb.BoardLive do
       |> assign(:flows, flows)
       |> assign(:run_summaries, run_summaries)
       |> assign(:face_runs, face_runs(cards, flows, run_summaries))
+      |> assign(:dirty_run_cards, MapSet.new())
+      |> assign(:run_flush_events, 0)
+      |> assign(:run_flush_pending?, false)
       |> assign_run_diagnostics(board, run_summaries)
       |> stream_configure(:conversation, dom_id: &conversation_dom_id/1)
       |> stream_configure(:activity, dom_id: &activity_dom_id/1)
@@ -1357,59 +1365,53 @@ defmodule RelayWeb.BoardLive do
     {:noreply, reload_board(socket)}
   end
 
-  # RLY-137 — coarse run-progress signal: refetch rather than patch state from the
-  # payload. Refreshes every card face's summary, and — when the changed run belongs
-  # to the open drawer's card — that card's own run timeline.
+  # RLY-204 — every run event names exactly one card. Rather than refetch the whole board
+  # (Cards.list_cards/1 + Runs.run_summaries_for_board/1) per event per session, funnel each
+  # into mark_run_dirty/2: accumulate the dirty card_id and arm a single ~150ms debounce timer.
+  # The burst flushes once, scoped to the cards that changed (handle_info(:flush_run_changes, …)).
   #
-  # The changed card's row lives inside a `phx-update="stream"` container, which only
-  # re-renders on stream_insert/stream_delete — an unrelated assign like :face_runs
-  # changing does NOT repaint it (AGENTS.md streams rule). So beyond rebuilding
-  # :face_runs (read by every future stream render), the changed card is explicitly
-  # re-streamed to pick up its new face now.
-  def handle_info({:run_changed, card_id}, socket) do
-    cards_by_stage = socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
+  # The engine's fine-grained events (Relay.Runs.Listener / Relay.Runs.RunServer broadcast on the
+  # same `board:<id>:runs` topic as the coarse {:run_changed, card_id}) all carry the %Run{} that
+  # changed, so each just contributes its card_id to the dirty set.
+  def handle_info({:run_changed, card_id}, socket), do: {:noreply, mark_run_dirty(socket, card_id)}
 
-    socket =
-      socket
-      |> assign(:run_summaries, Runs.run_summaries_for_board(socket.assigns.board))
-      |> refresh_face_runs(cards_by_stage)
+  def handle_info({:run_started, %Run{card_id: card_id}}, socket), do: {:noreply, mark_run_dirty(socket, card_id)}
 
-    socket =
-      case Cards.get_card(socket.assigns.board, card_id) do
-        %Card{} = card ->
-          if is_nil(card.archived_at) and find_stage_by_id(socket, card.stage_id) do
-            stream_insert(socket, stream_name(card.stage_id), card)
-          else
-            socket
-          end
+  def handle_info({:run_parked, %Run{card_id: card_id}}, socket), do: {:noreply, mark_run_dirty(socket, card_id)}
 
-        nil ->
-          socket
-      end
+  def handle_info({:run_resumed, %Run{card_id: card_id}}, socket), do: {:noreply, mark_run_dirty(socket, card_id)}
 
-    socket =
-      case socket.assigns.selected_card do
-        %Card{id: ^card_id} = card -> assign(socket, :card_runs, Runs.list_runs_for_card(card))
-        _other -> socket
-      end
-
-    {:noreply, socket}
-  end
-
-  # RLY-137 — the engine's fine-grained run events (Relay.Runs.Listener and
-  # Relay.Runs.RunServer both broadcast on the same `board:<id>:runs` topic as
-  # {:run_changed, card_id}) all carry the %Run{} that changed. Route each to the
-  # same card-scoped refetch rather than duplicating it.
-  def handle_info({:run_started, %Run{card_id: card_id}}, socket), do: handle_info({:run_changed, card_id}, socket)
-  def handle_info({:run_parked, %Run{card_id: card_id}}, socket), do: handle_info({:run_changed, card_id}, socket)
-  def handle_info({:run_resumed, %Run{card_id: card_id}}, socket), do: handle_info({:run_changed, card_id}, socket)
-  def handle_info({:run_finished, %Run{card_id: card_id}}, socket), do: handle_info({:run_changed, card_id}, socket)
+  def handle_info({:run_finished, %Run{card_id: card_id}}, socket), do: {:noreply, mark_run_dirty(socket, card_id)}
 
   def handle_info({:node_started, %Run{card_id: card_id}, _execution}, socket),
-    do: handle_info({:run_changed, card_id}, socket)
+    do: {:noreply, mark_run_dirty(socket, card_id)}
 
   def handle_info({:node_finished, %Run{card_id: card_id}, _execution}, socket),
-    do: handle_info({:run_changed, card_id}, socket)
+    do: {:noreply, mark_run_dirty(socket, card_id)}
+
+  # RLY-204 — flush the coalesced burst: refetch ONLY the dirty cards' summaries/faces, restream
+  # each, and refresh the open drawer's timeline when its card is dirty. This replaces the old
+  # per-event Cards.list_cards/1 + Runs.run_summaries_for_board/1 + refresh_face_runs/2 whole-board
+  # refetch. Emits [:relay, :board, :run_flush] with the coalescing win in numbers.
+  def handle_info(:flush_run_changes, socket) do
+    board = socket.assigns.board
+    dirty = socket.assigns.dirty_run_cards
+    flows = socket.assigns.flows
+
+    socket = Enum.reduce(dirty, socket, &flush_dirty_card(&2, &1, board, flows))
+
+    :telemetry.execute(
+      [:relay, :board, :run_flush],
+      %{card_count: MapSet.size(dirty), event_count: socket.assigns.run_flush_events},
+      %{board_id: board.id}
+    )
+
+    {:noreply,
+     socket
+     |> assign(:dirty_run_cards, MapSet.new())
+     |> assign(:run_flush_events, 0)
+     |> assign(:run_flush_pending?, false)}
+  end
 
   # RLY-10 — a board rename (this or another session): retitle live. The
   # broadcast board carries no preloaded stages, so merge just the name onto
@@ -1567,6 +1569,63 @@ defmodule RelayWeb.BoardLive do
   defp refresh_face_runs(socket, cards_by_stage) do
     cards = cards_by_stage |> Map.values() |> List.flatten()
     assign(socket, :face_runs, face_runs(cards, socket.assigns.flows, socket.assigns.run_summaries))
+  end
+
+  # RLY-204 — record that `card_id`'s run changed and arm the debounce timer once per burst.
+  # `run_flush_events` counts every event in the burst (across all cards); the dirty MapSet
+  # dedupes to the cards to refetch. The pending? gate arms exactly one send_after per burst,
+  # mirroring Relay.Runs.Scheduler.Server.mark_dirty/1.
+  defp mark_run_dirty(socket, card_id) do
+    socket =
+      socket
+      |> assign(:dirty_run_cards, MapSet.put(socket.assigns.dirty_run_cards, card_id))
+      |> assign(:run_flush_events, socket.assigns.run_flush_events + 1)
+
+    if socket.assigns.run_flush_pending? do
+      socket
+    else
+      Process.send_after(self(), :flush_run_changes, @run_flush_debounce_ms)
+      assign(socket, :run_flush_pending?, true)
+    end
+  end
+
+  # RLY-204 — refetch one dirty card: recompute its summary + face (scoped, not whole-board),
+  # restream it when its stage is loaded and it is unarchived, and refresh the open drawer's
+  # timeline when this is the selected card. A hard-deleted card drops out of both maps.
+  defp flush_dirty_card(socket, card_id, board, flows) do
+    case Cards.get_card(board, card_id) do
+      %Card{} = card ->
+        summary = Runs.run_summary_for_card(card)
+
+        run_summaries =
+          if summary,
+            do: Map.put(socket.assigns.run_summaries, card_id, summary),
+            else: Map.delete(socket.assigns.run_summaries, card_id)
+
+        face = Runs.face_summary(card, Cards.active_owner_type(card), flows, run_summaries)
+
+        socket =
+          socket
+          |> assign(:run_summaries, run_summaries)
+          |> assign(:face_runs, Map.put(socket.assigns.face_runs, card_id, face))
+
+        socket =
+          if is_nil(card.archived_at) and find_stage_by_id(socket, card.stage_id) do
+            stream_insert(socket, stream_name(card.stage_id), card)
+          else
+            socket
+          end
+
+        case socket.assigns.selected_card do
+          %Card{id: ^card_id} -> assign(socket, :card_runs, Runs.list_runs_for_card(card))
+          _other -> socket
+        end
+
+      nil ->
+        socket
+        |> assign(:run_summaries, Map.delete(socket.assigns.run_summaries, card_id))
+        |> assign(:face_runs, Map.delete(socket.assigns.face_runs, card_id))
+    end
   end
 
   # A new newest entry arrived ({:card_log_appended, …}): store it, recompute,

@@ -40,7 +40,11 @@ defmodule RelayWeb.BoardRunFaceTest do
     refute has_element?(view, "#card-#{ref}-log-strip")
 
     run |> Ecto.Changeset.change(status: :failed, current_node: "quality_review") |> Relay.Repo.update!()
+
+    board_id = board.id
+    attach_run_flush_telemetry()
     Runs.broadcast_run_changed(board.id, card.id)
+    assert_receive {:run_flush, %{card_count: 1}, %{board_id: ^board_id}}, 500
 
     assert has_element?(view, "#card-#{ref}-run-face", "RUN FAILED")
     assert has_element?(view, "[data-ref='#{ref}'].border-l-error")
@@ -186,5 +190,23 @@ defmodule RelayWeb.BoardRunFaceTest do
       assert has_element?(view, ~s(#card-#{face_ref(board, card)}-run-face[data-stalled="false"]))
       assert has_element?(view, "#card-#{face_ref(board, card)}-run-age")
     end
+  end
+
+  # RLY-204: BoardLive coalesces run events behind a ~150ms debounce (mark_run_dirty/2 +
+  # :flush_run_changes) rather than refetching on every broadcast — so a test that changes a
+  # run and immediately asserts on the rendered face must first wait for that flush.
+  defp attach_run_flush_telemetry do
+    handler_id = "test-run-flush-#{System.unique_integer([:positive])}"
+    test_pid = self()
+
+    :telemetry.attach(
+      handler_id,
+      [:relay, :board, :run_flush],
+      fn _event, measurements, metadata, _config -> send(test_pid, {:run_flush, measurements, metadata}) end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+    :ok
   end
 end
