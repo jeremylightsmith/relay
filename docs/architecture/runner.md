@@ -177,10 +177,13 @@ that stays server-side.
   `{"shared_clean": 0, "exclusive": 0}` so nothing queues behind it, finishes in-flight work,
   and wears an `OUTDATED` badge on the runners view until a human restarts it.
 - `POST /api/node-jobs/:id/outcome` (`.outcome/2`) — `Relay.Runs.get_claimed_job/2` (board-
-  scoped, 409 `conflict` if the job isn't `claimed`/`running`), then
-  `Relay.Runs.report_outcome/2` against the closed outcome set (422 `unknown_outcome`
-  otherwise). The four outcomes and what each does to the run and the card are tabulated in
-  the [state reference](state.md).
+  scoped) returns a three-way result: a `claimed`/`running` job runs
+  `Relay.Runs.report_outcome/2` against the closed outcome set (422 `unknown_outcome` on a bad
+  value); an already-finalized (`:done`) job is **first-writer-wins** — 200 with the run's
+  recorded `run_state`, ignoring the resent payload, so a retried outcome POST after a dropped
+  response never turns finished work into a failure (RLY-202); and only a `:queued` (reassigned)
+  or `:revoked` (zombie) job answers 409 `conflict`. The four outcomes and what each does to the
+  run and the card are tabulated in the [state reference](state.md).
 - **The wire contract is pinned by a fixture.** `test/fixtures/executor_contract.json` is
   generated from these routes by
   `test/relay_web/controllers/api/executor_contract_test.exs` (never hand-edited) and read by
