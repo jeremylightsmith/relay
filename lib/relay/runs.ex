@@ -1546,8 +1546,50 @@ defmodule Relay.Runs do
     end
   end
 
-  defp check_retryable(%Run{status: :failed}), do: :ok
-  defp check_retryable(%Run{status: status}), do: {:error, {:not_failed, status}}
+  defp check_retryable(%Run{} = run) do
+    cond do
+      restartable?(run) -> :ok
+      awaiting_human_answer?(run) -> {:error, :awaiting_answer}
+      true -> {:error, {:not_failed, run.status}}
+    end
+  end
+
+  # A genuine human question, not a died-agent masquerade: parked on needs_input with the latest
+  # execution actually a needs_input ask. The one non-restartable state retry names by itself, so
+  # a human is told to answer it rather than "restart" it (RLY-228).
+  defp awaiting_human_answer?(%Run{status: :parked, parked_reason: :needs_input} = run),
+    do: latest_execution_outcome(run) == :needs_input
+
+  defp awaiting_human_answer?(_run), do: false
+
+  @doc """
+  Whether `run` stalled in a way retry can revive in place — the ONE eligibility rule shared by
+  per-run retry (`check_retryable/1`), the bulk sweep (`restart_stalled/2`), and the drawer's
+  honest-Restart split (RLY-228). True for a clean `:failed` run, and for a died-agent park
+  (`:parked`, `parked_reason: :needs_input`, latest `NodeExecution.outcome == :failed` —
+  RLY-179's failure masquerading as a question). False for a genuine `:needs_input` question, any
+  `:executor_gone` park (RLY-199 auto-resumes those), and `:running`/`:done`/`:cancelled`.
+  """
+  def restartable?(%Run{status: status, parked_reason: parked_reason} = run),
+    do: restartable_by_outcome?(status, parked_reason, latest_execution_outcome(run))
+
+  # The eligibility rule, expressed exactly once (AGENTS.md "a magic value is defined once"):
+  # a run is revivable-in-place iff it FAILED cleanly, or it PARKED as needs_input while its
+  # latest node execution actually FAILED (a died agent masquerading as a question).
+  defp restartable_by_outcome?(:failed, _parked_reason, _latest_outcome), do: true
+  defp restartable_by_outcome?(:parked, :needs_input, :failed), do: true
+  defp restartable_by_outcome?(_status, _parked_reason, _latest_outcome), do: false
+
+  @doc "The `outcome` of `run`'s most recent NodeExecution, or nil when it has none."
+  def latest_execution_outcome(%Run{id: run_id}) do
+    Repo.one(
+      from e in NodeExecution,
+        where: e.run_id == ^run_id,
+        order_by: [desc: e.id],
+        limit: 1,
+        select: e.outcome
+    )
+  end
 
   # The partial unique index runs_one_active_per_card_index would reject the revival
   # anyway; refusing here turns a constraint error into a sentence a human can act on.
@@ -1657,6 +1699,7 @@ defmodule Relay.Runs do
   def retry_refusal_code(:no_flow), do: "no_flow"
   def retry_refusal_code({:unknown_node, _key}), do: "unknown_node"
   def retry_refusal_code({:executor_unavailable, _name}), do: "executor_unavailable"
+  def retry_refusal_code(:awaiting_answer), do: "awaiting_answer"
 
   @doc """
   The human sentence for a `retry_run/2` refusal — what a person reads when
@@ -1687,6 +1730,10 @@ defmodule Relay.Runs do
       "unreachable, so the retry would queue a job nothing can claim."
   end
 
+  def retry_refusal_message(:awaiting_answer) do
+    "This run is waiting on a human answer, not stalled — answer it instead of restarting."
+  end
+
   @doc """
   The most recent run of `card`, whatever its status — the resolution behind
   `POST /api/cards/:ref/retry`. Deliberately NOT "the most recent FAILED run":
@@ -1696,6 +1743,67 @@ defmodule Relay.Runs do
   """
   def latest_run_for_retry(%Card{id: card_id}) do
     Repo.one(from r in Run, where: r.card_id == ^card_id, order_by: [desc: r.id], limit: 1)
+  end
+
+  @doc """
+  Revive every restartable run on `board` — the mass-outage recovery (RLY-228). Each run is
+  revived through the per-run `retry_run/2` path, so its own guards (`check_no_active_run`,
+  executor liveness) still apply; a run that can't revive is counted `refused`, never fatal.
+  Returns `%{restarted: n, refused: m}` so the caller can flash "Restarted N cards."
+  """
+  def restart_stalled(%Board{} = board, actor) do
+    board
+    |> restartable_runs()
+    |> Enum.reduce(%{restarted: 0, refused: 0}, fn run, acc ->
+      case retry_run(run, actor: actor) do
+        {:ok, _run} -> %{acc | restarted: acc.restarted + 1}
+        {:error, _reason} -> %{acc | refused: acc.refused + 1}
+      end
+    end)
+  end
+
+  @doc "How many runs on `board` are `restartable?/1` — the board-header badge count (RLY-228)."
+  def restartable_count(%Board{} = board), do: board |> restartable_runs() |> length()
+
+  # The board's restartable runs: the LATEST run per card (exactly the run_summaries_for_board/1
+  # model, so the badge counts cards showing a stalled face and the sweep never revives a
+  # superseded run), filtered by the one eligibility rule. Latest node-execution outcome per run
+  # is read in ONE grouped query, not per-run — the bulk analog of latest_execution_outcome/1.
+  defp restartable_runs(%Board{id: board_id}) do
+    latest_runs =
+      Repo.all(
+        from r in Run,
+          join: c in Card,
+          on: c.id == r.card_id,
+          where: c.board_id == ^board_id,
+          distinct: r.card_id,
+          order_by: [asc: r.card_id, desc: r.inserted_at, desc: r.id]
+      )
+
+    outcomes = latest_outcomes(Enum.map(latest_runs, & &1.id))
+
+    Enum.filter(latest_runs, fn run ->
+      restartable_by_outcome?(run.status, run.parked_reason, Map.get(outcomes, run.id))
+    end)
+  end
+
+  # %{run_id => latest NodeExecution.outcome} for the given run ids, one grouped query.
+  defp latest_outcomes([]), do: %{}
+
+  defp latest_outcomes(run_ids) do
+    latest =
+      from e in NodeExecution,
+        where: e.run_id in ^run_ids,
+        group_by: e.run_id,
+        select: %{run_id: e.run_id, max_id: max(e.id)}
+
+    from(e in NodeExecution,
+      join: l in subquery(latest),
+      on: l.max_id == e.id,
+      select: {e.run_id, e.outcome}
+    )
+    |> Repo.all()
+    |> Map.new()
   end
 
   @doc false

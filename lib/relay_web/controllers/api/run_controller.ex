@@ -11,6 +11,9 @@ defmodule RelayWeb.Api.RunController do
   node-execution detail — the observability surface that replaces hand-written Ecto
   queries over `fly ssh console`. Read-only.
 
+  `POST /api/board/restart-stalled` bulk-revives every restartable run on the token's
+  board — the headless-operator path for a mass outage (RLY-228).
+
   Board-scoped like the rest of this scope: a run (or card) on another board is a 404,
   never a refusal that would confirm it exists.
   """
@@ -54,6 +57,17 @@ defmodule RelayWeb.Api.RunController do
     else
       _not_found -> {:error, :not_found}
     end
+  end
+
+  @doc """
+  Bulk-restart every environmentally-stalled run on the caller's board — the headless-operator
+  path for a mass outage (RLY-228). Board-scoped by the bearer token like every other route.
+  """
+  def restart_stalled(conn, _params) do
+    board = conn.assigns.current_board
+    summary = Runs.restart_stalled(board, conn.assigns.actor)
+
+    json(conn, %{data: %{status: "ok", restarted: summary.restarted, refused: summary.refused}})
   end
 
   defp do_retry(conn, run, params) do

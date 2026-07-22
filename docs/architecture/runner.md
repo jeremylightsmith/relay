@@ -240,15 +240,20 @@ retry by construction, and finished commits cannot be thrown away.
 - `POST /api/cards/:ref/retry` (`.retry_card/2`) — ref-addressed alias resolving the card's
   most recent run; what `relay retry <ref>` calls. Both take an optional `{"at": "<node_key>"}`
   body and funnel into `Relay.Runs.retry_run/2`.
+- `POST /api/board/restart-stalled` (`RelayWeb.Api.RunController.restart_stalled/2`) — bulk-revives
+  every restartable run on the token's board (RLY-228), returning
+  `200 {"data": {"status": "ok", "restarted", "refused"}}`. Board-scoped by the bearer token.
 
 Success is `200 {"data": {"status": "ok", "run_id", "node", "retries"}}`. A refusal is
-`422 {"error": {"code", "message"}}` where `code` is one of `not_failed`, `active_run_exists`,
-`no_flow`, `unknown_node`, `executor_unavailable` — the message names the specific status,
-node key or executor that blocked it. An unknown run/card, another board's run, or a card
-that has never run is `404`.
+`422 {"error": {"code", "message"}}` where `code` is one of `not_failed`, `awaiting_answer`,
+`active_run_exists`, `no_flow`, `unknown_node`, `executor_unavailable` — the message names the
+specific status, node key or executor that blocked it. An unknown run/card, another board's
+run, or a card that has never run is `404`. RLY-228 widened retry to a **died-agent park**
+(`:parked`/`needs_input` whose latest execution actually `:failed`); a genuine `:needs_input`
+question is refused `awaiting_answer` instead.
 
 The guard is split, because worktrees and branches are executor-side state Phoenix cannot
-see. Server-side, the endpoint refuses up front for the five reasons above — including an
+see. Server-side, the endpoint refuses up front for the six reasons above — including an
 `exclusive` run whose pinned executor is absent or stale per `Relay.Runs.executor_stale?/2`,
 whose worktree is unreachable. Executor-side, branch existence stays with RLY-166's
 `check_branch_attached` and RLY-173's `reattach_branch`; a retried job whose branch was
