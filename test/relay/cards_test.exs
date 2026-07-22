@@ -1327,6 +1327,46 @@ defmodule Relay.CardsTest do
     end
   end
 
+  describe "stage_column/2" do
+    setup do
+      user = insert(:user)
+      board = Relay.Boards.get_or_create_default_board(user)
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      done = Enum.find(board.stages, &(&1.name == "Done"))
+      %{board: board, backlog: backlog, done: done}
+    end
+
+    test "a non-terminal stage returns its cards in position order, not insertion order", %{
+      board: board,
+      backlog: backlog
+    } do
+      c3 = insert(:card, stage: backlog, title: "Three", position: 3, ref_number: 3)
+      c1 = insert(:card, stage: backlog, title: "One", position: 1, ref_number: 1)
+      c2 = insert(:card, stage: backlog, title: "Two", position: 2, ref_number: 2)
+
+      assert board |> Cards.stage_column(backlog.id) |> Enum.map(& &1.id) == [c1.id, c2.id, c3.id]
+    end
+
+    test "the terminal Done column follows the capped recency window (RLY-227's stage_neighbors/2 window)",
+         %{board: board, done: done} do
+      page = Cards.done_page_size()
+
+      cards =
+        for i <- 1..(page + 1) do
+          insert(:card, stage: done, title: "Done #{i}", position: i, ref_number: i)
+        end
+
+      by_recency = Enum.sort_by(cards, & &1.id, :desc)
+      expected_ids = by_recency |> Enum.take(page) |> Enum.map(& &1.id)
+
+      assert board |> Cards.stage_column(done.id) |> Enum.map(& &1.id) == expected_ids
+    end
+
+    test "an empty stage returns an empty list", %{board: board, backlog: backlog} do
+      assert Cards.stage_column(board, backlog.id) == []
+    end
+  end
+
   defp stage_card_ids(board, stage) do
     board |> Cards.list_cards() |> Enum.filter(&(&1.stage_id == stage.id)) |> Enum.map(& &1.id)
   end

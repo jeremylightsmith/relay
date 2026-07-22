@@ -226,9 +226,16 @@ defmodule Relay.Cards do
     |> neighbors_around(board, card.id)
   end
 
-  # The ordered list the board renders for `stage_id`: the recency window for the
-  # terminal Done column, else the position-ordered slice of list_cards/1.
-  defp stage_column(%Board{} = board, stage_id) do
+  @doc """
+  The ordered, non-archived cards the board renders for `stage_id`: the terminal
+  Done column's recency window (capped at `done_page_size/0`), else the
+  position-ordered slice of `list_cards/1`. The single source of column order —
+  `stage_neighbors/2` (desktop chevrons/arrow keys) and the embed card-tap
+  bridge's tapped-column payload (RLY-234, native swipe) both read it, so the
+  two can never disagree about a column's order. Requires `board.stages`
+  preloaded.
+  """
+  def stage_column(%Board{} = board, stage_id) do
     case Boards.terminal_stage(board.stages) do
       %Stage{id: ^stage_id} = terminal -> list_stage_cards(terminal, done_page_size())
       _other -> board |> list_cards() |> Enum.filter(&(&1.stage_id == stage_id))

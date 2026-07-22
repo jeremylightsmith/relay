@@ -181,6 +181,54 @@ defmodule RelayWeb.BoardLiveEmbedTest do
       refute has_element?(view, "#card-drawer")
     end
 
+    test "the payload carries the tapped column's ordered refs, each with its own kind (RLY-234)",
+         %{conn: conn, board: board, backlog: backlog} do
+      _second = insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
+      third = insert(:card, stage: backlog, title: "Third", position: 3, ref_number: 3)
+      {:ok, _third} = Cards.set_status(third, %{"status" => "failed"})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?embed=1")
+
+      view |> element(".board-card", "Tap me") |> render_click()
+
+      slug = board.slug
+
+      assert_push_event(view, "card-tap", %{
+        ref: "MY1",
+        board: ^slug,
+        kind: nil,
+        column: [
+          %{ref: "MY1", kind: nil},
+          %{ref: "MY2", kind: nil},
+          %{ref: "MY3", kind: "failed"}
+        ]
+      })
+    end
+
+    test "the column is the same full ordered list no matter which card in it was tapped",
+         %{conn: conn, board: board, backlog: backlog} do
+      _second = insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
+      third = insert(:card, stage: backlog, title: "Third", position: 3, ref_number: 3)
+      {:ok, _third} = Cards.set_status(third, %{"status" => "failed"})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?embed=1")
+
+      view |> element(".board-card", "Second") |> render_click()
+
+      slug = board.slug
+
+      assert_push_event(view, "card-tap", %{
+        ref: "MY2",
+        board: ^slug,
+        kind: nil,
+        column: [
+          %{ref: "MY1", kind: nil},
+          %{ref: "MY2", kind: nil},
+          %{ref: "MY3", kind: "failed"}
+        ]
+      })
+    end
+
     test "non-embed select still patches the drawer open (phone-width web keeps the drawer)",
          %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")

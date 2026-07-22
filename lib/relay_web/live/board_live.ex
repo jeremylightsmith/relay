@@ -1967,18 +1967,32 @@ defmodule RelayWeb.BoardLive do
   # (Relay.Push.copy/1); "failed" has no push counterpart, since
   # card_status_changed/3 never pushes for :failed. An unknown ref is a silent
   # no-op, like move_card.
+  #
+  # RLY-234 — also carries `column`: the tapped card's stage column, ordered
+  # exactly as the board renders it (Cards.stage_column/2), each entry with
+  # its own `kind`. Native swipe (CardScreen) computes prev/next from this
+  # list locally, with no per-swipe network round trip.
   defp push_card_tap(socket, ref) do
-    case Cards.get_card_by_ref(socket.assigns.board, ref) do
+    board = socket.assigns.board
+
+    case Cards.get_card_by_ref(board, ref) do
       %Card{} = card ->
         push_event(socket, "card-tap", %{
           ref: ref,
-          board: socket.assigns.board.slug,
-          kind: card_tap_kind(card)
+          board: board.slug,
+          kind: card_tap_kind(card),
+          column: tapped_column(board, card)
         })
 
       nil ->
         socket
     end
+  end
+
+  defp tapped_column(board, %Card{stage_id: stage_id}) do
+    board
+    |> Cards.stage_column(stage_id)
+    |> Enum.map(&%{ref: Cards.ref(board, &1), kind: card_tap_kind(&1)})
   end
 
   defp card_tap_kind(%Card{status: :in_review}), do: "in_review"
