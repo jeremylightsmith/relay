@@ -33,8 +33,8 @@ defmodule Relay.Push.TriggerTest do
       assert_received {:push_delivered, "tok-alice", payload}
       assert payload["kind"] == "needs_input"
       assert payload["aps"]["alert"]["title"] == "Question from the AI"
-      assert payload["aps"]["alert"]["body"] == "#{board.key}-#{card.ref_number}: #{card.title}"
-      assert payload["card_ref"] == "#{board.key}-#{card.ref_number}"
+      assert payload["aps"]["alert"]["body"] == "#{board.key}#{card.ref_number}: #{card.title}"
+      assert payload["card_ref"] == "#{board.key}#{card.ref_number}"
       assert payload["board_slug"] == board.slug
       assert payload["aps"]["sound"] == "default"
       assert payload["aps"]["badge"] == 1

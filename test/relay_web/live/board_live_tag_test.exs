@@ -19,7 +19,7 @@ defmodule RelayWeb.BoardLiveTagTest do
 
   describe "drawer TAGS section" do
     test "shows the tag as the shipped badge chip when set", %{conn: conn, board: board} do
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
       # badge badge-ghost badge-sm — pinned to the Relay Board artboard's rail chip
@@ -31,7 +31,7 @@ defmodule RelayWeb.BoardLiveTagTest do
          %{conn: conn, board: board, backlog: backlog} do
       {:ok, _card} = Cards.create_card(backlog, %{title: "Untagged"})
 
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-2")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
       render_async(view)
 
       assert has_element?(view, "#card-tag-display .italic", "None")
@@ -42,7 +42,7 @@ defmodule RelayWeb.BoardLiveTagTest do
          %{conn: conn, board: board, backlog: backlog} do
       {:ok, _} = Cards.create_card(backlog, %{title: "Other", tag: "infra"})
 
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
       view |> element("#card-tag-display") |> render_click()
@@ -55,7 +55,7 @@ defmodule RelayWeb.BoardLiveTagTest do
 
     test "committing a value sets the tag on the drawer and the card face",
          %{conn: conn, board: board, card: card} do
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
       view |> element("#card-tag-display") |> render_click()
@@ -69,7 +69,7 @@ defmodule RelayWeb.BoardLiveTagTest do
 
     test "a #-prefixed padded value is stored normalized",
          %{conn: conn, board: board, card: card} do
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
       view |> element("#card-tag-display") |> render_click()
@@ -80,7 +80,7 @@ defmodule RelayWeb.BoardLiveTagTest do
     end
 
     test "committing empty clears the tag everywhere", %{conn: conn, board: board, card: card} do
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
       view |> element("#card-tag-display") |> render_click()
@@ -92,7 +92,7 @@ defmodule RelayWeb.BoardLiveTagTest do
     end
 
     test "cancel closes the editor without saving", %{conn: conn, board: board, card: card} do
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
       view |> element("#card-tag-display") |> render_click()

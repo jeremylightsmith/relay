@@ -33,19 +33,19 @@ defmodule RelayWeb.Api.BoardLogsTest do
 
     conn =
       post_logs(conn, [
-        %{"ref" => "RLY-1", "kind" => "lifecycle", "text" => "started"},
-        %{"ref" => "RLY-1", "kind" => "claude", "text" => "thinking"}
+        %{"ref" => "RL1", "kind" => "lifecycle", "text" => "started"},
+        %{"ref" => "RL1", "kind" => "claude", "text" => "thinking"}
       ])
 
     assert response(conn, 200)
-    assert_receive {:agent_log, %{text: "started", kind: :lifecycle, ref: "RLY-1"}}
+    assert_receive {:agent_log, %{text: "started", kind: :lifecycle, ref: "RL1"}}
     assert_receive {:agent_log, %{text: "thinking", kind: :claude}}
   end
 
   test "a ref-tagged line is persisted onto its card", %{conn: conn, board: board} do
     card = insert(:card, stage: insert(:stage, board: board), ref_number: 7)
 
-    assert response(post_logs(conn, [%{"ref" => "RLY-7", "kind" => "claude", "text" => "🔧 Edit"}]), 200)
+    assert response(post_logs(conn, [%{"ref" => "RL7", "kind" => "claude", "text" => "🔧 Edit"}]), 200)
     :ok = settle()
 
     assert [row] = Repo.all(from a in Schemas.Activity, where: a.card_id == ^card.id)
@@ -69,7 +69,7 @@ defmodule RelayWeb.Api.BoardLogsTest do
     Relay.Events.subscribe(board.id)
 
     assert response(
-             post_logs(conn, [%{"kind" => "claude", "ref" => "RLY-7", "text" => "working", "node_job_id" => "812"}]),
+             post_logs(conn, [%{"kind" => "claude", "ref" => "RL7", "text" => "working", "node_job_id" => "812"}]),
              200
            )
 

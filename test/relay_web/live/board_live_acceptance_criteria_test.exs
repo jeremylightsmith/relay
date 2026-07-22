@@ -19,7 +19,7 @@ defmodule RelayWeb.BoardLiveAcceptanceCriteriaTest do
   end
 
   test "the drawer renders the acceptance criteria as markdown, collapsed", %{conn: conn, board: board} do
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     assert has_element?(view, "#card-drawer-acceptance-criteria-view strong", "oldbold")
@@ -27,7 +27,7 @@ defmodule RelayWeb.BoardLiveAcceptanceCriteriaTest do
   end
 
   test "Show more expands the section", %{conn: conn, board: board} do
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     view |> element("#card-drawer-acceptance-criteria-show-more") |> render_click()
@@ -36,7 +36,7 @@ defmodule RelayWeb.BoardLiveAcceptanceCriteriaTest do
   end
 
   test "editing and saving the criteria re-renders them as markdown", %{conn: conn, board: board} do
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     render_click(view, "edit_acceptance_criteria", %{})
@@ -47,6 +47,6 @@ defmodule RelayWeb.BoardLiveAcceptanceCriteriaTest do
     |> render_submit(%{"card" => %{"acceptance_criteria" => "### 1. New\n1. Expect: **newbold**"}})
 
     assert has_element?(view, "#card-drawer-acceptance-criteria-view strong", "newbold")
-    assert Cards.get_card_by_ref(board, "RLY-1").acceptance_criteria =~ "newbold"
+    assert Cards.get_card_by_ref(board, "MY1").acceptance_criteria =~ "newbold"
   end
 end

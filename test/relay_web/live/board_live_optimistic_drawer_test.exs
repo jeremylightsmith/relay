@@ -32,11 +32,11 @@ defmodule RelayWeb.BoardLiveOptimisticDrawerTest do
     # synchronously before the async body-load task can possibly resolve),
     # not a fresh has_element?/2 render — otherwise this races the async
     # fill on a fast test DB.
-    {:ok, view, html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
 
     # header/light data present without the heavy fetch
     assert html =~ "Optimistic open"
-    assert html =~ "RLY-1"
+    assert html =~ "MY1"
     # heavy sections show skeletons, not content
     assert html =~ ~s(id="card-drawer-description-skeleton")
     assert html =~ ~s(id="card-drawer-acceptance-criteria-skeleton")
@@ -63,7 +63,7 @@ defmodule RelayWeb.BoardLiveOptimisticDrawerTest do
     # snapshot (captured synchronously, before the async fill can resolve)
     # rather than a fresh has_element?/2 render, to avoid racing a fast
     # async fill.
-    {:ok, view, html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     assert html =~ ~s(id="card-drawer-conversation-loading")
 
     render_async(view)
@@ -75,7 +75,7 @@ defmodule RelayWeb.BoardLiveOptimisticDrawerTest do
   test "a cold deep-link renders light data + skeleton in the dead render, then fills",
        %{conn: conn, board: board} do
     # disconnected (dead) render: no async, skeleton shown, no crash
-    conn = get(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    conn = get(conn, ~p"/board/#{board.slug}?card=MY1")
     html = html_response(conn, 200)
 
     assert html =~ "Optimistic open"
@@ -91,11 +91,11 @@ defmodule RelayWeb.BoardLiveOptimisticDrawerTest do
   test "opening B before A's fill resolves ends on B with A's body dropped",
        %{conn: conn, board: board, backlog: backlog} do
     {:ok, _b} = Cards.create_card(backlog, %{title: "Second card"})
-    {:ok, _} = Cards.update_card(Cards.get_card_by_ref(board, "RLY-2"), %{description: "**bbody**"})
+    {:ok, _} = Cards.update_card(Cards.get_card_by_ref(board, "MY2"), %{description: "**bbody**"})
 
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     # switch to B before draining A's async
-    render_patch(view, ~p"/board/#{board.slug}?card=RLY-2")
+    render_patch(view, ~p"/board/#{board.slug}?card=MY2")
     render_async(view)
 
     assert has_element?(view, "#card-drawer-title-display", "Second card")
@@ -115,11 +115,11 @@ defmodule RelayWeb.BoardLiveOptimisticDrawerTest do
 
   test "a live refresh on the open card clears the skeleton with full content",
        %{conn: conn, board: board, card: card} do
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
 
     # a broadcast-style refresh carrying the full card must clear body_loading?
     {:ok, _} = Cards.update_card(card, %{plan: "**refreshedplan**"})
-    Events.broadcast(board.id, {:card_upserted, Cards.get_card_by_ref(board, "RLY-1")})
+    Events.broadcast(board.id, {:card_upserted, Cards.get_card_by_ref(board, "MY1")})
 
     render_async(view)
 

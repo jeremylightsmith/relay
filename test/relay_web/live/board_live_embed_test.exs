@@ -133,7 +133,7 @@ defmodule RelayWeb.BoardLiveEmbedTest do
       view |> element(".board-card", "Tap me") |> render_click()
 
       slug = board.slug
-      assert_push_event(view, "card-tap", %{ref: "RLY-1", board: ^slug, kind: nil})
+      assert_push_event(view, "card-tap", %{ref: "MY1", board: ^slug, kind: nil})
       refute has_element?(view, "#card-drawer")
     end
 
@@ -174,10 +174,10 @@ defmodule RelayWeb.BoardLiveEmbedTest do
 
       # The embed layout suppresses the top bar (and its Archived menu item), so
       # drive the handler directly — same pattern as the realtime tests' move_card.
-      render_hook(view, "open_archived_card", %{"ref" => "RLY-1"})
+      render_hook(view, "open_archived_card", %{"ref" => "MY1"})
 
       slug = board.slug
-      assert_push_event(view, "card-tap", %{ref: "RLY-1", board: ^slug, kind: nil})
+      assert_push_event(view, "card-tap", %{ref: "MY1", board: ^slug, kind: nil})
       refute has_element?(view, "#card-drawer")
     end
 
@@ -187,7 +187,7 @@ defmodule RelayWeb.BoardLiveEmbedTest do
 
       view |> element(".board-card", "Tap me") |> render_click()
 
-      assert_patch(view, ~p"/board/#{board.slug}?card=RLY-1")
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY1")
       assert has_element?(view, "#card-drawer")
     end
   end

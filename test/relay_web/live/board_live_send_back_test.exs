@@ -28,7 +28,7 @@ defmodule RelayWeb.BoardLiveSendBackTest do
     {:ok, _sent} = Cards.reject(card, "Handle the empty case", :agent)
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     assert has_element?(view, "#rejection-banner", "Changes requested")
@@ -39,7 +39,7 @@ defmodule RelayWeb.BoardLiveSendBackTest do
   test "no banner for a clean card", %{conn: conn, code: code, user: user} do
     {:ok, _card} = Cards.create_card(code, %{title: "Clean"})
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
     refute has_element?(view, "#rejection-banner")
   end
@@ -47,7 +47,7 @@ defmodule RelayWeb.BoardLiveSendBackTest do
   test "the standalone universal Send back control is gone from the drawer", %{conn: conn, board: board, code: code} do
     {:ok, _card} = Cards.create_card(code, %{title: "Bounce me"})
 
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
     assert has_element?(view, "#card-drawer")
     refute has_element?(view, "#send-back")
@@ -63,7 +63,7 @@ defmodule RelayWeb.BoardLiveSendBackTest do
     {:ok, card} = Cards.create_card(review, %{title: "Review me"})
     {:ok, _} = Cards.set_status(card, %{status: :in_review})
 
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
     view |> element("#review-request-changes") |> render_click()
 
@@ -74,7 +74,7 @@ defmodule RelayWeb.BoardLiveSendBackTest do
     |> form("#review-reject-form", reject: %{note: "Tighten it"})
     |> render_submit()
 
-    reloaded = Cards.get_card_by_ref(board, "RLY-1")
+    reloaded = Cards.get_card_by_ref(board, "MY1")
     assert reloaded.stage_id == plan.id
     assert reloaded.rejection
   end

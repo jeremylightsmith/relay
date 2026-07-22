@@ -231,7 +231,7 @@ defmodule Relay.Push do
 
   # Duplicates `Relay.Cards.ref/2` on purpose: `Push` cannot depend on `Cards`
   # (Cards calls Push — a back-dep would be a boundary cycle).
-  defp ref(%Board{key: key}, %Card{ref_number: ref_number}), do: "#{key}-#{ref_number}"
+  defp ref(%Board{key: key}, %Card{ref_number: ref_number}), do: "#{key}#{ref_number}"
 
   @doc "The configured delivery adapter (see `Relay.Push.Delivery`)."
   def adapter do

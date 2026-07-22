@@ -188,14 +188,18 @@ defmodule Relay.Activity.LogSink do
 
   # Only found refs are cached: a ref that misses (deleted card, stale worktree tag)
   # must stay re-resolvable, since the card may simply not exist yet.
+  #
+  # RLY-230: mirrors `Relay.Cards.format_ref/2`'s dashless `"#{key}#{ref_number}"` by hand
+  # (in SQL, for the same boundary-cycle reason `Relay.Push.ref/2` does) — refs arrive here
+  # already formatted by the current server, so no dash-tolerance is needed.
   defp lookup(board_id, refs) do
     Repo.all(
       from c in Schemas.Card,
         join: b in Schemas.Board,
         on: b.id == c.board_id,
         where: c.board_id == ^board_id,
-        where: fragment("? || '-' || ?", b.key, c.ref_number) in ^refs,
-        select: {fragment("? || '-' || ?", b.key, c.ref_number), c.id}
+        where: fragment("? || ?", b.key, c.ref_number) in ^refs,
+        select: {fragment("? || ?", b.key, c.ref_number), c.id}
     )
   end
 end

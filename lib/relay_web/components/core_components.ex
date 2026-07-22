@@ -948,10 +948,10 @@ defmodule RelayWeb.CoreComponents do
 
   ## Examples
 
-      <.board_card id="cards-1" ref="RLY-3" title="Ship MMF 03" tag="infra" />
+      <.board_card id="cards-1" ref="RL3" title="Ship MMF 03" tag="infra" />
       <.board_card
         id="cards-2"
-        ref="RLY-4"
+        ref="RL4"
         title="Migrate the posts"
         active_owner={:ai}
         status={:working}
@@ -1479,7 +1479,7 @@ defmodule RelayWeb.CoreComponents do
 
       <.card_drawer
         id="card-drawer"
-        ref="RLY-3"
+        ref="RL3"
         card={@selected_card}
         stage_name="Spec"
         stage_owner={:human}
@@ -3234,7 +3234,7 @@ defmodule RelayWeb.CoreComponents do
     doc: "the stage's category, forwarded to its cards for the green accent"
 
   attr :stage_id, :any, default: nil, doc: "the stage's database id, echoed back in compose events"
-  attr :board_key, :string, default: "RLY", doc: "the board's ref prefix, e.g. RLY in RLY-3"
+  attr :board_key, :string, default: "RL", doc: "the board's ref prefix, e.g. RL in RL3"
   attr :cards, :any, default: [], doc: "a LiveView stream or a list of {dom_id, card} tuples"
   attr :composing, :boolean, default: false
   attr :compose_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[title]; required when composing"
@@ -3513,7 +3513,7 @@ defmodule RelayWeb.CoreComponents do
                       id={dom_id}
                       title={card.title}
                       tag={card.tag}
-                      ref={"#{@board_key}-#{card.ref_number}"}
+                      ref={Cards.format_ref(@board_key, card.ref_number)}
                       status={card.status}
                       stage_type={@type}
                       done={@terminal and card.status == :ready}
@@ -3626,7 +3626,7 @@ defmodule RelayWeb.CoreComponents do
                   id={dom_id}
                   title={card.title}
                   tag={card.tag}
-                  ref={"#{@board_key}-#{card.ref_number}"}
+                  ref={Cards.format_ref(@board_key, card.ref_number)}
                   status={card.status}
                   stage_type={sub.lane}
                   done={false}

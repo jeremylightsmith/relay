@@ -1,7 +1,7 @@
 defmodule Relay.Cards do
   @moduledoc """
   The Cards context: cards on a board, per-board ref allocation
-  (RLY-1, RLY-2, ...), and per-stage ordering.
+  (RL1, RL2, ...), and per-stage ordering.
 
   An "actor" is either the single Relay AI agent (`:agent`) or a user
   (`{:user, user_id}`) — the same concept later reused for comments
@@ -343,14 +343,23 @@ defmodule Relay.Cards do
   end
 
   @doc """
-  The human-facing card ref: the board's key plus the card's per-board
-  ref number, e.g. `"RLY-12"`.
+  The dashless human-facing ref for a board `key` + `ref_number`, e.g. `"RL230"`. The single
+  formatter behind `ref/2` and the board-tile render
+  (`RelayWeb.CoreComponents.stage_column/1`, which holds a key string + a plain card map, not
+  `%Card{}` structs). `Relay.Push.ref/2` mirrors this by hand — Push cannot depend on Cards
+  (a back-dep would be a Boundary cycle).
+  """
+  def format_ref(key, ref_number), do: "#{key}#{ref_number}"
+
+  @doc """
+  The human-facing card ref: the board's key immediately followed by the card's per-board
+  ref number, e.g. `"RL230"` (no dash).
 
   Takes the board explicitly (a refinement of the spec's sketched
   `Card.ref/1`) so callers that already hold the board don't need
   `card.board` preloaded.
   """
-  def ref(%Board{key: key}, %Card{ref_number: ref_number}), do: "#{key}-#{ref_number}"
+  def ref(%Board{key: key}, %Card{ref_number: ref_number}), do: format_ref(key, ref_number)
 
   @doc """
   Updates a card's user/agent-editable attributes (`:title`, `:description`,
@@ -969,7 +978,7 @@ defmodule Relay.Cards do
   end
 
   @doc """
-  Fetches the card a human-facing ref (e.g. `"RLY-12"`) points at on
+  Fetches the card a human-facing ref (e.g. `"RL12"`) points at on
   `board`, or `nil` when the ref does not parse against the board's key
   or no such card exists on that board. Scoping by `board_id` means a
   ref can never resolve to another board's card — this is the card
@@ -1515,10 +1524,9 @@ defmodule Relay.Cards do
   end
 
   defp parse_ref_number(%Board{key: key}, ref) do
-    prefix = key <> "-"
-
-    with true <- String.starts_with?(ref, prefix),
-         {ref_number, ""} <- Integer.parse(String.replace_prefix(ref, prefix, "")),
+    with true <- String.starts_with?(ref, key),
+         digits = ref |> String.replace_prefix(key, "") |> String.replace_prefix("-", ""),
+         {ref_number, ""} <- Integer.parse(digits),
          true <- ref_number > 0 do
       {:ok, ref_number}
     else

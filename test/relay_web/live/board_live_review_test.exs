@@ -34,7 +34,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     {:ok, _card} = Cards.create_card(review, %{title: "Still queued"})
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     assert has_element?(view, "#card-drawer")
@@ -46,7 +46,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     in_review_card(review)
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     assert has_element?(view, "#review-panel", "READY FOR YOUR REVIEW")
@@ -62,7 +62,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     in_review_card(review_sub)
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     assert has_element?(view, "#review-approve", "Approve → Code · Done")
@@ -76,7 +76,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     in_review_card(code)
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     assert has_element?(view, "#review-panel", "READY FOR YOUR REVIEW")
@@ -90,7 +90,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
        %{conn: conn, user: user, board: board, review: review, deploy: deploy} do
     in_review_card(review)
 
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     view |> element("#review-approve") |> render_click()
@@ -101,7 +101,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     refute has_element?(view, "#flash-info")
     assert has_element?(view, "#stage-col-#{deploy.position}-cards .board-card", "Review me")
 
-    reloaded = Cards.get_card_by_ref(board, "RLY-1")
+    reloaded = Cards.get_card_by_ref(board, "MY1")
     assert reloaded.stage_id == deploy.id
     assert reloaded.status == :working
 
@@ -114,7 +114,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
        %{conn: conn, user: user, board: board, plan: plan, review: review} do
     in_review_card(review)
 
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     view |> element("#review-request-changes") |> render_click()
@@ -140,7 +140,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     refute has_element?(view, "#flash-info")
     assert has_element?(view, "#stage-col-#{plan.position}-cards .board-card", "Review me")
 
-    reloaded = Cards.get_card_by_ref(board, "RLY-1")
+    reloaded = Cards.get_card_by_ref(board, "MY1")
     assert reloaded.stage_id == plan.id
     assert reloaded.status == :ready
 
@@ -155,7 +155,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
        %{conn: conn, board: board, review: review} do
     in_review_card(review)
 
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
     view |> element("#review-request-changes") |> render_click()
 
@@ -166,12 +166,12 @@ defmodule RelayWeb.BoardLiveReviewTest do
 
   test "a review stage that is the board's first column shows Approve but no Request changes",
        %{conn: conn, user: user} do
-    {:ok, board} = Boards.create_board(user, %{name: "Gate first", key: "RLY"})
+    {:ok, board} = Boards.create_board(user, %{name: "Gate first"})
     first = board.stages |> Enum.filter(&is_nil(&1.parent_id)) |> Enum.min_by(& &1.position)
     {:ok, first} = Boards.update_stage(first, %{type: :review})
     in_review_card(first)
 
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=GA1")
     render_async(view)
 
     assert has_element?(view, "#review-approve")
@@ -182,7 +182,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
        %{conn: conn, board: board, review: review} do
     in_review_card(review)
 
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     view |> element("#review-request-changes") |> render_click()
@@ -190,14 +190,14 @@ defmodule RelayWeb.BoardLiveReviewTest do
 
     assert has_element?(view, "#review-reject-panel")
     assert has_element?(view, "#review-note-error")
-    assert Cards.get_card_by_ref(board, "RLY-1").status == :in_review
+    assert Cards.get_card_by_ref(board, "MY1").status == :in_review
   end
 
   test "Cancel collapses the note sub-panel back to the button row", %{conn: conn, review: review, user: user} do
     in_review_card(review)
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     view |> element("#review-request-changes") |> render_click()
@@ -214,7 +214,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     card = in_review_card(review)
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
     assert has_element?(view, "#review-panel")
     refute has_element?(view, "#needs-input-panel")
@@ -231,7 +231,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     {:ok, card} = Cards.create_card(review, %{title: "Live review"})
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
     refute has_element?(view, "#review-panel")
 

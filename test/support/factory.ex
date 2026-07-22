@@ -21,7 +21,7 @@ defmodule Relay.Factory do
     %Schemas.Board{
       name: "My board",
       slug: sequence(:slug, &"board-#{&1}"),
-      key: "RLY",
+      key: "RL",
       owner: build(:user)
     }
   end

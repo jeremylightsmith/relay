@@ -127,7 +127,7 @@ defmodule RelayWeb.BoardRunFaceTest do
       %{board: board, works: works}
     end
 
-    defp face_ref(board, card), do: "#{board.key}-#{card.ref_number}"
+    defp face_ref(board, card), do: "#{board.key}#{card.ref_number}"
 
     test "a running run face shows an age", %{conn: conn, board: board, works: works} do
       card = insert(:card, stage: works, status: :working)

@@ -161,10 +161,10 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(id="stage-col-4-cards")
       assert html =~ ~s(id="cards-1")
       assert html =~ "First card"
-      assert html =~ "RLY-1"
+      assert html =~ "RLY1"
       assert html =~ "#infra"
       assert html =~ ~s(id="cards-2")
-      assert html =~ "RLY-2"
+      assert html =~ "RLY2"
       assert html =~ ~s(data-active-owner="ai")
       assert html =~ "working · 40%"
     end

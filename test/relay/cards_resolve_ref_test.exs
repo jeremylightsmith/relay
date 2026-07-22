@@ -18,51 +18,59 @@ defmodule Relay.CardsResolveRefTest do
     insert(:card, stage: stage, ref_number: ref_number)
   end
 
-  test "resolves a ref on a board the user is a member of", %{user: user} do
-    board = member_board(user, "AAA", "alpha")
+  test "resolves a dashless ref on a board the user is a member of", %{user: user} do
+    board = member_board(user, "AA", "alpha")
     card = card_on(board, 7)
 
-    assert {:ok, resolved_board, resolved_card} = Cards.resolve_ref(user, "AAA-7")
+    assert {:ok, resolved_board, resolved_card} = Cards.resolve_ref(user, "AA7")
     assert resolved_board.id == board.id
     assert resolved_card.id == card.id
   end
 
-  test "an unknown ref is :not_found", %{user: user} do
-    member_board(user, "AAA", "alpha")
+  test "also resolves the optional-dash form (old links / muscle memory)", %{user: user} do
+    board = member_board(user, "AA", "alpha")
+    card = card_on(board, 7)
 
-    assert Cards.resolve_ref(user, "AAA-404") == {:error, :not_found}
+    assert {:ok, _board, resolved} = Cards.resolve_ref(user, "AA-7")
+    assert resolved.id == card.id
+  end
+
+  test "an unknown ref is :not_found", %{user: user} do
+    member_board(user, "AA", "alpha")
+
+    assert Cards.resolve_ref(user, "AA404") == {:error, :not_found}
   end
 
   test "a malformed ref is :not_found, not a crash", %{user: user} do
-    member_board(user, "AAA", "alpha")
+    member_board(user, "AA", "alpha")
 
     assert Cards.resolve_ref(user, "nonsense") == {:error, :not_found}
   end
 
   test "another user's card is :not_found — never leaking that it exists", %{user: user} do
-    member_board(user, "AAA", "alpha")
-    other_board = member_board(insert(:user), "BBB", "beta")
+    member_board(user, "AA", "alpha")
+    other_board = member_board(insert(:user), "BB", "beta")
     card_on(other_board, 1)
 
-    assert Cards.resolve_ref(user, "BBB-1") == {:error, :not_found}
+    assert Cards.resolve_ref(user, "BB1") == {:error, :not_found}
   end
 
   test "a ref two same-key boards share is :ambiguous_ref, never a guess", %{user: user} do
-    for slug <- ["alpha", "beta"], do: user |> member_board("RLY", slug) |> card_on(1)
+    for slug <- ["alpha", "beta"], do: user |> member_board("RL", slug) |> card_on(1)
 
-    assert Cards.resolve_ref(user, "RLY-1") == {:error, :ambiguous_ref}
+    assert Cards.resolve_ref(user, "RL1") == {:error, :ambiguous_ref}
   end
 
   test "the board slug disambiguates a shared ref", %{user: user} do
-    for slug <- ["alpha", "beta"], do: user |> member_board("RLY", slug) |> card_on(1)
+    for slug <- ["alpha", "beta"], do: user |> member_board("RL", slug) |> card_on(1)
 
-    assert {:ok, board, _card} = Cards.resolve_ref(user, "RLY-1", "beta")
+    assert {:ok, board, _card} = Cards.resolve_ref(user, "RL1", "beta")
     assert board.slug == "beta"
   end
 
   test "a slug the user cannot see is :not_found", %{user: user} do
-    user |> member_board("AAA", "alpha") |> card_on(1)
+    user |> member_board("AA", "alpha") |> card_on(1)
 
-    assert Cards.resolve_ref(user, "AAA-1", "someone-elses-board") == {:error, :not_found}
+    assert Cards.resolve_ref(user, "AA1", "someone-elses-board") == {:error, :not_found}
   end
 end

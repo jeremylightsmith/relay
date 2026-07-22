@@ -2,7 +2,7 @@ defmodule Schemas.Card do
   @moduledoc """
   A card on a board: a titled unit of work living in one stage. `position`
   orders cards within their stage; `ref_number` is the per-board sequence
-  behind the human-facing ref (board key + number, e.g. RLY-12 — see
+  behind the human-facing ref (board key + number, e.g. RL12 — see
   `Relay.Cards.ref/2`). `board_id`, `stage_id`, `position`, and
   `ref_number` are set programmatically, never cast from input. `branch`
   and `plan` (MMF spec 2026-07-08) carry the runner's git branch and

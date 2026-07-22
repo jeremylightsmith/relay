@@ -15,7 +15,7 @@ defmodule Relay.BoardsTest do
 
       assert board.owner_id == user.id
       assert board.name == "My board"
-      assert board.key == "RLY"
+      assert board.key == "MY"
       assert board.slug == "ada-lovelace"
 
       assert [
@@ -117,27 +117,36 @@ defmodule Relay.BoardsTest do
       refute changeset.valid?
     end
 
-    test "updates name and slug but never key or owner_id even when supplied" do
+    test "updates name, slug, and key but never owner_id even when supplied" do
       board = Boards.get_or_create_default_board(insert(:user))
-      %{key: key, owner_id: owner_id} = board
+      %{owner_id: owner_id} = board
 
       assert {:ok, updated} =
                Boards.update_board(board, %{
                  name: "Renamed",
                  slug: "renamed-slug",
-                 key: "HAX",
+                 key: "hx",
                  owner_id: -1
                })
 
       assert updated.name == "Renamed"
       assert updated.slug == "renamed-slug"
-      assert updated.key == key
+      assert updated.key == "HX"
       assert updated.owner_id == owner_id
 
       reloaded = Repo.get!(Board, board.id)
       assert reloaded.slug == "renamed-slug"
-      assert reloaded.key == key
+      assert reloaded.key == "HX"
       assert reloaded.owner_id == owner_id
+    end
+
+    test "rejects an invalid key and leaves the stored key unchanged" do
+      board = Boards.get_or_create_default_board(insert(:user))
+      %{key: key} = board
+
+      assert {:error, changeset} = Boards.update_board(board, %{key: "ABC"})
+      refute changeset.valid?
+      assert Repo.get!(Board, board.id).key == key
     end
 
     test "change_board/1 returns a changeset carrying the current name" do
@@ -164,7 +173,7 @@ defmodule Relay.BoardsTest do
       assert board.owner_id == user.id
       assert board.name == "Launch Board"
       assert board.slug == "launch-board"
-      assert board.key == "LAUNC"
+      assert board.key == "LA"
       assert length(board.stages) == 11
 
       assert Enum.map(board.stages, & &1.name) ==
@@ -186,7 +195,21 @@ defmodule Relay.BoardsTest do
     test "accepts string-keyed params (the create form)" do
       assert {:ok, board} = Boards.create_board(insert(:user), %{"name" => "Ops"})
       assert board.name == "Ops"
-      assert board.key == "OPS"
+      assert board.key == "OP"
+    end
+
+    test "derives the key from the first two letters of the name, uppercased" do
+      user = insert(:user)
+
+      {:ok, board} = Boards.create_board(user, %{name: "Payments"})
+      assert board.key == "PA"
+    end
+
+    test "falls back to RL when the name yields fewer than two letters" do
+      user = insert(:user)
+
+      {:ok, board} = Boards.create_board(user, %{name: "7!"})
+      assert board.key == "RL"
     end
 
     test "de-duplicates the derived slug against existing boards" do
@@ -198,9 +221,9 @@ defmodule Relay.BoardsTest do
       assert second.slug == "ops-2"
     end
 
-    test "falls back to key RLY when the name has no alphanumerics" do
+    test "falls back to key RL when the name has no alphanumerics" do
       assert {:ok, board} = Boards.create_board(insert(:user), %{name: "★ ☆ ★"})
-      assert board.key == "RLY"
+      assert board.key == "RL"
       assert board.slug == "board"
     end
 

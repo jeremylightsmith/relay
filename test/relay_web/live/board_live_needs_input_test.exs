@@ -21,7 +21,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, _card} = Cards.create_card(backlog, %{title: "Calm card"})
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     assert has_element?(view, "#card-drawer")
@@ -34,7 +34,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, _blocked} = Cards.request_input(card, "Which bucket?")
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     assert has_element?(view, "#needs-input-form > div.w-full #needs-input-answer")
@@ -46,7 +46,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, _blocked} = Cards.request_input(card, "Billing timezone or the viewer's?")
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     assert has_element?(view, "#needs-input-panel", "RELAY AI NEEDS YOUR INPUT")
@@ -56,7 +56,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     # the question renders markdown as HTML, not literal text
     {:ok, mdcard} = Cards.create_card(code, %{title: "Markdown ask"})
     {:ok, _} = Cards.request_input(mdcard, "Use **UTC** or the `viewer` tz?")
-    {:ok, mdview, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-#{mdcard.ref_number}")
+    {:ok, mdview, _html} = live(conn, ~p"/board/#{board.slug}?card=MY#{mdcard.ref_number}")
     render_async(mdview)
     assert has_element?(mdview, "#needs-input-question.md strong", "UTC")
     assert has_element?(mdview, "#needs-input-question.md code", "viewer")
@@ -71,7 +71,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, _card} = Cards.request_input(card, "Second question?")
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     assert has_element?(view, "#needs-input-question", "Second question?")
@@ -83,7 +83,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, card} = Cards.create_card(code, %{title: "Ship exports"})
     {:ok, _blocked} = Cards.request_input(card, "Which bucket?")
 
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
     assert has_element?(view, "#stage-col-#{code.position}-cards .card-needs-input", "needs you")
 
@@ -97,7 +97,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     refute has_element?(view, "#flash-info")
     refute has_element?(view, "#stage-col-#{code.position}-cards .card-needs-input")
 
-    reloaded = Cards.get_card_by_ref(board, "RLY-1")
+    reloaded = Cards.get_card_by_ref(board, "MY1")
     assert reloaded.status == :working
     assert reloaded.blocked_since == nil
 
@@ -114,14 +114,14 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, card} = Cards.create_card(backlog, %{title: "Human next"})
     {:ok, _blocked} = Cards.request_input(card, "Ready to start?")
 
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     view |> form("#needs-input-form", answer: %{body: "Yes, go"}) |> render_submit()
 
     assert_patch(view, ~p"/board/#{board.slug}")
     refute has_element?(view, "#card-drawer")
-    assert Cards.get_card_by_ref(board, "RLY-1").status == :ready
+    assert Cards.get_card_by_ref(board, "MY1").status == :ready
   end
 
   test "a human-blocked card (status control, no question) still gets the composer",
@@ -130,7 +130,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, _blocked} = Cards.set_status(card, %{status: :needs_input})
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     assert has_element?(view, "#needs-input-panel")
@@ -142,13 +142,13 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, card} = Cards.create_card(code, %{title: "Still blocked"})
     {:ok, _blocked} = Cards.request_input(card, "Which bucket?")
 
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     view |> form("#needs-input-form", answer: %{body: ""}) |> render_submit()
 
     assert has_element?(view, "#needs-input-panel")
-    assert Cards.get_card_by_ref(board, "RLY-1").status == :needs_input
+    assert Cards.get_card_by_ref(board, "MY1").status == :needs_input
   end
 
   test "a request_input from elsewhere pops the panel into an open drawer live (MMF 18)",
@@ -156,7 +156,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, card} = Cards.create_card(code, %{title: "Live block"})
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
     refute has_element?(view, "#needs-input-panel")
 
@@ -171,7 +171,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, blocked} = Cards.set_status(card, %{status: :needs_input})
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     # Simulate `:card_upserted` winning the race against the `:needs_input` Activity
@@ -203,7 +203,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, _blocked} = Cards.request_input(card, structured_questions(), :agent)
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     assert has_element?(view, "#needs-input-panel", "RELAY AI NEEDS YOUR INPUT")
@@ -223,7 +223,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, _blocked} = Cards.request_input(card, structured_questions(), :agent)
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     view |> element("#needs-input-option-1") |> render_click()
@@ -245,7 +245,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, _blocked} = Cards.request_input(card, structured_questions(), :agent)
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     view
@@ -260,7 +260,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, card} = Cards.create_card(code, %{title: "Send batch"})
     {:ok, _blocked} = Cards.request_input(card, structured_questions(), :agent)
 
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     # Q1: pick an option, advance
@@ -277,7 +277,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     assert_patch(view, ~p"/board/#{board.slug}")
     refute has_element?(view, "#card-drawer")
 
-    reloaded = Cards.get_card_by_ref(board, "RLY-1")
+    reloaded = Cards.get_card_by_ref(board, "MY1")
     assert reloaded.status == :working
     assert reloaded.blocked_since == nil
 
@@ -305,7 +305,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, _blocked} = Cards.request_input(card, [%{"prompt" => "Only one?"}], :agent)
 
     board = Boards.get_or_create_default_board(user)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     # single-question block: Send is on the first (only) step

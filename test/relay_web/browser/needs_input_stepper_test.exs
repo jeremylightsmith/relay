@@ -35,7 +35,7 @@ defmodule RelayWeb.Browser.NeedsInputStepperTest do
     conn
     |> visit("/dev/login")
     |> assert_has("body .phx-connected")
-    |> visit("/board/#{board.slug}?card=#{board.key}-#{card.ref_number}")
+    |> visit("/board/#{board.slug}?card=#{board.key}#{card.ref_number}")
     |> assert_has("#needs-input-panel")
     |> click("#needs-input-option-0")
     # the picked option must get the amber selected marker after a real click
@@ -65,7 +65,7 @@ defmodule RelayWeb.Browser.NeedsInputStepperTest do
     conn
     |> visit("/dev/login")
     |> assert_has("body .phx-connected")
-    |> visit("/board/#{board.slug}?card=#{board.key}-#{card.ref_number}")
+    |> visit("/board/#{board.slug}?card=#{board.key}#{card.ref_number}")
     |> assert_has("#needs-input-panel")
     # assert_has waits for the option to actually be in the DOM; `evaluate` below
     # does not auto-wait, and would otherwise read a null element.
