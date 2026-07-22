@@ -252,6 +252,25 @@ defmodule Relay.Cards do
   end
 
   @doc """
+  Sets or clears a card's `public_description` (RLY-69, owner action from the drawer).
+  A blank/whitespace-only string clears it to `nil`. Broadcasts `{:card_upserted, card}`
+  so open boards and the public board re-render. Returns `{:ok, card}` (owners preloaded).
+  """
+  def set_public_description(%Card{} = card, text) do
+    value =
+      case text do
+        t when is_binary(t) -> if String.trim(t) == "", do: nil, else: t
+        _ -> nil
+      end
+
+    card
+    |> Ecto.Changeset.change(public_description: value)
+    |> Repo.update()
+    |> preload_owners_result()
+    |> broadcast_upserted()
+  end
+
+  @doc """
   Replaces the card's whole sub-task checklist with `attrs_list` (a list of
   `%{"title" => ..., "done" => bool?}` maps) inside a transaction: deletes the
   card's existing sub_tasks and inserts the new list with `position` 0..n. Used by

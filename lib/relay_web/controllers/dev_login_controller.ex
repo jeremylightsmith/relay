@@ -10,11 +10,12 @@ defmodule RelayWeb.DevLoginController do
   alias Relay.Accounts
   alias RelayWeb.Auth
 
-  def create(conn, _params) do
+  def create(conn, params) do
     user = Accounts.ensure_dev_user!()
+    return_to = Auth.local_return_path(params["return_to"])
 
     conn
     |> put_flash(:info, "Signed in as #{user.email}")
-    |> Auth.log_in_user(user)
+    |> Auth.log_in_user(user, return_to)
   end
 end

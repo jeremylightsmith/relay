@@ -106,11 +106,15 @@ defmodule RelayWeb.Auth do
     |> refresh_session()
   end
 
-  @doc "Establishes the session (see `put_user_session/2`) and redirects to the board."
-  def log_in_user(conn, user) do
+  @doc """
+  Establishes the session (see `put_user_session/2`) and redirects — to `return_to`
+  when given a validated local path (RLY-69's OAuth `return_to`, e.g. back to the
+  public board a visitor signed in from), otherwise to the board.
+  """
+  def log_in_user(conn, user, return_to \\ nil) do
     conn
     |> put_user_session(user)
-    |> redirect(to: ~p"/board")
+    |> redirect(to: return_to || ~p"/board")
   end
 
   @doc "Clears the session and redirects to the sign-in page."
@@ -119,6 +123,19 @@ defmodule RelayWeb.Auth do
     |> renew_session()
     |> redirect(to: ~p"/")
   end
+
+  @doc """
+  Validates a post-sign-in `return_to` (RLY-69): returns the path when it is a
+  safe in-app relative path, otherwise `nil`. Only a path starting with a single
+  `/` is accepted — a scheme/host (`https://evil`) or a protocol-relative
+  `//evil/…` are open-redirect vectors and are rejected. One source of truth for
+  both OAuth (`AuthController`) and the dev bypass (`DevLoginController`).
+  """
+  def local_return_path("/" <> _ = path) do
+    if String.starts_with?(path, "//"), do: nil, else: path
+  end
+
+  def local_return_path(_other), do: nil
 
   @doc """
   `on_mount` hooks for `live_session`:

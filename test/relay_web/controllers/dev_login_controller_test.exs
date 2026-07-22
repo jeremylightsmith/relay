@@ -19,4 +19,19 @@ defmodule RelayWeb.DevLoginControllerTest do
 
     assert Repo.aggregate(User, :count) == 1
   end
+
+  test "GET /dev/login honors a local return_to", %{conn: conn} do
+    conn = get(conn, ~p"/dev/login?return_to=/board/acme/public")
+    assert redirected_to(conn) == "/board/acme/public"
+  end
+
+  test "GET /dev/login rejects an external return_to and falls back to /board", %{conn: conn} do
+    conn = get(conn, "/dev/login?return_to=https://evil.com")
+    assert redirected_to(conn) == ~p"/board"
+  end
+
+  test "GET /dev/login rejects a protocol-relative return_to", %{conn: conn} do
+    conn = get(conn, "/dev/login?return_to=//evil.com")
+    assert redirected_to(conn) == ~p"/board"
+  end
 end

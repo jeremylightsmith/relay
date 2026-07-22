@@ -6,6 +6,8 @@ defmodule Schemas.Board do
   programmatically, never cast from input. `card_seq` is the per-board
   card-ref counter (MMF 03), bumped under a row lock by
   `Relay.Cards.create_card/2` and never cast from input.
+  `public_enabled` + `public_intake_stage_id` (RLY-69) are the public-board
+  settings, written only via `public_settings_changeset/2`.
   """
 
   use Ecto.Schema
@@ -18,8 +20,10 @@ defmodule Schemas.Board do
     field :key, :string, default: "RLY"
     field :card_seq, :integer, default: 0
     field :archived_at, :utc_datetime
+    field :public_enabled, :boolean, default: false
 
     belongs_to :owner, Schemas.User
+    belongs_to :public_intake_stage, Schemas.Stage
     has_many :stages, Schemas.Stage
 
     timestamps(type: :utc_datetime)
@@ -40,6 +44,15 @@ defmodule Schemas.Board do
       message: "must be lowercase letters, numbers, and hyphens"
     )
     |> unique_constraint(:slug)
+  end
+
+  @doc """
+  Changeset for the RLY-69 public-board settings — the enable toggle and the intake
+  stage. Deliberately separate from `changeset/2` (which guards name/slug/key). The
+  Boards context validates that the intake stage belongs to this board.
+  """
+  def public_settings_changeset(board, attrs) do
+    cast(board, attrs, [:public_enabled, :public_intake_stage_id])
   end
 
   @doc "True when the board has been archived (read-only)."

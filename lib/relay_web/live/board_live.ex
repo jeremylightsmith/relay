@@ -29,6 +29,7 @@ defmodule RelayWeb.BoardLive do
   alias Relay.Flows
   alias Relay.Members
   alias Relay.Runs
+  alias Relay.Votes
   alias Schemas.Board
   alias Schemas.Card
   alias Schemas.Run
@@ -251,6 +252,7 @@ defmodule RelayWeb.BoardLive do
                   health={@health_by_card}
                   runs={@face_runs}
                   run_meta={@run_face_meta}
+                  vote_counts={@vote_counts}
                   cards={Map.fetch!(@streams, stream_name(stage.id))}
                   composing={@composing_stage_id == stage.id}
                   compose_form={@compose_form}
@@ -378,6 +380,11 @@ defmodule RelayWeb.BoardLive do
             Map.get(@run_summaries, @selected_card.id)
           )
         }
+        vote_count={@drawer_vote_count}
+        supporters={@drawer_supporters}
+        public_description={@selected_card.public_description}
+        editing_public_desc={@editing_public_desc}
+        public_desc_form={@public_desc_form}
       />
       <div
         :if={@archived_open}
@@ -555,6 +562,11 @@ defmodule RelayWeb.BoardLive do
       |> assign(:flows, flows)
       |> assign(:run_summaries, run_summaries)
       |> assign(:face_runs, face_runs(cards, flows, run_summaries))
+      |> assign(:vote_counts, Votes.counts_for_cards(Enum.map(cards, & &1.id)))
+      |> assign(:drawer_supporters, [])
+      |> assign(:drawer_vote_count, 0)
+      |> assign(:editing_public_desc, false)
+      |> assign(:public_desc_form, nil)
       |> assign(:dirty_run_cards, MapSet.new())
       |> assign(:run_flush_events, 0)
       |> assign(:run_flush_pending?, false)
@@ -594,6 +606,7 @@ defmodule RelayWeb.BoardLive do
         runs = Runs.list_runs_for_card(card)
         latest = List.first(runs)
         default_tab = if latest && latest.status in Run.active_statuses(), do: :run, else: :detail
+        {supporters, vote_count} = Votes.supporters(card, 5)
 
         {:noreply,
          socket
@@ -606,6 +619,8 @@ defmodule RelayWeb.BoardLive do
          |> assign_review(card)
          |> assign(:card_runs, runs)
          |> assign(:drawer_tab, default_tab)
+         |> assign(:drawer_supporters, supporters)
+         |> assign(:drawer_vote_count, vote_count)
          |> stream(:conversation, conversation, reset: true)
          |> stream(:activity, activity, reset: true)}
 
@@ -1009,6 +1024,30 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("save_card_description", _params, socket), do: {:noreply, socket}
+
+  def handle_event("start_public_desc", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    {:noreply,
+     socket
+     |> assign(:editing_public_desc, true)
+     |> assign(:public_desc_form, to_form(%{"public_description" => card.public_description || ""}))}
+  end
+
+  def handle_event("cancel_public_desc", _params, socket) do
+    {:noreply, assign(socket, :editing_public_desc, false)}
+  end
+
+  def handle_event(
+        "save_public_desc",
+        %{"public_description" => text},
+        %{assigns: %{selected_card: %Card{} = card}} = socket
+      ) do
+    {:ok, updated} = Cards.set_public_description(card, text)
+
+    {:noreply,
+     socket
+     |> assign(:selected_card, updated)
+     |> assign(:editing_public_desc, false)}
+  end
 
   def handle_event("edit_acceptance_criteria", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
     {:noreply,
@@ -1433,6 +1472,30 @@ defmodule RelayWeb.BoardLive do
 
   def handle_info({:stages_changed, _board_id}, socket) do
     {:noreply, reload_board(socket)}
+  end
+
+  # RLY-69 — a vote toggled somewhere (this board, the public board, another
+  # session). Refresh the affected card's count (and, if its drawer is open,
+  # the supporters block), then re-stream the card so its face badge repaints
+  # with the new @vote_counts value — mirrors the {:card_upserted, …} idiom.
+  def handle_info({:vote_changed, card_id}, socket) do
+    counts = Map.put(socket.assigns.vote_counts, card_id, Votes.count(card_id))
+    socket = assign(socket, :vote_counts, counts)
+
+    socket =
+      case socket.assigns.selected_card do
+        %Card{id: ^card_id} = card ->
+          {supporters, total} = Votes.supporters(card, 5)
+          assign(socket, drawer_supporters: supporters, drawer_vote_count: total)
+
+        _ ->
+          socket
+      end
+
+    case Cards.get_card(socket.assigns.board, card_id) do
+      %Card{} = card -> {:noreply, stream_insert(socket, stream_name(card.stage_id), card)}
+      _ -> {:noreply, socket}
+    end
   end
 
   # RLY-204 — every run event names exactly one card. Rather than refetch the whole board

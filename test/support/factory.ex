@@ -285,4 +285,13 @@ defmodule Relay.Factory do
 
     attachment |> merge_attributes(attrs) |> evaluate_lazy_attributes()
   end
+
+  # Full-control factory: `card`/`user` (when overridden) must be persisted.
+  def vote_factory(attrs) do
+    {card, attrs} = Map.pop_lazy(attrs, :card, fn -> insert(:card) end)
+    {user, attrs} = Map.pop_lazy(attrs, :user, fn -> insert(:user) end)
+
+    vote = %Schemas.Vote{card_id: card.id, user_id: user.id}
+    vote |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
 end

@@ -27,6 +27,10 @@ defmodule Relay.Events do
       purpose, receivers refetch stages.
     * `{:board_updated, board}` — a board's editable attributes (currently
       just `name`) changed; carries the fresh board (stages not preloaded).
+    * `{:vote_changed, card_id}` — a public upvote was added or removed (RLY-69);
+      receivers re-derive the affected card's count (and, if that card's drawer is
+      open, its supporters). Payload is minimal on purpose — the count is a query,
+      not a value pushed through the event.
 
   A global firehose topic (`events:firehose`) additionally carries every
   event as `{board_id, event}` — one subscription observes all boards

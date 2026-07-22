@@ -36,6 +36,7 @@ defmodule Relay do
       Runs.Capacity,
       Runs.RunDetail,
       Runs.SchedulerSupervisor,
-      Runs.Supervisor
+      Runs.Supervisor,
+      Votes
     ]
 end

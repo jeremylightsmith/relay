@@ -63,6 +63,50 @@ defmodule RelayWeb.AuthControllerTest do
     end
   end
 
+  describe "GET /auth/google (request phase) with return_to" do
+    test "stores a local return_to path in the session", %{conn: conn} do
+      conn = get(conn, ~p"/auth/google?return_to=/board/acme/public")
+      assert get_session(conn, :user_return_to) == "/board/acme/public"
+    end
+
+    test "rejects an external return_to (scheme+host)", %{conn: conn} do
+      conn = get(conn, ~p"/auth/google?return_to=https://evil.com/steal")
+      refute get_session(conn, :user_return_to)
+    end
+
+    test "rejects a protocol-relative return_to", %{conn: conn} do
+      conn = get(conn, ~p"/auth/google?return_to=//evil.com/steal")
+      refute get_session(conn, :user_return_to)
+    end
+
+    test "no return_to param leaves the session untouched", %{conn: conn} do
+      conn = get(conn, ~p"/auth/google")
+      refute get_session(conn, :user_return_to)
+    end
+  end
+
+  describe "GET /auth/google/callback with a stored return_to" do
+    test "redirects to the stored local path instead of the board", %{conn: conn} do
+      conn =
+        conn
+        |> get(~p"/auth/google?return_to=/board/acme/public")
+        |> recycle()
+        |> assign(:ueberauth_auth, google_auth())
+        |> get(~p"/auth/google/callback")
+
+      assert redirected_to(conn) == "/board/acme/public"
+    end
+
+    test "falls back to the board when no return_to was stored", %{conn: conn} do
+      conn =
+        conn
+        |> assign(:ueberauth_auth, google_auth())
+        |> get(~p"/auth/google/callback")
+
+      assert redirected_to(conn) == ~p"/board"
+    end
+  end
+
   describe "DELETE /logout" do
     test "clears the session and redirects to the sign-in page", %{conn: conn} do
       user = insert(:user)

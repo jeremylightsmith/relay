@@ -541,6 +541,99 @@ defmodule RelayWeb.CoreComponents do
   defp status_badge_label(:failed, _progress), do: "FAILED"
 
   @doc """
+  The RLY-69 public-support badge. `variant: :pill` is the public board's interactive
+  vote pill (violet-filled when `voted`, outlined otherwise); `variant: :count` is the
+  internal card face's muted `↑ N` label. Presentational only — the caller wires
+  `phx-click` via the global `rest`.
+  """
+  attr :count, :integer, required: true
+  attr :voted, :boolean, default: false
+  attr :variant, :atom, values: [:pill, :count], default: :pill
+  attr :size, :atom, values: [:sm, :lg], default: :sm
+  attr :class, :string, default: nil
+  attr :rest, :global
+
+  def support_badge(%{variant: :count} = assigns) do
+    ~H"""
+    <span
+      class={@class}
+      style="display:inline-flex;align-items:center;gap:3px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:oklch(0.56 0.02 255);"
+      title="Public supporters"
+      data-support-count={@count}
+      {@rest}
+    >
+      <span style="font-size:11px;line-height:1;">↑</span>{@count}
+    </span>
+    """
+  end
+
+  def support_badge(assigns) do
+    ~H"""
+    <button
+      type="button"
+      class={@class}
+      style={support_pill_style(@voted, @size)}
+      data-voted={to_string(@voted)}
+      {@rest}
+    >
+      <span style={"font-size:#{if(@size == :lg, do: "13px", else: "12px")};line-height:1;"}>↑</span>{@count}
+    </button>
+    """
+  end
+
+  defp support_pill_style(voted, size) do
+    base =
+      if voted do
+        "color:oklch(1 0 0);background:oklch(0.60 0.14 250);border:1px solid oklch(0.60 0.14 250);"
+      else
+        "color:oklch(0.48 0.10 250);background:oklch(1 0 0);border:1px solid oklch(0.86 0.05 250);"
+      end
+
+    dims =
+      if size == :lg do
+        "border-radius:10px;padding:9px 16px;gap:4px;font-size:13px;"
+      else
+        "border-radius:9px;padding:6px 11px;gap:3px;font-size:12px;min-width:52px;justify-content:center;"
+      end
+
+    "display:inline-flex;align-items:center;font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;flex:0 0 auto;" <>
+      base <> dims
+  end
+
+  @doc """
+  The RLY-69 supporters row: a horizontal stack of supporter avatars (faces already
+  limited by the caller) plus the total count. Renders a muted "+ M more" line when
+  `total` exceeds the number of faces shown. Used by the internal drawer's PUBLIC
+  SUPPORT block.
+  """
+  attr :supporters, :list, required: true
+  attr :total, :integer, required: true
+  attr :class, :string, default: nil
+
+  def supporters_row(assigns) do
+    assigns = assign(assigns, :more, assigns.total - length(assigns.supporters))
+
+    ~H"""
+    <div class={@class} style="display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="display:flex;align-items:center;">
+          <span
+            :for={{sp, i} <- Enum.with_index(@supporters)}
+            style={"margin-left:#{if(i == 0, do: 0, else: -6)}px;"}
+          >
+            <.avatar name={sp[:name]} email={sp[:email]} src={sp[:src]} size={24} tint={:identity} />
+          </span>
+        </div>
+        <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);">
+          {@total} {if(@total == 1, do: "supporter", else: "supporters")}
+        </span>
+      </div>
+      <span :if={@more > 0} style="font-size:11.5px;color:oklch(0.60 0.02 255);">+ {@more} more</span>
+    </div>
+    """
+  end
+
+  @doc """
   The one avatar (RLY-90). A person renders their photo when we have one
   (`src`), white initials on a colored circle otherwise; the AI renders the
   violet dot mark and never a photo. Every people surface (top bar, card
@@ -920,6 +1013,10 @@ defmodule RelayWeb.CoreComponents do
   attr :progress_at, :any, default: nil, doc: "RLY-191 last-progress timestamp for the run face age"
   attr :stalled?, :boolean, default: false, doc: "RLY-191 run face amber-stalls when its job is stuck"
 
+  attr :vote_count, :integer,
+    default: 0,
+    doc: "RLY-69 public-vote count — the ↑ N badge shows in the meta row for unstarted cards with votes"
+
   def board_card(assigns) do
     # RLY-137: a :done run on an :in_review card is the review-blue treatment — the face
     # tuple alone can't tell (it doesn't know the card's status), so the override lives here.
@@ -1062,6 +1159,12 @@ defmodule RelayWeb.CoreComponents do
         >
           #{@tag}
         </span>
+        <.support_badge
+          :if={@category == :unstarted and @vote_count > 0}
+          count={@vote_count}
+          variant={:count}
+          class="card-votes"
+        />
         <span style="flex:1;"></span>
         <.owner_avatars owners={@owners} active_owner={@active_owner} />
       </div>
@@ -1533,6 +1636,24 @@ defmodule RelayWeb.CoreComponents do
   attr :queued_flow, :any,
     default: nil,
     doc: "RLY-137: the enabled %Schemas.Flow{} that will pick this card up next, or nil"
+
+  attr :vote_count, :integer, default: 0, doc: "RLY-69 the card's public-vote total"
+
+  attr :supporters, :list,
+    default: [],
+    doc: "RLY-69 up to 5 %Schemas.User{} who voted, most-recent first"
+
+  attr :public_description, :string,
+    default: nil,
+    doc: "RLY-69 the card's public-facing description, shown on the public board"
+
+  attr :editing_public_desc, :boolean,
+    default: false,
+    doc: "RLY-69 whether the inline public-description editor is open"
+
+  attr :public_desc_form, :any,
+    default: nil,
+    doc: "RLY-69 a form for public_description; required when editing_public_desc"
 
   def card_drawer(assigns) do
     latest = List.first(assigns.runs)
@@ -2554,12 +2675,80 @@ defmodule RelayWeb.CoreComponents do
                   <div>Updated {Calendar.strftime(@card.updated_at, "%b %d, %Y")}</div>
                 </div>
               </div>
+
+              <%!-- PUBLIC SUPPORT (RLY-69) --%>
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.62 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">
+                  PUBLIC SUPPORT
+                </span>
+                <.supporters_row
+                  :if={@vote_count > 0}
+                  supporters={supporter_faces(@supporters)}
+                  total={@vote_count}
+                />
+                <span :if={@vote_count == 0} style="font-size:12px;color:oklch(0.60 0.02 255);">
+                  No public supporters yet.
+                </span>
+              </div>
+
+              <%!-- PUBLIC DESCRIPTION (RLY-69) --%>
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.62 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">
+                  PUBLIC DESCRIPTION
+                </span>
+                <p
+                  :if={@public_description && !@editing_public_desc}
+                  style="font-size:13px;line-height:1.55;color:oklch(0.42 0.02 255);margin:0;white-space:pre-wrap;"
+                >
+                  {@public_description}
+                </p>
+                <button
+                  :if={is_nil(@public_description) && !@editing_public_desc}
+                  id="add-public-desc"
+                  phx-click="start_public_desc"
+                  type="button"
+                  style="align-self:flex-start;background:transparent;border:none;padding:0;font-size:12px;font-weight:600;color:oklch(0.55 0.11 250);cursor:pointer;"
+                >
+                  + Add a public description
+                </button>
+                <.form
+                  :if={@editing_public_desc}
+                  for={@public_desc_form}
+                  id="public-desc-form"
+                  phx-submit="save_public_desc"
+                >
+                  <textarea
+                    name="public_description"
+                    style="width:100%;min-height:62px;border:1px solid oklch(0.60 0.14 250);border-radius:8px;padding:8px 10px;font-size:12.5px;line-height:1.5;color:oklch(0.30 0.02 255);outline:none;"
+                  >{@public_description}</textarea>
+                  <div style="display:flex;gap:7px;margin-top:8px;">
+                    <button
+                      type="submit"
+                      style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:7px;padding:6px 13px;font-size:12px;font-weight:600;"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      phx-click="cancel_public_desc"
+                      style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.01 255);color:oklch(0.46 0.02 255);border-radius:7px;padding:6px 12px;font-size:12px;font-weight:600;"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </.form>
+              </div>
             </div>
           </div>
         </aside>
       </div>
     </div>
     """
+  end
+
+  # RLY-69 — %Schemas.User{} rows -> the maps supporters_row/1 expects.
+  defp supporter_faces(users) do
+    Enum.map(users, fn u -> %{name: u.name, email: u.email, src: u.avatar_url} end)
   end
 
   attr :card, :any, required: true
@@ -3031,6 +3220,10 @@ defmodule RelayWeb.CoreComponents do
     default: %{},
     doc: "RLY-191 card_id => %{progress_at:, stalled?:}, from BoardLive's :run_face_meta assign"
 
+  attr :vote_counts, :map,
+    default: %{},
+    doc: "RLY-69 card_id => public vote count, from BoardLive's :vote_counts assign"
+
   def stage_column(assigns) do
     sublanes = Enum.map(assigns.sublanes, &Map.put_new(&1, :collapsed, false))
     total_count = (assigns.count || 0) + Enum.sum(Enum.map(sublanes, & &1.count))
@@ -3264,6 +3457,7 @@ defmodule RelayWeb.CoreComponents do
                       run={Map.get(@runs, card.id)}
                       progress_at={run_meta_at(@run_meta, card.id)}
                       stalled?={run_meta_stalled?(@run_meta, card.id)}
+                      vote_count={Map.get(@vote_counts, card.id, 0)}
                     />
                   </div>
                   <%!--
@@ -3376,6 +3570,7 @@ defmodule RelayWeb.CoreComponents do
                   run={Map.get(@runs, card.id)}
                   progress_at={run_meta_at(@run_meta, card.id)}
                   stalled?={run_meta_stalled?(@run_meta, card.id)}
+                  vote_count={Map.get(@vote_counts, card.id, 0)}
                 />
               </div>
             </div>
