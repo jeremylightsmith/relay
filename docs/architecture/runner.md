@@ -75,14 +75,16 @@ looks like the leftward flow is being starved. Pinned by
 - **Executor heartbeat**: `ExecutorHeartbeat` posts `{executor, capacity,
   running: [job-ids], bound_runs: [run-ids]}` to `POST /api/node-jobs/heartbeat` every
   `heartbeat_interval`s (RLY-164) and reads back `{revoked: [job-ids],
-  release_runs: [run-ids], want_capabilities, executor_outdated, required_version}`. It
-  terminates each revoked job's live subprocess via its `JobControl` (see "Node-job
-  transport" and "Executor mode" below). The advertised `capacity` is the executor's
-  configured per-class total; `running` is the jobs it believes it holds, so the server can
-  name the ones it no longer considers live. `bound_runs` (RLY-218) is the run-ids of
-  exclusive slots the executor holds *without* a live job; `release_runs` is the run-scoped
-  analogue of `revoked` — the subset now terminal server-side, so the executor frees those
-  idle-bound worktree slots within one heartbeat instead of waiting on a next outcome. The same
+  release_runs: [{run_id, status}], want_capabilities, executor_outdated,
+  required_version}`. It terminates each revoked job's live subprocess via its `JobControl`
+  (see "Node-job transport" and "Executor mode" below). The advertised `capacity` is the
+  executor's configured per-class total; `running` is the jobs it believes it holds, so the
+  server can name the ones it no longer considers live. `bound_runs` (RLY-218) is the
+  run-ids of per-card worktrees the executor holds *without* a live job; `release_runs` is
+  the run-scoped analogue of `revoked` — the subset now terminal server-side, named with its
+  `status` (`done`/`failed`/`cancelled`, `Relay.Runs.terminal_among/2`, RLY-231) so the
+  executor's recovery teardown can remove (done/cancelled) or retain (failed) that worktree
+  within one heartbeat instead of waiting on a next outcome. The same
   `running` list also refreshes card liveness (RLY-226, `Runs.refresh_running_card_liveness/2`):
   the server stamps `agent_heartbeat_at` on the cards whose reported job is still active, the
   positive complement of the revoke query, so a live-but-quiet agent never falsely reads `:stale`
@@ -294,8 +296,12 @@ nothing else — every board-specific fact lives server-side as flow data.
 
 - **Config.** `.relay/executor.json` holds `name` (defaults to hostname), `namespace`
   (default `exec`), `capacity: {shared_clean, exclusive}`, `poll_timeout`,
-  `heartbeat_interval`. Missing file → sensible defaults; capacity is the field a developer
-  routinely edits.
+  `heartbeat_interval`, and three optional per-card-worktree keys (RLY-231):
+  `cache_dir` (a warm dep/build cache dir passed to the prepare hook), `prepare` (path to a
+  project-specific prepare hook, default `.relay/prepare-worktree.sh`), and
+  `max_retained_failed` (how many failed-run worktrees to keep for post-mortem before the
+  oldest is evicted, default 3). Missing file → sensible defaults, including all three new
+  keys; capacity is the field a developer routinely edits.
 - **Single-process guarantee (RLY-193).** Exactly one `relay execute` may run per `{server,
   name}` (the pair the server keys an `Executor` on, `name` defaulting to hostname) and per
   worktree namespace. At startup `cmd_execute` takes two exclusive, non-blocking `fcntl.flock`
@@ -317,12 +323,46 @@ nothing else — every board-specific fact lives server-side as flow data.
   install/skip/more-info for each optional one. Requires a TTY. When the manifest
   advertises a newer `EXECUTOR_VERSION` it re-downloads `bin/relay` in place
   (upgrade-only) before installing anything.
-- **Worktree namespace.** `ExecutorPool` maps every job's `isolation` onto worktrees under
-  the `exec-*` namespace. `shared_clean` jobs share one reused `exec-clean` worktree (never
-  reset per-job, only fast-forwarded to base when every shared slot is idle). `exclusive`
-  jobs get a slot from a fixed `exec-work-1..N` pool, bound to a run from its first job
-  until that run reaches a terminal `run_state` — the reset happens only on that first job,
-  since a run's later nodes build on the diff its earlier nodes left in the worktree.
+- **Worktree namespace (RLY-231: one worktree per card).** `ExecutorPool` maps every job's
+  `isolation` onto worktrees under the `exec-*` namespace. `shared_clean` jobs share one
+  reused `exec-clean` worktree (never reset per-job, only fast-forwarded to base when every
+  shared slot is idle) — unchanged. `exclusive` jobs no longer draw from a fixed
+  `exec-work-1..N` pool; each **card** gets its own worktree named `<ns>-<ref>` (e.g.
+  `exec-RLY-231`), created on the card's first exclusive job and torn down when its run
+  reaches a terminal `run_state`. Since the worktree's identity is the card's branch,
+  cross-contamination between two cards is impossible by construction, and the binding is
+  derivable from `git worktree list` rather than an in-memory map, so a restart re-derives
+  it (`ExecutorPool.recover/0`) instead of losing it.
+  - **Capacity is reinterpreted, not reshaped:** `capacity.exclusive` is `max_worktrees` —
+    the max number of concurrent *active* per-card worktrees an executor holds, not a fixed
+    slot count. Advertised free `exclusive` = `max_worktrees − active_count`.
+  - **Two states.** *Active*: bound to a non-terminal run, counts toward `max_worktrees`,
+    holds a `MIX_TEST_PARTITION` index. *Retained*: a `failed` run's leftover kept on disk
+    (marked with the gitignored `.relay-retained` sentinel at its root) for post-mortem, up
+    to `max_retained_failed` (default 3, oldest evicted first by mtime past that), not
+    counted against capacity. `done`/`cancelled` remove the worktree immediately; a revoke
+    (`run_state == nil`) touches nothing.
+  - **Never-detach.** Once the run's `branch` node attaches `refs/heads/{branch}`, the
+    executor never re-detaches that worktree again — the old mid-run reset-on-revoke path
+    (below) is gone. A revoked exclusive job now just stops its subprocess and leaves the
+    worktree active and bound, ready for the pinned resume to continue in it.
+  - **Prepare hook.** On a reset (first job of a card, or reclaiming a retained worktree for
+    a new run), `ExecutorPool.create_or_rebaseline/1` makes the worktree clean at base, then
+    `run_prepare_hook/3` warms it: it runs `.relay/prepare-worktree.sh` if present and
+    executable, else the `prepare` command from `executor.json`, else it is a no-op (a cold
+    build, not an error). The hook receives `[worktree, ref, branch, base, cache_dir]` as
+    both argv and env (`RELAY_WORKTREE`/`RELAY_REF`/`RELAY_BRANCH`/`RELAY_BASE`/
+    `RELAY_CACHE_DIR`) with `cwd` set to the new worktree; **a nonzero exit fails the run
+    fail-fast** (its stderr becomes the node's failure detail) rather than silently running
+    against a half-warmed tree. Relay's own hook, `.relay/prepare-worktree.sh`, is a boring
+    first cut: it copies `deps/`, `_build/`, and `assets/node_modules/` from `cache_dir` (or
+    else the main checkout) into the fresh worktree via APFS clonefile copy-on-write
+    (`cp -Rc`, falling back to plain `cp -R`), so `mix deps.get` is a no-op and `mix compile`
+    only rebuilds the diff.
+  - **Shared `.git`.** Worktrees never get their own clone; `git worktree add/remove/prune`
+    routes through `git_worktree_with_retry`, the same bounded-retry discipline as
+    `git fetch` (RLY-224 §6), since concurrent per-card creates/teardowns race on the one
+    shared ref db.
 - **Per-node scratch (RLY-214).** Alongside the worktree itself, every node gets
   `RELAY_NODE_SCRATCH` (`scratch_path` in `bin/relay`): `tmp/<REF>/<node>.md` inside that same
   worktree, keyed only on `(ref, node)` so a re-queued job after an executor restart resolves
@@ -333,11 +373,13 @@ nothing else — every board-specific fact lives server-side as flow data.
 - **Test database per slot (RLY-213).** Worktree isolation keeps two concurrent runs' files
   apart, but `mix test` for both would otherwise hit the same Postgres database — Ecto's SQL
   sandbox only isolates concurrent tests *within* one BEAM, not across two OS processes.
-  `partition_for(slot)` (`bin/relay`) derives `MIX_TEST_PARTITION` from the same slot name at
-  the single point where a node's command launches (both `_stream_shell` and
-  `_stream_claude_job`), so every step of a run — including the `precommit` gate — sees the
-  same database: `exec-work-N` -> partition `N`, the shared `exec-clean` -> partition `0`.
-  `config/test.exs` already keys the database name off `MIX_TEST_PARTITION`.
+  `ExecutorPool.partition_for(slot)` (`bin/relay`) derives `MIX_TEST_PARTITION` from a
+  free-list index held by the worktree's registry record at the single point where a node's
+  command launches (both `_stream_shell` and `_stream_claude_job`), so every step of a run —
+  including the `precommit` gate — sees the same database: each active per-card worktree
+  (e.g. `exec-RLY-231`) holds its own index for the run's lifetime, recycled on teardown; the
+  shared `exec-clean` is always partition `0`. `config/test.exs` already keys the database
+  name off `MIX_TEST_PARTITION`.
 - **The claim/execute/report loop (`cmd_execute`).** Each iteration: advertise current free
   capacity per isolation class on a long-poll `POST /api/node-jobs/claim` (a read timeout is
   "no work", not an error); on a claim, hand the job to a worker thread bounded by the pool's
@@ -349,19 +391,23 @@ nothing else — every board-specific fact lives server-side as flow data.
   for in-flight workers to finish.
 - **Heartbeat-borne revoke.** `ExecutorHeartbeat` POSTs `{executor, capacity,
   running: [job-ids], bound_runs: [run-ids]}` to `POST /api/node-jobs/heartbeat` every
-  `heartbeat_interval`s and reads `{revoked: [job-ids], release_runs: [run-ids]}` back
-  (RLY-164), terminating each revoked job's live subprocess via its `JobControl`.
-  `release_runs` is the run-scoped analogue of `revoked` (RLY-218): the executor advertises
-  the run-ids of exclusive slots it holds with no live job (`bound_runs`), and the server
-  names the subset gone terminal server-side so the executor releases those idle-bound
-  worktree slots within one heartbeat. This is how taking the baton (ADR 0004, via
+  `heartbeat_interval`s and reads `{revoked: [job-ids],
+  release_runs: [{run_id, status}]}` back (RLY-164, status shape RLY-231), terminating each
+  revoked job's live subprocess via its `JobControl`. `release_runs` is the run-scoped
+  analogue of `revoked` (RLY-218): the executor advertises the run-ids of per-card worktrees
+  it holds with no live job (`bound_runs`), and the server names the subset gone terminal
+  server-side — with the status needed to choose remove vs retain
+  (`Relay.Runs.terminal_among/2`) — so the executor's `release_run/2` disposes of those
+  idle-bound worktrees within one heartbeat. This is how taking the baton (ADR 0004, via
   `park_claimed/1`) or cancelling from the run panel stops a running agent without waiting on
-  its next outcome POST. A revoked **exclusive** job resets its worktree (salvaging any leftovers via `git stash`,
-  same as `reset_worktree` elsewhere), since that worktree is bound 1:1 to this job/run. A
-  revoked **`shared_clean`** job leaves `exec-clean` untouched instead — that worktree is
-  shared by other jobs still running concurrently, and resetting it would destroy their
-  work; it's only ever fast-forwarded once every shared slot is idle. Either way, no outcome
-  is reported for a revoked job — the server already knows a revoked job never finished.
+  its next outcome POST. **Never-detach (RLY-231):** a revoked job of either isolation class
+  leaves its worktree exactly as it was — an exclusive worktree is bound 1:1 to its card and
+  stays active + attached to the branch for the pinned resume to continue in, and a revoked
+  `shared_clean` job already left `exec-clean` untouched (it's shared by other concurrently
+  running jobs and only ever fast-forwarded once every shared slot is idle). The old
+  reset-on-revoke for exclusive jobs is gone: no reset is ever needed mid-run now that a
+  worktree's identity is the card itself. Either way, no outcome is reported for a revoked
+  job — the server already knows a revoked job never finished.
 
 ### Agent node → `.claude/agents` definition
 

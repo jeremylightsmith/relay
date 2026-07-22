@@ -1138,6 +1138,102 @@ class ExecutorConfigCommittedFileTest(unittest.TestCase):
             cfg = json.load(f)
         self.assertNotIn("name", cfg)
 
+    def test_committed_executor_json_documents_the_new_worktree_keys(self):
+        """RLY-231: the checked-in example advertises the optional keys the per-card
+        worktree lifecycle reads (cache_dir/prepare/max_retained_failed) so a new clone
+        sees them without reading bin/relay's source."""
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            ".relay", "executor.json",
+        )
+        with open(path) as f:
+            cfg = json.load(f)
+        self.assertEqual(cfg["prepare"], ".relay/prepare-worktree.sh")
+        self.assertEqual(cfg["max_retained_failed"], 3)
+        self.assertIn("cache_dir", cfg)
+
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+class GitignoreRetainedMarkerTest(unittest.TestCase):
+    """RLY-231: a retained (failed-run) worktree's `.relay-retained` sentinel must survive
+    `git clean -fd` (only `-x` removes ignored files) and stay out of `git status
+    --porcelain` (else the worktree salvage path would try to stash it)."""
+
+    def test_gitignore_ignores_the_retained_marker(self):
+        with open(os.path.join(REPO_ROOT, ".gitignore")) as f:
+            lines = {line.strip() for line in f}
+        self.assertIn(".relay-retained", lines)
+
+
+class PrepareWorktreeHookTest(unittest.TestCase):
+    """RLY-231: the committed `.relay/prepare-worktree.sh` is Relay's own first-cut prepare
+    hook — it must actually warm a freshly created worktree from a warm main checkout (or a
+    configured cache dir) via CoW/plain copy, skip whatever isn't warm anywhere, and never
+    clobber a destination that already exists."""
+
+    HOOK = os.path.join(REPO_ROOT, ".relay", "prepare-worktree.sh")
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+        self.main = os.path.join(self.tmp, "main")
+        os.makedirs(self.main)
+        subprocess.run(["git", "init", "-q"], cwd=self.main, check=True)
+        subprocess.run(["git", "-c", "user.email=t@t.com", "-c", "user.name=t",
+                        "commit", "--allow-empty", "-q", "-m", "init"],
+                       cwd=self.main, check=True)
+        os.makedirs(os.path.join(self.main, "deps", "foo"))
+        with open(os.path.join(self.main, "deps", "foo", "mix.exs"), "w") as f:
+            f.write("warm\n")
+
+        self.wt = os.path.join(self.tmp, "wt")
+        subprocess.run(["git", "worktree", "add", "-q", "--detach", self.wt, "HEAD"],
+                       cwd=self.main, check=True)
+
+    def run_hook(self, cache_dir=""):
+        # Real invocation (bin/relay's run_prepare_hook) sets both argv AND env; the script
+        # only reads RELAY_CACHE_DIR from env, so the test must mirror that, not argv-only.
+        env = dict(os.environ, RELAY_WORKTREE=self.wt, RELAY_REF="RLY-1", RELAY_BRANCH="b",
+                   RELAY_BASE="origin/main", RELAY_CACHE_DIR=cache_dir)
+        return subprocess.run(
+            [self.HOOK, self.wt, "RLY-1", "b", "origin/main", cache_dir],
+            cwd=self.wt, env=env, capture_output=True, text=True)
+
+    def test_is_executable(self):
+        self.assertTrue(os.access(self.HOOK, os.X_OK))
+
+    def test_copies_deps_from_the_main_checkout_when_no_cache_dir(self):
+        proc = self.run_hook()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(os.path.isfile(os.path.join(self.wt, "deps", "foo", "mix.exs")))
+
+    def test_prefers_the_cache_dir_over_the_main_checkout(self):
+        cache = os.path.join(self.tmp, "cache")
+        os.makedirs(os.path.join(cache, "deps"))
+        with open(os.path.join(cache, "deps", "marker"), "w") as f:
+            f.write("from cache\n")
+        proc = self.run_hook(cache_dir=cache)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(os.path.isfile(os.path.join(self.wt, "deps", "marker")))
+        self.assertFalse(os.path.exists(os.path.join(self.wt, "deps", "foo")))
+
+    def test_skips_a_dir_that_is_not_warm_anywhere_without_failing(self):
+        proc = self.run_hook()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.wt, "_build")))
+
+    def test_does_not_clobber_an_existing_destination(self):
+        os.makedirs(os.path.join(self.wt, "deps"))
+        with open(os.path.join(self.wt, "deps", "mine"), "w") as f:
+            f.write("keep\n")
+        proc = self.run_hook()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(os.path.isfile(os.path.join(self.wt, "deps", "mine")))
+        self.assertFalse(os.path.exists(os.path.join(self.wt, "deps", "foo")))
+
 
 class _FakePopen:
     """Minimal Popen stand-in: yields the given stdout lines, then exits with `code`."""

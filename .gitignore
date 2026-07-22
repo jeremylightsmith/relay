@@ -55,3 +55,6 @@ npm-debug.log
 
 # Boundary graph intermediate output (mix relay.deps_graph); the committed graph lives in docs/architecture/deps.md
 /boundary/
+
+# Relay executor: sentinel marking a retained (failed-run) per-card worktree (RLY-231)
+.relay-retained
