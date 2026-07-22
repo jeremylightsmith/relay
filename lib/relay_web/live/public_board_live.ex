@@ -152,7 +152,7 @@ defmodule RelayWeb.PublicBoardLive do
                     YOU VOTED
                   </span>
                   <span
-                    :if={@current_user && card.posted_by_user_id == @current_user.id}
+                    :if={own_card?(@current_user, card)}
                     class="your-idea-badge font-mono text-[9.5px] font-semibold tracking-wider text-secondary uppercase"
                   >
                     YOUR IDEA
@@ -168,6 +168,45 @@ defmodule RelayWeb.PublicBoardLive do
                 data-vote-count={Map.get(@vote_counts, card.id, 0)}
                 class="mt-2"
               />
+
+              <%= if own_card?(@current_user, card) && is_nil(card.public_description) do %>
+                <%= if @editing_desc_id == card.id do %>
+                  <.form
+                    for={to_form(%{"description" => ""}, as: :desc)}
+                    id={"desc-form-#{card.id}"}
+                    phx-submit="save_desc"
+                    class="mt-2"
+                  >
+                    <input type="hidden" name="card-id" value={card.id} />
+                    <textarea
+                      id={"desc-editor-#{card.id}"}
+                      name="desc[description]"
+                      placeholder="Describe this idea for the public — one or two lines."
+                      class="textarea textarea-bordered w-full min-h-[62px] text-xs"
+                    ></textarea>
+                    <div class="mt-2 flex gap-2">
+                      <button type="submit" class="btn btn-primary btn-xs">Save</button>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-xs"
+                        phx-click="cancel_add_desc"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </.form>
+                <% else %>
+                  <button
+                    id={"add-desc-#{card.id}"}
+                    type="button"
+                    phx-click="start_add_desc"
+                    phx-value-card-id={card.id}
+                    class="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-secondary"
+                  >
+                    ＋ Add a public description
+                  </button>
+                <% end %>
+              <% end %>
             </div>
 
             <p :if={column.cards == []} class="text-xs text-base-content/40">Nothing here yet.</p>
@@ -372,6 +411,7 @@ defmodule RelayWeb.PublicBoardLive do
           |> assign(:new_card_id, nil)
           |> assign(:composer_cta, composer_cta(current_user))
           |> assign(:composer_form, blank_composer_form())
+          |> assign(:editing_desc_id, nil)
           |> assign_cards()
 
         {:ok, socket}
@@ -484,6 +524,38 @@ defmodule RelayWeb.PublicBoardLive do
     end
   end
 
+  # The inline "＋ Add a public description" affordance (RLY-225 Task 3) —
+  # poster-only, authorized against the already-loaded board-scoped `cards`
+  # assign (never a bare `Repo.get`, so a foreign id can't be targeted).
+  def handle_event("start_add_desc", %{"card-id" => id}, socket) do
+    card_id = String.to_integer(id)
+
+    if own_editable_card?(socket, card_id) do
+      {:noreply, assign(socket, :editing_desc_id, card_id)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("cancel_add_desc", _params, socket) do
+    {:noreply, assign(socket, :editing_desc_id, nil)}
+  end
+
+  def handle_event("save_desc", %{"card-id" => id, "desc" => %{"description" => text}}, socket) do
+    card_id = String.to_integer(id)
+
+    with true <- own_editable_card?(socket, card_id),
+         card = find_card(socket.assigns.cards, card_id),
+         {:ok, _updated} <- Cards.set_public_description(card, text) do
+      {:noreply,
+       socket
+       |> assign(:editing_desc_id, nil)
+       |> assign_cards()}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
   # PublicBoardLive subscribes to the FULL `board:<id>` topic (see
   # `Relay.Events`), so it must tolerate every event on it — an unmatched
   # `handle_info` crashes the LiveView. Card lifecycle events and votes refresh
@@ -533,6 +605,21 @@ defmodule RelayWeb.PublicBoardLive do
   end
 
   defp find_card(cards, id), do: Enum.find(cards, &(&1.id == id))
+
+  # True when `card` was posted by the signed-in `user` — the single source of
+  # truth the YOUR IDEA badge and the inline description editor's affordance
+  # both read (RLY-225 Task 3).
+  defp own_card?(nil, _card), do: false
+  defp own_card?(user, card), do: card.posted_by_user_id == user.id
+
+  # Authorization for the inline description editor's events: a card the
+  # signed-in user posted, resolved from the already board-scoped `cards`
+  # assign so a forged `card-id` for another board/user's card is never found.
+  defp own_editable_card?(socket, card_id) do
+    user = socket.assigns.current_user
+    card = find_card(socket.assigns.cards, card_id)
+    user != nil && card != nil && own_card?(user, card)
+  end
 
   # Opens the sign-in modal for `reason` — shared by the vote gate, the
   # header's Sign in button, and the post-an-idea gate (RLY-225), so the
