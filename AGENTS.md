@@ -27,7 +27,7 @@ rationale in [ADR 0001](docs/adr/0001-client-architecture.md) — read it before
 client-side or API surface.
 
 **Working Relay from Claude Code:** the `mix relay` CLI + REST API let a Claude session pull a
-card, work it, and hand it back. See [`docs/agent-integration.md`](docs/agent-integration.md).
+card, work it, and hand it back. See [`relay.md`](relay.md).
 
 ## Skill discipline
 

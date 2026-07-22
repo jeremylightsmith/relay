@@ -8,7 +8,7 @@ its supervised processes, the executor, the state machines, or the dependencies.
 The *why* behind these shapes lives in [`docs/adr/`](../adr/README.md); terms are defined in
 [`../glossary.md`](../glossary.md); the product north star is [`../vision.md`](../vision.md);
 UI truth is [`../designs/`](../designs/README.md); the agent-facing CLI/REST surface is
-[`../agent-integration.md`](../agent-integration.md).
+[`../../relay.md`](../../relay.md).
 
 ## System map
 

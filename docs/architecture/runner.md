@@ -12,7 +12,7 @@ the board-key REST API.
 
 1. **A CLI** for every card operation an agent needs (`card`, `move`, `comment`,
    `needs-input`, `approve`, …) — the surface documented in
-   [`../agent-integration.md`](../agent-integration.md).
+   [`../../relay.md`](../../relay.md).
 2. **`relay execute`** — the only runner mode: a poll loop that claims node-jobs from the
    server and runs them (see "Executor mode" below).
 
@@ -123,7 +123,7 @@ never 403s):
   spend — `attempts_mean`, `verdict_split`, `loop_laps`). Read-only, board-scoped.
 - CLI: `bin/relay why REF` / `bin/relay runs REF` / `bin/relay executors` /
   `bin/relay version` / `bin/relay flow-stats KEY`, documented in
-  [`../agent-integration.md`](../agent-integration.md).
+  [`../../relay.md`](../../relay.md).
 
 ## Bootstrap surface (RLY-181)
 
@@ -235,7 +235,7 @@ that stays server-side.
   `Relay.AgentLog.stamp/1` → `Relay.Activity.LogSink.row/2` → `activities.node_job_id`, kept
   for W6's run panel to key log lines off a specific node-job.
 - The full outcome-file contract (`RELAY_NODE_OUTCOME`) executors must honor is documented in
-  [`../agent-integration.md`](../agent-integration.md#node-job-protocol-adr-0006).
+  [`../../relay.md`](../../relay.md#node-job-protocol-adr-0006).
 
 ## Run recovery surface (RLY-189)
 
@@ -343,7 +343,7 @@ nothing else — every board-specific fact lives server-side as flow data.
   worktree, keyed only on `(ref, node)` so a re-queued job after an executor restart resolves
   the identical path. It sits under the checkout's own `.gitignore`, so it survives
   `reset_worktree`'s salvage/stash/clean untouched and never gets committed. See
-  [`../agent-integration.md`](../agent-integration.md#the-relay_node_scratch-contract) for the
+  [`../../relay.md`](../../relay.md#the-relay_node_scratch-contract) for the
   full contract, including why agents must not invent their own scratch path (RLY-177).
 - **Test database per slot (RLY-213).** Worktree isolation keeps two concurrent runs' files
   apart, but `mix test` for both would otherwise hit the same Postgres database — Ecto's SQL

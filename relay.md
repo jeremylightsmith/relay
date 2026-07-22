@@ -1,4 +1,4 @@
-# Working Relay from an agent (CLI + node-job executor)
+# Working with Relay from your agent
 
 Relay is programmable over a REST API (MMF 09) and a single `bin/relay` tool. That tool is two
 things in one:

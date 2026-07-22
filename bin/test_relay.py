@@ -1960,7 +1960,7 @@ class ExecutorHeartbeatTest(unittest.TestCase):
         hb._beat()   # must not raise, exactly like the watcher's Heartbeat
 
     def test_a_404_beat_prints_nothing_to_stderr(self):
-        """The server route doesn't exist yet (docs/agent-integration.md: "client-side only
+        """The server route doesn't exist yet (relay.md: "client-side only
         for now") — a real urlopen() 404 must be swallowed silently by the soft_404 call, not
         fall through to die()'s stderr print, or a long-running `relay execute` would spam an
         error line on every heartbeat tick forever."""
@@ -3296,13 +3296,13 @@ class DiscoverabilityTest(unittest.TestCase):
         for verb in ("relay why", "relay runs", "relay executors", "relay version", "--field"):
             self.assertIn(verb, relay.__doc__, f"the module docstring (relay --help) should list {verb}")
 
-    def test_agent_integration_documents_every_new_verb(self):
+    def test_relay_md_documents_every_new_verb(self):
         path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            "docs", "agent-integration.md")
+                            "relay.md")
         with open(path, encoding="utf-8") as f:
             doc = f.read()
         for verb in ("bin/relay why", "bin/relay runs", "bin/relay executors", "bin/relay version", "--field"):
-            self.assertIn(verb, doc, f"docs/agent-integration.md should document {verb}")
+            self.assertIn(verb, doc, f"relay.md should document {verb}")
 
 
 class TestPartitionTest(unittest.TestCase):
