@@ -1,18 +1,18 @@
 # Working with Relay from your agent
 
-Relay is programmable over a REST API (MMF 09) and a single `bin/relay` tool. That tool is two
-things in one:
+Relay is a kanban board you drive from an AI agent. Work moves back and forth between humans
+and AI as cards flow through a board's stages — Relay decides which card is ready, which flow
+runs it, and what each step does. You talk to Relay two ways, both through one tool,
+`bin/relay`:
 
 - a **CLI** — read the board and drive a card (`bin/relay board`, `move`, `comment`, …);
-- **`relay execute`** — the runner mode: claims node-jobs from the server and runs them,
+- **`relay execute`** — the runner mode: it claims work from the server and runs it,
   "passing the baton" between humans and AI as cards move through a board's flows.
 
-Dispatch is entirely server-side (ADR 0006): which cards are ready, which flow they run, and
-what each step does are all `Flow`/`Flow.Node`/`Flow.Edge` rows owned by `Relay.Runs.Scheduler`
-and `Relay.Runs`. `bin/relay` is generic — it knows the REST API and how to execute a claimed
-node-job, but **nothing** about any particular board's columns, agents, or skills. Per-project
-customization happens in **Settings › Flows** (or a per-project `.relay/flows.json` override,
-RLY-140), not in a runner config file.
+**Dispatch is entirely server-side.** Which cards are ready, which flow they run, and what each
+step does are all decided by Relay. `bin/relay` is generic — it knows the REST API and how to
+run a claimed job, but **nothing** about any particular board's columns, agents, or skills.
+Per-project customization happens in **Settings › Flows**, not in a runner config file.
 
 ---
 
@@ -28,7 +28,8 @@ RLY-140), not in a runner config file.
    ```
 3. **Confirm access:** `./bin/relay board` should print your board.
 
-`bin/relay` is zero-dependency (Python 3 stdlib only), so it runs anywhere the agent does.
+`bin/relay` is zero-dependency (Python 3 standard library only), so it runs anywhere the agent
+does.
 
 ## CLI
 
@@ -76,23 +77,21 @@ Every `--json` command also takes `--field PATH` for a single value:
 payload instead carries `done: true` once a `ready` card is parked at the board's terminal
 (rightmost) stage, plus a `needs_you: true/false` fact (and the board payload carries a
 `needs_you` rollup — `needs_input` / `in_review` / `awaiting_human` / `agent_stalled`). This
-means "ready" is used two ways below: **positionally**, a card is
-"ready to pull" when the column to its right is an AI column (invariant 5); as a **status**,
-`ready` means the card isn't actively `working`/blocked — it's just sitting wherever it is.
-Don't set a `done` status; move the card to its terminal stage instead and Done follows.
+means "ready" is used two ways: **positionally**, a card is "ready to pull" when the column to
+its right is an AI column; as a **status**, `ready` means the card isn't actively
+`working`/blocked — it's just sitting wherever it is. Don't set a `done` status; move the card
+to its terminal stage instead and Done follows.
 
 ## The executor
 
-`bin/relay execute` claims node-jobs from the server and runs each in an executor-owned git
+`bin/relay execute` claims jobs from the server and runs each in an executor-owned git
 worktree. It is cheap when idle — a long-poll claim only returns when there is actual work, or
 after `poll_timeout` seconds.
 
-Agent nodes run headless Claude (`claude -p --dangerously-skip-permissions --output-format
-stream-json`, streamed as a live feed, `--agent <name>` when the node names one — see
-"Agent node → `.claude/agents` definition" in [`docs/architecture/runner.md`](architecture/runner.md));
-`shell`/`gate` nodes run shell. Which stages are AI-enabled, what each node does, and where
-finished work goes are entirely `Flow` data — see [`docs/designs/flows/`](designs/flows/README.md)
-for the shipped library and Settings › Flows to view or override it on a board.
+Agent steps run headless Claude (`claude -p --dangerously-skip-permissions --output-format
+stream-json`, streamed as a live feed); shell/gate steps run shell. Which stages are
+AI-enabled, what each step does, and where finished work goes are all configured on the board —
+view or edit them in **Settings › Flows**.
 
 - **Watch it live:** `bin/relay execute` prints a `🤖`/`🔧` play-by-play of each headless step.
 - **One job:** `bin/relay execute --once`. **Dry run (no tokens, no mutations):** `--dry-run`.
@@ -107,187 +106,107 @@ not silently fall back to paid API). Working one card at a time keeps this manag
 
 ---
 
-## Node-job protocol (ADR 0006)
+## Running work — the node contract
 
-Every stage's reasoning lives server-side (`Relay.Runs`, the flow engine); `bin/relay execute`
-is a **thin executor** that only claims node-jobs, runs them, and reports outcomes, on top of
-the same board-key `/api` (ADR 0001 — no parallel surface):
+You only need this section if you **author your own flows or agents**. Using the shipped flows,
+Relay handles all of it for you.
 
-| Endpoint | Purpose |
-|---|---|
-| `POST /api/node-jobs/claim` | Claim the next eligible node-job. Request: `{executor: {name, host, interval}, capacity: {shared_clean, exclusive}}`. Response: `200` with `{id, run_id, ref, node_id, node_type, agent, run, isolation, resume_session, vars}` (`agent` is the `.claude/agents/<name>.md` definition a `type: agent` node names, or `nil`; no worktree path — that's executor-local; `run_id` is the owning run's row id, which `ExecutorPool` binds an exclusive worktree slot to), or `204` when nothing is claimable (the endpoint long-polls ~25s before returning `204`; pass `?wait=0` to short-poll instead). |
-| `POST /api/node-jobs/:id/outcome` | Report a job's result. Request: `{outcome, detail, git_sha, session_id}`, `outcome` one of `succeeded \| failed \| partial \| needs_input`. Response: `200` with `{status: "ok", run_state}` — `run_state` is the run's post-outcome status (`running \| parked \| done \| failed \| cancelled`), which `ExecutorPool.release` reads to decide whether to keep or free an exclusive slot. `422 unknown_outcome` for any other value. A duplicate outcome for an already-finalized (`:done`) job is **first-writer-wins**: `200` with the recorded `run_state`, ignoring the resent payload (RLY-202), so a retried POST after a dropped response never turns finished work into a failure. `409 conflict` now applies specifically to a reassigned (`:queued`) or revoked (`:revoked`) job — one no longer held by a live claim. |
-| `POST /api/board/heartbeat` | An **executor beat** carries `name` + `capacity` (e.g. `{"shared_clean": 3, "exclusive": 1}`). It upserts a durable `Executor` row, which is what the Runners view shows. A capacity-less beat is inert on this path. |
-| `POST /api/node-jobs/heartbeat` | The **executor's own** heartbeat (RLY-135/RLY-164, `relay execute`'s `ExecutorHeartbeat`): `{executor: {name, host}, capacity, running: [job-id, …]}`, response `{revoked: [job-id, …], want_capabilities, executor_outdated, required_version}` — `revoked` names the job-ids the server wants terminated (§ revoke, below), which the client kills via `JobControl`. Distinct from the `/api/board/heartbeat` beat above, which only carries capacity for liveness. |
-| `POST /api/board/logs` | Each entry may now carry an optional `node_job_id` (alongside the existing `run_id`), identifying the node-job that emitted the line. |
+A flow is a graph of **nodes** (steps). The server hands the executor one node-job at a time;
+the executor runs it in the card's worktree and reports a typed **outcome** that routes the
+card to the next node. Everything a node needs arrives in the job (the card `ref`, the resolved
+`vars`, and — for an agent node — which agent to run); nothing durable is passed through the
+working tree.
 
-### The `RELAY_NODE_OUTCOME` contract
+### Declaring an outcome
 
-Before running an agent node, the executor sets `RELAY_NODE_OUTCOME` to a **per-job** temp
-file (never a fixed path like `tmp/relay-outcome.json` — overlapping `shared_clean` jobs
-share a read-only worktree and must never collide). The agent node's prompt ends by writing
-that file:
+An agent node **must declare its verdict** by running:
 
-```json
-{"outcome": "succeeded", "detail": "…"}
+```
+relay outcome <succeeded|failed> [--detail TEXT|@file]
 ```
 
-`outcome` must be one of the closed set above; `detail` becomes the edge-borne
-`{prior.detail}` / `{nodes.<id>.detail}` for the next node. Before `POST`ing to
-`/api/node-jobs/:id/outcome`, the executor augments the file's contents with `git_sha` (the
-worktree's HEAD after the node ran) and `session_id` (the `claude -p` session id).
+`detail` becomes the context handed to the next node. The rule is strict on purpose:
 
-**Fallbacks**, evaluated in this order by `determine_agent_outcome`, when the node itself
-never wrote a clean outcome:
-1. the card was moved to `needs_input` during the node → report `needs_input` (checked first —
-   a human question always wins, even if the node also wrote an outcome file);
-2. otherwise, `RELAY_NODE_OUTCOME` supplies `{outcome, detail}` — the only channel a node has
-   to signal `partial`; an unreadable/malformed file is treated as `failed`, not silently
-   skipped, since a `claude -p` that exited 0 without writing a real outcome must not be
-   reported as `succeeded`;
-3. otherwise, **no outcome file was written → `failed`, whatever the exit code**. An agent node
-   must *declare* its verdict: a `claude -p` that exits 0 having written nothing is
-   indistinguishable from one that did the work, so reporting it `succeeded` would let a node
-   route past its own gate having produced nothing. (RLY-163: the first live Spec-flow dogfood
-   landed a card in *Spec:Review* with an empty spec exactly this way — the agent asked its
-   question as prose instead of calling `needs-input` — and the same hole would let a silent
-   `final_review` reach `merge`.) Rule 1 still covers the legitimate "I stopped to ask a
-   human" case, so a skill that parks on a question needs no outcome file.
+- **Silence is failure.** An agent that exits without declaring an outcome is reported
+  `failed`, whatever its exit code — an agent that did nothing is indistinguishable from one
+  that exited early, so it must never route past its own gate.
+- **A success claim must be backed by a commit.** For the commit-producing Code nodes
+  (`implement`, `final_fix`, `smoke_fix`, `acceptance_fix`), a `succeeded` that leaves the
+  branch unchanged is overridden to `failed`.
+- **Asking a human always wins.** If the node moved the card to `needs_input`, that is the
+  outcome even if the node also declared something else.
 
-**The twin no-op rule (RLY-194).** Silence is `failed`; so is a success claim the branch
-does not back up. A node marked `expects_commits` (the four commit-producing Code nodes:
-`implement`, `final_fix`, `smoke_fix`, `acceptance_fix`) that reports `succeeded` with a
-`git_sha` unchanged from the run's last known baseline is overridden by the server
-(`RunServer.apply_outcome/5`) to `failed` — a `no_op_success` detail — before the outcome is
-persisted. This is server-side only: `determine_agent_outcome` above is unaware of it, and no
-field is added to the outcome payload; an agent author should simply expect that a `succeeded`
-declaration on such a node is not honored unless it actually produced a commit.
-
-Agents declare their outcome by running **`relay outcome <outcome> [--detail TEXT|@file]`**
-(RLY-175) rather than writing the file by hand: `json.dump` does the writing, so a `detail`
-containing quotes or newlines cannot produce invalid JSON. A drill run died exactly that way —
-a review's outcome file failed to parse, the node was correctly reported `failed`, and the
-parse error was handed to the fixer as its findings list.
-
-Because rule 3 now fails a silent node, the executor **appends the outcome-contract
-instruction to every agent node's prompt automatically** (`OUTCOME_CONTRACT` in `bin/relay`) —
-the requirement travels with every invocation rather than depending on each flow's node prompt
-or each skill author remembering it. Shell and gate nodes are exempt: their exit code is
+The outcome-declaration reminder is appended to every agent node's prompt automatically, so the
+requirement travels with every invocation. Shell and gate nodes are exempt — their exit code is
 already an unambiguous verdict.
-
-Valid outcomes: succeeded | failed. (RLY-179: an outcome with no matching edge no longer fails
-the run — the engine degrades onto the node's `:failed` edge instead — so the prompt contract
-stopped advertising `partial`, which no seeded flow routes. The schema, the API validator, and
-the flow editor still accept `partial` for a hand-authored flow that declares its own edge.)
-
-**Needs-input re-entry.** A `needs_input` outcome parks the run; when a human clears the card
-and the run resumes, the server hands the same node back with `resume_session` set to the
-`session_id` the executor captured and reported last time. The executor's `_stream_claude_job`
-inserts `--resume <session_id>` into the `claude -p` argv, so the agent picks the conversation
-back up with its prior context intact rather than starting the node over from scratch.
 
 ### The `RELAY_NODE_SCRATCH` contract
 
-Before running every node — agent **and** shell/gate alike — the executor sets
-`RELAY_NODE_SCRATCH` to `tmp/<REF>/<node>.md` inside the node's own worktree
-(`scratch_path` in `bin/relay`), and creates the directory. It is **one file per card per
-node**: the path derives only from `(ref, node)`, both already known from the claim payload,
-so it stays stable across retries of the same node and across an executor restart — a
-re-queued job resolves the exact same path and sees whatever the earlier attempt left there
-(repeated attempts therefore share a file; that is intended, not a leak). The directory lives
-inside the checkout but is covered by the root `.gitignore`, so it survives `reset_worktree`'s
-salvage/stash/clean (none of which touch ignored paths) without ever being committed.
+Before running **every** node — agent and shell/gate alike — the executor sets
+`RELAY_NODE_SCRATCH` to a temp file inside the node's own worktree, and creates the directory.
+It is **one file per card per node**: the path derives only from `(ref, node)`, so it stays
+stable across retries of the same node and across an executor restart, and it is git-ignored so
+it never gets committed. Use it for `outcome failed --detail @$RELAY_NODE_SCRATCH`, and write
+any second scratch file (e.g. a structured `--questions` payload for `needs-input`) as a
+sibling in the same directory: `$(dirname "$RELAY_NODE_SCRATCH")/<name>.json`.
 
-`OUTCOME_CONTRACT` points every agent node at it for `outcome failed --detail
-@$RELAY_NODE_SCRATCH`, and any skill or command that needs a second scratch file (e.g. a
-structured `--questions` payload for `needs-input`) writes it as a sibling in the same
-directory, `$(dirname "$RELAY_NODE_SCRATCH")/<name>.json`.
-
-**Agents must not invent an absolute path of their own** (a literal hand-picked location
-outside the worktree) for scratch output. RLY-177 is the incident this closes: multiple
-nodes/cards once shared one hard-coded location, so one run's findings silently clobbered or
-were read by another run entirely. `$RELAY_NODE_SCRATCH` is namespaced per (ref, node)
-precisely so that can't happen again.
+**Agents must not invent an absolute path of their own** for scratch output.
+`$RELAY_NODE_SCRATCH` is namespaced per `(ref, node)` precisely so two runs can never read or
+clobber each other's files.
 
 ### The `RELAY_PLAN` contract
 
-Before running every node, the executor also exports `RELAY_PLAN` to `tmp/<REF>/plan.md` inside
-the node's own worktree (`plan_path` in `bin/relay`). Unlike `RELAY_NODE_SCRATCH` it is **per-REF,
-not per-node**: the Code flow's `branch` node writes the card's plan there, and every later node
-(`implement`, the reviewers, smoke/acceptance) reads the SAME file, because the path derives only
-from `(ref)`. It shares `tmp/<REF>/` with the scratch file, so it inherits the same `.gitignore`
-(`/tmp/`) coverage — it survives `reset_worktree` and is never committed.
+The executor also exports `RELAY_PLAN` to a plan file inside the node's worktree. Unlike
+`RELAY_NODE_SCRATCH` it is **per-card, not per-node**: the Code flow's first node writes the
+card's plan there, and every later node (`implement`, the reviewers, smoke/acceptance) reads
+the same file. It is git-ignored and namespaced by card, so two runs' plans are always
+different files. A node with no plan sees `RELAY_PLAN` unset, never inherited.
 
-This closes RLY-194: a worktree-root `plan.md` is gitignored and so survives `git clean -fd`, so
-after a slot is reused (RLY-218 slot instability) a run's `implement` node could read the PREVIOUS
-run's plan. Namespacing the plan by `<ref>` makes two runs' plans different files — the cross-run
-leak is impossible by construction. (Set-or-clear like `RELAY_NODE_SCRATCH`, RLY-216: a node
-without a plan sees `RELAY_PLAN` unset, never inherited.)
+### Needs-input re-entry
 
-### `relay execute` — the executor runner mode
+A `needs_input` outcome parks the run. When the human clears the card and the run resumes, the
+server hands the **same node** back and the agent's prior session is resumed with its context
+intact — it picks the conversation back up rather than starting the node over.
 
-`bin/relay execute` is **the runner mode**: it claims node-jobs from the endpoints in the
-table above, runs each in an executor-owned git worktree, and reports a typed outcome.
+### Configuring the executor
 
-- **Config: `.relay/executor.json`**:
+`bin/relay execute` is configured by `.relay/executor.json`:
 
-  ```json
-  {
-    "namespace": "exec",
-    "capacity": { "shared_clean": 3, "exclusive": 1 },
-    "poll_timeout": 25,
-    "heartbeat_interval": 15,
-    "cache_dir": "~/.relay/cache",
-    "prepare": ".relay/prepare-worktree.sh",
-    "max_retained_failed": 3
-  }
-  ```
+```json
+{
+  "namespace": "exec",
+  "capacity": { "shared_clean": 3, "exclusive": 1 },
+  "poll_timeout": 25,
+  "heartbeat_interval": 15,
+  "cache_dir": "~/.relay/cache",
+  "prepare": ".relay/prepare-worktree.sh",
+  "max_retained_failed": 3
+}
+```
 
-  `name` defaults to the hostname, `namespace` to `exec`; a missing file falls back to
-  `capacity: {shared_clean: 1, exclusive: 1}`. `capacity` is the field you'll routinely edit —
-  it caps how many `shared_clean` jobs and how many `exclusive` run-slots this executor
-  advertises at once. The three per-card-worktree keys are optional (RLY-231): `cache_dir` is a
-  warm dep/build cache passed to the prepare hook, `prepare` is the path to that hook (default
-  `.relay/prepare-worktree.sh`), and `max_retained_failed` caps how many failed-run worktrees
-  are kept on disk for post-mortem before the oldest is evicted (default 3). Worktrees for both
-  classes live under the `exec-*` namespace: `shared_clean` jobs share one reused `exec-clean`
-  worktree, and each `exclusive` **card** gets its own `exec-<ref>` worktree (e.g.
-  `exec-RLY-231`), created on demand and torn down when its run terminates — no fixed
-  `exec-work-N` pool.
+`name` defaults to the hostname, `namespace` to `exec`; a missing file falls back to
+`capacity: {shared_clean: 1, exclusive: 1}`. `capacity` is the field you'll routinely edit — it
+caps how many `shared_clean` jobs and how many `exclusive` run-slots this executor advertises at
+once. Worktrees live under the `exec-*` namespace: `shared_clean` jobs share one reused
+`exec-clean` worktree; each `exclusive` card gets its own `exec-<ref>` worktree, created on
+demand and torn down when its run terminates. The remaining keys are optional: `cache_dir` is a
+warm dep/build cache passed to the prepare hook, `prepare` is that hook's path, and
+`max_retained_failed` caps how many failed-run worktrees are kept on disk for post-mortem.
 
-- **Test database per active worktree (RLY-213).** `exclusive` capacity above 1 means multiple
-  Code runs execute concurrently, each in its own per-card `exec-<ref>` worktree — and each now
-  gets its own Postgres test database too, so two runs' `mix test` invocations (including the
-  `precommit` gate) don't truncate each other's rows. `bin/relay` assigns `MIX_TEST_PARTITION`
-  from a free-list index held by each active worktree's registry record
-  (`ExecutorPool.partition_for`, recycled on teardown) and exports it for every shell/agent
-  step; the shared `exec-clean` is always partition `0`. `config/test.exs` already reads
-  `MIX_TEST_PARTITION` into the database name (`relay_test$MIX_TEST_PARTITION`), so `mix test`
-  creates the database on first use — but on a cold machine it's faster to provision every
-  partition's database up front, one per exclusive run-slot you plan to allow:
-
-  ```sh
-  MIX_ENV=test MIX_TEST_PARTITION=1 mix ecto.create
-  MIX_ENV=test MIX_TEST_PARTITION=2 mix ecto.create
-  ```
-
-  Repeat up to your configured `exclusive` capacity (`MIX_TEST_PARTITION=1` .. `N`), plus
-  `MIX_TEST_PARTITION=0` for the shared `exec-clean` slot — each creates its own
-  `relay_test<N>` database (`psql -l` to confirm). This is belt-and-braces for a cold machine;
-  `mix test` creates a missing partition's database on first use regardless.
+> **Running more than one `exclusive` slot?** Concurrent runs each work in their own worktree,
+> so make sure they don't share mutable state — most importantly, **give each run its own test
+> database** (or equivalent) so parallel test suites don't truncate each other. How you do that
+> depends on your project's toolchain.
 
 - **Running it:** `bin/relay execute` runs the claim/execute/report loop until Ctrl-C (which
   stops claiming and waits for in-flight jobs to finish). `--once` drains a single
-  claim→execute→report cycle and exits (useful for scripting/testing). `--dry-run` claims and
-  mutates nothing — it only logs the capacity it would advertise. `--interval N` overrides the
-  configured `poll_timeout`.
-
-- **Cancel/revoke.** If a run is cancelled server-side while this executor is running one of
-  its node-jobs, the next heartbeat's `{revoked: [...]}` response terminates that job's live
-  subprocess. For an `exclusive` job (bound 1:1 to that job/run) it also resets the job's
-  worktree; a revoked `shared_clean` job is left as-is, since `exec-clean` is shared by other
-  jobs that may still be running there and resetting it would destroy their work. Either way,
-  no outcome is reported for a revoked job.
+  claim→execute→report cycle and exits. `--dry-run` claims and mutates nothing — it only logs
+  the capacity it would advertise. `--interval N` overrides the configured `poll_timeout`.
+- **Cancel/revoke.** If a run is cancelled server-side while this executor is running one of its
+  jobs, the executor terminates that job's live subprocess on its next heartbeat. An
+  `exclusive` job's worktree is reset; a `shared_clean` job's is left as-is (it is shared by
+  other jobs that may still be running there). Either way, no outcome is reported for a revoked
+  job.
 
 ## Operating invariants
 
@@ -313,10 +232,9 @@ build your own runner or agents, honor these:
 
 4. **Work travels *with the card*, not in shared repo files.** The **spec** is the card's
    `description`; the **acceptance criteria** are the card's `acceptance_criteria` field; the
-   **plan** is the card's `plan` field. A step materializes these into the repo
-   just-in-time (inside the card's branch, at the per-ref `$RELAY_PLAN` path) and never relies on
-   a shared worktree-root file that another card would clobber. (This is why `Card` has `branch` +
-   `plan` fields, API-read/writable.)
+   **plan** is the card's `plan` field. A step materializes these into the repo just-in-time
+   (inside the card's branch, at the per-card `$RELAY_PLAN` path) and never relies on a shared
+   worktree-root file that another card would clobber.
 
 5. **Readiness is positional and prioritized.** A card is *ready* when the column immediately to its
    right is an AI column (`Next up → Spec`, `Spec:Done → Plan`, `Plan:Done → Code`). Work
@@ -335,22 +253,19 @@ build your own runner or agents, honor these:
 
 8. **Ask, don't guess.** If a reasoning stage needs clarification, it calls `bin/relay needs-input`
    and stops; the human answers in the drawer; the card unblocks and resumes on a later tick.
-   Verification is baked into the Code flow itself, not one script: `precommit` (gate, `mix
-   precommit`) → `final_review` (whole-branch review) → `smoke` → `acceptance` (the "eyes" that
-   watch it actually run) all have to pass before `merge` pushes, opens the PR, and
-   squash-merges it — so nothing merges unverified. There is no separate Deploy stage.
+   Verification is baked into the Code flow itself: the precommit gate → whole-branch review →
+   smoke → acceptance (the "eyes" that watch it actually run) all have to pass before the card
+   merges — so nothing merges unverified.
 
 ## Customizing a board's flows
 
 A board's flows — which stages are AI-enabled, what each node does, model/effort per node,
-retry/loop budgets — are `Flow`/`Flow.Node`/`Flow.Edge` rows, not a repo config file. View or
-edit them in **Settings › Flows**; the shipped defaults (`Relay.Flows.DefaultLibrary`) are
-seeded from [`docs/designs/flows/*.jsonc`](designs/flows/README.md) — open those files for the
-literal node/edge contents of Spec, Plan, and Code. A repo may override specific fields
-per-project via `.relay/flows.json` (RLY-140) without forking the library.
+retry/loop budgets — are configured on the board, not in a repo config file. View or edit them
+in **Settings › Flows**, which is also where you can read the literal node/edge contents of the
+shipped Spec, Plan, and Code flows.
 
-To honor invariant 3, an agent/shell node's `run` should start by checking out the card's
-branch (from `vars.branch`) and end by committing. To honor invariant 4, the Plan flow writes
-the plan to the card's `plan` field, and the Code flow's `branch` node materializes it into the
-per-ref `$RELAY_PLAN` path (see [`code.jsonc`](designs/flows/code.jsonc)'s `branch` node) for
-`implement` to work through.
+Two rules keep custom nodes safe (see the invariants above): to honor invariant 3, an
+agent/shell node's command should start by checking out the card's branch (from `vars.branch`)
+and end by committing; to honor invariant 4, the Plan flow writes the plan to the card's `plan`
+field, and the Code flow's first node (`branch`, in the shipped `code.jsonc` definition)
+materializes it into the per-card `$RELAY_PLAN` path for `implement` to work through.
