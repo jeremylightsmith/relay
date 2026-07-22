@@ -97,8 +97,15 @@ refactor that benefits from isolation (e.g. keep a pure schema migration its own
   criterion — a criterion no task covers is a gap: add a task for it. Do **NOT** copy the
   criteria into the plan: the `acceptance-tester` reads them off the card at the Code stage, so
   a copy here would only drift.
-- Then a series of **bite-sized tasks**. Each task:
-  - `### Task N: <name>` with **Files** (exact create/modify/test paths) and
+- Then a series of **bite-sized tasks**. Each task opens with a heading in this EXACT,
+  machine-parsed format: **`## Task N: <name>`** — two-to-four `#`, the literal word `Task`,
+  the number, then a **colon**. The separator after the number MUST be a colon `:` — never an
+  em-dash `—`, en-dash `–`, hyphen `-`, or period. The Code flow's `foreach` node parses tasks
+  with `Relay.Runs.PlanTasks` (regex `^#{2,4} Task <N>: <title>`); **any other punctuation
+  matches ZERO tasks**, so the run parks the card in `needs_input` with "plan produced no
+  tasks" and nothing gets built. Write `## Task 1: Foo`, **not** `## Task 1 — Foo`. Under that
+  heading, each task carries:
+  - **Files** (exact create/modify/test paths) and
     **Interfaces** — split as **Consumes** (exact signatures this task uses from earlier
     tasks) and **Produces** (exact function names, params, and return types later tasks rely
     on). Each task's implementer sees only its own task, so this block is how it learns the

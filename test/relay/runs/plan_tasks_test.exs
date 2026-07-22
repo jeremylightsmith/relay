@@ -44,6 +44,25 @@ defmodule Relay.Runs.PlanTasksTest do
            ]
   end
 
+  test "accepts colon, em-dash, en-dash, or hyphen as the Task-number separator" do
+    # RLY-206/RLY-209: /write-plan repeatedly emitted `## Task N — <name>` (em-dash); the
+    # parser demanded a colon, silently yielded [], and the card parked in needs_input with
+    # "plan produced no tasks". Punctuation after the number is prose, not a contract.
+    plan = """
+    ## Task 1: Colon
+    ## Task 2 — Em-dash
+    ## Task 3 – En-dash
+    ## Task 4 - Hyphen
+    """
+
+    assert PlanTasks.parse(plan) == [
+             %{title: "Colon"},
+             %{title: "Em-dash"},
+             %{title: "En-dash"},
+             %{title: "Hyphen"}
+           ]
+  end
+
   test "a single hash is a document title, not a task" do
     assert PlanTasks.parse("# Task 1: this is the plan's own title") == []
   end

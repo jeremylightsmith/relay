@@ -15,7 +15,12 @@ defmodule Relay.Runs.PlanTasks do
   # parser used to demand exactly three; `/write-plan` emits two about as often, and the first
   # live Code dogfood parsed to [] for that reason alone. A single `#` is excluded on purpose —
   # that is the plan's own document title, not a task.
-  @heading ~r/^\#{2,4}[ \t]+Task[ \t]+\d+[ \t]*:[ \t]*(?<title>\S.*?)[ \t]*$/m
+  #
+  # The separator after the number is likewise prose, not a contract (RLY-206/RLY-209): accept
+  # a colon, em-dash, en-dash, or hyphen. `/write-plan` kept emitting `## Task N — <name>`
+  # (em-dash); demanding a colon silently yielded [] and parked the card in needs_input. The
+  # `u` flag is required so the multibyte dashes in the class match as characters, not bytes.
+  @heading ~r/^\#{2,4}[ \t]+Task[ \t]+\d+[ \t]*[-:—–][ \t]*(?<title>\S.*?)[ \t]*$/mu
 
   @spec parse(String.t() | nil) :: [%{title: String.t()}]
   def parse(nil), do: []
