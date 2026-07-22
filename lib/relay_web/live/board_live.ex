@@ -69,6 +69,19 @@ defmodule RelayWeb.BoardLive do
       </:title>
       <:actions>
         <button
+          :if={@stalled_count > 0 and not @read_only?}
+          type="button"
+          id="restart-stalled-button"
+          phx-click="restart_stalled"
+          data-confirm={"Restart #{@stalled_count} stalled cards?"}
+          class="btn btn-warning btn-sm min-h-[44px]"
+          aria-label={"Restart #{@stalled_count} stalled cards"}
+        >
+          <.icon name="hero-arrow-path" class="size-4" />
+          <span class="hidden sm:inline">Restart stalled</span>
+          <span class="badge badge-sm badge-neutral">{@stalled_count}</span>
+        </button>
+        <button
           type="button"
           id="agent-logs-button"
           phx-click={if(@logs_open, do: "close_logs", else: "open_logs")}
@@ -539,6 +552,7 @@ defmodule RelayWeb.BoardLive do
       socket
       |> assign(:page_title, board.name)
       |> assign(:board, board)
+      |> assign_stalled_count()
       |> assign(:read_only?, Board.archived?(board))
       |> assign(:archived_count, Cards.count_archived_cards(board))
       |> assign(:archived_open, false)
@@ -1367,6 +1381,20 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("retry_run", _params, socket), do: {:noreply, socket}
 
+  # RLY-228 — bulk restart of every environmentally-stalled run on the board (a spend-limit
+  # outage stalls many at once). Reuses each run's own revive path via Runs.restart_stalled/2,
+  # which skips genuine questions. revive_run's {:run_resumed, _} broadcasts refresh every other
+  # session's strips and badge; the acting socket recomputes the count synchronously.
+  def handle_event("restart_stalled", _params, socket) do
+    %{restarted: restarted} = Runs.restart_stalled(socket.assigns.board, current_actor(socket))
+    noun = if restarted == 1, do: "card", else: "cards"
+
+    {:noreply,
+     socket
+     |> assign_stalled_count()
+     |> put_flash(:info, "Restarted #{restarted} stalled #{noun}.")}
+  end
+
   # MMF 15 — the drawer's green review panel: the four human review actions,
   # each a thin wrapper over an existing context transition (Cards.approve/
   # reject from MMF 13, set_status/add_owner from MMF 06), attributed to the
@@ -1556,6 +1584,7 @@ defmodule RelayWeb.BoardLive do
 
     {:noreply,
      socket
+     |> assign_stalled_count()
      |> assign(:dirty_run_cards, MapSet.new())
      |> assign(:run_flush_events, 0)
      |> assign(:run_flush_pending?, false)}
@@ -1924,6 +1953,11 @@ defmodule RelayWeb.BoardLive do
   # Every action taken in this LiveView is attributed to the signed-in
   # human; the :agent default on the Cards mutators is the API's (MMF 09).
   defp current_actor(socket), do: {:user, socket.assigns.current_scope.user.id}
+
+  # RLY-228 — the board-header badge count: how many of the board's cards currently show a
+  # restartable (stalled) face. Recomputed on mount and on every coalesced run-event flush so
+  # it tracks new stalls/revives without a per-event query.
+  defp assign_stalled_count(socket), do: assign(socket, :stalled_count, Runs.restartable_count(socket.assigns.board))
 
   # RLY-94 — the card-tap bridge payload. `kind` tells the shell which native
   # action bar to render without a fetch: "in_review" at a review gate,
