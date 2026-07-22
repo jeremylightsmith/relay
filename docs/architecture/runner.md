@@ -253,7 +253,7 @@ run, or a card that has never run is `404`. RLY-228 widened retry to a **died-ag
 question is refused `awaiting_answer` instead.
 
 The guard is split, because worktrees and branches are executor-side state Phoenix cannot
-see. Server-side, the endpoint refuses up front for the five reasons above — including an
+see. Server-side, the endpoint refuses up front for the six reasons above — including an
 `exclusive` run whose pinned executor is absent or stale per `Relay.Runs.executor_stale?/2`,
 whose worktree is unreachable. Executor-side, branch existence stays with RLY-166's
 `check_branch_attached` and RLY-173's `reattach_branch`; a retried job whose branch was

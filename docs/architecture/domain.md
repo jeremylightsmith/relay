@@ -170,6 +170,15 @@ sharing behavior.
   `mark_failed/3`) puts the card back to `:working` so the board and the scheduler stop reading
   a live run as dead.
 
+  **Eligibility & bulk restart (RLY-228):** `restartable?/1` is the single rule for what retry
+  will revive. It now covers not only a terminally `failed` run but also a **died-agent park**
+  — a `:parked`/`parked_reason: :needs_input` run whose latest `NodeExecution.outcome` is
+  actually `:failed` (the agent died mid-turn rather than asking a genuine question). A real
+  `:needs_input` question is *not* restartable and `retry_run/2` refuses it with the
+  `:awaiting_answer` code. The bulk sweep — `restart_stalled/2` (revive every restartable run
+  on a board) and `restartable_count/1` (the board header count) — reaches that same
+  `restartable?/1` rule, so the count and what actually restarts can never disagree.
+
   **The retry allowance.** `runs.retries` is the one counter column on a schema that otherwise
   derives everything, and it is deliberate: it counts HUMAN interventions, which leave no trace
   in execution history. `engine_opts/1` feeds it to `Engine.decide/4` as `bonus:`, which is added
