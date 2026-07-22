@@ -34,8 +34,10 @@ sharing behavior.
   n+1 and writes a new snapshot **only if** the definition changed; a trigger-only change
   (including a stage rename) saves with no bump, since triggers are per-board wiring and not
   part of the versioned definition. `get_version/2` fetches an immutable snapshot by number;
-  `mid_run_count/1` is a stub returning `0` until the Runs schema pins a card to a version
-  (RLY-132 makes it real). The Flows settings tab (RLY-142) is backed by `customized?/1`
+  `mid_run_count/1` returns the real count of cards currently mid-run on a flow — runs whose
+  status is active (`Schemas.Run.active_statuses/0`, i.e. running or parked) — and feeds both
+  the flow-editor save note and the delete-confirm warning, so that number is defined once.
+  The Flows settings tab (RLY-142) is backed by `customized?/1`
   (normalized nodes/edges/isolation comparison against the library — trigger wiring never
   counts), `default_key?/1`, `duplicate_flow/1` (disabled `<key>-copy` clone),
   `unique_key/2` (the `base`/`base-2`/… generator behind both `-copy` and the create form's
@@ -44,7 +46,12 @@ sharing behavior.
   `start → done` skeleton and hands off to the editor; the flow is created disabled, so
   creation can never breach the one-enabled-flow-per-stage rule), and
   `reset_to_default/1` (restores the shipped definition via `save_definition/2`, so a reset
-  bumps the version and snapshots like any other save; triggers and `enabled` untouched).
+  bumps the version and snapshots like any other save; triggers and `enabled` untouched), and
+  `delete_flow/1` (RLY-221 — removes a flow from this board, disable-first: an enabled flow
+  returns `{:error, :flow_enabled}`, a disabled one is deleted and the DB cascade nil-s each
+  active run's `flow_id` (`runs.flow_id on_delete: :nilify_all`) and removes its version
+  snapshots (`flow_versions.flow_id on_delete: :delete_all`); a deleted shipped default does
+  not re-seed on the next deploy).
   `diff_from_default/1` structurally diffs a customized default flow against its shipped
   default (`nil` for a non-library key) — nodes grouped added/removed/changed (changed lists
   the differing fields), edges as `{from, to, on}` tuples grouped added/removed.
