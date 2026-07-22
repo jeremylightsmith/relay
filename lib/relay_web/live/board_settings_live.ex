@@ -87,6 +87,13 @@ defmodule RelayWeb.BoardSettingsLive do
             Stages
           </.link>
           <.link
+            patch={~p"/board/#{@board.slug}/settings?section=public"}
+            id="settings-tab-public"
+            style={tab_style(@section == :public)}
+          >
+            Public board
+          </.link>
+          <.link
             patch={~p"/board/#{@board.slug}/settings?section=flows"}
             id="settings-tab-flows"
             style={tab_style(@section == :flows)}
@@ -143,6 +150,13 @@ defmodule RelayWeb.BoardSettingsLive do
             Stages
           </.link>
           <.link
+            patch={~p"/board/#{@board.slug}/settings?section=public"}
+            id="settings-nav-public"
+            style={nav_style(@section == :public)}
+          >
+            Public board
+          </.link>
+          <.link
             patch={~p"/board/#{@board.slug}/settings?section=flows"}
             id="settings-nav-flows"
             style={nav_style(@section == :flows)}
@@ -182,6 +196,84 @@ defmodule RelayWeb.BoardSettingsLive do
         <%!-- Content pane — mockup lines ~186-187 --%>
         <div style="flex:1;overflow-y:auto;background:oklch(0.985 0.004 250);">
           <div style="max-width:760px;margin:0 auto;padding:34px 40px 84px 40px;">
+            <section :if={@section == :public} id="public-pane">
+              <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 4px 0;color:oklch(0.24 0.02 255);">
+                Public board
+              </h1>
+              <p style="font-size:14px;line-height:1.55;color:oklch(0.52 0.02 255);margin:0 0 28px 0;max-width:560px;">
+                Open a read-only version of this board to the public. Anyone can browse it and upvote ideas — the ones with the most support rise to the top.
+              </p>
+
+              <.form for={@public_form} id="public-settings-form" phx-change="save_public_settings">
+                <div style="display:flex;align-items:center;gap:16px;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px 18px;">
+                  <div style="flex:1;">
+                    <div style="font-size:14px;font-weight:600;color:oklch(0.28 0.02 255);">
+                      Enable public board
+                    </div>
+                    <div style="font-size:12.5px;color:oklch(0.55 0.02 255);margin-top:2px;">
+                      When on, the public URL below is live.
+                    </div>
+                  </div>
+                  <label style="cursor:pointer;">
+                    <input
+                      type="checkbox"
+                      name="board[public_enabled]"
+                      id="public-enabled-toggle"
+                      value="true"
+                      checked={@board.public_enabled}
+                      class="toggle toggle-secondary"
+                    />
+                  </label>
+                </div>
+
+                <div
+                  :if={@board.public_enabled}
+                  style="display:flex;flex-direction:column;gap:26px;margin-top:24px;"
+                >
+                  <div style="display:flex;flex-direction:column;gap:8px;">
+                    <label style="font-size:12px;font-weight:600;color:oklch(0.40 0.02 255);">
+                      Public URL
+                    </label>
+                    <div
+                      id="public-url-row"
+                      style="max-width:460px;display:flex;align-items:center;border:1px solid oklch(0.90 0.006 255);border-radius:9px;padding:10px 12px;background:oklch(0.99 0.002 255);font-size:13.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.40 0.02 255);"
+                    >
+                      {"#{RelayWeb.Endpoint.url()}/board/#{@board.slug}/public"}
+                    </div>
+                  </div>
+
+                  <div style="display:flex;flex-direction:column;gap:10px;">
+                    <label style="font-size:12px;font-weight:600;color:oklch(0.40 0.02 255);">
+                      New public ideas arrive in
+                    </label>
+                    <p style="font-size:12.5px;line-height:1.5;color:oklch(0.55 0.02 255);margin:0 0 2px 0;max-width:520px;">
+                      When someone posts on the public board, Relay creates a card in this stage.
+                    </p>
+                    <div
+                      id="intake-stage-picker"
+                      style="display:flex;flex-direction:column;gap:6px;max-width:460px;"
+                    >
+                      <label
+                        :for={stage <- main_stages_for_intake(@board.stages)}
+                        style={intake_row_style(@board.public_intake_stage_id == stage.id)}
+                      >
+                        <input
+                          type="radio"
+                          name="board[public_intake_stage_id]"
+                          value={stage.id}
+                          checked={@board.public_intake_stage_id == stage.id}
+                          class="radio radio-sm radio-secondary"
+                        />
+                        <span style="font-size:13.5px;color:oklch(0.32 0.02 255);flex:1;">
+                          {stage.name}
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </.form>
+            </section>
+
             <section :if={@section == :general} id="general-pane">
               <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px 0;color:oklch(0.26 0.02 255);">
                 General
@@ -877,6 +969,7 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:revealed_token, nil)
      |> assign(:lane_nonce, %{})
      |> assign(:general_form, to_form(Boards.change_board(board)))
+     |> assign(:public_form, to_form(Board.public_settings_changeset(board, %{})))
      |> assign(:read_only?, Board.archived?(board))
      |> assign(:editing_stage, nil)
      |> assign(:stage_form, nil)
@@ -930,9 +1023,27 @@ defmodule RelayWeb.BoardSettingsLive do
         toggle_wip bump_wip reorder_stage toggle_lane set_type toggle_ai set_reject_to
         toggle_collapsed_default invite_member remove_member flow_toggle flow_confirm_toggle
         flow_duplicate flow_reset flow_confirm_reset flow_delete flow_confirm_delete
-        flow_new flow_create_validate flow_create
+        flow_new flow_create_validate flow_create save_public_settings
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
+  end
+
+  def handle_event("save_public_settings", %{"board" => params}, socket) do
+    attrs = %{
+      "public_enabled" => params["public_enabled"] == "true",
+      "public_intake_stage_id" => params["public_intake_stage_id"]
+    }
+
+    case Boards.update_public_settings(socket.assigns.board, attrs) do
+      {:ok, board} ->
+        {:noreply,
+         socket
+         |> assign(:board, board)
+         |> assign(:public_form, to_form(Board.public_settings_changeset(board, %{})))}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :public_form, to_form(changeset))}
+    end
   end
 
   def handle_event("save_board_name", %{"board" => %{"name" => _} = params}, socket) do
@@ -1252,6 +1363,7 @@ defmodule RelayWeb.BoardSettingsLive do
 
   def handle_info(_message, socket), do: {:noreply, socket}
 
+  defp section(%{"section" => "public"}), do: :public
   defp section(%{"section" => "stages"}), do: :stages
   defp section(%{"section" => "flows"}), do: :flows
   defp section(%{"section" => "keys"}), do: :keys
@@ -1274,6 +1386,15 @@ defmodule RelayWeb.BoardSettingsLive do
     |> assign(:stages, mains)
     |> assign(:stage_groups, groups)
     |> assign(:lane_map, lane_map(board))
+  end
+
+  defp main_stages_for_intake(stages), do: Enum.filter(stages, &is_nil(&1.parent_id))
+
+  defp intake_row_style(active?) do
+    border = if active?, do: "oklch(0.86 0.05 250)", else: "oklch(0.92 0.006 255)"
+    bg = if active?, do: "oklch(0.97 0.02 250)", else: "oklch(1 0 0)"
+
+    "display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:9px;cursor:pointer;background:#{bg};border:1px solid #{border};"
   end
 
   # Ids in the DOM come from this user's own board rows.
