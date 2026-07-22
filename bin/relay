@@ -68,8 +68,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 19
-EXECUTOR_FINGERPRINT = "9c3080c204813d0cd7cab93fdac7d43e63d69e44b2fa38b877eb6dc80ed80a31"
+EXECUTOR_VERSION = 20
+EXECUTOR_FINGERPRINT = "0ca3a053fdcbb2a70f55a4740fdf0307eeffd70475f35ad28a70ad5987e1bfb1"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -122,18 +122,20 @@ def _api_backoff(attempt):
     time.sleep(0.5 * 2 ** (attempt - 1))
 
 
-def _retryable(method, err):
+def _retryable(method, err, idempotent=False):
     """Whether a failed attempt with this HTTP method should be retried.
 
     URLError (not an HTTPError): the server never processed the request, so a retry
-    can't double-apply — safe for any method. HTTPError 5xx: retry only idempotent
-    methods (GET, PATCH), never POST (could double-apply a mutation). 4xx: never."""
+    can't double-apply — safe for any method. HTTPError 5xx: retry idempotent methods
+    (GET, PATCH), never a plain POST (could double-apply a mutation) — but an
+    explicitly `idempotent` POST retries too (RLY-202: the outcome POST, which the
+    server answers 200 on a duplicate finalize). 4xx: never."""
     if isinstance(err, urllib.error.HTTPError):
-        return err.code >= 500 and method in ("GET", "PATCH")
+        return err.code >= 500 and (method in ("GET", "PATCH") or idempotent)
     return isinstance(err, urllib.error.URLError)
 
 
-def api(method, path, body=None, soft_404=False, soft_conflict=False, timeout=None, auth=True):
+def api(method, path, body=None, soft_404=False, soft_conflict=False, timeout=None, auth=True, idempotent=False):
     url = env("RELAY_URL").rstrip("/") + path
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
@@ -161,7 +163,7 @@ def api(method, path, body=None, soft_404=False, soft_conflict=False, timeout=No
                     return json.loads(e.read())
                 except Exception:
                     return {"error": {"code": "conflict"}}
-            if attempt < API_MAX_ATTEMPTS and _retryable(method, e):
+            if attempt < API_MAX_ATTEMPTS and _retryable(method, e, idempotent):
                 log(f"API {e.code} on {method} {path}, retrying "
                     f"({attempt}/{API_MAX_ATTEMPTS - 1})", kind="error")
                 _api_backoff(attempt)
@@ -172,7 +174,7 @@ def api(method, path, body=None, soft_404=False, soft_conflict=False, timeout=No
                 msg = f"HTTP {e.code}"
             die(f"API {e.code}: {msg}")
         except urllib.error.URLError as e:
-            if attempt < API_MAX_ATTEMPTS and _retryable(method, e):
+            if attempt < API_MAX_ATTEMPTS and _retryable(method, e, idempotent):
                 log(f"request failed ({e.reason}) on {method} {path}, retrying "
                     f"({attempt}/{API_MAX_ATTEMPTS - 1})", kind="error")
                 _api_backoff(attempt)
@@ -1256,9 +1258,10 @@ def heartbeat_body(executor, capacity, running, bound_runs, capabilities=None):
 def report_outcome(job_id, outcome, detail, git_sha, session_id=None):
     """POST the typed outcome; return the server-assigned run_state
     (running|parked|done|failed|cancelled) that tells the executor whether to keep or free an
-    exclusive slot (§3)."""
+    exclusive slot (§3). idempotent=True: the endpoint is first-writer-wins per job (RLY-202),
+    so a dropped request/response retries into the server's duplicate-200 rather than die()ing."""
     resp = api("POST", f"/api/node-jobs/{job_id}/outcome",
-               outcome_body(outcome, detail, git_sha, session_id))
+               outcome_body(outcome, detail, git_sha, session_id), idempotent=True)
     return (resp or {}).get("run_state")
 
 
@@ -1529,6 +1532,7 @@ def execute_one(job, slot, reset, control, pool):
     partition = partition_for(slot)
     run_state = None
     revoked = False
+    completed_outcome = None
     try:
         if reset and not DRY:
             reset_worktree(slot_path, pool.base)
@@ -1539,6 +1543,7 @@ def execute_one(job, slot, reset, control, pool):
             if not DRY and job.get("isolation") != "shared_clean":
                 reset_worktree(slot_path, pool.base)
             return None
+        completed_outcome = outcome
         run_state = report_outcome(job["id"], outcome, detail, git_sha, session_id)
         return run_state
     except (Exception, SystemExit) as e:
@@ -1549,8 +1554,17 @@ def execute_one(job, slot, reset, control, pool):
         # threading module discards uncaught exceptions on non-main threads silently — the
         # job would be lost with no outcome and nothing printed. Catch it here explicitly so
         # this remains the one place that always reports (never leak a slot on crash).
+        #
+        # A failure AFTER the node produced its outcome is a *transport* failure, not a
+        # work/judgment crash (RLY-202): the outcome POST is now idempotent-retryable, so this
+        # only fires once retries are exhausted. Label it distinctly so RLY-194's environmental
+        # split and the failure_signature breaker bucket don't count finished work as a crash.
+        if completed_outcome is not None:
+            fallback_detail = f"transport: outcome '{completed_outcome}' not reported after retries: {e}"
+        else:
+            fallback_detail = f"worker crashed: {e}"
         try:
-            run_state = report_outcome(job["id"], "failed", f"worker crashed: {e}", "", None)
+            run_state = report_outcome(job["id"], "failed", fallback_detail, "", None)
         except (Exception, SystemExit) as report_err:
             # a second die() while reporting the crash (server still down) — log rather than
             # let this vanish too.

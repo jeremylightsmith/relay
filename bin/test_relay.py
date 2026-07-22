@@ -785,6 +785,25 @@ class ApiRetryTest(unittest.TestCase):
         self.assertIsNone(relay.api("GET", "/api/cards/NOPE", soft_404=True))
         self.assertEqual(len(self.calls), 1)
 
+    def test_idempotent_post_retries_5xx_then_succeeds(self):
+        self._script([_http_error(500), _FakeResp(b'{"run_state": "done"}')])
+        self.assertEqual(
+            relay.api("POST", "/api/node-jobs/1/outcome", {"outcome": "succeeded"}, idempotent=True),
+            {"run_state": "done"})
+        self.assertEqual(len(self.calls), 2)
+
+    def test_report_outcome_retries_5xx_then_returns_run_state(self):
+        self._script([_http_error(500), _FakeResp(b'{"run_state": "parked"}')])
+        rs = relay.report_outcome("nj-1", "needs_input", "q", "sha")
+        self.assertEqual(rs, "parked")
+        self.assertEqual(len(self.calls), 2)
+
+    def test_report_outcome_retries_urlerror_then_returns_run_state(self):
+        self._script([urllib.error.URLError("blip"), _FakeResp(b'{"run_state": "running"}')])
+        rs = relay.report_outcome("nj-1", "succeeded", "", "sha")
+        self.assertEqual(rs, "running")
+        self.assertEqual(len(self.calls), 2)
+
 
 class ApiAuthTest(unittest.TestCase):
     """`GET /api/version` is unauthenticated by design (RLY-177) so "which release is
@@ -2059,6 +2078,28 @@ class ExecuteOneTest(unittest.TestCase):
         self.assertIn("worker crashed", self.reports[0][2])
         self.assertEqual(rs, "done")
         self.assertEqual(self.pool.capacity()["exclusive"], 1)       # never leak a slot
+
+    def test_a_post_completion_report_failure_is_labeled_transport_not_crash(self):
+        """RLY-202: when the node produced an outcome but reporting it fails after retries, the
+        fallback detail must be transport-labeled — not "worker crashed:" — so RLY-194's
+        environmental-vs-judgment split and the failure_signature bucket treat it as environmental."""
+        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "done", "sha", None)
+        calls = []
+
+        def flaky_report(job_id, outcome, detail, git_sha, session_id=None):
+            calls.append((outcome, detail))
+            if len(calls) == 1:
+                raise SystemExit(1)        # the real report exhausts its retries and die()s
+            return "failed"                # the crash-handler fallback lands
+
+        relay.report_outcome = flaky_report
+        j = job("exclusive_shell", run="x", id="nj-7", run_id="r7", vars={"ref": "RLY-7"})
+        slot, reset = self.pool.assign(j)
+        relay.execute_one(j, slot, reset, relay.JobControl(), self.pool)
+        self.assertEqual(calls[1][0], "failed")
+        self.assertIn("transport:", calls[1][1])
+        self.assertNotIn("worker crashed", calls[1][1])
+        self.assertIn("succeeded", calls[1][1])   # names the outcome that failed to report
 
     def test_a_second_systemexit_while_reporting_the_crash_is_logged_not_raised(self):
         """If report_outcome's own api() call die()s too (server still down while we try to

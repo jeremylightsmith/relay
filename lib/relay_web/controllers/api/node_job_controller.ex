@@ -170,9 +170,19 @@ defmodule RelayWeb.Api.NodeJobController do
     board = conn.assigns.current_board
 
     with {:ok, outcome} <- parse_outcome(params["outcome"]),
-         {:ok, job} <- Runs.get_claimed_job(board, id),
-         {:ok, run} <- report(job, outcome, params) do
+         {:ok, run} <- resolve_and_report(board, id, outcome, params) do
       json(conn, %{status: "ok", run_state: Atom.to_string(run.status)})
+    end
+  end
+
+  # RLY-202: a duplicate outcome POST for an already-finalized (:done) job is first-writer-wins —
+  # answer success with the run's recorded state, no re-finalize, no RunServer call. :queued
+  # (reassigned) / :revoked (zombie) still 409 via {:error, :conflict}.
+  defp resolve_and_report(board, id, outcome, params) do
+    case Runs.get_claimed_job(board, id) do
+      {:ok, job} -> report(job, outcome, params)
+      {:already_finalized, run} -> {:ok, run}
+      {:error, reason} -> {:error, reason}
     end
   end
 
