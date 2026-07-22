@@ -41,6 +41,7 @@ Human output by default; add `--json` for machine output. Non-zero exit on any e
 | `bin/relay why RLY-12` | **Why isn't this card moving?** One plain-language answer |
 | `bin/relay runs RLY-12` | The card's runs + node executions, with detail untruncated |
 | `bin/relay executors` | Who is connected, their advertised capacity, and the jobs they hold |
+| `bin/relay flow-stats code` | Per-node metrics for a flow (runs, duration, cost, attempts, verdict split, loop-laps); `--window 7d\|30d\|all`, `--json` |
 | `bin/relay version` | The git SHA the deployed app was built from |
 | `bin/relay create "Fix login" --stage Backlog` | Create a new card (title; optional `--stage`/`--description`/`--tag`) |
 | `bin/relay comment RLY-12 "…"` | Post a comment (as Relay AI) |

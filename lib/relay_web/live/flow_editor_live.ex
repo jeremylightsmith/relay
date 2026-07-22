@@ -420,6 +420,11 @@ defmodule RelayWeb.FlowEditorLive do
             <span style="color:oklch(0.78 0.02 255);">/</span>
             <span style="color:oklch(0.28 0.02 255);font-weight:600;">{humanize(@flow.key)}</span>
           </nav>
+          <FlowEditorComponents.flow_tabs
+            board_slug={@board.slug}
+            flow_key={@flow.key}
+            active={:editor}
+          />
           <span id="flow-editor-version-chip" style={version_chip_style(@dirty?)}>
             {if @dirty?, do: "Editing · unsaved", else: "v#{@flow.version}"}
           </span>

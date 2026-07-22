@@ -195,6 +195,180 @@ defmodule Relay.Runs do
     end
   end
 
+  # ---- Flow metrics (RLY-209) ----
+
+  @metric_windows ~w(7d 30d all)
+
+  @doc "The closed set of metrics windows. Defined once; LiveView, controller and CLI read it."
+  def metric_windows, do: @metric_windows
+
+  @doc "Default metrics window."
+  def default_window, do: "30d"
+
+  @doc "Completed-run count below which per-node percentiles aren't worth trusting (empty state)."
+  def min_runs_for_percentiles, do: 10
+
+  @doc """
+  Per-node rollup for `flow` over `opts[:window]` (one of `metric_windows/0`, default
+  `default_window/0`). Returns one map per node key that has executions in the window, in the
+  flow's node order. `runs` counts node executions, not cards. See moduledoc semantics.
+  """
+  def node_metrics_for_flow(%Flow{} = flow, opts \\ []) do
+    since = opts |> Keyword.get(:window, default_window()) |> normalize_window() |> window_since()
+
+    numeric = node_numeric_rows(flow, since)
+    verdicts = node_verdict_counts(flow, since)
+
+    flow.nodes
+    |> Enum.map(& &1.key)
+    |> Enum.uniq()
+    |> Enum.filter(&Map.has_key?(numeric, &1))
+    |> Enum.map(fn key ->
+      Map.put(numeric[key], :verdict_split, verdict_split(Map.get(verdicts, key, %{})))
+    end)
+  end
+
+  @doc "Stat-band summary for `flow` over `opts[:window]`."
+  def flow_metrics_summary(%Flow{} = flow, opts \\ []) do
+    since = opts |> Keyword.get(:window, default_window()) |> normalize_window() |> window_since()
+
+    run_stats =
+      from(r in Run,
+        join: c in Card,
+        on: c.id == r.card_id,
+        where: c.board_id == ^flow.board_id and r.flow_key == ^flow.key,
+        select: %{
+          total_runs: count(r.id),
+          completed: filter(count(r.id), r.status == :done),
+          median:
+            fragment(
+              "percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (? - ?)))",
+              r.finished_at,
+              r.started_at
+            )
+        }
+      )
+      |> filter_runs_since(since)
+      |> Repo.one()
+
+    total = run_stats.total_runs
+
+    %{
+      total_runs: total,
+      completed: run_stats.completed,
+      completed_pct: if(total > 0, do: round(run_stats.completed * 100 / total), else: 0),
+      total_spend: flow_total_spend(flow, since),
+      median_end_to_end: round_secs(run_stats.median)
+    }
+  end
+
+  # One grouped pass over node_executions for the numeric columns. percentile_cont ignores NULLs,
+  # so a node with unset cost / open timestamps yields nil there without a FILTER clause.
+  defp node_numeric_rows(%Flow{} = flow, since) do
+    from(ne in NodeExecution,
+      join: r in Run,
+      on: r.id == ne.run_id,
+      join: c in Card,
+      on: c.id == r.card_id,
+      where: c.board_id == ^flow.board_id and r.flow_key == ^flow.key,
+      group_by: ne.node_key,
+      select: %{
+        node_key: ne.node_key,
+        runs: count(ne.id),
+        duration_p50:
+          fragment(
+            "percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (? - ?)))",
+            ne.finished_at,
+            ne.started_at
+          ),
+        duration_p95:
+          fragment(
+            "percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (? - ?)))",
+            ne.finished_at,
+            ne.started_at
+          ),
+        cost_p50: fragment("percentile_cont(0.5) WITHIN GROUP (ORDER BY ?)", ne.cost),
+        cost_p95: fragment("percentile_cont(0.95) WITHIN GROUP (ORDER BY ?)", ne.cost),
+        attempts_mean: fragment("COUNT(*)::float / NULLIF(COUNT(DISTINCT (?, ?)), 0)", ne.run_id, ne.visit),
+        loop_laps: fragment("COUNT(DISTINCT (?, ?)) FILTER (WHERE ? > 1)", ne.run_id, ne.visit, ne.visit)
+      }
+    )
+    |> filter_since(since)
+    |> Repo.all()
+    |> Map.new(fn row ->
+      {row.node_key,
+       %{
+         node_key: row.node_key,
+         runs: row.runs,
+         duration_p50: round_secs(row.duration_p50),
+         duration_p95: round_secs(row.duration_p95),
+         cost_p50: to_decimal(row.cost_p50),
+         cost_p95: to_decimal(row.cost_p95),
+         attempts_mean: (row.attempts_mean || 0.0) * 1.0,
+         loop_laps: row.loop_laps || 0
+       }}
+    end)
+  end
+
+  # Verdict counts as a separate grouped pass so the outcome set stays sourced from
+  # NodeExecution.outcomes/0 rather than retyped as SQL literals.
+  defp node_verdict_counts(%Flow{} = flow, since) do
+    from(ne in NodeExecution,
+      join: r in Run,
+      on: r.id == ne.run_id,
+      join: c in Card,
+      on: c.id == r.card_id,
+      where: c.board_id == ^flow.board_id and r.flow_key == ^flow.key and not is_nil(ne.outcome),
+      group_by: [ne.node_key, ne.outcome],
+      select: {ne.node_key, ne.outcome, count(ne.id)}
+    )
+    |> filter_since(since)
+    |> Repo.all()
+    |> Enum.group_by(fn {key, _o, _c} -> key end)
+    |> Map.new(fn {key, triples} ->
+      {key, Map.new(triples, fn {_k, o, c} -> {o, c} end)}
+    end)
+  end
+
+  defp verdict_split(counts) do
+    Map.new(NodeExecution.outcomes(), fn outcome -> {outcome, Map.get(counts, outcome, 0)} end)
+  end
+
+  defp flow_total_spend(%Flow{} = flow, since) do
+    from(ne in NodeExecution,
+      join: r in Run,
+      on: r.id == ne.run_id,
+      join: c in Card,
+      on: c.id == r.card_id,
+      where: c.board_id == ^flow.board_id and r.flow_key == ^flow.key,
+      select: sum(ne.cost)
+    )
+    |> filter_since(since)
+    |> Repo.one()
+    |> to_decimal()
+  end
+
+  defp filter_since(query, nil), do: query
+  defp filter_since(query, since), do: from([ne] in query, where: ne.started_at >= ^since)
+
+  defp filter_runs_since(query, nil), do: query
+  defp filter_runs_since(query, since), do: from([r] in query, where: r.started_at >= ^since)
+
+  defp normalize_window(window) when window in @metric_windows, do: window
+  defp normalize_window(_), do: default_window()
+
+  defp window_since("all"), do: nil
+  defp window_since("7d"), do: DateTime.add(now(), -7 * 86_400, :second)
+  defp window_since("30d"), do: DateTime.add(now(), -30 * 86_400, :second)
+
+  defp round_secs(nil), do: nil
+  defp round_secs(seconds), do: round(seconds)
+
+  defp to_decimal(nil), do: nil
+  defp to_decimal(%Decimal{} = d), do: Decimal.round(d, 2)
+  defp to_decimal(n) when is_integer(n), do: n |> Decimal.new() |> Decimal.round(2)
+  defp to_decimal(n) when is_float(n), do: n |> Decimal.from_float() |> Decimal.round(2)
+
   # The one per-run summary map — built identically by run_summaries_for_board/1 (over the
   # whole board) and run_summary_for_card/1 (one card), so the shape lives in exactly one
   # place. `path` is the flow's happy path (drives node_index/node_count); `totals` is this

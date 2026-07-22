@@ -28,6 +28,7 @@ defmodule RelayWeb.CoreComponents do
   """
   use Phoenix.Component
   use Gettext, backend: RelayWeb.Gettext
+  use RelayWeb, :verified_routes
 
   alias Phoenix.HTML.FormField
   alias Phoenix.LiveView.JS
@@ -1668,6 +1669,8 @@ defmodule RelayWeb.CoreComponents do
     default: nil,
     doc: "RLY-227: ref of the next card in this card's stage column, or nil at the column's end"
 
+  attr :board_slug, :string, required: true, doc: "the current board slug, for the flow-metrics deep-link"
+
   def card_drawer(assigns) do
     latest = List.first(assigns.runs)
     # The card-status guard clears the parked banner the moment an answer flips the
@@ -2348,6 +2351,16 @@ defmodule RelayWeb.CoreComponents do
                     baton={baton_label(@latest_run, @card)}
                   />
                   <div style="padding:18px 22px 40px 22px;display:flex;flex-direction:column;gap:18px;">
+                    <.link
+                      :if={@latest_detail.flow_key}
+                      id="run-view-in-flow-metrics"
+                      navigate={
+                        ~p"/board/#{@board_slug}/flows/#{@latest_detail.flow_key}/metrics?#{[node: @latest_detail.current_node || @latest_detail.last_node, from: @ref]}"
+                      }
+                      style="font-size:12px;font-weight:600;color:oklch(0.44 0.14 292);align-self:flex-start;"
+                    >
+                      View in flow metrics →
+                    </.link>
                     <RunComponents.run_state_banner
                       :if={@card.rejection && @latest_detail.status == :running}
                       variant={:reentry}

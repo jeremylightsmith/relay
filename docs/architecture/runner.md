@@ -117,8 +117,13 @@ never 403s):
   was built from, baked in at image build time (`Dockerfile`'s `final` stage, fed by
   `.github/workflows/ci.yml`'s `flyctl deploy --build-arg`). Unauthenticated, on the plain
   `:api` pipeline — it leaks nothing a deploy does not.
+- `GET /api/flows/:key/metrics` (`RelayWeb.Api.FlowMetricsController.metrics/2`) — the per-node
+  rollup for a flow over a `?window=7d|30d|all` window (default `30d`): a `summary` stat band and
+  a `nodes` array (`runs`, `duration_p50/p95`, `cost_p50/p95` — `null` until executors report
+  spend — `attempts_mean`, `verdict_split`, `loop_laps`). Read-only, board-scoped.
 - CLI: `bin/relay why REF` / `bin/relay runs REF` / `bin/relay executors` /
-  `bin/relay version`, documented in [`../agent-integration.md`](../agent-integration.md).
+  `bin/relay version` / `bin/relay flow-stats KEY`, documented in
+  [`../agent-integration.md`](../agent-integration.md).
 
 ## Bootstrap surface (RLY-181)
 
@@ -441,4 +446,5 @@ the contract.
 `lib/relay_web/controllers/api/board_controller.ex`,
 `lib/relay_web/controllers/scaffold_controller.ex`,
 `lib/relay_web/controllers/api/run_controller.ex`,
-`lib/relay_web/controllers/api/executor_controller.ex`.*
+`lib/relay_web/controllers/api/executor_controller.ex`,
+`lib/relay_web/controllers/api/flow_metrics_controller.ex`.*

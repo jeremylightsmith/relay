@@ -16,6 +16,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-1",
           ref: "RLY-7",
+          board_slug: "storybook-board",
           card: story_card(),
           stage_name: "Code",
           stage_owner: :ai,
@@ -36,6 +37,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-stale",
           ref: "RLY-11",
+          board_slug: "storybook-board",
           card: story_card(),
           stage_name: "Code",
           stage_owner: :ai,
@@ -56,6 +58,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-stopped",
           ref: "RLY-12",
+          board_slug: "storybook-board",
           card: story_card(),
           stage_name: "Code",
           stage_owner: :ai,
@@ -76,6 +79,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-2",
           ref: "RLY-8",
+          board_slug: "storybook-board",
           card: %{story_card() | description: nil, tag: nil, status: :ready, progress: nil, owners: []},
           stage_name: "Spec",
           stage_owner: :human,
@@ -96,6 +100,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-3",
           ref: "RLY-9",
+          board_slug: "storybook-board",
           card: %{
             story_card()
             | status: :needs_input,
@@ -126,6 +131,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-stepper",
           ref: "RLY-73",
+          board_slug: "storybook-board",
           card: %{
             story_card()
             | status: :needs_input,
@@ -172,6 +178,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-4",
           ref: "RLY-10",
+          board_slug: "storybook-board",
           card: %{story_card() | status: :in_review, progress: nil},
           stage_name: "Review",
           stage_owner: :human,
@@ -196,6 +203,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-5",
           ref: "RLY-11",
+          board_slug: "storybook-board",
           card: %{story_card() | status: :in_review, progress: nil},
           stage_name: "Review",
           stage_owner: :human,
@@ -223,6 +231,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-embed",
           ref: "RLY-12",
+          board_slug: "storybook-board",
           card: %{story_card() | status: :in_review, progress: nil},
           stage_name: "Review",
           stage_owner: :human,
@@ -248,6 +257,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-6",
           ref: "RLY-12",
+          board_slug: "storybook-board",
           card: %{
             story_card()
             | branch: "rly-12-wire-the-runner",
@@ -278,6 +288,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-7",
           ref: "RLY-13",
+          board_slug: "storybook-board",
           card: %{
             story_card()
             | status: :ready,
@@ -309,6 +320,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-9",
           ref: "RLY-18",
+          board_slug: "storybook-board",
           card: %{
             story_card()
             | status: :in_review,
@@ -346,6 +358,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-sub-tasks",
           ref: "RLY-60",
+          board_slug: "storybook-board",
           card: %{
             story_card()
             | status: :working,
@@ -373,6 +386,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-working",
           ref: "RLY-20",
+          board_slug: "storybook-board",
           card: %{
             story_card()
             | status: :working,
@@ -402,6 +416,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-done",
           ref: "RLY-21",
+          board_slug: "storybook-board",
           card: %{story_card() | status: :ready, progress: nil},
           done: true,
           stage_name: "Done",
@@ -421,6 +436,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         attributes: %{
           id: "story-drawer-loading",
           ref: "RLY-68",
+          board_slug: "storybook-board",
           card: %{
             story_card()
             | description: nil,

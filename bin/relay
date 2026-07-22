@@ -68,8 +68,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 20
-EXECUTOR_FINGERPRINT = "0ca3a053fdcbb2a70f55a4740fdf0307eeffd70475f35ad28a70ad5987e1bfb1"
+EXECUTOR_VERSION = 21
+EXECUTOR_FINGERPRINT = "82a02951e20c21ebb6c6863606653d740821b29121ae5af01113d0082252f5e3"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -705,6 +705,32 @@ def cmd_runs(args):
 def cmd_executors(args):
     executors = api("GET", "/api/executors")["data"]
     emit(args, executors, lambda: print(format_executors(executors)))
+
+
+def cmd_flow_stats(args):
+    path = f"/api/flows/{args.key}/metrics"
+    if getattr(args, "window", None):
+        path += f"?window={args.window}"
+    data = api("GET", path)["data"]
+    emit(args, data, lambda: print(format_flow_stats(args.key, data)))
+
+
+def format_flow_stats(key, data):
+    s = data["summary"]
+    lines = [
+        f"{key} flow — {s['total_runs']} runs, {s['completed']} completed ({s['completed_pct']}%)",
+        f"  total spend: {s['total_spend'] or '—'}   median end-to-end: {s['median_end_to_end'] or '—'}s",
+        "",
+        f"  {'NODE':<20} {'RUNS':>5} {'DUR p50/p95':>14} {'COST p50/p95':>16} {'ATT':>5} {'LAPS':>5}",
+    ]
+    for n in data["nodes"]:
+        dur = f"{n['duration_p50']}/{n['duration_p95']}"
+        cost = f"{n['cost_p50'] or '—'}/{n['cost_p95'] or '—'}"
+        lines.append(
+            f"  {n['node_key']:<20} {n['runs']:>5} {dur:>14} {cost:>16} "
+            f"{n['attempts_mean']:>5.1f} {n['loop_laps']:>5}"
+        )
+    return "\n".join(lines)
 
 
 def cmd_version(args):
@@ -2045,6 +2071,8 @@ def build_parser():
     rt.add_argument("--at")
     add("runs", cmd_runs, "ref", json_flag=True)
     add("executors", cmd_executors, json_flag=True)
+    fs = add("flow-stats", cmd_flow_stats, "key", json_flag=True)
+    fs.add_argument("--window")
     add("version", cmd_version, json_flag=True)
     add("git-fetch", cmd_git_fetch)
     oc = add("outcome", cmd_outcome, "outcome")

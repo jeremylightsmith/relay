@@ -92,6 +92,7 @@ defmodule RelayWeb.Router do
       live "/board/:slug/settings", BoardSettingsLive
       live "/board/:slug/runners", BoardRunnersLive
       live "/board/:slug/flows/:key", FlowEditorLive
+      live "/board/:slug/flows/:key/metrics", FlowMetricsLive
 
       # RLY-87 — the native app's card host: BoardLive rendering the drawer alone.
       # Chromeless by construction (the :card mount forces embed: true), so it can
@@ -207,6 +208,7 @@ defmodule RelayWeb.Router do
     get "/cards/:ref/diagnosis", DiagnosisController, :show
     get "/cards/:ref/runs", RunController, :index
     get "/executors", ExecutorController, :index
+    get "/flows/:key/metrics", FlowMetricsController, :metrics
     patch "/cards/:ref", CardController, :update
     patch "/cards/:ref/sub-tasks/:id", CardController, :toggle_sub_task
     post "/cards/:ref/move", CardController, :move
