@@ -2314,6 +2314,71 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
+  describe "card drawer prev/next (RLY-227)" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      insert(:card, stage: backlog, title: "First", position: 1, ref_number: 1)
+      insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
+      insert(:card, stage: backlog, title: "Third", position: 3, ref_number: 3)
+      %{board: board}
+    end
+
+    test "the middle card shows enabled prev and next chevrons", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-2")
+
+      assert has_element?(view, "#card-drawer-prev:not([disabled])")
+      assert has_element?(view, "#card-drawer-next:not([disabled])")
+    end
+
+    test "clicking the next chevron advances to the next card in the column", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-2")
+
+      view |> element("#card-drawer-next") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=RLY-3")
+      assert has_element?(view, "#card-drawer .drawer-card-ref", "RLY-3")
+    end
+
+    test "the next chevron is disabled on the last card of the column", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-3")
+
+      assert has_element?(view, "#card-drawer-next[disabled]")
+      assert has_element?(view, "#card-drawer-prev:not([disabled])")
+    end
+
+    test "the prev chevron is disabled on the first card of the column", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+
+      assert has_element?(view, "#card-drawer-prev[disabled]")
+      assert has_element?(view, "#card-drawer-next:not([disabled])")
+    end
+
+    test "keyboard ArrowRight advances and ArrowLeft returns", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-2")
+
+      view |> element("#card-drawer-next") |> render_keydown(%{"key" => "ArrowRight"})
+      assert_patch(view, ~p"/board/#{board.slug}?card=RLY-3")
+
+      view |> element("#card-drawer-prev") |> render_keydown(%{"key" => "ArrowLeft"})
+      assert_patch(view, ~p"/board/#{board.slug}?card=RLY-2")
+      assert has_element?(view, "#card-drawer .drawer-card-ref", "RLY-2")
+    end
+
+    test "the drawer panel carries the CardSwipe hook and neighbor data on the web board", %{
+      conn: conn,
+      board: board
+    } do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-2")
+
+      assert has_element?(view, ~s(#card-drawer-panel[phx-hook="CardSwipe"]))
+      assert has_element?(view, ~s(#card-drawer-panel[data-prev="RLY-1"]))
+      assert has_element?(view, ~s(#card-drawer-panel[data-next="RLY-3"]))
+    end
+  end
+
   defp expand_stage(view, stage) do
     view |> element("#stage-strip-#{stage.id}") |> render_click()
   end

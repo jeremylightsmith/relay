@@ -1235,6 +1235,89 @@ defmodule Relay.CardsTest do
     end
   end
 
+  describe "stage_neighbors/2" do
+    setup do
+      user = insert(:user)
+      board = Relay.Boards.get_or_create_default_board(user)
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      done = Enum.find(board.stages, &(&1.name == "Done"))
+      %{board: board, backlog: backlog, done: done}
+    end
+
+    test "a middle card returns both neighbors, in position order", %{board: board, backlog: backlog} do
+      _c1 = insert(:card, stage: backlog, title: "One", position: 1, ref_number: 1)
+      c2 = insert(:card, stage: backlog, title: "Two", position: 2, ref_number: 2)
+      _c3 = insert(:card, stage: backlog, title: "Three", position: 3, ref_number: 3)
+
+      assert Cards.stage_neighbors(board, c2) == %{prev: "RLY-1", next: "RLY-3"}
+    end
+
+    test "the first card of a column has no prev", %{board: board, backlog: backlog} do
+      c1 = insert(:card, stage: backlog, title: "One", position: 1, ref_number: 1)
+      _c2 = insert(:card, stage: backlog, title: "Two", position: 2, ref_number: 2)
+
+      assert Cards.stage_neighbors(board, c1) == %{prev: nil, next: "RLY-2"}
+    end
+
+    test "the last card of a column has no next", %{board: board, backlog: backlog} do
+      _c1 = insert(:card, stage: backlog, title: "One", position: 1, ref_number: 1)
+      c2 = insert(:card, stage: backlog, title: "Two", position: 2, ref_number: 2)
+
+      assert Cards.stage_neighbors(board, c2) == %{prev: "RLY-1", next: nil}
+    end
+
+    test "a single-card column has neither neighbor", %{board: board, backlog: backlog} do
+      only = insert(:card, stage: backlog, title: "Only", position: 1, ref_number: 1)
+
+      assert Cards.stage_neighbors(board, only) == %{prev: nil, next: nil}
+    end
+
+    test "ordering follows list_cards position order, not insertion order", %{board: board, backlog: backlog} do
+      # Inserted out of order; column order is by position.
+      c_third = insert(:card, stage: backlog, title: "Third", position: 3, ref_number: 3)
+      c_first = insert(:card, stage: backlog, title: "First", position: 1, ref_number: 1)
+      c_second = insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
+
+      assert Cards.stage_neighbors(board, c_second) == %{prev: "RLY-1", next: "RLY-3"}
+      assert Cards.stage_neighbors(board, c_first).prev == nil
+      assert Cards.stage_neighbors(board, c_third).next == nil
+    end
+
+    test "the terminal Done column follows the recency window (desc updated_at, desc id)", %{
+      board: board,
+      done: done
+    } do
+      # Same-second inserts, so the window order is the desc-id tiebreak: c3, c2, c1.
+      _c1 = insert(:card, stage: done, title: "First done", position: 1, ref_number: 1)
+      c2 = insert(:card, stage: done, title: "Second done", position: 2, ref_number: 2)
+      _c3 = insert(:card, stage: done, title: "Third done", position: 3, ref_number: 3)
+
+      assert Cards.stage_neighbors(board, c2) == %{prev: "RLY-3", next: "RLY-1"}
+    end
+
+    test "the terminal Done column stops at the capped window's oldest shown card", %{
+      board: board,
+      done: done
+    } do
+      page = Cards.done_page_size()
+
+      cards =
+        for i <- 1..(page + 1) do
+          insert(:card, stage: done, title: "Done #{i}", position: i, ref_number: i)
+        end
+
+      # Window = the newest `page` cards by desc id. Its oldest shown card is the
+      # page-th newest; the (page + 1)-th newest is below the cap, so `next` is nil.
+      by_recency = Enum.sort_by(cards, & &1.id, :desc)
+      oldest_shown = Enum.at(by_recency, page - 1)
+      one_up = Enum.at(by_recency, page - 2)
+
+      neighbors = Cards.stage_neighbors(board, oldest_shown)
+      assert neighbors.next == nil
+      assert neighbors.prev == Cards.ref(board, one_up)
+    end
+  end
+
   defp stage_card_ids(board, stage) do
     board |> Cards.list_cards() |> Enum.filter(&(&1.stage_id == stage.id)) |> Enum.map(& &1.id)
   end

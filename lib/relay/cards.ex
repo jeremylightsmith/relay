@@ -201,6 +201,56 @@ defmodule Relay.Cards do
     |> Repo.preload(card_preloads())
   end
 
+  @done_page_size 8
+
+  @doc """
+  The terminal Done column's render window size (RLY-53): how many of the newest
+  cards the board shows before "Show more". The single definition — `BoardLive`'s
+  initial/reveal count and `stage_neighbors/2`'s Done window both read it here.
+  """
+  def done_page_size, do: @done_page_size
+
+  @doc """
+  Refs of the cards immediately before/after `card` within its own stage column,
+  in the same order the board renders that column (RLY-227). Returns
+  `%{prev: ref | nil, next: ref | nil}`; `nil` at either end of the column.
+
+  Reuses the board's own ordered reads so neighbor order can never drift from the
+  rendered order: a non-terminal stage follows `list_cards/1`'s position order; the
+  terminal Done column follows the `list_stage_cards/2` recency window, capped at
+  `done_page_size/0`. Requires `board.stages` preloaded.
+  """
+  def stage_neighbors(%Board{} = board, %Card{stage_id: stage_id} = card) do
+    board
+    |> stage_column(stage_id)
+    |> neighbors_around(board, card.id)
+  end
+
+  # The ordered list the board renders for `stage_id`: the recency window for the
+  # terminal Done column, else the position-ordered slice of list_cards/1.
+  defp stage_column(%Board{} = board, stage_id) do
+    case Boards.terminal_stage(board.stages) do
+      %Stage{id: ^stage_id} = terminal -> list_stage_cards(terminal, done_page_size())
+      _other -> board |> list_cards() |> Enum.filter(&(&1.stage_id == stage_id))
+    end
+  end
+
+  defp neighbors_around(column, board, card_id) do
+    case Enum.find_index(column, &(&1.id == card_id)) do
+      nil -> %{prev: nil, next: nil}
+      idx -> %{prev: neighbor_ref(column, board, idx - 1), next: neighbor_ref(column, board, idx + 1)}
+    end
+  end
+
+  defp neighbor_ref(_column, _board, idx) when idx < 0, do: nil
+
+  defp neighbor_ref(column, board, idx) do
+    case Enum.at(column, idx) do
+      %Card{} = neighbor -> ref(board, neighbor)
+      nil -> nil
+    end
+  end
+
   @doc """
   Archives `card` (RLY-4): a reversible soft-hide. Stamps `archived_at`
   (truncated UTC, like boards), attributes an `:archived` activity to

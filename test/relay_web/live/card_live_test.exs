@@ -118,6 +118,21 @@ defmodule RelayWeb.CardLiveTest do
 
       assert_raise Ecto.NoResultsError, fn -> live(conn, ~p"/cards/ZZZ-1") end
     end
+
+    test "the native card host shows no web prev/next chevrons", %{conn: conn, board: board, ref: ref} do
+      {:ok, view, _html} = live(conn, ~p"/cards/#{ref}?board=#{board.slug}")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer-prev")
+      refute has_element?(view, "#card-drawer-next")
+    end
+
+    test "the native card host does not mount the CardSwipe hook", %{conn: conn, board: board, ref: ref} do
+      {:ok, view, _html} = live(conn, ~p"/cards/#{ref}?board=#{board.slug}")
+      render_async(view)
+
+      refute has_element?(view, ~s([phx-hook="CardSwipe"]))
+    end
   end
 
   describe "/cards/:ref with duplicate board keys" do

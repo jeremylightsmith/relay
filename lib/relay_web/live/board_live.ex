@@ -40,9 +40,9 @@ defmodule RelayWeb.BoardLive do
   @category_order [:unstarted, :planning, :in_progress, :complete]
 
   # RLY-53 — the terminal Done column renders at most this many cards, with a
-  # "Show N more" button revealing the next batch. Keep in sync with the
-  # stage_column/1 :page_size default.
-  @done_page_size 8
+  # "Show N more" button revealing the next batch. Single definition in
+  # Relay.Cards (RLY-227) so stage_neighbors/2's Done window matches this exactly.
+  @done_page_size Cards.done_page_size()
 
   # RLY-112: nothing broadcasts when a card GOES QUIET — that is exactly what staleness
   # is. Without this clock a card never goes amber until something unrelated re-renders it.
@@ -327,6 +327,9 @@ defmodule RelayWeb.BoardLive do
         :if={@selected_card}
         id="card-drawer"
         embed={@embed}
+        swipe_enabled={not @embed and @live_action != :card}
+        prev_ref={@prev_ref}
+        next_ref={@next_ref}
         ref={Cards.ref(@board, @selected_card)}
         card={@selected_card}
         stage_name={drawer_stage_name(@selected_stage, @board.stages)}
@@ -724,6 +727,18 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("close_drawer", _params, socket) do
     {:noreply, push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}")}
+  end
+
+  # RLY-227 — step to the prev/next card in the open card's stage column. The refs
+  # come from @prev_ref/@next_ref (Cards.stage_neighbors/2); a nil neighbor is a
+  # no-op, which is the authoritative "stop at the column's ends" — held here
+  # regardless of client state (disabled chevron, swipe bounce, or arrow key).
+  def handle_event("prev_card", _params, socket) do
+    {:noreply, navigate_neighbor(socket, socket.assigns.prev_ref)}
+  end
+
+  def handle_event("next_card", _params, socket) do
+    {:noreply, navigate_neighbor(socket, socket.assigns.next_ref)}
   end
 
   def handle_event("retry_card", %{"ref" => ref}, socket) do
@@ -2435,6 +2450,7 @@ defmodule RelayWeb.BoardLive do
           socket
           |> assign(:selected_card, card)
           |> assign(:selected_stage, find_stage_by_id(socket, card.stage_id))
+          |> assign_stage_neighbors(card)
           |> assign(:title_form, to_form(%{"title" => card.title}, as: :card))
           |> assign(:editing_title, false)
           |> assign(:editing_tag, false)
@@ -2474,6 +2490,8 @@ defmodule RelayWeb.BoardLive do
         |> assign(
           selected_card: nil,
           selected_stage: nil,
+          prev_ref: nil,
+          next_ref: nil,
           title_form: nil,
           editing_title: false,
           editing_tag: false,
@@ -2505,6 +2523,20 @@ defmodule RelayWeb.BoardLive do
         |> stream(:conversation, [], reset: true)
         |> stream(:activity, [], reset: true)
     end
+  end
+
+  # RLY-227 — the refs the drawer's prev/next chevrons + swipe navigate to, from
+  # the card's own stage column (server is the single source of order and of the
+  # stop-at-ends rule). Requires board.stages, which @board always carries.
+  defp assign_stage_neighbors(socket, %Card{} = card) do
+    %{prev: prev, next: next} = Cards.stage_neighbors(socket.assigns.board, card)
+    assign(socket, prev_ref: prev, next_ref: next)
+  end
+
+  defp navigate_neighbor(socket, nil), do: socket
+
+  defp navigate_neighbor(socket, ref) do
+    push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}?card=#{ref}")
   end
 
   # Kick off the async heavy-body fetch when the socket is connected. On a
