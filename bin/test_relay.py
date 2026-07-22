@@ -1123,6 +1123,29 @@ class ExecutorPoolRecoverTest(unittest.TestCase):
         self.assertFalse(reset)                                 # resume, do NOT re-baseline
         self.assertEqual(p.wts["exec-RLY-1"]["run_id"], "r99")  # adopted the resuming run
 
+    def test_recover_reclaims_retired_pool_slots_without_counting_capacity(self):
+        """RLY-231 in-place upgrade: `<ns>-work-N` slots left by the RETIRED fixed pool must be
+        reclaimed (remove+prune), never adopted as phantom active worktrees — otherwise each
+        permanently consumes an exclusive partition with run_id None that nothing can free."""
+        self.addCleanup(setattr, relay, "git_worktree_with_retry",
+                        relay.git_worktree_with_retry)
+        calls = []
+        relay.git_worktree_with_retry = lambda args: calls.append(args) or True
+        relay._list_worktree_paths = lambda: [
+            relay.worktree_path("exec-clean"),
+            relay.worktree_path("exec-work-1"),   # stale slot from the retired pool
+            relay.worktree_path("exec-work-2"),   # stale slot from the retired pool
+            relay.worktree_path("exec-RLY-1"),    # a genuine per-card worktree
+        ]
+        relay._is_retained_worktree = lambda path: False
+        p = relay.ExecutorPool(self.CFG)
+        p.recover()
+        self.assertNotIn("exec-work-1", p.wts)                  # not adopted
+        self.assertNotIn("exec-work-2", p.wts)
+        self.assertEqual(p.capacity()["exclusive"], 1)          # only exec-RLY-1 counts
+        self.assertIn(["remove", "--force", relay.worktree_path("exec-work-1")], calls)
+        self.assertIn(["remove", "--force", relay.worktree_path("exec-work-2")], calls)
+
 
 class ExecutorConfigCommittedFileTest(unittest.TestCase):
     """The committed .relay/executor.json is a shared example checked into every clone; it

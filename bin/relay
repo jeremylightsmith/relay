@@ -68,8 +68,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 23
-EXECUTOR_FINGERPRINT = "7502b96f76e8c0c32fbb6232e0df4c03cf92626139f94197e20c1600f3aaba24"
+EXECUTOR_VERSION = 24
+EXECUTOR_FINGERPRINT = "fe552facf9f48cb6f1b5f8057953126e738f2a168c2aa500e6f658f4774fbaff"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1023,6 +1023,12 @@ class ExecutorPool:
     def wt_name(self, ref):
         return f"{self.ns}-{_sanitize_ref(ref)}"
 
+    def _retired_pool_slot(self, name):
+        """True if `name` is a `<ns>-work-N` worktree from the RETIRED fixed pool (RLY-231).
+        No real card ref sanitizes to `work-N`, so this shape is unambiguously a stale slot to
+        reclaim on recover(), never a per-card worktree to adopt."""
+        return re.fullmatch(rf"{re.escape(self.ns)}-work-\d+", name) is not None
+
     # ---- partition free-list (RLY-213), caller holds self.lock ----------
     def _take_partition(self):
         return self.free_partitions.pop(0) if self.free_partitions else None
@@ -1239,13 +1245,23 @@ class ExecutorPool:
         with RETAINED_MARKER is retained; otherwise active with an UNKNOWN binding (run_id None) —
         its resuming job adopts it (assign's reset=False branch) without re-baselining, so commits
         on its branch survive. Capacity is therefore correct immediately, with no in-memory
-        run_id->slot map to lose."""
+        run_id->slot map to lose.
+
+        A `<ns>-work-N` worktree is NOT a per-card worktree — it is a slot left behind by the
+        RETIRED fixed pool (RLY-231). The forced version-floor bump makes this upgrade in place,
+        so recover() reclaims those stale slots (remove+prune) instead of adopting them; otherwise
+        each would masquerade as a phantom active worktree with run_id None, permanently consuming
+        an exclusive partition that nothing can ever free."""
         with self.lock:
             for path in _list_worktree_paths():
                 name = os.path.basename(path)
                 if name == self.shared_name or not name.startswith(self.ns + "-"):
                     continue
                 if name in self.wts:
+                    continue
+                if self._retired_pool_slot(name):
+                    git_worktree_with_retry(["remove", "--force", path])
+                    git_worktree_with_retry(["prune"])
                     continue
                 if _is_retained_worktree(path):
                     self.wts[name] = {"run_id": None, "state": "retained",
