@@ -44,5 +44,5 @@ other's work:
 > **On failure, flag the card — never retry-loop.** Set the card to `needs_input` with the
 > reason. Blocked cards are skipped, so a flagged card waits for a human instead of looping.
 
-See the repository's `docs/agent-integration.md` and `docs/architecture/runner.md` for the
-full runner reference.
+See the repository's `relay.md` — installed into every scaffolded project by `bin/relay
+init` — and `docs/architecture/runner.md` for the full runner reference.

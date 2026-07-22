@@ -58,8 +58,8 @@ defmodule RelayWeb.DocsControllerTest do
 
     refute html =~ "RLY-181"
     refute html =~ "not available yet"
-    assert html =~ "/install | sh"
-    assert html =~ "relay init"
+    assert html =~ "relay-config"
+    assert html =~ "bin/relay init"
   end
 
   test "the CLI page documents init", %{conn: conn} do
@@ -69,11 +69,11 @@ defmodule RelayWeb.DocsControllerTest do
     assert html =~ "--force"
   end
 
-  test "the runner architecture page lists the scaffold endpoints", %{conn: conn} do
+  test "the runner architecture page describes the relay-config scaffold source", %{conn: conn} do
     html = conn |> get(~p"/docs/architecture-runner") |> html_response(200)
 
-    assert html =~ "/api/scaffold"
-    assert html =~ "/install/relay"
+    assert html =~ "relay-config"
+    refute html =~ "/api/scaffold"
   end
 
   test "the getting-started page needs no repo access and links the runbook", %{conn: conn} do

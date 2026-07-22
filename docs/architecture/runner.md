@@ -125,30 +125,14 @@ never 403s):
   `bin/relay version` / `bin/relay flow-stats KEY`, documented in
   [`../../relay.md`](../../relay.md).
 
-## Bootstrap surface (RLY-181)
+## Bootstrap surface (RLY-208)
 
-Three **public, unauthenticated** endpoints, served by
-`RelayWeb.ScaffoldController`. They are the only Relay endpoints with no board key,
-deliberately: a fresh project has none yet, and the payload is the same content as the
-public repo.
-
-- `GET /api/scaffold` (`.scaffold/2`) — one JSON document,
-  `{scaffold_version, cli_version, files: [{path, mode, content}]}`, with **every file's
-  content inline**. There is no `?path=` parameter, so the endpoint has no
-  path-traversal surface. The file list is an explicit allowlist in the controller —
-  the seven Code-flow agents, the `brainstorm` skill and `write-plan` command the Spec
-  and Plan flows name, the four skills those invoke, `.relay/executor.json`, and a
-  starter `AGENTS.md`/`CLAUDE.md`. Relay-only files do not ship.
-- `GET /install/relay` (`.cli/2`) — `bin/relay` itself as `text/plain`, with an
-  `X-Relay-CLI-Version` header taken from the script's own `VERSION` constant.
-- `GET /install` (`.install/2`) — a POSIX `sh` bootstrap that curls the above into
-  `bin/relay` and runs `bin/relay init`. The host is interpolated from the request's own
-  URL, so a script fetched from a host always points back at that host.
-
-The payload is embedded at compile time through the committed symlinks
-`priv/scaffold/claude -> ../../.claude` and `priv/scaffold/relay -> ../../bin/relay`
-(the pattern `priv/docs/architecture -> ../../docs/architecture` established), so the
-repo's real files remain the single source of truth and there is no copy step.
+There is no scaffold-over-HTTP surface on the board server anymore. `bin/relay init`
+pulls its manifest and every file it installs from the external **`relay-config`**
+repo over plain HTTPS (`RELAY_CONFIG_URL/manifest.json`, then each item's `src` under
+the same base) — the board server is no longer in the scaffolding path. The board
+(`RELAY_URL`) is still needed at runtime, for the API key `relay execute` authenticates
+with, and is still named in `init`'s closing checklist.
 
 ## Node-job transport (RLY-134, ADR 0006 card 04)
 
@@ -327,11 +311,12 @@ nothing else — every board-specific fact lives server-side as flow data.
   correct because a single identity can no longer be split across two live processes each
   beating a partial `running` list. Two executors on one host are therefore unsupported;
   multi-executor-per-host capacity would be a separate card doing host+namespace identity work.
-- `bin/relay init [--url URL] [--force] [--dry-run] [--no-self-update]` scaffolds a
-  project from `GET /api/scaffold`. It needs a **URL but no API key**. Idempotent:
-  unchanged files are reported, edited ones are diffed and skipped unless `--force`.
-  When the server's `cli_version` exceeds the script's `VERSION` constant it re-downloads
-  `bin/relay` in place (upgrade-only) and says so.
+- `bin/relay init [--config-url URL] [--url URL] [--no-self-update]` interactively
+  scaffolds a project from the `relay-config` repo (`RELAY_CONFIG_URL` /
+  `--config-url`), announcing each step, installing required items, and prompting
+  install/skip/more-info for each optional one. Requires a TTY. When the manifest
+  advertises a newer `EXECUTOR_VERSION` it re-downloads `bin/relay` in place
+  (upgrade-only) before installing anything.
 - **Worktree namespace.** `ExecutorPool` maps every job's `isolation` onto worktrees under
   the `exec-*` namespace. `shared_clean` jobs share one reused `exec-clean` worktree (never
   reset per-job, only fast-forwarded to base when every shared slot is idle). `exclusive`

@@ -43,16 +43,19 @@ the error you get without it.
 
 ## 3. Get the CLI and scaffold your project
 
-From the project directory you want agents to work in:
+Download the executor, then run init **in a terminal** (init is interactive and will
+refuse a piped/non-TTY run):
 
 ```bash
-curl -fsSL https://<board-host>/install | sh
+curl -fsSL https://raw.githubusercontent.com/jeremylightsmith/relay-config/main/install.sh | sh
+bin/relay init
 ```
 
-That one line drops `bin/relay` into `bin/` and immediately runs `bin/relay init`, which
-fetches the project scaffold from your board and writes it —
-**no access to the Relay repository is needed**, the scaffold is served by your board,
-not cloned from anywhere:
+`bin/relay init` pulls configuration from the `relay-config` repo, keeps `bin/relay` up
+to date, installs `relay.md` (how your agent drives Relay) and wires it into
+`CLAUDE.md`/`AGENTS.md`, then walks you through each remaining skill and agent one at a
+time — **no access to the Relay repository is needed**, everything is fetched from
+`relay-config`, not cloned from anywhere:
 
 - `.relay/executor.json` — how many jobs this machine will run at once, and in which
   isolation class;
@@ -60,15 +63,17 @@ not cloned from anywhere:
 - `.claude/skills/` — the skills the Spec and Plan flows run;
 - `AGENTS.md` — the project instructions every agent reads.
 
-Already have `bin/relay` on this machine? Run `bin/relay init --url https://<board-host>`
-directly (or export `RELAY_URL` first) — `init` needs a URL but deliberately **not** an API
-key, since it runs before a board key exists.
+Already have `bin/relay` on this machine? Run `bin/relay init` directly from that
+project directory — it defaults to the public `relay-config` repo (override with
+`--config-url` or `RELAY_CONFIG_URL`) and takes an optional `--url` for the closing
+checklist; it does not need a board URL or an API key to scaffold, since it runs before
+a board key exists.
 
-`relay init` is safe to re-run: an unchanged file is reported `unchanged`, and a file you
-have edited is shown as a diff and left alone unless you pass `--force`. Two more flags:
-`--dry-run` reports what it *would* write and touches nothing, and `--no-self-update`
-suppresses the automatic `bin/relay` upgrade that otherwise fires when the board is
-serving a newer CLI than the one you have (it only ever upgrades, never downgrades).
+`relay init` is safe to re-run: install an item once and a second run reports it
+`unchanged`, and a file you have edited locally is shown as a diff with the choice to
+overwrite or leave it. `--no-self-update` suppresses the automatic `bin/relay` upgrade
+that otherwise fires first when `relay-config` is advertising a newer CLI than the one
+you have (it only ever upgrades, never downgrades).
 
 **Question for a human:** which project directory should agents work in? It must be a git
 repository, and it should be one you are willing to let agents create branches in.
