@@ -104,7 +104,20 @@ defmodule Relay.FlowVersionsTest do
   end
 
   describe "mid_run_count/1" do
-    test "returns 0 until the Runs schema exists" do
+    test "counts only active runs on this flow, ignoring terminal and other-flow runs" do
+      %{board: board} = board_with_stages()
+      {:ok, flow} = Flows.create_flow(board, valid_attrs(board))
+      {:ok, other} = Flows.create_flow(board, valid_attrs(board, %{key: "other"}))
+
+      insert(:run, flow_id: flow.id, status: :running)
+      insert(:run, flow_id: flow.id, status: :parked)
+      insert(:run, flow_id: flow.id, status: :done)
+      insert(:run, flow_id: other.id, status: :running)
+
+      assert Flows.mid_run_count(flow) == 2
+    end
+
+    test "returns 0 for a flow with no runs" do
       %{board: board} = board_with_stages()
       {:ok, flow} = Flows.create_flow(board, valid_attrs(board))
       assert Flows.mid_run_count(flow) == 0

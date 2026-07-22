@@ -576,4 +576,34 @@ defmodule Relay.FlowsTest do
       assert keys == ["a-flow", "b-flow"]
     end
   end
+
+  describe "delete_flow/1" do
+    test "deletes a disabled flow and cascades its version snapshots" do
+      ctx = board_with_stages()
+      {:ok, flow} = Flows.create_flow(ctx.board, valid_attrs(triggers(ctx)))
+
+      assert Flows.get_version(flow, 1)
+      assert {:ok, %Flow{}} = Flows.delete_flow(flow)
+      assert Flows.get_flow(ctx.board, "custom") == nil
+      refute Flows.get_version(flow, 1)
+    end
+
+    test "refuses to delete an enabled flow" do
+      ctx = board_with_stages()
+      {:ok, flow} = Flows.create_flow(ctx.board, valid_attrs(triggers(ctx)))
+      {:ok, flow} = Flows.enable_flow(flow)
+
+      assert {:error, :flow_enabled} = Flows.delete_flow(flow)
+      assert Flows.get_flow(ctx.board, "custom")
+    end
+
+    test "deleting a disabled flow nil-s the flow_id of its active runs" do
+      ctx = board_with_stages()
+      {:ok, flow} = Flows.create_flow(ctx.board, valid_attrs(triggers(ctx)))
+      run = insert(:run, flow_id: flow.id, status: :running)
+
+      assert {:ok, _} = Flows.delete_flow(flow)
+      assert Repo.reload(run).flow_id == nil
+    end
+  end
 end
