@@ -26,9 +26,13 @@ defmodule RelayWeb.PublicBoardLive do
   signed-in visitors: signed out sees only the total count ("N people support
   this. Sign in to see who."), matching `Relay.Votes.supporters/2`'s contract.
 
-  Real-time: subscribes to the board's `Relay.Events` topic and recomputes the
-  columns on `{:vote_changed, _card_id}` — coarse on purpose (see
-  `Relay.Events`'s moduledoc), matching every other event on this topic.
+  Real-time: subscribes to the board's full `Relay.Events` topic and recomputes
+  the columns (and any open detail modal) on votes and card lifecycle events
+  (`{:vote_changed, _}`, `{:card_upserted, _}`, `{:card_moved, _, _}`,
+  `{:card_archived, _}`) — coarse on purpose (see `Relay.Events`'s moduledoc). A
+  catch-all absorbs the topic's other events (timeline/log appends, stage/board
+  config), which don't affect the public roadmap; without it an unmatched message
+  would crash the LiveView.
   """
 
   use RelayWeb, :live_view
@@ -287,14 +291,7 @@ defmodule RelayWeb.PublicBoardLive do
     card = find_card(socket.assigns.cards, card_id)
 
     {supporters, total} =
-      case socket.assigns.current_scope do
-        nil ->
-          {[], Map.get(socket.assigns.vote_counts, card_id, 0)}
-
-        scope ->
-          {fetched, total} = Votes.supporters(card, @supporters_preview)
-          {you_first(fetched, scope.user.id), total}
-      end
+      load_supporters(card, socket.assigns.current_scope, socket.assigns.vote_counts)
 
     {:noreply,
      socket
@@ -334,10 +331,31 @@ defmodule RelayWeb.PublicBoardLive do
     {:noreply, assign(socket, :sort_by, if(sort == "new", do: :new, else: :votes))}
   end
 
+  # PublicBoardLive subscribes to the FULL `board:<id>` topic (see
+  # `Relay.Events`), so it must tolerate every event on it — an unmatched
+  # `handle_info` crashes the LiveView. Card lifecycle events and votes refresh
+  # the columns (the roadmap reflects added/moved/removed cards live); the modal
+  # is reconciled so it never renders a card that left the public set. Everything
+  # else on the topic (timeline/log appends, stage/board config) doesn't affect
+  # the public roadmap and is absorbed by the catch-all below.
   @impl true
   def handle_info({:vote_changed, _card_id}, socket) do
-    {:noreply, assign_cards(socket)}
+    {:noreply, socket |> assign_cards() |> refresh_open_card()}
   end
+
+  def handle_info({:card_upserted, _card}, socket) do
+    {:noreply, socket |> assign_cards() |> refresh_open_card()}
+  end
+
+  def handle_info({:card_moved, _card, _from_stage_id}, socket) do
+    {:noreply, socket |> assign_cards() |> refresh_open_card()}
+  end
+
+  def handle_info({:card_archived, _card}, socket) do
+    {:noreply, socket |> assign_cards() |> refresh_open_card()}
+  end
+
+  def handle_info(_message, socket), do: {:noreply, socket}
 
   # Reloads the board's public cards + vote counts + this visitor's voted-card
   # set — the one source of truth `columns/3` derives the rendered layout from.
@@ -362,6 +380,40 @@ defmodule RelayWeb.PublicBoardLive do
   end
 
   defp find_card(cards, id), do: Enum.find(cards, &(&1.id == id))
+
+  # Loads the detail modal's supporter block: signed-out visitors see only the
+  # count (the `vote_counts` total, per `Relay.Votes.supporters/2`'s gating);
+  # signed-in visitors get the preview list with their own row moved first.
+  defp load_supporters(card, nil, vote_counts), do: {[], Map.get(vote_counts, card.id, 0)}
+
+  defp load_supporters(card, scope, _vote_counts) do
+    {fetched, total} = Votes.supporters(card, @supporters_preview)
+    {you_first(fetched, scope.user.id), total}
+  end
+
+  # Keeps an open detail modal consistent after the card set is refreshed: drop
+  # it if its card left the public set (render/1 would crash finding it nil),
+  # otherwise recompute its supporter block so an open modal reflects live vote
+  # and lifecycle changes rather than going stale until reopened (RLY-69 review).
+  defp refresh_open_card(%{assigns: %{open_card_id: nil}} = socket), do: socket
+
+  defp refresh_open_card(%{assigns: %{open_card_id: card_id}} = socket) do
+    case find_card(socket.assigns.cards, card_id) do
+      nil ->
+        socket
+        |> assign(:open_card_id, nil)
+        |> assign(:open_card_supporters, [])
+        |> assign(:open_card_supporters_total, 0)
+
+      card ->
+        {supporters, total} =
+          load_supporters(card, socket.assigns.current_scope, socket.assigns.vote_counts)
+
+        socket
+        |> assign(:open_card_supporters, supporters)
+        |> assign(:open_card_supporters_total, total)
+    end
+  end
 
   # The sign-in modal's title varies by why it opened (RLY-69 spec review):
   # vote-triggered opens read "Sign in to vote"; every other entry point (the

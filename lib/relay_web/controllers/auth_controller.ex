@@ -63,18 +63,9 @@ defmodule RelayWeb.AuthController do
   # Absent or rejected params leave the session untouched (no stale value to clean up —
   # `Auth.put_user_session/2` renews the session on every sign-in anyway).
   defp put_return_to(conn, _opts) do
-    case local_path(conn.params["return_to"]) do
+    case Auth.local_return_path(conn.params["return_to"]) do
       nil -> conn
       path -> put_session(conn, :user_return_to, path)
     end
   end
-
-  # Only an in-app relative path is safe to redirect to post-sign-in: it must start with
-  # a single "/" (a bare "//host/…" is a protocol-relative URL — same open-redirect risk
-  # as a full "https://host/…").
-  defp local_path("/" <> _ = path) do
-    if String.starts_with?(path, "//"), do: nil, else: path
-  end
-
-  defp local_path(_other), do: nil
 end

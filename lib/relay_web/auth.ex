@@ -125,6 +125,19 @@ defmodule RelayWeb.Auth do
   end
 
   @doc """
+  Validates a post-sign-in `return_to` (RLY-69): returns the path when it is a
+  safe in-app relative path, otherwise `nil`. Only a path starting with a single
+  `/` is accepted — a scheme/host (`https://evil`) or a protocol-relative
+  `//evil/…` are open-redirect vectors and are rejected. One source of truth for
+  both OAuth (`AuthController`) and the dev bypass (`DevLoginController`).
+  """
+  def local_return_path("/" <> _ = path) do
+    if String.starts_with?(path, "//"), do: nil, else: path
+  end
+
+  def local_return_path(_other), do: nil
+
+  @doc """
   `on_mount` hooks for `live_session`:
 
     * `:mount_current_scope` — assigns `current_scope` (or nil) and continues.

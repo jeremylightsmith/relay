@@ -246,5 +246,38 @@ defmodule RelayWeb.PublicBoardLiveTest do
 
       assert has_element?(view, "#public-vote-#{card.id}", "1")
     end
+
+    test "non-vote board events do not crash the public LiveView",
+         %{conn: conn, board: board, card: card} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/public")
+
+      # The public board subscribes to the FULL `board:<id>` topic, which carries
+      # many non-vote events. An unmatched handle_info would crash the LiveView,
+      # so every one of these must be absorbed and the view keep rendering.
+      Relay.Events.broadcast(board.id, {:stages_changed, board.id})
+      Relay.Events.broadcast(board.id, {:board_updated, board})
+      Relay.Events.broadcast(board.id, {:timeline_appended, card.id, %{}})
+      Relay.Events.broadcast(board.id, {:card_log_appended, card.id, []})
+      Relay.Events.broadcast(board.id, {:card_upserted, card})
+      Relay.Events.broadcast(board.id, {:card_moved, card, nil})
+      Relay.Events.broadcast(board.id, {:card_archived, card})
+
+      assert render(view) =~ "Mobile app"
+    end
+
+    test "an open modal's supporter count updates live on another viewer's vote",
+         %{conn: conn, board: board, card: card} do
+      viewer = insert(:user)
+      {:ok, view, _html} = conn |> log_in_user(viewer) |> live(~p"/board/#{board.slug}/public")
+
+      view |> element("#public-card-open-#{card.id}") |> render_click()
+      assert has_element?(view, "#public-supporters", "Supporters · 0")
+
+      voter = insert(:user, name: "Maya Lin")
+      Votes.toggle_vote(voter, card)
+
+      assert has_element?(view, "#public-supporters", "Supporters · 1")
+      assert has_element?(view, "#public-supporters [data-supporter-name]", "Maya Lin")
+    end
   end
 end
