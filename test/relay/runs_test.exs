@@ -585,6 +585,18 @@ defmodule Relay.RunsTest do
 
       other = insert(:board)
       assert {:error, :not_found} = Runs.get_claimed_job(other, claimed.id)
+
+      # done (finalized) → already_finalized carrying the run (first-writer-wins)
+      Repo.update_all(from(j in NodeJob, where: j.id == ^claimed.id), set: [state: :done])
+      assert {:already_finalized, %Run{} = finalized_run} = Runs.get_claimed_job(board, claimed.id)
+      assert finalized_run.id == run.id
+
+      # revoked (zombie) and queued (reassigned) still hard-conflict
+      Repo.update_all(from(j in NodeJob, where: j.id == ^claimed.id), set: [state: :revoked])
+      assert {:error, :conflict} = Runs.get_claimed_job(board, claimed.id)
+
+      Repo.update_all(from(j in NodeJob, where: j.id == ^claimed.id), set: [state: :queued])
+      assert {:error, :conflict} = Runs.get_claimed_job(board, claimed.id)
     end
   end
 

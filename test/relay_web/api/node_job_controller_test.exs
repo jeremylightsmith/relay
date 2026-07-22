@@ -288,6 +288,46 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert body["error"]["code"] == "conflict"
     end
 
+    test "a duplicate outcome for a finalized job is first-writer-wins (200, original stands)",
+         %{conn: conn, board: board, flow: flow} do
+      {_run, id} = claim_one(conn, board, flow)
+
+      # First outcome finalizes the job (:done) and advances the run.
+      assert conn
+             |> post(~p"/api/node-jobs/#{id}/outcome", Jason.encode!(%{"outcome" => "succeeded", "detail" => "ok"}))
+             |> json_response(200) == %{"status" => "ok", "run_state" => "done"}
+
+      # A stray resend with a DIFFERENT payload (the crash-handler's "failed") for the now-:done
+      # job gets a clean 200 with the recorded run_state — and does NOT overwrite the record.
+      assert conn
+             |> post(
+               ~p"/api/node-jobs/#{id}/outcome",
+               Jason.encode!(%{"outcome" => "failed", "detail" => "stray crash resend"})
+             )
+             |> json_response(200) == %{"status" => "ok", "run_state" => "done"}
+
+      job = Relay.Repo.get!(Schemas.NodeJob, id)
+      execution = Relay.Repo.get!(Schemas.NodeExecution, job.node_execution_id)
+      assert execution.outcome == :succeeded
+      assert execution.detail == "ok"
+    end
+
+    test "reporting on a revoked (zombie) job is 409 conflict", %{conn: conn, board: board, flow: flow} do
+      {_run, id} = claim_one(conn, board, flow)
+
+      Relay.Repo.update_all(
+        from(j in Schemas.NodeJob, where: j.id == ^id),
+        set: [state: :revoked]
+      )
+
+      body =
+        conn
+        |> post(~p"/api/node-jobs/#{id}/outcome", Jason.encode!(%{"outcome" => "succeeded", "detail" => "x"}))
+        |> json_response(409)
+
+      assert body["error"]["code"] == "conflict"
+    end
+
     test "an unknown job id is 404", %{conn: conn} do
       assert conn
              |> post(~p"/api/node-jobs/999999/outcome", Jason.encode!(%{"outcome" => "succeeded"}))

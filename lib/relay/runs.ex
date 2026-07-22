@@ -884,11 +884,15 @@ defmodule Relay.Runs do
 
   @doc """
   The board's node-job `id` (integer or numeric string — the controller hands
-  in a raw path param) when it is held by a live claim (`state in [:claimed,
-  :running]`). `{:error, :not_found}` when no such job exists on the board or
-  `id` isn't a valid integer, `{:error, :conflict}` when it exists but is not
-  currently held — so a zombie executor cannot clobber a reassigned or
-  revoked job.
+  in a raw path param) resolved against its claim state:
+
+    * `{:ok, job}` — held by a live claim (`state in [:claimed, :running]`).
+    * `{:already_finalized, run}` — the job is already `:done`; a duplicate/stray
+      outcome POST for it is first-writer-wins (RLY-202), so the controller answers
+      success with the run's recorded state rather than a conflict.
+    * `{:error, :not_found}` — no such job on the board, or `id` isn't a valid integer.
+    * `{:error, :conflict}` — it exists but is `:queued` (reassigned) or `:revoked`
+      (zombie), so a stale executor cannot clobber it.
   """
   def get_claimed_job(%Board{} = board, id) when is_binary(id) do
     case Integer.parse(id) do
@@ -911,6 +915,7 @@ defmodule Relay.Runs do
     cond do
       is_nil(job) -> {:error, :not_found}
       job.state in NodeJob.claimed_states() -> {:ok, job}
+      job.state == :done -> {:already_finalized, Repo.get!(Run, job.run_id)}
       true -> {:error, :conflict}
     end
   end
