@@ -76,6 +76,15 @@ defmodule RelayWeb.Api.NodeJobController do
       `executor_outdated` / `required_version` so an executor idling with nothing to claim
       still learns why.
 
+    * **Liveness (RLY-226).** The same `running` list is a positive signal: each id maps to a
+      card, and `Relay.Runs.refresh_running_card_liveness/2` stamps `agent_heartbeat_at` fresh on
+      the cards whose job is still active server-side. That is what keeps a live-but-quiet agent —
+      one mid-`mix precommit`, a long test, a long thinking turn — from falsely reading `:stale` in
+      `Cards.health/1`. It is the exact positive complement of the revoke query above (revoked =
+      on-board but NOT active; refresh = on-board AND active), and never masks a real stall: a job
+      the server has finalized/revoked is not active, so it is not refreshed, and `health/1` decides
+      `:stopped` before staleness regardless.
+
   Board-scoped throughout: an id belonging to another board is simply not live *here*, so one
   board's executor can never be told to kill another's work.
   """
@@ -91,6 +100,12 @@ defmodule RelayWeb.Api.NodeJobController do
       # forever otherwise, invisible to both claim_next_job (queued-only) and the stale-executor
       # reaper (this executor is alive). The absence of a job from `running` is the signal.
       :ok = Runs.requeue_orphaned_jobs(board, executor, running)
+
+      # RLY-226: the positive complement of `revoked_among/2` in the reply below — stamp
+      # `agent_heartbeat_at` fresh on the cards whose reported job is still active, so a
+      # quiet-but-running agent does not falsely age to `:stale` in `Cards.health/1`. Result
+      # ignored: liveness is best-effort.
+      _ = Runs.refresh_running_card_liveness(board, running)
 
       json(conn, %{
         revoked: Runs.revoked_among(board, running),

@@ -543,5 +543,43 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
 
       assert body["executor_outdated"] == false
     end
+
+    test "a beat listing a running job refreshes that card's liveness", %{conn: conn, board: board} do
+      flow = four_outcome_flow(board)
+      {run, _job} = start_queued_job(board, flow)
+      {:ok, executor} = Runs.upsert_executor(board, %{"name" => "exec-a", "capacity" => %{"shared_clean" => 1}})
+      {:ok, claimed} = Runs.claim_next_job(executor)
+
+      card_before = Relay.Repo.get!(Schemas.Card, run.card_id)
+      assert card_before.agent_heartbeat_at == nil
+
+      conn =
+        post(conn, ~p"/api/node-jobs/heartbeat", %{
+          "executor" => %{"name" => "exec-a"},
+          "capacity" => %{"shared_clean" => 1},
+          "running" => [claimed.id]
+        })
+
+      # Reply shape is unchanged by this feature.
+      assert %{"revoked" => []} = json_response(conn, 200)
+      assert %DateTime{} = Relay.Repo.get!(Schemas.Card, run.card_id).agent_heartbeat_at
+    end
+
+    test "a beat that omits a running job does not refresh that card's liveness", %{conn: conn, board: board} do
+      flow = four_outcome_flow(board)
+      {run, _job} = start_queued_job(board, flow)
+      {:ok, executor} = Runs.upsert_executor(board, %{"name" => "exec-a", "capacity" => %{"shared_clean" => 1}})
+      {:ok, _claimed} = Runs.claim_next_job(executor)
+
+      conn =
+        post(conn, ~p"/api/node-jobs/heartbeat", %{
+          "executor" => %{"name" => "exec-a"},
+          "capacity" => %{"shared_clean" => 1},
+          "running" => []
+        })
+
+      assert %{"revoked" => []} = json_response(conn, 200)
+      assert Relay.Repo.get!(Schemas.Card, run.card_id).agent_heartbeat_at == nil
+    end
   end
 end
