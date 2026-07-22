@@ -929,7 +929,8 @@ defmodule RelayWeb.BoardSettingsLive do
         save_board_name save_board_slug edit_stage save_stage add_stage delete_stage
         toggle_wip bump_wip reorder_stage toggle_lane set_type toggle_ai set_reject_to
         toggle_collapsed_default invite_member remove_member flow_toggle flow_confirm_toggle
-        flow_duplicate flow_reset flow_confirm_reset flow_new flow_create_validate flow_create
+        flow_duplicate flow_reset flow_confirm_reset flow_delete flow_confirm_delete
+        flow_new flow_create_validate flow_create
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -1183,6 +1184,21 @@ defmodule RelayWeb.BoardSettingsLive do
         {:ok, _flow} -> socket
         {:error, :not_a_default} -> put_flash(socket, :error, "Only flows from the default library can be reset.")
         {:error, changeset} -> put_flash(socket, :error, "Could not reset the flow: #{flow_errors(changeset)}.")
+      end
+
+    {:noreply, socket |> close_flow_panel() |> assign_flows()}
+  end
+
+  def handle_event("flow_delete", %{"flow-id" => flow_id}, socket) do
+    {:noreply, socket |> assign(:flow_panel, {parse_flow_id(flow_id), :delete}) |> assign(:flow_preflight, nil)}
+  end
+
+  def handle_event("flow_confirm_delete", %{"flow-id" => flow_id}, socket) do
+    socket =
+      case Flows.delete_flow(find_flow(socket, flow_id)) do
+        {:ok, _flow} -> socket
+        {:error, :flow_enabled} -> put_flash(socket, :error, "Disable the flow before deleting it.")
+        {:error, changeset} -> put_flash(socket, :error, "Could not delete the flow: #{flow_errors(changeset)}.")
       end
 
     {:noreply, socket |> close_flow_panel() |> assign_flows()}

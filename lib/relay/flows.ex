@@ -22,6 +22,7 @@ defmodule Relay.Flows do
   alias Schemas.Board
   alias Schemas.Flow
   alias Schemas.FlowVersion
+  alias Schemas.Run
   alias Schemas.Stage
 
   require Logger
@@ -159,6 +160,17 @@ defmodule Relay.Flows do
   end
 
   @doc """
+  Deletes a flow, enforcing the "disable first" rule in the domain (not just the UI): an
+  **enabled** flow (the scheduler's live input) returns `{:error, :flow_enabled}` and is left
+  intact. A disabled flow is deleted; the DB cascade nil-s each active run's `flow_id`
+  (`runs.flow_id on_delete: :nilify_all`) and removes its version snapshots
+  (`flow_versions.flow_id on_delete: :delete_all`), so no manual cleanup is needed. Returns
+  `{:ok, flow} | {:error, :flow_enabled} | {:error, changeset}`.
+  """
+  def delete_flow(%Flow{enabled: true}), do: {:error, :flow_enabled}
+  def delete_flow(%Flow{} = flow), do: Repo.delete(flow)
+
+  @doc """
   Idempotently seeds the default library onto `board`: inserts each default
   flow whose `key` the board lacks and never touches existing rows, so edits
   survive re-seeding. The authored trigger stage *names* are resolved
@@ -260,10 +272,16 @@ defmodule Relay.Flows do
   end
 
   @doc """
-  Count of cards currently mid-run on this flow. Returns 0 until the Runs schema (RLY-132)
-  exists — the save modal omits the mid-run note when 0. RLY-132 makes this real.
+  Count of cards currently mid-run on this flow — runs whose status is active
+  (`Schemas.Run.active_statuses/0`, i.e. running or parked). Feeds both the flow-editor save
+  note and the delete-confirm warning, so the "cards mid-run" number is defined once here.
   """
-  def mid_run_count(%Flow{}), do: 0
+  def mid_run_count(%Flow{id: flow_id}) do
+    Repo.aggregate(
+      from(r in Run, where: r.flow_id == ^flow_id and r.status in ^Run.active_statuses()),
+      :count
+    )
+  end
 
   @doc """
   Structural diff of a customized default flow against its shipped default, or nil for a
