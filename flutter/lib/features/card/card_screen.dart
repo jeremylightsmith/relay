@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../config.dart';
 import '../decisions/review_queue.dart';
+import 'card_nav_context.dart';
 import 'card_summary.dart';
 import 'pr_launcher.dart';
 import 'widgets/card_context_chips.dart';
@@ -32,6 +33,7 @@ class CardScreen extends ConsumerStatefulWidget {
     required this.cardRef,
     required this.boardSlug,
     this.kind,
+    this.navContext,
     this.bodyBuilder,
   });
 
@@ -41,6 +43,10 @@ class CardScreen extends ConsumerStatefulWidget {
   /// `in_review` | `needs_input`, from the inbox row or the push payload. Null/unknown
   /// renders no bar: the wrong bar on a card is worse than no bar.
   final String? kind;
+
+  /// The ordered cards surrounding this one (RLY-234), for horizontal swipe nav. Null
+  /// on a cold deep link / push (go_router `extra` is in-memory) → swipe is inert.
+  final CardNavContext? navContext;
 
   /// Overrides the webview body. `flutter test` runs on the host, where
   /// flutter_inappwebview has no platform implementation and throws on build —
@@ -65,11 +71,37 @@ class CardScreen extends ConsumerStatefulWidget {
 }
 
 class _CardScreenState extends ConsumerState<CardScreen> {
+  /// Accumulated horizontal drag distance for the in-progress swipe. Positive =
+  /// rightward (→ previous card), negative = leftward (→ next) — mirrors the web hook.
+  double _dragDx = 0;
+
+  /// Logical pixels a horizontal drag must pass to commit to a neighbor; below it the
+  /// drag is ignored, so an incidental sideways nudge never navigates.
+  static const double _swipeCommitThreshold = 60;
+
   @override
   void initState() {
     super.initState();
     _seedIfNeeded();
     _scheduleBanner();
+  }
+
+  /// Decide the just-finished horizontal drag. A committed rightward drag steps to the
+  /// previous card, leftward to the next. At a list boundary (neighbor null) or with no
+  /// nav context it is a no-op — no wrap, no crash. Commit *replaces* the route, carrying
+  /// the context re-centered on the neighbor, so Back still returns to the originating
+  /// list (Decision 3 — mirrors navigateQueue's pushReplacement).
+  void _commitSwipe() {
+    final dx = _dragDx;
+    _dragDx = 0;
+    if (dx.abs() < _swipeCommitThreshold) return;
+    final target = dx > 0 ? widget.navContext?.prev : widget.navContext?.next;
+    if (target == null) return;
+    final kindParam = target.kind == null ? '' : '&kind=${target.kind}';
+    GoRouter.of(context).pushReplacement(
+      '/cards/${target.ref}?board=${target.boardSlug}$kindParam',
+      extra: widget.navContext?.at(target.ref),
+    );
   }
 
   // go_router's default page key is derived from the route *pattern*
@@ -180,21 +212,30 @@ class _CardScreenState extends ConsumerState<CardScreen> {
       // InAppWebView keeps the old card's page, since initialUrlRequest only
       // applies on mount. The per-card key remounts the body so the new card
       // actually loads.
-      body: KeyedSubtree(
-        key: ValueKey('card_body_${widget.cardRef}'),
-        child:
-            widget.bodyBuilder?.call(context) ??
-            InAppWebView(
-              key: const Key('card_webview'),
-              initialUrlRequest: URLRequest(
-                url: WebUri(
-                  CardScreen.cardUrl(
-                    cardRef: widget.cardRef,
-                    boardSlug: widget.boardSlug,
+      body: GestureDetector(
+        key: const Key('card_swipe_area'),
+        // Horizontal only: the webview owns vertical scroll, so the gesture arena keeps
+        // vertical drags with the scroll view and only a horizontal drag reaches these
+        // callbacks (RLY-234 — mirrors the web hook's |dx|>|dy| rule).
+        onHorizontalDragStart: (_) => _dragDx = 0,
+        onHorizontalDragUpdate: (d) => _dragDx += d.delta.dx,
+        onHorizontalDragEnd: (_) => _commitSwipe(),
+        child: KeyedSubtree(
+          key: ValueKey('card_body_${widget.cardRef}'),
+          child:
+              widget.bodyBuilder?.call(context) ??
+              InAppWebView(
+                key: const Key('card_webview'),
+                initialUrlRequest: URLRequest(
+                  url: WebUri(
+                    CardScreen.cardUrl(
+                      cardRef: widget.cardRef,
+                      boardSlug: widget.boardSlug,
+                    ),
                   ),
                 ),
               ),
-            ),
+        ),
       ),
       bottomNavigationBar: _bottomBar(),
     );
