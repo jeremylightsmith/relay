@@ -42,6 +42,25 @@ defmodule RelayWeb.Api.CardActionsTest do
     assert conn |> post(~p"/api/cards/#{ref(board, card)}/move", %{stage: foreign_stage.id}) |> json_response(404)
   end
 
+  test "move that would strand a live run answers 409 would_strand_run and does not move", %{
+    conn: conn,
+    board: board,
+    code: code
+  } do
+    done = insert(:stage, board: board, name: "Done", type: :done, position: 3)
+    flow = insert(:flow, board: board, key: "code", works_in_stage_id: code.id)
+    card = insert(:card, stage: code)
+    insert(:run, card: card, flow_id: flow.id, flow_key: flow.key, status: :parked)
+
+    body =
+      conn
+      |> post(~p"/api/cards/#{ref(board, card)}/move", %{stage: done.id})
+      |> json_response(409)
+
+    assert body["error"]["code"] == "would_strand_run"
+    assert Cards.get_card_by_ref(board, ref(board, card)).stage_id == code.id
+  end
+
   test "comments posts an agent comment shown as Relay AI", %{conn: conn, board: board, spec: spec} do
     card = insert(:card, stage: spec)
 

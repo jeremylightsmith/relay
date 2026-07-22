@@ -84,6 +84,16 @@ defmodule RelayWeb.Api.FallbackController do
     |> render(:error, code: "conflict", message: "This job is no longer held by your claim")
   end
 
+  def call(conn, {:error, :would_strand_run}) do
+    conn
+    |> put_status(:conflict)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "would_strand_run",
+      message: "This card has a live run — cancel the run before moving it out of its work lane"
+    )
+  end
+
   def call(conn, {:error, :unknown_outcome}) do
     conn
     |> put_status(:unprocessable_entity)

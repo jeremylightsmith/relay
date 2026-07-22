@@ -199,7 +199,11 @@ sharing behavior.
   by [ADR 0004](../adr/0004-card-ownership-and-the-claim-rule.md); derived agent health
   (`Cards.health/1`, 90s `STALE_AFTER`) and the four-bucket needs-you rollup
   (`needs_input` / `in_review` / `awaiting_human` / `agent_stalled` — RLY-148) surfaced by
-  `GET /api/board` and the boards-home badges.
+  `GET /api/board` and the boards-home badges. A move that would strand a live run
+  (`Cards.stranded_run/2`: an active run whose flow `works_in_stage` is not the destination) is
+  refused up front with `{:error, :would_strand_run}` — `POST /api/cards/:ref/move` maps it to
+  **409 `would_strand_run`** (RLY-217); the board pre-checks and confirms instead of surfacing
+  the raw error.
 - **Members** — board membership; who can see and act on a board.
 - **Accounts** — users and Google sign-in (`GoogleTokenValidator` verifies native mobile
   tokens); user API tokens for `/api/all`.
