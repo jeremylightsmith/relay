@@ -44,6 +44,7 @@ defmodule Relay.Runs.RunServer do
   alias Relay.Repo
   alias Relay.Runs
   alias Relay.Runs.Engine
+  alias Relay.Runs.Transitions
   alias Schemas.Card
   alias Schemas.NodeExecution
   alias Schemas.NodeJob
@@ -171,7 +172,13 @@ defmodule Relay.Runs.RunServer do
         # a parked/needs_input run paired with a not-yet-blocked card — which
         # it would misread as "the answer already arrived" and resume.
         ensure_card_blocked(run, execution)
-        run = run |> Ecto.Changeset.change(status: :parked, parked_reason: :needs_input) |> Repo.update!()
+
+        run =
+          case Transitions.transition(run, [:running], :parked, set: [parked_reason: :needs_input]) do
+            {:ok, parked} -> parked
+            {:error, :not_in_expected_state} -> Repo.get!(Run, run.id)
+          end
+
         Runs.broadcast_runs(board_id, {:run_parked, run})
         {:stop, :normal, {:ok, run}, state}
 

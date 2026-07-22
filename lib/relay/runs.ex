@@ -28,10 +28,12 @@ defmodule Relay.Runs do
   alias Relay.Runs.Capacity
   alias Relay.Runs.Engine
   alias Relay.Runs.PlanTasks
+  alias Relay.Runs.Policy
   alias Relay.Runs.Preflight
   alias Relay.Runs.RunServer
   alias Relay.Runs.Scheduler
   alias Relay.Runs.Scheduler.Server, as: SchedulerServer
+  alias Relay.Runs.Transitions
   alias Schemas.Board
   alias Schemas.Card
   alias Schemas.Executor
@@ -386,7 +388,7 @@ defmodule Relay.Runs do
   def queued_flow(%Card{} = card, active_owner, flows, summary) do
     active_run? = summary != nil and summary.status in Run.active_statuses()
 
-    if card.status == :ready and active_owner == :ai and not active_run? do
+    if Policy.pullable?(%{status: card.status, active_owner: active_owner}) and not active_run? do
       Enum.find(flows, &(&1.enabled and &1.pulls_from_stage_id == card.stage_id))
     end
   end
@@ -626,16 +628,19 @@ defmodule Relay.Runs do
   def cancel_run(%Run{} = run) do
     stop_server(run)
     run = Repo.get!(Run, run.id)
+    revoke_active_jobs(run)
 
-    if run.status in Run.active_statuses() do
-      revoke_active_jobs(run)
-      run = close_run!(run, :cancelled, nil)
-      card = Repo.get!(Card, run.card_id)
-      {:ok, _entry} = Activity.log(card, %{type: :action, actor: :agent, text: "run cancelled"})
-      broadcast_runs(card.board_id, {:run_finished, run})
-      {:ok, run}
-    else
-      {:error, :not_active}
+    case Transitions.transition(run, Run.active_statuses(), :cancelled,
+           set: [parked_reason: nil, current_node: nil, failure_detail: nil, finished_at: now()]
+         ) do
+      {:ok, cancelled} ->
+        card = Repo.get!(Card, cancelled.card_id)
+        {:ok, _entry} = Activity.log(card, %{type: :action, actor: :agent, text: "run cancelled"})
+        broadcast_runs(card.board_id, {:run_finished, cancelled})
+        {:ok, cancelled}
+
+      {:error, :not_in_expected_state} ->
+        {:error, :not_active}
     end
   end
 
@@ -1526,11 +1531,9 @@ defmodule Relay.Runs do
 
     revoke_active_jobs(run)
 
-    query = from r in Run, where: r.id == ^run.id and r.status == :running, select: r
-
-    case Repo.update_all(query, set: [status: :parked, parked_reason: :executor_gone]) do
-      {1, [updated]} -> broadcast_runs(board_id_of(updated), {:run_parked, updated})
-      {0, _none} -> :ok
+    case Transitions.transition(run, [:running], :parked, set: [parked_reason: :executor_gone]) do
+      {:ok, updated} -> broadcast_runs(board_id_of(updated), {:run_parked, updated})
+      {:error, :not_in_expected_state} -> :ok
     end
 
     :ok
@@ -1540,16 +1543,14 @@ defmodule Relay.Runs do
   ## @doc false: internal engine plumbing, not public context API.
 
   @doc false
-  def resume_run(%Run{id: id} = _run, opts \\ []) do
-    query = from r in Run, where: r.id == ^id and r.status == :parked, select: r
-
-    case Repo.update_all(query, set: [status: :running, parked_reason: nil]) do
-      {1, [updated]} ->
+  def resume_run(%Run{} = run, opts \\ []) do
+    case Transitions.transition(run, [:parked], :running, set: [parked_reason: nil]) do
+      {:ok, updated} ->
         broadcast_runs(board_id_of(updated), {:run_resumed, updated})
         {:ok, _pid} = ensure_server(updated, {:reenter, Keyword.get(opts, :resume_session)})
         {:ok, updated}
 
-      {0, _none} ->
+      {:error, :not_in_expected_state} ->
         {:error, :not_parked}
     end
   end
@@ -1703,27 +1704,47 @@ defmodule Relay.Runs do
   end
 
   defp revive_run(run, node, mode, actor) do
-    changeset =
-      run
-      |> Changeset.change(
-        status: :running,
-        parked_reason: nil,
-        current_node: node,
-        failure_detail: nil,
-        finished_at: nil,
-        retries: run.retries + 1
-      )
-      |> Run.changeset()
+    result =
+      try do
+        # From-state is the run's OWN current status, not a hardcoded :failed: `restartable?/1`
+        # (checked by `check_retryable/1` above) also revives a :parked run whose
+        # `parked_reason` is :needs_input but whose latest execution actually failed (RLY-179's
+        # failure masquerading as a question) — both {:failed, :running} and {:parked, :running}
+        # are legal edges, so guarding on the run's actual status covers either origin exactly.
+        Transitions.transition(run, [run.status], :running,
+          set: [
+            parked_reason: nil,
+            current_node: node,
+            failure_detail: nil,
+            finished_at: nil,
+            retries: run.retries + 1
+          ]
+        )
+      rescue
+        e in Ecto.ConstraintError ->
+          # The residual window (another active run appears on the card between
+          # check_no_active_run/1 and this UPDATE) surfaces the same mapped error a human reads.
+          if e.constraint == "runs_one_active_per_card_index",
+            do: {:error, :active_run_exists},
+            else: reraise(e, __STACKTRACE__)
+      end
 
-    case Repo.update(changeset) do
+    case result do
       {:ok, run} ->
         clear_card_failure(run, actor)
         broadcast_runs(board_id_of(run), {:run_resumed, run})
         {:ok, _pid} = ensure_server(run, mode)
         {:ok, run}
 
-      {:error, %Changeset{}} ->
+      # A concurrent transition flipped this run out of :failed under us — a from-state guard
+      # the old changeset path lacked. check_retryable/1 + check_no_active_run/1 mean the only
+      # realistic cause is another active run now existing on the card, so preserve the code a
+      # caller already handles.
+      {:error, :not_in_expected_state} ->
         {:error, :active_run_exists}
+
+      {:error, :active_run_exists} = err ->
+        err
     end
   end
 
@@ -1854,14 +1875,12 @@ defmodule Relay.Runs do
     stop_server(run)
     run = Repo.get!(Run, run.id)
 
-    query = from r in Run, where: r.id == ^run.id and r.status == :running, select: r
-
-    case Repo.update_all(query, set: [status: :parked, parked_reason: :claimed, pinned_executor_name: nil]) do
-      {1, [updated]} ->
+    case Transitions.transition(run, [:running], :parked, set: [parked_reason: :claimed, pinned_executor_name: nil]) do
+      {:ok, updated} ->
         revoke_active_jobs(updated)
         broadcast_runs(board_id_of(updated), {:run_parked, updated})
 
-      {0, _none} ->
+      {:error, :not_in_expected_state} ->
         :ok
     end
 
@@ -1985,15 +2004,22 @@ defmodule Relay.Runs do
 
   @doc false
   def close_run!(%Run{} = run, status, failure_detail) do
-    run
-    |> Changeset.change(
-      status: status,
-      parked_reason: nil,
-      current_node: nil,
-      failure_detail: failure_detail,
-      finished_at: now()
-    )
-    |> Repo.update!()
+    case Transitions.transition(run, [:running], status,
+           set: [
+             parked_reason: nil,
+             current_node: nil,
+             failure_detail: failure_detail,
+             finished_at: now()
+           ]
+         ) do
+      {:ok, updated} ->
+        updated
+
+      # Defensively impossible (every caller holds a provably-:running run); the guarded
+      # UPDATE already logged the no-op, so return the row's current truth.
+      {:error, :not_in_expected_state} ->
+        Repo.get!(Run, run.id)
+    end
   end
 
   @doc false

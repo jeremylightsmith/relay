@@ -37,17 +37,28 @@ flowchart LR
     Attachments --> Boards
     Attachments --> Repo
     Boards --> Events
+    Boards --> Flows
     Boards --> Repo
     Cards --> Activity
     Cards --> Boards
     Cards --> Events
     Cards --> Push
     Cards --> Repo
+    Cards --> Votes
     Events --> BoardWatch
+    Flows --> Repo
     Members --> Events
     Members --> Repo
     Push --> Members
     Push --> Repo
+    Runs --> Activity
+    Runs --> Boards
+    Runs --> Cards
+    Runs --> Events
+    Runs --> Flows
+    Runs --> Repo
+    Votes --> Events
+    Votes --> Repo
 ```
 <!-- END generated: boundary-graph -->
 
