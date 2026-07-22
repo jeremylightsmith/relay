@@ -77,6 +77,9 @@ defmodule RelayWeb.DocsControllerTest do
 
     assert html =~ "relay-config"
     refute html =~ "/api/scaffold"
+    # RLY-208: ScaffoldController was deleted; the page's "Sources of truth" footer must not
+    # still cite it.
+    refute html =~ "scaffold_controller.ex"
   end
 
   test "the getting-started page needs no repo access and links the runbook", %{conn: conn} do

@@ -429,7 +429,6 @@ the contract.
 *Sources of truth: `bin/relay`, `.relay/executor.json`, `bin/test_relay.py`,
 `lib/relay_web/controllers/api/node_job_controller.ex`, `lib/relay/runs.ex`,
 `lib/relay_web/controllers/api/board_controller.ex`,
-`lib/relay_web/controllers/scaffold_controller.ex`,
 `lib/relay_web/controllers/api/run_controller.ex`,
 `lib/relay_web/controllers/api/executor_controller.ex`,
 `lib/relay_web/controllers/api/flow_metrics_controller.ex`.*
