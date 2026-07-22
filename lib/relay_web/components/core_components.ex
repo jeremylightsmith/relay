@@ -1674,6 +1674,11 @@ defmodule RelayWeb.CoreComponents do
     # baton, before the engine's own run row update lands.
     parked_run = latest && latest.status == :parked && assigns.card.status == :needs_input && latest
 
+    # RLY-228 — split the parked branch by the latest-outcome discriminator: a died-agent park
+    # (restartable) gets the honest Restart banner; a genuine question keeps the needs_input form.
+    # `!!` coerces to a plain boolean so the template's `not @died_agent_park` is always defined.
+    died_agent_park = !!(parked_run && Relay.Runs.restartable?(parked_run))
+
     assigns =
       assigns
       |> assign(:sub_task_progress, Cards.sub_task_progress(assigns.card))
@@ -1681,6 +1686,7 @@ defmodule RelayWeb.CoreComponents do
       |> assign(:latest_run, latest)
       |> assign(:latest_detail, latest && Relay.Runs.run_detail(latest, assigns.run_flow))
       |> assign(:parked_run, parked_run)
+      |> assign(:died_agent_park, died_agent_park)
       |> assign(:show_run_tab?, assigns.runs != [] or assigns.queued_flow != nil)
 
     ~H"""
@@ -2367,7 +2373,7 @@ defmodule RelayWeb.CoreComponents do
                       detail={@latest_detail}
                     />
                     <RunComponents.run_state_banner
-                      :if={@parked_run}
+                      :if={@parked_run && not @died_agent_park}
                       variant={:parked}
                       detail={@latest_detail}
                     >
@@ -2381,6 +2387,11 @@ defmodule RelayWeb.CoreComponents do
                         body_loading={@body_loading}
                       />
                     </RunComponents.run_state_banner>
+                    <RunComponents.run_state_banner
+                      :if={@died_agent_park}
+                      variant={:stopped}
+                      detail={@latest_detail}
+                    />
                     <RunComponents.run_mini_graph
                       :if={@latest_detail.status == :running and @run_flow}
                       path={Relay.Runs.happy_path(@run_flow)}
