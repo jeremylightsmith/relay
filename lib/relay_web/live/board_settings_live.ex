@@ -279,7 +279,7 @@ defmodule RelayWeb.BoardSettingsLive do
                 General
               </h1>
               <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 18px 0;max-width:560px;">
-                The board's display name and its URL slug (relay.app/&lt;slug&gt;).
+                The board's display name, its URL slug (relay.app/&lt;slug&gt;), and its card key.
               </p>
               <div style="display:flex;flex-direction:column;gap:22px;max-width:420px;">
                 <div>
@@ -314,6 +314,29 @@ defmodule RelayWeb.BoardSettingsLive do
                   <span :if={@read_only?} class="font-mono" style="font-size:14px;">
                     relay.app/{@board.slug}
                   </span>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                  <label style="font-size:12px;font-weight:600;color:oklch(0.40 0.02 255);">
+                    Card key
+                  </label>
+                  <.boxed_field
+                    :if={!@read_only?}
+                    id="board-key"
+                    value={@board.key}
+                    form={@general_form}
+                    field={:key}
+                    save_event="save_board_key"
+                    cancel_event="cancel_board_key"
+                  />
+                  <span :if={@read_only?} class="font-mono" style="font-size:14px;">
+                    {@board.key}
+                  </span>
+                  <p
+                    id="board-key-warning"
+                    style="font-size:12px;line-height:1.5;color:oklch(0.55 0.12 60);margin:0;"
+                  >
+                    Changing this renames every card on this board (e.g. {@board.key}230).
+                  </p>
                 </div>
               </div>
 
@@ -1019,7 +1042,7 @@ defmodule RelayWeb.BoardSettingsLive do
   end
 
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
-        save_board_name save_board_slug edit_stage save_stage add_stage delete_stage
+        save_board_name save_board_slug save_board_key edit_stage save_stage add_stage delete_stage
         toggle_wip bump_wip reorder_stage toggle_lane set_type toggle_ai set_reject_to
         toggle_collapsed_default invite_member remove_member flow_toggle flow_confirm_toggle
         flow_duplicate flow_reset flow_confirm_reset flow_delete flow_confirm_delete
@@ -1086,6 +1109,24 @@ defmodule RelayWeb.BoardSettingsLive do
   end
 
   def handle_event("cancel_board_slug", _params, socket) do
+    {:noreply, assign(socket, :general_form, to_form(Boards.change_board(socket.assigns.board)))}
+  end
+
+  def handle_event("save_board_key", %{"board" => %{"key" => _} = params}, socket) do
+    case Boards.update_board(socket.assigns.board, Map.take(params, ["key"])) do
+      {:ok, board} ->
+        {:noreply,
+         socket
+         |> assign(:board, board)
+         |> assign(:general_form, to_form(Boards.change_board(board)))
+         |> put_flash(:info, "Card key saved.")}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :general_form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("cancel_board_key", _params, socket) do
     {:noreply, assign(socket, :general_form, to_form(Boards.change_board(socket.assigns.board)))}
   end
 
