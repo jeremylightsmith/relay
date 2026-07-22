@@ -1697,7 +1697,13 @@ defmodule RelayWeb.CoreComponents do
         <.link :if={!@embed} id={"#{@id}-scrim"} patch={@close_patch} class="drawer-overlay">
           <span class="sr-only">Close</span>
         </.link>
-        <aside class="drawer-panel flex h-dvh w-full flex-col overflow-y-auto bg-base-100 shadow-xl drawer:overflow-hidden drawer:w-[min(760px,94vw)]">
+        <aside
+          id="card-drawer-panel"
+          phx-hook={@swipe_enabled && "CardSwipe"}
+          data-prev={@prev_ref}
+          data-next={@next_ref}
+          class="drawer-panel flex h-dvh w-full flex-col overflow-y-auto bg-base-100 shadow-xl drawer:overflow-hidden drawer:w-[min(760px,94vw)] will-change-transform"
+        >
           <header class="flex items-start gap-3 border-b border-base-300 p-5">
             <div class="flex min-w-0 flex-1 flex-col gap-1.5">
               <div class="flex items-center gap-2">
