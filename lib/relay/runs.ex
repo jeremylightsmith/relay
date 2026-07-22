@@ -840,6 +840,49 @@ defmodule Relay.Runs do
   def revoked_among(_board, _running), do: []
 
   @doc """
+  Of the job ids an executor reports it is running, stamp `agent_heartbeat_at = now` on the cards
+  whose job is still active (`state in NodeJob.active_states()`) on THIS board (RLY-226). This is
+  the exact positive complement of `revoked_among/2` — revoked = on-board but NOT active; refresh =
+  on-board AND active — and it is the "a live executor is actively holding this card" signal wired
+  into `Cards.health/1`, so a quiet-but-running agent no longer falsely ages to `:stale`.
+
+  Requiring `active_states()` (not merely "reported running") is the conservative, self-consistent
+  rule `revoked_among/2` uses: a job the server has already finalized or revoked can never be kept
+  falsely alive.
+
+  Board-scoped like `revoked_among/2` — an id belonging to another board is not refreshed here, so
+  one board's beat can never keep another board's card alive. The single write is delegated to
+  `Cards.touch_heartbeats/2`, keeping `agent_heartbeat_at` to exactly one write site (one
+  `update_all`, deliberately no broadcast). Non-integer / unknown ids are ignored; `[]` → `{0, nil}`
+  with no query — a heartbeat must never 500 on a malformed beat.
+  """
+  def refresh_running_card_liveness(%Board{id: board_id} = board, running_ids) when is_list(running_ids) do
+    ids = for id <- running_ids, int = to_job_id(id), is_integer(int), do: int
+
+    case ids do
+      [] ->
+        {0, nil}
+
+      ids ->
+        refs =
+          from(j in NodeJob,
+            join: r in Run,
+            on: r.id == j.run_id,
+            join: c in Card,
+            on: c.id == r.card_id,
+            where: c.board_id == ^board_id and j.id in ^ids and j.state in ^NodeJob.active_states(),
+            select: c.ref_number
+          )
+          |> Repo.all()
+          |> Enum.map(&Cards.ref(board, %Card{ref_number: &1}))
+
+        Cards.touch_heartbeats(board, refs)
+    end
+  end
+
+  def refresh_running_card_liveness(_board, _running), do: {0, nil}
+
+  @doc """
   The subset of `bound_run_ids` whose run is TERMINAL (`status in Run.terminal_statuses()`) on
   THIS board — the run-scoped analogue of `revoked_among/2`, one level up. The executor reports
   the run-ids of exclusive slots it holds with no live job (`bound_runs`); this names the ones it

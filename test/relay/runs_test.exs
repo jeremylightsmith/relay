@@ -1051,4 +1051,110 @@ defmodule Relay.RunsTest do
       assert Runs.terminal_among(board, [999_999]) == []
     end
   end
+
+  describe "refresh_running_card_liveness/2 (RLY-226)" do
+    # A card on `board` with a node-job in `state`. Returns {card, job}. Mirrors the
+    # NodeJob → Run → Card shape the function joins over.
+    defp liveness_card(board, state) do
+      # `board` already owns the seeded default stages at positions 1-11
+      # (Relay.Boards.create_board/2), so a fresh stage needs a position outside that
+      # range to avoid the stages_board_id_position_index unique constraint.
+      stage = insert(:stage, board: board, position: 1000 + System.unique_integer([:positive]))
+      card = insert(:card, stage: stage)
+      run = insert(:run, card: card)
+      node_execution = insert(:node_execution, run: run)
+      job = insert(:node_job, node_execution: node_execution, state: state)
+      {card, job}
+    end
+
+    test "stamps a fresh agent_heartbeat_at on a card whose job is running", %{board: board} do
+      {card, job} = liveness_card(board, :running)
+      assert card.agent_heartbeat_at == nil
+
+      assert {1, nil} = Runs.refresh_running_card_liveness(board, [job.id])
+
+      assert %DateTime{} = Relay.Repo.get!(Card, card.id).agent_heartbeat_at
+    end
+
+    test "stamps only cards with an active reported job, never an idle one", %{board: board} do
+      {running, job} = liveness_card(board, :running)
+      # A second running card whose id is NOT passed stands in for an idle card.
+      {idle, _idle_job} = liveness_card(board, :running)
+
+      assert {1, nil} = Runs.refresh_running_card_liveness(board, [job.id])
+
+      assert %DateTime{} = Relay.Repo.get!(Card, running.id).agent_heartbeat_at
+      assert Relay.Repo.get!(Card, idle.id).agent_heartbeat_at == nil
+    end
+
+    test "two running jobs both stamp; returns {2, nil}", %{board: board} do
+      {a, job_a} = liveness_card(board, :running)
+      {b, job_b} = liveness_card(board, :running)
+      {idle, _} = liveness_card(board, :running)
+
+      assert {2, nil} = Runs.refresh_running_card_liveness(board, [job_a.id, job_b.id])
+
+      assert %DateTime{} = Relay.Repo.get!(Card, a.id).agent_heartbeat_at
+      assert %DateTime{} = Relay.Repo.get!(Card, b.id).agent_heartbeat_at
+      assert Relay.Repo.get!(Card, idle.id).agent_heartbeat_at == nil
+    end
+
+    test "does not stamp a card whose job is terminal (not active)", %{board: board} do
+      {card, job} = liveness_card(board, :done)
+
+      assert {0, nil} = Runs.refresh_running_card_liveness(board, [job.id])
+      assert Relay.Repo.get!(Card, card.id).agent_heartbeat_at == nil
+    end
+
+    test "never stamps another board's card (board scoping)", %{board: board} do
+      {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other"})
+      {card, job} = liveness_card(other, :running)
+
+      assert {0, nil} = Runs.refresh_running_card_liveness(board, [job.id])
+      assert Relay.Repo.get!(Card, card.id).agent_heartbeat_at == nil
+    end
+
+    test "ignores non-integer and unknown ids; [] is a no-op that never crashes", %{board: board} do
+      assert {0, nil} = Runs.refresh_running_card_liveness(board, [])
+      assert {0, nil} = Runs.refresh_running_card_liveness(board, ["not-an-int", 999_999])
+    end
+
+    test "a running-but-quiet card reads :live after refresh, :stale without", %{board: board} do
+      {card, job} = liveness_card(board, :running)
+      now = DateTime.utc_now()
+      # Newest Activity older than @stale_after (90s) — health/1 takes explicit inputs, so an
+      # in-memory struct is enough; :moved keeps Activity.kind out of the :failure branch.
+      aged = %Schemas.Activity{
+        type: :moved,
+        inserted_at: DateTime.truncate(DateTime.add(now, -120, :second), :second)
+      }
+
+      base = %{newest: aged, heartbeat_at: nil, ai_active?: true, ai_stage?: true, now: now}
+      assert Relay.Cards.health(base) == :stale
+
+      assert {1, nil} = Runs.refresh_running_card_liveness(board, [job.id])
+      refreshed = Relay.Repo.get!(Card, card.id)
+
+      assert Relay.Cards.health(%{base | heartbeat_at: refreshed.agent_heartbeat_at}) == :live
+    end
+
+    test "a fresh heartbeat never masks a genuinely failed agent (:stopped wins)", %{board: board} do
+      {card, job} = liveness_card(board, :running)
+      now = DateTime.utc_now()
+      failure = %Schemas.Activity{type: :failure, inserted_at: DateTime.truncate(now, :second)}
+
+      assert {1, nil} = Runs.refresh_running_card_liveness(board, [job.id])
+      refreshed = Relay.Repo.get!(Card, card.id)
+
+      inputs = %{
+        newest: failure,
+        heartbeat_at: refreshed.agent_heartbeat_at,
+        ai_active?: true,
+        ai_stage?: true,
+        now: now
+      }
+
+      assert Relay.Cards.health(inputs) == :stopped
+    end
+  end
 end
