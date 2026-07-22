@@ -1,4 +1,9 @@
-Code.require_file("priv/repo/migrations/20260722173857_backfill_board_keys_two_letters.exs")
+# On a pending/CI test DB the `test` alias's `ecto.migrate` compiles this migration
+# in-memory before the suite loads, so re-requiring it here would "redefine" the module and
+# abort under --warnings-as-errors. Only load it from disk when the migrator hasn't already.
+if !Code.ensure_loaded?(Relay.Repo.Migrations.BackfillBoardKeysTwoLetters) do
+  Code.require_file("priv/repo/migrations/20260722173857_backfill_board_keys_two_letters.exs")
+end
 
 defmodule Relay.Migrations.BackfillBoardKeysTwoLettersTest do
   use ExUnit.Case, async: true
