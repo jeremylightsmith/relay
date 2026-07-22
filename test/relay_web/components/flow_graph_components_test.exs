@@ -102,6 +102,23 @@ defmodule RelayWeb.FlowGraphComponentsTest do
       assert html =~ "oklch(0.42 0.10 155)"
     end
 
+    test "foreach guard edges render human wording appended to the outcome" do
+      nodes = [%{key: "q", type: :agent, run: "review"}, %{key: "impl", type: :agent, run: "do"}]
+
+      edges = [
+        %{from: "start", to: "q", on: nil},
+        %{from: "q", to: "impl", on: :succeeded, when: :foreach_remaining},
+        %{from: "q", to: "done", on: :succeeded, when: :foreach_exhausted}
+      ]
+
+      html = graph(nodes, edges, [])
+      assert html =~ "succeeded · while tasks remain"
+      assert html =~ "succeeded · all tasks done"
+      # the raw guard atom never reaches the pill
+      refute html =~ "foreach_remaining"
+      refute html =~ "foreach_exhausted"
+    end
+
     # RLY-186 regression: the pill used to be pinned at a hardcoded top:150px/left:2px, which the
     # new vertical layout drew a spine node right on top of. It must instead be anchored to the
     # layout's done_point so it lands below the last spine node, clear of every node.

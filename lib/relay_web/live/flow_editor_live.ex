@@ -147,7 +147,7 @@ defmodule RelayWeb.FlowEditorLive do
   def handle_event("select_node", %{"key" => to}, %{assigns: %{connecting: %{from: from}}} = socket) do
     socket =
       apply_working(socket, fn w ->
-        %{w | edges: w.edges ++ [%{from: from, to: to, on: :succeeded, max_loops: nil}]}
+        %{w | edges: w.edges ++ [%{from: from, to: to, on: :succeeded, max_loops: nil, when: nil}]}
       end)
 
     index = length(socket.assigns.working.edges) - 1
@@ -357,6 +357,9 @@ defmodule RelayWeb.FlowEditorLive do
   defp cast_node_value(_f, v), do: v
 
   defp cast_edge_value(:on, v), do: String.to_existing_atom(v)
+
+  defp cast_edge_value(:when, ""), do: nil
+  defp cast_edge_value(:when, v), do: String.to_existing_atom(v)
 
   defp cast_edge_value(:max_loops, v) do
     case Integer.parse(v || "") do
