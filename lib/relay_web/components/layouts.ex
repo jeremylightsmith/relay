@@ -137,10 +137,13 @@ defmodule RelayWeb.Layouts do
 
   @doc """
   The public roadmap shell (RLY-69, `/board/:slug/public`): board name, a "Public
-  roadmap" label, the plain-text public URL, and a Sign in link (or the visitor's
+  roadmap" label, the plain-text public URL, and a Sign in button (or the visitor's
   avatar when signed in) — no board-switcher nav, no `embed` handling, no
   `require_authenticated` assumptions. `current_scope` is nil for the majority
-  signed-out visitor; here it only decides the sign-in-link-vs-avatar swap.
+  signed-out visitor; here it only decides the sign-in-button-vs-avatar swap. The Sign
+  in button `phx-click`s `"open_signin"` on the parent LiveView (`PublicBoardLive`)
+  rather than linking straight to OAuth, so it opens the sign-in modal with the
+  "browse" reason copy instead of bypassing it.
   """
   attr :flash, :map, required: true, doc: "the map of flash messages"
   attr :current_scope, :map, default: nil
@@ -171,14 +174,15 @@ defmodule RelayWeb.Layouts do
             email={@current_scope.user.email}
           />
         </div>
-        <.link
+        <button
           :if={!@current_scope}
-          href={~p"/auth/google?return_to=#{@public_path}"}
+          type="button"
+          phx-click="open_signin"
           id="public-board-sign-in"
           class="btn btn-sm btn-primary"
         >
           Sign in
-        </.link>
+        </button>
       </header>
 
       <main class="mx-auto max-w-6xl px-4 py-8 sm:px-6">

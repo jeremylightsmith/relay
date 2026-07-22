@@ -103,17 +103,41 @@ defmodule RelayWeb.PublicBoardLiveTest do
       refute has_element?(view, "#public-signin-modal", "Continue with email")
     end
 
-    test "the header shows a Sign in link (not an avatar)", %{conn: conn, board: board} do
+    test "the header shows a Sign in control (not an avatar)", %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/public")
 
       assert has_element?(view, "#public-board-sign-in", "Sign in")
     end
 
-    test "the sign-in link carries return_to back to this public board", %{conn: conn, board: board} do
+    test "clicking the header Sign in opens the sign-in modal with the browse copy",
+         %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/public")
 
+      refute has_element?(view, "#public-signin-modal")
+
+      view |> element("#public-board-sign-in") |> render_click()
+
+      assert has_element?(view, "#public-signin-modal", "Sign in to Relay")
+      refute has_element?(view, "#public-signin-modal", "Sign in to vote")
+    end
+
+    test "the modal opened from a vote pill still shows the vote copy", %{conn: conn, board: board, mobile: mobile} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/public")
+
+      view |> element("#public-vote-#{mobile.id}") |> render_click()
+
+      assert has_element?(view, "#public-signin-modal", "Sign in to vote")
+      refute has_element?(view, "#public-signin-modal", "Sign in to Relay")
+    end
+
+    test "the sign-in modal's Google link carries return_to, from either entry point",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/public")
+
+      view |> element("#public-board-sign-in") |> render_click()
+
       assert view
-             |> element("#public-board-sign-in")
+             |> element("#public-signin-google")
              |> render() =~ "/auth/google?return_to=%2Fboard%2F#{board.slug}%2Fpublic"
     end
   end

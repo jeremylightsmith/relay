@@ -9,12 +9,18 @@ defmodule RelayWeb.PublicBoardLive do
   Non-done cards (`Stage.public_categories/0`: unstarted, planning, in_progress)
   are shown collapsed into three category columns, sorted by vote count (ties
   broken by recency). Voting requires sign-in: a signed-out click opens the
-  "Sign in to vote" modal instead of casting a vote; the modal's "Continue with
-  Google" link carries `return_to` back to this board (RLY-69's OAuth
-  `return_to` — see `RelayWeb.AuthController`), so signing in returns the
-  visitor here. A pending vote is **not** replayed across the OAuth round trip
-  (YAGNI, per the card's decisions) — the visitor returns signed in and clicks
-  vote again.
+  sign-in modal instead of casting a vote; the modal's "Continue with Google"
+  link carries `return_to` back to this board (RLY-69's OAuth `return_to` —
+  see `RelayWeb.AuthController`), so signing in returns the visitor here. A
+  pending vote is **not** replayed across the OAuth round trip (YAGNI, per the
+  card's decisions) — the visitor returns signed in and clicks vote again.
+
+  The sign-in modal's title varies by why it opened (`@signin_reason`): a
+  vote-triggered open shows "Sign in to vote"; the header's Sign in button
+  (`Layouts.public_board`'s `phx-click="open_signin"`) opens it with the
+  "browse" reason and shows "Sign in to Relay" instead — the header never
+  navigates straight to OAuth, so a signed-out visitor always sees the modal
+  copy first.
 
   Supporters (the card detail modal's SUPPORTERS block) are private to
   signed-in visitors: signed out sees only the total count ("N people support
@@ -219,10 +225,10 @@ defmodule RelayWeb.PublicBoardLive do
         id="public-signin-modal"
         class="modal modal-open"
         role="dialog"
-        aria-label="Sign in to vote"
+        aria-label={signin_title(@signin_reason)}
       >
         <div class="modal-box max-w-sm text-center">
-          <h3 class="text-lg font-semibold">Sign in to vote</h3>
+          <h3 class="text-lg font-semibold">{signin_title(@signin_reason)}</h3>
           <p class="mt-2 text-sm text-base-content/60">
             Sign in so your vote sticks — you can change it any time.
           </p>
@@ -265,6 +271,7 @@ defmodule RelayWeb.PublicBoardLive do
           |> assign(:open_card_supporters, [])
           |> assign(:open_card_supporters_total, 0)
           |> assign(:sign_in_open, false)
+          |> assign(:signin_reason, :vote)
           |> assign_cards()
 
         {:ok, socket}
@@ -303,13 +310,20 @@ defmodule RelayWeb.PublicBoardLive do
   def handle_event("vote", %{"id" => id}, socket) do
     case socket.assigns.current_scope do
       nil ->
-        {:noreply, assign(socket, :sign_in_open, true)}
+        {:noreply, socket |> assign(:sign_in_open, true) |> assign(:signin_reason, :vote)}
 
       %{user: user} ->
         card = find_card(socket.assigns.cards, String.to_integer(id))
         {:ok, _added_or_removed} = Votes.toggle_vote(user, card)
         {:noreply, assign_cards(socket)}
     end
+  end
+
+  # The header's Sign in button (`Layouts.public_board`) — opens the modal with
+  # the "browse" reason ("Sign in to Relay") instead of navigating straight to
+  # OAuth, so a signed-out visitor always sees the modal copy first.
+  def handle_event("open_signin", _params, socket) do
+    {:noreply, socket |> assign(:sign_in_open, true) |> assign(:signin_reason, :browse)}
   end
 
   def handle_event("close_signin", _params, socket) do
@@ -348,6 +362,12 @@ defmodule RelayWeb.PublicBoardLive do
   end
 
   defp find_card(cards, id), do: Enum.find(cards, &(&1.id == id))
+
+  # The sign-in modal's title varies by why it opened (RLY-69 spec review):
+  # vote-triggered opens read "Sign in to vote"; every other entry point (the
+  # header's Sign in button) reads "Sign in to Relay".
+  defp signin_title(:vote), do: "Sign in to vote"
+  defp signin_title(:browse), do: "Sign in to Relay"
 
   # Moves the signed-in viewer's own supporter entry (if present on this preview
   # page) to the front — the detail modal's "you first" ordering (RLY-69 spec
