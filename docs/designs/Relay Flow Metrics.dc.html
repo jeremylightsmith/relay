@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.32 0.02 255);background:oklch(0.955 0.008 255);-webkit-font-smoothing:antialiased;}
+  a{color:oklch(0.60 0.14 250);text-decoration:none;} a:hover{text-decoration:underline;}
+  button{font-family:inherit;cursor:pointer;}
+  ::-webkit-scrollbar{width:9px;height:9px;}
+  ::-webkit-scrollbar-thumb{background:oklch(0.86 0.01 255);border-radius:6px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+</style>
+</helmet>
+
+<div style="height:100vh;display:flex;flex-direction:column;overflow:hidden;">
+
+  <!-- Top bar -->
+  <div style="display:flex;align-items:center;gap:12px;height:52px;padding:0 18px;border-bottom:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);flex:0 0 auto;z-index:30;">
+    <div style="display:flex;align-items:center;gap:9px;">
+      <div style="width:23px;height:23px;border-radius:7px;background:oklch(0.60 0.14 250);display:flex;align-items:center;justify-content:center;position:relative;">
+        <div style="width:8px;height:8px;border-radius:50%;background:oklch(1 0 0);"></div>
+        <div style="position:absolute;right:3px;top:3px;width:4px;height:4px;border-radius:50%;background:oklch(0.60 0.14 250);box-shadow:0 0 0 1.5px oklch(1 0 0);"></div>
+      </div>
+      <span style="font-weight:600;font-size:15px;letter-spacing:-0.02em;">Relay</span>
+    </div>
+    <div style="width:1px;height:18px;background:oklch(0.90 0.006 255);"></div>
+    <div style="display:flex;align-items:center;gap:7px;font-size:13px;">
+      <a href="#" style="color:oklch(0.52 0.02 255);font-weight:600;">Payments</a>
+      <span style="color:oklch(0.78 0.02 255);">/</span>
+      <a href="Relay Flows.dc.html" style="color:oklch(0.52 0.02 255);font-weight:600;">Flows</a>
+      <span style="color:oklch(0.78 0.02 255);">/</span>
+      <span style="color:oklch(0.28 0.02 255);font-weight:600;">Code</span>
+    </div>
+    <span style="flex:1;"></span>
+    <div title="Dana Kim" style="width:27px;height:27px;border-radius:50%;background:oklch(0.62 0.13 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;">DK</div>
+  </div>
+
+  <!-- Artboard state switcher -->
+  <div style="display:flex;align-items:center;gap:9px;padding:8px 18px;border-bottom:1px solid oklch(0.93 0.006 255);background:oklch(0.992 0.002 255);flex:0 0 auto;flex-wrap:wrap;z-index:20;">
+    <span style="font-size:9.5px;font-weight:600;letter-spacing:0.07em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">ARTBOARD STATE</span>
+    <div style="display:flex;gap:4px;flex-wrap:wrap;">
+      <button onClick="{{ onView_populated }}" style="{{ sw.populated }}">Populated</button>
+      <button onClick="{{ onView_blank }}" style="{{ sw.blank }}">Cost blank</button>
+      <button onClick="{{ onView_compare }}" style="{{ sw.compare }}">Compare v3 → v4</button>
+      <button onClick="{{ onView_empty }}" style="{{ sw.empty }}">Not enough data</button>
+      <button onClick="{{ onView_fromcard }}" style="{{ sw.fromcard }}">Deep-link from RLY-150</button>
+    </div>
+  </div>
+
+  <!-- Section tabs -->
+  <div style="display:flex;align-items:center;gap:0;padding:11px 18px 0 18px;border-bottom:1px solid oklch(0.93 0.006 255);background:oklch(1 0 0);flex:0 0 auto;z-index:10;">
+    <a href="Relay Flow Editor.dc.html" style="font-size:13.5px;font-weight:600;color:oklch(0.52 0.02 255);padding:0 14px 12px 14px;">Editor</a>
+    <span style="font-size:13.5px;font-weight:600;color:oklch(0.26 0.02 255);padding:0 14px 12px 14px;border-bottom:2px solid oklch(0.56 0.16 292);margin-bottom:-1px;">Metrics</span>
+    <a href="#" style="font-size:13.5px;font-weight:600;color:oklch(0.52 0.02 255);padding:0 14px 12px 14px;">Settings</a>
+    <a href="Relay Runners.dc.html" style="font-size:13.5px;font-weight:600;color:oklch(0.52 0.02 255);padding:0 14px 12px 14px;">Runners</a>
+  </div>
+
+  <!-- Scroll body -->
+  <div style="flex:1;overflow-y:auto;">
+    <div style="max-width:1240px;margin:0 auto;padding:26px 28px 64px 28px;display:flex;flex-direction:column;gap:20px;">
+
+      <!-- Section head -->
+      <div style="display:flex;align-items:flex-end;gap:20px;flex-wrap:wrap;">
+        <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:280px;">
+          <div style="font-size:22px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.24 0.02 255);">Flow metrics</div>
+          <p style="font-size:13.5px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0;max-width:560px;">Per-node rollup for the <b style="color:oklch(0.34 0.02 255);">Code</b> flow. Every node execution records duration, attempts, verdict and cost — this is where you read it in aggregate and decide what to tune.</p>
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;">
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <span style="font-size:9.5px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">MEASURING</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="{{ verChipStyle }}">{{ verChip }}</span>
+              <button onClick="{{ onToggleCompare }}" style="{{ compareBtnStyle }}">{{ compareBtnLabel }}</button>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <span style="font-size:9.5px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">WINDOW</span>
+            <div style="display:inline-flex;background:oklch(0.96 0.004 255);border:1px solid oklch(0.90 0.006 255);border-radius:9px;padding:3px;gap:2px;">
+              <sc-for list="{{ winOpts }}" as="w" hint-placeholder-count="3">
+                <button onClick="{{ w.onClick }}" style="{{ w.style }}">{{ w.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Deep-link banner -->
+      <sc-if value="{{ isFromCard }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;align-items:center;gap:13px;background:oklch(0.975 0.02 250);border:1px solid oklch(0.88 0.05 250);border-left:3px solid oklch(0.60 0.14 250);border-radius:11px;padding:13px 16px;">
+          <span style="width:26px;height:26px;border-radius:7px;background:oklch(0.60 0.14 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">↳</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:600;color:oklch(0.34 0.06 250);">Opened from <span style="font-family:'JetBrains Mono',ui-monospace,monospace;">RLY-150</span> · CSV export of the board</div>
+            <div style="font-size:12.5px;line-height:1.5;color:oklch(0.46 0.05 250);margin-top:2px;">Jumped to <b style="font-family:'JetBrains Mono',ui-monospace,monospace;">quality_review</b> — the node this card's run is on — measured at <b style="font-family:'JetBrains Mono',ui-monospace,monospace;">v3</b>, the version the run is pinned to. This is how it behaves across <b>every</b> card, not just this one.</div>
+          </div>
+          <a href="Relay Card Run Panel.dc.html" style="font-size:12.5px;font-weight:600;color:oklch(0.44 0.13 250);white-space:nowrap;flex:0 0 auto;">← Back to card</a>
+        </div>
+      </sc-if>
+
+      <!-- Stat band -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);border:1px solid oklch(0.92 0.006 255);border-radius:12px;overflow:hidden;background:oklch(1 0 0);">
+        <sc-for list="{{ stats }}" as="s" hint-placeholder-count="4">
+          <div style="{{ s.wrapStyle }}">
+            <div style="font-size:9.5px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.60 0.02 255);">{{ s.label }}</div>
+            <div style="{{ s.valStyle }}">{{ s.value }}</div>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- Insight strip -->
+      <sc-if value="{{ insight.show }}" hint-placeholder-val="{{ true }}">
+        <div style="{{ insight.wrapStyle }}">
+          <span style="{{ insight.tagStyle }}">{{ insight.tag }}</span>
+          <span style="font-size:13px;line-height:1.5;color:{{ insight.msgColor }};">{{ insight.msg }}</span>
+        </div>
+      </sc-if>
+
+      <!-- Table -->
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+          <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.58 0.02 255);">{{ tableCaption }}</span>
+          <span style="flex:1;"></span>
+          <div style="display:flex;align-items:center;gap:14px;">
+            <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:oklch(0.52 0.02 255);"><span style="width:9px;height:9px;border-radius:3px;background:oklch(0.60 0.13 155);"></span>succeeded</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:oklch(0.52 0.02 255);"><span style="width:9px;height:9px;border-radius:3px;background:oklch(0.70 0.13 65);"></span>needs input</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:oklch(0.52 0.02 255);"><span style="width:9px;height:9px;border-radius:3px;background:oklch(0.62 0.16 22);"></span>failed</span>
+          </div>
+        </div>
+
+        <div style="border:1px solid oklch(0.92 0.006 255);border-radius:12px;overflow-x:auto;background:oklch(1 0 0);">
+          <!-- header -->
+          <div style="{{ headStyle }}">
+            <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);text-align:left;">NODE</div>
+            <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);text-align:right;">RUNS</div>
+            <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);text-align:right;">DURATION<br><span style="font-weight:400;color:oklch(0.66 0.02 255);">p50 · p95</span></div>
+            <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);text-align:right;">COST<br><span style="font-weight:400;color:oklch(0.66 0.02 255);">p50 · p95</span></div>
+            <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);text-align:right;">ATTEMPTS<br><span style="font-weight:400;color:oklch(0.66 0.02 255);">mean / visit</span></div>
+            <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);text-align:left;">VERDICT SPLIT</div>
+            <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);text-align:right;">LOOP-LAPS</div>
+          </div>
+
+          <!-- rows -->
+          <sc-if value="{{ showRows }}" hint-placeholder-val="{{ true }}">
+            <sc-for list="{{ rows }}" as="r" hint-placeholder-count="14">
+              <div style="{{ r.wrapStyle }}">
+                <!-- node -->
+                <div style="display:flex;flex-direction:column;gap:5px;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <span style="{{ r.nameStyle }}">{{ r.name }}</span>
+                    <sc-if value="{{ r.isPinned }}" hint-placeholder-val="{{ false }}">
+                      <span style="font-size:9px;font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.44 0.13 250);background:oklch(0.95 0.03 250);border-radius:5px;padding:2px 6px;white-space:nowrap;">RLY-150 is here</span>
+                    </sc-if>
+                    <sc-if value="{{ r.isHotBadge }}" hint-placeholder-val="{{ false }}">
+                      <span style="font-size:9px;font-weight:600;letter-spacing:0.04em;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.54 0.16 22);background:oklch(0.96 0.03 22);border-radius:5px;padding:2px 6px;white-space:nowrap;">HOTSPOT</span>
+                    </sc-if>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <span style="{{ r.typeTagStyle }}">{{ r.typeTag }}</span>
+                    <sc-if value="{{ r.showModel }}" hint-placeholder-val="{{ false }}">
+                      <span style="{{ r.modelStyle }}">{{ r.model }}</span>
+                    </sc-if>
+                  </div>
+                </div>
+                <!-- runs -->
+                <div style="text-align:right;font-size:13px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.34 0.02 255);">{{ r.runs }}</div>
+                <!-- duration -->
+                <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
+                  <div style="font-size:12.5px;font-family:'JetBrains Mono',ui-monospace,monospace;"><span style="color:oklch(0.60 0.02 255);">{{ r.d50 }}</span><span style="color:oklch(0.82 0.02 255);margin:0 5px;">/</span><span style="{{ r.d95Style }}">{{ r.d95 }}</span></div>
+                  <sc-if value="{{ r.durDelta.show }}" hint-placeholder-val="{{ false }}"><span style="{{ r.durDelta.style }}">{{ r.durDelta.text }}</span></sc-if>
+                </div>
+                <!-- cost -->
+                <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
+                  <sc-if value="{{ r.costBlank }}" hint-placeholder-val="{{ false }}">
+                    <span style="font-size:13px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.74 0.01 255);">—</span>
+                  </sc-if>
+                  <sc-if value="{{ r.costShown }}" hint-placeholder-val="{{ true }}">
+                    <div style="font-size:12.5px;font-family:'JetBrains Mono',ui-monospace,monospace;"><span style="color:oklch(0.60 0.02 255);">{{ r.c50 }}</span><span style="color:oklch(0.82 0.02 255);margin:0 5px;">/</span><span style="{{ r.c95Style }}">{{ r.c95 }}</span></div>
+                  </sc-if>
+                  <sc-if value="{{ r.costDelta.show }}" hint-placeholder-val="{{ false }}"><span style="{{ r.costDelta.style }}">{{ r.costDelta.text }}</span></sc-if>
+                </div>
+                <!-- attempts -->
+                <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
+                  <span style="{{ r.attStyle }}">{{ r.att }}</span>
+                  <sc-if value="{{ r.attDelta.show }}" hint-placeholder-val="{{ false }}"><span style="{{ r.attDelta.style }}">{{ r.attDelta.text }}</span></sc-if>
+                </div>
+                <!-- verdict -->
+                <div title="{{ r.verdictTitle }}" style="display:flex;flex-direction:column;gap:4px;">
+                  <div style="display:flex;width:100%;max-width:158px;height:8px;border-radius:5px;overflow:hidden;background:oklch(0.94 0.006 255);">
+                    <span style="{{ r.vokStyle }}"></span>
+                    <span style="{{ r.vinStyle }}"></span>
+                    <span style="{{ r.vfailStyle }}"></span>
+                  </div>
+                  <span style="{{ r.verdictLabelStyle }}">{{ r.verdictLabel }}</span>
+                </div>
+                <!-- loops -->
+                <div style="text-align:right;"><span style="{{ r.loopStyle }}">{{ r.loops }}</span></div>
+              </div>
+            </sc-for>
+          </sc-if>
+
+          <!-- empty state -->
+          <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:54px 24px 58px 24px;text-align:center;">
+              <div style="display:flex;align-items:flex-end;gap:5px;height:34px;opacity:0.5;">
+                <span style="width:9px;height:14px;border-radius:3px;background:oklch(0.86 0.01 255);"></span>
+                <span style="width:9px;height:26px;border-radius:3px;background:oklch(0.86 0.01 255);"></span>
+                <span style="width:9px;height:10px;border-radius:3px;background:oklch(0.86 0.01 255);"></span>
+                <span style="width:9px;height:20px;border-radius:3px;background:oklch(0.86 0.01 255);"></span>
+              </div>
+              <div style="font-size:16px;font-weight:600;color:oklch(0.34 0.02 255);">Not enough runs in this window yet</div>
+              <p style="font-size:13px;line-height:1.6;color:oklch(0.52 0.02 255);margin:0;max-width:460px;">Only <b style="font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.36 0.02 255);">3 runs</b> completed in the last 7 days. Per-node percentiles need roughly <b style="font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.36 0.02 255);">10+</b> completed runs at this version before they're worth trusting.</p>
+              <button onClick="{{ onView_populated }}" style="margin-top:2px;background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;">Widen to all-time</button>
+            </div>
+          </sc-if>
+        </div>
+
+        <!-- footnote -->
+        <div style="display:flex;align-items:center;gap:8px;font-size:11.5px;color:oklch(0.56 0.02 255);">
+          <span style="font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.62 0.02 255);">RUNS</span>
+          <span>count node executions, not cards — a node visited twice by one card counts twice. Per-card totals live in the card's <a href="Relay Card Run Panel.dc.html">Run panel</a>.</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1240,&quot;height&quot;:920}}">
+class Component extends DCLogic {
+  state = { view: 'populated', window: '30d' };
+
+  renderVals() {
+    const s = this.state;
+    const mono = "'JetBrains Mono',ui-monospace,monospace";
+    const INK='oklch(0.30 0.02 255)', MUTED='oklch(0.60 0.02 255)';
+    const VIOLET='oklch(0.44 0.14 292)', GREEN='oklch(0.60 0.13 155)', AMBER='oklch(0.70 0.13 65)', ROSE='oklch(0.62 0.16 22)';
+    const GT = 'grid-template-columns:minmax(220px,1.3fr) 62px 130px 130px 92px 170px 84px;';
+    const view = s.view;
+    const isCompare = view === 'compare';
+    const isBlank = view === 'blank';
+    const isEmpty = view === 'empty';
+    const isFromCard = view === 'fromcard';
+
+    // ---- formatting ----
+    const fmtDur = (x) => {
+      x = Math.round(x);
+      if (x < 60) return x + 's';
+      const m = Math.floor(x / 60), ss = x % 60;
+      return ss ? `${m}m ${ss}s` : `${m}m`;
+    };
+    const fmtCost = (c) => '$' + c.toFixed(2);
+
+    // ---- node data (v4 current; p = v3 prior for deltas) ----
+    const nodes = [
+      { id:'branch',         type:'shell', model:null,     runs:128, d50:6,   d95:11,  c50:0.00, c95:0.00, att:1.0, v:[100,0,0], loops:0 },
+      { id:'implement',      type:'agent', model:'sonnet', runs:214, d50:138, d95:340, c50:0.78, c95:2.10, att:1.7, v:[86,2,12], loops:86, p:{att:1.9,c95:2.40,d95:340} },
+      { id:'spec_review',    type:'agent', model:'sonnet', runs:176, d50:28,  d95:62,  c50:0.18, c95:0.44, att:1.2, v:[82,0,18], loops:31 },
+      { id:'quality_review', type:'agent', model:'opus',   runs:168, d50:46,  d95:204, c50:0.34, c95:1.90, att:2.4, v:[59,2,39], loops:64, hot:true, p:{att:3.1,c95:2.60,d95:250} },
+      { id:'next_task',      type:'gate',  model:null,     runs:132, d50:0,   d95:1,   c50:0.00, c95:0.00, att:1.0, v:[100,0,0], loops:40 },
+      { id:'precommit',      type:'shell', model:null,     runs:120, d50:42,  d95:130, c50:0.02, c95:0.05, att:1.1, v:[90,0,10], loops:12 },
+      { id:'final_review',   type:'agent', model:'opus',   runs:118, d50:38,  d95:90,  c50:0.30, c95:0.80, att:1.1, v:[92,0,8],  loops:9 },
+      { id:'final_fix',      type:'agent', model:'opus',   runs:11,  d50:70,  d95:150, c50:0.28, c95:0.62, att:1.0, v:[95,0,5],  loops:11 },
+      { id:'smoke',          type:'agent', model:'opus',   runs:122, d50:100, d95:252, c50:0.40, c95:1.20, att:1.3, v:[80,0,20], loops:22, p:{att:1.2,c95:1.10,d95:210} },
+      { id:'smoke_fix',      type:'agent', model:'opus',   runs:22,  d50:64,  d95:140, c50:0.30, c95:0.70, att:1.0, v:[91,0,9],  loops:22 },
+      { id:'acceptance',     type:'agent', model:'opus',   runs:116, d50:52,  d95:125, c50:0.36, c95:0.95, att:1.2, v:[86,1,13], loops:14 },
+      { id:'acceptance_fix', type:'agent', model:'opus',   runs:14,  d50:58,  d95:120, c50:0.24, c95:0.55, att:1.0, v:[93,0,7],  loops:14 },
+      { id:'post',           type:'agent', model:'sonnet', runs:112, d50:22,  d95:40,  c50:0.12, c95:0.22, att:1.0, v:[99,0,1],  loops:1 },
+      { id:'merge',          type:'shell', model:null,     runs:112, d50:14,  d95:26,  c50:0.00, c95:0.00, att:1.0, v:[100,0,0], loops:0 },
+    ];
+
+    const typeMeta = {
+      agent: { tag:'agent', bg:'oklch(0.96 0.03 292)', c:'oklch(0.46 0.13 292)' },
+      shell: { tag:'shell', bg:'oklch(0.96 0.004 255)', c:'oklch(0.50 0.02 255)' },
+      gate:  { tag:'gate',  bg:'oklch(0.97 0.03 75)', c:'oklch(0.48 0.11 65)' },
+    };
+
+    const mkDelta = (kind, cur, prev) => {
+      if (!isCompare || prev == null) return { show:false };
+      const d = cur - prev;
+      const thr = kind==='att' ? 0.1 : kind==='cost' ? 0.01 : 3;
+      if (Math.abs(d) < thr) return { show:false };
+      const improved = d < 0;
+      const arrow = improved ? '↓' : '↑';
+      const val = kind==='att' ? Math.abs(d).toFixed(1)
+                : kind==='cost' ? '$'+Math.abs(d).toFixed(2)
+                : fmtDur(Math.abs(d));
+      const color = improved ? 'oklch(0.44 0.12 155)' : 'oklch(0.55 0.15 22)';
+      return { show:true, text:`${arrow} ${val}`, style:`font-size:10px;font-weight:600;font-family:${mono};color:${color};` };
+    };
+
+    const rows = nodes.map(n => {
+      const isPinned = isFromCard && n.id === 'quality_review';
+      const isHot = !!n.hot;
+      const emphasize = isHot; // rose emphasis on the tail metrics
+      const tm = typeMeta[n.type];
+      let bg = 'oklch(1 0 0)', extra = '';
+      if (isPinned) { bg = 'oklch(0.975 0.02 250)'; extra = 'box-shadow:inset 3px 0 0 oklch(0.60 0.14 250);'; }
+      else if (isHot && !isEmpty) { bg = 'oklch(0.988 0.014 22)'; extra = 'box-shadow:inset 3px 0 0 oklch(0.62 0.16 22);'; }
+
+      const d95c = emphasize ? 'oklch(0.52 0.15 22)' : 'oklch(0.30 0.02 255)';
+      const c95c = emphasize ? 'oklch(0.52 0.15 22)' : 'oklch(0.30 0.02 255)';
+      const attc = emphasize ? 'oklch(0.52 0.15 22)' : (n.att > 1.0 ? 'oklch(0.34 0.02 255)' : 'oklch(0.58 0.02 255)');
+      const loopc = n.loops === 0 ? 'oklch(0.74 0.01 255)' : (emphasize ? 'oklch(0.52 0.15 22)' : 'oklch(0.40 0.02 255)');
+
+      const seg = (p, color) => `height:100%;width:${p}%;background:${color};`;
+      const [ok, inp, fail] = n.v;
+
+      return {
+        wrapStyle: `display:grid;${GT}min-width:1000px;align-items:center;column-gap:14px;padding:12px 16px;border-top:1px solid oklch(0.95 0.005 255);background:${bg};${extra}`,
+        name: n.id,
+        nameStyle: `font-size:13px;font-weight:600;font-family:${mono};color:${isPinned?'oklch(0.30 0.06 250)':'oklch(0.28 0.02 255)'};`,
+        isPinned,
+        isHotBadge: isHot && !isPinned && !isEmpty,
+        typeTag: tm.tag,
+        typeTagStyle: `font-size:8.5px;font-weight:700;letter-spacing:0.06em;font-family:${mono};background:${tm.bg};color:${tm.c};padding:2px 6px;border-radius:4px;`,
+        showModel: !!n.model,
+        model: n.model || '',
+        modelStyle: `font-size:10.5px;font-weight:500;font-family:${mono};color:oklch(0.44 0.10 292);background:oklch(0.975 0.02 292);padding:2px 7px;border-radius:4px;`,
+        runs: String(n.runs),
+        d50: fmtDur(n.d50), d95: fmtDur(n.d95),
+        d95Style: `color:${d95c};font-weight:${emphasize?600:500};`,
+        durDelta: mkDelta('dur', n.d95, n.p && n.p.d95),
+        costBlank: isBlank,
+        costShown: !isBlank,
+        c50: fmtCost(n.c50), c95: fmtCost(n.c95),
+        c95Style: `color:${c95c};font-weight:${emphasize?600:500};`,
+        costDelta: isBlank ? { show:false } : mkDelta('cost', n.c95, n.p && n.p.c95),
+        att: n.att.toFixed(1),
+        attStyle: `font-size:13px;font-family:${mono};color:${attc};font-weight:${emphasize?600:400};`,
+        attDelta: mkDelta('att', n.att, n.p && n.p.att),
+        vokStyle: seg(ok, GREEN), vinStyle: seg(inp, AMBER), vfailStyle: seg(fail, ROSE),
+        verdictTitle: `${ok}% succeeded · ${inp}% needs input · ${fail}% failed`,
+        verdictLabel: `${ok}% ok${fail>0?` · ${fail}% fail`:''}`,
+        verdictLabelStyle: `font-size:10px;font-family:${mono};color:${fail>=25?'oklch(0.54 0.14 22)':'oklch(0.58 0.02 255)'};`,
+        loops: String(n.loops),
+        loopStyle: `font-size:13px;font-family:${mono};color:${loopc};font-weight:${n.loops>=40?600:400};`,
+      };
+    });
+
+    // ---- stat band ----
+    const statWrap = (i) => `padding:14px 16px;display:flex;flex-direction:column;gap:6px;${i<3?'border-right:1px solid oklch(0.94 0.005 255);':''}`;
+    const bigVal = (c) => `font-size:21px;font-weight:600;letter-spacing:-0.01em;font-family:${mono};color:${c};`;
+    let statData;
+    if (isEmpty) {
+      statData = [['TOTAL RUNS','3',INK],['COMPLETED','1 · 33%',INK],['TOTAL SPEND','$4.90',INK],['MEDIAN END-TO-END','—','oklch(0.74 0.01 255)']];
+    } else {
+      const spend = isBlank ? ['TOTAL SPEND','—','oklch(0.74 0.01 255)'] : ['TOTAL SPEND','$214.60',INK];
+      statData = [['TOTAL RUNS','128',INK],['COMPLETED','116 · 91%',INK], spend, ['MEDIAN END-TO-END','43m',INK]];
+    }
+    const stats = statData.map((d, i) => ({ wrapStyle: statWrap(i), label:d[0], value:d[1], valStyle: bigVal(d[2]) }));
+
+    // ---- insight strip ----
+    let insight = { show:false };
+    if (isEmpty || isFromCard) {
+      insight = { show:false };
+    } else if (isBlank) {
+      insight = { show:true, tag:'COST', msg:'Cost lights up once executors report spend. Duration, attempts and verdicts are recording live right now.',
+        wrapStyle:'display:flex;align-items:center;gap:12px;background:oklch(0.985 0.004 255);border:1px solid oklch(0.92 0.006 255);border-radius:11px;padding:12px 15px;',
+        tagStyle:`font-size:9.5px;font-weight:700;letter-spacing:0.06em;font-family:${mono};color:oklch(0.52 0.02 255);background:oklch(0.95 0.004 255);padding:3px 8px;border-radius:5px;white-space:nowrap;`,
+        msgColor:'oklch(0.48 0.02 255)' };
+    } else if (isCompare) {
+      insight = { show:true, tag:'v3 → v4', msg:'Capping quality_review retries cut its mean attempts 3.1 → 2.4 and p95 spend $2.60 → $1.90. smoke got slower (p95 3m 30s → 4m 12s) — worth a look before the next save.',
+        wrapStyle:'display:flex;align-items:center;gap:12px;background:oklch(0.98 0.02 292);border:1px solid oklch(0.91 0.04 292);border-radius:11px;padding:12px 15px;',
+        tagStyle:`font-size:9.5px;font-weight:700;letter-spacing:0.04em;font-family:${mono};color:oklch(0.46 0.14 292);background:oklch(0.96 0.03 292);padding:3px 8px;border-radius:5px;white-space:nowrap;`,
+        msgColor:'oklch(0.44 0.08 292)' };
+    } else {
+      insight = { show:true, tag:'HOTSPOT', msg:'quality_review (opus) is where run time and spend concentrate — 39% of visits fail, driving mean attempts to 2.4 and p95 spend to $1.90. Try a cheaper model or a tighter prompt here first.',
+        wrapStyle:'display:flex;align-items:center;gap:12px;background:oklch(0.985 0.02 22);border:1px solid oklch(0.90 0.04 22);border-radius:11px;padding:12px 15px;',
+        tagStyle:`font-size:9.5px;font-weight:700;letter-spacing:0.05em;font-family:${mono};color:oklch(0.54 0.16 22);background:oklch(0.96 0.03 22);padding:3px 8px;border-radius:5px;white-space:nowrap;`,
+        msgColor:'oklch(0.46 0.08 22)' };
+    }
+
+    // ---- version + window controls ----
+    const verChip = isCompare ? 'v3 → v4' : isFromCard ? 'v3' : 'v4';
+    const verChipStyle = `font-size:14px;font-weight:600;font-family:${mono};padding:6px 12px;border-radius:8px;` +
+      (isCompare ? 'background:oklch(0.96 0.03 292);color:oklch(0.44 0.14 292);'
+       : isFromCard ? 'background:oklch(0.95 0.03 250);color:oklch(0.44 0.13 250);'
+       : 'background:oklch(0.96 0.004 255);color:oklch(0.34 0.02 255);');
+    const compareBtnStyle = `font-size:12px;font-weight:600;border-radius:8px;padding:7px 12px;border:1px solid ${isCompare?'oklch(0.86 0.05 292)':'oklch(0.90 0.006 255)'};background:${isCompare?'oklch(0.97 0.02 292)':'oklch(1 0 0)'};color:${isCompare?'oklch(0.46 0.13 292)':'oklch(0.44 0.02 255)'};`;
+    const compareBtnLabel = isCompare ? 'Exit compare' : 'Compare versions';
+
+    const winKeys = [['7d','7 days'],['30d','30 days'],['all','All time']];
+    const winSel = isEmpty ? '7d' : s.window;
+    const winOpts = winKeys.map(([k,label]) => {
+      const on = k === winSel;
+      return { label,
+        onClick: () => this.setState({ window:k }),
+        style: `font-size:12px;font-weight:600;padding:6px 12px;border-radius:6px;border:none;` +
+          (on ? 'background:oklch(1 0 0);color:oklch(0.28 0.02 255);box-shadow:0 1px 2px oklch(0.5 0.03 255/0.14);' : 'background:transparent;color:oklch(0.52 0.02 255);') };
+    });
+
+    const sw = (k) => `font-size:11.5px;font-weight:600;padding:6px 11px;border-radius:7px;border:none;` +
+      (view===k ? 'background:oklch(0.95 0.03 292);color:oklch(0.44 0.14 292);' : 'background:transparent;color:oklch(0.50 0.02 255);');
+
+    const tableCaption = isEmpty ? 'CODE FLOW · 14 nodes · flow order'
+      : isCompare ? 'CODE FLOW · 14 nodes · Δ vs v3'
+      : isFromCard ? 'CODE FLOW · 14 nodes · v3'
+      : 'CODE FLOW · 14 nodes · flow order';
+
+    return {
+      sw: { populated:sw('populated'), blank:sw('blank'), compare:sw('compare'), empty:sw('empty'), fromcard:sw('fromcard') },
+      onView_populated: () => this.setState({ view:'populated' }),
+      onView_blank: () => this.setState({ view:'blank' }),
+      onView_compare: () => this.setState({ view:'compare' }),
+      onView_empty: () => this.setState({ view:'empty' }),
+      onView_fromcard: () => this.setState({ view:'fromcard' }),
+      onToggleCompare: () => this.setState({ view: this.state.view==='compare' ? 'populated' : 'compare' }),
+      isFromCard, isEmpty, showRows: !isEmpty,
+      headStyle: `display:grid;${GT}min-width:1000px;align-items:end;column-gap:14px;padding:11px 16px;background:oklch(0.975 0.004 255);border-bottom:1px solid oklch(0.92 0.006 255);`,
+      rows, stats, insight,
+      verChip, verChipStyle, compareBtnStyle, compareBtnLabel, winOpts,
+      tableCaption,
+    };
+  }
+}
+</script>
+</body>
+</html>
