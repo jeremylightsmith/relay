@@ -63,7 +63,7 @@
       "host": "fixture-host",
       "interval": 30,
       "name": "fixture",
-      "version": 19
+      "version": 21
     }
   },
   "heartbeat": {
@@ -85,14 +85,14 @@
         "host": "fixture-host",
         "interval": 30,
         "name": "fixture",
-        "version": 19
+        "version": 21
       },
       "running": []
     },
     "response": {
       "executor_outdated": false,
       "release_runs": [],
-      "required_version": 19,
+      "required_version": 21,
       "revoked": [],
       "want_capabilities": false
     }

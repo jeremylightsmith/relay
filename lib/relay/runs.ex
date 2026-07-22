@@ -831,7 +831,12 @@ defmodule Relay.Runs do
   # (RLY-224 landed EXECUTOR_VERSION 18 on main first, with git-fetch retry but no $RELAY_PLAN
   # support, so 18 alone is NOT sufficient here — the floor must be the version that actually
   # carries RELAY_PLAN, which is 19 once both changes are combined.)
-  @min_executor_version 19
+  # RLY-231 raised this to 21: the executor moved from a fixed reused slot pool (`exec-work-N`,
+  # bound through an in-memory map) to one fresh worktree per card. A pre-21 executor still runs
+  # the slot pool and reads the heartbeat `release_runs` reply as bare ids (it is now
+  # {run_id, status} maps), so against the new server it would mis-bind worktrees and never
+  # release them — worse than a stopped one.
+  @min_executor_version 21
 
   @doc "The minimum `bin/relay` EXECUTOR_VERSION this server will claim jobs to."
   def min_executor_version, do: @min_executor_version
