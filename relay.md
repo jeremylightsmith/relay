@@ -236,25 +236,35 @@ table above, runs each in an executor-owned git worktree, and reports a typed ou
     "namespace": "exec",
     "capacity": { "shared_clean": 3, "exclusive": 1 },
     "poll_timeout": 25,
-    "heartbeat_interval": 15
+    "heartbeat_interval": 15,
+    "cache_dir": "~/.relay/cache",
+    "prepare": ".relay/prepare-worktree.sh",
+    "max_retained_failed": 3
   }
   ```
 
   `name` defaults to the hostname, `namespace` to `exec`; a missing file falls back to
   `capacity: {shared_clean: 1, exclusive: 1}`. `capacity` is the field you'll routinely edit —
   it caps how many `shared_clean` jobs and how many `exclusive` run-slots this executor
-  advertises at once. Worktrees for both classes live under the `exec-*` namespace
-  (`exec-clean`, `exec-work-1`, …), auto-created.
+  advertises at once. The three per-card-worktree keys are optional (RLY-231): `cache_dir` is a
+  warm dep/build cache passed to the prepare hook, `prepare` is the path to that hook (default
+  `.relay/prepare-worktree.sh`), and `max_retained_failed` caps how many failed-run worktrees
+  are kept on disk for post-mortem before the oldest is evicted (default 3). Worktrees for both
+  classes live under the `exec-*` namespace: `shared_clean` jobs share one reused `exec-clean`
+  worktree, and each `exclusive` **card** gets its own `exec-<ref>` worktree (e.g.
+  `exec-RLY-231`), created on demand and torn down when its run terminates — no fixed
+  `exec-work-N` pool.
 
-- **Test database per slot (RLY-213).** `exclusive` capacity above 1 means multiple Code runs
-  execute concurrently, each in its own `exec-work-N` worktree — and each now gets its own
-  Postgres test database too, so two runs' `mix test` invocations (including the `precommit`
-  gate) don't truncate each other's rows. `bin/relay` derives `MIX_TEST_PARTITION` from the
-  slot name (`partition_for`) and exports it for every shell/agent step: `exec-work-N` ->
-  partition `N`, the shared `exec-clean` -> partition `0`. `config/test.exs` already reads
+- **Test database per active worktree (RLY-213).** `exclusive` capacity above 1 means multiple
+  Code runs execute concurrently, each in its own per-card `exec-<ref>` worktree — and each now
+  gets its own Postgres test database too, so two runs' `mix test` invocations (including the
+  `precommit` gate) don't truncate each other's rows. `bin/relay` assigns `MIX_TEST_PARTITION`
+  from a free-list index held by each active worktree's registry record
+  (`ExecutorPool.partition_for`, recycled on teardown) and exports it for every shell/agent
+  step; the shared `exec-clean` is always partition `0`. `config/test.exs` already reads
   `MIX_TEST_PARTITION` into the database name (`relay_test$MIX_TEST_PARTITION`), so `mix test`
   creates the database on first use — but on a cold machine it's faster to provision every
-  slot's database up front, once per slot you plan to allow:
+  partition's database up front, one per exclusive run-slot you plan to allow:
 
   ```sh
   MIX_ENV=test MIX_TEST_PARTITION=1 mix ecto.create

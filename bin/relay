@@ -68,8 +68,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 22
-EXECUTOR_FINGERPRINT = "867fd5b935e02968301f59195477a05802a94b935dd9406a41322973caa134b7"
+EXECUTOR_VERSION = 24
+EXECUTOR_FINGERPRINT = "fe552facf9f48cb6f1b5f8057953126e738f2a168c2aa500e6f658f4774fbaff"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -332,10 +332,11 @@ class ExecutorHeartbeat:
         self.running_fn = running_fn
         self.on_revoke = on_revoke
         # RLY-218: the run-scoped release channel, symmetric with on_revoke one level up.
-        # bound_fn -> the idle-bound run-ids to report; on_release_run(run_id) -> free that slot.
-        # Both default to safe no-ops so a heartbeat constructed without them still beats.
+        # bound_fn -> the idle-bound run-ids to report; on_release_run(run_id, status) -> tear
+        # down (done/cancelled) or retain (failed) that worktree. Both default to safe no-ops so
+        # a heartbeat constructed without them still beats.
         self.bound_fn = bound_fn or (lambda: [])
-        self.on_release_run = on_release_run or (lambda _run_id: None)
+        self.on_release_run = on_release_run or (lambda _run_id, _status=None: None)
         self.interval = interval
         self.capacity = capacity or {}
         # Last inventory hash the server ACKNOWLEDGED. None ⇒ send on the next beat, so the
@@ -372,8 +373,14 @@ class ExecutorHeartbeat:
                 self._caps_hash = None
             for job_id in resp.get("revoked", []):
                 self.on_revoke(job_id)
-            for run_id in resp.get("release_runs", []):
-                self.on_release_run(run_id)
+            for item in resp.get("release_runs", []):
+                # RLY-231: the reply now names each terminal bound run with its STATUS so the
+                # recovery teardown can remove (done/cancelled) vs retain (failed). Tolerate the
+                # legacy bare-int form (status None → remove) for a server mid-deploy.
+                if isinstance(item, dict):
+                    self.on_release_run(item.get("run_id"), item.get("status"))
+                else:
+                    self.on_release_run(item, None)
         except SystemExit:      # api() die()s on HTTP/network error
             pass
         except Exception:
@@ -795,6 +802,7 @@ def load_executor_config():
         "capacity": {"shared_clean": 1, "exclusive": 1},
         "poll_timeout": 25,
         "heartbeat_interval": 15,
+        "max_retained_failed": 3,
     }
     try:
         with open(EXECUTOR_CONFIG_PATH) as f:
@@ -917,23 +925,6 @@ def refresh_worktree(name, base):
     reset_worktree(path, base)
 
 
-def partition_for(slot):
-    """The MIX_TEST_PARTITION for an executor slot (RLY-213).
-
-    config/test.exs names the test database `relay_test$MIX_TEST_PARTITION`, and Ecto's SQL
-    sandbox isolates concurrent tests only WITHIN one BEAM — two slots running `mix test` as
-    separate OS processes against one database read and truncate each other's rows. The pool
-    already isolates the filesystem (one git worktree per exclusive run); this isolates the
-    database the same way, keyed off the same slot name so the two can never disagree.
-
-    `<ns>-work-N` -> "N"; the shared `<ns>-clean` -> "0". Several shared_clean jobs do share
-    partition 0, which is acceptable today (brainstorm/write_plan do not run the suite) and is
-    still strictly better than sharing with a Code run.
-    """
-    m = re.search(r"-work-(\d+)$", slot)
-    return m.group(1) if m else "0"
-
-
 def scratch_path(slot_path, ref, node):
     """Where an agent node writes scratch output (findings, logs) — RLY-214.
 
@@ -983,68 +974,103 @@ TERMINAL_RUN_STATES = ("done", "failed", "cancelled")
 ISOLATION_CLASSES = ("shared_clean", "exclusive")
 
 
+RETAINED_MARKER = ".relay-retained"   # gitignored sentinel at a retained worktree's root
+
+
+def _sanitize_ref(ref):
+    """A filesystem/git-safe worktree suffix from a card ref. Refs are normally already
+    safe (`RLY-231`); this only guards a ref that carries a slash or space."""
+    return re.sub(r"[^A-Za-z0-9._-]", "-", str(ref))
+
+
 class ExecutorPool:
     """Executor-local worktree mapping (never sent to the server). Namespace-disjoint from the
     watcher's work pool so both runners run at once.
 
       shared_clean -> one shared worktree `<ns>-clean`, up to `capacity.shared_clean` concurrent
                       jobs, REUSED (never reset per-job); fast-forwarded to base only when every
-                      shared slot is idle (the watcher's scan() discipline).
-      exclusive    -> a fixed pool `<ns>-work-1..N`; a slot is BOUND to a run from its first job
-                      until the run reaches a terminal run_state, and reset only on that first job
-                      (a run's nodes share one worktree — the branch diff is the reviewers' bus).
+                      shared slot is idle (the watcher's scan() discipline). UNCHANGED (RLY-231).
+      exclusive    -> ONE worktree PER CARD, `<ns>-<ref>`, created on the card's first job and
+                      torn down when the run terminates (RLY-231). Never reused across cards.
+                      Identity is the card's branch, so cross-contamination is impossible by
+                      construction; the binding is derivable from `git worktree list`, so a
+                      restart re-derives it (recover()).
+
+    Each exclusive worktree is tracked in `self.wts` (name -> record) in one of two states:
+      active   -> bound to a non-terminal run; counts toward `max_worktrees`; holds a
+                  MIX_TEST_PARTITION index (RLY-213); `live` True while a job runs in it.
+      retained -> a `failed` run's leftover kept for post-mortem; NOT counted; no partition;
+                  marked on disk (RETAINED_MARKER); evictable oldest-first past
+                  `max_retained_failed` or under capacity pressure.
     """
 
     def __init__(self, cfg, base="origin/main"):
         self.ns = cfg.get("namespace", "exec")
         self.base = base
+        self.cfg = cfg
         self.cap_shared = cfg["capacity"]["shared_clean"]
-        self.cap_excl = cfg["capacity"]["exclusive"]
+        self.max_worktrees = cfg["capacity"]["exclusive"]
+        self.max_retained_failed = cfg.get("max_retained_failed", 3)
         self.shared_name = f"{self.ns}-clean"
         self.shared_used = 0
-        # exclusive slot name -> run_id it is bound to (None = free)
-        self.excl = {f"{self.ns}-work-{i}": None for i in range(1, self.cap_excl + 1)}
-        # RLY-218: slot names that currently have a LIVE job. A slot in `active` is never
-        # reported as idle-bound and is never freed by release_run — this keeps the run-scoped
-        # release path (idle runs) disjoint from the outcome/revoke path (live jobs) and makes
-        # the double-release race unreachable.
-        self.active = set()
+        # name -> {"run_id", "state": "active"|"retained", "live": bool, "partition": str|None}
+        self.wts = {}
+        # free MIX_TEST_PARTITION indices for active worktrees (RLY-213); "0" is shared_clean's.
+        self.free_partitions = [str(i) for i in range(1, self.max_worktrees + 1)]
         self.lock = threading.Lock()
 
+    # ---- names ----------------------------------------------------------
+    def wt_name(self, ref):
+        return f"{self.ns}-{_sanitize_ref(ref)}"
+
+    def _retired_pool_slot(self, name):
+        """True if `name` is a `<ns>-work-N` worktree from the RETIRED fixed pool (RLY-231).
+        No real card ref sanitizes to `work-N`, so this shape is unambiguously a stale slot to
+        reclaim on recover(), never a per-card worktree to adopt."""
+        return re.fullmatch(rf"{re.escape(self.ns)}-work-\d+", name) is not None
+
+    # ---- partition free-list (RLY-213), caller holds self.lock ----------
+    def _take_partition(self):
+        return self.free_partitions.pop(0) if self.free_partitions else None
+
+    def _release_partition(self, rec):
+        if rec.get("partition") is not None:
+            self.free_partitions.append(rec["partition"])
+            self.free_partitions.sort(key=int)
+            rec["partition"] = None
+
+    def _active_count(self):
+        return sum(1 for r in self.wts.values() if r["state"] == "active")
+
+    def partition_for(self, slot):
+        """The MIX_TEST_PARTITION for a worktree (RLY-213). shared_clean -> "0"; an active
+        per-card worktree -> its held index; anything else -> "0" (safe default)."""
+        if slot == self.shared_name:
+            return "0"
+        with self.lock:
+            rec = self.wts.get(slot)
+            return rec["partition"] if rec and rec.get("partition") else "0"
+
+    # ---- capacity / polling --------------------------------------------
     def capacity(self):
-        """Currently-free capacity per class, for advertising on a claim. A slot bound to a
-        parked run counts as NOT free (exclusive affinity is absolute — ADR 0006 §5)."""
         with self.lock:
             return {
                 "shared_clean": max(0, self.cap_shared - self.shared_used),
-                "exclusive": sum(1 for bound in self.excl.values() if bound is None),
+                "exclusive": max(0, self.max_worktrees - self._active_count()),
             }
 
     def has_bound_slots(self):
-        """True while any exclusive slot is bound to a run (running or parked). The
-        execute loop keeps polling in that case even at 0 free capacity: the bound
-        run may have a pinned resume/next job the server hands over regardless of
-        advertised capacity (exclusive affinity — ADR 0006 §5)."""
+        """True while any ACTIVE per-card worktree is bound to a run — the poller keeps polling
+        so a pinned resume/next job can be handed over regardless of advertised capacity.
+        Retained worktrees are terminal and do NOT keep the poller alive."""
         with self.lock:
-            return any(bound is not None for bound in self.excl.values())
+            return any(r["state"] == "active" for r in self.wts.values())
 
-    def ensure(self):
-        ensure_worktree(self.shared_name, self.base)
-        for name in self.excl:
-            ensure_worktree(name, self.base)
-
-    def refresh_idle_shared(self):
-        """The idle-check and the reset must be one atomic step under the pool lock:
-        refresh_worktree()'s hard reset + git clean assumes the worktree is idle for its
-        whole duration (see reset_worktree's docstring), so dropping the lock in between
-        would let assign() hand the worktree to a job mid-reset."""
-        with self.lock:
-            if self.shared_used == 0:
-                refresh_worktree(self.shared_name, self.base)
-
+    # ---- assign ---------------------------------------------------------
     def assign(self, job):
-        """Reserve a slot for `job`; return (slot_name, reset?) or None when no slot is free.
-        reset? is True only for the first job of an exclusive run."""
+        """Reserve a worktree for `job`; return (slot_name, reset?) or None if none is free.
+        reset? is True when the worktree must be created/re-baselined + warmed (first job of a
+        run, or reclaim of a retained one) and False when a live/recovered worktree is reused."""
         iso = job["isolation"]
         run_id = job["run_id"]
         with self.lock:
@@ -1053,52 +1079,259 @@ class ExecutorPool:
                     return None
                 self.shared_used += 1
                 return self.shared_name, False
-            for name, bound in self.excl.items():          # reuse the run's own slot
-                if bound == run_id:
-                    self.active.add(name)
-                    return name, False
-            for name, bound in self.excl.items():          # else take a free slot
-                if bound is None:
-                    self.excl[name] = run_id
-                    self.active.add(name)
-                    return name, True
+
+            name = self.wt_name(job["vars"]["ref"])
+            rec = self.wts.get(name)
+
+            # Reuse an active worktree already bound to this run (a later node), OR one recovered
+            # from disk with an unknown binding (run_id None) that this job now adopts. Never
+            # re-baseline here — the branch holds the run's commits.
+            if rec and rec["state"] == "active" and rec["run_id"] in (run_id, None):
+                rec["run_id"] = run_id
+                rec["live"] = True
+                return name, False
+
+            # Reclaim a retained (failed) worktree for a new run of the same card: re-baseline it.
+            if rec and rec["state"] == "retained":
+                if self._active_count() >= self.max_worktrees:
+                    return None
+                if rec.get("partition") is None:
+                    rec["partition"] = self._take_partition()
+                rec.update(run_id=run_id, state="active", live=True)
+                return name, True
+
+            # A brand-new card: create a fresh worktree if there is room.
+            if rec is None:
+                if self._active_count() >= self.max_worktrees:
+                    return None
+                self.wts[name] = {"run_id": run_id, "state": "active", "live": True,
+                                  "partition": self._take_partition()}
+                return name, True
+
+            # rec is active but bound to a *different* live run (should not happen — one card
+            # never runs twice at once). Refuse rather than steal a live worktree.
             return None
 
+    # ---- release (outcome / revoke path) --------------------------------
     def release(self, job, slot, run_state):
-        """Free/keep the slot per the outcome's run_state. shared_clean always frees; an
-        exclusive slot stays bound while running/parked and unbinds on a terminal state
-        (done/failed/cancelled) or a revoke (run_state=None). Either way the slot no longer has
-        a live job, so it leaves `active` (RLY-218)."""
-        with self.lock:
-            if job["isolation"] == "shared_clean":
+        """Free/keep the worktree per the outcome's run_state. shared_clean always frees a slot.
+        For an exclusive per-card worktree: running/parked keep it active; done/cancelled tear it
+        down; failed retains it; a revoke (run_state=None) leaves it active and bound so the
+        pinned run resumes in it (the mid-run reset-on-revoke is GONE — never-detach, RLY-231)."""
+        if job["isolation"] == "shared_clean":
+            with self.lock:
                 self.shared_used = max(0, self.shared_used - 1)
+            return
+        with self.lock:
+            rec = self.wts.get(slot)
+            if rec is None:
                 return
-            self.active.discard(slot)
-            if run_state in ACTIVE_RUN_STATES:
-                return
-            if slot in self.excl:
-                self.excl[slot] = None
+            rec["live"] = False
+            if run_state is None or run_state in ACTIVE_RUN_STATES:
+                return                                  # revoke or still-live: keep active+bound
+            self._finish_locked(slot, rec, run_state)
+
+    def release_run(self, run_id, status=None):
+        """Recovery path: the heartbeat named `run_id` terminal (server-side) while this executor
+        holds its worktree with no live job. Tear it down (done/cancelled) or retain it (failed)
+        per `status`. A legacy server may send status=None → default to removal (the old
+        behavior). Never touch a worktree with a live job (defense-in-depth)."""
+        with self.lock:
+            for name, rec in list(self.wts.items()):
+                if rec["run_id"] == run_id and rec["state"] == "active" and not rec["live"]:
+                    self._finish_locked(name, rec, status or "done")
+
+    def _finish_locked(self, slot, rec, run_state):
+        """Terminal disposition of an active worktree. Caller holds self.lock."""
+        self._release_partition(rec)
+        if run_state == "failed":
+            rec["state"] = "retained"
+            rec["run_id"] = None
+            self._teardown(slot, retain=True)
+            self._evict_retained_over_cap_locked()
+        else:  # done | cancelled
+            self.wts.pop(slot, None)
+            self._teardown(slot, retain=False)
 
     def idle_bound_run_ids(self):
-        """Run-ids of exclusive slots that are BOUND but have no live job on this executor — what
-        the heartbeat sends as `bound_runs` (RLY-218). A slot with a live job (`name in
-        self.active`) is excluded: reporting it could let the server name a still-running run for
-        release and free its worktree out from under the job (the double-release race). Distinct:
-        a run holds at most one exclusive slot, but dedupe defensively."""
+        """Run-ids of ACTIVE worktrees with no live job — the heartbeat's `bound_runs`. A
+        worktree with a live job is excluded so the server can never name a still-running run for
+        release. Recovered worktrees (run_id None) are excluded (nothing to report yet)."""
         with self.lock:
-            return list({run_id for name, run_id in self.excl.items()
-                         if run_id is not None and name not in self.active})
+            return list({r["run_id"] for r in self.wts.values()
+                         if r["state"] == "active" and not r["live"]
+                         and r["run_id"] is not None})
 
-    def release_run(self, run_id):
-        """Unbind every IDLE slot bound to `run_id` — the server reported it terminal
-        (`release_runs`). The `not in self.active` guard is defense-in-depth: a slot with a live
-        job is never freed here (that run releases only through the outcome/revoke path), so the
-        double-release race is unreachable even if the server ever names a still-running run. No
-        worktree reset — deferred to the next run's first assign, matching the existing release."""
+    # ---- retention eviction --------------------------------------------
+    def _evict_retained_over_cap_locked(self):
+        retained = [n for n, r in self.wts.items() if r["state"] == "retained"]
+        if len(retained) <= self.max_retained_failed:
+            return
+        # Oldest-first by the worktree dir's mtime (survives restarts; no in-memory clock).
+        retained.sort(key=lambda n: _worktree_mtime(worktree_path(n)))
+        for name in retained[:len(retained) - self.max_retained_failed]:
+            self.wts.pop(name, None)
+            self._teardown(name, retain=False)
+
+    # ---- git plumbing (worktree lifecycle) ------------------------------
+    def create_or_rebaseline(self, slot):
+        """Make `slot` a clean worktree at base. Missing -> `git worktree add --detach`; an
+        existing (reclaimed retained) one -> hard reset + clean to base (salvaging dirty edits via
+        stash, per reset_worktree) and clear its retained marker. It is fine to sit DETACHED at
+        base here: the flow's first node (`branch`) runs `git checkout -B {branch} origin/main`,
+        attaching the branch before any commit (the check_branch_attached/reattach exception for
+        "checkout -B" covers it)."""
+        path = worktree_path(slot)
+        if os.path.isdir(path):
+            reset_worktree(path, self.base)
+            _clear_retained_marker(path)
+            return
+        if not git_fetch_with_retry(ROOT):
+            die("git fetch failed while creating a per-card worktree")
+        if not git_worktree_with_retry(["add", "--detach", path, self.base]):
+            die(f"git worktree add failed for {slot}")
+
+    def _teardown(self, slot, retain):
+        """Remove (done/cancelled) or retain (failed) a per-card worktree. Salvages any dirty
+        edits via `git stash` first (preserving today's safety). Retained worktrees stay on disk
+        with RETAINED_MARKER so a restart classifies them; removal routes through the shared-.git
+        retry discipline (RLY-224/§6)."""
+        path = worktree_path(slot)
+        if not os.path.isdir(path):
+            return
+        dirty = subprocess.run(["git", "status", "--porcelain"], cwd=path,
+                               capture_output=True, text=True).stdout.strip()
+        if dirty:
+            subprocess.run(["git", "stash", "push", "-u", "-m", f"auto-salvage {slot}"],
+                           cwd=path, check=False)
+        if retain:
+            _write_retained_marker(path)
+            return
+        git_worktree_with_retry(["remove", "--force", path])
+        git_worktree_with_retry(["prune"])
+
+    def run_prepare_hook(self, slot_path, ref, branch):
+        """Warm a freshly created/re-baselined worktree via the project's prepare hook (§4).
+        Location: `.relay/prepare-worktree.sh` if present+executable, else the `prepare` command
+        from executor.json, else SKIP (no-op — a cold build is correct, not an error). Inputs go
+        as BOTH argv and env. Returns None on success/skip, or captured stderr on nonzero exit —
+        a failing hook FAILS the run (decision 2)."""
+        hook = self.cfg.get("prepare") or os.path.join(".relay", "prepare-worktree.sh")
+        hook_abs = hook if os.path.isabs(hook) else os.path.join(ROOT, hook)
+        if not (os.path.isfile(hook_abs) and os.access(hook_abs, os.X_OK)):
+            return None
+        cache_dir = os.path.expanduser(self.cfg.get("cache_dir") or "")
+        hook_env = dict(os.environ,
+                        RELAY_WORKTREE=slot_path, RELAY_REF=str(ref),
+                        RELAY_BRANCH=str(branch or ""), RELAY_BASE=self.base,
+                        RELAY_CACHE_DIR=cache_dir)
+        proc = subprocess.run([hook_abs, slot_path, str(ref), str(branch or ""),
+                               self.base, cache_dir],
+                              cwd=slot_path, env=hook_env, capture_output=True, text=True)
+        if proc.returncode == 0:
+            return None
+        return (proc.stderr or proc.stdout or f"prepare hook exited {proc.returncode}").strip()
+
+    # ---- startup / recovery --------------------------------------------
+    def ensure(self):
+        """Create the reused shared_clean worktree up front; per-card exclusive worktrees are
+        created on demand in create_or_rebaseline. Then recover any per-card worktrees already on
+        disk from a prior process (restart-safe binding, RLY-231 AC #8)."""
+        ensure_worktree(self.shared_name, self.base)
+        self.recover()
+
+    def recover(self):
+        """Rebuild the registry from `git worktree list` after a restart. A `<ns>-<ref>` worktree
+        with RETAINED_MARKER is retained; otherwise active with an UNKNOWN binding (run_id None) —
+        its resuming job adopts it (assign's reset=False branch) without re-baselining, so commits
+        on its branch survive. Capacity is therefore correct immediately, with no in-memory
+        run_id->slot map to lose.
+
+        A `<ns>-work-N` worktree is NOT a per-card worktree — it is a slot left behind by the
+        RETIRED fixed pool (RLY-231). The forced version-floor bump makes this upgrade in place,
+        so recover() reclaims those stale slots (remove+prune) instead of adopting them; otherwise
+        each would masquerade as a phantom active worktree with run_id None, permanently consuming
+        an exclusive partition that nothing can ever free."""
         with self.lock:
-            for name, bound in self.excl.items():
-                if bound == run_id and name not in self.active:
-                    self.excl[name] = None
+            for path in _list_worktree_paths():
+                name = os.path.basename(path)
+                if name == self.shared_name or not name.startswith(self.ns + "-"):
+                    continue
+                if name in self.wts:
+                    continue
+                if self._retired_pool_slot(name):
+                    git_worktree_with_retry(["remove", "--force", path])
+                    git_worktree_with_retry(["prune"])
+                    continue
+                if _is_retained_worktree(path):
+                    self.wts[name] = {"run_id": None, "state": "retained",
+                                      "live": False, "partition": None}
+                else:
+                    self.wts[name] = {"run_id": None, "state": "active", "live": False,
+                                      "partition": self._take_partition()}
+            self._evict_retained_over_cap_locked()
+
+    def refresh_idle_shared(self):
+        with self.lock:
+            if self.shared_used == 0:
+                refresh_worktree(self.shared_name, self.base)
+
+
+def git_worktree_with_retry(args):
+    """`git worktree <args...>` (add/remove/prune) in ROOT, retried on the shared-ref-db race
+    (RLY-224 extended to worktree mutations, §6). Per-card worktrees share one `.git`, so two
+    concurrent creates/teardowns race on the worktree list + ref db. Returns True on success;
+    on final failure prints the captured stderr and returns False."""
+    last_err = ""
+    for attempt in range(1, GIT_FETCH_MAX_ATTEMPTS + 1):
+        proc = subprocess.run(["git", "worktree", *args], cwd=ROOT,
+                              capture_output=True, text=True)
+        if proc.returncode == 0:
+            return True
+        last_err = proc.stderr or proc.stdout or ""
+        if attempt < GIT_FETCH_MAX_ATTEMPTS:
+            _fetch_backoff(attempt)
+    sys.stderr.write(last_err)
+    return False
+
+
+def _list_worktree_paths():
+    """Absolute paths of every registered git worktree (for restart recovery)."""
+    proc = subprocess.run(["git", "worktree", "list", "--porcelain"], cwd=ROOT,
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        return []
+    return [line[len("worktree "):] for line in proc.stdout.splitlines()
+            if line.startswith("worktree ")]
+
+
+def _worktree_mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
+def _is_retained_worktree(path):
+    """True if `path` is a retained (failed-run) per-card worktree — its root holds the
+    RETAINED_MARKER sentinel. A dedicated seam so recovery tests can stub classification
+    without monkeypatching os.path.exists globally."""
+    return os.path.exists(os.path.join(path, RETAINED_MARKER))
+
+
+def _write_retained_marker(path):
+    try:
+        with open(os.path.join(path, RETAINED_MARKER), "w") as f:
+            f.write("retained by relay executor for post-mortem (RLY-231)\n")
+    except OSError:
+        pass
+
+
+def _clear_retained_marker(path):
+    try:
+        os.remove(os.path.join(path, RETAINED_MARKER))
+    except OSError:
+        pass
 
 
 def render(template, vars):
@@ -1165,7 +1398,7 @@ def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scr
     a JobControl can kill that group.
 
     `partition`, if given, is exported as MIX_TEST_PARTITION in the child's env (RLY-213) —
-    the caller supplies `partition_for(slot)` so every gate this job runs, including
+    the caller supplies `pool.partition_for(slot)` so every gate this job runs, including
     `precommit`, sees the slot's own test database.
 
     `scratch`, if given, is exported as RELAY_NODE_SCRATCH (RLY-214) — the caller supplies
@@ -1387,8 +1620,13 @@ def determine_agent_outcome(job, ok, outcome_path):
 
 
 def git_head_sha(path):
-    """The worktree's HEAD sha, or None when rev-parse fails."""
-    proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=path, capture_output=True, text=True)
+    """The worktree's HEAD sha, or None when rev-parse fails (including a `path` that does not
+    exist yet — e.g. a prepare-hook failure reported before the worktree was ever created)."""
+    try:
+        proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=path,
+                              capture_output=True, text=True)
+    except OSError:
+        return None
     return proc.stdout.strip() if proc.returncode == 0 else None
 
 
@@ -1479,7 +1717,7 @@ def run_node_job(job, slot_path, control, partition=None):
     Reuses the streaming primitives, tagged per job. Does NOT report — the caller POSTs the
     outcome (§6) and acts on the run_state (§3).
 
-    `partition` (the caller's `partition_for(slot)`, RLY-213) rides straight through to
+    `partition` (the caller's `pool.partition_for(slot)`, RLY-213) rides straight through to
     whichever streaming primitive runs the step — computed once by the caller, never
     re-derived here.
 
@@ -1555,19 +1793,33 @@ def execute_one(job, slot, reset, control, pool):
     reported for a revoke (§5). Always frees/keeps the slot per run_state in a finally (never
     leak a slot)."""
     slot_path = worktree_path(slot)
-    partition = partition_for(slot)
+    partition = pool.partition_for(slot)
     run_state = None
     revoked = False
     completed_outcome = None
+    unreported_crash = False   # crash whose own failure-report also failed (§ finally, below)
     try:
         if reset and not DRY:
-            reset_worktree(slot_path, pool.base)
+            # First job of a run (or reclaim of a retained worktree): create/re-baseline the
+            # per-card worktree, then warm it via the project's prepare hook. A nonzero hook
+            # FAILS the run fail-fast (RLY-231 decision 2) — report failed and skip the node so
+            # the run's worktree is retained for inspection (the finally releases with `failed`).
+            pool.create_or_rebaseline(slot)
+            ref = (job.get("vars") or {}).get("ref")
+            hook_err = pool.run_prepare_hook(slot_path, ref, (job.get("vars") or {}).get("branch"))
+            if hook_err:
+                detail = f"prepare hook failed: {hook_err}"
+                log(f"  ⚠ {ref}: {detail}", ref=ref, kind="error")
+                completed_outcome = "failed"
+                run_state = report_outcome(job["id"], "failed", detail,
+                                           git_head_sha(slot_path), None)
+                return run_state
         outcome, detail, git_sha, session_id = run_node_job(
             job, slot_path, control, partition=partition)
         if control.cancelled():
             revoked = True
-            if not DRY and job.get("isolation") != "shared_clean":
-                reset_worktree(slot_path, pool.base)
+            # RLY-231 never-detach: a revoked exclusive job's worktree belongs to exactly one
+            # card/run and is left on its branch to resume — NO reset/detach here anymore.
             return None
         completed_outcome = outcome
         run_state = report_outcome(job["id"], outcome, detail, git_sha, session_id)
@@ -1596,9 +1848,21 @@ def execute_one(job, slot, reset, control, pool):
             # let this vanish too.
             log(f"failed to report crash outcome for {job['id']}: {report_err}", kind="error")
             run_state = None
+            unreported_crash = True
         return run_state
     finally:
-        pool.release(job, slot, None if (revoked or control.cancelled()) else run_state)
+        # None here means two DIFFERENT things and the pool must not conflate them: a genuine
+        # revoke (never-detach — keep the worktree active+bound for the pinned resume) vs. a
+        # crash whose own failure-report also failed (`unreported_crash` — the server was never
+        # told, so treat it like `failed` locally: retain the worktree for post-mortem rather
+        # than leaving it bound forever as if it were still live).
+        if revoked or control.cancelled():
+            release_state = None
+        elif unreported_crash:
+            release_state = "failed"
+        else:
+            release_state = run_state
+        pool.release(job, slot, release_state)
 
 
 # ---- Single-executor startup lock (RLY-193) --------------------------------

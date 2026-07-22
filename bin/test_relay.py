@@ -899,190 +899,252 @@ class ExecutorConfigTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             relay.load_executor_config()
 
+    def test_max_retained_failed_defaults_to_three(self):
+        relay.EXECUTOR_CONFIG_PATH = "/nope/does/not/exist.json"
+        cfg = relay.load_executor_config()
+        self.assertEqual(cfg["max_retained_failed"], 3)
+        self.assertIsNone(cfg.get("cache_dir"))
+        self.assertIsNone(cfg.get("prepare"))
+
 
 class ExecutorPoolTest(unittest.TestCase):
-    CFG = {"namespace": "exec", "capacity": {"shared_clean": 2, "exclusive": 2}}
+    """Per-card worktree model (RLY-231): the exclusive class no longer has fixed
+    `-work-N` slots; each card gets a worktree named `<ns>-<ref>`, created on its
+    first job and torn down (done/cancelled) or retained (failed) at terminal."""
+
+    CFG = {"namespace": "exec",
+           "capacity": {"shared_clean": 2, "exclusive": 2},
+           "max_retained_failed": 3}
+
+    def setUp(self):
+        # All worktree git plumbing is stubbed: these tests exercise the in-memory
+        # bookkeeping, not real git. create_or_rebaseline/_teardown become no-ops.
+        for name in ("create_or_rebaseline", "_teardown"):
+            orig = getattr(relay.ExecutorPool, name)
+            self.addCleanup(setattr, relay.ExecutorPool, name, orig)
+            setattr(relay.ExecutorPool, name, lambda self, *a, **k: None)
 
     def pool(self):
         return relay.ExecutorPool(self.CFG)
 
-    def test_namespace_is_disjoint_from_the_watcher_pools(self):
-        p = self.pool()
-        names = [p.shared_name] + list(p.excl)
-        self.assertEqual(p.shared_name, "exec-clean")
-        self.assertEqual(sorted(p.excl), ["exec-work-1", "exec-work-2"])
-        self.assertTrue(all(n.startswith("exec-") for n in names))
-        self.assertNotIn("clean", names)  # the watcher's shared worktree name
-        self.assertNotIn("work-1", names)
+    def excl(self, run_id, ref):
+        return {"isolation": "exclusive", "run_id": run_id, "vars": {"ref": ref}}
 
+    # -- naming / disjointness ------------------------------------------------
+    def test_worktree_name_is_ns_dash_ref(self):
+        p = self.pool()
+        self.assertEqual(p.wt_name("RLY-231"), "exec-RLY-231")
+        self.assertEqual(p.shared_name, "exec-clean")
+
+    def test_ref_is_sanitized_for_the_filesystem(self):
+        p = self.pool()
+        self.assertEqual(p.wt_name("feat/foo bar"), "exec-feat-foo-bar")
+
+    # -- shared_clean unchanged ----------------------------------------------
     def test_shared_clean_reuses_one_worktree_without_reset(self):
         p = self.pool()
-        a = p.assign({"isolation": "shared_clean", "run_id": "r1"})
-        b = p.assign({"isolation": "shared_clean", "run_id": "r2"})
+        a = p.assign({"isolation": "shared_clean", "run_id": "r1", "vars": {"ref": "A"}})
+        b = p.assign({"isolation": "shared_clean", "run_id": "r2", "vars": {"ref": "B"}})
         self.assertEqual(a, ("exec-clean", False))
         self.assertEqual(b, ("exec-clean", False))
-        self.assertIsNone(p.assign({"isolation": "shared_clean", "run_id": "r3"}))  # cap 2
+        self.assertIsNone(p.assign({"isolation": "shared_clean", "run_id": "r3",
+                                    "vars": {"ref": "C"}}))  # cap 2
 
-    def test_shared_capacity_reflects_free_slots(self):
+    # -- create / reuse -------------------------------------------------------
+    def test_first_job_of_a_card_creates_a_fresh_worktree_and_resets(self):
         p = self.pool()
-        self.assertEqual(p.capacity()["shared_clean"], 2)
-        p.assign({"isolation": "shared_clean", "run_id": "r1"})
-        self.assertEqual(p.capacity()["shared_clean"], 1)
-        p.release({"isolation": "shared_clean", "run_id": "r1"}, "exec-clean", "done")
-        self.assertEqual(p.capacity()["shared_clean"], 2)
+        slot, reset = p.assign(self.excl("r1", "RLY-1"))
+        self.assertEqual(slot, "exec-RLY-1")
+        self.assertTrue(reset)  # first job → create + prepare
 
-    def test_first_exclusive_job_of_a_run_resets_its_slot(self):
+    def test_second_job_of_same_run_reuses_the_worktree_without_reset(self):
         p = self.pool()
-        slot, reset = p.assign({"isolation": "exclusive", "run_id": "r1"})
-        self.assertEqual(slot, "exec-work-1")
-        self.assertTrue(reset)  # first job of the run → reset before use
-
-    def test_subsequent_job_of_same_run_reuses_slot_without_reset(self):
-        p = self.pool()
-        slot1, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
-        p.release({"isolation": "exclusive", "run_id": "r1"}, slot1, "running")
-        slot2, reset2 = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        slot1, _ = p.assign(self.excl("r1", "RLY-1"))
+        p.release(self.excl("r1", "RLY-1"), slot1, "running")
+        slot2, reset2 = p.assign(self.excl("r1", "RLY-1"))
         self.assertEqual(slot2, slot1)
-        self.assertFalse(reset2)  # same run reuses the worktree as-is
+        self.assertFalse(reset2)
 
-    def test_running_and_parked_keep_the_slot_bound(self):
+    def test_a_different_card_gets_a_different_worktree(self):
         p = self.pool()
-        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
-        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "parked")
-        # parked run keeps its slot: capacity shows it as NOT free, and a different run
-        # cannot take it (only the other free slot).
-        self.assertEqual(p.capacity()["exclusive"], 1)
-        other, _ = p.assign({"isolation": "exclusive", "run_id": "r2"})
-        self.assertEqual(other, "exec-work-2")
+        s1, _ = p.assign(self.excl("r1", "RLY-1"))
+        s2, _ = p.assign(self.excl("r2", "RLY-2"))
+        self.assertEqual({s1, s2}, {"exec-RLY-1", "exec-RLY-2"})
 
-    def test_terminal_run_state_frees_the_slot(self):
+    # -- capacity -------------------------------------------------------------
+    def test_capacity_is_max_worktrees_minus_active(self):
         p = self.pool()
-        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
-        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "done")
         self.assertEqual(p.capacity()["exclusive"], 2)
-
-    def test_idle_bound_run_ids_lists_bound_slots_without_a_live_job(self):
-        p = self.pool()
-        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
-        # while the job is live the slot is active → NOT reported as idle-bound
-        self.assertEqual(p.idle_bound_run_ids(), [])
-        # a parked release keeps the binding but clears the active mark → now idle-bound
-        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "parked")
-        self.assertEqual(p.idle_bound_run_ids(), ["r1"])
-
-    def test_idle_bound_run_ids_excludes_an_active_slot(self):
-        p = self.pool()
-        s1, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
-        p.release({"isolation": "exclusive", "run_id": "r1"}, s1, "parked")  # r1 idle-bound
-        p.assign({"isolation": "exclusive", "run_id": "r2"})                 # r2 has a live job
-        self.assertEqual(p.idle_bound_run_ids(), ["r1"])
-
-    def test_release_run_frees_a_terminal_runs_idle_slot(self):
-        p = self.pool()
-        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
-        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "parked")  # idle-bound, kept
+        p.assign(self.excl("r1", "RLY-1"))
         self.assertEqual(p.capacity()["exclusive"], 1)
-        p.release_run("r1")                                    # server named it terminal
-        self.assertEqual(p.capacity()["exclusive"], 2)         # freed with no restart
-        self.assertFalse(p.has_bound_slots())
-
-    def test_release_run_skips_a_slot_with_a_live_job(self):
-        p = self.pool()
-        p.assign({"isolation": "exclusive", "run_id": "r1"})   # active, never released
-        p.release_run("r1")                                    # must NOT free an active slot
-        self.assertEqual(p.capacity()["exclusive"], 1)
-        self.assertEqual(p.idle_bound_run_ids(), [])
-
-    def test_release_run_on_an_unknown_run_id_is_a_noop(self):
-        p = self.pool()
-        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
-        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "parked")
-        p.release_run("nope")
-        self.assertEqual(p.idle_bound_run_ids(), ["r1"])       # r1 untouched
-
-    def test_revoke_run_state_none_frees_the_slot(self):
-        p = self.pool()
-        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
-        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, None)  # revoke
-        self.assertEqual(p.capacity()["exclusive"], 2)
-
-    def test_exclusive_capacity_exhausts_then_returns_none(self):
-        p = self.pool()
-        p.assign({"isolation": "exclusive", "run_id": "r1"})
-        p.assign({"isolation": "exclusive", "run_id": "r2"})
+        p.assign(self.excl("r2", "RLY-2"))
         self.assertEqual(p.capacity()["exclusive"], 0)
-        self.assertIsNone(p.assign({"isolation": "exclusive", "run_id": "r3"}))
+        self.assertIsNone(p.assign(self.excl("r3", "RLY-3")))  # beyond max_worktrees
 
-    def test_has_bound_slots_tracks_exclusive_bindings(self):
-        # The execute loop must keep polling while any exclusive slot is bound to a
-        # run, even when free capacity is 0 — the bound (possibly parked) run may
-        # have a pinned resume/next job the server will hand over regardless of
-        # advertised capacity (exclusive affinity, ADR 0006 §5). Without this the
-        # holder idles forever and the parked run never resumes.
+    def test_running_and_parked_keep_the_worktree_active(self):
         p = self.pool()
-        self.assertFalse(p.has_bound_slots())
-        slot, _ = p.assign({"isolation": "exclusive", "run_id": "r1"})
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))
+        p.release(self.excl("r1", "RLY-1"), slot, "parked")
+        self.assertEqual(p.capacity()["exclusive"], 1)  # still active
         self.assertTrue(p.has_bound_slots())
-        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "parked")
-        self.assertTrue(p.has_bound_slots())  # parked keeps the binding
-        p.release({"isolation": "exclusive", "run_id": "r1"}, slot, "done")
-        self.assertFalse(p.has_bound_slots())  # terminal frees it
 
-    def test_has_bound_slots_ignores_shared_clean(self):
+    # -- teardown / retention -------------------------------------------------
+    def test_done_removes_the_worktree_and_frees_capacity(self):
         p = self.pool()
-        p.assign({"isolation": "shared_clean", "run_id": "r1"})
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))
+        p.release(self.excl("r1", "RLY-1"), slot, "done")
+        self.assertEqual(p.capacity()["exclusive"], 2)
+        self.assertNotIn(slot, p.wts)
+
+    def test_cancelled_removes_the_worktree(self):
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))
+        p.release(self.excl("r1", "RLY-1"), slot, "cancelled")
+        self.assertNotIn(slot, p.wts)
+
+    def test_failed_retains_the_worktree_uncounted(self):
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))
+        p.release(self.excl("r1", "RLY-1"), slot, "failed")
+        self.assertIn(slot, p.wts)
+        self.assertEqual(p.wts[slot]["state"], "retained")
+        # retained does NOT count → a new card can still start up to the cap
+        self.assertEqual(p.capacity()["exclusive"], 2)
         self.assertFalse(p.has_bound_slots())
+
+    def test_a_rerun_reclaims_a_retained_worktree_with_reset(self):
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))
+        p.release(self.excl("r1", "RLY-1"), slot, "failed")     # retained
+        slot2, reset2 = p.assign(self.excl("r2", "RLY-1"))      # same card, new run
+        self.assertEqual(slot2, slot)
+        self.assertTrue(reset2)                                 # re-baseline for the new run
+        self.assertEqual(p.wts[slot]["state"], "active")
+
+    def test_revoke_leaves_the_worktree_active_and_bound(self):
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))
+        p.release(self.excl("r1", "RLY-1"), slot, None)         # revoke
+        self.assertIn(slot, p.wts)
+        self.assertEqual(p.wts[slot]["state"], "active")
+        self.assertTrue(p.has_bound_slots())                   # stays for the pinned resume
+
+    # -- partitions -----------------------------------------------------------
+    def test_two_active_worktrees_get_distinct_partitions(self):
+        p = self.pool()
+        s1, _ = p.assign(self.excl("r1", "RLY-1"))
+        s2, _ = p.assign(self.excl("r2", "RLY-2"))
+        self.assertNotEqual(p.partition_for(s1), p.partition_for(s2))
+        self.assertIn(p.partition_for(s1), ("1", "2"))
+        self.assertEqual(p.partition_for("exec-clean"), "0")
+
+    def test_teardown_releases_the_partition_for_reuse(self):
+        p = self.pool()
+        s1, _ = p.assign(self.excl("r1", "RLY-1"))
+        part = p.partition_for(s1)
+        p.release(self.excl("r1", "RLY-1"), s1, "done")
+        s2, _ = p.assign(self.excl("r2", "RLY-2"))
+        self.assertEqual(p.partition_for(s2), part)            # index recycled
+
+    # -- idle-bound / recovery release ---------------------------------------
+    def test_idle_bound_run_ids_lists_active_worktrees_without_a_live_job(self):
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))
+        self.assertEqual(p.idle_bound_run_ids(), [])           # live
+        p.release(self.excl("r1", "RLY-1"), slot, "parked")
+        self.assertEqual(p.idle_bound_run_ids(), ["r1"])
+
+    def test_release_run_done_removes_an_idle_worktree(self):
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))
+        p.release(self.excl("r1", "RLY-1"), slot, "parked")    # idle-bound
+        p.release_run("r1", "done")
+        self.assertNotIn(slot, p.wts)
+        self.assertEqual(p.capacity()["exclusive"], 2)
+
+    def test_release_run_failed_retains_an_idle_worktree(self):
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))
+        p.release(self.excl("r1", "RLY-1"), slot, "parked")
+        p.release_run("r1", "failed")
+        self.assertEqual(p.wts[slot]["state"], "retained")
+
+    def test_release_run_skips_a_worktree_with_a_live_job(self):
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))           # live
+        p.release_run("r1", "done")                            # must NOT tear down
+        self.assertIn(slot, p.wts)
+        self.assertEqual(p.wts[slot]["state"], "active")
 
     def test_release_on_unknown_slot_does_not_raise(self):
         p = self.pool()
-        # A slot the pool never handed out (e.g. a stale/None slot from a caller bug)
-        # must not crash release() with a KeyError — it's a no-op for an unbound slot.
-        p.release({"isolation": "exclusive", "run_id": "r1"}, "exec-work-99", "done")
-        p.release({"isolation": "exclusive", "run_id": "r1"}, None, "done")
+        p.release(self.excl("r1", "RLY-1"), "exec-nope", "done")
+        p.release(self.excl("r1", "RLY-1"), None, "done")
         self.assertEqual(p.capacity()["exclusive"], 2)
 
-    def test_refresh_idle_shared_holds_the_lock_across_the_reset(self):
-        """refresh_idle_shared's idle-check and the destructive refresh_worktree() reset
-        (git reset --hard + git clean, per reset_worktree's own docstring) must be atomic
-        under the pool lock — otherwise a job can be assign()ed into the shared worktree
-        between the check and the reset, and the reset then blows it out from under a
-        running job."""
-        p = self.pool()
-        refresh_started = threading.Event()
-        release_refresh = threading.Event()
-        events = []
 
-        def fake_refresh_worktree(name, base):
-            events.append("refresh-start")
-            refresh_started.set()
-            release_refresh.wait(timeout=2)
-            events.append("refresh-end")
+class ExecutorPoolRecoverTest(unittest.TestCase):
+    """RLY-231 AC #8: a restart re-derives per-card worktrees from `git worktree list` — no
+    in-memory run_id->slot map to lose. An active worktree is reused (reset=False, commits
+    survive); a retained one is classified by its on-disk marker."""
 
-        real = relay.refresh_worktree
-        relay.refresh_worktree = fake_refresh_worktree
-        self.addCleanup(setattr, relay, "refresh_worktree", real)
+    CFG = {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 2},
+           "max_retained_failed": 3}
 
-        refresher = threading.Thread(target=p.refresh_idle_shared)
-        refresher.start()
-        self.assertTrue(refresh_started.wait(timeout=2))
+    def setUp(self):
+        self.addCleanup(setattr, relay, "_list_worktree_paths", relay._list_worktree_paths)
+        self.addCleanup(setattr, relay, "_is_retained_worktree", relay._is_retained_worktree)
+        relay._list_worktree_paths = lambda: [
+            relay.worktree_path("exec-clean"),
+            relay.worktree_path("exec-RLY-1"),   # active (no marker)
+            relay.worktree_path("exec-RLY-2"),   # retained (marker present)
+        ]
+        relay._is_retained_worktree = lambda path: path.endswith("exec-RLY-2")
+        # keep git plumbing inert
+        for name in ("create_or_rebaseline", "_teardown"):
+            orig = getattr(relay.ExecutorPool, name)
+            setattr(relay.ExecutorPool, name, (lambda *a, **k: None))
+            self.addCleanup(setattr, relay.ExecutorPool, name, orig)
 
-        assigned = {}
+    def test_recover_classifies_and_advertises_correct_capacity(self):
+        p = relay.ExecutorPool(self.CFG)
+        p.recover()
+        self.assertEqual(p.wts["exec-RLY-1"]["state"], "active")
+        self.assertEqual(p.wts["exec-RLY-2"]["state"], "retained")
+        self.assertNotIn("exec-clean", p.wts)
+        self.assertEqual(p.capacity()["exclusive"], 1)          # one active recovered
 
-        def do_assign():
-            assigned["result"] = p.assign({"isolation": "shared_clean", "run_id": "r1"})
-            events.append("assign")
+    def test_next_job_reuses_a_recovered_active_worktree_without_reset(self):
+        p = relay.ExecutorPool(self.CFG)
+        p.recover()
+        slot, reset = p.assign({"isolation": "exclusive", "run_id": "r99",
+                                "vars": {"ref": "RLY-1"}})
+        self.assertEqual(slot, "exec-RLY-1")
+        self.assertFalse(reset)                                 # resume, do NOT re-baseline
+        self.assertEqual(p.wts["exec-RLY-1"]["run_id"], "r99")  # adopted the resuming run
 
-        assigner = threading.Thread(target=do_assign)
-        assigner.start()
-        assigner.join(timeout=0.2)  # give it a real chance to race in if unlocked
-        self.assertNotIn("assign", events)  # must still be blocked behind the pool lock
-
-        release_refresh.set()
-        refresher.join(timeout=2)
-        assigner.join(timeout=2)
-
-        self.assertEqual(events, ["refresh-start", "refresh-end", "assign"])
-        self.assertEqual(assigned["result"], ("exec-clean", False))
+    def test_recover_reclaims_retired_pool_slots_without_counting_capacity(self):
+        """RLY-231 in-place upgrade: `<ns>-work-N` slots left by the RETIRED fixed pool must be
+        reclaimed (remove+prune), never adopted as phantom active worktrees — otherwise each
+        permanently consumes an exclusive partition with run_id None that nothing can free."""
+        self.addCleanup(setattr, relay, "git_worktree_with_retry",
+                        relay.git_worktree_with_retry)
+        calls = []
+        relay.git_worktree_with_retry = lambda args: calls.append(args) or True
+        relay._list_worktree_paths = lambda: [
+            relay.worktree_path("exec-clean"),
+            relay.worktree_path("exec-work-1"),   # stale slot from the retired pool
+            relay.worktree_path("exec-work-2"),   # stale slot from the retired pool
+            relay.worktree_path("exec-RLY-1"),    # a genuine per-card worktree
+        ]
+        relay._is_retained_worktree = lambda path: False
+        p = relay.ExecutorPool(self.CFG)
+        p.recover()
+        self.assertNotIn("exec-work-1", p.wts)                  # not adopted
+        self.assertNotIn("exec-work-2", p.wts)
+        self.assertEqual(p.capacity()["exclusive"], 1)          # only exec-RLY-1 counts
+        self.assertIn(["remove", "--force", relay.worktree_path("exec-work-1")], calls)
+        self.assertIn(["remove", "--force", relay.worktree_path("exec-work-2")], calls)
 
 
 class ExecutorConfigCommittedFileTest(unittest.TestCase):
@@ -1098,6 +1160,102 @@ class ExecutorConfigCommittedFileTest(unittest.TestCase):
         with open(path) as f:
             cfg = json.load(f)
         self.assertNotIn("name", cfg)
+
+    def test_committed_executor_json_documents_the_new_worktree_keys(self):
+        """RLY-231: the checked-in example advertises the optional keys the per-card
+        worktree lifecycle reads (cache_dir/prepare/max_retained_failed) so a new clone
+        sees them without reading bin/relay's source."""
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            ".relay", "executor.json",
+        )
+        with open(path) as f:
+            cfg = json.load(f)
+        self.assertEqual(cfg["prepare"], ".relay/prepare-worktree.sh")
+        self.assertEqual(cfg["max_retained_failed"], 3)
+        self.assertIn("cache_dir", cfg)
+
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+class GitignoreRetainedMarkerTest(unittest.TestCase):
+    """RLY-231: a retained (failed-run) worktree's `.relay-retained` sentinel must survive
+    `git clean -fd` (only `-x` removes ignored files) and stay out of `git status
+    --porcelain` (else the worktree salvage path would try to stash it)."""
+
+    def test_gitignore_ignores_the_retained_marker(self):
+        with open(os.path.join(REPO_ROOT, ".gitignore")) as f:
+            lines = {line.strip() for line in f}
+        self.assertIn(".relay-retained", lines)
+
+
+class PrepareWorktreeHookTest(unittest.TestCase):
+    """RLY-231: the committed `.relay/prepare-worktree.sh` is Relay's own first-cut prepare
+    hook — it must actually warm a freshly created worktree from a warm main checkout (or a
+    configured cache dir) via CoW/plain copy, skip whatever isn't warm anywhere, and never
+    clobber a destination that already exists."""
+
+    HOOK = os.path.join(REPO_ROOT, ".relay", "prepare-worktree.sh")
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+        self.main = os.path.join(self.tmp, "main")
+        os.makedirs(self.main)
+        subprocess.run(["git", "init", "-q"], cwd=self.main, check=True)
+        subprocess.run(["git", "-c", "user.email=t@t.com", "-c", "user.name=t",
+                        "commit", "--allow-empty", "-q", "-m", "init"],
+                       cwd=self.main, check=True)
+        os.makedirs(os.path.join(self.main, "deps", "foo"))
+        with open(os.path.join(self.main, "deps", "foo", "mix.exs"), "w") as f:
+            f.write("warm\n")
+
+        self.wt = os.path.join(self.tmp, "wt")
+        subprocess.run(["git", "worktree", "add", "-q", "--detach", self.wt, "HEAD"],
+                       cwd=self.main, check=True)
+
+    def run_hook(self, cache_dir=""):
+        # Real invocation (bin/relay's run_prepare_hook) sets both argv AND env; the script
+        # only reads RELAY_CACHE_DIR from env, so the test must mirror that, not argv-only.
+        env = dict(os.environ, RELAY_WORKTREE=self.wt, RELAY_REF="RLY-1", RELAY_BRANCH="b",
+                   RELAY_BASE="origin/main", RELAY_CACHE_DIR=cache_dir)
+        return subprocess.run(
+            [self.HOOK, self.wt, "RLY-1", "b", "origin/main", cache_dir],
+            cwd=self.wt, env=env, capture_output=True, text=True)
+
+    def test_is_executable(self):
+        self.assertTrue(os.access(self.HOOK, os.X_OK))
+
+    def test_copies_deps_from_the_main_checkout_when_no_cache_dir(self):
+        proc = self.run_hook()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(os.path.isfile(os.path.join(self.wt, "deps", "foo", "mix.exs")))
+
+    def test_prefers_the_cache_dir_over_the_main_checkout(self):
+        cache = os.path.join(self.tmp, "cache")
+        os.makedirs(os.path.join(cache, "deps"))
+        with open(os.path.join(cache, "deps", "marker"), "w") as f:
+            f.write("from cache\n")
+        proc = self.run_hook(cache_dir=cache)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(os.path.isfile(os.path.join(self.wt, "deps", "marker")))
+        self.assertFalse(os.path.exists(os.path.join(self.wt, "deps", "foo")))
+
+    def test_skips_a_dir_that_is_not_warm_anywhere_without_failing(self):
+        proc = self.run_hook()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.wt, "_build")))
+
+    def test_does_not_clobber_an_existing_destination(self):
+        os.makedirs(os.path.join(self.wt, "deps"))
+        with open(os.path.join(self.wt, "deps", "mine"), "w") as f:
+            f.write("keep\n")
+        proc = self.run_hook()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(os.path.isfile(os.path.join(self.wt, "deps", "mine")))
+        self.assertFalse(os.path.exists(os.path.join(self.wt, "deps", "foo")))
 
 
 class _FakePopen:
@@ -1980,6 +2138,58 @@ class ExecutorHeartbeatTest(unittest.TestCase):
         self.assertEqual(err.getvalue(), "")
 
 
+class ExecuteOnePrepareHookTest(unittest.TestCase):
+    """RLY-231: on a reset (first job / reclaim) execute_one creates-or-rebaselines the worktree
+    and runs the prepare hook BEFORE the flow node; a nonzero hook fails the run fail-fast."""
+
+    def _pool(self, hook_err):
+        class P:
+            base = "origin/main"
+            def __init__(self):
+                self.created = []
+                self.released = []
+            def create_or_rebaseline(self, slot):
+                self.created.append(slot)
+            def run_prepare_hook(self, slot_path, ref, branch):
+                return hook_err
+            def partition_for(self, slot):
+                return "1"
+            def release(self, job, slot, run_state):
+                self.released.append(run_state)
+        return P()
+
+    def setUp(self):
+        self.reported = []
+        self.addCleanup(setattr, relay, "report_outcome", relay.report_outcome)
+        relay.report_outcome = lambda jid, o, d, sha, sid: (self.reported.append((o, d)) or "failed")
+        self.addCleanup(setattr, relay, "run_node_job", relay.run_node_job)
+        relay.run_node_job = lambda *a, **k: ("succeeded", "", "sha", None)
+
+    def job(self):
+        return {"id": 1, "isolation": "exclusive", "run_id": "r1",
+                "vars": {"ref": "RLY-1", "branch": "b"}}
+
+    def test_failing_prepare_hook_fails_the_run_without_running_the_node(self):
+        ran = []
+        relay.run_node_job = lambda *a, **k: ran.append(True) or ("succeeded", "", "s", None)
+        pool = self._pool("cache restore blew up")
+        ctl = relay.JobControl()
+        relay.execute_one(self.job(), "exec-RLY-1", True, ctl, pool)
+        self.assertEqual(ran, [])                              # node never ran
+        self.assertEqual(self.reported[0][0], "failed")
+        self.assertIn("prepare hook", self.reported[0][1])
+        self.assertIn("cache restore blew up", self.reported[0][1])
+        self.assertEqual(pool.released, ["failed"])            # → worktree retained
+
+    def test_ok_hook_creates_then_runs_the_node(self):
+        ran = []
+        relay.run_node_job = lambda *a, **k: ran.append(True) or ("succeeded", "", "s", None)
+        pool = self._pool(None)
+        relay.execute_one(self.job(), "exec-RLY-1", True, relay.JobControl(), pool)
+        self.assertEqual(pool.created, ["exec-RLY-1"])
+        self.assertEqual(ran, [True])
+
+
 class ExecuteOneTest(unittest.TestCase):
     def setUp(self):
         self._saved = {k: getattr(relay, k) for k in
@@ -1994,14 +2204,22 @@ class ExecuteOneTest(unittest.TestCase):
         relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
         self.pool = relay.ExecutorPool(
             {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 1}})
+        # RLY-231: execute_one now drives per-card worktree git through the pool. Record the
+        # create/prepare/teardown calls instead of running real git.
+        self.created, self.prepared, self.torn = [], [], []
+        self.pool.create_or_rebaseline = lambda slot: self.created.append(slot)
+        self.pool.run_prepare_hook = lambda slot_path, ref, branch: self.prepared.append(ref) or None
+        self.pool._teardown = lambda slot, retain: self.torn.append((slot, retain))
 
-    def test_first_exclusive_job_resets_then_runs_and_reports(self):
+    def test_first_exclusive_job_creates_warms_then_runs_and_reports(self):
         relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha1", None)
         j = job("exclusive_shell", run="x", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
         slot, reset = self.pool.assign(j)
+        self.assertEqual(slot, "exec-RLY-1")
         rs = relay.execute_one(j, slot, reset, relay.JobControl(), self.pool)
         self.assertEqual(rs, "done")
-        self.assertEqual(self.resets, ["/tmp/exec-work-1"])          # reset before use
+        self.assertEqual(self.created, ["exec-RLY-1"])               # created before use
+        self.assertEqual(self.prepared, ["RLY-1"])                  # then warmed
         self.assertEqual(self.reports[0], ("nj-1", "succeeded", "", "sha1", None))
 
     def test_shared_job_is_not_reset(self):
@@ -2032,7 +2250,7 @@ class ExecuteOneTest(unittest.TestCase):
         self.assertEqual(self.resets, [])                            # shared: never reset on revoke
         self.assertEqual(self.pool.capacity()["shared_clean"], 1)    # slot freed
 
-    def test_a_revoke_mid_run_resets_and_reports_nothing(self):
+    def test_a_revoke_of_an_exclusive_job_does_not_reset_and_keeps_the_worktree_bound(self):
         control = relay.JobControl()
 
         def revoked_run(job, path, ctl, partition=None):
@@ -2046,8 +2264,10 @@ class ExecuteOneTest(unittest.TestCase):
         rs = relay.execute_one(j, slot, reset, control, self.pool)
         self.assertIsNone(rs)
         self.assertEqual(self.reports, [])                           # §5: no outcome for a revoke
-        self.assertEqual(self.resets, ["/tmp/exec-work-1", "/tmp/exec-work-1"])  # pre + salvage
-        self.assertEqual(self.pool.capacity()["exclusive"], 1)       # slot freed
+        self.assertEqual(self.resets, [])                            # never-detach: no reset
+        self.assertEqual(self.torn, [])                              # worktree kept for resume
+        self.assertEqual(self.pool.capacity()["exclusive"], 0)       # still active + bound
+        self.assertTrue(self.pool.has_bound_slots())
 
     def test_a_worker_crash_reports_failed_and_frees_the_slot(self):
         def boom(job, path, control, partition=None):
@@ -2288,13 +2508,24 @@ class ExecutorHeartbeatCapacityTest(unittest.TestCase):
         self.assertEqual(sent["body"]["bound_runs"], [7, 9])
 
     def test_release_runs_in_the_reply_are_handed_to_on_release_run(self):
-        relay.api = lambda *a, **k: {"revoked": [], "release_runs": [42, 43]}
+        relay.api = lambda *a, **k: {"revoked": [],
+                                     "release_runs": [{"run_id": 42, "status": "done"},
+                                                      {"run_id": 43, "status": "failed"}]}
         released = []
         hb = relay.ExecutorHeartbeat({"name": "e"}, lambda: [], lambda jid: None,
                                      capacity={"shared_clean": 1, "exclusive": 1},
-                                     on_release_run=released.append)
+                                     on_release_run=lambda rid, st: released.append((rid, st)))
         hb._beat()
-        self.assertEqual(released, [42, 43])
+        self.assertEqual(released, [(42, "done"), (43, "failed")])
+
+    def test_release_runs_tolerates_the_legacy_bare_int_form(self):
+        relay.api = lambda *a, **k: {"revoked": [], "release_runs": [7]}
+        released = []
+        hb = relay.ExecutorHeartbeat({"name": "e"}, lambda: [], lambda jid: None,
+                                     capacity={"shared_clean": 1, "exclusive": 1},
+                                     on_release_run=lambda rid, st: released.append((rid, st)))
+        hb._beat()
+        self.assertEqual(released, [(7, None)])
 
 
 class ExecutorSingletonLockTest(unittest.TestCase):
@@ -3350,17 +3581,21 @@ class TestPartitionTest(unittest.TestCase):
     """RLY-213: each executor slot gets its own MIX_TEST_PARTITION so two concurrent
     Code runs do not share one Postgres database."""
 
-    def test_exclusive_slots_map_to_their_index(self):
-        self.assertEqual(relay.partition_for("exec-work-1"), "1")
-        self.assertEqual(relay.partition_for("exec-work-2"), "2")
-        self.assertEqual(relay.partition_for("exec-work-10"), "10")
+    def test_active_worktrees_map_to_distinct_indices(self):
+        cfg = {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 2},
+               "max_retained_failed": 3}
+        for name in ("create_or_rebaseline", "_teardown"):
+            orig = getattr(relay.ExecutorPool, name)
+            self.addCleanup(setattr, relay.ExecutorPool, name, orig)
+            setattr(relay.ExecutorPool, name, lambda self, *a, **k: None)
+        p = relay.ExecutorPool(cfg)
+        s1, _ = p.assign({"isolation": "exclusive", "run_id": "r1", "vars": {"ref": "A"}})
+        s2, _ = p.assign({"isolation": "exclusive", "run_id": "r2", "vars": {"ref": "B"}})
+        self.assertEqual({p.partition_for(s1), p.partition_for(s2)}, {"1", "2"})
 
     def test_shared_slot_maps_to_zero(self):
-        self.assertEqual(relay.partition_for("exec-clean"), "0")
-
-    def test_a_custom_namespace_still_maps(self):
-        # namespace is configurable; the index is what matters, not the prefix
-        self.assertEqual(relay.partition_for("ci-work-3"), "3")
+        cfg = {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 1}}
+        self.assertEqual(relay.ExecutorPool(cfg).partition_for("exec-clean"), "0")
 
     def test_shell_step_exports_the_partition(self):
         with tempfile.TemporaryDirectory() as d:
@@ -3483,6 +3718,10 @@ class TestPartitionTest(unittest.TestCase):
         try:
             pool = relay.ExecutorPool(
                 {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 1}})
+            # RLY-231: execute_one drives per-card worktree git through the pool now; stub it
+            # out so this test exercises the partition threading, not real git worktree ops.
+            pool.create_or_rebaseline = lambda slot: None
+            pool.run_prepare_hook = lambda slot_path, ref, branch: None
             j = job("exclusive_shell", run="x", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
             slot, reset = pool.assign(j)
             relay.execute_one(j, slot, reset, relay.JobControl(), pool)

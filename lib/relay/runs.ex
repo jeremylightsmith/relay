@@ -831,7 +831,12 @@ defmodule Relay.Runs do
   # (RLY-224 landed EXECUTOR_VERSION 18 on main first, with git-fetch retry but no $RELAY_PLAN
   # support, so 18 alone is NOT sufficient here — the floor must be the version that actually
   # carries RELAY_PLAN, which is 19 once both changes are combined.)
-  @min_executor_version 19
+  # RLY-231 raised this to 21: the executor moved from a fixed reused slot pool (`exec-work-N`,
+  # bound through an in-memory map) to one fresh worktree per card. A pre-21 executor still runs
+  # the slot pool and reads the heartbeat `release_runs` reply as bare ids (it is now
+  # {run_id, status} maps), so against the new server it would mis-bind worktrees and never
+  # release them — worse than a stopped one.
+  @min_executor_version 21
 
   @doc "The minimum `bin/relay` EXECUTOR_VERSION this server will claim jobs to."
   def min_executor_version, do: @min_executor_version
@@ -1065,7 +1070,8 @@ defmodule Relay.Runs do
   The subset of `bound_run_ids` whose run is TERMINAL (`status in Run.terminal_statuses()`) on
   THIS board — the run-scoped analogue of `revoked_among/2`, one level up. The executor reports
   the run-ids of exclusive slots it holds with no live job (`bound_runs`); this names the ones it
-  may now release, because the run has ended server-side.
+  may now release, because the run has ended server-side. Returned as `%{id, status}` maps so the
+  executor's recovery teardown can choose remove (done/cancelled) vs retain (failed).
 
   Board-scoped and conservative for the same reason as `revoked_among/2`: a run-id this board does
   not own is NOT returned (the slot stays bound rather than freeing on an id we cannot verify), and
@@ -1086,7 +1092,7 @@ defmodule Relay.Runs do
             where:
               c.board_id == ^board_id and r.id in ^ids and
                 r.status in ^Run.terminal_statuses(),
-            select: r.id
+            select: %{id: r.id, status: r.status}
         )
     end
   end
