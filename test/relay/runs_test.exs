@@ -1036,11 +1036,14 @@ defmodule Relay.RunsTest do
       {:ok, elsewhere} = Runs.cancel_run(elsewhere)
 
       result = Runs.terminal_among(board, [active.id, cancelled.id, done.id, elsewhere.id])
+      ids = Enum.map(result, & &1.id)
 
-      assert cancelled.id in result
-      assert done.id in result
-      refute active.id in result
-      refute elsewhere.id in result
+      assert cancelled.id in ids
+      assert done.id in ids
+      refute active.id in ids
+      refute elsewhere.id in ids
+      assert %{id: _, status: :cancelled} = Enum.find(result, &(&1.id == cancelled.id))
+      assert %{id: _, status: :done} = Enum.find(result, &(&1.id == done.id))
     end
 
     test "an empty list in returns an empty list", %{board: board} do

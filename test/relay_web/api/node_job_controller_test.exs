@@ -454,7 +454,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
         })
 
       assert %{"release_runs" => release_runs} = json_response(conn, 200)
-      assert run.id in release_runs
+      assert %{"run_id" => run.id, "status" => "cancelled"} in release_runs
     end
 
     test "a still-active bound run is NOT in release_runs", %{conn: conn, board: board} do

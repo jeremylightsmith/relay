@@ -21,6 +21,11 @@ defmodule Relay.Runs.Capacity do
   reconcile immediately (acceptance criterion 2's "without waiting a full tick").
   W9/W10 feed this store from executor heartbeats; until then it stays empty and
   the scheduler is dormant.
+
+  **`exclusive` semantics (RLY-231):** the `exclusive` class means the max number of
+  concurrent per-card worktrees an executor holds, reinterpreted from the old fixed
+  `-work-N` slot count — the per-class debit and the capacity numbers themselves are
+  unchanged by that reinterpretation.
   """
 
   use GenServer

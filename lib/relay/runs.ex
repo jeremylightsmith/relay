@@ -1065,7 +1065,8 @@ defmodule Relay.Runs do
   The subset of `bound_run_ids` whose run is TERMINAL (`status in Run.terminal_statuses()`) on
   THIS board — the run-scoped analogue of `revoked_among/2`, one level up. The executor reports
   the run-ids of exclusive slots it holds with no live job (`bound_runs`); this names the ones it
-  may now release, because the run has ended server-side.
+  may now release, because the run has ended server-side. Returned as `%{id, status}` maps so the
+  executor's recovery teardown can choose remove (done/cancelled) vs retain (failed).
 
   Board-scoped and conservative for the same reason as `revoked_among/2`: a run-id this board does
   not own is NOT returned (the slot stays bound rather than freeing on an id we cannot verify), and
@@ -1086,7 +1087,7 @@ defmodule Relay.Runs do
             where:
               c.board_id == ^board_id and r.id in ^ids and
                 r.status in ^Run.terminal_statuses(),
-            select: r.id
+            select: %{id: r.id, status: r.status}
         )
     end
   end
