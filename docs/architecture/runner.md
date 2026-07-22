@@ -82,7 +82,11 @@ looks like the leftward flow is being starved. Pinned by
   name the ones it no longer considers live. `bound_runs` (RLY-218) is the run-ids of
   exclusive slots the executor holds *without* a live job; `release_runs` is the run-scoped
   analogue of `revoked` — the subset now terminal server-side, so the executor frees those
-  idle-bound worktree slots within one heartbeat instead of waiting on a next outcome.
+  idle-bound worktree slots within one heartbeat instead of waiting on a next outcome. The same
+  `running` list also refreshes card liveness (RLY-226, `Runs.refresh_running_card_liveness/2`):
+  the server stamps `agent_heartbeat_at` on the cards whose reported job is still active, the
+  positive complement of the revoke query, so a live-but-quiet agent never falsely reads `:stale`
+  in `Cards.health/1`.
 - **Run ids**: each executor worker tags its log lines with the claimed job's `run_id`
   (RLY-112) so a card's timeline can group lines by run.
 
