@@ -1655,6 +1655,19 @@ defmodule RelayWeb.CoreComponents do
     default: nil,
     doc: "RLY-69 a form for public_description; required when editing_public_desc"
 
+  attr :swipe_enabled, :boolean,
+    default: false,
+    doc:
+      "RLY-227: web board drawer (non-embed) — renders the prev/next chevron cluster, the arrow-key bindings, and the CardSwipe hook. Off on the native card host so it can't fight native gestures."
+
+  attr :prev_ref, :string,
+    default: nil,
+    doc: "RLY-227: ref of the previous card in this card's stage column, or nil at the column's start"
+
+  attr :next_ref, :string,
+    default: nil,
+    doc: "RLY-227: ref of the next card in this card's stage column, or nil at the column's end"
+
   def card_drawer(assigns) do
     latest = List.first(assigns.runs)
     # The card-status guard clears the parked banner the moment an answer flips the
@@ -1723,6 +1736,32 @@ defmodule RelayWeb.CoreComponents do
               >
                 {@card.title}
               </h2>
+            </div>
+            <div :if={@swipe_enabled} id="card-drawer-nav" class="flex items-center gap-1">
+              <button
+                type="button"
+                id="card-drawer-prev"
+                phx-click="prev_card"
+                phx-window-keydown="prev_card"
+                phx-key="ArrowLeft"
+                disabled={is_nil(@prev_ref)}
+                class="btn btn-ghost btn-sm btn-square min-h-[44px] min-w-[44px]"
+                aria-label="Previous card"
+              >
+                <.icon name="hero-chevron-left" class="size-5" />
+              </button>
+              <button
+                type="button"
+                id="card-drawer-next"
+                phx-click="next_card"
+                phx-window-keydown="next_card"
+                phx-key="ArrowRight"
+                disabled={is_nil(@next_ref)}
+                class="btn btn-ghost btn-sm btn-square min-h-[44px] min-w-[44px]"
+                aria-label="Next card"
+              >
+                <.icon name="hero-chevron-right" class="size-5" />
+              </button>
             </div>
             <.link
               :if={!@embed}
