@@ -257,6 +257,14 @@ defmodule Relay.RunsReadSideTest do
       refute Runs.queued_flow(card, :ai, [ctx.flow], %{status: :running})
       refute Runs.queued_flow(%{card | status: :working}, :ai, [ctx.flow], nil)
     end
+
+    test "queued for a :queued-status card and for an unowned ready card (RLY-206 face nudge)", ctx do
+      queued = insert(:card, stage: ctx.pulls_from, status: :queued)
+      unowned = insert(:card, stage: ctx.pulls_from, status: :ready)
+
+      assert %Schemas.Flow{key: "code"} = Runs.queued_flow(queued, :ai, [ctx.flow], nil)
+      assert %Schemas.Flow{key: "code"} = Runs.queued_flow(unowned, nil, [ctx.flow], nil)
+    end
   end
 
   describe "face_summary/4" do
@@ -306,6 +314,14 @@ defmodule Relay.RunsReadSideTest do
 
       assert {:queued, %Schemas.Flow{key: "code"}} =
                Runs.face_summary(card, :ai, [ctx.flow], %{})
+    end
+
+    test "an unowned ready card on a pulls-from stage shows the queued pill (RLY-206 nudge)", ctx do
+      pulls_from = Enum.find(ctx.board.stages, &(&1.id == ctx.flow.pulls_from_stage_id))
+      card = insert(:card, stage: pulls_from, status: :ready)
+
+      assert {:queued, %Schemas.Flow{key: "code"}} =
+               Runs.face_summary(card, nil, [ctx.flow], %{})
     end
   end
 

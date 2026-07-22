@@ -28,6 +28,7 @@ defmodule Relay.Runs do
   alias Relay.Runs.Capacity
   alias Relay.Runs.Engine
   alias Relay.Runs.PlanTasks
+  alias Relay.Runs.Policy
   alias Relay.Runs.Preflight
   alias Relay.Runs.RunServer
   alias Relay.Runs.Scheduler
@@ -387,7 +388,7 @@ defmodule Relay.Runs do
   def queued_flow(%Card{} = card, active_owner, flows, summary) do
     active_run? = summary != nil and summary.status in Run.active_statuses()
 
-    if card.status == :ready and active_owner == :ai and not active_run? do
+    if Policy.pullable?(%{status: card.status, active_owner: active_owner}) and not active_run? do
       Enum.find(flows, &(&1.enabled and &1.pulls_from_stage_id == card.stage_id))
     end
   end

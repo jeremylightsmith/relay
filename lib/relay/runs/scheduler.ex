@@ -21,6 +21,7 @@ defmodule Relay.Runs.Scheduler do
   reassigned mid-run).
   """
 
+  alias Relay.Runs.Policy
   alias Relay.Runs.Scheduler.Plan
   alias Relay.Runs.Scheduler.Snapshot
 
@@ -81,9 +82,7 @@ defmodule Relay.Runs.Scheduler do
 
       cond do
         MapSet.member?(acc.decided, run.card_id) -> acc
-        run.parked_reason != :executor_gone -> acc
-        card.active_owner == :human -> acc
-        card.status in [:needs_input, :failed] -> acc
+        not Policy.resumable?(run, card) -> acc
         true -> maybe_resume(acc, run)
       end
     end)
@@ -151,8 +150,7 @@ defmodule Relay.Runs.Scheduler do
   end
 
   defp fresh_eligible?(card, decided, run_by_card) do
-    card.active_owner != :human and
-      card.status in [:ready, :queued] and
+    Policy.pullable?(card) and
       not Map.has_key?(run_by_card, card.id) and
       not MapSet.member?(decided, card.id)
   end
@@ -283,7 +281,7 @@ defmodule Relay.Runs.Scheduler do
       dispatched?(snapshot, card) ->
         verdict(:dispatchable, "This card would dispatch on the scheduler's next tick.", evidence)
 
-      card.active_owner == :human ->
+      not Policy.agent_may_hold?(card) ->
         verdict(:owned_by_human, "A human holds the baton on this card, so no flow will pick it up.", evidence)
 
       card.status == :needs_input ->

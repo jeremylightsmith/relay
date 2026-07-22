@@ -36,6 +36,7 @@ defmodule Relay.Runs.Listener do
 
   alias Relay.Repo
   alias Relay.Runs
+  alias Relay.Runs.Policy
   alias Schemas.Card
   alias Schemas.Flow
   alias Schemas.NodeExecution
@@ -97,7 +98,10 @@ defmodule Relay.Runs.Listener do
   defp reconcile_card(card, nil), do: maybe_reenter_after_rejection(card)
 
   defp reconcile_card(card, %Run{status: :running} = run) do
-    if Relay.Cards.active_owner_type(card) == :human, do: Runs.park_claimed(run)
+    if !Policy.agent_may_hold?(%{active_owner: Relay.Cards.active_owner_type(card)}) do
+      Runs.park_claimed(run)
+    end
+
     :ok
   end
 
