@@ -297,5 +297,5 @@ CLI: `bin/relay version`.
 ## CLI
 
 Most of the time you'll drive this API through the `bin/relay` CLI rather than raw
-HTTP — it wraps pull/work/hand-back into a few commands. See `docs/agent-integration.md`
+HTTP — it wraps pull/work/hand-back into a few commands. See `relay.md`
 in the repository for the full agent workflow.

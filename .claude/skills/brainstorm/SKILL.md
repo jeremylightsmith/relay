@@ -144,7 +144,7 @@ changes only *how* you deliver them, not *whether* you ask.
   `needs-input` call carrying a **structured** question array, then STOP. Do not
   guess-and-write a spec when real questions remain. Write the array to a scratch JSON file
   under `$RELAY_NODE_SCRATCH`'s directory (never an invented `/tmp` path — see
-  [`docs/agent-integration.md`](../../../docs/agent-integration.md#the-relay_node_scratch-contract))
+  [`relay.md`](../../../relay.md#the-relay_node_scratch-contract))
   and pass it with `--questions`:
 
       questions_file="$(dirname "$RELAY_NODE_SCRATCH")/questions.json"

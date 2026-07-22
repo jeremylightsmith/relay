@@ -7,13 +7,15 @@ exits non-zero.
 > [!NOTE]
 > Every write is attributed to the board's AI agent, **"Relay AI"**. Set `RELAY_URL` and
 > `RELAY_API_KEY` first — see [Authentication & API access](/docs/authentication). The one
-> exception is `bin/relay init`, which needs only a URL: it runs before a board key exists.
+> exception is `bin/relay init`, which needs neither: it pulls scaffolding from the
+> `relay-config` repo over plain HTTPS and runs before a board key exists (it does need an
+> interactive terminal).
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `bin/relay init` | Scaffold this project from the board: `.claude/` agents + skills, `.relay/executor.json`, `AGENTS.md`. Flags: `--url` (board host, else `RELAY_URL`), `--force` (overwrite files you edited), `--dry-run` (report only, write nothing), `--no-self-update` (skip the upgrade-only `bin/relay` refresh). See [Getting started](/docs) |
+| `bin/relay init` | Interactively scaffold this project from the `relay-config` repo: `relay.md`, `.claude/` agents + skills, `AGENTS.md`/`CLAUDE.md`. Flags: `--config-url` (relay-config base, else `RELAY_CONFIG_URL`), `--url` (board host for the closing checklist, else `RELAY_URL`), `--no-self-update` (skip the upgrade-only `bin/relay` refresh). See [Getting started](/docs) |
 | `bin/relay board` | The board: stages with their cards |
 | `bin/relay card RLY-12` | One card: description, plan, branch, timeline |
 | `bin/relay why RLY-12` | **Why isn't this card moving?** One plain-language answer |

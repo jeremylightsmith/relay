@@ -53,8 +53,8 @@ defmodule Relay.Markdown.LinksTest do
     end
 
     test "the anchor is preserved on the fallback too" do
-      assert Links.rewrite("../agent-integration.md#node-job-protocol-adr-0006", @dir, @slugs) ==
-               "https://github.com/jeremylightsmith/relay/blob/main/docs/agent-integration.md#node-job-protocol-adr-0006"
+      assert Links.rewrite("../vision.md#north-star", @dir, @slugs) ==
+               "https://github.com/jeremylightsmith/relay/blob/main/docs/vision.md#north-star"
     end
 
     test "a directory link outside the set resolves to its GitHub path" do

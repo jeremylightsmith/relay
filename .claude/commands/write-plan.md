@@ -161,7 +161,7 @@ the loop. The node's `run` is a bare `/write-plan {ref}`, so every operational r
   the card's `spec` field is empty or missing, park the card where the problem actually is,
   writing the questions to a scratch file under `$RELAY_NODE_SCRATCH`'s directory (never an
   invented `/tmp` path — see
-  [`docs/agent-integration.md`](../../docs/agent-integration.md#the-relay_node_scratch-contract)):
+  [`relay.md`](../../relay.md#the-relay_node_scratch-contract)):
 
       questions_file="$(dirname "$RELAY_NODE_SCRATCH")/questions.json"
       cat > "$questions_file" <<'JSON'
