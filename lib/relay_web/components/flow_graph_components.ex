@@ -199,6 +199,7 @@ defmodule RelayWeb.FlowGraphComponents do
   # defensive accessors — tolerate raw DefaultLibrary maps that omit optional keys entirely.
   defp edge_on(edge), do: Map.get(edge, :on)
   defp edge_max_loops(edge), do: Map.get(edge, :max_loops)
+  defp edge_when(edge), do: Map.get(edge, :when)
   defp node_model(node), do: Map.get(node, :model)
   defp node_effort(node), do: Map.get(node, :effort)
   defp node_run(node), do: Map.get(node, :run)
@@ -255,13 +256,19 @@ defmodule RelayWeb.FlowGraphComponents do
   defp humanize(key), do: String.replace(key, "_", " ")
 
   defp edge_label(edge) do
-    on = edge_on(edge)
-
-    case edge_max_loops(edge) do
-      max when is_integer(max) -> "#{on} · max #{max}"
-      _ -> to_string(on)
-    end
+    [to_string(edge_on(edge)), when_label(edge_when(edge)), max_loops_label(edge_max_loops(edge))]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join(" · ")
   end
+
+  # Human wording for the foreach guard on the diagram pill. This is a presentation label, not
+  # a second copy of Schemas.Flow.Edge.when_values/0 — the closed set is owned there.
+  defp when_label(:foreach_remaining), do: "while tasks remain"
+  defp when_label(:foreach_exhausted), do: "all tasks done"
+  defp when_label(_), do: nil
+
+  defp max_loops_label(max) when is_integer(max), do: "max #{max}"
+  defp max_loops_label(_), do: nil
 
   # ---- orthogonal edge geometry ----
 

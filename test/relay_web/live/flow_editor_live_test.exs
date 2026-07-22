@@ -18,6 +18,15 @@ defmodule RelayWeb.FlowEditorLiveTest do
     assert has_element?(view, "#flow-graph")
   end
 
+  test "the Code flow diagram distinguishes the two quality_review succeeded edges by their guard",
+       %{conn: conn, board: board} do
+    {:ok, view, html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    _ = view
+    # the loop-back and the advance no longer read as identical bare "succeeded"
+    assert html =~ "succeeded · while tasks remain"
+    assert html =~ "succeeded · all tasks done"
+  end
+
   test "renders full-bleed (wide) chrome, not the narrow centered column", %{conn: conn, board: board} do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
     # RLY-143: without `wide` the graph editor gets clipped to Layouts.app's default
