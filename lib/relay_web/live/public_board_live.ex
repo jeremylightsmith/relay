@@ -177,7 +177,15 @@ defmodule RelayWeb.PublicBoardLive do
                     name={supporter.name}
                     email={supporter.email}
                   />
-                  <span>{supporter.name || supporter.email}</span>
+                  <span data-supporter-name>{supporter.name || supporter.email}</span>
+                  <span
+                    :if={supporter.id == @current_scope.user.id}
+                    data-supporter-you
+                    class="text-[10px] font-semibold"
+                    style="color:oklch(0.60 0.14 250);"
+                  >
+                    YOU
+                  </span>
                 </li>
               </ul>
               <p
@@ -273,8 +281,12 @@ defmodule RelayWeb.PublicBoardLive do
 
     {supporters, total} =
       case socket.assigns.current_scope do
-        nil -> {[], Map.get(socket.assigns.vote_counts, card_id, 0)}
-        _scope -> Votes.supporters(card, @supporters_preview)
+        nil ->
+          {[], Map.get(socket.assigns.vote_counts, card_id, 0)}
+
+        scope ->
+          {fetched, total} = Votes.supporters(card, @supporters_preview)
+          {you_first(fetched, scope.user.id), total}
       end
 
     {:noreply,
@@ -336,6 +348,13 @@ defmodule RelayWeb.PublicBoardLive do
   end
 
   defp find_card(cards, id), do: Enum.find(cards, &(&1.id == id))
+
+  # Moves the signed-in viewer's own supporter entry (if present on this preview
+  # page) to the front — the detail modal's "you first" ordering (RLY-69 spec
+  # review). Leaves the rest of `Votes.supporters/2`'s recency order untouched.
+  defp you_first(supporters, viewer_id) do
+    Enum.sort_by(supporters, &(&1.id != viewer_id))
+  end
 
   # Groups `cards` (stage preloaded) into the three public columns, each sorted
   # by vote count desc (ties broken by `cards`' own order — newest-first, since

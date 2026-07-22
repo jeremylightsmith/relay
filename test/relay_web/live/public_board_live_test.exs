@@ -180,6 +180,27 @@ defmodule RelayWeb.PublicBoardLiveTest do
       assert has_element?(view, "#public-card-modal", "Maya Lin")
       refute has_element?(view, "#public-card-modal", "Sign in to see who")
     end
+
+    test "the signed-in viewer's own supporter row is listed first and marked YOU",
+         %{conn: conn, board: board, card: card} do
+      viewer = insert(:user, name: "Vy Owens")
+      Votes.toggle_vote(viewer, card)
+
+      {:ok, view, _html} = conn |> log_in_user(viewer) |> live(~p"/board/#{board.slug}/public")
+
+      view |> element("#public-card-open-#{card.id}") |> render_click()
+
+      names =
+        view
+        |> element("#public-supporters")
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("[data-supporter-name]")
+        |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+
+      assert names == ["Vy Owens", "Maya Lin"]
+      assert has_element?(view, "#public-supporters [data-supporter-you]", "YOU")
+    end
   end
 
   describe "real-time" do

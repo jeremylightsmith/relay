@@ -10,11 +10,21 @@ defmodule RelayWeb.DevLoginController do
   alias Relay.Accounts
   alias RelayWeb.Auth
 
-  def create(conn, _params) do
+  def create(conn, params) do
     user = Accounts.ensure_dev_user!()
+    return_to = local_path(params["return_to"])
 
     conn
     |> put_flash(:info, "Signed in as #{user.email}")
-    |> Auth.log_in_user(user)
+    |> Auth.log_in_user(user, return_to)
   end
+
+  # Same validation as `RelayWeb.AuthController`'s `local_path/1` (RLY-69): only an
+  # in-app relative path is safe to redirect to — must start with a single "/", never
+  # a scheme/host or a protocol-relative "//host/…".
+  defp local_path("/" <> _ = path) do
+    if String.starts_with?(path, "//"), do: nil, else: path
+  end
+
+  defp local_path(_other), do: nil
 end
