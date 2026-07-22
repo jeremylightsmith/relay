@@ -728,6 +728,7 @@ defmodule RelayWeb.CoreComponentsTest do
           id: "card-drawer",
           ref: "RLY-1",
           card: card,
+          board_slug: "test-board",
           stage_name: "Code",
           stage_owner: :ai,
           close_patch: "/board",
@@ -1161,6 +1162,7 @@ defmodule RelayWeb.CoreComponentsTest do
       base = %{
         id: "d",
         ref: "RLY-68",
+        board_slug: "test-board",
         card: %{
           title: "Optimistic drawer",
           description: nil,

@@ -5,7 +5,7 @@ defmodule RelayWeb.FlowEditorComponents do
   LiveView to keep it lean. Concrete visual values follow
   docs/designs/Relay Flow Editor.dc.html (§inspector lines ~127-202, palette ~466-476).
   """
-  use Phoenix.Component
+  use RelayWeb, :html
 
   @type_tag %{
     agent: {"AGENT", "oklch(0.46 0.14 292)", "oklch(0.95 0.04 292)"},
@@ -580,4 +580,38 @@ defmodule RelayWeb.FlowEditorComponents do
     next = (current || 0) + delta
     if next < 1, do: "", else: next
   end
+
+  attr :board_slug, :string, required: true
+  attr :flow_key, :string, required: true
+  attr :active, :atom, values: [:editor, :metrics], required: true
+
+  @doc "Editor | Metrics tab strip shared by FlowEditorLive and FlowMetricsLive."
+  def flow_tabs(assigns) do
+    ~H"""
+    <nav id="flow-tabs" style="display:flex;align-items:center;gap:2px;">
+      <.link
+        id="flow-tab-editor"
+        navigate={~p"/board/#{@board_slug}/flows/#{@flow_key}"}
+        style={flow_tab_style(@active == :editor)}
+      >
+        Editor
+      </.link>
+      <.link
+        id="flow-tab-metrics"
+        navigate={~p"/board/#{@board_slug}/flows/#{@flow_key}/metrics"}
+        style={flow_tab_style(@active == :metrics)}
+      >
+        Metrics
+      </.link>
+    </nav>
+    """
+  end
+
+  defp flow_tab_style(true),
+    do:
+      "font-size:13px;font-weight:600;padding:5px 12px;border-radius:7px;" <>
+        "background:oklch(1 0 0);color:oklch(0.28 0.02 255);box-shadow:0 1px 2px oklch(0.5 0.03 255/0.14);"
+
+  defp flow_tab_style(false),
+    do: "font-size:13px;font-weight:600;padding:5px 12px;border-radius:7px;color:oklch(0.52 0.02 255);"
 end
