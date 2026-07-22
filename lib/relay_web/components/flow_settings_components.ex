@@ -22,7 +22,11 @@ defmodule RelayWeb.FlowSettingsComponents do
   def flow_name(%Flow{key: key}), do: key |> String.replace("-", " ") |> String.capitalize()
 
   attr :rows, :list, required: true, doc: "%{flow: %Flow{}, customized?: bool, resettable?: bool} maps"
-  attr :panel, :any, required: true, doc: "nil | {flow_id, :confirm} | {flow_id, :reset} | {:new, form}"
+
+  attr :panel, :any,
+    required: true,
+    doc: "nil | {flow_id, :confirm} | {flow_id, :reset} | {flow_id, :delete} | {:new, form}"
+
   attr :preflight, :any, default: nil, doc: "Runs.preflight_flow/1's snapshot for the open enable confirm, or nil"
   attr :slug, :string, required: true, doc: "the board slug, for the Edit item's editor link"
   attr :stages, :list, required: true, doc: "the board's stages, unfiltered, for the create form's pickers"
@@ -365,6 +369,17 @@ defmodule RelayWeb.FlowSettingsComponents do
                         ↺ Reset to default
                       </button>
                     </li>
+                    <li :if={not row.flow.enabled}>
+                      <button
+                        type="button"
+                        id={"flow-#{row.flow.id}-delete"}
+                        phx-click="flow_delete"
+                        phx-value-flow-id={row.flow.id}
+                        style="color:oklch(0.55 0.19 25);"
+                      >
+                        🗑 Delete flow
+                      </button>
+                    </li>
                   </ul>
                 </details>
               </div>
@@ -376,6 +391,7 @@ defmodule RelayWeb.FlowSettingsComponents do
               preflight={@preflight}
             />
             <.reset_confirm :if={@panel == {row.flow.id, :reset}} flow={row.flow} />
+            <.delete_confirm :if={@panel == {row.flow.id, :delete}} flow={row.flow} />
           </div>
         </div>
       </div>
@@ -700,6 +716,60 @@ defmodule RelayWeb.FlowSettingsComponents do
             id={"flow-#{@flow.id}-reset-cancel"}
             phx-click="flow_cancel_panel"
             style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.04 65);color:oklch(0.48 0.04 65);border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  attr :flow, Flow, required: true
+
+  defp delete_confirm(assigns) do
+    assigns = assign(assigns, :mid_run, Flows.mid_run_count(assigns.flow))
+
+    ~H"""
+    <div
+      id={"flow-#{@flow.id}-delete-confirm"}
+      style="display:flex;align-items:flex-start;gap:12px;margin:0 18px 16px 18px;background:oklch(0.985 0.02 25);border:1px solid oklch(0.87 0.07 25);border-radius:10px;padding:14px 16px;"
+    >
+      <span style="width:22px;height:22px;border-radius:50%;background:oklch(0.62 0.19 25);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">
+        !
+      </span>
+      <div style="flex:1;">
+        <div style="font-size:13.5px;font-weight:600;color:oklch(0.45 0.16 25);margin-bottom:3px;">
+          Delete the {flow_name(@flow)} flow?
+        </div>
+        <p style="font-size:12.5px;line-height:1.5;color:oklch(0.46 0.08 25);margin:0 0 10px 0;max-width:560px;">
+          This permanently removes the flow from this board and its version history. A shipped
+          default flow will not come back on the next deploy — use Reset to default instead if
+          you only want to undo edits.
+        </p>
+        <p
+          :if={@mid_run > 0}
+          id={"flow-#{@flow.id}-delete-midrun"}
+          style="font-size:12.5px;line-height:1.5;color:oklch(0.46 0.08 25);margin:0 0 10px 0;max-width:560px;font-weight:600;"
+        >
+          {@mid_run} cards are mid-run on this flow. Deleting it orphans them — their next
+          hand-off fails with <span style="font-family:ui-monospace,monospace;">no_flow</span>.
+        </p>
+        <div style="display:flex;gap:8px;">
+          <button
+            type="button"
+            id={"flow-#{@flow.id}-delete-cta"}
+            phx-click="flow_confirm_delete"
+            phx-value-flow-id={@flow.id}
+            style="background:oklch(0.58 0.19 25);color:oklch(1 0 0);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+          >
+            Delete {flow_name(@flow)}
+          </button>
+          <button
+            type="button"
+            id={"flow-#{@flow.id}-delete-cancel"}
+            phx-click="flow_cancel_panel"
+            style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.04 25);color:oklch(0.48 0.06 25);border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
           >
             Cancel
           </button>

@@ -635,4 +635,78 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       assert Flows.get_flow(board, "sneaky") == nil
     end
   end
+
+  describe "delete flow (RLY-221)" do
+    test "the Delete item is absent for an enabled flow and present for a disabled one",
+         %{conn: conn, board: board} do
+      spec = flow(board, "spec")
+      view = open_flows(conn, board)
+
+      # seeded flows are disabled → Delete is offered
+      assert has_element?(view, "#flow-#{spec.id}-delete", "Delete flow")
+
+      # enable it → Delete disappears
+      {:ok, _} = Flows.enable_flow(spec)
+      view = open_flows(conn, board)
+      refute has_element?(view, "#flow-#{spec.id}-delete")
+    end
+
+    test "clicking Delete opens the confirm panel; confirming removes the row for good",
+         %{conn: conn, board: board} do
+      spec = flow(board, "spec")
+      view = open_flows(conn, board)
+
+      view |> element("#flow-#{spec.id}-delete") |> render_click()
+      assert has_element?(view, "#flow-#{spec.id}-delete-confirm", "Delete the Spec flow?")
+
+      view |> element("#flow-#{spec.id}-delete-cta") |> render_click()
+
+      refute has_element?(view, "#flow-row-#{spec.id}")
+      assert Flows.get_flow(board, "spec") == nil
+
+      # and it does not return on reload
+      view = open_flows(conn, board)
+      refute has_element?(view, "#flow-row-#{spec.id}")
+    end
+
+    test "cancel closes the confirm panel without deleting", %{conn: conn, board: board} do
+      spec = flow(board, "spec")
+      view = open_flows(conn, board)
+
+      view |> element("#flow-#{spec.id}-delete") |> render_click()
+      view |> element("#flow-#{spec.id}-delete-cancel") |> render_click()
+
+      refute has_element?(view, "#flow-#{spec.id}-delete-confirm")
+      assert Flows.get_flow(board, "spec")
+    end
+
+    test "the confirm panel warns when cards are mid-run, then delete nil-s their flow_id",
+         %{conn: conn, board: board} do
+      spec = flow(board, "spec")
+      run = insert(:run, flow_id: spec.id, status: :running)
+      view = open_flows(conn, board)
+
+      view |> element("#flow-#{spec.id}-delete") |> render_click()
+      assert has_element?(view, "#flow-#{spec.id}-delete-midrun", "mid-run on this flow")
+      assert has_element?(view, "#flow-#{spec.id}-delete-midrun", "no_flow")
+
+      view |> element("#flow-#{spec.id}-delete-cta") |> render_click()
+
+      assert Flows.get_flow(board, "spec") == nil
+      assert Repo.reload(run).flow_id == nil
+    end
+
+    test "an archived board rejects delete as read-only", %{conn: conn, board: board} do
+      spec = flow(board, "spec")
+      {:ok, _} = Boards.archive_board(board)
+      view = open_flows(conn, board)
+
+      render_click(view, "flow_delete", %{"flow-id" => to_string(spec.id)})
+      assert render(view) =~ "archived (read-only)"
+
+      render_click(view, "flow_confirm_delete", %{"flow-id" => to_string(spec.id)})
+      assert render(view) =~ "archived (read-only)"
+      assert Flows.get_flow(board, "spec")
+    end
+  end
 end
