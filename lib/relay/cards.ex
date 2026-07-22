@@ -21,6 +21,8 @@ defmodule Relay.Cards do
   alias Schemas.Card
   alias Schemas.CardOwner
   alias Schemas.CardRejection
+  alias Schemas.Flow
+  alias Schemas.Run
   alias Schemas.Stage
   alias Schemas.SubTask
   alias Schemas.User
@@ -895,6 +897,32 @@ defmodule Relay.Cards do
   defp candidate_boards(boards, slug), do: Enum.filter(boards, &(&1.slug == slug))
 
   @doc """
+  The active run a move of `card` into `target_stage` would strand, or `nil`.
+
+  A move strands a run when `card` has an active (`:running`/`:parked`) run whose flow's work
+  lane (`works_in_stage`) is NOT `target_stage` — i.e. the card is being pulled out of the lane
+  its run works in (to Done, back to a queue, into another flow's lane). A within-lane reorder
+  (destination == the run's `works_in_stage`) and a card with no active run both return `nil`.
+
+  Anchored on the run's `works_in_stage`, NOT `card.stage_id`, so the engine's own
+  pull-into-lane move — which carries the card from its pull stage INTO `works_in_stage` while
+  the run is already active — is transparent: its destination IS the work lane, so it never
+  strands (the land-on-completion move runs after the run is terminal, so it has no active run
+  either). Boundary: `Cards` reads `Schemas.Run`/`Schemas.Flow` directly because `Runs` depends
+  on `Cards`, not the reverse; the closed active-status set comes from `Run.active_statuses/0`.
+  """
+  def stranded_run(%Card{id: card_id}, %Stage{id: target_stage_id}) do
+    Repo.one(
+      from r in Run,
+        join: f in Flow,
+        on: f.id == r.flow_id,
+        where: r.card_id == ^card_id and r.status in ^Run.active_statuses(),
+        where: f.works_in_stage_id != ^target_stage_id,
+        select: r
+    )
+  end
+
+  @doc """
   Moves `card` into `target_stage` at the 0-based `index` among the
   stage's cards (excluding the moved card itself), attributed to `actor`
   (`:agent | {:user, user_id}`, defaults to `:agent`), returning
@@ -906,9 +934,23 @@ defmodule Relay.Cards do
   callers resolve both on the current board, and a cross-board call
   raises `FunctionClauseError`. A cross-stage move logs a `:moved`
   activity entry (MMF 07) attributed to `actor`.
+
+  Refuses with `{:error, :would_strand_run}` before any write when the move would strand a live
+  run out of its work lane (`stranded_run/2`) — see that doc for what counts as stranding.
   """
   def move_card(%Card{board_id: board_id} = card, %Stage{board_id: board_id} = target_stage, index, actor \\ :agent)
       when is_integer(index) do
+    if stranded_run(card, target_stage) do
+      # RLY-217: refuse before any write — a move that would strand a live run out of its work
+      # lane is a consequential action. The board pre-checks stranded_run/2 and confirms first,
+      # so a human never sees this raw error; programmatic callers get it (→ 409 at the API).
+      {:error, :would_strand_run}
+    else
+      do_move_card(card, target_stage, index, actor)
+    end
+  end
+
+  defp do_move_card(%Card{} = card, %Stage{} = target_stage, index, actor) do
     previous_stage_id = card.stage_id
     from_status = card.status
 

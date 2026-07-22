@@ -442,6 +442,43 @@ defmodule RelayWeb.BoardLive do
         </div>
         <label class="modal-backdrop" phx-click="close_archived">Close</label>
       </div>
+      <div
+        :if={@pending_move}
+        id="stranded-move-modal"
+        class="modal modal-open"
+        role="dialog"
+        aria-label="Confirm move"
+      >
+        <div class="modal-box max-w-md">
+          <h3 class="text-lg font-semibold">Cancel this run and move the card?</h3>
+          <p class="mt-3 text-sm text-base-content/80">
+            <span class="font-medium">{@pending_move.ref}</span>
+            has a {@pending_move.status} run
+            (<span class="font-medium">{@pending_move.node}</span>, {@pending_move.flow_key} flow).
+            Moving it to <span class="font-medium">{@pending_move.target_stage_name}</span>
+            will cancel that run and free its executor slot.
+          </p>
+          <div class="modal-action">
+            <button
+              type="button"
+              id="stranded-move-cancel"
+              phx-click="cancel_move"
+              class="btn btn-ghost"
+            >
+              Keep it here
+            </button>
+            <button
+              type="button"
+              id="stranded-move-confirm"
+              phx-click="confirm_move"
+              class="btn btn-error"
+            >
+              Cancel run &amp; move
+            </button>
+          </div>
+        </div>
+        <label class="modal-backdrop" phx-click="cancel_move">Close</label>
+      </div>
     </Layouts.app>
     """
   end
@@ -496,6 +533,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:archived_count, Cards.count_archived_cards(board))
       |> assign(:archived_open, false)
       |> assign(:archived_cards, [])
+      |> assign(:pending_move, nil)
       |> assign(:logs_open, false)
       |> assign(:agent_log_ids, [])
       |> stream_configure(:agent_logs, dom_id: &"agent-log-#{&1.id}")
@@ -587,7 +625,7 @@ defmodule RelayWeb.BoardLive do
         save_card_acceptance_criteria save_card_spec save_card_plan
         add_owner remove_owner take_over post_comment answer_input
         answer_select answer_custom answer_next answer_back answer_goto answer_submit
-        review_approve review_reject retry_card
+        review_approve review_reject retry_card confirm_move cancel_move
         archive_card restore_card toggle_sub_task
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
@@ -764,13 +802,45 @@ defmodule RelayWeb.BoardLive do
   def handle_event("move_card", %{"ref" => ref, "stage_id" => stage_id} = params, socket) do
     with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
          %Stage{} = stage <- resolve_stage(socket, stage_id),
-         index when is_integer(index) <- resolve_index(params, socket, stage),
-         {:ok, moved} <- Cards.move_card(card, stage, index, current_actor(socket)) do
-      {:noreply, socket |> apply_move(card.stage_id, moved) |> maybe_warn_over_wip(stage, card.stage_id)}
+         index when is_integer(index) <- resolve_index(params, socket, stage) do
+      move_or_prompt(socket, ref, card, stage, index)
     else
       _ -> {:noreply, socket}
     end
   end
+
+  # RLY-217 — the user confirmed a stranding move: cancel the run (frees its executor slot via the
+  # existing revoke/release path) THEN apply the now-safe move. After cancel the run is terminal,
+  # so move_card no longer refuses. cancel_run/1 logs the "run cancelled" timeline entry.
+  def handle_event("confirm_move", _params, %{assigns: %{pending_move: %{} = pm}} = socket) do
+    socket = assign(socket, :pending_move, nil)
+
+    with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, pm.ref),
+         %Stage{} = stage <- resolve_stage(socket, pm.target_stage_id),
+         %Run{} = run <- Runs.get_run(pm.run_id) do
+      _ = Runs.cancel_run(run)
+
+      case Cards.move_card(card, stage, pm.index, current_actor(socket)) do
+        {:ok, moved} -> {:noreply, apply_move(socket, card.stage_id, moved)}
+        _error -> {:noreply, socket}
+      end
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("confirm_move", _params, socket), do: {:noreply, socket}
+
+  # RLY-217 — the user declined: the card never moved. Clear the intent and restream the affected
+  # lanes so the board is pristine (belt-and-suspenders; the DnD hook never mutates the DOM list).
+  def handle_event("cancel_move", _params, %{assigns: %{pending_move: %{} = pm}} = socket) do
+    {:noreply,
+     socket
+     |> assign(:pending_move, nil)
+     |> restream_lanes([pm.source_stage_id, pm.target_stage_id])}
+  end
+
+  def handle_event("cancel_move", _params, socket), do: {:noreply, socket}
 
   # MMF 12c — clicking a collapsed stage strip force-opens it for this session only
   # (a MapSet in the socket; not persisted, not broadcast). RLY-111: also clears any
@@ -2002,6 +2072,46 @@ defmodule RelayWeb.BoardLive do
   # place, so refetch and reset the source and target stage streams,
   # refresh the lane counts, and keep the drawer in sync when the moved
   # card is the selected one.
+  # RLY-217 — the stranding pre-check: a live run out of its work lane prompts instead of
+  # moving (prompt_stranded_move/6); otherwise the move proceeds as before.
+  defp move_or_prompt(socket, ref, %Card{} = card, %Stage{} = stage, index) do
+    case Cards.stranded_run(card, stage) do
+      nil -> apply_ordinary_move(socket, card, stage, index)
+      %Run{} = run -> {:noreply, prompt_stranded_move(socket, ref, card, stage, index, run)}
+    end
+  end
+
+  defp apply_ordinary_move(socket, %Card{} = card, %Stage{} = stage, index) do
+    case Cards.move_card(card, stage, index, current_actor(socket)) do
+      {:ok, moved} ->
+        {:noreply, socket |> apply_move(card.stage_id, moved) |> maybe_warn_over_wip(stage, card.stage_id)}
+
+      _error ->
+        {:noreply, socket}
+    end
+  end
+
+  # RLY-217 — a drop/menu-move that would strand a live run: do NOT move. Stash the intent so
+  # the modal (rendered from @pending_move) can name the exact consequence, and restream the
+  # source + destination lanes so the optimistically-dragged card visibly returns to origin.
+  defp prompt_stranded_move(socket, ref, %Card{} = card, %Stage{} = stage, index, %Run{} = run) do
+    pending = %{
+      ref: ref,
+      source_stage_id: card.stage_id,
+      target_stage_id: stage.id,
+      target_stage_name: stage.name,
+      index: index,
+      run_id: run.id,
+      status: run.status,
+      node: run.current_node,
+      flow_key: run.flow_key
+    }
+
+    socket
+    |> assign(:pending_move, pending)
+    |> restream_lanes([card.stage_id, stage.id])
+  end
+
   defp apply_move(socket, source_stage_id, %Card{} = moved) do
     cards_by_stage = socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
 
