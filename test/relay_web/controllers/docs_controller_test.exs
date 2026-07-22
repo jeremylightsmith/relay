@@ -66,7 +66,10 @@ defmodule RelayWeb.DocsControllerTest do
     html = conn |> get(~p"/docs/cli") |> html_response(200)
 
     assert html =~ "bin/relay init"
-    assert html =~ "--force"
+    assert html =~ "--config-url"
+    assert html =~ "relay-config"
+    refute html =~ "--force"
+    refute html =~ "--dry-run"
   end
 
   test "the runner architecture page describes the relay-config scaffold source", %{conn: conn} do
