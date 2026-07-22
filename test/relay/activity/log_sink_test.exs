@@ -20,7 +20,7 @@ defmodule Relay.Activity.LogSinkTest do
       %{
         id: System.unique_integer([:monotonic, :positive]),
         ts: DateTime.utc_now(),
-        ref: "RLY-7",
+        ref: "RL7",
         kind: :claude,
         text: "a line",
         run_id: nil,
@@ -76,7 +76,7 @@ defmodule Relay.Activity.LogSinkTest do
   end
 
   test "an unknown ref is dropped without crashing the sink", %{board: board, card: card, sink: sink} do
-    :ok = LogSink.enqueue(board.id, [entry(%{ref: "RLY-9999", text: "ghost"})], sink)
+    :ok = LogSink.enqueue(board.id, [entry(%{ref: "RL9999", text: "ghost"})], sink)
     :ok = LogSink.enqueue(board.id, [entry(%{text: "real"})], sink)
     :ok = settle(sink)
 
@@ -128,7 +128,7 @@ defmodule Relay.Activity.LogSinkTest do
 
   test "entries for a card on another board are not written", %{sink: sink} do
     other_board = insert(:board)
-    :ok = LogSink.enqueue(other_board.id, [entry(%{ref: "RLY-7", text: "cross-board"})], sink)
+    :ok = LogSink.enqueue(other_board.id, [entry(%{ref: "RL7", text: "cross-board"})], sink)
     :ok = settle(sink)
 
     assert Repo.aggregate(from(a in Schemas.Activity, where: a.text == "cross-board"), :count) == 0

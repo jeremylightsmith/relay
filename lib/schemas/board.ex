@@ -1,11 +1,12 @@
 defmodule Schemas.Board do
   @moduledoc """
   A user's kanban board. One board per user for now (MMF 19 adds more).
-  `slug` is stored for future slug-routing (MMF 19); `key` is the short
-  card-ref prefix (e.g. "RLY-12", used from MMF 03). `owner_id` is set
-  programmatically, never cast from input. `card_seq` is the per-board
-  card-ref counter (MMF 03), bumped under a row lock by
-  `Relay.Cards.create_card/2` and never cast from input.
+  `slug` is stored for future slug-routing (MMF 19); `key` is the
+  exactly-2-letter card-ref prefix (e.g. "RL12", used from MMF 03,
+  dashless since RLY-230). `owner_id` is set programmatically, never cast
+  from input. `card_seq` is the per-board card-ref counter (MMF 03),
+  bumped under a row lock by `Relay.Cards.create_card/2` and never cast
+  from input.
   `public_enabled` + `public_intake_stage_id` (RLY-69) are the public-board
   settings, written only via `public_settings_changeset/2`.
   """
@@ -17,7 +18,7 @@ defmodule Schemas.Board do
   schema "boards" do
     field :name, :string, default: "My board"
     field :slug, :string
-    field :key, :string, default: "RLY"
+    field :key, :string, default: "RL"
     field :card_seq, :integer, default: 0
     field :archived_at, :utc_datetime
     field :public_enabled, :boolean, default: false
@@ -38,13 +39,19 @@ defmodule Schemas.Board do
     # name would reset it to "My board" instead of failing validation below.
     |> cast(attrs, [:name, :slug, :key], empty_values: [])
     |> update_change(:name, &String.trim/1)
+    |> update_change(:key, &normalize_key/1)
     |> validate_required([:name, :slug, :key])
     |> validate_length(:name, min: 1, max: 80)
+    |> validate_format(:key, ~r/\A[A-Z]{2}\z/, message: "must be exactly 2 letters")
     |> validate_format(:slug, ~r/\A[a-z0-9]+(?:-[a-z0-9]+)*\z/,
       message: "must be lowercase letters, numbers, and hyphens"
     )
     |> unique_constraint(:slug)
   end
+
+  # Upcase, then keep only A–Z. `validate_format/3` above enforces the "exactly 2" rule on the
+  # normalized value, so "rl" -> "RL", "R1" -> "R" (rejected), "abc" -> "ABC" (rejected).
+  defp normalize_key(key), do: key |> to_string() |> String.upcase() |> String.replace(~r/[^A-Z]/, "")
 
   @doc """
   Changeset for the RLY-69 public-board settings — the enable toggle and the intake

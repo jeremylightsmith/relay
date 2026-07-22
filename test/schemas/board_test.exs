@@ -13,7 +13,7 @@ defmodule Schemas.BoardTest do
         |> Repo.insert!()
 
       assert board.name == "My board"
-      assert board.key == "RLY"
+      assert board.key == "RL"
       assert board.slug == "my-slug"
       assert board.owner_id == user.id
     end
@@ -41,15 +41,43 @@ defmodule Schemas.BoardTest do
   describe "changeset/2 slug format (MMF 19)" do
     test "rejects a slug with uppercase, spaces, or symbols" do
       for bad <- ["Bad Slug", "acme/product", "under_score", "-leading", "trailing-"] do
-        cs = Board.changeset(%Board{owner_id: 1}, %{name: "B", slug: bad, key: "B"})
+        cs = Board.changeset(%Board{owner_id: 1}, %{name: "B", slug: bad, key: "RL"})
         refute cs.valid?, "expected #{inspect(bad)} to be invalid"
         assert "must be lowercase letters, numbers, and hyphens" in errors_on(cs).slug
       end
     end
 
     test "accepts a lowercase hyphenated slug" do
-      cs = Board.changeset(%Board{owner_id: 1}, %{name: "B", slug: "acme-1", key: "B"})
+      cs = Board.changeset(%Board{owner_id: 1}, %{name: "B", slug: "acme-1", key: "RL"})
       assert cs.valid?
+    end
+  end
+
+  describe "changeset/2 card key (RLY-230)" do
+    test "accepts an exactly-2-letter key" do
+      cs = Board.changeset(%Board{owner_id: 1}, %{name: "B", slug: "acme-1", key: "RL"})
+      assert cs.valid?
+      assert Ecto.Changeset.get_field(cs, :key) == "RL"
+    end
+
+    test "upcases a lowercase key" do
+      cs = Board.changeset(%Board{owner_id: 1}, %{name: "B", slug: "acme-1", key: "xy"})
+      assert cs.valid?
+      assert Ecto.Changeset.get_field(cs, :key) == "XY"
+    end
+
+    test "strips symbols/digits, then validates the remaining letters" do
+      # "R1" normalizes to "R" (one letter) -> rejected with the 2-letter message
+      cs = Board.changeset(%Board{owner_id: 1}, %{name: "B", slug: "acme-1", key: "R1"})
+      refute cs.valid?
+      assert "must be exactly 2 letters" in errors_on(cs).key
+    end
+
+    test "rejects a one-letter key, a three-letter key, and a blank key" do
+      for bad <- ["R", "RLY", ""] do
+        cs = Board.changeset(%Board{owner_id: 1}, %{name: "B", slug: "acme-1", key: bad})
+        refute cs.valid?, "expected #{inspect(bad)} to be invalid"
+      end
     end
   end
 

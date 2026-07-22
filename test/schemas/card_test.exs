@@ -61,7 +61,8 @@ defmodule Schemas.CardTest do
 
   describe "Cards.ref/2" do
     test "formats the human-facing ref from the board key and ref_number" do
-      assert Cards.ref(%Board{key: "RLY"}, %Card{ref_number: 12}) == "RLY-12"
+      assert Cards.ref(%Board{key: "RLY"}, %Card{ref_number: 12}) == "RLY12"
+      assert Cards.format_ref("RL", 230) == "RL230"
     end
   end
 

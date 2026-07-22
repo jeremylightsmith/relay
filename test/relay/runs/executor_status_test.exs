@@ -119,7 +119,7 @@ defmodule Relay.Runs.ExecutorStatusTest do
 
       assert [%{jobs: [listed]}] = Runs.list_executor_status(board, now)
       assert listed.job_id == job.id
-      assert listed.ref == "#{board.key}-#{card.ref_number}"
+      assert listed.ref == "#{board.key}#{card.ref_number}"
       assert listed.title == "Ship it"
       assert listed.node_key == "implement"
       assert listed.state == :running

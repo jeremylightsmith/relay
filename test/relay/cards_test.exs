@@ -30,7 +30,7 @@ defmodule Relay.CardsTest do
       {:ok, card3} = Cards.create_card(stage, %{title: "Third"})
 
       assert Enum.map([card1, card2, card3], & &1.ref_number) == [1, 2, 3]
-      assert Cards.ref(board, card3) == "RLY-3"
+      assert Cards.ref(board, card3) == "RLY3"
       assert Repo.get!(Board, board.id).card_seq == 3
     end
 
@@ -44,7 +44,7 @@ defmodule Relay.CardsTest do
 
       assert a2.ref_number == 2
       assert b1.ref_number == 1
-      assert Cards.ref(other_board, b1) == "OPS-1"
+      assert Cards.ref(other_board, b1) == "OPS1"
     end
 
     test "inserts each new card at the top of its stage, shifting the rest down",
@@ -414,12 +414,12 @@ defmodule Relay.CardsTest do
     test "returns the card the ref points at on the board", %{board: board, stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "Find me"})
 
-      assert %Card{id: id} = Cards.get_card_by_ref(board, "RLY-1")
+      assert %Card{id: id} = Cards.get_card_by_ref(board, "RLY1")
       assert id == card.id
     end
 
     test "returns nil for an unknown ref number", %{board: board} do
-      assert Cards.get_card_by_ref(board, "RLY-99") == nil
+      assert Cards.get_card_by_ref(board, "RLY99") == nil
     end
 
     test "returns nil for malformed or foreign-key refs", %{board: board, stage: stage} do
@@ -435,7 +435,7 @@ defmodule Relay.CardsTest do
 
       {:ok, _theirs} = Cards.create_card(other_stage, %{title: "Theirs"})
 
-      assert Cards.get_card_by_ref(board, "RLY-1") == nil
+      assert Cards.get_card_by_ref(board, "RLY1") == nil
     end
 
     test "still returns an archived card (loadable by ref, like archived boards)", %{
@@ -445,9 +445,18 @@ defmodule Relay.CardsTest do
       {:ok, card} = Cards.create_card(stage, %{title: "Archived but linkable"})
       {:ok, _archived} = Cards.archive_card(card)
 
-      assert %Card{id: id, archived_at: at} = Cards.get_card_by_ref(board, "RLY-1")
+      assert %Card{id: id, archived_at: at} = Cards.get_card_by_ref(board, "RLY1")
       assert id == card.id
       assert at
+    end
+
+    test "resolves both the dashless and optional-dash forms; rejects a wrong prefix", %{board: board, stage: stage} do
+      card = insert(:card, stage: stage, board: board, ref_number: 7)
+
+      assert %Card{id: id} = Cards.get_card_by_ref(board, "RLY7")
+      assert %Card{id: ^id} = Cards.get_card_by_ref(board, "RLY-7")
+      assert Cards.get_card_by_ref(board, "ZZ7") == nil
+      assert id == card.id
     end
   end
 
@@ -467,7 +476,7 @@ defmodule Relay.CardsTest do
 
       {:ok, _} = Cards.set_sub_tasks(card, [%{"title" => "One"}, %{"title" => "Two"}])
 
-      light = Cards.get_card_light_by_ref(board, "RLY-1")
+      light = Cards.get_card_light_by_ref(board, "RLY1")
 
       assert light.id == card.id
       assert light.title == "Light me"
@@ -485,7 +494,7 @@ defmodule Relay.CardsTest do
     end
 
     test "returns nil for an unknown ref number", %{board: board} do
-      assert Cards.get_card_light_by_ref(board, "RLY-99") == nil
+      assert Cards.get_card_light_by_ref(board, "RLY99") == nil
     end
 
     test "returns nil for malformed or foreign-key refs", %{board: board, stage: stage} do
@@ -502,7 +511,7 @@ defmodule Relay.CardsTest do
       {:ok, _card} = Cards.create_card(other_stage, %{title: "Foreign"})
 
       # the RLY board has no card #1 yet
-      assert Cards.get_card_light_by_ref(board, "RLY-1") == nil
+      assert Cards.get_card_light_by_ref(board, "RLY1") == nil
     end
   end
 
@@ -1104,7 +1113,7 @@ defmodule Relay.CardsTest do
       assert created.owners == []
 
       assert [%Card{owners: []}] = Cards.list_cards(board)
-      assert %Card{owners: []} = Cards.get_card_by_ref(board, "RLY-1")
+      assert %Card{owners: []} = Cards.get_card_by_ref(board, "RLY1")
 
       {:ok, updated} = Cards.update_card(created, %{title: "Still preloaded"})
       assert updated.owners == []
@@ -1119,7 +1128,7 @@ defmodule Relay.CardsTest do
     test "archive stamps archived_at and preserves stage/position/owners", %{stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "Retire me"})
       {:ok, _owner} = Cards.add_owner(card, :agent)
-      card = Cards.get_card_by_ref(Repo.get!(Board, stage.board_id), "RLY-1")
+      card = Cards.get_card_by_ref(Repo.get!(Board, stage.board_id), "RLY1")
 
       assert {:ok, archived} = Cards.archive_card(card)
 
@@ -1249,21 +1258,21 @@ defmodule Relay.CardsTest do
       c2 = insert(:card, stage: backlog, title: "Two", position: 2, ref_number: 2)
       _c3 = insert(:card, stage: backlog, title: "Three", position: 3, ref_number: 3)
 
-      assert Cards.stage_neighbors(board, c2) == %{prev: "RLY-1", next: "RLY-3"}
+      assert Cards.stage_neighbors(board, c2) == %{prev: "MY1", next: "MY3"}
     end
 
     test "the first card of a column has no prev", %{board: board, backlog: backlog} do
       c1 = insert(:card, stage: backlog, title: "One", position: 1, ref_number: 1)
       _c2 = insert(:card, stage: backlog, title: "Two", position: 2, ref_number: 2)
 
-      assert Cards.stage_neighbors(board, c1) == %{prev: nil, next: "RLY-2"}
+      assert Cards.stage_neighbors(board, c1) == %{prev: nil, next: "MY2"}
     end
 
     test "the last card of a column has no next", %{board: board, backlog: backlog} do
       _c1 = insert(:card, stage: backlog, title: "One", position: 1, ref_number: 1)
       c2 = insert(:card, stage: backlog, title: "Two", position: 2, ref_number: 2)
 
-      assert Cards.stage_neighbors(board, c2) == %{prev: "RLY-1", next: nil}
+      assert Cards.stage_neighbors(board, c2) == %{prev: "MY1", next: nil}
     end
 
     test "a single-card column has neither neighbor", %{board: board, backlog: backlog} do
@@ -1278,7 +1287,7 @@ defmodule Relay.CardsTest do
       c_first = insert(:card, stage: backlog, title: "First", position: 1, ref_number: 1)
       c_second = insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
 
-      assert Cards.stage_neighbors(board, c_second) == %{prev: "RLY-1", next: "RLY-3"}
+      assert Cards.stage_neighbors(board, c_second) == %{prev: "MY1", next: "MY3"}
       assert Cards.stage_neighbors(board, c_first).prev == nil
       assert Cards.stage_neighbors(board, c_third).next == nil
     end
@@ -1292,7 +1301,7 @@ defmodule Relay.CardsTest do
       c2 = insert(:card, stage: done, title: "Second done", position: 2, ref_number: 2)
       _c3 = insert(:card, stage: done, title: "Third done", position: 3, ref_number: 3)
 
-      assert Cards.stage_neighbors(board, c2) == %{prev: "RLY-3", next: "RLY-1"}
+      assert Cards.stage_neighbors(board, c2) == %{prev: "MY3", next: "MY1"}
     end
 
     test "the terminal Done column stops at the capped window's oldest shown card", %{

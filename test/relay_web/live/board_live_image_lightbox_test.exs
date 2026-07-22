@@ -48,7 +48,7 @@ defmodule RelayWeb.BoardLiveImageLightboxTest do
           "screens" => [%{"url" => "/images/logo_light_128.png", "caption" => "Board"}]
         })
 
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
       assert has_element?(view, "#ai-result-screens img.cursor-zoom-in")

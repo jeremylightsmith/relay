@@ -18,7 +18,7 @@ defmodule RelayWeb.BoardLiveSubTasksTest do
   test "no SUB-TASKS or AI RESULT section for a bare card", %{conn: conn, board: board, code: code} do
     {:ok, _card} = Cards.create_card(code, %{title: "Bare"})
 
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     assert has_element?(view, "#card-drawer")
@@ -32,7 +32,7 @@ defmodule RelayWeb.BoardLiveSubTasksTest do
     {:ok, card} = Cards.set_sub_tasks(card, [%{"title" => "First"}, %{"title" => "Second"}])
     [first, _second] = card.sub_tasks
 
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
     assert has_element?(view, "#sub-tasks-count", "0/2")
     assert has_element?(view, "#sub-task-#{first.id}", "First")
@@ -48,7 +48,7 @@ defmodule RelayWeb.BoardLiveSubTasksTest do
     {:ok, card} = Cards.create_card(code, %{title: "Resulted"})
     {:ok, _card} = Cards.update_ai_result(card, %{"summary" => "All **done**", "changes" => ["Wired it"]})
 
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=RLY-1")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     assert has_element?(view, "#ai-result")

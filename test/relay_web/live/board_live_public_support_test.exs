@@ -17,7 +17,7 @@ defmodule RelayWeb.BoardLivePublicSupportTest do
   test "an unstarted card with votes shows the support badge on its face", %{conn: conn, board: board, card: card} do
     insert(:vote, card: card)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
-    assert has_element?(view, "article[data-ref='#{board.key}-#{card.ref_number}'] .card-votes", "1")
+    assert has_element?(view, "article[data-ref='#{board.key}#{card.ref_number}'] .card-votes", "1")
   end
 
   test "the drawer shows PUBLIC SUPPORT and the Add-a-public-description flow", %{
@@ -40,6 +40,6 @@ defmodule RelayWeb.BoardLivePublicSupportTest do
     |> render_submit()
 
     assert render(view) =~ "Ship the mobile app"
-    assert Cards.get_card_by_ref(board, "#{board.key}-#{card.ref_number}").public_description == "Ship the mobile app"
+    assert Cards.get_card_by_ref(board, "#{board.key}#{card.ref_number}").public_description == "Ship the mobile app"
   end
 end

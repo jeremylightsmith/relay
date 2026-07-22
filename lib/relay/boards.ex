@@ -41,15 +41,15 @@ defmodule Relay.Boards do
   end
 
   @doc """
-  Updates a board's user-editable `name` and `slug` — never `key` or
-  `owner_id`, whatever the caller passes. Validates slug format and
-  uniqueness. On success broadcasts `{:board_updated, board}` (MMF 18) so
-  every open board retitles/redirects live. Returns
+  Updates a board's user-editable `name`, `slug`, and card `key` — never `owner_id`,
+  whatever the caller passes. Validates slug format/uniqueness and the 2-letter key rule
+  (in `Schemas.Board.changeset/2`). On success broadcasts `{:board_updated, board}` (MMF 18)
+  so every open board retitles/redirects and re-renders its refs live. Returns
   `{:ok, board} | {:error, changeset}`.
   """
   def update_board(%Board{} = board, attrs) do
     board
-    |> Board.changeset(Map.take(attrs, [:name, "name", :slug, "slug"]))
+    |> Board.changeset(Map.take(attrs, [:name, "name", :slug, "slug", :key, "key"]))
     |> Repo.update()
     |> broadcast_board_updated(board.id)
   end
@@ -575,8 +575,7 @@ defmodule Relay.Boards do
     {:ok, board} =
       create_board(user, %{
         name: "My board",
-        slug: unique_slug(slugify(user_source(user))),
-        key: "RLY"
+        slug: unique_slug(slugify(user_source(user)))
       })
 
     board
@@ -625,12 +624,12 @@ defmodule Relay.Boards do
 
   defp fetch_name(attrs), do: attrs[:name] || attrs["name"] || ""
 
-  # Card-ref key: uppercased alphanumerics of the name, capped at 5 chars,
-  # falling back to "RLY". Refs resolve per-board, so a shared key is harmless.
+  # Card-ref key: the first two A–Z letters of the name, uppercased; falls back to "RL" when the
+  # name yields fewer than two letters. Refs resolve per-board, so a shared key is harmless.
   defp derive_key(name) do
-    case name |> to_string() |> String.upcase() |> String.replace(~r/[^A-Z0-9]/, "") |> String.slice(0, 5) do
-      "" -> "RLY"
-      key -> key
+    case name |> to_string() |> String.upcase() |> String.replace(~r/[^A-Z]/, "") |> String.slice(0, 2) do
+      <<_::binary-size(2)>> = key -> key
+      _ -> "RL"
     end
   end
 

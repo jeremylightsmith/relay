@@ -6,15 +6,15 @@
       "isolation": "exclusive",
       "node_id": "work",
       "node_type": "shell",
-      "ref": "CTB-1",
+      "ref": "CB1",
       "resume_session": null,
       "run": "mix precommit",
       "run_id": "<run-id>",
       "vars": {
-        "branch": "ctb-1-contract-card",
+        "branch": "cb-1-contract-card",
         "findings": null,
         "prior_detail": null,
-        "ref": "CTB-1",
+        "ref": "CB1",
         "sub_task": null
       }
     },
@@ -24,15 +24,15 @@
       "isolation": "shared_clean",
       "node_id": "work",
       "node_type": "agent",
-      "ref": "CTA-1",
+      "ref": "CA1",
       "resume_session": "<session-id>",
       "run": "/write-plan {ref}",
       "run_id": "<run-id>",
       "vars": {
-        "branch": "cta-1-contract-card",
+        "branch": "ca-1-contract-card",
         "findings": null,
         "prior_detail": null,
-        "ref": "CTA-1",
+        "ref": "CA1",
         "sub_task": null
       }
     },
@@ -42,15 +42,15 @@
       "isolation": "shared_clean",
       "node_id": "work",
       "node_type": "agent",
-      "ref": "CTA-1",
+      "ref": "CA1",
       "resume_session": null,
       "run": "/write-plan {ref}",
       "run_id": "<run-id>",
       "vars": {
-        "branch": "cta-1-contract-card",
+        "branch": "ca-1-contract-card",
         "findings": null,
         "prior_detail": null,
-        "ref": "CTA-1",
+        "ref": "CA1",
         "sub_task": null
       }
     }

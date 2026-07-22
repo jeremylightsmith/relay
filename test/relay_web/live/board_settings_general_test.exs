@@ -149,5 +149,53 @@ defmodule RelayWeb.BoardSettingsGeneralTest do
       refute has_element?(view, ".hero-pencil-square")
       refute has_element?(view, ".editable-text")
     end
+
+    test "the General pane shows the Card key field and the rename warning", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      assert has_element?(view, "#board-key-form #board-key-input")
+      assert view |> element("#board-key-input") |> render() =~ board.key
+      assert has_element?(view, "#board-key-warning")
+      assert view |> element("#board-key-warning") |> render() =~ "renames every card"
+    end
+
+    test "saving a valid Card key persists it and re-renders the field uppercased", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      html =
+        view
+        |> form("#board-key-form", board: %{key: "ab"})
+        |> render_submit()
+
+      assert html =~ "Card key saved."
+      assert Boards.get_or_create_default_board(user).key == "AB"
+      assert view |> element("#board-key-input") |> render() =~ "AB"
+    end
+
+    test "an invalid Card key shows the validation message and does not change the key", %{conn: conn, user: user} do
+      original = Boards.get_or_create_default_board(user).key
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      html =
+        view
+        |> form("#board-key-form", board: %{key: "ABC"})
+        |> render_submit()
+
+      assert html =~ "must be exactly 2 letters"
+      assert Boards.get_or_create_default_board(user).key == original
+    end
+
+    test "cancelling a Card key edit reverts the field without saving", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      view |> element("#board-key-cancel") |> render_click()
+
+      assert view |> element("#board-key-input") |> render() =~ board.key
+      assert Boards.get_or_create_default_board(user).key == board.key
+    end
   end
 end

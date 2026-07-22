@@ -27,7 +27,7 @@ defmodule RelayWeb.BoardLiveWipMoveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      render_hook(view, "move_card", %{"ref" => "RLY-4", "stage_id" => code.id, "index" => 0})
+      render_hook(view, "move_card", %{"ref" => "MY4", "stage_id" => code.id, "index" => 0})
 
       assert has_element?(view, "#stage-col-5-cards .board-card", "One more")
       assert Repo.get!(Card, card.id).stage_id == code.id
@@ -43,7 +43,7 @@ defmodule RelayWeb.BoardLiveWipMoveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      render_hook(view, "move_card", %{"ref" => "RLY-2", "stage_id" => code.id, "index" => 0})
+      render_hook(view, "move_card", %{"ref" => "MY2", "stage_id" => code.id, "index" => 0})
 
       assert has_element?(view, "#stage-col-5-cards .board-card", "Fits fine")
       refute has_element?(view, "#flash-error")
@@ -58,7 +58,7 @@ defmodule RelayWeb.BoardLiveWipMoveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      render_hook(view, "move_card", %{"ref" => "RLY-2", "stage_id" => code.id, "index" => 0})
+      render_hook(view, "move_card", %{"ref" => "MY2", "stage_id" => code.id, "index" => 0})
 
       refute has_element?(view, "#flash-error")
       assert has_element?(view, "#stage-col-5 .stage-wip[data-over]", "wip 2/1")
@@ -71,7 +71,7 @@ defmodule RelayWeb.BoardLiveWipMoveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      render_hook(view, "move_card", %{"ref" => "RLY-4", "stage_id" => code.id, "index" => 0})
+      render_hook(view, "move_card", %{"ref" => "MY4", "stage_id" => code.id, "index" => 0})
 
       assert has_element?(view, "#stage-col-5-cards .board-card", "Free flow")
       refute has_element?(view, "#flash-error")
@@ -87,8 +87,8 @@ defmodule RelayWeb.BoardLiveWipMoveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      # RLY-1, RLY-2 are the Code cards; RLY-3 is the Spec card being moved.
-      render_hook(view, "move_card", %{"ref" => "RLY-3", "stage_id" => review.id, "index" => 0})
+      # MY1, MY2 are the Code cards; MY3 is the Spec card being moved.
+      render_hook(view, "move_card", %{"ref" => "MY3", "stage_id" => review.id, "index" => 0})
 
       assert Repo.get!(Card, card.id).stage_id == review.id
       assert has_element?(view, "#flash-error", "Code is over its WIP limit — 3/2")

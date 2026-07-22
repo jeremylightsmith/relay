@@ -32,8 +32,8 @@ defmodule RelayWeb.Api.ExecutorContractTest do
   test "the committed fixture matches what /api/node-jobs/* actually sends and accepts" do
     user = insert(:user)
 
-    shared = board_with_flow(user, "Contract A", "CTA", :shared_clean, agent_node())
-    exclusive = board_with_flow(user, "Contract B", "CTB", :exclusive, shell_node())
+    shared = board_with_flow(user, "Contract A", "CA", :shared_clean, agent_node())
+    exclusive = board_with_flow(user, "Contract B", "CB", :exclusive, shell_node())
 
     # The heartbeat MUST run before anything is claimed: RLY-170's orphan recovery reads the
     # absence of a job from `running` as "this executor restarted and lost it" and requeues it,

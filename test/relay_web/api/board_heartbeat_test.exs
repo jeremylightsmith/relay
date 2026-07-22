@@ -22,7 +22,7 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
     beaten = insert(:card, stage: stage, ref_number: 7)
     untouched = insert(:card, stage: stage, ref_number: 9)
 
-    assert %{"stamped" => 1} = json_response(beat(conn, ["RLY-7"]), 200)
+    assert %{"stamped" => 1} = json_response(beat(conn, ["RL7"]), 200)
 
     assert Repo.get!(Schemas.Card, beaten.id).agent_heartbeat_at
     assert Repo.get!(Schemas.Card, untouched.id).agent_heartbeat_at == nil
@@ -32,12 +32,12 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
     other_board = insert(:board)
     other_card = insert(:card, stage: insert(:stage, board: other_board), ref_number: 7)
 
-    assert %{"stamped" => 0} = json_response(beat(conn, ["RLY-7"]), 200)
+    assert %{"stamped" => 0} = json_response(beat(conn, ["RL7"]), 200)
     assert Repo.get!(Schemas.Card, other_card.id).agent_heartbeat_at == nil
   end
 
   test "an unknown or malformed ref is ignored, not an error", %{conn: conn} do
-    assert %{"stamped" => 0} = json_response(beat(conn, ["RLY-9999", "nonsense", ""]), 200)
+    assert %{"stamped" => 0} = json_response(beat(conn, ["RL9999", "nonsense", ""]), 200)
   end
 
   test "an empty ref list is a no-op", %{conn: conn} do
@@ -48,7 +48,7 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
     card = insert(:card, stage: stage, ref_number: 3)
     before = DateTime.add(DateTime.utc_now(), -1, :second)
 
-    assert {1, nil} = Cards.touch_heartbeats(board, ["RLY-3"])
+    assert {1, nil} = Cards.touch_heartbeats(board, ["RL3"])
 
     stamped = Repo.get!(Schemas.Card, card.id).agent_heartbeat_at
     assert DateTime.after?(stamped, before)
@@ -58,7 +58,7 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
     conn =
       build_conn()
       |> put_req_header("content-type", "application/json")
-      |> post(~p"/api/board/heartbeat", Jason.encode!(%{"refs" => ["RLY-1"]}))
+      |> post(~p"/api/board/heartbeat", Jason.encode!(%{"refs" => ["RL1"]}))
 
     assert json_response(conn, 401)
   end
@@ -66,7 +66,7 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
   test "a legacy refs-only payload stamps cards", %{conn: conn, stage: stage} do
     insert(:card, stage: stage, ref_number: 7)
 
-    assert %{"stamped" => 1} = json_response(beat(conn, ["RLY-7"]), 200)
+    assert %{"stamped" => 1} = json_response(beat(conn, ["RL7"]), 200)
   end
 
   test "an executor beat (name + capacity) upserts an Executor row",
@@ -85,7 +85,7 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
           "interval" => 30,
           "pools" => [%{"name" => "clean", "mode" => "shared", "used" => 0, "total" => 3}],
           "jobs" => [],
-          "refs" => ["RLY-7"],
+          "refs" => ["RL7"],
           "capacity" => %{"shared_clean" => 3, "exclusive" => 1}
         })
       )
@@ -101,7 +101,7 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
 
     conn
     |> put_req_header("content-type", "application/json")
-    |> post(~p"/api/board/heartbeat", Jason.encode!(%{"runner_id" => "w1", "interval" => 30, "refs" => ["RLY-7"]}))
+    |> post(~p"/api/board/heartbeat", Jason.encode!(%{"runner_id" => "w1", "interval" => 30, "refs" => ["RL7"]}))
     |> json_response(200)
 
     assert Repo.aggregate(Schemas.Executor, :count) == 0

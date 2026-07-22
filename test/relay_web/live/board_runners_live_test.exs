@@ -40,7 +40,7 @@ defmodule RelayWeb.BoardRunnersLiveTest do
     %{card: card, job: job}
   end
 
-  defp ref(board, card), do: "#{board.key}-#{card.ref_number}"
+  defp ref(board, card), do: "#{board.key}#{card.ref_number}"
 
   test "a heartbeating executor renders by name with its capacity chips and FRESH pill",
        %{conn: conn, board: board} do
@@ -183,7 +183,7 @@ defmodule RelayWeb.BoardRunnersLiveTest do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
 
     AgentLog.record(board.id, [
-      %{"ref" => "RLY-9999", "kind" => "claude", "text" => "orphan line"},
+      %{"ref" => "MY9999", "kind" => "claude", "text" => "orphan line"},
       %{"kind" => "lifecycle", "text" => "board-level line"}
     ])
 

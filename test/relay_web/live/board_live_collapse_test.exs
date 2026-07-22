@@ -145,7 +145,7 @@ defmodule RelayWeb.BoardLiveCollapseTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
       assert has_element?(view, "#stage-strip-#{code.id} .stage-count", "1")
 
-      render_hook(view, "move_card", %{"ref" => "RLY-2", "stage_id" => code.id, "index" => 0})
+      render_hook(view, "move_card", %{"ref" => "MY2", "stage_id" => code.id, "index" => 0})
 
       assert has_element?(view, "#stage-strip-#{code.id} .stage-count", "2")
       refute has_element?(view, "#stage-col-5")
