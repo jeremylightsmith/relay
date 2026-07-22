@@ -8,7 +8,8 @@ defmodule Relay.Cards do
   (MMF 07) and API attribution (MMF 09).
   """
 
-  use Boundary, deps: [Relay.Activity, Relay.Boards, Relay.Events, Relay.Push, Relay.Repo, Schemas]
+  use Boundary,
+    deps: [Relay.Activity, Relay.Boards, Relay.Events, Relay.Push, Relay.Repo, Relay.Votes, Schemas]
 
   import Ecto.Query
 
@@ -17,6 +18,7 @@ defmodule Relay.Cards do
   alias Relay.Events
   alias Relay.Push
   alias Relay.Repo
+  alias Relay.Votes
   alias Schemas.Board
   alias Schemas.Card
   alias Schemas.CardOwner
@@ -52,6 +54,7 @@ defmodule Relay.Cards do
     :ai_result,
     :board_id,
     :stage_id,
+    :posted_by_user_id,
     :rejection,
     :inserted_at,
     :updated_at
@@ -86,6 +89,68 @@ defmodule Relay.Cards do
       end)
 
     broadcast_upserted(result)
+  end
+
+  @doc """
+  Orchestrates one public-board idea submission (RLY-225): resolves the board's
+  `public_intake_stage_id`, enforces the per-account rate limit, creates the card
+  attributed to the poster with `posted_by_user_id` stamped programmatically, and
+  applies the poster's first vote.
+
+  Returns `{:ok, card}` or `{:error, :no_intake_stage | :rate_limited | changeset}`.
+  The `create_card` upsert broadcast and the `Votes.toggle_vote` vote-changed
+  broadcast both fire on the board topic, so open boards update live.
+  """
+  def post_public_idea(%Board{} = board, %User{} = user, attrs) do
+    cond do
+      is_nil(board.public_intake_stage_id) ->
+        {:error, :no_intake_stage}
+
+      not within_public_post_limit?(user) ->
+        {:error, :rate_limited}
+
+      true ->
+        stage = Repo.get!(Stage, board.public_intake_stage_id)
+
+        case create_card(stage, public_idea_attrs(attrs), {:user, user.id}) do
+          {:ok, card} ->
+            {:ok, card} = stamp_poster(card, user)
+            {:ok, _added} = Votes.toggle_vote(user, card)
+            {:ok, card}
+
+          {:error, changeset} ->
+            {:error, changeset}
+        end
+    end
+  end
+
+  @doc """
+  The public-post rate-limit policy (RLY-225): a list of `{window_seconds, max_count}`
+  windows. The single source of truth for the caps — every consumer calls this; the
+  literal numbers are never re-typed (AGENTS.md magic-value discipline).
+  """
+  def public_post_limits, do: [{3600, 5}, {86_400, 20}]
+
+  @doc """
+  True when `user` may post another public idea — i.e. for every
+  `{window, max}` in `public_post_limits/0`, the user has posted fewer than
+  `max` cards (`posted_by_user_id == user.id`) inside that window. The count is
+  global per account, across all boards.
+  """
+  def within_public_post_limit?(%User{id: user_id}) do
+    now = DateTime.utc_now()
+
+    Enum.all?(public_post_limits(), fn {window_seconds, max_count} ->
+      since = DateTime.add(now, -window_seconds, :second)
+
+      count =
+        Repo.aggregate(
+          from(c in Card, where: c.posted_by_user_id == ^user_id and c.inserted_at > ^since),
+          :count
+        )
+
+      count < max_count
+    end)
   end
 
   @doc """
@@ -1734,5 +1799,30 @@ defmodule Relay.Cards do
       {:ok, card} -> {:ok, place_at(card, stage, 0)}
       {:error, _changeset} = error -> error
     end
+  end
+
+  # Title + optional public_description from a public submission (string- or atom-keyed).
+  # A blank/whitespace public_description stores nil (matches the mockup's `formDesc.trim() || null`).
+  defp public_idea_attrs(attrs) do
+    %{
+      "title" => attrs["title"] || attrs[:title],
+      "public_description" => blank_to_nil(attrs["public_description"] || attrs[:public_description])
+    }
+  end
+
+  defp blank_to_nil(nil), do: nil
+
+  defp blank_to_nil(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  # Stamp the public poster on the card programmatically (never cast — security rule for ids).
+  defp stamp_poster(%Card{} = card, %User{} = user) do
+    card
+    |> Ecto.Changeset.change(posted_by_user_id: user.id)
+    |> Repo.update()
   end
 end
