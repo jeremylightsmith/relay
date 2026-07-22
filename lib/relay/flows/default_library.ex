@@ -162,8 +162,11 @@ defmodule Relay.Flows.DefaultLibrary do
           key: "merge",
           type: :shell,
           run:
-            "git push origin HEAD:refs/heads/{branch} && " <>
-              "url=$(gh pr create --fill --head {branch} --base main) && " <>
+            "state=$(gh pr view {branch} --json state -q .state 2>/dev/null || echo \"\"); " <>
+              "[ \"$state\" = MERGED ] && exit 0; " <>
+              "git push --force-with-lease origin HEAD:refs/heads/{branch} && " <>
+              "url=$(gh pr view {branch} --json url -q .url 2>/dev/null || " <>
+              "gh pr create --fill --head {branch} --base main) && " <>
               "{relay} pr {ref} \"$url\" && gh pr merge {branch} --squash"
         }
       ],

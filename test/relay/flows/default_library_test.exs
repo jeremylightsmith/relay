@@ -119,6 +119,30 @@ defmodule Relay.Flows.DefaultLibraryTest do
       assert edge?(flow, "merge", "resync", :failed)
     end
 
+    test "merge is an idempotent :shell node that converges on merged (RLY-215)" do
+      n = cf_node(code_flow(), "merge")
+      assert n.type == :shell
+
+      expected =
+        "state=$(gh pr view {branch} --json state -q .state 2>/dev/null || echo \"\"); " <>
+          "[ \"$state\" = MERGED ] && exit 0; " <>
+          "git push --force-with-lease origin HEAD:refs/heads/{branch} && " <>
+          "url=$(gh pr view {branch} --json url -q .url 2>/dev/null || " <>
+          "gh pr create --fill --head {branch} --base main) && " <>
+          "{relay} pr {ref} \"$url\" && gh pr merge {branch} --squash"
+
+      assert n.run == expected
+
+      # Why each piece is there:
+      assert n.run =~ "--force-with-lease"
+      assert n.run =~ "gh pr view {branch} --json url"
+      assert n.run =~ "|| gh pr create"
+      assert n.run =~ "[ \"$state\" = MERGED ] && exit 0"
+
+      # RLY-199 regression guard: no plain non-force push may remain.
+      refute n.run =~ "git push origin HEAD"
+    end
+
     test "every agent node parks on a hard failure via a needs_input edge (RLY-194)" do
       flow = code_flow()
 
