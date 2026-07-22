@@ -136,6 +136,61 @@ defmodule RelayWeb.Layouts do
   end
 
   @doc """
+  The public roadmap shell (RLY-69, `/board/:slug/public`): board name, a "Public
+  roadmap" label, the plain-text public URL, and a Sign in link (or the visitor's
+  avatar when signed in) — no board-switcher nav, no `embed` handling, no
+  `require_authenticated` assumptions. `current_scope` is nil for the majority
+  signed-out visitor; here it only decides the sign-in-link-vs-avatar swap.
+  """
+  attr :flash, :map, required: true, doc: "the map of flash messages"
+  attr :current_scope, :map, default: nil
+  attr :board_name, :string, required: true
+  attr :public_path, :string, required: true, doc: "…/board/:slug/public, shown as plain text"
+  slot :inner_block, required: true
+
+  def public_board(assigns) do
+    ~H"""
+    <div class="min-h-screen" style="background:oklch(0.955 0.008 255);">
+      <header
+        id="public-board-header"
+        class="flex items-center gap-3 border-b border-base-300 bg-base-100 px-4 sm:px-6"
+        style="height:53px;"
+      >
+        <span class="truncate text-[15px] font-semibold">{@board_name}</span>
+        <span class="badge badge-ghost badge-sm uppercase tracking-wider">Public roadmap</span>
+        <span class="hidden truncate font-mono text-xs text-base-content/50 sm:inline">
+          {@public_path}
+        </span>
+        <span class="flex-1"></span>
+        <div :if={@current_scope} id="public-board-avatar">
+          <.avatar
+            size={28}
+            tint={:role}
+            src={@current_scope.user.avatar_url}
+            name={@current_scope.user.name}
+            email={@current_scope.user.email}
+          />
+        </div>
+        <.link
+          :if={!@current_scope}
+          href={~p"/auth/google?return_to=#{@public_path}"}
+          id="public-board-sign-in"
+          class="btn btn-sm btn-primary"
+        >
+          Sign in
+        </.link>
+      </header>
+
+      <main class="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+        {render_slot(@inner_block)}
+      </main>
+
+      <.flash_group flash={@flash} />
+    </div>
+    """
+  end
+
+  @doc """
   Public documentation layout: top nav (wordmark → `/`, "/ Docs" eyebrow, "Open the board"
   → `/board`), a left sidebar grouped by section with the active page highlighted, the article
   slot, and an "on this page" TOC rail. Public — never reads `current_scope`. Docs are static

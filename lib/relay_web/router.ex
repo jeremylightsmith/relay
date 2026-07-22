@@ -99,6 +99,19 @@ defmodule RelayWeb.Router do
       # browser destination** — the web opens a card at /board/:slug?card=:ref.
       live "/cards/:ref", BoardLive, :card
     end
+
+    # RLY-69 — the public, read-only roadmap. Deliberately its own `live_session`
+    # (not `:require_authenticated`): it must render for signed-out visitors, and
+    # `mount_current_scope` (not `require_authenticated`) assigns `current_scope`
+    # (nil when signed out) instead of redirecting.
+    live_session :public,
+      on_mount:
+        if(Application.compile_env(:relay, :sql_sandbox),
+          do: [RelayWeb.LiveAcceptance],
+          else: []
+        ) ++ [{RelayWeb.Auth, :mount_current_scope}, {RelayWeb.Auth, :mount_embed}] do
+      live "/board/:slug/public", PublicBoardLive
+    end
   end
 
   scope "/", RelayWeb do

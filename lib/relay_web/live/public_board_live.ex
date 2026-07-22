@@ -1,0 +1,380 @@
+defmodule RelayWeb.PublicBoardLive do
+  @moduledoc """
+  The public, read-only roadmap (RLY-69): `/board/:slug/public`. Renders for
+  signed-out visitors and signed-in users alike — mounted under the router's
+  `:public` `live_session`, which uses `{RelayWeb.Auth, :mount_current_scope}`
+  (assigns `current_scope`, nil when signed out) rather than
+  `:require_authenticated`.
+
+  Non-done cards (`Stage.public_categories/0`: unstarted, planning, in_progress)
+  are shown collapsed into three category columns, sorted by vote count (ties
+  broken by recency). Voting requires sign-in: a signed-out click opens the
+  "Sign in to vote" modal instead of casting a vote; the modal's "Continue with
+  Google" link carries `return_to` back to this board (RLY-69's OAuth
+  `return_to` — see `RelayWeb.AuthController`), so signing in returns the
+  visitor here. A pending vote is **not** replayed across the OAuth round trip
+  (YAGNI, per the card's decisions) — the visitor returns signed in and clicks
+  vote again.
+
+  Supporters (the card detail modal's SUPPORTERS block) are private to
+  signed-in visitors: signed out sees only the total count ("N people support
+  this. Sign in to see who."), matching `Relay.Votes.supporters/2`'s contract.
+
+  Real-time: subscribes to the board's `Relay.Events` topic and recomputes the
+  columns on `{:vote_changed, _card_id}` — coarse on purpose (see
+  `Relay.Events`'s moduledoc), matching every other event on this topic.
+  """
+
+  use RelayWeb, :live_view
+
+  alias Relay.Boards
+  alias Relay.Events
+  alias Relay.Votes
+  alias Schemas.Board
+  alias Schemas.Stage
+
+  @supporters_preview 5
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <Layouts.public_board
+      flash={@flash}
+      current_scope={@current_scope}
+      board_name={@board.name}
+      public_path={@public_path}
+    >
+      <p class="text-sm text-base-content/60">
+        This is our public roadmap. Upvote the ideas you want most.
+      </p>
+      <div class="mt-1 flex items-center justify-between">
+        <p class="text-xs text-base-content/40">
+          {length(@cards)} {if(length(@cards) == 1, do: "idea", else: "ideas")} · sorted by {if(
+            @sort_by == :new,
+            do: "newest",
+            else: "votes"
+          )}
+        </p>
+        <div class="join">
+          <button
+            type="button"
+            id="public-sort-votes"
+            phx-click="set_sort"
+            phx-value-sort="votes"
+            class={["btn btn-xs join-item", @sort_by == :votes && "btn-active"]}
+          >
+            Top
+          </button>
+          <button
+            type="button"
+            id="public-sort-new"
+            phx-click="set_sort"
+            phx-value-sort="new"
+            class={["btn btn-xs join-item", @sort_by == :new && "btn-active"]}
+          >
+            New
+          </button>
+        </div>
+      </div>
+
+      <div class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div
+          :for={column <- columns(@cards, @sort_by, @vote_counts)}
+          id={"public-column-#{column.key}"}
+        >
+          <div class="mb-2 flex items-center gap-2">
+            <span class={["h-2.5 w-2.5 rounded-full", category_dot_class(column.key)]}></span>
+            <h2 class="text-sm font-semibold">{column.label}</h2>
+            <span data-column-count class="text-xs text-base-content/40">{column.count}</span>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <div
+              :for={card <- column.cards}
+              id={"public-card-#{card.id}"}
+              class="rounded-[11px] border border-base-300 bg-base-100 p-3"
+            >
+              <div
+                id={"public-card-open-#{card.id}"}
+                phx-click="open_card"
+                phx-value-id={card.id}
+                class="cursor-pointer"
+              >
+                <p class="text-sm font-medium">{card.title}</p>
+                <p :if={card.public_description} class="mt-1 text-xs text-base-content/60">
+                  {card.public_description}
+                </p>
+                <div class="mt-2 flex items-center gap-2">
+                  <span class="text-[11px] text-base-content/40">
+                    {relative_age(card.inserted_at)}
+                  </span>
+                  <span
+                    :if={MapSet.member?(@voted_ids, card.id)}
+                    class="text-[10px] font-semibold"
+                    style="color:oklch(0.60 0.14 250);"
+                  >
+                    YOU VOTED
+                  </span>
+                </div>
+              </div>
+              <.support_badge
+                id={"public-vote-#{card.id}"}
+                count={Map.get(@vote_counts, card.id, 0)}
+                voted={MapSet.member?(@voted_ids, card.id)}
+                phx-click="vote"
+                phx-value-id={card.id}
+                class="mt-2"
+              />
+            </div>
+
+            <p :if={column.cards == []} class="text-xs text-base-content/40">Nothing here yet.</p>
+          </div>
+        </div>
+      </div>
+
+      <div
+        :if={@open_card_id}
+        id="public-card-modal"
+        class="modal modal-open"
+        role="dialog"
+        aria-label="Card detail"
+      >
+        <% card = find_card(@cards, @open_card_id) %>
+        <div class="modal-box max-w-lg">
+          <div class="flex items-center justify-between">
+            <span class="flex items-center gap-2 text-xs uppercase tracking-wider text-base-content/50">
+              <span class={["h-2.5 w-2.5 rounded-full", category_dot_class(card.stage.category)]}>
+              </span>
+              {category_label(card.stage.category)}
+            </span>
+            <button
+              type="button"
+              id="public-card-modal-close"
+              phx-click="close_card"
+              class="btn btn-sm btn-circle btn-ghost"
+              aria-label="Close"
+            >
+              <.icon name="hero-x-mark" class="size-4" />
+            </button>
+          </div>
+
+          <h3 class="mt-2 text-lg font-semibold">{card.title}</h3>
+          <p class="mt-2 text-sm text-base-content/70">
+            {card.public_description || "No public description yet."}
+          </p>
+
+          <div id="public-supporters" class="mt-4">
+            <p class="text-xs uppercase tracking-wider text-base-content/50">
+              Supporters · {@open_card_supporters_total}
+            </p>
+            <%= if @current_scope do %>
+              <ul class="mt-2 flex flex-col gap-2">
+                <li :for={supporter <- @open_card_supporters} class="flex items-center gap-2 text-sm">
+                  <.avatar
+                    size={24}
+                    tint={:identity}
+                    src={supporter.avatar_url}
+                    name={supporter.name}
+                    email={supporter.email}
+                  />
+                  <span>{supporter.name || supporter.email}</span>
+                </li>
+              </ul>
+              <p
+                :if={@open_card_supporters_total > length(@open_card_supporters)}
+                class="mt-2 text-xs text-base-content/40"
+              >
+                Show all {@open_card_supporters_total} supporters →
+              </p>
+            <% else %>
+              <p class="mt-2 text-sm text-base-content/60">
+                {@open_card_supporters_total} people support this. Sign in to see who.
+              </p>
+            <% end %>
+          </div>
+
+          <.support_badge
+            id={"public-vote-modal-#{card.id}"}
+            count={Map.get(@vote_counts, card.id, 0)}
+            voted={MapSet.member?(@voted_ids, card.id)}
+            size={:lg}
+            phx-click="vote"
+            phx-value-id={card.id}
+            class="mt-4"
+          />
+        </div>
+        <label class="modal-backdrop" phx-click="close_card">Close</label>
+      </div>
+
+      <div
+        :if={@sign_in_open}
+        id="public-signin-modal"
+        class="modal modal-open"
+        role="dialog"
+        aria-label="Sign in to vote"
+      >
+        <div class="modal-box max-w-sm text-center">
+          <h3 class="text-lg font-semibold">Sign in to vote</h3>
+          <p class="mt-2 text-sm text-base-content/60">
+            Sign in so your vote sticks — you can change it any time.
+          </p>
+          <.link
+            href={~p"/auth/google?return_to=#{@public_path}"}
+            id="public-signin-google"
+            class="btn btn-primary mt-4 w-full"
+          >
+            Continue with Google
+          </.link>
+          <p class="mt-3 text-xs text-base-content/40">No account needed to browse — only to vote.</p>
+          <button
+            type="button"
+            id="public-signin-close"
+            phx-click="close_signin"
+            class="btn btn-sm btn-ghost mt-2"
+          >
+            Cancel
+          </button>
+        </div>
+        <label class="modal-backdrop" phx-click="close_signin">Close</label>
+      </div>
+    </Layouts.public_board>
+    """
+  end
+
+  @impl true
+  def mount(%{"slug" => slug}, _session, socket) do
+    case Boards.get_public_board(slug) do
+      {:ok, board} ->
+        if connected?(socket), do: Events.subscribe(board.id)
+
+        socket =
+          socket
+          |> assign(:board, board)
+          |> assign(:public_path, ~p"/board/#{board.slug}/public")
+          |> assign(:page_title, "#{board.name} · Public roadmap")
+          |> assign(:sort_by, :votes)
+          |> assign(:open_card_id, nil)
+          |> assign(:open_card_supporters, [])
+          |> assign(:open_card_supporters_total, 0)
+          |> assign(:sign_in_open, false)
+          |> assign_cards()
+
+        {:ok, socket}
+
+      :error ->
+        raise Ecto.NoResultsError, queryable: Board
+    end
+  end
+
+  @impl true
+  def handle_event("open_card", %{"id" => id}, socket) do
+    card_id = String.to_integer(id)
+    card = find_card(socket.assigns.cards, card_id)
+
+    {supporters, total} =
+      case socket.assigns.current_scope do
+        nil -> {[], Map.get(socket.assigns.vote_counts, card_id, 0)}
+        _scope -> Votes.supporters(card, @supporters_preview)
+      end
+
+    {:noreply,
+     socket
+     |> assign(:open_card_id, card_id)
+     |> assign(:open_card_supporters, supporters)
+     |> assign(:open_card_supporters_total, total)}
+  end
+
+  def handle_event("close_card", _params, socket) do
+    {:noreply, assign(socket, :open_card_id, nil)}
+  end
+
+  def handle_event("vote", %{"id" => id}, socket) do
+    case socket.assigns.current_scope do
+      nil ->
+        {:noreply, assign(socket, :sign_in_open, true)}
+
+      %{user: user} ->
+        card = find_card(socket.assigns.cards, String.to_integer(id))
+        {:ok, _added_or_removed} = Votes.toggle_vote(user, card)
+        {:noreply, assign_cards(socket)}
+    end
+  end
+
+  def handle_event("close_signin", _params, socket) do
+    {:noreply, assign(socket, :sign_in_open, false)}
+  end
+
+  def handle_event("set_sort", %{"sort" => sort}, socket) do
+    {:noreply, assign(socket, :sort_by, if(sort == "new", do: :new, else: :votes))}
+  end
+
+  @impl true
+  def handle_info({:vote_changed, _card_id}, socket) do
+    {:noreply, assign_cards(socket)}
+  end
+
+  # Reloads the board's public cards + vote counts + this visitor's voted-card
+  # set — the one source of truth `columns/3` derives the rendered layout from.
+  # Refetched wholesale on every vote and `{:vote_changed, _}` broadcast rather
+  # than patched in place: `Relay.Events` is coarse by design (see its
+  # moduledoc), and a public board is small enough that this is cheap.
+  defp assign_cards(socket) do
+    cards = Boards.list_public_cards(socket.assigns.board)
+    card_ids = Enum.map(cards, & &1.id)
+    counts = Votes.counts_for_cards(card_ids)
+
+    voted_ids =
+      case socket.assigns.current_scope do
+        nil -> MapSet.new()
+        %{user: user} -> Votes.voted_card_ids(user, card_ids)
+      end
+
+    socket
+    |> assign(:cards, cards)
+    |> assign(:vote_counts, counts)
+    |> assign(:voted_ids, voted_ids)
+  end
+
+  defp find_card(cards, id), do: Enum.find(cards, &(&1.id == id))
+
+  # Groups `cards` (stage preloaded) into the three public columns, each sorted
+  # by vote count desc (ties broken by `cards`' own order — newest-first, since
+  # `Boards.list_public_cards/1` orders that way) or by recency when `sort_by`
+  # is `:new`. `Enum.sort_by/2` is a stable sort, so votes-desc naturally keeps
+  # the newest-first tiebreak without a secondary key.
+  defp columns(cards, sort_by, vote_counts) do
+    for category <- Stage.public_categories() do
+      cat_cards =
+        cards
+        |> Enum.filter(&(&1.stage.category == category))
+        |> sort_cards(sort_by, vote_counts)
+
+      %{key: category, label: category_label(category), cards: cat_cards, count: length(cat_cards)}
+    end
+  end
+
+  defp sort_cards(cards, :new, _vote_counts), do: cards
+  defp sort_cards(cards, :votes, vote_counts), do: Enum.sort_by(cards, &(-Map.get(vote_counts, &1.id, 0)))
+
+  defp category_label(:unstarted), do: "Unstarted"
+  defp category_label(:planning), do: "Planning"
+  defp category_label(:in_progress), do: "In progress"
+
+  defp category_dot_class(:unstarted), do: "border-2 border-base-content/30"
+  defp category_dot_class(:planning), do: "bg-secondary/70"
+  defp category_dot_class(:in_progress), do: "bg-primary/70"
+
+  # The artboard's compact relative age, in day/week/month buckets — coarser
+  # than `RelayWeb.CoreComponents`'s now/m/h/d (built for recent runner
+  # activity); public ideas commonly sit for weeks or months.
+  defp relative_age(%DateTime{} = at) do
+    days = DateTime.utc_now() |> DateTime.diff(at, :second) |> div(86_400)
+
+    cond do
+      days < 1 -> "today"
+      days < 14 -> "#{days}d"
+      days < 60 -> "#{div(days, 7)}w"
+      true -> "#{div(days, 30)}mo"
+    end
+  end
+end
