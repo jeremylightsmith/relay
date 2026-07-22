@@ -208,6 +208,7 @@ defmodule RelayWeb.Router do
     get "/cards/:ref/diagnosis", DiagnosisController, :show
     get "/cards/:ref/runs", RunController, :index
     get "/executors", ExecutorController, :index
+    get "/flows/:key/metrics", FlowMetricsController, :metrics
     patch "/cards/:ref", CardController, :update
     patch "/cards/:ref/sub-tasks/:id", CardController, :toggle_sub_task
     post "/cards/:ref/move", CardController, :move

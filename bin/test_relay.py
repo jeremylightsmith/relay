@@ -3168,6 +3168,51 @@ class RunsAndExecutorsRenderingTest(unittest.TestCase):
         self.assertEqual(parser.parse_args(["executors"]).func, relay.cmd_executors)
 
 
+class FlowStatsRenderingTest(unittest.TestCase):
+    DATA = {
+        "summary": {
+            "total_runs": 12,
+            "completed": 10,
+            "completed_pct": 83,
+            "total_spend": None,
+            "median_end_to_end": 900,
+        },
+        "nodes": [
+            {
+                "node_key": "implement",
+                "runs": 12,
+                "duration_p50": 60,
+                "duration_p95": 120,
+                "cost_p50": None,
+                "cost_p95": None,
+                "attempts_mean": 1.5,
+                "verdict_split": {"succeeded": 10, "failed": 1, "partial": 0, "needs_input": 1},
+                "loop_laps": 2,
+            }
+        ],
+    }
+
+    def test_flow_stats_render_shows_summary_and_node_row(self):
+        out = relay.format_flow_stats("code", self.DATA)
+        self.assertIn("code flow", out)
+        self.assertIn("12 runs", out)
+        self.assertIn("10 completed", out)
+        self.assertIn("83%", out)
+        self.assertIn("implement", out)
+        self.assertIn("60/120", out)
+
+    def test_flow_stats_render_shows_em_dash_for_blank_cost_and_spend(self):
+        out = relay.format_flow_stats("code", self.DATA)
+        self.assertIn("—", out)
+
+    def test_the_cli_wires_flow_stats(self):
+        parser = relay.build_parser()
+        args = parser.parse_args(["flow-stats", "code", "--window", "7d"])
+        self.assertEqual(args.func, relay.cmd_flow_stats)
+        self.assertEqual(args.key, "code")
+        self.assertEqual(args.window, "7d")
+
+
 class TimelineTextRenderingTest(unittest.TestCase):
     def render(self, timeline):
         buf = io.StringIO()
