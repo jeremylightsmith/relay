@@ -53,6 +53,23 @@ human can. A retry revives the SAME run row rather than starting a new one, so t
 stay append-only and "it failed here, then a human retried" is fully reconstructable from
 `node_executions` plus the `retries` counter.
 
+The from → to edges of that machine — the source of truth is `Relay.Runs.Transitions`'
+`@transitions` data, and this table is generated from it by `mix relay.gen_state` (a stale block
+fails `mix precommit`). Every run-status write goes through `Relay.Runs.Transitions.transition/4`,
+a guarded `UPDATE` that refuses (and logs) a transition from an unexpected state.
+
+<!-- BEGIN generated: run-transitions -->
+| From | To | Meaning |
+| --- | --- | --- |
+| `failed` | `running` | human retry / `revive_run` (RLY-189) |
+| `parked` | `cancelled` | human cancelled a parked run |
+| `parked` | `running` | resume |
+| `running` | `cancelled` | human cancelled a live run |
+| `running` | `done` | flow reached its `done` target |
+| `running` | `failed` | engine gave up (no route / caps / breaker) |
+| `running` | `parked` | park (reason: `needs_input` \| `claimed` \| `executor_gone`) |
+<!-- END generated: run-transitions -->
+
 `parked_reason` says *why* a parked run is waiting:
 
 | `parked_reason` | Waiting on |
@@ -60,6 +77,12 @@ stay append-only and "it failed here, then a human retried" is fully reconstruct
 | `needs_input` | A human to answer the node's question in the card drawer. |
 | `claimed` | An executor that has claimed the node-job to report its outcome. |
 | `executor_gone` | An executor that stopped heartbeating; the reaper parks the run so it can be re-dispatched rather than lost. |
+
+Whether an agent may work a card at all — the human-baton gate, the fresh-pull gate, and the
+`:executor_gone` resume gate — is decided by `Relay.Runs.Policy` (`agent_may_hold?/1`,
+`pullable?/1`, `resumable?/2`), one shared definition the scheduler, the run listener, and the
+board card face all call. It is a set of predicates, not a closed data table, so there is nothing
+to generate; the drift protection there is the shared-predicate test suite.
 
 ## Node-job state
 
