@@ -108,4 +108,17 @@ defmodule RelayWeb.FlowMetricsLiveTest do
     assert has_element?(view, "#node-here-implement")
     assert html =~ "inset 3px 0 0 oklch(0.60 0.14 250)"
   end
+
+  test "deep-link with an empty node param omits the 'jumped to' clause", %{
+    conn: conn,
+    board: board
+  } do
+    seed_runs(board, "implement", 10)
+
+    {:ok, view, _html} =
+      live(conn, ~p"/board/#{board.slug}/flows/code/metrics?node=&from=RLY-42")
+
+    assert has_element?(view, "#deep-link-banner", "RLY-42")
+    refute has_element?(view, "#deep-link-banner", "jumped to")
+  end
 end

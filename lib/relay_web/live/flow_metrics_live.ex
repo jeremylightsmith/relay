@@ -38,8 +38,8 @@ defmodule RelayWeb.FlowMetricsLive do
     {:noreply,
      socket
      |> assign(:window, window)
-     |> assign(:deep_node, params["node"])
-     |> assign(:deep_ref, params["from"])
+     |> assign(:deep_node, blank_to_nil(params["node"]))
+     |> assign(:deep_ref, blank_to_nil(params["from"]))
      |> assign(:summary, summary)
      |> assign(:rows, rows)
      |> assign(:enough?, summary.completed >= Runs.min_runs_for_percentiles())
@@ -63,6 +63,12 @@ defmodule RelayWeb.FlowMetricsLive do
 
   defp maybe_put(list, _k, nil), do: list
   defp maybe_put(list, k, v), do: list ++ [{k, v}]
+
+  # A deep-link param that arrives as "" (e.g. `?node=` when a run has no last_node) is not a
+  # real value — treat it as absent so the banner clause and row highlight don't act on empty.
+  defp blank_to_nil(nil), do: nil
+  defp blank_to_nil(""), do: nil
+  defp blank_to_nil(v), do: v
 
   defp normalize_window(window) do
     if window in Runs.metric_windows(), do: window, else: Runs.default_window()
