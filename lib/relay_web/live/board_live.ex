@@ -341,7 +341,7 @@ defmodule RelayWeb.BoardLive do
         id="card-drawer"
         board_slug={@board.slug}
         embed={@embed}
-        swipe_enabled={not @embed and @live_action != :card}
+        card_nav_enabled={not @embed and @live_action != :card}
         prev_ref={@prev_ref}
         next_ref={@next_ref}
         ref={Cards.ref(@board, @selected_card)}

@@ -127,11 +127,11 @@ defmodule RelayWeb.CardLiveTest do
       refute has_element?(view, "#card-drawer-next")
     end
 
-    test "the native card host does not mount the CardSwipe hook", %{conn: conn, board: board, ref: ref} do
+    test "the native card host does not mount the ArrowKeyGuard hook", %{conn: conn, board: board, ref: ref} do
       {:ok, view, _html} = live(conn, ~p"/cards/#{ref}?board=#{board.slug}")
       render_async(view)
 
-      refute has_element?(view, ~s([phx-hook="CardSwipe"]))
+      refute has_element?(view, ~s([phx-hook="ArrowKeyGuard"]))
     end
   end
 

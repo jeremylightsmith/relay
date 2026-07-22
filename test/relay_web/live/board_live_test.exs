@@ -2367,15 +2367,13 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#card-drawer .drawer-card-ref", "MY2")
     end
 
-    test "the drawer panel carries the CardSwipe hook and neighbor data on the web board", %{
-      conn: conn,
-      board: board
-    } do
+    test "the drawer panel carries the ArrowKeyGuard hook and no touch neighbor data on the web board",
+         %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
 
-      assert has_element?(view, ~s(#card-drawer-panel[phx-hook="CardSwipe"]))
-      assert has_element?(view, ~s(#card-drawer-panel[data-prev="MY1"]))
-      assert has_element?(view, ~s(#card-drawer-panel[data-next="MY3"]))
+      assert has_element?(view, ~s(#card-drawer-panel[phx-hook="ArrowKeyGuard"]))
+      refute has_element?(view, ~s(#card-drawer-panel[data-prev]))
+      refute has_element?(view, ~s(#card-drawer-panel[data-next]))
     end
   end
 
