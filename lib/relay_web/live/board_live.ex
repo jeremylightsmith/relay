@@ -1968,9 +1968,11 @@ defmodule RelayWeb.BoardLive do
   # card_status_changed/3 never pushes for :failed. An unknown ref is a silent
   # no-op, like move_card.
   #
-  # RLY-234 — also carries `column`: the tapped card's stage column, ordered
+  # RLY-234 — also carries `cards`: the tapped card's stage column, ordered
   # exactly as the board renders it (Cards.stage_column/2), each entry with
-  # its own `kind`. Native swipe (CardScreen) computes prev/next from this
+  # its own `kind`. This `cards` key is the wire contract the native shell
+  # reads (board_screen.dart navContextForTap → payload['cards']); keep the
+  # two in lockstep. Native swipe (CardScreen) computes prev/next from this
   # list locally, with no per-swipe network round trip.
   defp push_card_tap(socket, ref) do
     board = socket.assigns.board
@@ -1981,7 +1983,7 @@ defmodule RelayWeb.BoardLive do
           ref: ref,
           board: board.slug,
           kind: card_tap_kind(card),
-          column: tapped_column(board, card)
+          cards: tapped_column(board, card)
         })
 
       nil ->
