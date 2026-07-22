@@ -20,7 +20,9 @@ defmodule Schemas.Card do
   `sub_tasks` is the card's ordered checklist (RLY-18), written via
   `Relay.Cards.set_sub_tasks/2`, never cast here. `public_description`
   (RLY-69) is the optional public-board copy, distinct from the internal
-  `description`; nullable, cast like `description`.
+  `description`; nullable, cast like `description`. `posted_by_user_id`
+  (RLY-225) records the public poster of an idea; nullable, never cast —
+  set programmatically on the public-posting path only.
   """
 
   use Ecto.Schema
@@ -51,6 +53,7 @@ defmodule Schemas.Card do
 
     belongs_to :board, Schemas.Board
     belongs_to :stage, Schemas.Stage
+    belongs_to :posted_by_user, Schemas.User
     has_many :owners, Schemas.CardOwner
     has_many :sub_tasks, Schemas.SubTask
     embeds_one :rejection, Schemas.CardRejection, on_replace: :delete
