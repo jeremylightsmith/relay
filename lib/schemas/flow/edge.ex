@@ -17,14 +17,19 @@ defmodule Schemas.Flow.Edge do
 
   import Ecto.Changeset
 
+  @when_values [:foreach_remaining, :foreach_exhausted]
+
   @primary_key false
   embedded_schema do
     field :from, :string
     field :to, :string
     field :on, Ecto.Enum, values: [:succeeded, :failed, :partial, :needs_input]
     field :max_loops, :integer
-    field :when, Ecto.Enum, values: [:foreach_remaining, :foreach_exhausted]
+    field :when, Ecto.Enum, values: @when_values
   end
+
+  @doc "The closed set of foreach `when` guard values (AGENTS.md: defined once, read by both the schema field and the flow editor's WHEN control)."
+  def when_values, do: @when_values
 
   @doc "Validates one edge; graph-level rules (endpoints, routing) live on Schemas.Flow."
   def changeset(edge, attrs) do

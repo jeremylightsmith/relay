@@ -274,6 +274,57 @@ defmodule RelayWeb.FlowEditorLiveTest do
     refute has_element?(view, "#flow-editor-errors")
   end
 
+  test "the edge inspector's WHEN control shows the guard and edits it (set, then clear)", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    # quality_review → sync (succeeded, when: foreach_exhausted) is edge index 7
+    view |> element(~s([data-edge="7"])) |> render_click()
+    assert has_element?(view, "#inspector-edge-when")
+    assert has_element?(view, "#inspector-edge-when option[value='foreach_exhausted'][selected]")
+
+    # change the guard to the other value → dirty + reflects the choice
+    view
+    |> element("#inspector-edge-when-form")
+    |> render_change(%{"value" => "foreach_remaining"})
+
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+    assert has_element?(view, "#inspector-edge-when option[value='foreach_remaining'][selected]")
+
+    # clear the guard to (none) → the empty option is selected
+    view
+    |> element("#inspector-edge-when-form")
+    |> render_change(%{"value" => ""})
+
+    assert has_element?(view, "#inspector-edge-when option[value=''][selected]")
+  end
+
+  test "editing another field on a guarded edge preserves its WHEN guard (2b regression)", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    # quality_review → implement (succeeded, when: foreach_remaining) is edge index 6
+    view |> element(~s([data-edge="6"])) |> render_click()
+    assert has_element?(view, "#inspector-edge-when option[value='foreach_remaining'][selected]")
+
+    # step an UNRELATED field (MAX LOOPS) and save through the confirm modal
+    view |> element("#inspector-max-loops-inc") |> render_click()
+    view |> element("#flow-editor-save") |> render_click()
+    view |> element("#flow-save-confirm") |> render_click()
+
+    # the saved v2 edge still carries its foreach_remaining guard — not dropped
+    assert %Schemas.FlowVersion{edges: edges} = Flows.get_version(Flows.get_flow!(board, "code"), 2)
+
+    assert Enum.any?(edges, fn e ->
+             e.from == "quality_review" and e.to == "implement" and
+               e.on == :succeeded and e.when == :foreach_remaining and e.max_loops == 1
+           end)
+  end
+
   test "Delete edge in the inspector removes the selected edge", %{conn: conn, board: board} do
     {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
     count_before = count_edges(render(view))

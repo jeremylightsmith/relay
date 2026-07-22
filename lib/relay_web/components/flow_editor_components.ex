@@ -295,7 +295,7 @@ defmodule RelayWeb.FlowEditorComponents do
   attr :read_only?, :boolean, default: false
 
   def edge_inspector(assigns) do
-    assigns = assign(assigns, :outcomes, @outcomes)
+    assigns = assign(assigns, outcomes: @outcomes, whens: Schemas.Flow.Edge.when_values())
 
     ~H"""
     <div style="padding:16px 18px;display:flex;flex-direction:column;gap:16px;">
@@ -349,6 +349,31 @@ defmodule RelayWeb.FlowEditorComponents do
               selected={to_string(@edge.on) == outcome}
             >
               {outcome}
+            </option>
+          </select>
+        </form>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:7px;">
+        <span style="font-size:10px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
+          WHEN
+        </span>
+        <form id="inspector-edge-when-form" phx-change="edit_edge">
+          <input type="hidden" name="index" value={@index} />
+          <input type="hidden" name="field" value="when" />
+          <select
+            id="inspector-edge-when"
+            name="value"
+            disabled={@read_only?}
+            style="border:1px solid oklch(0.90 0.006 255);background:oklch(0.99 0.002 255);border-radius:8px;padding:6px 10px;font-size:12.5px;font-family:ui-monospace,monospace;color:oklch(0.40 0.02 255);"
+          >
+            <option value="" selected={is_nil(@edge.when)}>(none)</option>
+            <option
+              :for={when_value <- @whens}
+              value={when_value}
+              selected={@edge.when == when_value}
+            >
+              {when_value}
             </option>
           </select>
         </form>
