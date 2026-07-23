@@ -13,6 +13,8 @@ defmodule Relay.Runs.Listener do
   — the scheduler is no longer a backstop for `:needs_input`/`:claimed` parks (RLY-200).
 
   Rules, in order:
+    * card in a terminal-type stage (`Stage.terminal_types/0`) + active run → cancel the run
+      (RLY-233); first, so a parked run whose card reached Done is closed, not resumed.
     * active `:running` run + human owner present → revoke the active job
       and park the run `:claimed` at its last checkpoint (the card is not
       touched).
@@ -41,6 +43,7 @@ defmodule Relay.Runs.Listener do
   alias Schemas.Flow
   alias Schemas.NodeExecution
   alias Schemas.Run
+  alias Schemas.Stage
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
@@ -97,7 +100,22 @@ defmodule Relay.Runs.Listener do
 
   defp reconcile_card(card, nil), do: maybe_reenter_after_rejection(card)
 
-  defp reconcile_card(card, %Run{status: :running} = run) do
+  # RLY-233: FIRST active-run rule. A card that has reached a terminal-type stage must not keep
+  # an active run — close it (freeing its executor slot) before any resume rule can re-dispatch
+  # it. Being first, it pre-empts the :needs_input/:claimed resume clauses in reconcile_active/2,
+  # so a parked run whose card was moved to Done is CANCELLED, not resumed (which would
+  # regenerate a zombie). With Part 1's atomic dispatch landed, the only "active run + terminal
+  # stage" states this can observe are genuine leaks — no grace window, no time threshold.
+  defp reconcile_card(card, %Run{} = run) do
+    if terminal_stage?(card) do
+      _ = Runs.cancel_run(run)
+      :ok
+    else
+      reconcile_active(card, run)
+    end
+  end
+
+  defp reconcile_active(card, %Run{status: :running} = run) do
     if !Policy.agent_may_hold?(%{active_owner: Relay.Cards.active_owner_type(card)}) do
       Runs.park_claimed(run)
     end
@@ -105,7 +123,7 @@ defmodule Relay.Runs.Listener do
     :ok
   end
 
-  defp reconcile_card(card, %Run{status: :parked, parked_reason: :needs_input} = run) do
+  defp reconcile_active(card, %Run{status: :parked, parked_reason: :needs_input} = run) do
     if card.status != :needs_input do
       _ = Runs.resume_run(run, resume_session: last_session(run))
     end
@@ -113,7 +131,7 @@ defmodule Relay.Runs.Listener do
     :ok
   end
 
-  defp reconcile_card(card, %Run{status: :parked, parked_reason: :claimed} = run) do
+  defp reconcile_active(card, %Run{status: :parked, parked_reason: :claimed} = run) do
     if Relay.Cards.active_owner_type(card) == :ai do
       _ = Runs.resume_run(run)
     end
@@ -126,7 +144,16 @@ defmodule Relay.Runs.Listener do
   # outside `Relay.Runs`'s own park_* functions) is left untouched rather
   # than crashing the reconciler — reconciliation self-heals on the next
   # event, so a no-op here is safe.
-  defp reconcile_card(_card, %Run{}), do: :ok
+  defp reconcile_active(_card, %Run{}), do: :ok
+
+  # RLY-233: a card in a terminal-type stage (Stage.terminal_types/0 — the single source) has
+  # left every flow's scope, so any run still active on it is a leak.
+  defp terminal_stage?(%Card{stage_id: stage_id}) do
+    case Repo.get(Stage, stage_id) do
+      %Stage{type: type} -> type in Stage.terminal_types()
+      nil -> false
+    end
+  end
 
   defp last_session(%Run{} = run) do
     Repo.one(

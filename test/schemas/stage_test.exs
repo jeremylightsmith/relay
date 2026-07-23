@@ -75,6 +75,10 @@ defmodule Schemas.StageTest do
     assert Ecto.Changeset.get_field(changeset, :reject_to_stage_id) == nil
   end
 
+  test "terminal_types/0 is exactly [:done]" do
+    assert Stage.terminal_types() == [:done]
+  end
+
   test "a child stage must be review or done" do
     child = %Stage{board_id: 1, parent_id: 1}
     bad = Stage.changeset(child, %{name: "X", position: 2, category: :in_progress, type: :work})

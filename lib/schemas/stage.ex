@@ -86,6 +86,14 @@ defmodule Schemas.Stage do
   """
   def public_categories, do: [:unstarted, :planning, :in_progress]
 
+  @doc """
+  The stage `type`s that mean a card has left every flow's scope — the single source of truth
+  for "terminal stage" (RLY-233). The orphaned-run sweep (`Relay.Runs.close_orphaned_runs/0`)
+  and the card-event Listener's terminal-close rule both filter through this; no second literal
+  `:done` partition exists.
+  """
+  def terminal_types, do: [:done]
+
   # ai_enabled only applies to work/planning; every other type zeroes it (create + type change).
   defp normalize_ai_enabled(changeset) do
     if get_field(changeset, :type) in [:work, :planning] do

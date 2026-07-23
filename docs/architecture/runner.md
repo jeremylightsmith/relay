@@ -216,6 +216,12 @@ that stays server-side.
   scheduler snapshot (`Scheduler.Server.build_snapshot/2`), so the planner never resumes a
   pinned run onto a machine the reaper has given up on — without this a parked exclusive run
   oscillates resume↔reap forever and `relay why` misreports it as "dispatchable" (RLY-199).
+  The same reaper tick also calls `Relay.Runs.close_orphaned_runs/0` — a companion sweep, not
+  an executor-liveness check — closing any run still active while its card already sits in a
+  terminal-type stage (RLY-233). This is safe to treat as an unambiguous leak because run
+  dispatch (`Relay.Runs.start_run/3`) now moves the card into the flow's work lane and inserts
+  the run row in one transaction: no committed state ever has an active run sitting on a
+  terminal-type stage except a genuine leak.
 - **Log `node_job_id` convergence.** `POST /api/board/logs` entries may carry an optional
   `node_job_id` alongside `run_id` — same nullable-string shape, not an FK. It rides through
   `Relay.AgentLog.stamp/1` → `Relay.Activity.LogSink.row/2` → `activities.node_job_id`, kept
@@ -259,6 +265,16 @@ CLI: `relay retry <ref> [--at NODE] [--json]`. On a refusal it prints the server
 stderr and exits non-zero.
 
 ## Scheduler / Listener authority split (RLY-200)
+
+Before either owner below gets a say, `Relay.Runs.Listener.reconcile_card/2` runs a first,
+unconditional rule: a card that has reached a terminal-type stage (`Schemas.Stage.terminal_types/0`)
+with a still-active run (`running`/`parked`, any `parked_reason`) is closed via
+`Relay.Runs.cancel_run/2`, not resumed (RLY-233). This is what stops a parked `:needs_input`
+run from being resumed after its card reached Done — closing pre-empts the resume rules below.
+`Relay.Runs.ExecutorReaper`'s 30s sweep (`Relay.Runs.close_orphaned_runs/0`) is the companion
+catch-up for anything the event path missed. Run dispatch (`Relay.Runs.start_run/3`) moves the
+card into the flow's work lane and inserts the run row in one transaction, so "active run +
+terminal stage" is an unambiguous leak signal with no grace window needed.
 
 A parked run has exactly one process allowed to resume it, keyed off `Schemas.Run`'s
 `parked_reason`:

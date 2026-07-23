@@ -46,12 +46,22 @@ A run is one traversal of a flow for one card.
 | `parked` | Suspended, carrying a `parked_reason`. Resumable. | The reason clearing — a human answers, an executor claims, an executor returns. |
 | `done` | The flow reached its `done` target. Terminal. | — |
 | `failed` | The engine decided the run cannot continue. | A human retry (`Relay.Runs.retry_run/2`, RLY-189) — the only way back to `running`. |
-| `cancelled` | A human stopped the run. Terminal. | — |
+| `cancelled` | A human stopped the run, or it was closed as a leak. Terminal. | — |
 
 `failed` is the one non-terminal-looking terminal: nothing in the engine ever leaves it, but a
 human can. A retry revives the SAME run row rather than starting a new one, so the history rows
 stay append-only and "it failed here, then a human retried" is fully reconstructable from
 `node_executions` plus the `retries` counter.
+
+A run is closed `:cancelled` — never relabelled `:done` — when its card reaches a terminal-type
+stage (`Schemas.Stage.terminal_types/0`) while the run is still active (`running`/`parked`,
+RLY-233): the card-event `Relay.Runs.Listener`'s first reconcile rule closes it within one event,
+and the `Relay.Runs.ExecutorReaper`'s 30s sweep (`Relay.Runs.close_orphaned_runs/0`) catches
+anything the event path missed. A legitimately completed run is already `:done` before its card
+moves off the stage, so it is never selected by either path and never relabelled. Run dispatch
+(`Relay.Runs.start_run/3`) moves the card into the flow's work lane and inserts the run row in one
+transaction, so no committed state ever has an active run sitting on a terminal-type stage except
+a genuine leak — no grace window or time threshold is needed to tell the two apart.
 
 The from → to edges of that machine — the source of truth is `Relay.Runs.Transitions`'
 `@transitions` data, and this table is generated from it by `mix relay.gen_state` (a stale block

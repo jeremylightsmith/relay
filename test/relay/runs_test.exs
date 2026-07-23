@@ -24,6 +24,11 @@ defmodule Relay.RunsTest do
     flow
   end
 
+  defp enabled_flow(board, key) do
+    {:ok, flow} = board |> Relay.Flows.get_flow!(key) |> Relay.Flows.enable_flow()
+    flow
+  end
+
   defp card_in(board, stage_name, title \\ "Try the engine") do
     stage = Enum.find(board.stages, &(&1.name == stage_name))
     {:ok, card} = Relay.Cards.create_card(stage, %{title: title})
@@ -176,6 +181,36 @@ defmodule Relay.RunsTest do
       {:ok, human_flow} = Relay.Flows.enable_flow(human_flow)
       other = card_in(board, "Next up", "Human flow")
       assert Runs.start_run(other, human_flow) == {:error, :unsupported_node_type}
+    end
+
+    test "dispatch from a :done-type pull stage moves the card into the work lane atomically",
+         %{board: board} do
+      flow = enabled_flow(board, "plan")
+      card = card_in(board, "Spec:Done", "atomic dispatch")
+      spec_done = Enum.find(board.stages, &(&1.name == "Spec:Done"))
+      plan_stage = Enum.find(board.stages, &(&1.name == "Plan"))
+
+      assert {:ok, %Run{status: :running}} = Runs.start_run(card, flow)
+
+      reloaded = Relay.Cards.get_card(board, card.id)
+      # Committed end state: card off the :done pull stage, in the work lane, :working.
+      assert reloaded.stage_id == plan_stage.id
+      refute reloaded.stage_id == spec_done.id
+      assert reloaded.status == :working
+      # And the run is active and bound to this card — the two committed together.
+      assert %Run{status: :running} = Runs.active_run(reloaded)
+    end
+
+    test "a second start on a card with an active run fails and does not move the card",
+         %{board: board} do
+      flow = enabled_flow(board, "plan")
+      card = card_in(board, "Spec:Done", "double start")
+      {:ok, _first} = Runs.start_run(card, flow)
+      moved = Relay.Cards.get_card(board, card.id)
+      # `card` (the stale struct still at Spec:Done) is what a racing caller would hold.
+      assert {:error, :active_run_exists} = Runs.start_run(card, flow)
+      # The losing attempt left the card exactly where the winning run put it — no extra move.
+      assert Relay.Cards.get_card(board, card.id).stage_id == moved.stage_id
     end
   end
 
@@ -349,6 +384,66 @@ defmodule Relay.RunsTest do
       assert Enum.any?(
                Relay.Activity.list_timeline(card),
                &match?(%Schemas.Activity{type: :action, text: "run cancelled"}, &1)
+             )
+    end
+  end
+
+  describe "close_orphaned_runs/0" do
+    test "closes an active run whose card is in a Done stage, frees it, is idempotent",
+         %{board: board} do
+      done = Enum.find(board.stages, &(&1.name == "Done"))
+      card = insert(:card, stage: done)
+      run = insert(:run, card: card, status: :running)
+
+      assert Runs.close_orphaned_runs() == 1
+      assert %Run{status: :cancelled} = Runs.get_run!(run.id)
+      assert Enum.all?(Runs.active_runs(board.id), &(&1.id != run.id))
+      # Idempotent: a second sweep finds nothing.
+      assert Runs.close_orphaned_runs() == 0
+    end
+
+    test "closes a parked run in a Done SUB-LANE too", %{board: board} do
+      plan_done = Enum.find(board.stages, &(&1.name == "Plan:Done"))
+      card = insert(:card, stage: plan_done)
+      run = insert(:run, card: card, status: :parked, parked_reason: :needs_input)
+
+      assert Runs.close_orphaned_runs() == 1
+      assert %Run{status: :cancelled} = Runs.get_run!(run.id)
+    end
+
+    test "leaves an active run whose card is in a non-terminal stage untouched", %{board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      card = insert(:card, stage: code)
+      run = insert(:run, card: card, status: :running)
+
+      assert Runs.close_orphaned_runs() == 0
+      assert %Run{status: :running} = Runs.get_run!(run.id)
+    end
+
+    test "never relabels an already-:done run and logs nothing extra", %{board: board} do
+      done = Enum.find(board.stages, &(&1.name == "Done"))
+      card = insert(:card, stage: done)
+      run = insert(:run, card: card, status: :done)
+
+      assert Runs.close_orphaned_runs() == 0
+      assert %Run{status: :done} = Runs.get_run!(run.id)
+
+      refute Enum.any?(
+               Relay.Activity.list_timeline(Relay.Repo.get!(Card, card.id)),
+               &match?(%Schemas.Activity{type: :action}, &1)
+             )
+    end
+
+    test "logs the 'card already completed' message on the closed card", %{board: board} do
+      done = Enum.find(board.stages, &(&1.name == "Done"))
+      card = insert(:card, stage: done)
+      _run = insert(:run, card: card, status: :running)
+
+      assert Runs.close_orphaned_runs() == 1
+
+      assert Enum.any?(
+               Relay.Activity.list_timeline(Relay.Repo.get!(Card, card.id)),
+               &match?(%Schemas.Activity{type: :action, text: "run closed — card already completed"}, &1)
              )
     end
   end

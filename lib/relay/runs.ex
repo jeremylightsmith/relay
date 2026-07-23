@@ -667,29 +667,16 @@ defmodule Relay.Runs do
   defp start_seeded_run(card, flow, start_target, context) do
     result =
       Repo.transaction(fn ->
+        card = move_into_work_lane(card, flow)
         run = insert_run(card, flow, start_target, context)
         sub_task_id = if start_target == foreach_node_key(flow), do: next_sub_task_id(run)
         execution = insert_execution!(run, start_target, 1, 1, sub_task_id)
         job = insert_job!(run, execution, build_payload(run, flow, start_target, sub_task_id: sub_task_id))
-        {run, execution, job}
+        {card, run, execution, job}
       end)
 
     case result do
-      {:ok, {run, execution, job}} ->
-        card =
-          if card.stage_id == flow.works_in_stage_id do
-            card
-          else
-            works_in = Repo.get!(Stage, flow.works_in_stage_id)
-            {:ok, moved} = Cards.move_card(card, works_in, @append_index, :agent)
-            moved
-          end
-
-        # The move's snap only overrides an INVALID status (ADR 0003); :ready is
-        # already valid on a work stage, so the AI taking over needs an explicit
-        # :working set — status changes only ever happen through set_status/3.
-        {:ok, _card} = Cards.set_status(card, %{status: :working}, :agent)
-
+      {:ok, {card, run, execution, job}} ->
         broadcast_runs(card.board_id, {:run_started, run})
         broadcast_runs(card.board_id, {:node_started, run, execution})
         {:ok, _pid} = ensure_server(run, {:dispatch, job.id})
@@ -698,6 +685,31 @@ defmodule Relay.Runs do
       {:error, %Changeset{errors: errors}} ->
         if Keyword.has_key?(errors, :card_id), do: {:error, :active_run_exists}, else: {:error, :invalid}
     end
+  end
+
+  # RLY-233 Part 1: move the card into the flow's work lane and set it :working BEFORE the run
+  # row is inserted, inside start_seeded_run's single transaction. This guarantees no committed
+  # state ever has an active run while the card still sits at its (often :done-type) pull stage,
+  # so "active run + terminal stage" becomes an unambiguous leak signal (Part 2). Moving first
+  # also sidesteps stranded_run/2 — there is no active run at move time.
+  #
+  # A card already in the work lane (rejection re-entry) is NOT re-moved: a gratuitous
+  # append-move would clear the CHANGES REQUESTED banner via move_card's rejection-clearing rule.
+  # The move's snap only overrides an INVALID status (ADR 0003); :ready is already valid on a
+  # work stage, so the AI taking over needs an explicit :working — status changes only ever
+  # happen through set_status/3.
+  defp move_into_work_lane(card, flow) do
+    moved =
+      if card.stage_id == flow.works_in_stage_id do
+        card
+      else
+        works_in = Repo.get!(Stage, flow.works_in_stage_id)
+        {:ok, moved} = Cards.move_card(card, works_in, @append_index, :agent)
+        moved
+      end
+
+    {:ok, working} = Cards.set_status(moved, %{status: :working}, :agent)
+    working
   end
 
   # A `foreach` flow iterates the card's sub_tasks, so the server materializes them
@@ -796,10 +808,11 @@ defmodule Relay.Runs do
 
   @doc """
   Cancels an active run: stops its server, revokes any in-flight job,
-  marks the run `:cancelled`, and logs an `:action` entry to the card's
-  timeline. The card itself is left where it sits.
+  marks the run `:cancelled`, and logs an `:action` entry (`log_text`,
+  default `"run cancelled"`) to the card's timeline. The card itself is
+  left where it sits.
   """
-  def cancel_run(%Run{} = run) do
+  def cancel_run(%Run{} = run, log_text \\ "run cancelled") do
     stop_server(run)
     run = Repo.get!(Run, run.id)
     revoke_active_jobs(run)
@@ -809,13 +822,39 @@ defmodule Relay.Runs do
          ) do
       {:ok, cancelled} ->
         card = Repo.get!(Card, cancelled.card_id)
-        {:ok, _entry} = Activity.log(card, %{type: :action, actor: :agent, text: "run cancelled"})
+        {:ok, _entry} = Activity.log(card, %{type: :action, actor: :agent, text: log_text})
         broadcast_runs(card.board_id, {:run_finished, cancelled})
         {:ok, cancelled}
 
       {:error, :not_in_expected_state} ->
         {:error, :not_active}
     end
+  end
+
+  @doc """
+  Closes every leaked run — a run still `active` (`Run.active_statuses/0`) whose card already
+  sits in a terminal-type stage (`Stage.terminal_types/0`) — and returns the count closed.
+  Joins run → card → stage across all boards and routes each through `cancel_run/2`, which stops
+  its server, revokes its in-flight job (freeing a `shared_clean` slot), closes it `:cancelled`
+  and drops it from `active_runs`/capacity (freeing an `exclusive` slot), logs, and broadcasts.
+  Idempotent — a second call finds none (`cancel_run/2` returns `{:error, :not_active}` on a
+  now-terminal run). Invoked by the `ExecutorReaper` tick and usable directly as a catch-up.
+  """
+  def close_orphaned_runs do
+    from(r in Run,
+      join: c in Card,
+      on: c.id == r.card_id,
+      join: s in Stage,
+      on: s.id == c.stage_id,
+      where: r.status in ^Run.active_statuses() and s.type in ^Stage.terminal_types()
+    )
+    |> Repo.all()
+    |> Enum.reduce(0, fn run, closed ->
+      case cancel_run(run, "run closed — card already completed") do
+        {:ok, _cancelled} -> closed + 1
+        {:error, :not_active} -> closed
+      end
+    end)
   end
 
   ## Executors (ADR 0006 card 04)
