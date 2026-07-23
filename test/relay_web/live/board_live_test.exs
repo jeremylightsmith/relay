@@ -1848,7 +1848,8 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(view, "#account-menu #archived-cards-menu-item")
       assert has_element?(view, "#account-menu #sign-out")
-      assert has_element?(view, "#account-menu [data-phx-theme='dark']")
+      # QUICKFIX: theme toggle hidden while dark mode is broken (forced light).
+      refute has_element?(view, "#account-menu [data-phx-theme='dark']")
     end
 
     test "clicking Archived cards in the dropdown opens the archived modal", %{conn: conn} do

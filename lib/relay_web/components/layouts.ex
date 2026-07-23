@@ -108,12 +108,7 @@ defmodule RelayWeb.Layouts do
           class="menu dropdown-content z-50 mt-2 w-60 rounded-box bg-base-100 p-2 shadow"
         >
           {render_slot(@menu_items)}
-          <li class="menu-title px-2 text-[10px] uppercase tracking-wider">Theme</li>
-          <li>
-            <div class="pointer-events-auto px-1 py-1 hover:bg-transparent">
-              <.theme_toggle />
-            </div>
-          </li>
+          <%!-- QUICKFIX: theme toggle hidden while dark mode is broken (forced light in root.html.heex). --%>
           <li>
             <.link href={~p"/logout"} method="delete" id="sign-out">
               <.icon name="hero-arrow-right-on-rectangle" class="size-4" /> Sign out

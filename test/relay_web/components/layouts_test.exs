@@ -53,13 +53,13 @@ defmodule RelayWeb.LayoutsTest do
     assert html =~ "phx-connected"
   end
 
-  test "renders the avatar dropdown with theme toggle and sign out" do
+  test "renders the avatar dropdown with sign out" do
     html = render_app(%{inner_block: inner_block_slot()})
 
     assert html =~ ~s(id="account-menu")
     assert html =~ ~s(id="sign-out")
-    # theme toggle segmented control renders its system/light/dark buttons
-    assert html =~ ~s(data-phx-theme="dark")
+    # QUICKFIX: theme toggle hidden while dark mode is broken (forced light).
+    refute html =~ ~s(data-phx-theme="dark")
     # initials fallback (no avatar_url)
     assert html =~ "AL"
   end

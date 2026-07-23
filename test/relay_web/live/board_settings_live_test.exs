@@ -172,12 +172,13 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       assert has_element?(view, "#top-bar-crumb-boards")
     end
 
-    test "the avatar dropdown has Theme + Sign out but no Archived cards", %{conn: conn, user: user} do
+    test "the avatar dropdown has Sign out but no Archived cards", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       assert has_element?(view, "#account-menu #sign-out")
-      assert has_element?(view, "#account-menu [data-phx-theme='dark']")
+      # QUICKFIX: theme toggle hidden while dark mode is broken (forced light).
+      refute has_element?(view, "#account-menu [data-phx-theme='dark']")
       refute has_element?(view, "#archived-cards-menu-item")
     end
   end

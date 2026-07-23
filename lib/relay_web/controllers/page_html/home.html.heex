@@ -18,7 +18,7 @@
         <a href="#stages" class="hover:text-primary">Stages</a>
       </div>
       <span class="flex-1"></span>
-      <Layouts.theme_toggle />
+      <%!-- QUICKFIX: theme toggle hidden while dark mode is broken (forced light in root.html.heex). --%>
       <a
         href={~p"/auth/google"}
         class="hidden text-[13.5px] text-base-content/70 hover:text-primary sm:inline"
