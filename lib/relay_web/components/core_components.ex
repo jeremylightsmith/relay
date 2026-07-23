@@ -1656,10 +1656,10 @@ defmodule RelayWeb.CoreComponents do
     default: nil,
     doc: "RLY-69 a form for public_description; required when editing_public_desc"
 
-  attr :swipe_enabled, :boolean,
+  attr :card_nav_enabled, :boolean,
     default: false,
     doc:
-      "RLY-227: web board drawer (non-embed) — renders the prev/next chevron cluster, the arrow-key bindings, and the CardSwipe hook. Off on the native card host so it can't fight native gestures."
+      "RLY-234: web board drawer (non-embed, non-card) — mounts the ArrowKeyGuard hook and renders the prev/next chevron cluster + arrow-key bindings. Off on the native card host, where native gestures own card-to-card nav."
 
   attr :prev_ref, :string,
     default: nil,
@@ -1708,10 +1708,8 @@ defmodule RelayWeb.CoreComponents do
         </.link>
         <aside
           id="card-drawer-panel"
-          phx-hook={@swipe_enabled && "CardSwipe"}
-          data-prev={@prev_ref}
-          data-next={@next_ref}
-          class="drawer-panel flex h-dvh w-full flex-col overflow-y-auto bg-base-100 shadow-xl drawer:overflow-hidden drawer:w-[min(760px,94vw)] will-change-transform"
+          phx-hook={@card_nav_enabled && "ArrowKeyGuard"}
+          class="drawer-panel flex h-dvh w-full flex-col overflow-y-auto bg-base-100 shadow-xl drawer:overflow-hidden drawer:w-[min(760px,94vw)]"
         >
           <header class="flex items-start gap-3 border-b border-base-300 p-5">
             <div class="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -1752,7 +1750,7 @@ defmodule RelayWeb.CoreComponents do
                 {@card.title}
               </h2>
             </div>
-            <div :if={@swipe_enabled} id="card-drawer-nav" class="flex items-center gap-1">
+            <div :if={@card_nav_enabled} id="card-drawer-nav" class="flex items-center gap-1">
               <button
                 type="button"
                 id="card-drawer-prev"

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../config.dart';
+import '../card/card_nav_context.dart';
 import 'board_prefs.dart';
 import 'new_card_sheet.dart';
 
@@ -60,6 +61,29 @@ class BoardScreen extends ConsumerStatefulWidget {
     return kind == null ? base : '$base&kind=$kind';
   }
 
+  /// The swipe navigation context for a `relayCardTap` payload (RLY-234): the tapped
+  /// column's ordered `cards: [{ref, kind}]` (emitted by board_live's card-tap bridge),
+  /// as a [CardNavContext] seeked to the tapped ref. Null when the payload carries no
+  /// column (a build/browser fallback with no `cards`) — swipe is then inert.
+  static CardNavContext? navContextForTap(Map<dynamic, dynamic> payload) {
+    final ref = payload['ref'] as String?;
+    if (ref == null || ref.isEmpty) return null;
+    final board = payload['board'] as String? ?? '';
+    final raw = payload['cards'];
+    if (raw is! List) return null;
+
+    final items = <CardNavItem>[];
+    for (final entry in raw) {
+      if (entry is! Map) continue;
+      final r = entry['ref'] as String?;
+      if (r == null || r.isEmpty) continue;
+      items.add(
+        CardNavItem(ref: r, boardSlug: board, kind: entry['kind'] as String?),
+      );
+    }
+    return CardNavContext.seed(items: items, currentRef: ref);
+  }
+
   @override
   ConsumerState<BoardScreen> createState() => _BoardScreenState();
 }
@@ -99,7 +123,12 @@ class _BoardScreenState extends ConsumerState<BoardScreen> {
                           ? args.first as Map
                           : const <dynamic, dynamic>{};
                       final path = BoardScreen.cardPathForTap(payload);
-                      if (path != null && context.mounted) context.push(path);
+                      if (path != null && context.mounted) {
+                        context.push(
+                          path,
+                          extra: BoardScreen.navContextForTap(payload),
+                        );
+                      }
                     },
                   );
                   // RLY-126 · BOARD-04 — the board header "+" bubbles out of the

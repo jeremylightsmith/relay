@@ -26,7 +26,7 @@ import {hooks as colocatedHooks} from "phoenix-colocated/relay"
 import topbar from "../vendor/topbar"
 import BoardDnD from "./hooks/board_dnd"
 import BoardPager from "./hooks/board_pager"
-import CardSwipe from "./hooks/card_swipe"
+import ArrowKeyGuard from "./hooks/arrow_key_guard"
 import CommitField from "./hooks/commit_field"
 import SubmitOnCmdEnter from "./hooks/submit_on_cmd_enter"
 import SubmitOnEnter from "./hooks/submit_on_enter"
@@ -36,7 +36,7 @@ const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, BoardDnD, BoardPager, CardSwipe, CommitField, SubmitOnCmdEnter, SubmitOnEnter},
+  hooks: {...colocatedHooks, BoardDnD, BoardPager, ArrowKeyGuard, CommitField, SubmitOnCmdEnter, SubmitOnEnter},
 })
 
 // Show progress bar on live navigation and form submits

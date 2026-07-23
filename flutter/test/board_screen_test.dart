@@ -79,6 +79,37 @@ void main() {
     });
   });
 
+  group('navContextForTap', () {
+    test(
+      'parses the column into an ordered context seeked to the tapped ref',
+      () {
+        final ctx = BoardScreen.navContextForTap({
+          'ref': 'RLY-2',
+          'board': 'demo',
+          'kind': 'in_review',
+          'cards': [
+            {'ref': 'RLY-1', 'kind': null},
+            {'ref': 'RLY-2', 'kind': 'in_review'},
+            {'ref': 'RLY-3', 'kind': null},
+          ],
+        });
+        expect(ctx, isNotNull);
+        expect(ctx!.index, 1);
+        expect(ctx.prev?.ref, 'RLY-1');
+        expect(ctx.next?.ref, 'RLY-3');
+        expect(ctx.next?.boardSlug, 'demo');
+        expect(ctx.next?.kind, isNull);
+      },
+    );
+
+    test('is null without a cards list — a plain tap carries no column', () {
+      expect(
+        BoardScreen.navContextForTap({'ref': 'RLY-2', 'board': 'demo'}),
+        isNull,
+      );
+    });
+  });
+
   testWidgets(
     'the Board tab hosts the webview body chromeless (no native AppBar)',
     (tester) async {

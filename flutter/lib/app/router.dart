@@ -6,6 +6,7 @@ import '../features/auth/sign_in_screen.dart';
 import '../features/auth/splash_screen.dart';
 import '../features/auth/welcome_screen.dart';
 import '../features/board/board_screen.dart';
+import '../features/card/card_nav_context.dart';
 import '../features/card/card_screen.dart';
 import '../features/decisions/reject_note_screen.dart';
 import '../features/needs_you/needs_you_screen.dart';
@@ -81,6 +82,7 @@ GoRouter buildRouter({
           cardRef: state.pathParameters['ref']!,
           boardSlug: state.uri.queryParameters['board'] ?? '',
           kind: state.uri.queryParameters['kind'],
+          navContext: state.extra as CardNavContext?,
           bodyBuilder: cardBodyBuilder,
         ),
       ),

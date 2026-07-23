@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/api_client.dart';
+import '../card/card_nav_context.dart';
 import '../decisions/review_queue.dart';
 import 'feed_controller.dart';
 import 'models/feed_row.dart';
@@ -110,7 +111,18 @@ class _NeedsYouScreenState extends ConsumerState<NeedsYouScreen>
     final rows =
         ref.read(feedControllerProvider).value?.rows ?? const <FeedRow>[];
     ref.read(reviewQueueProvider.notifier).enter(rows: rows, atRef: row.ref);
-    unawaited(context.push(routeFor(QueueItem.fromRow(row))));
+    final navContext = CardNavContext.seed(
+      items: rows
+          .map(
+            (r) =>
+                CardNavItem(ref: r.ref, boardSlug: r.board.slug, kind: r.kind),
+          )
+          .toList(growable: false),
+      currentRef: row.ref,
+    );
+    unawaited(
+      context.push(routeFor(QueueItem.fromRow(row)), extra: navContext),
+    );
   }
 
   @override
