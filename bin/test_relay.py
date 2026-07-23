@@ -2340,11 +2340,43 @@ class ExecuteOneTest(unittest.TestCase):
         self.assertEqual(self.pool.capacity()["exclusive"], 1)       # never leak a slot
 
 
+def isolate_executor_locks(test):
+    """Point the executor singleton locks (identity + namespace) at a throwaway dir.
+
+    Any test that drives `cmd_execute`/`acquire_executor_locks` otherwise takes the real
+    locks under `~/.relay/locks` and `.claude/worktrees/`, which collide with a live
+    `relay execute` on a dev box (making precommit fail only when the app is running), and
+    leak fds into the module-global `_EXECUTOR_LOCKS` that later tests count. Mirrors the
+    isolation `ExecutorSingletonLockTest` already does for itself.
+    """
+    lockdir = tempfile.mkdtemp()
+    test.addCleanup(shutil.rmtree, lockdir, ignore_errors=True)
+    prev = os.environ.get("RELAY_EXECUTOR_LOCK_DIR")
+    os.environ["RELAY_EXECUTOR_LOCK_DIR"] = os.path.join(lockdir, "locks")
+    test.addCleanup(lambda: os.environ.__setitem__("RELAY_EXECUTOR_LOCK_DIR", prev)
+                    if prev is not None
+                    else os.environ.pop("RELAY_EXECUTOR_LOCK_DIR", None))
+    test.addCleanup(setattr, relay, "WORKTREES_DIR", relay.WORKTREES_DIR)
+    relay.WORKTREES_DIR = os.path.join(lockdir, "worktrees")
+
+    def _release():
+        for fd in list(relay._EXECUTOR_LOCKS):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        relay._EXECUTOR_LOCKS.clear()
+
+    # Registered last → runs first on teardown: drop held fds before the dir is removed.
+    test.addCleanup(_release)
+
+
 class ExecuteLoopTest(unittest.TestCase):
     """`execute --once` drains one claim→execute→report cycle; a long-poll timeout is 'no
     work', not an error."""
 
     def setUp(self):
+        isolate_executor_locks(self)
         self._saved = {k: getattr(relay, k) for k in
                        ("load_executor_config", "claim_node_job", "run_node_job",
                         "report_outcome", "reset_worktree", "refresh_worktree",
@@ -2799,6 +2831,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
     advertising zero capacity, which is why that assertion is here and not decoration."""
 
     def setUp(self):
+        isolate_executor_locks(self)
         self._saved = {k: getattr(relay, k) for k in
                        ("load_executor_config", "claim_node_job", "run_node_job",
                         "report_outcome", "reset_worktree", "refresh_worktree",
