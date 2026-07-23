@@ -5,6 +5,7 @@ defmodule Relay.Runs.ListenerTest do
   alias Relay.Runs.FakeDispatcher
   alias Relay.Runs.Listener
   alias Relay.Runs.Scheduler.Server
+  alias Schemas.Card
   alias Schemas.NodeJob
   alias Schemas.Run
 
@@ -224,6 +225,46 @@ defmodule Relay.Runs.ListenerTest do
 
     # Exactly one resume — no second broadcast from a scheduler-driven resume.
     refute_receive {:run_resumed, _}, 100
+  end
+
+  test "a card that reached a Done stage with a parked :needs_input run is CLOSED, not resumed",
+       %{board: board} do
+    done = Enum.find(board.stages, &(&1.name == "Done"))
+    card = insert(:card, stage: done)
+    run = insert(:run, card: card, status: :parked, parked_reason: :needs_input)
+
+    # Drive the Listener: any card event on this card triggers reconcile_card/2.
+    Relay.Events.broadcast(board.id, {:card_upserted, Relay.Repo.get!(Card, card.id)})
+
+    assert_receive {:run_finished, %Run{status: :cancelled}}
+    assert %Run{status: :cancelled} = Runs.get_run!(run.id)
+    # It was closed, not resumed: no fresh job dispatched.
+    refute_receive {:dispatched, _job}
+    refute_receive {:run_resumed, _run}
+  end
+
+  test "a card that reached a Done stage with a :running run is closed", %{board: board} do
+    done = Enum.find(board.stages, &(&1.name == "Done"))
+    card = insert(:card, stage: done)
+    run = insert(:run, card: card, status: :running)
+
+    Relay.Events.broadcast(board.id, {:card_upserted, Relay.Repo.get!(Card, card.id)})
+
+    assert_receive {:run_finished, %Run{status: :cancelled}}
+    assert %Run{status: :cancelled} = Runs.get_run!(run.id)
+  end
+
+  test "a card in a non-terminal work stage with a running run is left alone", %{board: board} do
+    code = Enum.find(board.stages, &(&1.name == "Code"))
+    # AI-owned so the :running clause's agent_may_hold? check does not park it.
+    card = insert(:card, stage: code)
+    insert(:card_owner, card: card)
+    run = insert(:run, card: card, status: :running)
+
+    Relay.Events.broadcast(board.id, {:card_upserted, Relay.Repo.get!(Card, card.id)})
+
+    refute_receive {:run_finished, _run}
+    assert %Run{status: :running} = Runs.get_run!(run.id)
   end
 
   test "boot sweep resumes a parked needs-input run whose answer arrived while the Listener was down",
