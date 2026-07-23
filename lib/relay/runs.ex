@@ -808,10 +808,11 @@ defmodule Relay.Runs do
 
   @doc """
   Cancels an active run: stops its server, revokes any in-flight job,
-  marks the run `:cancelled`, and logs an `:action` entry to the card's
-  timeline. The card itself is left where it sits.
+  marks the run `:cancelled`, and logs an `:action` entry (`log_text`,
+  default `"run cancelled"`) to the card's timeline. The card itself is
+  left where it sits.
   """
-  def cancel_run(%Run{} = run) do
+  def cancel_run(%Run{} = run, log_text \\ "run cancelled") do
     stop_server(run)
     run = Repo.get!(Run, run.id)
     revoke_active_jobs(run)
@@ -821,13 +822,39 @@ defmodule Relay.Runs do
          ) do
       {:ok, cancelled} ->
         card = Repo.get!(Card, cancelled.card_id)
-        {:ok, _entry} = Activity.log(card, %{type: :action, actor: :agent, text: "run cancelled"})
+        {:ok, _entry} = Activity.log(card, %{type: :action, actor: :agent, text: log_text})
         broadcast_runs(card.board_id, {:run_finished, cancelled})
         {:ok, cancelled}
 
       {:error, :not_in_expected_state} ->
         {:error, :not_active}
     end
+  end
+
+  @doc """
+  Closes every leaked run — a run still `active` (`Run.active_statuses/0`) whose card already
+  sits in a terminal-type stage (`Stage.terminal_types/0`) — and returns the count closed.
+  Joins run → card → stage across all boards and routes each through `cancel_run/2`, which stops
+  its server, revokes its in-flight job (freeing a `shared_clean` slot), closes it `:cancelled`
+  and drops it from `active_runs`/capacity (freeing an `exclusive` slot), logs, and broadcasts.
+  Idempotent — a second call finds none (`cancel_run/2` returns `{:error, :not_active}` on a
+  now-terminal run). Invoked by the `ExecutorReaper` tick and usable directly as a catch-up.
+  """
+  def close_orphaned_runs do
+    from(r in Run,
+      join: c in Card,
+      on: c.id == r.card_id,
+      join: s in Stage,
+      on: s.id == c.stage_id,
+      where: r.status in ^Run.active_statuses() and s.type in ^Stage.terminal_types()
+    )
+    |> Repo.all()
+    |> Enum.reduce(0, fn run, closed ->
+      case cancel_run(run, "run closed — card already completed") do
+        {:ok, _cancelled} -> closed + 1
+        {:error, :not_active} -> closed
+      end
+    end)
   end
 
   ## Executors (ADR 0006 card 04)
