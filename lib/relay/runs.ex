@@ -667,29 +667,16 @@ defmodule Relay.Runs do
   defp start_seeded_run(card, flow, start_target, context) do
     result =
       Repo.transaction(fn ->
+        card = move_into_work_lane(card, flow)
         run = insert_run(card, flow, start_target, context)
         sub_task_id = if start_target == foreach_node_key(flow), do: next_sub_task_id(run)
         execution = insert_execution!(run, start_target, 1, 1, sub_task_id)
         job = insert_job!(run, execution, build_payload(run, flow, start_target, sub_task_id: sub_task_id))
-        {run, execution, job}
+        {card, run, execution, job}
       end)
 
     case result do
-      {:ok, {run, execution, job}} ->
-        card =
-          if card.stage_id == flow.works_in_stage_id do
-            card
-          else
-            works_in = Repo.get!(Stage, flow.works_in_stage_id)
-            {:ok, moved} = Cards.move_card(card, works_in, @append_index, :agent)
-            moved
-          end
-
-        # The move's snap only overrides an INVALID status (ADR 0003); :ready is
-        # already valid on a work stage, so the AI taking over needs an explicit
-        # :working set — status changes only ever happen through set_status/3.
-        {:ok, _card} = Cards.set_status(card, %{status: :working}, :agent)
-
+      {:ok, {card, run, execution, job}} ->
         broadcast_runs(card.board_id, {:run_started, run})
         broadcast_runs(card.board_id, {:node_started, run, execution})
         {:ok, _pid} = ensure_server(run, {:dispatch, job.id})
@@ -698,6 +685,31 @@ defmodule Relay.Runs do
       {:error, %Changeset{errors: errors}} ->
         if Keyword.has_key?(errors, :card_id), do: {:error, :active_run_exists}, else: {:error, :invalid}
     end
+  end
+
+  # RLY-233 Part 1: move the card into the flow's work lane and set it :working BEFORE the run
+  # row is inserted, inside start_seeded_run's single transaction. This guarantees no committed
+  # state ever has an active run while the card still sits at its (often :done-type) pull stage,
+  # so "active run + terminal stage" becomes an unambiguous leak signal (Part 2). Moving first
+  # also sidesteps stranded_run/2 — there is no active run at move time.
+  #
+  # A card already in the work lane (rejection re-entry) is NOT re-moved: a gratuitous
+  # append-move would clear the CHANGES REQUESTED banner via move_card's rejection-clearing rule.
+  # The move's snap only overrides an INVALID status (ADR 0003); :ready is already valid on a
+  # work stage, so the AI taking over needs an explicit :working — status changes only ever
+  # happen through set_status/3.
+  defp move_into_work_lane(card, flow) do
+    moved =
+      if card.stage_id == flow.works_in_stage_id do
+        card
+      else
+        works_in = Repo.get!(Stage, flow.works_in_stage_id)
+        {:ok, moved} = Cards.move_card(card, works_in, @append_index, :agent)
+        moved
+      end
+
+    {:ok, working} = Cards.set_status(moved, %{status: :working}, :agent)
+    working
   end
 
   # A `foreach` flow iterates the card's sub_tasks, so the server materializes them
