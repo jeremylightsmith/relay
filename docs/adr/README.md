@@ -16,6 +16,7 @@ that supersedes the old one (update the old one's status to `Superseded by NNNN`
 | [0005](0005-mobile-app-scope-and-architecture.md) | Mobile app: scope & hybrid native-shell architecture | Draft |
 | [0006](0006-workflow-orchestration.md) | Workflow orchestration: Relay owns the graph, developers own the nodes | Proposed |
 | [0007](0007-card-lifecycle-and-failure-states.md) | Card lifecycle: the happy path and every failure mode | Proposed |
+| [0008](0008-documentation-taxonomy.md) | Documentation taxonomy: what lives where, and why | Proposed |
 
 ## Format
 
