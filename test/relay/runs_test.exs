@@ -448,6 +448,45 @@ defmodule Relay.RunsTest do
     end
   end
 
+  # RLY-233 / RE239: the single-snapshot leak predicate the listener's terminal-close rule uses,
+  # so it decides "is this run a leak?" from one consistent read of run → card → stage (exactly
+  # like close_orphaned_runs/0) and can never be fooled by a card stage read separately from the
+  # run — the skew that let a concurrent Spec:Done → Plan dispatch cancel a fresh plan run.
+  describe "leaked?/1" do
+    test "true for an active run whose card sits in a terminal (Done) stage", %{board: board} do
+      done = Enum.find(board.stages, &(&1.name == "Done"))
+      card = insert(:card, stage: done)
+      run = insert(:run, card: card, status: :running)
+
+      assert Runs.leaked?(run)
+    end
+
+    test "true for a parked run whose card sits in a Done sub-lane", %{board: board} do
+      spec_done = Enum.find(board.stages, &(&1.name == "Spec:Done"))
+      card = insert(:card, stage: spec_done)
+      run = insert(:run, card: card, status: :parked, parked_reason: :needs_input)
+
+      assert Runs.leaked?(run)
+    end
+
+    test "false for an active run whose card sits in a non-terminal work stage (the RE239 race)",
+         %{board: board} do
+      plan = Enum.find(board.stages, &(&1.name == "Plan"))
+      card = insert(:card, stage: plan)
+      run = insert(:run, card: card, status: :running)
+
+      refute Runs.leaked?(run)
+    end
+
+    test "false for an already-terminal run even under a Done card", %{board: board} do
+      done = Enum.find(board.stages, &(&1.name == "Done"))
+      card = insert(:card, stage: done)
+      run = insert(:run, card: card, status: :cancelled)
+
+      refute Runs.leaked?(run)
+    end
+  end
+
   describe "upsert_executor/2" do
     setup %{board: board}, do: %{board: board}
 

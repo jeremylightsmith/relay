@@ -267,14 +267,17 @@ stderr and exits non-zero.
 ## Scheduler / Listener authority split (RLY-200)
 
 Before either owner below gets a say, `Relay.Runs.Listener.reconcile_card/2` runs a first,
-unconditional rule: a card that has reached a terminal-type stage (`Schemas.Stage.terminal_types/0`)
-with a still-active run (`running`/`parked`, any `parked_reason`) is closed via
+unconditional rule: a still-active run (`running`/`parked`, any `parked_reason`) that is a *leak* —
+its card already sits in a terminal-type stage (`Schemas.Stage.terminal_types/0`) — is closed via
 `Relay.Runs.cancel_run/2`, not resumed (RLY-233). This is what stops a parked `:needs_input`
 run from being resumed after its card reached Done — closing pre-empts the resume rules below.
 `Relay.Runs.ExecutorReaper`'s 30s sweep (`Relay.Runs.close_orphaned_runs/0`) is the companion
 catch-up for anything the event path missed. Run dispatch (`Relay.Runs.start_run/3`) moves the
-card into the flow's work lane and inserts the run row in one transaction, so "active run +
-terminal stage" is an unambiguous leak signal with no grace window needed.
+card into the flow's work lane and inserts the run row in one transaction, so no committed state
+pairs an active run with a terminal pull stage — and the leak itself is judged from a single
+`run → card → stage` snapshot (`Relay.Runs.leaked?/1`), never a card stage read apart from the
+run, so a concurrent `Spec:Done → Plan` dispatch between two reads can't get a freshly-dispatched
+run cancelled (RLY-233 / RE239). No grace window is needed.
 
 A parked run has exactly one process allowed to resume it, keyed off `Schemas.Run`'s
 `parked_reason`:

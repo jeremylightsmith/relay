@@ -281,14 +281,16 @@ These are hypotheses, ordered by how much they've already bitten us. Several are
 cause wearing different costumes: **the run lifecycle and the card's stage transitions are not
 transactionally coupled.**
 
-1. **Dispatch is non-atomic — the "active run in a `:done` stage" window.** `start_run/3` inserts
-   the Run row `:running` while the card is *still* at its `pulls_from` stage, then moves it to
-   `works_in`. The code/plan flows pull from Plan:Done / Spec:Done, which are `type: :done`. So there
-   is a real, observable window where *"an active run exists AND the card is in a done-type stage"*
-   is true although nothing finished. This is exactly what breaks RLY-233's terminal-close rule
-   (it self-cancels fresh runs) and it falsifies the tempting invariant "card in a done stage ⇒
-   done." **Fix: make dispatch atomic** (move the card *then* insert the run in one transaction),
-   not a grace-window band-aid — this is the answer to the RLY-233 question currently open.
+1. **Dispatch is non-atomic — the "active run in a `:done` stage" window. → RESOLVED (RLY-233 /
+   #190 + RE239).** Dispatch is now atomic: `start_seeded_run/4` moves the card into the flow's
+   work lane *then* inserts the run in one transaction, so no *committed* state ever pairs an active
+   run with a card still at its (often `:done`-type) `pulls_from` stage. The residual was purely
+   observational — the `Listener`'s terminal-close rule read the card stage and the active run in
+   two separate queries and could straddle a concurrent `Spec:Done → Plan` dispatch, seeing the
+   stale done stage beside the fresh plan run and cancelling it (the live RE239 incident: a plan run
+   self-cancelled twice at that handoff). Closed by judging the leak from a single
+   `run → card → stage` snapshot (`Relay.Runs.leaked?/1`) — the same predicate `close_orphaned_runs/0`
+   sweeps with — instead of a card stage read apart from the run.
 
 2. **Outcome delivery is neither durable nor idempotent.** When an agent finishes a node it POSTs
    the outcome via `bin/relay outcome`. If that report is lost — executor restarted mid-report
@@ -325,8 +327,11 @@ transactionally coupled.**
 
 6. **Runs leak past card completion.** A card reaching Done doesn't terminal-close its active run —
    we saw zombie `:running` rows on Done cards and a parked run holding an exclusive slot (RLY-157).
-   RLY-233 is the fix, but it's blocked on Gap 1's race, which is the tell that the leak and the race
-   are one problem: lands-on/Done transitions and run termination aren't transactionally coupled.
+   RLY-233 is the fix (the `Listener`'s terminal-close rule + `close_orphaned_runs/0`, both closing a
+   run whose card sits in a terminal-type stage). Its Gap 1 blocker — the dispatch/observation race —
+   is now resolved (atomic dispatch + the single-snapshot `leaked?/1` leak test), so the leak-close
+   paths are no longer endangered by it; what remains is keeping lands-on/Done transitions and run
+   termination coupled tightly enough that no new leak reopens.
 
 7. **Retry only works on `:failed`.** A run stranded `:running` (Gap 2), or a card a human wants to
    force-rerun, has no clean path except `cancel_run` + re-pull — which discards every node already

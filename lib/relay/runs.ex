@@ -857,6 +857,31 @@ defmodule Relay.Runs do
     end)
   end
 
+  @doc """
+  True if `run` is a leak — still `active` (`Run.active_statuses/0`) while its card already sits in
+  a terminal-type stage (`Stage.terminal_types/0`) — decided in ONE `run → card → stage` query, so
+  the verdict is a single consistent snapshot (the same predicate `close_orphaned_runs/0` sweeps
+  with).
+
+  Atomic dispatch (`start_seeded_run/4` moves the card into the work lane *before* inserting the
+  run, in one transaction) guarantees no committed state ever pairs an active run with a card still
+  at its (often `:done`-type) pull stage, so a freshly dispatched run is never a leak — only a
+  genuinely stranded one is. The listener's terminal-close rule uses this instead of reading the
+  card stage and the active run in separate queries, which could straddle a concurrent
+  `Spec:Done → Plan` dispatch and cancel the fresh plan run (RLY-233 / RE239).
+  """
+  def leaked?(%Run{id: id}) do
+    Repo.exists?(
+      from(r in Run,
+        join: c in Card,
+        on: c.id == r.card_id,
+        join: s in Stage,
+        on: s.id == c.stage_id,
+        where: r.id == ^id and r.status in ^Run.active_statuses() and s.type in ^Stage.terminal_types()
+      )
+    )
+  end
+
   ## Executors (ADR 0006 card 04)
 
   # The oldest `bin/relay` EXECUTOR_VERSION this server will hand work to (RLY-184). One
