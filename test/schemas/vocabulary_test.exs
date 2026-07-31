@@ -34,12 +34,20 @@ defmodule Schemas.VocabularyTest do
     assert Enum.all?(Schemas.NodeJob.claimed_states(), &(&1 in Schemas.NodeJob.active_states()))
   end
 
-  test "outcomes/0 equals the whole NodeExecution outcome enum" do
-    assert Schemas.NodeExecution.outcomes() == Ecto.Enum.values(Schemas.NodeExecution, :outcome)
-  end
-
-  test "isolation_classes/0 equals the whole Flow isolation enum" do
-    assert Schemas.Flow.isolation_classes() == Ecto.Enum.values(Schemas.Flow, :isolation)
+  test "every closed set is defined once, delegating to its Ecto.Enum" do
+    for {module, fun, field} <- [
+          {Schemas.Card, :statuses, :status},
+          {Schemas.Stage, :categories, :category},
+          {Schemas.Stage, :types, :type},
+          {Schemas.Run, :statuses, :status},
+          {Schemas.Run, :parked_reasons, :parked_reason},
+          {Schemas.NodeJob, :states, :state},
+          {Schemas.NodeExecution, :outcomes, :outcome},
+          {Schemas.Flow, :isolation_classes, :isolation}
+        ] do
+      assert apply(module, fun, []) == Ecto.Enum.values(module, field),
+             "#{inspect(module)}.#{fun}/0 must delegate to Ecto.Enum.values(#{inspect(module)}, #{inspect(field)})"
+    end
   end
 
   test "runnable_types/0 is a subset of the Node type enum" do

@@ -52,10 +52,9 @@ LiveView UI serves web and mobile — the mobile apps are thin native shells aro
 | [domain.md](domain.md) | What are the contexts and core schemas? What invariants govern them? |
 | [runtime.md](runtime.md) | What processes run? What PubSub topics exist? How does real-time flow? |
 | [runner.md](runner.md) | How does work physically get done by agents? |
+| [state.md](state.md) | What are the closed vocabularies, the four state machines and their transitions? |
+| [failures.md](failures.md) | How does each known failure mode get handled, and where does the card end up? |
 | [deps.md](deps.md) | What do modules and the app depend on, internally and externally? |
-
-- [State reference](state.md) — card status, run status, node-job state and the four node
-  outcomes, with their transitions and the seams between them.
 
 ---
 *Sources of truth: `lib/relay.ex`, `lib/relay_web.ex`, `lib/schemas.ex`,

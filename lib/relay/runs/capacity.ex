@@ -19,8 +19,8 @@ defmodule Relay.Runs.Capacity do
   board's scheduler. Every `put/2`/`clear/1` broadcasts
   `{:executor_capacity_changed, executor_id}` on `topic/0` so schedulers
   reconcile immediately (acceptance criterion 2's "without waiting a full tick").
-  W9/W10 feed this store from executor heartbeats; until then it stays empty and
-  the scheduler is dormant.
+  The executor heartbeat feeds this store; with no executor connected it is
+  empty and the scheduler is dormant.
 
   **`exclusive` semantics (RLY-231):** the `exclusive` class means the max number of
   concurrent per-card worktrees an executor holds, reinterpreted from the old fixed

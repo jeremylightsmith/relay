@@ -94,6 +94,12 @@ defmodule Schemas.Stage do
   """
   def terminal_types, do: [:done]
 
+  @doc "The closed set of stage categories."
+  def categories, do: Ecto.Enum.values(__MODULE__, :category)
+
+  @doc "The closed set of stage types."
+  def types, do: Ecto.Enum.values(__MODULE__, :type)
+
   # ai_enabled only applies to work/planning; every other type zeroes it (create + type change).
   defp normalize_ai_enabled(changeset) do
     if get_field(changeset, :type) in [:work, :planning] do

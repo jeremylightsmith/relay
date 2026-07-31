@@ -100,7 +100,6 @@ defmodule RelayWeb.DocsControllerTest do
       {"/docs/cards-and-handoffs", "Cards &amp; handoffs"},
       {"/docs/statuses-and-outcomes", "Statuses &amp; outcomes"},
       {"/docs/cli", "bin/relay"},
-      {"/docs/agent-integration", "Agent integration"},
       {"/docs/api", "REST API reference"},
       {"/docs/authentication", "Authentication &amp; API access"},
       {"/docs/runbook-flow-cutover", "Enabling a flow safely"}
@@ -177,6 +176,14 @@ defmodule RelayWeb.DocsControllerTest do
     assert_error_sent 404, fn -> get(conn, "/docs/does-not-exist") end
   end
 
+  test "the retired agent-integration slug is a 404 and is gone from the sidebar", %{conn: conn} do
+    assert_error_sent 404, fn -> get(conn, "/docs/agent-integration") end
+
+    html = conn |> get(~p"/docs") |> html_response(200)
+    refute html =~ "Agent integration"
+    refute html =~ ~s(href="/docs/agent-integration")
+  end
+
   test "every architecture page returns 200 signed out", %{conn: conn} do
     pages = [
       {"/docs/architecture", "Relay architecture"},
@@ -184,6 +191,7 @@ defmodule RelayWeb.DocsControllerTest do
       {"/docs/architecture-runtime", "Runtime"},
       {"/docs/architecture-runner", "runner"},
       {"/docs/architecture-state", "State reference"},
+      {"/docs/architecture-failures", "Failure modes"},
       {"/docs/architecture-deps", "Dependencies"}
     ]
 
@@ -249,6 +257,7 @@ defmodule RelayWeb.DocsControllerTest do
           "/docs/architecture-runtime",
           "/docs/architecture-runner",
           "/docs/architecture-state",
+          "/docs/architecture-failures",
           "/docs/architecture-deps"
         ] do
       html = conn |> get(path) |> html_response(200)
@@ -288,7 +297,6 @@ defmodule RelayWeb.DocsControllerTest do
           "Cards &amp; handoffs",
           "Statuses &amp; outcomes",
           "CLI (bin/relay)",
-          "Agent integration",
           "REST API reference",
           "Authentication &amp; API access",
           "Enabling a flow safely"

@@ -82,7 +82,7 @@ A **stage** (returned inside `GET /api/board`):
 
 ```json
 {
-  "id": 5, "name": "Plan", "category": "started", "owner": "ai",
+  "id": 5, "name": "Plan", "category": "in_progress", "owner": "ai",
   "position": 3, "approval_gate": false, "reject_to_stage_id": null,
   "wip_limit": null, "lane": "main", "parent_id": null
 }

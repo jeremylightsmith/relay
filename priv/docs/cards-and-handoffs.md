@@ -6,12 +6,15 @@ A **card** is a unit of work — a title, description, tag, sub-tasks, comments,
 
 A card's **owner is derived from its stage**. On top of that it carries a **status**:
 
+<!-- vocab: Schemas.Card.statuses/0 -->
 | Status | Meaning |
 | --- | --- |
 | `ready` | Not actively being worked — sitting wherever it is |
+| `queued` | The board has picked the card up, but no work has started yet |
 | `working` | An agent (or person) is actively on it |
 | `needs_input` | Blocked on a human answer |
 | `in_review` | Waiting at a human approval gate |
+| `failed` | A step ended terminally and gave up. The card is in front of you with the reason |
 
 > [!NOTE]
 > **Done is derived, not a status.** A card is *done* once a `ready` card is parked at the
@@ -28,3 +31,10 @@ A **hand-off** is a card moving between a human stage and an AI stage, carrying 
 description, comments, and results — across. A human scopes a card and moves it into an AI
 stage; the agent does a pass and returns it to a human review stage; the human approves it
 forward or sends it back.
+
+## Going deeper
+
+Every board term is defined in the
+[glossary](https://github.com/jeremylightsmith/relay/blob/main/docs/glossary.md); the full
+per-status transition tables — plus run status, node-job state and the four outcomes — are in the
+[state reference](/docs/architecture-state).

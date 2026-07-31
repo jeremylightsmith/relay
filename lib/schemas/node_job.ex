@@ -43,6 +43,9 @@ defmodule Schemas.NodeJob do
   """
   def claimed_states, do: [:claimed, :running]
 
+  @doc "The closed set of node-job states."
+  def states, do: Ecto.Enum.values(__MODULE__, :state)
+
   @doc "Validates a programmatically-built job row."
   def changeset(job) do
     job

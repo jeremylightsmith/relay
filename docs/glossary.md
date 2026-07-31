@@ -13,13 +13,16 @@ the MMF design specs).
   **This is the canonical name for what the code currently calls a "sub-lane" / "lane"** — those
   identifiers (`Boards.sublanes/1`, `enable_lane/2`, `has_many :sublanes`) are legacy names for
   *substage* and have not yet been renamed.
-- **Category** — the coarse board grouping a main stage belongs to (`:unstarted | :planning |
-  :in_progress | :complete`), used for ordering and the Done derivation.
-- **Stage type** — a stage's behavior type: `queue | work | planning | review | done`. Types drive
-  the claim rule and the arrival status (`Schemas.Stage.default_status/1`).
+- **Category** — the coarse board grouping a main stage belongs to, used for ordering and the
+  Done derivation. The values are generated from the schema into
+  [`architecture/state.md`](architecture/state.md).
+- **Stage type** — a stage's behavior type. Types drive the claim rule and the arrival status
+  (`Schemas.Stage.default_status/1`). The values are generated from the schema into
+  [`architecture/state.md`](architecture/state.md).
 - **Card** — a unit of work (`Schemas.Card`) that lives in exactly one stage/substage at a time.
-- **Status** — a card's lifecycle state: `ready | working | needs_input | in_review`. A stage
-  type's default status is applied on arrival when the current status isn't valid there (ADR 0003).
+- **Status** — a card's lifecycle state. A stage type's default status is applied on arrival when
+  the current status isn't valid there (ADR 0003). The values are generated from the schema into
+  [`architecture/state.md`](architecture/state.md).
 - **Baton / ownership** — who holds the card: **Human = blue** (`--color-primary`), **AI = violet**
   (`--color-secondary`). An **unowned** card claims an owner when it *enters* a work/planning
   stage (the mover decides); an already-owned card keeps its owners through every move.

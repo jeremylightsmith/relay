@@ -139,4 +139,7 @@ defmodule Schemas.Card do
   @doc "True when the card has been archived (soft-hidden from the board)."
   def archived?(%__MODULE__{archived_at: nil}), do: false
   def archived?(%__MODULE__{}), do: true
+
+  @doc "The closed set of card statuses — the one definition; the docs generate from it (RE239)."
+  def statuses, do: Ecto.Enum.values(__MODULE__, :status)
 end

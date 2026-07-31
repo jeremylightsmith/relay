@@ -67,6 +67,11 @@ looks like the leftward flow is being starved. Pinned by
 `test/relay/runs/scheduler_test.exs` and exercised live over the REST API by
 `test/relay_web/api/plan_flow_e2e_test.exs` / `test/relay/runs/code_flow_e2e_test.exs`.
 
+Because that capacity is global **by executor** rather than board-scoped, a stale or contended
+view of it can over-assign — two boards' schedulers can both count the same free slot. The
+executor's own live capacity is the final backstop, so an over-assigned job waits there rather
+than double-booking (YAGNI: no multi-board reservation yet).
+
 ## Side channels
 
 - **Log mirror**: every feed line is queued to a background `LogForwarder` thread that
@@ -226,8 +231,8 @@ that stays server-side.
   `node_job_id` alongside `run_id` — same nullable-string shape, not an FK. It rides through
   `Relay.AgentLog.stamp/1` → `Relay.Activity.LogSink.row/2` → `activities.node_job_id`, kept
   for W6's run panel to key log lines off a specific node-job.
-- The full outcome-file contract (`RELAY_NODE_OUTCOME`) executors must honor is documented in
-  [`../../relay.md`](../../relay.md#node-job-protocol-adr-0006).
+- The full outcome-file contract (`RELAY_NODE_OUTCOME`) executors must honor is
+  [Declaring an outcome](#declaring-an-outcome) below.
 
 ## Run recovery surface (RLY-189)
 
@@ -313,6 +318,21 @@ arrived while the Listener was down is not lost — the scheduler is no longer a
 node-job transport above. It knows the Relay REST API and how to execute a node-job;
 nothing else — every board-specific fact lives server-side as flow data.
 
+Every iteration of the loop is the same three steps:
+
+1. **Claim** the next node-job from the server (a long-poll — cheap when idle).
+2. **Run** it — an agent node runs headless Claude; `shell`/`gate` nodes run shell.
+3. **Report** the typed outcome back to the server, which advances the flow (moving the card to
+   the next stage when the flow lands there).
+
+Step 3 is a contract a node author has to honor — see
+[Declaring an outcome](#declaring-an-outcome) below.
+
+Agent steps run headless Claude, which uses whatever authentication the local Claude CLI has — a
+**Claude subscription** (no `ANTHROPIC_API_KEY` needed) or, if `ANTHROPIC_API_KEY` is set, the
+metered API. Subscription rate limits are the ceiling; when hit, the step is throttled, not
+silently billed to the paid API.
+
 - **Config.** `.relay/executor.json` holds `name` (defaults to hostname), `namespace`
   (default `exec`), `capacity: {shared_clean, exclusive}`, `poll_timeout`,
   `heartbeat_interval`, and three optional per-card-worktree keys (RLY-231):
@@ -321,6 +341,12 @@ nothing else — every board-specific fact lives server-side as flow data.
   `max_retained_failed` (how many failed-run worktrees to keep for post-mortem before the
   oldest is evicted, default 3). Missing file → sensible defaults, including all three new
   keys; capacity is the field a developer routinely edits.
+
+  > **Running more than one `exclusive` slot?** Concurrent runs each work in their own
+  > worktree, so make sure they don't share mutable state — most importantly, **give each run
+  > its own test database** (or equivalent) so parallel test suites don't truncate each other.
+  > How you do that depends on your project's toolchain (the prepare hook below is where a
+  > project wires per-worktree isolation).
 - **Single-process guarantee (RLY-193).** Exactly one `relay execute` may run per `{server,
   name}` (the pair the server keys an `Executor` on, `name` defaulting to hostname) and per
   worktree namespace. At startup `cmd_execute` takes two exclusive, non-blocking `fcntl.flock`
@@ -428,6 +454,35 @@ nothing else — every board-specific fact lives server-side as flow data.
   worktree's identity is the card itself. Either way, no outcome is reported for a revoked
   job — the server already knows a revoked job never finished.
 
+### Declaring an outcome
+
+An agent node **must declare its verdict** before it exits, by running:
+
+```
+relay outcome <outcome> [--detail TEXT|@file]
+```
+
+`bin/relay` writes the JSON to `$RELAY_NODE_OUTCOME` (set per node; the verb refuses to run
+outside a node), so a `detail` containing quotes or newlines cannot corrupt the file. `detail`
+becomes the context handed to the next node. Which outcomes exist and what each one does to the
+run and the card is [state.md](state.md#node-outcomes)'s "Node outcomes" table — the schema owns
+that set, not this page.
+
+Three executor-side rules sit on top of it:
+
+- **Silence is failure.** A node that exits without declaring is reported `failed` whatever its
+  exit code — a node that did nothing is indistinguishable from one that exited early, so it must
+  never route past its own gate.
+- **A success claim must be backed by a commit.** On a node marked `expects_commits`, a
+  `succeeded` that left HEAD unmoved is rewritten to `failed` before finalize
+  ([failures.md](failures.md) A6).
+- **Asking a human wins.** If the node moved the card to `needs_input`, that is the outcome even
+  if the node also declared something else.
+
+The reminder is appended to every agent node's prompt automatically, so the requirement travels
+with every invocation. `shell` and `gate` nodes are exempt — their exit status is already an
+unambiguous verdict.
+
 ### Agent node → `.claude/agents` definition
 
 A flow node of type `agent` may name an `agent` (e.g. `plan-implementer`). The server
@@ -489,6 +544,32 @@ reference file, because those files ship to other projects through the RLY-181 s
 as single files with no `references/` siblings.
 `test/relay/agents/escalation_contract_test.exs` pins the markers so an edit can't silently drop
 the contract.
+
+## Operating invariants
+
+If you build your own runner or your own node behavior, honor these — break one and cards corrupt
+each other's work:
+
+1. **One agent per working directory at a time.** A `git checkout` (or branch/file edit) is
+   global to the directory — two agents on two branches in one directory overwrite each other.
+   Serialize (one card at a time), or give each agent its own clone or `git worktree`. Don't run
+   the executor and an interactive session in the same working tree at once.
+2. **State lives on the board, never in the working tree.** Many cards are in flight, moving back
+   and forth between stages; a card may be specced now and planned days later while others pass
+   through. Nothing durable may depend on what's currently checked out or on a shared repo-root
+   scratch file.
+3. **Each card owns its branch — check it out at the start of a step, commit at the end.** Every
+   step must be self-contained: begin by checking out the card's branch (from its `branch`
+   field), end by committing (never leave uncommitted changes for the next card to inherit).
+4. **Work travels with the card.** The spec is the card's `spec`; the acceptance criteria its
+   `acceptance_criteria`; the plan its `plan` field. Materialize these into the branch
+   just-in-time (at the per-card `$RELAY_PLAN` path), never via a shared file another card would
+   clobber.
+
+Readiness, ordering, WIP and failure routing are **not** on this list: they are decided
+server-side by the scheduler and the engine (see "Dispatch is server-side" above,
+[state.md](state.md) and [failures.md](failures.md)). An executor that tries to decide them
+locally will disagree with the server.
 
 ---
 *Sources of truth: `bin/relay`, `.relay/executor.json`, `bin/test_relay.py`,

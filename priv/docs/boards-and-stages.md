@@ -8,7 +8,16 @@ shows at a glance what's *on you*, what's *on an agent*, and what's *blocked*.
 A **stage** is a column of work with two orthogonal properties:
 
 - an **owner** — `human` or `ai` — which decides who holds a card while it sits there, and
-- a **category** — `unstarted`, `in progress`, or `complete` — so its meaning is unambiguous.
+- a **category**, so its meaning on the board is unambiguous:
+
+<!-- vocab: Schemas.Stage.categories/0 -->
+
+| Category | A card sitting here is… |
+| --- | --- |
+| `unstarted` | not begun — an idea, a backlog item, something queued up next |
+| `planning` | being specified or designed, not yet being built |
+| `in_progress` | actively being worked |
+| `complete` | finished — shipped, or archived |
 
 A stage can also carry a **WIP limit** and act as an **approval gate**.
 

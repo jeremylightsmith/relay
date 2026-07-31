@@ -1,6 +1,8 @@
 # ADR 0001 — Client architecture: LiveView-first with a thin native wrapper
 
-**Status:** Accepted (2026-07-06)
+## Status
+
+Accepted (2026-07-06)
 
 ## Context
 
