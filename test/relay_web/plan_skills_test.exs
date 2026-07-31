@@ -2,7 +2,7 @@ defmodule Relay.PlanSkillsTest do
   use ExUnit.Case, async: true
 
   # exec-plan.md and execute-plan.js were retired by RLY-139 (the Code cutover): the
-  # Code stage is now a flow (docs/designs/flows/code.jsonc) run by the server-side
+  # Code stage is now a flow (docs/designs/flows/code.json) run by the server-side
   # scheduler, not a `/exec-plan` command. Their describe blocks retired with them —
   # see test/relay/runs/code_flow_e2e_test.exs for the flow's coverage.
   @write_plan Path.join([File.cwd!(), ".claude", "commands", "write-plan.md"])

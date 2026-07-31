@@ -29,6 +29,7 @@ defmodule Relay do
       Cards,
       Events,
       Flows,
+      Flows.Document,
       Markdown,
       Members,
       Push,

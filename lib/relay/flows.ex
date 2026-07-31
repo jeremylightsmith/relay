@@ -12,12 +12,13 @@ defmodule Relay.Flows do
   `{:error, changeset}`.
   """
 
-  use Boundary, deps: [Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Repo, Schemas], exports: [Document]
 
   import Ecto.Query
 
   alias Ecto.Changeset
   alias Relay.Flows.DefaultLibrary
+  alias Relay.Flows.Document
   alias Relay.Repo
   alias Schemas.Board
   alias Schemas.Flow
@@ -98,6 +99,18 @@ defmodule Relay.Flows do
   end
 
   @doc """
+  The board's flow with `key`, trigger stages preloaded — the shape
+  `Relay.Flows.Document.encode/1` requires. nil when the board has no such flow.
+  """
+  def get_flow_with_stages(%Board{id: board_id}, key) when is_binary(key) do
+    Repo.one(
+      from f in Flow,
+        where: f.board_id == ^board_id and f.key == ^key,
+        preload: [:pulls_from_stage, :works_in_stage, :lands_on_stage]
+    )
+  end
+
+  @doc """
   Creates a flow on `board` with full graph validation. `board_id` and
   `enabled` are never cast — flows are created disabled and flipped via
   `enable_flow/1`. Inserts a v1 snapshot in the same transaction — every
@@ -105,17 +118,20 @@ defmodule Relay.Flows do
   `{:ok, flow} | {:error, changeset}`.
   """
   def create_flow(%Board{} = board, attrs) do
+    Repo.transaction(fn -> insert_flow!(board, attrs) end)
+  end
+
+  # Non-transactional core, shared with upsert_from_document/3 so a push runs in ONE transaction.
+  defp insert_flow!(%Board{} = board, attrs) do
     changeset =
       %Flow{board_id: board.id}
       |> Flow.changeset(attrs)
       |> validate_trigger_stages(board.id)
 
-    Repo.transaction(fn ->
-      case Repo.insert(changeset) do
-        {:ok, flow} -> snapshot!(flow)
-        {:error, cs} -> Repo.rollback(cs)
-      end
-    end)
+    case Repo.insert(changeset) do
+      {:ok, flow} -> snapshot!(flow)
+      {:error, cs} -> Repo.rollback(cs)
+    end
   end
 
   @doc """
@@ -203,13 +219,10 @@ defmodule Relay.Flows do
     :ok
   end
 
-  @node_fields [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes, :foreach, :agent]
-  @edge_fields [:from, :to, :on, :max_loops, :when]
-
   @doc """
   Whether the flow's definition (nodes, edges, isolation) differs from the
   default library's definition for its key — normalized comparison, so the
-  library's sparse attr maps and the embedded structs compare field-by-field.
+  library's dense attr maps and the embedded structs compare field-by-field.
   A flow whose key isn't a library key at all (e.g. a duplicate) is always
   customized. Trigger wiring never counts: triggers are per-board and a
   stage rename must not flag a flow.
@@ -221,8 +234,8 @@ defmodule Relay.Flows do
 
       default ->
         flow.isolation != default.isolation or
-          normalize(flow.nodes, @node_fields) != normalize(default.nodes, @node_fields) or
-          normalize(flow.edges, @edge_fields) != normalize(default.edges, @edge_fields)
+          normalize(flow.nodes, Flow.Node.fields()) != normalize(default.nodes, Flow.Node.fields()) or
+          normalize(flow.edges, Flow.Edge.fields()) != normalize(default.edges, Flow.Edge.fields())
     end
   end
 
@@ -242,8 +255,8 @@ defmodule Relay.Flows do
       pulls_from_stage_id: flow.pulls_from_stage_id,
       works_in_stage_id: flow.works_in_stage_id,
       lands_on_stage_id: flow.lands_on_stage_id,
-      nodes: Enum.map(flow.nodes, &Map.take(&1, @node_fields)),
-      edges: Enum.map(flow.edges, &Map.take(&1, @edge_fields))
+      nodes: Enum.map(flow.nodes, &Map.take(&1, Flow.Node.fields())),
+      edges: Enum.map(flow.edges, &Map.take(&1, Flow.Edge.fields()))
     }
 
     Repo.transaction(fn ->
@@ -264,6 +277,125 @@ defmodule Relay.Flows do
     fn -> save_and_maybe_bump(flow, attrs) end
     |> Repo.transaction()
     |> preload_saved()
+  end
+
+  @doc """
+  Creates or updates `key`'s flow on `board` from a canonical `Relay.Flows.Document` (RLY-241) —
+  the `PUT /api/flows/:key` write path, and the reconcile engine's.
+
+  One transaction, in order: decode → key check → resolve the trigger stage NAMES against this
+  board → optional compare-and-swap on `version` → write → reconcile `enabled`. Any step failing
+  rolls the whole thing back; a push must never half-apply.
+
+  Graph validation is not reimplemented: the write routes through `create_flow/2`'s and
+  `save_definition/2`'s cores, so `Schemas.Flow.changeset/2` (a start node, edge endpoints, unique
+  routing, the foreach-guard rule) is enforced exactly as the Flow Editor enforces it — and
+  `save_definition/2`'s "bump and snapshot only when the definition changed" is what makes
+  pull → push unchanged a genuine no-op.
+
+  `enabled` absent from the document leaves the flow's current state untouched (a new flow is
+  created disabled, as `create_flow/2` guarantees); a document that doesn't mention `enabled`
+  cannot silently disarm a live flow. `version` absent means last-write-wins; `version` present
+  and stale is `{:error, :stale_version}` with no write. A `version` on a flow that does not exist
+  is ignored — pull → someone deletes → push recreates at v1 is desirable, not a conflict.
+
+  Returns `{:ok, :created | :updated, flow}` with the trigger stages preloaded, or one of
+  `{:error, {:invalid_document, reason}}`, `{:error, :key_mismatch}`,
+  `{:error, {:unknown_stages, names}}`, `{:error, :stale_version}`,
+  `{:error, {:invalid, changeset}}`.
+  """
+  def upsert_from_document(%Board{} = board, key, doc) when is_binary(key) and is_map(doc) do
+    with {:ok, attrs} <- decode_document(doc),
+         :ok <- check_document_key(attrs, key) do
+      result = Repo.transaction(fn -> upsert_document!(board, key, attrs) end)
+
+      case result do
+        {:ok, {tag, flow}} -> {:ok, tag, flow}
+        {:error, %Changeset{} = cs} -> {:error, {:invalid, cs}}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  def upsert_from_document(%Board{}, key, _doc) when is_binary(key),
+    do: {:error, {:invalid_document, "document must be a JSON object"}}
+
+  defp decode_document(doc) do
+    case Document.decode(doc) do
+      {:ok, attrs} -> {:ok, attrs}
+      {:error, reason} -> {:error, {:invalid_document, reason}}
+    end
+  end
+
+  # The path is the resource; a silent rename via PUT is a footgun for the reconcile engine.
+  defp check_document_key(%{key: doc_key}, key) when doc_key != key, do: {:error, :key_mismatch}
+  defp check_document_key(_attrs, _key), do: :ok
+
+  defp upsert_document!(board, key, attrs) do
+    existing = get_flow(board, key)
+    check_document_version!(existing, Map.get(attrs, :version))
+
+    definition =
+      attrs
+      |> Map.take([:isolation, :nodes, :edges])
+      |> Map.put(:key, key)
+      |> Map.merge(resolve_trigger!(board, Map.get(attrs, :trigger)))
+
+    {tag, flow} = write_document!(board, existing, definition)
+    reconcile_enabled!(flow, Map.get(attrs, :enabled))
+
+    {tag, get_flow_with_stages(board, key)}
+  end
+
+  defp check_document_version!(nil, _version), do: :ok
+  defp check_document_version!(_flow, nil), do: :ok
+  defp check_document_version!(%Flow{version: version}, version), do: :ok
+  defp check_document_version!(_flow, _stale), do: Repo.rollback(:stale_version)
+
+  # Names, not ids — that is what makes a document portable across boards. An explicit null is
+  # allowed and resolves to nil (the flow is deliberately un-armed); a trigger absent from the
+  # document leaves the flow's current wiring alone.
+  defp resolve_trigger!(_board, nil), do: %{}
+
+  defp resolve_trigger!(%Board{id: board_id}, trigger) do
+    ids = Map.new(Repo.all(from s in Stage, where: s.board_id == ^board_id, select: {s.name, s.id}))
+
+    pairs = [
+      {:pulls_from_stage_id, trigger.pulls_from},
+      {:works_in_stage_id, trigger.works_in},
+      {:lands_on_stage_id, trigger.lands_on}
+    ]
+
+    missing = Enum.uniq(for {_field, name} <- pairs, is_binary(name), not is_map_key(ids, name), do: name)
+
+    if missing == [] do
+      Map.new(pairs, fn {field, name} -> {field, name && Map.get(ids, name)} end)
+    else
+      Repo.rollback({:unknown_stages, missing})
+    end
+  end
+
+  defp write_document!(board, nil, definition), do: {:created, insert_flow!(board, definition)}
+
+  defp write_document!(_board, %Flow{} = flow, definition), do: {:updated, save_and_maybe_bump(flow, definition)}
+
+  # Route through enable_flow/1 / disable_flow/1 so the existing rules apply — trigger
+  # completeness, and the one-enabled-flow-per-pulls_from-stage unique index.
+  defp reconcile_enabled!(_flow, nil), do: :ok
+  defp reconcile_enabled!(%Flow{enabled: enabled}, enabled), do: :ok
+
+  defp reconcile_enabled!(flow, true) do
+    case enable_flow(flow) do
+      {:ok, _flow} -> :ok
+      {:error, cs} -> Repo.rollback(cs)
+    end
+  end
+
+  defp reconcile_enabled!(flow, false) do
+    case disable_flow(flow) do
+      {:ok, _flow} -> :ok
+      {:error, cs} -> Repo.rollback(cs)
+    end
   end
 
   @doc "The immutable snapshot for `flow` at version `n`, or nil."
@@ -375,11 +507,14 @@ defmodule Relay.Flows do
 
   defp default_for(key), do: Enum.find(DefaultLibrary.all(), &(&1.key == key))
 
-  # Embedded structs and the library's plain attr maps normalize to the same
-  # shape: every field present, nil when unset.
-  defp normalize(items, fields) do
-    Enum.map(items || [], fn item -> Map.new(fields, &{&1, Map.get(item, &1)}) end)
-  end
+  # Embedded structs and the library's plain attr maps normalize to the same shape: every
+  # field present. Both sides are already dense — a struct always carries every field, and
+  # `Relay.Flows.Document.decode/1` fills every field the JSON omits with the schema default
+  # (pinned by default_library_test's denseness assertion), which is exactly what lets this
+  # compare field-by-field with no per-field default handling.
+  defp normalize(items, fields), do: Enum.map(items || [], &normalize_one(&1, fields))
+
+  defp normalize_one(item, fields), do: Map.new(fields, &{&1, Map.get(item, &1)})
 
   defp save_and_maybe_bump(flow, attrs) do
     case update_flow(flow, attrs) do
@@ -411,8 +546,8 @@ defmodule Relay.Flows do
       flow_id: flow.id,
       version: flow.version,
       isolation: flow.isolation,
-      nodes: Enum.map(flow.nodes, &Map.take(&1, @node_fields)),
-      edges: Enum.map(flow.edges, &Map.take(&1, @edge_fields))
+      nodes: Enum.map(flow.nodes, &Map.take(&1, Flow.Node.fields())),
+      edges: Enum.map(flow.edges, &Map.take(&1, Flow.Edge.fields()))
     })
     |> Repo.insert!()
 
@@ -426,8 +561,8 @@ defmodule Relay.Flows do
   defp sync_flow_to_default!(flow, default) do
     attrs = %{
       isolation: default.isolation,
-      nodes: Enum.map(default.nodes, &Map.take(&1, @node_fields)),
-      edges: Enum.map(default.edges, &Map.take(&1, @edge_fields))
+      nodes: Enum.map(default.nodes, &Map.take(&1, Flow.Node.fields())),
+      edges: Enum.map(default.edges, &Map.take(&1, Flow.Edge.fields()))
     }
 
     Repo.transaction(fn ->
@@ -441,13 +576,15 @@ defmodule Relay.Flows do
 
   defp definition_changed?(%Flow{} = before, %Flow{} = now) do
     before.isolation != now.isolation or
-      normalize(before.nodes, @node_fields) != normalize(now.nodes, @node_fields) or
-      normalize(before.edges, @edge_fields) != normalize(now.edges, @edge_fields)
+      normalize(before.nodes, Flow.Node.fields()) != normalize(now.nodes, Flow.Node.fields()) or
+      normalize(before.edges, Flow.Edge.fields()) != normalize(now.edges, Flow.Edge.fields())
   end
 
   defp diff_nodes(flow, default) do
     cur = Map.new(flow.nodes, &{&1.key, &1})
-    def_ = Map.new(default.nodes, &{&1.key, Map.new(@node_fields, fn f -> {f, Map.get(&1, f)} end)})
+
+    def_ = Map.new(default.nodes, &{&1.key, normalize_one(&1, Flow.Node.fields())})
+
     cur_keys = MapSet.new(Map.keys(cur))
     def_keys = MapSet.new(Map.keys(def_))
 
@@ -465,7 +602,7 @@ defmodule Relay.Flows do
   end
 
   defp changed_fields(node, default_map) do
-    for f <- @node_fields, Map.get(node, f) != Map.get(default_map, f), do: f
+    for f <- Flow.Node.fields(), Map.get(node, f) != Map.get(default_map, f), do: f
   end
 
   defp diff_edges(flow, default) do

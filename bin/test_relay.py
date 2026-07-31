@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -3516,6 +3517,175 @@ class FlowStatsRenderingTest(unittest.TestCase):
         self.assertEqual(args.func, relay.cmd_flow_stats)
         self.assertEqual(args.key, "code")
         self.assertEqual(args.window, "7d")
+
+
+class FlowPullPushTest(unittest.TestCase):
+    """RLY-241: `relay flow [KEY]` pulls a serialized flow, `relay flow-push KEY FILE|-` pushes it."""
+
+    DOC = {
+        "key": "code",
+        "version": 7,
+        "enabled": True,
+        "isolation": "exclusive",
+        "trigger": {"pulls_from": "Plan:Done", "works_in": "Code", "lands_on": "Review"},
+        "nodes": [
+            {"key": "branch", "type": "shell", "run": "{relay} git-fetch && git checkout -B {branch} origin/main"},
+            {"key": "implement", "type": "agent", "model": "sonnet", "agent": "plan-implementer",
+             "expects_commits": True, "run": "Implement the task named {sub_task} …"},
+        ],
+        "edges": [
+            {"from": "start", "to": "branch"},
+            {"from": "branch", "to": "implement", "on": "succeeded"},
+        ],
+    }
+
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+        self.sent = []
+        relay.api = lambda method, path, body=None, **k: (
+            self.sent.append((method, path, body)) or self._respond(path)
+        )
+
+    def _respond(self, path):
+        if path == "/api/flows":
+            return {"data": [self.DOC, dict(self.DOC, key="spec", isolation="shared_clean")]}
+        return {"data": self.DOC}
+
+    def _args(self, argv):
+        return relay.build_parser().parse_args(argv)
+
+    def _stdout(self, fn, *a):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            fn(*a)
+        return buf.getvalue()
+
+    # ---- pull ----
+
+    def test_flow_with_a_key_gets_the_single_flow_route(self):
+        relay.cmd_flow(self._args(["flow", "code"]))
+        self.assertEqual(self.sent, [("GET", "/api/flows/code", None)])
+
+    def test_flow_with_no_key_gets_the_index_route(self):
+        relay.cmd_flow(self._args(["flow"]))
+        self.assertEqual(self.sent, [("GET", "/api/flows", None)])
+
+    def test_flow_json_prints_the_canonical_document_verbatim(self):
+        out = self._stdout(relay.cmd_flow, self._args(["flow", "code", "--json"]))
+        self.assertEqual(json.loads(out), self.DOC)
+
+    def test_flow_field_selects_one_value(self):
+        out = self._stdout(relay.cmd_flow, self._args(["flow", "code", "--field", "version"]))
+        self.assertEqual(out.strip(), "7")
+
+    def test_flow_human_summary_shows_version_enabled_isolation_trigger_and_nodes(self):
+        out = relay.format_flow(self.DOC)
+        self.assertIn("code", out)
+        self.assertIn("v7", out)
+        self.assertIn("enabled", out)
+        self.assertIn("exclusive", out)
+        self.assertIn("Plan:Done", out)
+        self.assertIn("Review", out)
+        self.assertIn("2 nodes", out)
+        self.assertIn("2 edges", out)
+        self.assertIn("implement", out)
+        self.assertIn("plan-implementer", out)
+
+    def test_flow_human_summary_marks_a_disabled_flow(self):
+        self.assertIn("disabled", relay.format_flow(dict(self.DOC, enabled=False)))
+
+    def test_flow_list_renders_one_row_per_flow(self):
+        out = relay.format_flow_list([self.DOC, dict(self.DOC, key="spec", enabled=False)])
+        self.assertIn("code", out)
+        self.assertIn("spec", out)
+        self.assertIn("exclusive", out)
+
+    def test_a_null_trigger_field_renders_without_crashing(self):
+        doc = dict(self.DOC, trigger={"pulls_from": None, "works_in": None, "lands_on": None})
+        self.assertIn("—", relay.format_flow(doc))
+        self.assertIn("—", relay.format_flow_list([doc]))
+
+    # ---- push ----
+
+    def test_flow_push_puts_the_document_from_a_file(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(self.DOC, f)
+            path = f.name
+        self.addCleanup(os.unlink, path)
+
+        relay.cmd_flow_push(self._args(["flow-push", "code", path]))
+        self.assertEqual(
+            self.sent,
+            [("GET", "/api/flows/code", None), ("PUT", "/api/flows/code", self.DOC)],
+        )
+
+    def test_flow_push_reads_the_document_from_stdin_for_dash(self):
+        real_stdin = sys.stdin
+        self.addCleanup(setattr, sys, "stdin", real_stdin)
+        sys.stdin = io.StringIO(json.dumps(self.DOC))
+
+        relay.cmd_flow_push(self._args(["flow-push", "code", "-"]))
+        self.assertEqual(
+            self.sent,
+            [("GET", "/api/flows/code", None), ("PUT", "/api/flows/code", self.DOC)],
+        )
+
+    def test_flow_push_dies_on_a_file_that_is_not_json(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            f.write("{not json")
+            path = f.name
+        self.addCleanup(os.unlink, path)
+
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            relay.cmd_flow_push(self._args(["flow-push", "code", path]))
+        self.assertIn(path, err.getvalue())
+
+    def test_push_render_reports_the_new_version(self):
+        out = relay.format_flow_push("code", dict(self.DOC, version=6), self.DOC)
+        self.assertIn("v7", out)
+        self.assertNotIn("unchanged", out)
+
+    def test_push_render_reports_unchanged_only_when_the_whole_document_round_tripped(self):
+        out = relay.format_flow_push("code", self.DOC, self.DOC)
+        self.assertIn("unchanged", out)
+
+    # The server bumps the version only on a DEFINITION change, so an enabled flip (or a
+    # trigger rewire) writes without moving it. A version-only verdict called that push
+    # "unchanged" while the flow was in fact now armed and dispatching (RLY-241).
+    def test_push_render_reports_saved_for_an_enabled_flip_that_did_not_bump_the_version(self):
+        out = relay.format_flow_push("code", dict(self.DOC, enabled=False), self.DOC)
+        self.assertIn("saved as v7", out)
+        self.assertNotIn("unchanged", out)
+
+    def test_push_render_reports_saved_for_a_trigger_rewire_that_did_not_bump_the_version(self):
+        before = dict(self.DOC, trigger={"from": "Spec:Done", "stage": "Code", "done": "Review"})
+        out = relay.format_flow_push("code", before, self.DOC)
+        self.assertIn("saved as v7", out)
+        self.assertNotIn("unchanged", out)
+
+    def test_push_render_reports_saved_when_the_flow_did_not_exist_before(self):
+        self.assertIn("saved as v7", relay.format_flow_push("code", None, self.DOC))
+
+    # ---- wiring ----
+
+    def test_the_cli_wires_both_verbs(self):
+        parser = relay.build_parser()
+
+        a = parser.parse_args(["flow", "code", "--json"])
+        self.assertEqual(a.func, relay.cmd_flow)
+        self.assertEqual(a.key, "code")
+        self.assertTrue(a.json)
+
+        b = parser.parse_args(["flow"])
+        self.assertEqual(b.func, relay.cmd_flow)
+        self.assertIsNone(b.key)
+
+        c = parser.parse_args(["flow-push", "code", "/tmp/code.json"])
+        self.assertEqual(c.func, relay.cmd_flow_push)
+        self.assertEqual(c.key, "code")
+        self.assertEqual(c.file, "/tmp/code.json")
 
 
 class TimelineTextRenderingTest(unittest.TestCase):

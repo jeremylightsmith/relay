@@ -76,8 +76,8 @@ slot (`fresh_eligible?`, `lib/relay/runs/scheduler.ex:152`; `Policy.pullable?/1`
 `works_in` stage and goes `:working`, and the engine walks nodes until it reaches `done` (card
 lands on the flow's `lands_on` stage) or a review gate (card `:in_review`, waiting for a human).
 
-The three flows (`lib/relay/flows/default_library.ex`), each a mirror of
-`docs/designs/flows/*.jsonc`:
+The three flows (`lib/relay/flows/default_library.ex`), each **loaded from**
+`docs/designs/flows/*.json`:
 
 - **spec** (`shared_clean`): `Next up → brainstorm → Spec:Review`.
 - **plan** (`shared_clean`): `Spec:Done → write_plan → Plan:Done`.

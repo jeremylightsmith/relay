@@ -26,10 +26,24 @@ defmodule Schemas.Flow.Node do
 
   import Ecto.Changeset
 
+  @fields [
+    :key,
+    :type,
+    :run,
+    :model,
+    :effort,
+    :max_retries,
+    :timeout_minutes,
+    :foreach,
+    :agent,
+    :expects_commits
+  ]
+  @types [:agent, :shell, :gate, :parallel, :human]
+
   @primary_key false
   embedded_schema do
     field :key, :string
-    field :type, Ecto.Enum, values: [:agent, :shell, :gate, :parallel, :human]
+    field :type, Ecto.Enum, values: @types
     field :run, :string
     field :model, :string
     field :effort, :string
@@ -40,28 +54,28 @@ defmodule Schemas.Flow.Node do
     field :expects_commits, :boolean, default: false
   end
 
+  @doc """
+  The closed set of node fields — the ONE list every consumer reads (this schema's `cast/3`,
+  `Relay.Flows`' normalize/snapshot/duplicate, the flow editor's working copy, and
+  `Relay.Flows.Document`). Copies of it disagreed before RLY-241 and silently dropped
+  `expects_commits`.
+  """
+  def fields, do: @fields
+
+  @doc "The closed set of node `type` values (read by the schema field and by the decoder)."
+  def types, do: @types
+
   @doc ~S"""
-  The subset of node `type`s an executor actually runs (RLY-139). A strict subset of the type
-  enum — `:parallel` and `:human` are valid node types that do not dispatch — so this is
-  guarded as a subset, not a partition.
+  The subset of node `type`s an executor actually runs (RLY-139). A strict subset of `types/0` —
+  `:parallel` and `:human` are valid node types that do not dispatch — so this is guarded as a
+  subset, not a partition.
   """
   def runnable_types, do: [:agent, :shell, :gate]
 
   @doc "Validates one node; graph-level rules (key uniqueness) live on Schemas.Flow."
   def changeset(node, attrs) do
     node
-    |> cast(attrs, [
-      :key,
-      :type,
-      :run,
-      :model,
-      :effort,
-      :max_retries,
-      :timeout_minutes,
-      :foreach,
-      :agent,
-      :expects_commits
-    ])
+    |> cast(attrs, @fields)
     |> validate_required([:key, :type])
     |> validate_exclusion(:key, ["start", "done", "needs_input"], message: "is a reserved sentinel name")
     |> validate_number(:max_retries, greater_than: 0)

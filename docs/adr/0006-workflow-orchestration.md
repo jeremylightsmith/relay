@@ -280,7 +280,7 @@ this is the developer-owned layer):
 | `relay_config.json` | 42 lines: pipeline (stages/prompts) + pools + poll interval | **gone (RLY-139)** — deleted; executor keeps `.relay/executor.json` | developer (capacity only) |
 | `.claude/skills/` (brainstorm, systematic-debugging, TDD, verification…) | node behavior + process discipline | **unchanged** — agent nodes run in the checkout, so these keep working | developer, freely |
 | `.claude/commands/` (write-plan, exec-plan, finish, worktree) | stage entry points the runner prompts into | write-plan/finish/worktree stay; **exec-plan deleted (RLY-139)** | developer |
-| `.claude/workflows/execute-plan.js` | 485 lines — the entire Code orchestration | **gone (RLY-139)** — deleted; its orchestration is [`code.jsonc`](../designs/flows/code.jsonc)'s nodes + edges | — |
+| `.claude/workflows/execute-plan.js` | 485 lines — the entire Code orchestration | **gone (RLY-139)** — deleted; its orchestration is [`code.json`](../designs/flows/code.json)'s nodes + edges | — |
 | `.claude/agents/*.md` (8: plan-implementer, spec/quality/final reviewers, final-fixer, smoke, acceptance, rebaser) | subagent types execute-plan.js spawns | **kept** — pointed at by node `agent`, rendered as `--agent <name>` | developer |
 | `.relay/flows.json` | n/a | per-project flow overrides (RLY-140) | developer |
 | `CLAUDE.md` / `AGENTS.md` | project instructions every agent reads | unchanged | developer |

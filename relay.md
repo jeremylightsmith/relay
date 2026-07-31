@@ -68,6 +68,8 @@ no `jq`). Non-zero exit on any error. Long text args accept `-` (stdin) or `@pat
 | `bin/relay runs RLY-12` | The card's runs + node executions, full failure detail |
 | `bin/relay executors` | Who's connected, their capacity, the jobs they hold |
 | `bin/relay flow-stats code` | Per-node metrics for a flow (duration, cost, attempts, verdicts); `--window` |
+| `bin/relay flow` · `bin/relay flow code` | The board's flows, or one flow's definition; `--json` **is the pull** |
+| `bin/relay flow-push code code.json` | Push an edited flow document back (`-` reads stdin) |
 | `bin/relay version` | The git SHA the deployed app was built from |
 | `bin/relay create "Fix login" --stage Backlog` | Create a card (`--stage`/`--description`/`--tag`) |
 | `bin/relay move RLY-12 Code` | Move to a stage (by name, e.g. `"Code:Review"`) |
@@ -128,5 +130,12 @@ The full node/outcome/`RELAY_PLAN` contract, the executor, and the operating inv
 A board's flows — which stages are AI-enabled, what each node does, model/effort, retry/loop
 budgets — are edited in **Settings › Flows**, not in a repo config file. Two rules keep custom
 nodes safe: a node's command should start by checking out the card's branch (from `vars.branch`)
-and end by committing; and the Code flow's first node (`branch`, in the shipped `code.jsonc`)
+and end by committing; and the Code flow's first node (`branch`, in the shipped `code.json`)
 materializes the card's `plan` into the per-card `$RELAY_PLAN` path for later nodes to work through.
+
+A flow is also readable and writable as data: `bin/relay flow code --json > code.json` pulls the
+canonical document (nodes, edges, trigger as stage **names**, isolation, version), and
+`bin/relay flow-push code code.json` pushes it back. An unchanged push bumps nothing; an edited
+one bumps the version like an editor save. Include the pulled `version` to get compare-and-swap
+(a `409` means the flow moved under you — re-pull, re-apply, push again); omit it for
+last-write-wins. The same document shape is what `docs/designs/flows/*.json` ships.

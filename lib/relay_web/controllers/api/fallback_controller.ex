@@ -3,6 +3,7 @@ defmodule RelayWeb.Api.FallbackController do
   use RelayWeb, :controller
 
   alias RelayWeb.Api.ErrorJSON
+  alias RelayWeb.ChangesetErrors
 
   def call(conn, {:error, :not_found}) do
     conn
@@ -23,6 +24,53 @@ defmodule RelayWeb.Api.FallbackController do
     |> put_status(:bad_request)
     |> put_view(json: ErrorJSON)
     |> render(:error, code: "invalid", message: "Invalid request")
+  end
+
+  def call(conn, {:error, {:invalid_document, reason}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid_document", message: reason)
+  end
+
+  def call(conn, {:error, :key_mismatch}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "key_mismatch",
+      message: "the document's key does not match the key in the URL"
+    )
+  end
+
+  def call(conn, {:error, {:unknown_stages, names}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "unknown_stages",
+      message: "this board has no stage named: #{Enum.join(names, ", ")}"
+    )
+  end
+
+  def call(conn, {:error, :stale_version}) do
+    conn
+    |> put_status(:conflict)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "stale_version",
+      message: "this flow changed since you pulled it — re-pull, re-apply your edit, and push again"
+    )
+  end
+
+  # The flow endpoints answer 422 for "your document is invalid", including graph errors. The
+  # shared bare-changeset clause above stays 400: a dozen existing API tests pin it, and two
+  # different answers for one question would be worse than one narrow clause (RLY-241).
+  def call(conn, {:error, {:invalid, %Ecto.Changeset{} = changeset}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid", message: changeset_message(changeset))
   end
 
   def call(conn, {:error, :not_in_review}) do
@@ -111,13 +159,7 @@ defmodule RelayWeb.Api.FallbackController do
     |> render(:error, code: "invalid_executor", message: "executor must be an object")
   end
 
-  defp changeset_message(changeset) do
-    changeset
-    |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->
-      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
-        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-      end)
-    end)
-    |> Enum.map_join("; ", fn {field, msgs} -> "#{field} #{Enum.join(msgs, ", ")}" end)
-  end
+  # Embed errors nest, so this cannot join `traverse_errors/2`'s output directly — see
+  # RelayWeb.ChangesetErrors, which owns that walk for both this and the flow editor.
+  defp changeset_message(changeset), do: changeset |> ChangesetErrors.messages() |> Enum.join("; ")
 end

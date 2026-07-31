@@ -8,10 +8,11 @@ defmodule RelayWeb.FlowGraphComponents do
   NOT for layout: node positions and edge paths are computed vertically by `FlowLayout` and
   intentionally diverge from the artboard as of RLY-186.
 
-  Nodes/edges may arrive either as `Schemas.Flow.Node`/`Edge` structs (always carry every
-  field, nil when unset) or as plain maps straight from `Relay.Flows.DefaultLibrary` (which
-  omit optional keys entirely, e.g. the start edge has no `:on` key at all). Every accessor
-  below goes through `Map.get/2` so both shapes render without raising.
+  Nodes/edges may arrive either as `Schemas.Flow.Node`/`Edge` structs or as plain maps from
+  `Relay.Flows.DefaultLibrary` / the flow editor's working copy. Both shapes are dense — every
+  field present, nil when unset — since RLY-241 made `Relay.Flows.Document.decode/1` fill the
+  schema default for anything the JSON omits. Every accessor below still goes through
+  `Map.get/2` so a partial map from a future caller renders rather than raising.
   """
   use Phoenix.Component
 
@@ -196,7 +197,8 @@ defmodule RelayWeb.FlowGraphComponents do
 
   # ---- style/geometry helpers (private) ----
 
-  # defensive accessors — tolerate raw DefaultLibrary maps that omit optional keys entirely.
+  # defensive accessors — every shipped shape is dense (see the moduledoc), so these only
+  # guard against a partial map from a future caller.
   defp edge_on(edge), do: Map.get(edge, :on)
   defp edge_max_loops(edge), do: Map.get(edge, :max_loops)
   defp edge_when(edge), do: Map.get(edge, :when)

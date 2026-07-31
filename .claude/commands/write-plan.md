@@ -42,7 +42,7 @@ context, so authoring in-context is how those decisions reach the plan.
 
    Then summarize the task breakdown to the user. There is no runner command to launch by hand
    anymore (RLY-139): once the card is approved into `Plan:Done`, the Code flow
-   (`docs/designs/flows/code.jsonc`, if enabled for this board in Settings › Flows) picks it up
+   (`docs/designs/flows/code.json`, if enabled for this board in Settings › Flows) picks it up
    automatically — dispatch is server-side. Do NOT move or approve the card yourself — that's a
    separate, human-gated step.
 
@@ -51,7 +51,7 @@ context, so authoring in-context is how those decisions reach the plan.
 ## Plan authoring guidance
 
 You are writing an implementation plan to be executed autonomously by the Code flow (the
-server-side flow engine, ADR 0006 — `docs/designs/flows/code.jsonc`). Assume the executing
+server-side flow engine, ADR 0006 — `docs/designs/flows/code.json`). Assume the executing
 engineer has zero repo context and needs every detail.
 
 ### Input
