@@ -31,6 +31,7 @@ defmodule RelayWeb.DocsController do
     {"architecture-runtime", "Runtime", "Architecture", "architecture/runtime.md"},
     {"architecture-runner", "Runner", "Architecture", "architecture/runner.md"},
     {"architecture-state", "State reference", "Architecture", "architecture/state.md"},
+    {"architecture-failures", "Failure modes", "Architecture", "architecture/failures.md"},
     {"architecture-deps", "Dependencies", "Architecture", "architecture/deps.md"}
   ]
 

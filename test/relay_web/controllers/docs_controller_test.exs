@@ -184,6 +184,7 @@ defmodule RelayWeb.DocsControllerTest do
       {"/docs/architecture-runtime", "Runtime"},
       {"/docs/architecture-runner", "runner"},
       {"/docs/architecture-state", "State reference"},
+      {"/docs/architecture-failures", "Failure modes"},
       {"/docs/architecture-deps", "Dependencies"}
     ]
 
@@ -249,6 +250,7 @@ defmodule RelayWeb.DocsControllerTest do
           "/docs/architecture-runtime",
           "/docs/architecture-runner",
           "/docs/architecture-state",
+          "/docs/architecture-failures",
           "/docs/architecture-deps"
         ] do
       html = conn |> get(path) |> html_response(200)

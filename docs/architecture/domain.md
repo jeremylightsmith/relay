@@ -75,133 +75,24 @@ sharing behavior.
   in Runs because `Flows` may not depend on `Runs` (a boundary cycle the compiler rejects);
   `Runs` reads it to answer whether anyone can actually satisfy it.
 - **Runs** — the workflow execution engine (ADR 0006 card 02 / RLY-132): a run executes a
-  flow graph against a card as a supervised, Postgres-backed state machine. Outcome routing
-  on `succeeded/failed/partial/needs_input`, per-node `max_retries`, per-edge `max_loops`, a
-  per-node visit cap and a failure-signature circuit breaker (both
-  `config :relay, Relay.Runs`), needs-input parking, restart resume, and baton interplay
-  (claim parks, hand-back resumes, rejection re-enters with the note — via
-  `Relay.Runs.Listener` on the Events firehose). A run points at the LIVE flow row (no
-  snapshot; versioning is RLY-152). **No-op guard (RLY-194):** `RunServer.apply_outcome/5`
-  rewrites a reported `:succeeded` to `:failed` (with a `no_op_success` detail) when the
-  node is `expects_commits` and its reported `git_sha` equals the run's last non-nil
-  baseline sha — fail-open on either sha being `nil`. The rewrite happens before
-  `Runs.finalize_job!/2` so the failure-signature circuit breaker sees it like any other
-  failure; a `"needs_input"` edge target is a third engine decision (alongside
-  `"done"`/a node key) that parks the run for a human rather than dead-ending it. Node
-  execution goes through the
-  `Relay.Runs.Dispatcher` behaviour (`config :relay, :runs_dispatcher`; default
-  `NoopDispatcher` — jobs sit `:queued` for card 04's pull transport). All card writes go
-  through `Relay.Cards`, so ADR 0003/0004 rules apply automatically.
-  **Read side (RLY-137):** `list_runs_for_card/1` (newest-first, node executions
-  preloaded chronologically) and `latest_run/1` back the card drawer's Run tab;
-  `run_summaries_for_board/1` batches every card's latest-run summary
-  (`status`, `flow_key`, `current_node`, `node_index`/`node_count` on the flow's
-  happy path, `duration_s`/`cost`/`nodes`/`attempts` totals) in three queries for
-  the board card face. `happy_path/1` linearizes a flow's `:succeeded`-edge chain
-  from `start` to `done`. `run_summary_for_card/1` (RLY-204) is the one-card variant — the same
-  summary map for a single card's latest run (or nil), built through the shared `build_summary/3`
-  so the shape is defined once; BoardLive uses it to refetch only the card a run event names,
-  coalescing a burst behind a ~150 ms debounce rather than re-aggregating the whole board.
-  `queued_flow/4` and `face_summary/4` are pure
-  derivations over a card + flows + summaries — no scheduler/NodeJob read — that
-  decide what the board card face shows (`{:run, summary}`, `{:queued, flow}`, or
-  `nil` → legacy strip). Callers refetch via the coarse
-  `{:run_changed, card_id}` event on `board:<id>:runs`
-  (`Relay.Runs.broadcast_run_changed/2`) rather than patching state from the
-  engine's fine-grained events — see [runtime.md](runtime.md). `duration_s` is
-  derived (summed `finished_at - started_at`) since `NodeExecution` stores no
-  duration column; `flow_version` in a summary is always `nil` today (`Run`
-  points at the live flow row, no version column yet — RLY-152).
-  **Server-side dispatch (ADR 0006 / RLY-133):** the same `Relay.Runs` boundary also owns
-  the scheduler brain — the server-side heir to `bin/relay`'s `find_all_ready`. The pure
-  core `Relay.Runs.Scheduler.plan/1` takes a `Snapshot` (stages/cards/flows/runs/capacity
-  as plain maps — no DB, no processes) and returns an ordered `Plan` of `{:start, ...}` /
-  `{:resume, ...}` dispatches plus the pulls-from `ready ↔ queued` reconciliation
-  (rightmost-works-in-stage-first flow priority, resume-before-fresh, WIP counted across
-  sub-lanes, named-executor capacity with exclusive-isolation affinity — no over-dispatch
-  in one pass). A per-board `Relay.Runs.Scheduler.Server` GenServer (registered in
-  `Relay.Runs.SchedulerRegistry`, supervised by the `Relay.Runs.SchedulerSupervisor`
-  `DynamicSupervisor`) assembles the snapshot, calls `plan/1`, and delegates each decision
-  to the injectable `Relay.Runs.Scheduler.Engine` behaviour (`active_runs/1`,
-  `start_run/3`, `resume_run/2` — `config :relay, :runs_engine`; default
-  `Relay.Runs.Scheduler.RunsEngine`, the adapter onto `Relay.Runs.start_run/3` /
-  `resume_run/2` (`NoopEngine` remains for tests that inject it)). `active_runs/1` resolves
-  each run's persisted `pinned_executor_name` to that board's durable executor row id
-  (`pinned_executor_id`), so a parked `exclusive` run's scheduler-side resume is pinned to the
-  same machine the claim layer already pins its jobs to (RLY-199 — one column, two readers).
-  The scheduler writes no
-  `Run` rows and moves no cards into works-in — it owns only the `ready ↔ queued`
-  marking; the engine owns the rest. It reacts to the board's `Relay.Events` topic
-  and `Relay.Runs.Capacity`'s `runs:capacity` topic (an executor-keyed ETS store of
-  advertised capacity per isolation class, fed by the executor heartbeat's `name` +
-  `capacity` branch (`BoardController.heartbeat/2`); the scheduler's snapshot subtracts
-  each in-flight `:running` run's isolation class before planning, so a running run holds
-  its slot across reconciles), with a slow ~60s tick as backstop. Cross-board
-  capacity is global by executor — a stale/contended view can over-assign; the
-  executor's own live capacity is the final backstop (YAGNI: no multi-board reservation
-  yet). `Relay.Runs.SchedulerSupervisor.start_all/0` boot-starts one scheduler per board
-  only when `:runs_auto_start` is on (dev/prod; off in test).
-  **Budget accounting is per `foreach` iteration; the breaker is global (RLY-139).** Inside a
-  `foreach` loop, `max_loops`, `max_retries` and the per-node visit cap are counted over
-  the history filtered to the current iteration's `sub_task_id`, so `max_loops: 3` means
-  "3 laps per task" and a churny early task cannot spend a later task's budget. The
-  failure-signature circuit breaker deliberately keeps the FULL, unfiltered history:
-  per-iteration budgets exist to bound *productive* churn, while the breaker catches
-  *unproductive* repetition — the identical failure recurring across task boundaries is
-  more alarming, not less. Outside a `foreach` there is no `sub_task_id`, the filter is
-  the identity function, and every budget is whole-run exactly as before (RLY-139).
-  **Preflight (RLY-182):** `Relay.Runs.preflight_flow/1` (`Relay.Runs.Preflight`) is the
-  read-only readiness snapshot behind the Flows enable confirm — a single fresh executor must
-  satisfy capacity *and* inventory (the agents/skills `Flows.node_requirements/1` names) for
-  the flow to be reported ready; a union across executors is deliberately not readiness, since
-  a run dispatches to one machine. A null `capabilities` on an executor is unknown, not
-  missing — it is surfaced as its own caveat rather than a false "missing agent" alarm. Both
-  seams are one-way, Runs → Flows, never the reverse.
-  **Retry (RLY-189):** `retry_run/2` revives a terminally `failed` run *in place* — status back
-  to `:running`, `current_node` recovered from the run's most recent `NodeExecution` (`close_run!/3`
-  nils it on every terminal close), `failure_detail`/`finished_at` cleared, `retries` incremented
-  — then `ensure_server(run, {:reenter, nil})`, exactly as `resume_run/2` does for a parked run.
-  `opts[:at]` re-enters a different node of the flow via the new `{:reenter_new_visit, nil}` start
-  mode: a FRESH visit at attempt 1, matching a real `{:transition, node}`, because re-entering a
-  node on its old visit number would corrupt per-visit retry accounting. `resume_session` is
-  always `nil` — the point is to run the node again with the failure in front of it, not to
-  continue the conversation that produced it, and every re-entry now passes the last failed
-  execution's detail forward as `findings`. `Relay.Cards.clear_failure/2` (the inverse of
-  `mark_failed/3`) puts the card back to `:working` so the board and the scheduler stop reading
-  a live run as dead.
-
-  **Eligibility & bulk restart (RLY-228):** `restartable?/1` is the single rule for what retry
-  will revive. It now covers not only a terminally `failed` run but also a **died-agent park**
-  — a `:parked`/`parked_reason: :needs_input` run whose latest `NodeExecution.outcome` is
-  actually `:failed` (the agent died mid-turn rather than asking a genuine question). A real
-  `:needs_input` question is *not* restartable and `retry_run/2` refuses it with the
-  `:awaiting_answer` code. The bulk sweep — `restart_stalled/2` (revive every restartable run
-  on a board) and `restartable_count/1` (the board header count) — reaches that same
-  `restartable?/1` rule, so the count and what actually restarts can never disagree.
-
-  **The retry allowance.** `runs.retries` is the one counter column on a schema that otherwise
-  derives everything, and it is deliberate: it counts HUMAN interventions, which leave no trace
-  in execution history. `engine_opts/1` feeds it to `Engine.decide/4` as `bonus:`, which is added
-  to EVERY cap the engine consults — node `max_retries`, edge `max_loops` (unlimited stays
-  unlimited), the breaker threshold, and the visit cap. So a retried run can always make exactly
-  one more move than it just did, and a retry that changes nothing dies again immediately. No
-  automatic loop can obtain an allowance, because only `retry_run/2` increments the counter.
-  **Stopped-work detection (RLY-191):** `Relay.Runs.Scheduler.Snapshot` also carries an
-  `executors` field (`%{executor_id => %{name, version, outdated, freshness}}`, built by
-  `Scheduler.Server.build_snapshot/2` from `Runs.list_board_executors/1` and the existing
-  `Runs.executor_outdated?/1` / `executor_freshness/2` predicates — never a second
-  computation). `Scheduler.capacity_diagnosis/1` reads that field and is the one function that
-  turns an empty/refusing/silent roster into `:no_executor` / `:executor_outdated` /
-  `:executor_gone` (vs. a legitimately busy `:awaiting_capacity`); both `explain/2`'s terminal
-  branch and `Relay.Runs.stopped_work/2` call it, so `relay why`, the diagnosis API, and the
-  board-level verdict can never disagree. `Runs.stopped_work/2` is the public, board-level
-  read: `nil` when the board is quiet, or `%{reason, detail, queued_count,
-  oldest_queued_age_s, evidence}` once at least one node-job has sat `:queued` unclaimed past
-  `@stopped_work_after_s` (120s) AND the roster reason is one of the three above. `diagnose/3`
-  also layers a roster-blocked override on top of `explain/2`'s `:run_active` verdict for a
-  live run whose current job isn't actually being worked (queued/unclaimed, or held by a
-  silent executor) while the roster is refusing/absent — the false-"working" signal the
-  original incident showed.
+  `Schemas.Flow` graph against a card as a supervised, Postgres-backed state machine. This
+  boundary owns four things.
+  **The engine** (`Relay.Runs.Engine` / `RunServer`): outcome routing, per-node `max_retries`,
+  per-edge `max_loops`, the visit cap and the failure-signature circuit breaker, needs-input
+  parking, restart resume — budgets are per-`foreach`-iteration, the breaker is whole-run.
+  **The scheduler brain**: `Relay.Runs.Scheduler.plan/1`, a pure `Snapshot → Plan` function behind
+  a per-board `Scheduler.Server`, plus `capacity_diagnosis/1` — the one place an empty, refusing
+  or silent executor roster becomes a verdict.
+  **The read side**: `list_runs_for_card/1`, `latest_run/1`, `run_summaries_for_board/1`,
+  `run_summary_for_card/1`, `happy_path/1`, `queued_flow/4`, `face_summary/4` — every summary
+  built through one shared private builder, so the shape is defined exactly once.
+  **The dispatcher seam**: the `Relay.Runs.Dispatcher` behaviour (`config :relay, :runs_dispatcher`).
+  All card writes go through `Relay.Cards`, so ADR 0003/0004 rules apply automatically.
+  Run/node/job statuses and their transitions are in [state.md](state.md); dispatch, the executor,
+  worktrees and the transport are in [runner.md](runner.md); the failure grid is in
+  [failures.md](failures.md). The *why* is [ADR 0006](../adr/0006-workflow-orchestration.md) and
+  [ADR 0007](../adr/0007-card-lifecycle-and-failure-states.md); per-function detail lives in the
+  `Relay.Runs` `@moduledoc` and the functions' own `@doc`s.
 - **Cards** — the card lifecycle: create/edit/move/archive, status (`working`,
   `needs_input`, `failed`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject,
   needs-input questions. `failed` (RLY-179) is set only by `Relay.Cards.mark_failed/3` when a
@@ -236,10 +127,6 @@ sharing behavior.
 - **Votes** — public upvotes (RLY-69): a unique `(card_id, user_id)` row; `toggle_vote/2`
   toggles and broadcasts `{:vote_changed, card_id}`. A card's supporters are the voting users.
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
-
-Planned by [ADR 0006](../adr/0006-workflow-orchestration.md): the trigger scheduler (03), the
-REST node-job transport + Executor table (04), the real executor (05), and the run UI (07).
-The engine itself (card 02, above) is live.
 
 ## Core schemas
 
