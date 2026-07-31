@@ -57,7 +57,8 @@ print(json.dumps(mod.collect_capabilities()))
 That prints `{"agents": [...], "skills": [...]}` — repo `.claude/` **and** `~/.claude`
 (`agents/*.md`, `skills/*/SKILL.md`, `commands/*.md`) plus built-ins — byte-for-byte what
 this machine reports to the server. If it cannot load (no `python3`, no `bin/relay`), say
-so and **skip checks 1, 2 and 7**: unknown is not missing.
+so and **skip checks 1 and 2**: unknown is not missing. Check 7 still runs — it needs only
+`ls .claude/agents/*.md` and the flow documents, never the inventory.
 
 What a flow *requires* is read off the document, mirroring `Relay.Flows.node_requirements/1`
 in `lib/relay/flows.ex` — check the two still agree:
@@ -76,7 +77,7 @@ in `lib/relay/flows.ex` — check the two still agree:
 | 3 | `trigger.pulls_from` / `works_in` / `lands_on` all non-null | per flow | **error** if enabled, **warning** if not |
 | 4 | leading binaries of a `run` exist on PATH *on this machine* | shell + gate nodes | **error** |
 | 5 | a fresh executor advertises capacity in the flow's `isolation` class | per flow | **warning** |
-| 6 | every connected executor reports `outdated: true` | board-wide | **warning** |
+| 6 | at least one connected executor is **not** `outdated` | board-wide | **warning** |
 | 7 | a repo `.claude/agents/*.md` that no **enabled** flow node names | board-wide | **warning** |
 
 **error** = the node cannot possibly run as written. **warning** = something is off but the
@@ -90,7 +91,9 @@ whose command word holds an unexpanded `{placeholder}`. A segment you cannot par
 **"on this machine"**: PATH here is not PATH on the executor.
 
 **Checks 5–6 read, they do not compute.** Report the server's `freshness`, `stale?` and
-`outdated` fields; never compare version numbers yourself.
+`outdated` fields; never compare version numbers yourself. Check 6 is **fleet-wide** — it
+warns only when *no* connected executor is current (the board can then place no work at all)
+— but the finding names every outdated executor.
 
 **Check 7 scans the repo's `.claude/agents/` only** — `~/.claude` globals are not this
 repo's dead code.
@@ -133,6 +136,6 @@ all-clear.
   drifts from the executor and the report starts lying.
 - **Pushing a flow the user has not seen** — every push is confirmed, node-level, first.
 - **Reporting a check-4 miss as certain** — it is a heuristic about *this machine's* PATH.
-- **Reporting an unloadable inventory as "everything missing"** — skip checks 1, 2, 7 and
+- **Reporting an unloadable inventory as "everything missing"** — skip checks 1 and 2 and
   say why.
 - **Running this from a flow node** — it is interactive by design.
