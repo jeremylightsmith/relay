@@ -68,8 +68,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 24
-EXECUTOR_FINGERPRINT = "fe552facf9f48cb6f1b5f8057953126e738f2a168c2aa500e6f658f4774fbaff"
+EXECUTOR_VERSION = 25
+EXECUTOR_FINGERPRINT = "3dac75be2ed8e812c995319967ddb965c2c14f80892c25d4573a50c5614bc297"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -738,6 +738,92 @@ def format_flow_stats(key, data):
             f"{n['attempts_mean']:>5.1f} {n['loop_laps']:>5}"
         )
     return "\n".join(lines)
+
+
+def cmd_flow(args):
+    """`relay flow` lists the board's flows; `relay flow KEY` prints one.
+
+    `relay flow KEY --json` IS the pull: `relay flow code --json > code.json`."""
+    key = getattr(args, "key", None)
+    if key:
+        doc = api("GET", f"/api/flows/{key}")["data"]
+        emit(args, doc, lambda: print(format_flow(doc)))
+    else:
+        docs = api("GET", "/api/flows")["data"]
+        emit(args, docs, lambda: print(format_flow_list(docs)))
+
+
+def cmd_flow_push(args):
+    """`relay flow-push KEY FILE|-` PUTs a document; `-` reads it from stdin.
+
+    A 409 surfaces the server's "re-pull" message through api()'s die()."""
+    doc = read_flow_document(args.file)
+    returned = api("PUT", f"/api/flows/{args.key}", doc)["data"]
+    emit(args, returned, lambda: print(format_flow_push(args.key, doc, returned)))
+
+
+def read_flow_document(path):
+    raw = sys.stdin.read() if path == "-" else _read_file(path)
+    try:
+        doc = json.loads(raw)
+    except json.JSONDecodeError as e:
+        die(f"{path}: not valid JSON ({e})")
+    if not isinstance(doc, dict):
+        die(f"{path}: a flow document must be a JSON object")
+    return doc
+
+
+def _read_file(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except OSError as e:
+        die(f"{path}: {e.strerror}")
+
+
+def _trigger_chain(doc):
+    t = doc.get("trigger") or {}
+    return " → ".join((t.get(k) or "—") for k in ("pulls_from", "works_in", "lands_on"))
+
+
+def format_flow(doc):
+    state = "enabled" if doc.get("enabled") else "disabled"
+    nodes, edges = doc.get("nodes") or [], doc.get("edges") or []
+    lines = [
+        f"{doc['key']} flow — v{doc.get('version', '?')}  {state}  {doc.get('isolation', '—')}",
+        f"  trigger: {_trigger_chain(doc)}",
+        f"  {len(nodes)} nodes / {len(edges)} edges",
+        "",
+        f"  {'NODE':<18} {'TYPE':<7} {'MODEL':<7} {'AGENT':<18} RUN",
+    ]
+    for n in nodes:
+        run = " ".join((n.get("run") or "").split())
+        if len(run) > 44:
+            run = run[:43] + "…"
+        lines.append(
+            f"  {n['key']:<18} {n.get('type', '—'):<7} {(n.get('model') or '—'):<7} "
+            f"{(n.get('agent') or '—'):<18} {run}"
+        )
+    return "\n".join(lines)
+
+
+def format_flow_list(docs):
+    lines = [f"{'KEY':<16} {'ON':<4} {'VER':>4} {'ISOLATION':<14} TRIGGER"]
+    for d in docs:
+        on = "yes" if d.get("enabled") else "no"
+        lines.append(
+            f"{d['key']:<16} {on:<4} {d.get('version', '?'):>4} "
+            f"{d.get('isolation', '—'):<14} {_trigger_chain(d)}"
+        )
+    return "\n".join(lines)
+
+
+def format_flow_push(key, pushed, returned):
+    """An unchanged push bumps nothing — say so rather than implying a write happened."""
+    version = returned.get("version")
+    if pushed.get("version") is not None and pushed["version"] == version:
+        return f"{key}: unchanged (v{version})"
+    return f"{key}: saved as v{version}"
 
 
 def cmd_version(args):
@@ -2420,6 +2506,9 @@ def build_parser():
     add("executors", cmd_executors, json_flag=True)
     fs = add("flow-stats", cmd_flow_stats, "key", json_flag=True)
     fs.add_argument("--window")
+    fl = add("flow", cmd_flow, json_flag=True)
+    fl.add_argument("key", nargs="?")
+    add("flow-push", cmd_flow_push, "key", "file", json_flag=True)
     add("version", cmd_version, json_flag=True)
     add("git-fetch", cmd_git_fetch)
     oc = add("outcome", cmd_outcome, "outcome")
