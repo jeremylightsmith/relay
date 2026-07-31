@@ -84,14 +84,16 @@ in `lib/relay/flows.ex` — check the two still agree:
 flow could still run right now.
 
 **Check 4 is a heuristic — say so in the finding.** Split `run` on `&&`, `||`, `;`, `|`;
-take each segment's first bare word; expand `{relay}` to `./bin/relay`; skip shell builtins
-and keywords (`test`, `[`, `cd`, `exit`, `echo`), `VAR=$(…)` assignments, and any segment
-whose command word holds an unexpanded `{placeholder}`. A segment you cannot parse produces
-**no finding** — a false "missing binary" is worse than a miss. Every check-4 finding says
-**"on this machine"**: PATH here is not PATH on the executor.
+take each segment's first bare word; expand `{relay}` to `./bin/relay`; skip shell builtins,
+keywords and grouping tokens (`test`, `[`, `]`, `cd`, `exit`, `echo`, `:`, `{`, `}`, `(`, `)`,
+`!`, `if`, `then`, `else`, `fi`, `for`, `while`, `do`, `done`), `VAR=$(…)` assignments, and
+any segment whose command word holds an unexpanded `{placeholder}`. A segment you cannot
+parse produces **no finding** — a false "missing binary" is worse than a miss. Every check-4
+finding says **"on this machine"**: PATH here is not PATH on the executor.
 
 **Checks 5–6 read, they do not compute.** Report the server's `freshness`, `stale?` and
-`outdated` fields; never compare version numbers yourself. Check 6 is **fleet-wide** — it
+`outdated` fields; never compare version numbers yourself. Check 5 is a **fleet union** — the
+authoritative per-executor answer is the Flows enable confirm. Check 6 is **fleet-wide** — it
 warns only when *no* connected executor is current (the board can then place no work at all)
 — but the finding names every outdated executor.
 
