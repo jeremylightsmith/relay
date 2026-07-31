@@ -7,6 +7,8 @@ defmodule Schemas.VocabularyTest do
   """
   use ExUnit.Case, async: true
 
+  alias Schemas.Flow.Edge
+
   test "run statuses partition exactly into active + terminal" do
     assert Enum.sort(Schemas.Run.active_statuses() ++ Schemas.Run.terminal_statuses()) ==
              Enum.sort(Ecto.Enum.values(Schemas.Run, :status))
@@ -55,5 +57,31 @@ defmodule Schemas.VocabularyTest do
              Schemas.Flow.Node.runnable_types(),
              &(&1 in Ecto.Enum.values(Schemas.Flow.Node, :type))
            )
+  end
+
+  test "Node.fields/0 is exactly the embedded schema's field list" do
+    assert Enum.sort(Schemas.Flow.Node.fields()) ==
+             Enum.sort(Schemas.Flow.Node.__schema__(:fields))
+  end
+
+  test "Edge.fields/0 is exactly the embedded schema's field list" do
+    assert Enum.sort(Edge.fields()) ==
+             Enum.sort(Edge.__schema__(:fields))
+  end
+
+  test "expects_commits is in the node field list (RLY-241: copies of it used to omit it)" do
+    assert :expects_commits in Schemas.Flow.Node.fields()
+  end
+
+  test "types/0 equals the whole Node type enum" do
+    assert Schemas.Flow.Node.types() == Ecto.Enum.values(Schemas.Flow.Node, :type)
+  end
+
+  test "the edge `on` enum is the NodeExecution outcome set, not a second copy of it" do
+    assert Ecto.Enum.values(Edge, :on) == Schemas.NodeExecution.outcomes()
+  end
+
+  test "the edge `when` enum equals when_values/0" do
+    assert Ecto.Enum.values(Edge, :when) == Edge.when_values()
   end
 end

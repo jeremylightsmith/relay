@@ -14,9 +14,7 @@ defmodule RelayWeb.FlowEditorLive do
   alias RelayWeb.FlowGraphComponents
   alias RelayWeb.FlowLayout
   alias Schemas.Board
-
-  @node_fields [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes, :foreach, :agent]
-  @edge_fields [:from, :to, :on, :max_loops, :when]
+  alias Schemas.Flow
 
   @impl true
   def mount(%{"slug" => slug, "key" => key}, _session, socket) do
@@ -46,8 +44,8 @@ defmodule RelayWeb.FlowEditorLive do
   # Snapshot the persisted flow into the working copy and reset dirty/errors.
   defp load_flow(socket, flow) do
     working = %{
-      nodes: Enum.map(flow.nodes, &Map.take(&1, @node_fields)),
-      edges: Enum.map(flow.edges, &Map.take(&1, @edge_fields)),
+      nodes: Enum.map(flow.nodes, &Map.take(&1, Flow.Node.fields())),
+      edges: Enum.map(flow.edges, &Map.take(&1, Flow.Edge.fields())),
       isolation: flow.isolation,
       pulls_from_stage_id: flow.pulls_from_stage_id,
       works_in_stage_id: flow.works_in_stage_id,
@@ -82,7 +80,7 @@ defmodule RelayWeb.FlowEditorLive do
     working = socket.assigns.working
 
     changeset =
-      Schemas.Flow.changeset(socket.assigns.flow, %{
+      Flow.changeset(socket.assigns.flow, %{
         nodes: working.nodes,
         edges: working.edges,
         isolation: working.isolation
@@ -110,8 +108,8 @@ defmodule RelayWeb.FlowEditorLive do
   defp flatten_error_messages(msg) when is_binary(msg), do: [msg]
 
   defp dirty?(flow, working) do
-    Enum.map(flow.nodes, &Map.take(&1, @node_fields)) != working.nodes or
-      Enum.map(flow.edges, &Map.take(&1, @edge_fields)) != working.edges or
+    Enum.map(flow.nodes, &Map.take(&1, Flow.Node.fields())) != working.nodes or
+      Enum.map(flow.edges, &Map.take(&1, Flow.Edge.fields())) != working.edges or
       flow.isolation != working.isolation or
       flow.pulls_from_stage_id != working.pulls_from_stage_id or
       flow.works_in_stage_id != working.works_in_stage_id or
@@ -119,8 +117,8 @@ defmodule RelayWeb.FlowEditorLive do
   end
 
   defp definition_dirty?(flow, working) do
-    Enum.map(flow.nodes, &Map.take(&1, @node_fields)) != working.nodes or
-      Enum.map(flow.edges, &Map.take(&1, @edge_fields)) != working.edges or
+    Enum.map(flow.nodes, &Map.take(&1, Flow.Node.fields())) != working.nodes or
+      Enum.map(flow.edges, &Map.take(&1, Flow.Edge.fields())) != working.edges or
       flow.isolation != working.isolation
   end
 

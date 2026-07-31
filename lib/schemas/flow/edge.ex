@@ -17,16 +17,22 @@ defmodule Schemas.Flow.Edge do
 
   import Ecto.Changeset
 
+  @fields [:from, :to, :on, :max_loops, :when]
   @when_values [:foreach_remaining, :foreach_exhausted]
+  # The `on` vocabulary is the executor's outcome set, defined once on Schemas.NodeExecution.
+  @outcomes Schemas.NodeExecution.outcomes()
 
   @primary_key false
   embedded_schema do
     field :from, :string
     field :to, :string
-    field :on, Ecto.Enum, values: [:succeeded, :failed, :partial, :needs_input]
+    field :on, Ecto.Enum, values: @outcomes
     field :max_loops, :integer
     field :when, Ecto.Enum, values: @when_values
   end
+
+  @doc "The closed set of edge fields — the ONE list every consumer reads (RLY-241)."
+  def fields, do: @fields
 
   @doc "The closed set of foreach `when` guard values (AGENTS.md: defined once, read by both the schema field and the flow editor's WHEN control)."
   def when_values, do: @when_values
@@ -34,7 +40,7 @@ defmodule Schemas.Flow.Edge do
   @doc "Validates one edge; graph-level rules (endpoints, routing) live on Schemas.Flow."
   def changeset(edge, attrs) do
     edge
-    |> cast(attrs, [:from, :to, :on, :max_loops, :when])
+    |> cast(attrs, @fields)
     |> validate_required([:from, :to])
     |> validate_number(:max_loops, greater_than: 0)
   end

@@ -203,9 +203,6 @@ defmodule Relay.Flows do
     :ok
   end
 
-  @node_fields [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes, :foreach, :agent]
-  @edge_fields [:from, :to, :on, :max_loops, :when]
-
   @doc """
   Whether the flow's definition (nodes, edges, isolation) differs from the
   default library's definition for its key — normalized comparison, so the
@@ -221,8 +218,10 @@ defmodule Relay.Flows do
 
       default ->
         flow.isolation != default.isolation or
-          normalize(flow.nodes, @node_fields) != normalize(default.nodes, @node_fields) or
-          normalize(flow.edges, @edge_fields) != normalize(default.edges, @edge_fields)
+          normalize(flow.nodes, Flow.Node.fields(), %Flow.Node{}) !=
+            normalize(default.nodes, Flow.Node.fields(), %Flow.Node{}) or
+          normalize(flow.edges, Flow.Edge.fields(), %Flow.Edge{}) !=
+            normalize(default.edges, Flow.Edge.fields(), %Flow.Edge{})
     end
   end
 
@@ -242,8 +241,8 @@ defmodule Relay.Flows do
       pulls_from_stage_id: flow.pulls_from_stage_id,
       works_in_stage_id: flow.works_in_stage_id,
       lands_on_stage_id: flow.lands_on_stage_id,
-      nodes: Enum.map(flow.nodes, &Map.take(&1, @node_fields)),
-      edges: Enum.map(flow.edges, &Map.take(&1, @edge_fields))
+      nodes: Enum.map(flow.nodes, &Map.take(&1, Flow.Node.fields())),
+      edges: Enum.map(flow.edges, &Map.take(&1, Flow.Edge.fields()))
     }
 
     Repo.transaction(fn ->
@@ -375,10 +374,14 @@ defmodule Relay.Flows do
 
   defp default_for(key), do: Enum.find(DefaultLibrary.all(), &(&1.key == key))
 
-  # Embedded structs and the library's plain attr maps normalize to the same
-  # shape: every field present, nil when unset.
-  defp normalize(items, fields) do
-    Enum.map(items || [], fn item -> Map.new(fields, &{&1, Map.get(item, &1)}) end)
+  # Embedded structs and the library's plain attr maps normalize to the same shape: every
+  # field present. `defaults` (a `%Flow.Node{}` or `%Flow.Edge{}`) supplies the value for a
+  # field the source omits — the library's literals are sparse (e.g. they omit
+  # `expects_commits` rather than spelling out its `false` default), while an embedded struct
+  # always carries every field, so falling back to bare `nil` would compare a struct's real
+  # default (e.g. `false`) unequal to the library's omission of the same default.
+  defp normalize(items, fields, defaults) do
+    Enum.map(items || [], fn item -> Map.new(fields, &{&1, Map.get(item, &1, Map.get(defaults, &1))}) end)
   end
 
   defp save_and_maybe_bump(flow, attrs) do
@@ -411,8 +414,8 @@ defmodule Relay.Flows do
       flow_id: flow.id,
       version: flow.version,
       isolation: flow.isolation,
-      nodes: Enum.map(flow.nodes, &Map.take(&1, @node_fields)),
-      edges: Enum.map(flow.edges, &Map.take(&1, @edge_fields))
+      nodes: Enum.map(flow.nodes, &Map.take(&1, Flow.Node.fields())),
+      edges: Enum.map(flow.edges, &Map.take(&1, Flow.Edge.fields()))
     })
     |> Repo.insert!()
 
@@ -426,8 +429,8 @@ defmodule Relay.Flows do
   defp sync_flow_to_default!(flow, default) do
     attrs = %{
       isolation: default.isolation,
-      nodes: Enum.map(default.nodes, &Map.take(&1, @node_fields)),
-      edges: Enum.map(default.edges, &Map.take(&1, @edge_fields))
+      nodes: Enum.map(default.nodes, &Map.take(&1, Flow.Node.fields())),
+      edges: Enum.map(default.edges, &Map.take(&1, Flow.Edge.fields()))
     }
 
     Repo.transaction(fn ->
@@ -441,13 +444,19 @@ defmodule Relay.Flows do
 
   defp definition_changed?(%Flow{} = before, %Flow{} = now) do
     before.isolation != now.isolation or
-      normalize(before.nodes, @node_fields) != normalize(now.nodes, @node_fields) or
-      normalize(before.edges, @edge_fields) != normalize(now.edges, @edge_fields)
+      normalize(before.nodes, Flow.Node.fields(), %Flow.Node{}) != normalize(now.nodes, Flow.Node.fields(), %Flow.Node{}) or
+      normalize(before.edges, Flow.Edge.fields(), %Flow.Edge{}) != normalize(now.edges, Flow.Edge.fields(), %Flow.Edge{})
   end
 
   defp diff_nodes(flow, default) do
     cur = Map.new(flow.nodes, &{&1.key, &1})
-    def_ = Map.new(default.nodes, &{&1.key, Map.new(@node_fields, fn f -> {f, Map.get(&1, f)} end)})
+
+    def_ =
+      Map.new(
+        default.nodes,
+        &{&1.key, Map.new(Flow.Node.fields(), fn f -> {f, Map.get(&1, f, Map.get(%Flow.Node{}, f))} end)}
+      )
+
     cur_keys = MapSet.new(Map.keys(cur))
     def_keys = MapSet.new(Map.keys(def_))
 
@@ -465,7 +474,7 @@ defmodule Relay.Flows do
   end
 
   defp changed_fields(node, default_map) do
-    for f <- @node_fields, Map.get(node, f) != Map.get(default_map, f), do: f
+    for f <- Flow.Node.fields(), Map.get(node, f) != Map.get(default_map, f), do: f
   end
 
   defp diff_edges(flow, default) do
