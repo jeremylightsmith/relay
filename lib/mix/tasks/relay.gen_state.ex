@@ -11,7 +11,8 @@ defmodule Mix.Tasks.Relay.GenState do
 
   The `--check` form is a precommit/CI gate: it fails when an edge is added to or removed from
   `Relay.Runs.Transitions` without the doc being regenerated. Only the from->to edge table is
-  generated — every other table and all prose in `state.md` stays hand-written.
+  generated here — all prose in `state.md` stays hand-written, and the separate `vocabularies`
+  block belongs to `Mix.Tasks.Relay.GenVocab`.
 
   A direct sibling of `Mix.Tasks.Relay.DepsGraph`: same marker-splice shape, same `--check`
   contract.

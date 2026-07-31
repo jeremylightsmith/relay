@@ -5,10 +5,10 @@ the seams between them are where the bugs are. This page brings them together.
 
 ## Closed vocabularies
 
-Every closed set in the system, generated from the schema that owns it by `mix relay.gen_vocab`
-(a stale block fails `mix precommit`). **This table is the authority on what values exist.**
-[`../glossary.md`](../glossary.md) is the authority on what each term *means*; the sections below
-say what each value *does*.
+The closed sets that move a card and its run through a flow, generated from the schema that owns
+each one by `mix relay.gen_vocab` (a stale block fails `mix precommit`). **This table is the
+authority on what values these sets take.** [`../glossary.md`](../glossary.md) is the authority on
+what each term *means*; the sections below say what each value *does*.
 
 <!-- BEGIN generated: vocabularies -->
 | Vocabulary | Values | Owner |
@@ -21,6 +21,12 @@ say what each value *does*.
 | Stage category | `unstarted` · `planning` · `in_progress` · `complete` | `Schemas.Stage.categories/0` |
 | Stage type | `queue` · `work` · `planning` · `review` · `done` | `Schemas.Stage.types/0` |
 <!-- END generated: vocabularies -->
+
+These are the *runtime* vocabularies, not every closed set in the codebase. The flow-**definition**
+vocabularies — isolation class (`Schemas.Flow.isolation_classes/0`), node type and edge condition
+(`Schemas.Flow.Node`, `Schemas.Flow.Edge`) — describe a flow rather than a card in motion; they are
+owned exactly the same way, by one accessor or `Ecto.Enum` on their schema, and are documented in
+[`runner.md`](runner.md). The rule does not vary: the schema owns the set, nothing re-types it.
 
 ## Card status
 

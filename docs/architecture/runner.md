@@ -231,8 +231,8 @@ that stays server-side.
   `node_job_id` alongside `run_id` — same nullable-string shape, not an FK. It rides through
   `Relay.AgentLog.stamp/1` → `Relay.Activity.LogSink.row/2` → `activities.node_job_id`, kept
   for W6's run panel to key log lines off a specific node-job.
-- The full outcome-file contract (`RELAY_NODE_OUTCOME`) executors must honor is documented in
-  [`../../relay.md`](../../relay.md#node-job-protocol-adr-0006).
+- The full outcome-file contract (`RELAY_NODE_OUTCOME`) executors must honor is
+  [Declaring an outcome](#declaring-an-outcome) below.
 
 ## Run recovery surface (RLY-189)
 
@@ -324,6 +324,9 @@ Every iteration of the loop is the same three steps:
 2. **Run** it — an agent node runs headless Claude; `shell`/`gate` nodes run shell.
 3. **Report** the typed outcome back to the server, which advances the flow (moving the card to
    the next stage when the flow lands there).
+
+Step 3 is a contract a node author has to honor — see
+[Declaring an outcome](#declaring-an-outcome) below.
 
 Agent steps run headless Claude, which uses whatever authentication the local Claude CLI has — a
 **Claude subscription** (no `ANTHROPIC_API_KEY` needed) or, if `ANTHROPIC_API_KEY` is set, the
@@ -444,6 +447,35 @@ silently billed to the paid API.
   reset-on-revoke for exclusive jobs is gone: no reset is ever needed mid-run now that a
   worktree's identity is the card itself. Either way, no outcome is reported for a revoked
   job — the server already knows a revoked job never finished.
+
+### Declaring an outcome
+
+An agent node **must declare its verdict** before it exits, by running:
+
+```
+relay outcome <outcome> [--detail TEXT|@file]
+```
+
+`bin/relay` writes the JSON to `$RELAY_NODE_OUTCOME` (set per node; the verb refuses to run
+outside a node), so a `detail` containing quotes or newlines cannot corrupt the file. `detail`
+becomes the context handed to the next node. Which outcomes exist and what each one does to the
+run and the card is [state.md](state.md#node-outcomes)'s "Node outcomes" table — the schema owns
+that set, not this page.
+
+Three executor-side rules sit on top of it:
+
+- **Silence is failure.** A node that exits without declaring is reported `failed` whatever its
+  exit code — a node that did nothing is indistinguishable from one that exited early, so it must
+  never route past its own gate.
+- **A success claim must be backed by a commit.** On a node marked `expects_commits`, a
+  `succeeded` that left HEAD unmoved is rewritten to `failed` before finalize
+  ([failures.md](failures.md) A6).
+- **Asking a human wins.** If the node moved the card to `needs_input`, that is the outcome even
+  if the node also declared something else.
+
+The reminder is appended to every agent node's prompt automatically, so the requirement travels
+with every invocation. `shell` and `gate` nodes are exempt — their exit status is already an
+unambiguous verdict.
 
 ### Agent node → `.claude/agents` definition
 
