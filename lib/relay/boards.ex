@@ -30,7 +30,8 @@ defmodule Relay.Boards do
     {"Done", :complete, :done, false}
   ]
 
-  @category_order [:unstarted, :planning, :in_progress, :complete]
+  # Board-progression order is the schema's declaration order — defined once on the schema.
+  @category_order Stage.categories()
 
   @doc """
   An unvalidated changeset for a board's user-editable attributes.

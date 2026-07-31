@@ -37,7 +37,7 @@ defmodule RelayWeb.BoardLive do
 
   require Logger
 
-  @category_order [:unstarted, :planning, :in_progress, :complete]
+  @category_order Stage.categories()
 
   # RLY-53 — the terminal Done column renders at most this many cards, with a
   # "Show N more" button revealing the next batch. Single definition in
