@@ -341,6 +341,12 @@ silently billed to the paid API.
   `max_retained_failed` (how many failed-run worktrees to keep for post-mortem before the
   oldest is evicted, default 3). Missing file → sensible defaults, including all three new
   keys; capacity is the field a developer routinely edits.
+
+  > **Running more than one `exclusive` slot?** Concurrent runs each work in their own
+  > worktree, so make sure they don't share mutable state — most importantly, **give each run
+  > its own test database** (or equivalent) so parallel test suites don't truncate each other.
+  > How you do that depends on your project's toolchain (the prepare hook below is where a
+  > project wires per-worktree isolation).
 - **Single-process guarantee (RLY-193).** Exactly one `relay execute` may run per `{server,
   name}` (the pair the server keys an `Executor` on, `name` defaulting to hostname) and per
   worktree namespace. At startup `cmd_execute` takes two exclusive, non-blocking `fcntl.flock`
