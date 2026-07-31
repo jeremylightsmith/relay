@@ -51,4 +51,4 @@ git log -1 --format=%B | bin/relay comment RLY-12 -
 Every `--json` command also takes `--field PATH` to print a single dotted-path value bare —
 `bin/relay card RLY-12 --field status` prints `working`, with no quotes and no `jq`.
 
-For the autonomous runner and its operating rules, see [Agent integration](/docs/agent-integration).
+For the autonomous runner and its operating rules, see [the runner](/docs/architecture-runner).

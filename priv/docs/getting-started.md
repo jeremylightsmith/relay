@@ -159,5 +159,5 @@ failed shows the node that failed and its outcome there.
 - New to the model? [Boards & stages](/docs/boards-and-stages) and
   [Cards & handoffs](/docs/cards-and-handoffs).
 - Driving a card by hand? The [CLI](/docs/cli).
-- Building your own runner or agents? [Agent integration](/docs/agent-integration) and the
+- Building your own runner or agents? [The runner](/docs/architecture-runner) and the
   [REST API reference](/docs/api).

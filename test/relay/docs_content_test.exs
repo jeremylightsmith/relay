@@ -9,7 +9,6 @@ defmodule Relay.DocsContentTest do
     {"cards-and-handoffs.md", "# Cards & handoffs"},
     {"authentication.md", "# Authentication & API access"},
     {"cli.md", "# CLI (`bin/relay`)"},
-    {"agent-integration.md", "# Agent integration"},
     {"api.md", "# REST API reference"}
   ]
 
@@ -39,18 +38,42 @@ defmodule Relay.DocsContentTest do
     assert html =~ "Authorization: Bearer"
   end
 
-  test "the agent-integration and CLI pages describe the current runner, not the retired one" do
+  test "the runner and CLI pages describe the current runner, not the retired one" do
     # RLY-139: `relay watch` / `relay_config.json` / `relay pull` / `relay layout` are
     # deleted — the live public docs must not send an operator after them.
-    agent_integration = read("agent-integration.md")
+    runner = File.read!(Path.join(File.cwd!(), "docs/architecture/runner.md"))
     cli = read("cli.md")
 
-    assert agent_integration =~ "bin/relay execute"
-    refute agent_integration =~ "relay watch"
-    refute agent_integration =~ "relay_config.json"
+    assert runner =~ "bin/relay execute"
+    assert runner =~ "is **deleted**", "runner.md must still record that the legacy runner is gone"
 
     refute cli =~ "bin/relay pull"
     refute cli =~ "bin/relay layout"
+  end
+
+  test "the runner page carries the four current operating invariants and none of the retired ones" do
+    runner = File.read!(Path.join(File.cwd!(), "docs/architecture/runner.md"))
+
+    assert runner =~ "## Operating invariants"
+    assert runner =~ "One agent per working directory"
+    assert runner =~ "State lives on the board"
+    assert runner =~ "Each card owns its branch"
+    assert runner =~ "Work travels with the card"
+
+    # Invariants 5-8 described the retired board-runner; they are false under server-side
+    # dispatch and the engine's retry/breaker budgets, so they must not be rescued.
+    refute runner =~ "Readiness is positional"
+    refute runner =~ "right-to-left"
+    refute runner =~ "never retry-loop"
+  end
+
+  test "no doc still links to the retired /docs/agent-integration page" do
+    paths = ["relay.md"] ++ Path.wildcard("priv/docs/*.md") ++ Path.wildcard("docs/**/*.md")
+
+    for path <- paths, path != "docs/adr/0008-documentation-taxonomy.md" do
+      refute File.read!(Path.join(File.cwd!(), path)) =~ "docs/agent-integration",
+             "#{path} still links to the retired agent-integration page"
+    end
   end
 
   test "api.md documents every endpoint RLY-177 added" do

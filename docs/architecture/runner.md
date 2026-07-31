@@ -313,6 +313,18 @@ arrived while the Listener was down is not lost — the scheduler is no longer a
 node-job transport above. It knows the Relay REST API and how to execute a node-job;
 nothing else — every board-specific fact lives server-side as flow data.
 
+Every iteration of the loop is the same three steps:
+
+1. **Claim** the next node-job from the server (a long-poll — cheap when idle).
+2. **Run** it — an agent node runs headless Claude; `shell`/`gate` nodes run shell.
+3. **Report** the typed outcome back to the server, which advances the flow (moving the card to
+   the next stage when the flow lands there).
+
+Agent steps run headless Claude, which uses whatever authentication the local Claude CLI has — a
+**Claude subscription** (no `ANTHROPIC_API_KEY` needed) or, if `ANTHROPIC_API_KEY` is set, the
+metered API. Subscription rate limits are the ceiling; when hit, the step is throttled, not
+silently billed to the paid API.
+
 - **Config.** `.relay/executor.json` holds `name` (defaults to hostname), `namespace`
   (default `exec`), `capacity: {shared_clean, exclusive}`, `poll_timeout`,
   `heartbeat_interval`, and three optional per-card-worktree keys (RLY-231):
@@ -489,6 +501,32 @@ reference file, because those files ship to other projects through the RLY-181 s
 as single files with no `references/` siblings.
 `test/relay/agents/escalation_contract_test.exs` pins the markers so an edit can't silently drop
 the contract.
+
+## Operating invariants
+
+If you build your own runner or your own node behavior, honor these — break one and cards corrupt
+each other's work:
+
+1. **One agent per working directory at a time.** A `git checkout` (or branch/file edit) is
+   global to the directory — two agents on two branches in one directory overwrite each other.
+   Serialize (one card at a time), or give each agent its own clone or `git worktree`. Don't run
+   the executor and an interactive session in the same working tree at once.
+2. **State lives on the board, never in the working tree.** Many cards are in flight, moving back
+   and forth between stages; a card may be specced now and planned days later while others pass
+   through. Nothing durable may depend on what's currently checked out or on a shared repo-root
+   scratch file.
+3. **Each card owns its branch — check it out at the start of a step, commit at the end.** Every
+   step must be self-contained: begin by checking out the card's branch (from its `branch`
+   field), end by committing (never leave uncommitted changes for the next card to inherit).
+4. **Work travels with the card.** The spec is the card's `spec`; the acceptance criteria its
+   `acceptance_criteria`; the plan its `plan` field. Materialize these into the branch
+   just-in-time (at the per-card `$RELAY_PLAN` path), never via a shared file another card would
+   clobber.
+
+Readiness, ordering, WIP and failure routing are **not** on this list: they are decided
+server-side by the scheduler and the engine (see "Dispatch is server-side" above,
+[state.md](state.md) and [failures.md](failures.md)). An executor that tries to decide them
+locally will disagree with the server.
 
 ---
 *Sources of truth: `bin/relay`, `.relay/executor.json`, `bin/test_relay.py`,

@@ -53,4 +53,4 @@ The API is scoped to a single board and lives under `/api`: `GET /api/board`, `G
 documents each one with request/response examples and the full status/error-code table.
 
 For the commands most agents actually use, see the [CLI](/docs/cli); for the runner and its
-operating rules, see [Agent integration](/docs/agent-integration).
+operating rules, see [the runner](/docs/architecture-runner).

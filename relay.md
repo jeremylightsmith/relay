@@ -7,7 +7,7 @@ is ready, which flow runs it, and what each step does. You talk to it through on
 
 - **Drive a card** — `bin/relay board`, `card`, `move`, `comment`, … (this doc).
 - **Run work** — `bin/relay execute` claims jobs from the server and runs them, passing the
-  baton between human and AI. It's a separate role; setup lives at `$RELAY_URL/docs/agent-integration`.
+  baton between human and AI. It's a separate role; setup lives at `$RELAY_URL/docs/architecture-runner`.
 
 **Dispatch is entirely server-side.** Which cards are ready, which flow they run, and what each
 step does are decided by Relay and configured per-board in **Settings › Flows** — never in a
@@ -121,7 +121,7 @@ inside the node's own worktree. It is **one file per card per node** — the pat
 **Never invent your own absolute scratch path.**
 
 The full node/outcome/`RELAY_PLAN` contract, the executor, and the operating invariants live at
-`$RELAY_URL/docs/agent-integration`.
+`$RELAY_URL/docs/architecture-runner`.
 
 ## Customizing a board's flows
 
