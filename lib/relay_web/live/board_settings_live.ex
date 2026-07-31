@@ -39,7 +39,7 @@ defmodule RelayWeb.BoardSettingsLive do
   alias Schemas.Stage
   alias Schemas.User
 
-  @categories [:unstarted, :planning, :in_progress, :complete]
+  @categories Stage.categories()
 
   @impl true
   def render(assigns) do
