@@ -1,8 +1,12 @@
 # ADR 0005 — Mobile app: scope and hybrid native-shell architecture
 
-**Status:** Draft (2026-07-12) — the hybrid direction is **validated by a spike** and the
-V1/V1.1 scope is broken into cards (see "Resolved decisions" + "Card breakdown"). A few genuine
-questions remain open; not yet Accepted.
+## Status
+
+Proposed (2026-07-12)
+
+The hybrid direction is **validated by a spike** and the V1/V1.1 scope is broken into cards
+(see "Resolved decisions" + "Card breakdown"). A few genuine questions remain open; not yet
+Accepted.
 
 **Related:** builds on / refines [ADR 0001](0001-client-architecture.md) (LiveView-first with
 a thin native wrapper). Source: `docs/designs/Relay Mobile Brief.dc.html` (platform brief

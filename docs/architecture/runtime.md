@@ -32,7 +32,7 @@ One flat `one_for_one` supervisor (`Relay.Supervisor`, started by `Relay.Applica
 | `Phoenix.PubSub` (`Relay.PubSub`) | all topics below |
 | `RelayWeb.ApiLog` | in-memory recent API request log for the admin page |
 | `Relay.BoardWatch` | ETS owner for per-board version counters (RLY-12) |
-| `Relay.Runs.Capacity` | ETS owner for per-executor advertised free capacity (RLY-133); empty until W9 |
+| `Relay.Runs.Capacity` | ETS owner for per-executor advertised free capacity (RLY-133), fed by the executor heartbeat |
 | `Registry` (`Relay.Runs.SchedulerRegistry`) | per-board scheduler lookup keys (RLY-133) |
 | `Relay.Runs.SchedulerSupervisor` | DynamicSupervisor for per-board `Scheduler.Server`s (RLY-133); boot-starts per board only when `:runs_auto_start` |
 | `Relay.Activity.LogSink` | debounces runner log lines into one `insert_all` per burst (RLY-112) |

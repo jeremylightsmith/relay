@@ -1,6 +1,8 @@
 # ADR 0006 — Workflow orchestration: Relay owns the graph, developers own the nodes
 
-**Status:** Proposed (2026-07-16)
+## Status
+
+Proposed (2026-07-16)
 
 ## Context
 

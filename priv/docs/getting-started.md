@@ -149,9 +149,10 @@ order:
 If none of those explain it, open the card's drawer **Run** tab: a run that started and
 failed shows the node that failed and its outcome there.
 
-> [!NOTE]
-> A dedicated diagnosis surface — one place that answers "why isn't this card moving?"
-> without checking four things by hand — is planned as RLY-177 (API) and RLY-178 (UI).
+> [!TIP]
+> There is a dedicated diagnosis surface for exactly this question: run `bin/relay why <ref>`,
+> or read `GET /api/cards/:ref/diagnosis`. It answers "why isn't this card moving?" in one call
+> instead of four checks by hand.
 
 ## Where to go next
 
