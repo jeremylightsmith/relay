@@ -128,5 +128,5 @@ The full node/outcome/`RELAY_PLAN` contract, the executor, and the operating inv
 A board's flows — which stages are AI-enabled, what each node does, model/effort, retry/loop
 budgets — are edited in **Settings › Flows**, not in a repo config file. Two rules keep custom
 nodes safe: a node's command should start by checking out the card's branch (from `vars.branch`)
-and end by committing; and the Code flow's first node (`branch`, in the shipped `code.jsonc`)
+and end by committing; and the Code flow's first node (`branch`, in the shipped `code.json`)
 materializes the card's `plan` into the per-card `$RELAY_PLAN` path for later nodes to work through.

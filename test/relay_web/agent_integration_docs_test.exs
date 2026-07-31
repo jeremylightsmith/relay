@@ -35,7 +35,7 @@ defmodule Relay.AgentIntegrationDocsTest do
     assert doc =~ "vars.branch",
            "the Customizing section should point at the current run/vars node model"
 
-    assert doc =~ "code.jsonc",
+    assert doc =~ "code.json",
            "the Customizing section should point at the Code flow's `branch` node"
   end
 end

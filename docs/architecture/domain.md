@@ -22,7 +22,9 @@ sharing behavior.
   node in any shipped flow leaves `:failed` unrouted is enforced by
   `default_library_test.exs`.
   `Relay.Flows.seed_default_flows!/1` idempotently seeds the default spec/plan/code library
-  (from `Relay.Flows.DefaultLibrary`, the compiled translation of `docs/designs/flows/*.jsonc`)
+  (from `Relay.Flows.DefaultLibrary`, which **loads** `docs/designs/flows/*.json` at
+  compile time via `@external_resource` — those files are the source of truth, and
+  `Relay.Flows.Document` is the one serializer both they and the API go through)
   — `Boards.create_board/2` calls it after enabling the `Spec:Review`/`Spec:Done`/`Plan:Done`
   sub-lanes so every trigger resolves. Flows seed disabled; at most one enabled flow may pull
   from a stage (partial unique index). Nothing executes yet — the engine is the Runs card (02).

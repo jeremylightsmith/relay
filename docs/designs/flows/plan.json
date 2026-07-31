@@ -1,0 +1,13 @@
+{
+  "key": "plan",
+  "isolation": "shared_clean",
+  "trigger": { "pulls_from": "Spec:Done", "works_in": "Plan", "lands_on": "Plan:Done" },
+  "nodes": [
+    { "key": "write_plan", "type": "agent", "run": "/write-plan {ref}", "max_retries": 1 }
+  ],
+  "edges": [
+    { "from": "start", "to": "write_plan" },
+    { "from": "write_plan", "to": "done", "on": "succeeded" },
+    { "from": "write_plan", "to": "needs_input", "on": "failed" }
+  ]
+}

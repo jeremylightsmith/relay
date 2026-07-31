@@ -1,0 +1,13 @@
+{
+  "key": "spec",
+  "isolation": "shared_clean",
+  "trigger": { "pulls_from": "Next up", "works_in": "Spec", "lands_on": "Spec:Review" },
+  "nodes": [
+    { "key": "brainstorm", "type": "agent", "run": "/brainstorm {ref}", "max_retries": 1 }
+  ],
+  "edges": [
+    { "from": "start", "to": "brainstorm" },
+    { "from": "brainstorm", "to": "done", "on": "succeeded" },
+    { "from": "brainstorm", "to": "needs_input", "on": "failed" }
+  ]
+}

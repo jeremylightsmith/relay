@@ -12,7 +12,7 @@ defmodule Relay.Flows do
   `{:error, changeset}`.
   """
 
-  use Boundary, deps: [Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Repo, Schemas], exports: [Document]
 
   import Ecto.Query
 
@@ -95,6 +95,18 @@ defmodule Relay.Flows do
   @doc "Like get_flow/2 but raises Ecto.NoResultsError when not found."
   def get_flow!(%Board{id: board_id}, key) when is_binary(key) do
     Repo.get_by!(Flow, board_id: board_id, key: key)
+  end
+
+  @doc """
+  The board's flow with `key`, trigger stages preloaded — the shape
+  `Relay.Flows.Document.encode/1` requires. nil when the board has no such flow.
+  """
+  def get_flow_with_stages(%Board{id: board_id}, key) when is_binary(key) do
+    Repo.one(
+      from f in Flow,
+        where: f.board_id == ^board_id and f.key == ^key,
+        preload: [:pulls_from_stage, :works_in_stage, :lands_on_stage]
+    )
   end
 
   @doc """

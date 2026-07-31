@@ -3,6 +3,34 @@ defmodule Relay.Flows.DefaultLibraryTest do
 
   alias Relay.Flows.DefaultLibrary
 
+  test "the library is loaded from docs/designs/flows/*.json, and pins them as external resources" do
+    assert length(DefaultLibrary.all()) == 3
+    assert Enum.map(DefaultLibrary.all(), & &1.key) == ["spec", "plan", "code"]
+
+    code = Enum.find(DefaultLibrary.all(), &(&1.key == "code"))
+    assert length(code.nodes) == 18
+    assert length(code.edges) == 38
+    assert code.isolation == :exclusive
+    assert code.trigger == %{pulls_from: "Plan:Done", works_in: "Code", lands_on: "Review"}
+
+    # `@external_resource` is accumulated, so it appears three times in the attribute list —
+    # Keyword.get_values/2, not `kw[:external_resource]`, which would return only the first.
+    resources =
+      :attributes
+      |> DefaultLibrary.__info__()
+      |> Keyword.get_values(:external_resource)
+      |> List.flatten()
+
+    assert length(resources) == 3
+    assert Enum.any?(resources, &String.ends_with?(to_string(&1), "docs/designs/flows/code.json"))
+  end
+
+  test "decode is dense, so every node carries every field (the customized?/1 comparison depends on it)" do
+    for flow <- DefaultLibrary.all(), node <- flow.nodes do
+      assert Enum.sort(Map.keys(node)) == Enum.sort(Schemas.Flow.Node.fields())
+    end
+  end
+
   # RLY-194 inverted this from an allowlist to a law. Every :agent/:gate node in every
   # flow must route its :failed outcome — to a fix, or to the "needs_input" park sentinel.
   # A failed node must never be a dead end. :shell nodes are outside this test's scope —

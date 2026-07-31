@@ -57,7 +57,7 @@ defmodule Relay.FlowsSeedTest do
     assert code.isolation == :exclusive
   end
 
-  test "translates the authored jsonc graphs faithfully" do
+  test "the authored JSON graphs seed faithfully" do
     ctx = library_board()
     :ok = Flows.seed_default_flows!(ctx.board)
 
@@ -98,6 +98,18 @@ defmodule Relay.FlowsSeedTest do
 
     assert %{to: "sync", when: :foreach_exhausted} =
              Enum.find(code.edges, &(&1.from == "quality_review" and &1.when == :foreach_exhausted))
+
+    # RLY-241: the JSON files ARE the library, so the shipped expects_commits marks must
+    # survive the file → Document.decode! → changeset → row path.
+    assert code.nodes |> Enum.filter(& &1.expects_commits) |> Enum.map(& &1.key) |> Enum.sort() ==
+             ["acceptance_fix", "final_fix", "implement", "smoke_fix"]
+
+    assert Enum.find(code.nodes, &(&1.key == "implement")).foreach == "card.sub_tasks"
+
+    assert code.edges
+           |> Enum.filter(&(&1.from == "quality_review" and &1.on == :succeeded))
+           |> Enum.map(& &1.when)
+           |> Enum.sort() == [:foreach_exhausted, :foreach_remaining]
   end
 
   test "the Code flow's agent nodes name their .claude/agents definition" do
