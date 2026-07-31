@@ -50,6 +50,12 @@ defmodule Schemas.Run do
   @doc "True when `status` is an active (running or parked) run status."
   def active?(status), do: status in active_statuses()
 
+  @doc "The closed set of run statuses."
+  def statuses, do: Ecto.Enum.values(__MODULE__, :status)
+
+  @doc "The closed set of reasons a parked run is waiting."
+  def parked_reasons, do: Ecto.Enum.values(__MODULE__, :parked_reason)
+
   @doc """
   Validates a programmatically-built run. The partial unique index
   `runs_one_active_per_card_index` enforces at most one active

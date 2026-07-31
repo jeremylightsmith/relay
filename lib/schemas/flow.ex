@@ -33,7 +33,7 @@ defmodule Schemas.Flow do
   end
 
   @doc "The closed set of flow isolation classes."
-  def isolation_classes, do: [:shared_clean, :exclusive]
+  def isolation_classes, do: Ecto.Enum.values(__MODULE__, :isolation)
 
   @doc """
   Validates a flow definition. `board_id` must already be set on the struct.

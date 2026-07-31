@@ -3,12 +3,24 @@
 Four state machines drive a card through a flow. They live in four different modules, and
 the seams between them are where the bugs are. This page brings them together.
 
-| Machine | Values | Owner |
+## Closed vocabularies
+
+Every closed set in the system, generated from the schema that owns it by `mix relay.gen_vocab`
+(a stale block fails `mix precommit`). **This table is the authority on what values exist.**
+[`../glossary.md`](../glossary.md) is the authority on what each term *means*; the sections below
+say what each value *does*.
+
+<!-- BEGIN generated: vocabularies -->
+| Vocabulary | Values | Owner |
 | --- | --- | --- |
-| Card status | `ready · queued · working · needs_input · in_review · failed` | `Relay.Cards` |
-| Run status | `running · parked · done · failed · cancelled` | `Relay.Runs` |
-| Node-job state | `queued · claimed · running · done · revoked` | `Relay.Runs.Dispatcher` |
-| Node outcome | `succeeded · failed · partial · needs_input` | the node itself |
+| Card status | `ready` · `working` · `needs_input` · `in_review` · `queued` · `failed` | `Schemas.Card.statuses/0` |
+| Node outcome | `succeeded` · `failed` · `partial` · `needs_input` | `Schemas.NodeExecution.outcomes/0` |
+| Node-job state | `queued` · `claimed` · `running` · `done` · `revoked` | `Schemas.NodeJob.states/0` |
+| Run parked reason | `needs_input` · `claimed` · `executor_gone` | `Schemas.Run.parked_reasons/0` |
+| Run status | `running` · `parked` · `done` · `failed` · `cancelled` | `Schemas.Run.statuses/0` |
+| Stage category | `unstarted` · `planning` · `in_progress` · `complete` | `Schemas.Stage.categories/0` |
+| Stage type | `queue` · `work` · `planning` · `review` · `done` | `Schemas.Stage.types/0` |
+<!-- END generated: vocabularies -->
 
 ## Card status
 

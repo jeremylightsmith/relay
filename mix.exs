@@ -146,6 +146,7 @@ defmodule Relay.MixProject do
         "sobelow --config",
         "deps.audit",
         "relay.gen_state --check",
+        "relay.gen_vocab --check",
         "relay.deps_graph --check",
         "test",
         "cmd python3 bin/test_relay.py"

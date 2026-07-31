@@ -42,7 +42,7 @@ defmodule Schemas.NodeExecution do
   end
 
   @doc "The closed set of node outcomes an executor may report."
-  def outcomes, do: [:succeeded, :failed, :partial, :needs_input]
+  def outcomes, do: Ecto.Enum.values(__MODULE__, :outcome)
 
   @doc "Validates a programmatically-built execution row."
   def changeset(execution) do
