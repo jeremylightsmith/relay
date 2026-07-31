@@ -218,12 +218,18 @@ defmodule Relay.Flows.Document do
     end
   end
 
-  # Every field present: the document's value when given, else the schema's own default.
+  # Every field present: the document's value when given, else the schema's own default. An
+  # explicit `null` counts as "not given" — JSON has two ways to say nothing, and a hand-edited
+  # document that spells out `"expects_commits": null` must not store nil where the schema says
+  # false (that would make `Flows.customized?/1` compare nil != false and flag the flow forever).
   defp dense(item, fields, defaults) do
     Map.new(fields, fn field ->
-      {field, Map.get(item, Atom.to_string(field), Map.get(defaults, field))}
+      {field, item |> Map.get(Atom.to_string(field)) |> default_if_nil(Map.get(defaults, field))}
     end)
   end
+
+  defp default_if_nil(nil, default), do: default
+  defp default_if_nil(value, _default), do: value
 
   defp field_names(fields), do: Enum.map(fields, &Atom.to_string/1)
 

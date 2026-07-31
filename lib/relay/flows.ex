@@ -222,7 +222,7 @@ defmodule Relay.Flows do
   @doc """
   Whether the flow's definition (nodes, edges, isolation) differs from the
   default library's definition for its key — normalized comparison, so the
-  library's sparse attr maps and the embedded structs compare field-by-field.
+  library's dense attr maps and the embedded structs compare field-by-field.
   A flow whose key isn't a library key at all (e.g. a duplicate) is always
   customized. Trigger wiring never counts: triggers are per-board and a
   stage rename must not flag a flow.
@@ -234,10 +234,8 @@ defmodule Relay.Flows do
 
       default ->
         flow.isolation != default.isolation or
-          normalize(flow.nodes, Flow.Node.fields(), %Flow.Node{}) !=
-            normalize(default.nodes, Flow.Node.fields(), %Flow.Node{}) or
-          normalize(flow.edges, Flow.Edge.fields(), %Flow.Edge{}) !=
-            normalize(default.edges, Flow.Edge.fields(), %Flow.Edge{})
+          normalize(flow.nodes, Flow.Node.fields()) != normalize(default.nodes, Flow.Node.fields()) or
+          normalize(flow.edges, Flow.Edge.fields()) != normalize(default.edges, Flow.Edge.fields())
     end
   end
 
@@ -510,14 +508,13 @@ defmodule Relay.Flows do
   defp default_for(key), do: Enum.find(DefaultLibrary.all(), &(&1.key == key))
 
   # Embedded structs and the library's plain attr maps normalize to the same shape: every
-  # field present. `defaults` (a `%Flow.Node{}` or `%Flow.Edge{}`) supplies the value for a
-  # field the source omits — the library's literals are sparse (e.g. they omit
-  # `expects_commits` rather than spelling out its `false` default), while an embedded struct
-  # always carries every field, so falling back to bare `nil` would compare a struct's real
-  # default (e.g. `false`) unequal to the library's omission of the same default.
-  defp normalize(items, fields, defaults) do
-    Enum.map(items || [], fn item -> Map.new(fields, &{&1, Map.get(item, &1, Map.get(defaults, &1))}) end)
-  end
+  # field present. Both sides are already dense — a struct always carries every field, and
+  # `Relay.Flows.Document.decode/1` fills every field the JSON omits with the schema default
+  # (pinned by default_library_test's denseness assertion), which is exactly what lets this
+  # compare field-by-field with no per-field default handling.
+  defp normalize(items, fields), do: Enum.map(items || [], &normalize_one(&1, fields))
+
+  defp normalize_one(item, fields), do: Map.new(fields, &{&1, Map.get(item, &1)})
 
   defp save_and_maybe_bump(flow, attrs) do
     case update_flow(flow, attrs) do
@@ -579,18 +576,14 @@ defmodule Relay.Flows do
 
   defp definition_changed?(%Flow{} = before, %Flow{} = now) do
     before.isolation != now.isolation or
-      normalize(before.nodes, Flow.Node.fields(), %Flow.Node{}) != normalize(now.nodes, Flow.Node.fields(), %Flow.Node{}) or
-      normalize(before.edges, Flow.Edge.fields(), %Flow.Edge{}) != normalize(now.edges, Flow.Edge.fields(), %Flow.Edge{})
+      normalize(before.nodes, Flow.Node.fields()) != normalize(now.nodes, Flow.Node.fields()) or
+      normalize(before.edges, Flow.Edge.fields()) != normalize(now.edges, Flow.Edge.fields())
   end
 
   defp diff_nodes(flow, default) do
     cur = Map.new(flow.nodes, &{&1.key, &1})
 
-    def_ =
-      Map.new(
-        default.nodes,
-        &{&1.key, Map.new(Flow.Node.fields(), fn f -> {f, Map.get(&1, f, Map.get(%Flow.Node{}, f))} end)}
-      )
+    def_ = Map.new(default.nodes, &{&1.key, normalize_one(&1, Flow.Node.fields())})
 
     cur_keys = MapSet.new(Map.keys(cur))
     def_keys = MapSet.new(Map.keys(def_))

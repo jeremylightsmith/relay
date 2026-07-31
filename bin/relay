@@ -68,8 +68,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 25
-EXECUTOR_FINGERPRINT = "3dac75be2ed8e812c995319967ddb965c2c14f80892c25d4573a50c5614bc297"
+EXECUTOR_VERSION = 26
+EXECUTOR_FINGERPRINT = "73fcee89e08095a013f88a79e6d43b894de9944f92e7e65982068edd8c06fbb6"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -756,10 +756,13 @@ def cmd_flow(args):
 def cmd_flow_push(args):
     """`relay flow-push KEY FILE|-` PUTs a document; `-` reads it from stdin.
 
-    A 409 surfaces the server's "re-pull" message through api()'s die()."""
+    A 409 surfaces the server's "re-pull" message through api()'s die().
+
+    The pre-push GET exists only to render an honest verdict — see format_flow_push."""
     doc = read_flow_document(args.file)
+    before = api("GET", f"/api/flows/{args.key}", soft_404=True)
     returned = api("PUT", f"/api/flows/{args.key}", doc)["data"]
-    emit(args, returned, lambda: print(format_flow_push(args.key, doc, returned)))
+    emit(args, returned, lambda: print(format_flow_push(args.key, before and before["data"], returned)))
 
 
 def read_flow_document(path):
@@ -818,10 +821,16 @@ def format_flow_list(docs):
     return "\n".join(lines)
 
 
-def format_flow_push(key, pushed, returned):
-    """An unchanged push bumps nothing — say so rather than implying a write happened."""
+def format_flow_push(key, before, returned):
+    """An unchanged push bumps nothing — say so rather than implying a write happened.
+
+    `before` is the server's pre-push document (None if the flow did not exist). The verdict
+    compares it to `returned` WHOLE, not just `version`: by design an `enabled` flip or a
+    trigger rewire writes without bumping the version — the server bumps only on a definition
+    change — so a version-only check announced "unchanged" for a push that had just armed a
+    flow (RLY-241). Both sides are server-rendered by the same encoder, so equality is exact."""
     version = returned.get("version")
-    if pushed.get("version") is not None and pushed["version"] == version:
+    if before == returned:
         return f"{key}: unchanged (v{version})"
     return f"{key}: saved as v{version}"
 

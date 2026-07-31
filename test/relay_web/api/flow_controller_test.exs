@@ -200,6 +200,30 @@ defmodule RelayWeb.Api.FlowControllerTest do
       assert Flows.get_flow!(board, "spec").version == 1
     end
 
+    # RLY-241: `Schemas.Flow` casts nodes/edges as embeds, so `traverse_errors/2` hands the
+    # renderer a LIST OF MAPS for those keys, not a list of strings. The shared renderer used to
+    # `Enum.join` that and raise, turning every node-level graph error into a 500.
+    test "a node-level graph error is a 422 invalid carrying the node's message", %{conn: conn, board: board} do
+      doc = pull(conn, "spec")
+      zeroed = update_in(doc, ["nodes"], fn [node | rest] -> [Map.put(node, "max_retries", 0) | rest] end)
+
+      body = conn |> push_doc("spec", zeroed) |> json_response(422)
+
+      assert body["error"]["code"] == "invalid"
+      assert body["error"]["message"] =~ "must be greater than 0"
+      assert Flows.get_flow!(board, "spec").version == 1
+    end
+
+    test "an edge-level graph error is a 422 invalid carrying the edge's message", %{conn: conn} do
+      doc = pull(conn, "spec")
+      looped = update_in(doc, ["edges"], fn [edge | rest] -> [Map.put(edge, "max_loops", 0) | rest] end)
+
+      body = conn |> push_doc("spec", looped) |> json_response(422)
+
+      assert body["error"]["code"] == "invalid"
+      assert body["error"]["message"] =~ "must be greater than 0"
+    end
+
     test "arming a flow whose pulls_from stage already has an enabled flow is a 422, and rolls the write back",
          %{conn: conn, board: board} do
       spec = Flows.get_flow!(board, "spec")

@@ -3615,7 +3615,10 @@ class FlowPullPushTest(unittest.TestCase):
         self.addCleanup(os.unlink, path)
 
         relay.cmd_flow_push(self._args(["flow-push", "code", path]))
-        self.assertEqual(self.sent, [("PUT", "/api/flows/code", self.DOC)])
+        self.assertEqual(
+            self.sent,
+            [("GET", "/api/flows/code", None), ("PUT", "/api/flows/code", self.DOC)],
+        )
 
     def test_flow_push_reads_the_document_from_stdin_for_dash(self):
         real_stdin = sys.stdin
@@ -3623,7 +3626,10 @@ class FlowPullPushTest(unittest.TestCase):
         sys.stdin = io.StringIO(json.dumps(self.DOC))
 
         relay.cmd_flow_push(self._args(["flow-push", "code", "-"]))
-        self.assertEqual(self.sent, [("PUT", "/api/flows/code", self.DOC)])
+        self.assertEqual(
+            self.sent,
+            [("GET", "/api/flows/code", None), ("PUT", "/api/flows/code", self.DOC)],
+        )
 
     def test_flow_push_dies_on_a_file_that_is_not_json(self):
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
@@ -3641,13 +3647,26 @@ class FlowPullPushTest(unittest.TestCase):
         self.assertIn("v7", out)
         self.assertNotIn("unchanged", out)
 
-    def test_push_render_reports_unchanged_when_the_version_did_not_move(self):
+    def test_push_render_reports_unchanged_only_when_the_whole_document_round_tripped(self):
         out = relay.format_flow_push("code", self.DOC, self.DOC)
         self.assertIn("unchanged", out)
 
-    def test_push_render_reports_the_version_when_the_document_carried_none(self):
-        pushed = {k: v for k, v in self.DOC.items() if k != "version"}
-        self.assertIn("v7", relay.format_flow_push("code", pushed, self.DOC))
+    # The server bumps the version only on a DEFINITION change, so an enabled flip (or a
+    # trigger rewire) writes without moving it. A version-only verdict called that push
+    # "unchanged" while the flow was in fact now armed and dispatching (RLY-241).
+    def test_push_render_reports_saved_for_an_enabled_flip_that_did_not_bump_the_version(self):
+        out = relay.format_flow_push("code", dict(self.DOC, enabled=False), self.DOC)
+        self.assertIn("saved as v7", out)
+        self.assertNotIn("unchanged", out)
+
+    def test_push_render_reports_saved_for_a_trigger_rewire_that_did_not_bump_the_version(self):
+        before = dict(self.DOC, trigger={"from": "Spec:Done", "stage": "Code", "done": "Review"})
+        out = relay.format_flow_push("code", before, self.DOC)
+        self.assertIn("saved as v7", out)
+        self.assertNotIn("unchanged", out)
+
+    def test_push_render_reports_saved_when_the_flow_did_not_exist_before(self):
+        self.assertIn("saved as v7", relay.format_flow_push("code", None, self.DOC))
 
     # ---- wiring ----
 

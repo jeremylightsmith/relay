@@ -590,4 +590,5 @@ locally will disagree with the server.
 `lib/relay_web/controllers/api/board_controller.ex`,
 `lib/relay_web/controllers/api/run_controller.ex`,
 `lib/relay_web/controllers/api/executor_controller.ex`,
-`lib/relay_web/controllers/api/flow_metrics_controller.ex`.*
+`lib/relay_web/controllers/api/flow_metrics_controller.ex`,
+`lib/relay_web/controllers/api/flow_controller.ex`.*

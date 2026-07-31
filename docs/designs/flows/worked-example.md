@@ -33,9 +33,9 @@ UNCHANGED THROUGHOUT: .claude/skills/* (brainstorm, TDD, debugging, …),
 
 | Stage | What it does | Today's configuration | Tomorrow's configuration |
 | --- | --- | --- | --- |
-| **Spec** | Reads the card, asks the human clarifying questions (needs-input stepper), writes the spec + acceptance criteria back to the card | **Cut over (RLY-136):** no `relay_config.json` pipeline entry — runs as the enabled `spec` [Flow row ↓](#spec-stage) (22 lines) on the engine + [`brainstorm` skill](../../../.claude/skills/brainstorm/SKILL.md) | [Flow row ↓](#spec-stage) (22 lines) |
-| **Plan** | Turns the approved spec into the implementation plan stored on the card | **Cut over (RLY-138):** no `relay_config.json` pipeline entry — runs as the enabled `plan` [Flow row ↓](#plan-stage) (18 lines) on the engine + [`write-plan` command](../../../.claude/commands/write-plan.md) | [Flow row ↓](#plan-stage) (18 lines) |
-| **Code** | Implements the plan task-by-task with TDD + two reviews each, then precommit, whole-branch review, smoke, acceptance, and PR + squash-merge | **Cut over (RLY-139):** no `relay_config.json` pipeline entry — runs as the enabled `code` [Flow row ↓](#code-stage) (`code.json`, 13 nodes / 21 edges) on the engine + 7 [`.claude/agents/`](../../../.claude/agents/) files named by node `agent` | [Flow row ↓](#code-stage) (`code.json`) |
+| **Spec** | Reads the card, asks the human clarifying questions (needs-input stepper), writes the spec + acceptance criteria back to the card | **Cut over (RLY-136):** no `relay_config.json` pipeline entry — runs as the enabled `spec` [Flow row ↓](#spec-stage) (13 lines) on the engine + [`brainstorm` skill](../../../.claude/skills/brainstorm/SKILL.md) | [Flow row ↓](#spec-stage) (13 lines) |
+| **Plan** | Turns the approved spec into the implementation plan stored on the card | **Cut over (RLY-138):** no `relay_config.json` pipeline entry — runs as the enabled `plan` [Flow row ↓](#plan-stage) (13 lines) on the engine + [`write-plan` command](../../../.claude/commands/write-plan.md) | [Flow row ↓](#plan-stage) (13 lines) |
+| **Code** | Implements the plan task-by-task with TDD + two reviews each, then precommit, whole-branch review, smoke, acceptance, and PR + squash-merge | **Cut over (RLY-139):** no `relay_config.json` pipeline entry — runs as the enabled `code` [Flow row ↓](#code-stage) (`code.json`, 18 nodes / 38 edges) on the engine + 7 [`.claude/agents/`](../../../.claude/agents/) files named by node `agent` | [Flow row ↓](#code-stage) (`code.json`) |
 
 ### Spec stage
 
@@ -152,18 +152,18 @@ node at a `.claude/agents/<name>.md` definition, which supplies the system promp
 [`rebaser`](../../../.claude/agents/rebaser.md) (39) stays in the repo but no Code node names
 it yet.
 
-**Tomorrow** — the `Flow` row is [`code.json`](code.json) **in its entirety** (13 nodes,
-21 edges, models + agents per node) plus the record wrapper:
+**Tomorrow** — the `Flow` row is [`code.json`](code.json) **in its entirety** (18 nodes,
+38 edges, models + agents per node) plus the record wrapper:
 
 ```jsonc
 { "key": "code", "board_id": 1, "enabled": false, "origin": "default", "version": 1,
   "isolation": "exclusive",
   "trigger": { "from": "Plan:Done", "stage": "Code", "done": "Review" },
-  "nodes": { /* the 13 nodes of code.json — branch, implement (foreach: "card.sub_tasks"),
+  "nodes": { /* the 18 nodes of code.json — branch, implement (foreach: "card.sub_tasks"),
                 spec_review, quality_review, precommit, final_review, final_fix,
                 smoke, smoke_fix, acceptance, acceptance_fix, post, merge. The next_task
                 grep-gate is GONE — "which task is next" is engine-derived (RLY-139). */ },
-  "edges": [ /* its 21 outcome-routed edges: quality_review carries TWO guarded
+  "edges": [ /* its 38 outcome-routed edges: quality_review carries TWO guarded
                 succeeded edges on the same outcome — { to: implement, when:
                 foreach_remaining } and { to: precommit, when: foreach_exhausted } —
                 which is what the next_task gate was faking; fix loops bounded by

@@ -86,6 +86,18 @@ defmodule Relay.Flows.DocumentTest do
       assert Enum.all?(attrs.edges, &(Enum.sort(Map.keys(&1)) == Enum.sort(Flow.Edge.fields())))
     end
 
+    # A hand-edited document is this card's headline workflow, and JSON has two ways to say
+    # "nothing here". An explicit null that stored nil instead of the schema's `false` would
+    # make `customized?/1` read nil != false and flag the flow as customized forever.
+    test "is dense: an explicit null fills the schema default too, not just an absent key" do
+      nulled = put_in(@minimal, ["nodes"], [%{"key" => "a", "type" => "agent", "expects_commits" => nil}])
+
+      {:ok, attrs} = Document.decode(nulled)
+
+      [node] = attrs.nodes
+      assert node.expects_commits == false
+    end
+
     test "converts enums to atoms via the schemas' source functions" do
       {:ok, attrs} = Document.decode(@minimal)
       assert attrs.isolation == :shared_clean

@@ -10,6 +10,7 @@ defmodule RelayWeb.FlowEditorLive do
 
   alias Relay.Boards
   alias Relay.Flows
+  alias RelayWeb.ChangesetErrors
   alias RelayWeb.FlowEditorComponents
   alias RelayWeb.FlowGraphComponents
   alias RelayWeb.FlowLayout
@@ -86,26 +87,8 @@ defmodule RelayWeb.FlowEditorLive do
         isolation: working.isolation
       })
 
-    assign(socket, :errors, changeset_error_messages(changeset))
+    assign(socket, :errors, ChangesetErrors.leaf_messages(changeset))
   end
-
-  # Flattens top-level AND nested (cast_embed) errors into plain message strings.
-  # `Ecto.Changeset.traverse_errors/2` alone isn't enough because it returns a
-  # nested %{field => [msg | %{...}]} shape — this walks it down to the leaves.
-  defp changeset_error_messages(changeset) do
-    changeset
-    |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->
-      Enum.reduce(opts, msg, fn {key, value}, acc -> String.replace(acc, "%{#{key}}", to_string(value)) end)
-    end)
-    |> flatten_error_messages()
-    |> Enum.uniq()
-  end
-
-  defp flatten_error_messages(errors) when is_map(errors),
-    do: Enum.flat_map(errors, fn {_f, v} -> flatten_error_messages(v) end)
-
-  defp flatten_error_messages(errors) when is_list(errors), do: Enum.flat_map(errors, &flatten_error_messages/1)
-  defp flatten_error_messages(msg) when is_binary(msg), do: [msg]
 
   defp dirty?(flow, working) do
     Enum.map(flow.nodes, &Map.take(&1, Flow.Node.fields())) != working.nodes or
@@ -335,7 +318,7 @@ defmodule RelayWeb.FlowEditorLive do
         socket |> put_flash(:info, "Saved as v#{flow.version}.") |> load_flow(flow)
 
       {:error, changeset} ->
-        errors = changeset_error_messages(changeset)
+        errors = ChangesetErrors.leaf_messages(changeset)
         assign(socket, :errors, Enum.uniq(socket.assigns.errors ++ errors))
     end
   end

@@ -3,6 +3,7 @@ defmodule RelayWeb.Api.FallbackController do
   use RelayWeb, :controller
 
   alias RelayWeb.Api.ErrorJSON
+  alias RelayWeb.ChangesetErrors
 
   def call(conn, {:error, :not_found}) do
     conn
@@ -158,13 +159,7 @@ defmodule RelayWeb.Api.FallbackController do
     |> render(:error, code: "invalid_executor", message: "executor must be an object")
   end
 
-  defp changeset_message(changeset) do
-    changeset
-    |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->
-      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
-        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-      end)
-    end)
-    |> Enum.map_join("; ", fn {field, msgs} -> "#{field} #{Enum.join(msgs, ", ")}" end)
-  end
+  # Embed errors nest, so this cannot join `traverse_errors/2`'s output directly — see
+  # RelayWeb.ChangesetErrors, which owns that walk for both this and the flow editor.
+  defp changeset_message(changeset), do: changeset |> ChangesetErrors.messages() |> Enum.join("; ")
 end
