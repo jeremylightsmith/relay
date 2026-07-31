@@ -128,9 +128,22 @@ never 403s):
   rollup for a flow over a `?window=7d|30d|all` window (default `30d`): a `summary` stat band and
   a `nodes` array (`runs`, `duration_p50/p95`, `cost_p50/p95` — `null` until executors report
   spend — `attempts_mean`, `verdict_split`, `loop_laps`). Read-only, board-scoped.
+- `GET /api/flows` (`RelayWeb.Api.FlowController.index/2`) — every flow on the board, fully
+  serialized in stable `key` order. One round trip is all `relay doctor` (RLY-240) needs.
+- `GET /api/flows/:key` (`RelayWeb.Api.FlowController.show/2`) — one flow as the canonical
+  `Relay.Flows.Document` (RLY-241): `key`, `version`, `enabled`, `isolation`, the trigger as
+  stage **names** (portable across boards), and the ordered `nodes`/`edges` arrays. Sparse —
+  nil fields and schema defaults are omitted. 404s an unknown key.
+- `PUT /api/flows/:key` (`RelayWeb.Api.FlowController.update/2`) — upsert a flow from a document
+  via `Relay.Flows.upsert_from_document/3`, in one transaction: `Schemas.Flow.changeset/2`'s
+  graph validation, `save_definition/2`'s version-bump semantics (an unchanged push bumps
+  nothing — pull → push is a genuine no-op), and `enable_flow/1`/`disable_flow/1`'s arming rules.
+  `201` on create, `200` on update. Refusals: `422 invalid_document` / `key_mismatch` /
+  `unknown_stages` / `invalid`, and `409 stale_version` when the document carries a `version`
+  that no longer matches (absent `version` = last-write-wins).
 - CLI: `bin/relay why REF` / `bin/relay runs REF` / `bin/relay executors` /
-  `bin/relay version` / `bin/relay flow-stats KEY`, documented in
-  [`../../relay.md`](../../relay.md).
+  `bin/relay version` / `bin/relay flow-stats KEY` / `bin/relay flow [KEY]` /
+  `bin/relay flow-push KEY FILE`, documented in [`../../relay.md`](../../relay.md).
 
 ## Bootstrap surface (RLY-208)
 

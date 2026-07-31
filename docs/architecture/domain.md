@@ -42,6 +42,16 @@ sharing behavior.
   `mid_run_count/1` returns the real count of cards currently mid-run on a flow — runs whose
   status is active (`Schemas.Run.active_statuses/0`, i.e. running or parked) — and feeds both
   the flow-editor save note and the delete-confirm warning, so that number is defined once.
+  **Serialization (RLY-241):** `Relay.Flows.Document` is the one serializer for a flow's canonical
+  JSON document — `encode/1` (sparse: nil and schema-default fields omitted) and `decode/1`
+  (dense: every node/edge field present, filled from the schema default, so `customized?/1`'s
+  field-by-field comparison against the embedded structs stays exact). `decode ∘ encode` is a
+  fixed point, which is what makes pull → push unchanged a no-op. Triggers serialize as stage
+  **names**, not ids, so a document is portable across boards.
+  `upsert_from_document/3` is the write path behind `PUT /api/flows/:key`: decode → key check →
+  resolve trigger names → optional compare-and-swap on `version` → `create_flow/2` or
+  `save_definition/2` → reconcile `enabled` through `enable_flow/1`/`disable_flow/1`, all in one
+  transaction so a push never half-applies.
   The Flows settings tab (RLY-142) is backed by `customized?/1`
   (normalized nodes/edges/isolation comparison against the library — trigger wiring never
   counts), `default_key?/1`, `duplicate_flow/1` (disabled `<key>-copy` clone),

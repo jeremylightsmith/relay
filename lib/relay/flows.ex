@@ -18,6 +18,7 @@ defmodule Relay.Flows do
 
   alias Ecto.Changeset
   alias Relay.Flows.DefaultLibrary
+  alias Relay.Flows.Document
   alias Relay.Repo
   alias Schemas.Board
   alias Schemas.Flow
@@ -117,17 +118,20 @@ defmodule Relay.Flows do
   `{:ok, flow} | {:error, changeset}`.
   """
   def create_flow(%Board{} = board, attrs) do
+    Repo.transaction(fn -> insert_flow!(board, attrs) end)
+  end
+
+  # Non-transactional core, shared with upsert_from_document/3 so a push runs in ONE transaction.
+  defp insert_flow!(%Board{} = board, attrs) do
     changeset =
       %Flow{board_id: board.id}
       |> Flow.changeset(attrs)
       |> validate_trigger_stages(board.id)
 
-    Repo.transaction(fn ->
-      case Repo.insert(changeset) do
-        {:ok, flow} -> snapshot!(flow)
-        {:error, cs} -> Repo.rollback(cs)
-      end
-    end)
+    case Repo.insert(changeset) do
+      {:ok, flow} -> snapshot!(flow)
+      {:error, cs} -> Repo.rollback(cs)
+    end
   end
 
   @doc """
@@ -275,6 +279,125 @@ defmodule Relay.Flows do
     fn -> save_and_maybe_bump(flow, attrs) end
     |> Repo.transaction()
     |> preload_saved()
+  end
+
+  @doc """
+  Creates or updates `key`'s flow on `board` from a canonical `Relay.Flows.Document` (RLY-241) —
+  the `PUT /api/flows/:key` write path, and the reconcile engine's.
+
+  One transaction, in order: decode → key check → resolve the trigger stage NAMES against this
+  board → optional compare-and-swap on `version` → write → reconcile `enabled`. Any step failing
+  rolls the whole thing back; a push must never half-apply.
+
+  Graph validation is not reimplemented: the write routes through `create_flow/2`'s and
+  `save_definition/2`'s cores, so `Schemas.Flow.changeset/2` (a start node, edge endpoints, unique
+  routing, the foreach-guard rule) is enforced exactly as the Flow Editor enforces it — and
+  `save_definition/2`'s "bump and snapshot only when the definition changed" is what makes
+  pull → push unchanged a genuine no-op.
+
+  `enabled` absent from the document leaves the flow's current state untouched (a new flow is
+  created disabled, as `create_flow/2` guarantees); a document that doesn't mention `enabled`
+  cannot silently disarm a live flow. `version` absent means last-write-wins; `version` present
+  and stale is `{:error, :stale_version}` with no write. A `version` on a flow that does not exist
+  is ignored — pull → someone deletes → push recreates at v1 is desirable, not a conflict.
+
+  Returns `{:ok, :created | :updated, flow}` with the trigger stages preloaded, or one of
+  `{:error, {:invalid_document, reason}}`, `{:error, :key_mismatch}`,
+  `{:error, {:unknown_stages, names}}`, `{:error, :stale_version}`,
+  `{:error, {:invalid, changeset}}`.
+  """
+  def upsert_from_document(%Board{} = board, key, doc) when is_binary(key) and is_map(doc) do
+    with {:ok, attrs} <- decode_document(doc),
+         :ok <- check_document_key(attrs, key) do
+      result = Repo.transaction(fn -> upsert_document!(board, key, attrs) end)
+
+      case result do
+        {:ok, {tag, flow}} -> {:ok, tag, flow}
+        {:error, %Changeset{} = cs} -> {:error, {:invalid, cs}}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  def upsert_from_document(%Board{}, key, _doc) when is_binary(key),
+    do: {:error, {:invalid_document, "document must be a JSON object"}}
+
+  defp decode_document(doc) do
+    case Document.decode(doc) do
+      {:ok, attrs} -> {:ok, attrs}
+      {:error, reason} -> {:error, {:invalid_document, reason}}
+    end
+  end
+
+  # The path is the resource; a silent rename via PUT is a footgun for the reconcile engine.
+  defp check_document_key(%{key: doc_key}, key) when doc_key != key, do: {:error, :key_mismatch}
+  defp check_document_key(_attrs, _key), do: :ok
+
+  defp upsert_document!(board, key, attrs) do
+    existing = get_flow(board, key)
+    check_document_version!(existing, Map.get(attrs, :version))
+
+    definition =
+      attrs
+      |> Map.take([:isolation, :nodes, :edges])
+      |> Map.put(:key, key)
+      |> Map.merge(resolve_trigger!(board, Map.get(attrs, :trigger)))
+
+    {tag, flow} = write_document!(board, existing, definition)
+    reconcile_enabled!(flow, Map.get(attrs, :enabled))
+
+    {tag, get_flow_with_stages(board, key)}
+  end
+
+  defp check_document_version!(nil, _version), do: :ok
+  defp check_document_version!(_flow, nil), do: :ok
+  defp check_document_version!(%Flow{version: version}, version), do: :ok
+  defp check_document_version!(_flow, _stale), do: Repo.rollback(:stale_version)
+
+  # Names, not ids — that is what makes a document portable across boards. An explicit null is
+  # allowed and resolves to nil (the flow is deliberately un-armed); a trigger absent from the
+  # document leaves the flow's current wiring alone.
+  defp resolve_trigger!(_board, nil), do: %{}
+
+  defp resolve_trigger!(%Board{id: board_id}, trigger) do
+    ids = Map.new(Repo.all(from s in Stage, where: s.board_id == ^board_id, select: {s.name, s.id}))
+
+    pairs = [
+      {:pulls_from_stage_id, trigger.pulls_from},
+      {:works_in_stage_id, trigger.works_in},
+      {:lands_on_stage_id, trigger.lands_on}
+    ]
+
+    missing = Enum.uniq(for {_field, name} <- pairs, is_binary(name), not is_map_key(ids, name), do: name)
+
+    if missing == [] do
+      Map.new(pairs, fn {field, name} -> {field, name && Map.get(ids, name)} end)
+    else
+      Repo.rollback({:unknown_stages, missing})
+    end
+  end
+
+  defp write_document!(board, nil, definition), do: {:created, insert_flow!(board, definition)}
+
+  defp write_document!(_board, %Flow{} = flow, definition), do: {:updated, save_and_maybe_bump(flow, definition)}
+
+  # Route through enable_flow/1 / disable_flow/1 so the existing rules apply — trigger
+  # completeness, and the one-enabled-flow-per-pulls_from-stage unique index.
+  defp reconcile_enabled!(_flow, nil), do: :ok
+  defp reconcile_enabled!(%Flow{enabled: enabled}, enabled), do: :ok
+
+  defp reconcile_enabled!(flow, true) do
+    case enable_flow(flow) do
+      {:ok, _flow} -> :ok
+      {:error, cs} -> Repo.rollback(cs)
+    end
+  end
+
+  defp reconcile_enabled!(flow, false) do
+    case disable_flow(flow) do
+      {:ok, _flow} -> :ok
+      {:error, cs} -> Repo.rollback(cs)
+    end
   end
 
   @doc "The immutable snapshot for `flow` at version `n`, or nil."
