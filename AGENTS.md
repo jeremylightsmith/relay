@@ -40,6 +40,12 @@ use them.
   "Fix this bug / a test fails" → `systematic-debugging` first. Implementing a feature → the
   `test-driven-development` skill before any code. About to claim something works/passes →
   `verification-before-completion`.
+- **Editing the factory triggers `/relay-doctor`.** After you change a flow (or push one with
+  `./bin/relay flow-push`), or add, rename, or remove a `.claude/agents/*.md`,
+  `.claude/skills/*/SKILL.md`, or `.claude/commands/*.md`, run `/relay-doctor` by hand in an
+  interactive session — it asks questions, so never invoke it from a flow node. It checks
+  that every flow node still resolves to a real step in this repo and walks you through each
+  fix. A flow that names an agent this repo no longer has fails at run time, not at edit time.
 - **These thoughts are rationalizations — stop and check for a skill instead:** "this is too
   simple," "let me just explore first," "I'll check the files quickly," "the skill is
   overkill," "I already know what that means," "I'll do this one thing first."
