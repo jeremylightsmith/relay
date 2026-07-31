@@ -18,7 +18,7 @@ defmodule Relay.Application do
         {Phoenix.PubSub, name: Relay.PubSub},
         RelayWeb.ApiLog,
         Relay.BoardWatch,
-        # RLY-133: server-side dispatch. Capacity store (empty until W9), the per-board
+        # RLY-133: server-side dispatch. Capacity store (fed by the executor heartbeat), the per-board
         # scheduler registry + dynamic supervisor, and a boot task that starts a scheduler per
         # board only when :runs_auto_start is on (off in test, so boot never queries the DB).
         Relay.Runs.Capacity,

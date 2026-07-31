@@ -8,7 +8,8 @@ shows at a glance what's *on you*, what's *on an agent*, and what's *blocked*.
 A **stage** is a column of work with two orthogonal properties:
 
 - an **owner** — `human` or `ai` — which decides who holds a card while it sits there, and
-- a **category** — `unstarted`, `in progress`, or `complete` — so its meaning is unambiguous.
+- a **category** — `unstarted`, `planning`, `in_progress`, or `complete` — so its meaning is
+  unambiguous.
 
 A stage can also carry a **WIP limit** and act as an **approval gate**.
 

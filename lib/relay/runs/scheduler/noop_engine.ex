@@ -2,8 +2,8 @@ defmodule Relay.Runs.Scheduler.NoopEngine do
   @moduledoc """
   The default `Relay.Runs.Scheduler.Engine` binding until a real adapter onto
   `Relay.Runs`'s run-execution engine is wired up. Reports no active runs and
-  swallows dispatches. In production the capacity store is empty until W9, so
-  the scheduler stays dormant and these write callbacks are never invoked
+  swallows dispatches. With no executor connected the capacity store is empty,
+  so the scheduler stays dormant and these write callbacks are never invoked
   before a real engine replaces this via the `:runs_engine` config.
   """
 

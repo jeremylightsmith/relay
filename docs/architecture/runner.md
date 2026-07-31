@@ -67,6 +67,11 @@ looks like the leftward flow is being starved. Pinned by
 `test/relay/runs/scheduler_test.exs` and exercised live over the REST API by
 `test/relay_web/api/plan_flow_e2e_test.exs` / `test/relay/runs/code_flow_e2e_test.exs`.
 
+Because that capacity is global **by executor** rather than board-scoped, a stale or contended
+view of it can over-assign — two boards' schedulers can both count the same free slot. The
+executor's own live capacity is the final backstop, so an over-assigned job waits there rather
+than double-booking (YAGNI: no multi-board reservation yet).
+
 ## Side channels
 
 - **Log mirror**: every feed line is queued to a background `LogForwarder` thread that

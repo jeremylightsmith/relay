@@ -25,7 +25,7 @@ exits non-zero.
 | `bin/relay create "Fix login" --stage Backlog` | Create a card (optional `--stage`/`--description`/`--tag`) |
 | `bin/relay comment RLY-12 "…"` | Post a comment (as Relay AI) |
 | `bin/relay move RLY-12 Code` | Move to a stage by name |
-| `bin/relay status RLY-12 working` | Set status (`ready`, `working`, `needs_input`, `in_review`) |
+| `bin/relay status RLY-12 working` | Set status (any card status, e.g. `working` — see [Statuses & outcomes](/docs/statuses-and-outcomes); it snaps to one the stage allows) |
 | `bin/relay describe RLY-12 @spec.md` | Set the card's description (the spec) |
 | `bin/relay criteria RLY-12 @criteria.md` | Set the card's acceptance criteria (numbered; read at the review gate) |
 | `bin/relay plan RLY-12 @plan.md` | Set the card's plan |
