@@ -43,7 +43,6 @@ defmodule Relay.Runs.Listener do
   alias Schemas.Flow
   alias Schemas.NodeExecution
   alias Schemas.Run
-  alias Schemas.Stage
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
@@ -100,14 +99,19 @@ defmodule Relay.Runs.Listener do
 
   defp reconcile_card(card, nil), do: maybe_reenter_after_rejection(card)
 
-  # RLY-233: FIRST active-run rule. A card that has reached a terminal-type stage must not keep
-  # an active run — close it (freeing its executor slot) before any resume rule can re-dispatch
-  # it. Being first, it pre-empts the :needs_input/:claimed resume clauses in reconcile_active/2,
-  # so a parked run whose card was moved to Done is CANCELLED, not resumed (which would
-  # regenerate a zombie). With Part 1's atomic dispatch landed, the only "active run + terminal
-  # stage" states this can observe are genuine leaks — no grace window, no time threshold.
+  # RLY-233: FIRST active-run rule. A card that has genuinely reached a terminal-type stage must
+  # not keep an active run — close it (freeing its executor slot) before any resume rule can
+  # re-dispatch it. Being first, it pre-empts the :needs_input/:claimed resume clauses in
+  # reconcile_active/2, so a parked run whose card was moved to Done is CANCELLED, not resumed
+  # (which would regenerate a zombie).
+  #
+  # The leak test is a SINGLE-SNAPSHOT query (Runs.leaked?/1), not this handler's separately-read
+  # card stage. Atomic dispatch guarantees no committed state pairs an active run with a card at a
+  # :done-type pull stage, but reading the card (from the triggering event) and the active run in
+  # two queries can straddle a concurrent Spec:Done → Plan dispatch — seeing the stale done stage
+  # alongside the fresh plan run and cancelling it (RLY-233 / RE239). One snapshot never sees that.
   defp reconcile_card(card, %Run{} = run) do
-    if terminal_stage?(card) do
+    if Runs.leaked?(run) do
       _ = Runs.cancel_run(run)
       :ok
     else
@@ -145,15 +149,6 @@ defmodule Relay.Runs.Listener do
   # than crashing the reconciler — reconciliation self-heals on the next
   # event, so a no-op here is safe.
   defp reconcile_active(_card, %Run{}), do: :ok
-
-  # RLY-233: a card in a terminal-type stage (Stage.terminal_types/0 — the single source) has
-  # left every flow's scope, so any run still active on it is a leak.
-  defp terminal_stage?(%Card{stage_id: stage_id}) do
-    case Repo.get(Stage, stage_id) do
-      %Stage{type: type} -> type in Stage.terminal_types()
-      nil -> false
-    end
-  end
 
   defp last_session(%Run{} = run) do
     Repo.one(

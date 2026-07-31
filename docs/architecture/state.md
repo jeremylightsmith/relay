@@ -61,7 +61,11 @@ anything the event path missed. A legitimately completed run is already `:done` 
 moves off the stage, so it is never selected by either path and never relabelled. Run dispatch
 (`Relay.Runs.start_run/3`) moves the card into the flow's work lane and inserts the run row in one
 transaction, so no committed state ever has an active run sitting on a terminal-type stage except
-a genuine leak — no grace window or time threshold is needed to tell the two apart.
+a genuine leak. Both paths judge that leak from a single `run → card → stage` snapshot
+(`Relay.Runs.leaked?/1`, the reaper's join) — never a card stage read apart from the run — so a
+concurrent `Spec:Done → Plan` dispatch landing between two reads can't make the Listener mistake a
+freshly-dispatched run for a leak and cancel it (RLY-233 / RE239). No grace window or time
+threshold is needed to tell the two apart.
 
 The from → to edges of that machine — the source of truth is `Relay.Runs.Transitions`'
 `@transitions` data, and this table is generated from it by `mix relay.gen_state` (a stale block
