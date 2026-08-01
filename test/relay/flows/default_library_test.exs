@@ -153,7 +153,9 @@ defmodule Relay.Flows.DefaultLibraryTest do
 
       expected =
         "state=$(gh pr view {branch} --json state -q .state 2>/dev/null || echo \"\"); " <>
-          "[ \"$state\" = MERGED ] && exit 0; " <>
+          "if [ \"$state\" = MERGED ]; then " <>
+          "url=$(gh pr view {branch} --json url -q .url 2>/dev/null || echo \"\"); " <>
+          ~s([ -n "$url" ] && {relay} pr {ref} "$url"; exit 0; fi; ) <>
           "git push --force-with-lease origin HEAD:refs/heads/{branch} && " <>
           "url=$(gh pr view {branch} --json url -q .url 2>/dev/null || " <>
           "gh pr create --fill --head {branch} --base main) && " <>
@@ -165,7 +167,8 @@ defmodule Relay.Flows.DefaultLibraryTest do
       assert n.run =~ "--force-with-lease"
       assert n.run =~ "gh pr view {branch} --json url"
       assert n.run =~ "|| gh pr create"
-      assert n.run =~ "[ \"$state\" = MERGED ] && exit 0"
+      assert n.run =~ "if [ \"$state\" = MERGED ]; then"
+      assert n.run =~ "exit 0; fi;"
 
       # RLY-199 regression guard: no plain non-force push may remain.
       refute n.run =~ "git push origin HEAD"
@@ -219,5 +222,68 @@ defmodule Relay.Flows.DefaultLibraryTest do
       assert Relay.Runs.min_executor_version() >= 18
       assert Relay.Runs.executor_outdated?(%Schemas.Executor{version: 17})
     end
+  end
+
+  test "the shipped flows declare exactly the RE244 card contract" do
+    declared =
+      for flow <- DefaultLibrary.all(),
+          node <- flow.nodes,
+          node.reads != [] or node.writes != [],
+          into: %{},
+          do: {{flow.key, node.key}, {node.reads, node.writes}}
+
+    assert declared == %{
+             {"spec", "brainstorm"} => {[:description], [:spec, :acceptance_criteria]},
+             {"plan", "write_plan"} => {[:spec, :acceptance_criteria], [:plan]},
+             {"code", "branch"} => {[:plan], [:branch]},
+             {"code", "post"} => {[], [:ai_result]},
+             {"code", "merge"} => {[], [:pr_url]}
+           }
+  end
+
+  # RLY-165: sub_tasks are seeded server-side at Code-run start from card.plan, so no node
+  # may claim to write them — a declared write is ENFORCED and would fail write_plan.
+  test "no shipped node declares it writes sub_tasks" do
+    for flow <- DefaultLibrary.all(), node <- flow.nodes do
+      refute :sub_tasks in node.writes, "#{flow.key}/#{node.key} must not declare sub_tasks"
+    end
+  end
+
+  test "the branch node records the branch on the card, last in the chain (RE244 §5)" do
+    flow = Enum.find(DefaultLibrary.all(), &(&1.key == "code"))
+    branch = Enum.find(flow.nodes, &(&1.key == "branch"))
+
+    # Last deliberately: if the plan is missing, the node fails and no branch is recorded.
+    assert String.ends_with?(branch.run, "&& {relay} branch {ref} {branch}")
+  end
+
+  # The node declares `writes: [pr_url]` and the guard demotes a `succeeded` that left it
+  # blank. `merge` has no `failed -> needs_input` edge, so a blank write bounces
+  # merge -> resync -> reverify -> merge until the loop budget is spent and the run fails
+  # terminally. The already-MERGED fast path must therefore record the URL too: a PR merged
+  # out of band (`/finish`, or a human merging in the GitHub UI while the run is parked)
+  # leaves `pr_url` blank, and this node's happy path is the ONLY writer of that field.
+  test "the merge node records pr_url on its already-MERGED fast path too (RE244 §5)" do
+    flow = Enum.find(DefaultLibrary.all(), &(&1.key == "code"))
+    merge = Enum.find(flow.nodes, &(&1.key == "merge"))
+
+    assert :pr_url in merge.writes
+
+    [fast_path, _rest] = String.split(merge.run, "fi;", parts: 2)
+
+    assert fast_path =~ "{relay} pr {ref} \"$url\"",
+           "the MERGED branch must record pr_url before it exits, or the guard fails the run"
+
+    assert fast_path =~ "exit 0",
+           "the MERGED branch must still short-circuit rather than re-push and re-merge"
+  end
+
+  test "the post node records the structured ai_result, not just a comment (RE244 §5)" do
+    flow = Enum.find(DefaultLibrary.all(), &(&1.key == "code"))
+    post = Enum.find(flow.nodes, &(&1.key == "post"))
+
+    assert post.run =~ "{relay} result {ref}"
+    # `bin/relay result` does json.loads(text) — the argument must be a JSON object, not prose.
+    assert post.run =~ "JSON object"
   end
 end

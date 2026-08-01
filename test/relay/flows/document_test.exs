@@ -193,4 +193,55 @@ defmodule Relay.Flows.DocumentTest do
       end
     end
   end
+
+  describe "the card contract (RE244)" do
+    test "encodes as string lists and omits an empty contract" do
+      spec = encoded(library_board(), "spec")
+      brainstorm = Enum.find(spec["nodes"], &(&1["key"] == "brainstorm"))
+
+      assert brainstorm["reads"] == ["description"]
+      assert brainstorm["writes"] == ["spec", "acceptance_criteria"]
+
+      code = encoded(library_board(), "code")
+      precommit = Enum.find(code["nodes"], &(&1["key"] == "precommit"))
+      refute Map.has_key?(precommit, "reads")
+      refute Map.has_key?(precommit, "writes")
+    end
+
+    test "decodes field names to atoms through the card vocabulary" do
+      doc =
+        put_in(@minimal, ["nodes"], [
+          %{"key" => "a", "type" => "agent", "reads" => ["spec"], "writes" => ["plan"]}
+        ])
+
+      assert {:ok, attrs} = Document.decode(doc)
+      assert [%{reads: [:spec], writes: [:plan]}] = attrs.nodes
+    end
+
+    test "an unknown contract field is an error naming it, never a minted atom" do
+      doc =
+        put_in(@minimal, ["nodes"], [
+          %{"key" => "a", "type" => "agent", "writes" => ["nonsense_field"]}
+        ])
+
+      assert {:error, msg} = Document.decode(doc)
+      assert msg =~ "nonsense_field"
+    end
+
+    # Both "absent" and "explicit null" must land on the schema default, or a sparse library
+    # map compares unequal to the dense struct and customized?/1 flags the flow forever.
+    test "an absent or null contract decodes to []" do
+      absent = put_in(@minimal, ["nodes"], [%{"key" => "a", "type" => "agent"}])
+      assert {:ok, %{nodes: [%{reads: [], writes: []}]}} = Document.decode(absent)
+
+      nulled = put_in(@minimal, ["nodes"], [%{"key" => "a", "type" => "agent", "reads" => nil}])
+      assert {:ok, %{nodes: [%{reads: [], writes: []}]}} = Document.decode(nulled)
+    end
+
+    test "a non-list contract is rejected" do
+      doc = put_in(@minimal, ["nodes"], [%{"key" => "a", "type" => "agent", "reads" => "spec"}])
+      assert {:error, msg} = Document.decode(doc)
+      assert msg =~ "reads must be an array"
+    end
+  end
 end

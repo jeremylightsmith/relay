@@ -106,7 +106,11 @@ became comment-free JSON (RLY-241). Keyed by node.
 
 - **`branch`** — also materializes the card's `plan` into the per-ref `$RELAY_PLAN` path
   (what `/exec-plan` used to do before RLY-139) for `implement` to read. RLY-224 routed its
-  fetch through the single retrying `{relay} git-fetch` helper.
+  fetch through the single retrying `{relay} git-fetch` helper, and, last in the chain, records
+  the branch on the card with `{relay} branch {ref} {branch}` (RE244 §5 — last deliberately: if
+  the plan is missing, the node fails and no branch is recorded). `post` likewise records the
+  structured `ai_result` with `{relay} result {ref}` alongside its comment, and already has a
+  `failed → needs_input` edge, so a malformed result parks for a human rather than merging blind.
 - **`implement`** — execute-plan's per-task loop as a real engine `foreach`: each entry begins
   one iteration bound to one of the card's sub_tasks. The `next_task` grep-gate is **gone** —
   "which task is next" is derived server-side, and `{sub_task}` names it in the prompt.
@@ -140,6 +144,27 @@ became comment-free JSON (RLY-241). Keyed by node.
 - **`expects_commits`** — RLY-194 marks the four commit-producing nodes (`implement`,
   `final_fix`, `smoke_fix`, `acceptance_fix`): `RunServer` may override a reported `succeeded`
   back to `failed` when HEAD didn't move.
+- **`reads` / `writes`** — RE244's **card-field contract**: which card fields a node consumes and
+  which it must fill, drawn from `Schemas.Card.contract_fields/0`. Valid on **every** node type
+  (unlike `agent`/`expects_commits`) — `branch` is a `shell` node that writes `branch`. `writes`
+  is **enforced at run time**: a node reporting `succeeded` with a declared field still blank has
+  its outcome rewritten to `failed` before finalize
+  ([failures.md](../../architecture/failures.md) A10), then routes like any other failure.
+  `reads` is **advisory only** (doctor-only) — plenty of legitimate cards carry a title and no
+  description, so a read precondition would fail the Spec flow on every one of them. This is a
+  *separate* contract from `expects_commits`, which stays the commit guard's own field;
+  `commits` is not a legal contract value. What the shipped flows declare: `spec·brainstorm`
+  reads `description`, writes `spec` + `acceptance_criteria`; `plan·write_plan` reads `spec` +
+  `acceptance_criteria`, writes `plan`; `code·branch` reads `plan`, writes `branch`;
+  `code·post` writes `ai_result`; `code·merge` writes `pr_url`. Every other node declares
+  neither — its output is commits. `sub_tasks` is never declared: it is seeded server-side at
+  Code-run start from `card.plan` (RLY-165). Existing boards pick the contract up automatically:
+  `Relay.Flows.sync_defaults!/0` runs at deploy (`Relay.Release.migrate/0`) and re-syncs every
+  **library-managed** (`version == 1`) flow to the new default, so the contract and the run
+  strings that satisfy it land together in one transaction. A **hand-customized** flow
+  (`version > 1`) is skipped and keeps its undeclared nodes — `/relay-doctor`'s establish
+  dialogue is the upgrade path for those. An undeclared node never fires the guard, so a skipped
+  flow behaves exactly as it does today.
 
 ## Open modeling questions (settle in RLY-131/132)
 

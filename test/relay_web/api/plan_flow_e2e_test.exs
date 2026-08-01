@@ -52,6 +52,11 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
     flow
   end
 
+  # The scripted executor here runs no real skill, so a card that goes on to report
+  # `succeeded` must already carry the fields the shipped Spec/Plan flows declare they write
+  # (RE244) — the Spec e2e card carries `spec` + `acceptance_criteria`, the Plan e2e card
+  # carries `spec` + `acceptance_criteria` + `plan` — otherwise the guard rewrites that
+  # `succeeded` to `failed`.
   defp card_in(board, stage_name, attrs) do
     {:ok, card} = Cards.create_card(stage(board, stage_name), Map.take(attrs, [:title]))
     {:ok, card} = Cards.update_card(card, Map.delete(attrs, :title))
@@ -104,7 +109,14 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
     test "a card in Spec:Done is dispatched, claimed, reported, and lands on Plan:Done",
          %{conn: conn, board: board} do
       enable(board, "plan")
-      card = card_in(board, "Spec:Done", %{title: "Has a spec", spec: "# An approved spec\n\nDo the thing."})
+
+      card =
+        card_in(board, "Spec:Done", %{
+          title: "Has a spec",
+          spec: "# An approved spec\n\nDo the thing.",
+          plan: "A plan (pre-seeded, RE244)."
+        })
+
       ref = Cards.ref(board, card)
 
       announce(conn, board, %{shared_clean: 1, exclusive: 0})
@@ -177,8 +189,19 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
       enable(board, "spec")
       enable(board, "plan")
 
-      spec_card = card_in(board, "Next up", %{title: "Needs a spec"})
-      plan_card = card_in(board, "Spec:Done", %{title: "Needs a plan", spec: "# Approved"})
+      spec_card =
+        card_in(board, "Next up", %{
+          title: "Needs a spec",
+          spec: "# Spec (pre-seeded, RE244)",
+          acceptance_criteria: "1. It works."
+        })
+
+      plan_card =
+        card_in(board, "Spec:Done", %{
+          title: "Needs a plan",
+          spec: "# Approved",
+          plan: "A plan (pre-seeded, RE244)."
+        })
 
       announce(conn, board, %{shared_clean: 2, exclusive: 0})
       server = start_scheduler(board)

@@ -6,7 +6,9 @@
     {
       "key": "branch",
       "type": "shell",
-      "run": "{relay} git-fetch && git checkout -B {branch} origin/main && {relay} card {ref} --json | jq -r '.plan // empty' > \"$RELAY_PLAN\" && test -s \"$RELAY_PLAN\""
+      "run": "{relay} git-fetch && git checkout -B {branch} origin/main && {relay} card {ref} --json | jq -r '.plan // empty' > \"$RELAY_PLAN\" && test -s \"$RELAY_PLAN\" && {relay} branch {ref} {branch}",
+      "reads": ["plan"],
+      "writes": ["branch"]
     },
     {
       "key": "implement",
@@ -93,7 +95,8 @@
       "key": "post",
       "type": "agent",
       "model": "sonnet",
-      "run": "Post the acceptance checklist and smoke screenshots to card {ref} as one comment."
+      "run": "Post the acceptance checklist and smoke screenshots to card {ref} as one comment, then record the structured result with `{relay} result {ref} @<file>`, where the file holds a JSON object with `summary`, `changes`, `screens` and `deploy_url`.",
+      "writes": ["ai_result"]
     },
     {
       "key": "resync",
@@ -111,7 +114,8 @@
     {
       "key": "merge",
       "type": "shell",
-      "run": "state=$(gh pr view {branch} --json state -q .state 2>/dev/null || echo \"\"); [ \"$state\" = MERGED ] && exit 0; git push --force-with-lease origin HEAD:refs/heads/{branch} && url=$(gh pr view {branch} --json url -q .url 2>/dev/null || gh pr create --fill --head {branch} --base main) && {relay} pr {ref} \"$url\" && gh pr merge {branch} --squash"
+      "run": "state=$(gh pr view {branch} --json state -q .state 2>/dev/null || echo \"\"); if [ \"$state\" = MERGED ]; then url=$(gh pr view {branch} --json url -q .url 2>/dev/null || echo \"\"); [ -n \"$url\" ] && {relay} pr {ref} \"$url\"; exit 0; fi; git push --force-with-lease origin HEAD:refs/heads/{branch} && url=$(gh pr view {branch} --json url -q .url 2>/dev/null || gh pr create --fill --head {branch} --base main) && {relay} pr {ref} \"$url\" && gh pr merge {branch} --squash",
+      "writes": ["pr_url"]
     }
   ],
   "edges": [

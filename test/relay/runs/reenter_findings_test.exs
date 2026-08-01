@@ -19,7 +19,16 @@ defmodule Relay.Runs.ReenterFindingsTest do
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Re-entry Board"})
     {:ok, flow} = board |> Relay.Flows.get_flow!("spec") |> Relay.Flows.enable_flow()
     stage = Enum.find(board.stages, &(&1.name == "Next up"))
-    {:ok, card} = Relay.Cards.create_card(stage, %{title: "Carry the failure forward"})
+    # The scripted executor here runs no real skill, so the card arrives already carrying the
+    # fields the shipped spec flow declares it writes (RE244) — otherwise every `succeeded` is
+    # rewritten to `failed` by the missing-writes guard.
+    {:ok, card} =
+      Relay.Cards.create_card(stage, %{
+        title: "Carry the failure forward",
+        spec: "# Spec (pre-seeded — the spec flow's brainstorm declares it writes this, RE244)",
+        acceptance_criteria: "1. It works."
+      })
+
     %{board: board, flow: flow, card: card}
   end
 

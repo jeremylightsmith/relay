@@ -134,7 +134,10 @@ defmodule Relay.Runs.RunServer do
   # the checked-off id; the broadcast for that write still waits until after
   # commit, alongside every other card effect below.
   defp apply_outcome(run, flow, job, attrs, state) do
-    attrs = override_no_op_success(run, flow, job, attrs)
+    attrs =
+      run
+      |> override_no_op_success(flow, job, attrs)
+      |> then(&override_missing_writes(run, flow, job, &1))
 
     {:ok, {decision, execution, next, checked_off_id}} =
       Repo.transaction(fn ->
@@ -375,6 +378,48 @@ defmodule Relay.Runs.RunServer do
       "unchanged from before the node ran. A node that must produce commits and produced " <>
       "none has not done its work. (no_op_success: #{node_key})"
   end
+
+  # RE244: a node that declares `writes` (card fields it must fill) but reported :succeeded with
+  # one of them still blank did not do its work — the "empty spec reached Spec:Review" class.
+  # Same load-time seam and same rewrite-before-finalize contract as the commit guard above; the
+  # commit guard runs first, and because this clause matches only :succeeded, its more specific
+  # message survives. `reads` is deliberately NOT checked here: it is advisory / doctor-only,
+  # because plenty of legitimate cards carry a title and no description, and a read precondition
+  # would fail the Spec flow on every one of them — do not "complete the symmetry". Fail open
+  # when the node is not in the flow.
+  defp override_missing_writes(run, flow, job, %{outcome: :succeeded} = attrs) do
+    node = Enum.find(flow.nodes, &(&1.key == job.node_key))
+
+    case node && node.writes do
+      [_ | _] = declared -> demote_if_blank(run, job, declared, attrs)
+      _none -> attrs
+    end
+  end
+
+  defp override_missing_writes(_run, _flow, _job, attrs), do: attrs
+
+  defp demote_if_blank(run, job, declared, attrs) do
+    card = Card |> Repo.get!(run.card_id) |> Repo.preload(:sub_tasks)
+
+    case Relay.Cards.blank_contract_fields(card, declared) do
+      [] ->
+        attrs
+
+      blank ->
+        Map.merge(attrs, %{outcome: :failed, detail: missing_writes_detail(job.node_key, blank, declared)})
+    end
+  end
+
+  # Human sentence first, machine token in parens — the engine.ex convention.
+  defp missing_writes_detail(node_key, blank, declared) do
+    verb = if length(blank) == 1, do: "is", else: "are"
+
+    "`#{node_key}` reported success but the card's #{backticked(blank)} #{verb} still empty — " <>
+      "the node declares it writes #{backticked(declared)}. A node that must fill a card field " <>
+      "and left it blank has not done its work. (missing_writes: #{node_key})"
+  end
+
+  defp backticked(fields), do: Enum.map_join(fields, ", ", &"`#{&1}`")
 
   # The detail of the run's most recent outcome-bearing execution, but ONLY when it
   # failed: a re-entry after a park-on-question or a success carries no findings.

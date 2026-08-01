@@ -61,4 +61,27 @@ defmodule RelayWeb.FlowEditorExpectsCommitsTest do
     assert code.nodes |> Enum.filter(& &1.expects_commits) |> Enum.map(& &1.key) |> Enum.sort() ==
              ["acceptance_fix", "final_fix", "implement", "smoke_fix"]
   end
+
+  test "saving the Plan flow with an untouched definition preserves the card contract (RE244)", %{
+    conn: conn,
+    board: board
+  } do
+    contract = fn flow ->
+      node = Enum.find(flow.nodes, &(&1.key == "write_plan"))
+      {node.reads, node.writes}
+    end
+
+    before = contract.(Flows.get_flow!(board, "plan"))
+    assert before == {[:spec, :acceptance_criteria], [:plan]}
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/plan")
+
+    plan = Flows.get_flow!(board, "plan")
+    other = Enum.find(board.stages, &(&1.id != plan.pulls_from_stage_id))
+
+    view |> element("#trigger-pulls-from") |> render_change(%{"stage_id" => to_string(other.id)})
+    view |> element("#flow-editor-save") |> render_click()
+
+    assert contract.(Flows.get_flow!(board, "plan")) == before
+  end
 end

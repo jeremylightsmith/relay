@@ -142,4 +142,14 @@ defmodule Schemas.Card do
 
   @doc "The closed set of card statuses — the one definition; the docs generate from it (RE239)."
   def statuses, do: Ecto.Enum.values(__MODULE__, :status)
+
+  @doc """
+  The closed set of card fields a flow node may declare in its `reads`/`writes` contract
+  (RE244) — the ONE definition; `Schemas.Flow.Node`'s two contract enums are its only
+  consumers. `commits` is deliberately absent: "this node must produce commits" is
+  `Schemas.Flow.Node.expects_commits`, a separate field with a separate guard (RLY-194).
+  """
+  def contract_fields do
+    [:description, :spec, :acceptance_criteria, :plan, :sub_tasks, :branch, :pr_url, :ai_result]
+  end
 end

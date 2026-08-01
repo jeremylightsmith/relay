@@ -185,9 +185,13 @@ changes only *how* you deliver them, not *whether* you ask.
 
 - **On re-entry** (the card comes back after the human answers): the answers are in the card
   timeline — `./bin/relay card <ref>` shows your question comment and the human's answer
-  comment (also honor any CHANGES REQUESTED block). Read them, incorporate, then write the
-  spec to the card (`./bin/relay spec <ref> @<tmpfile>`) and stop — or send one more batched
-  `needs-input` only if something is genuinely still ambiguous.
+  comment (also honor any CHANGES REQUESTED block). Read them, incorporate, then write **both**
+  the spec and the acceptance criteria to the card (`./bin/relay spec <ref> @<tmpfile>` and
+  `./bin/relay criteria <ref> @<tmpfile>`, exactly as **After approval** describes) and stop —
+  or send one more batched `needs-input` only if something is genuinely still ambiguous.
+  Writing only the spec fails the node: the Spec flow declares
+  `"writes": ["spec", "acceptance_criteria"]`, and a declared field left blank rewrites this
+  node's `succeeded` to `failed`.
 
 - **Only write the spec directly, without asking, when there are genuinely no meaningful
   questions.** The board's `Spec:Review` lane is the approval gate for the spec itself.

@@ -19,7 +19,8 @@ defmodule Relay.Flows.Document do
   against a struct carrying `expects_commits: false` and flag every default flow as customized.
 
   Together these make **`decode ∘ encode` a fixed point**, so pull → push unchanged is a
-  genuine no-op.
+  genuine no-op. RE244's `reads`/`writes` follow the same law: they encode as string arrays, an
+  empty one is omitted, and an absent or null one decodes back to `[]`.
 
   String→atom conversion is driven by the schemas' own source functions
   (`Schemas.Flow.isolation_classes/0`, `Schemas.Flow.Node.types/0`,
@@ -27,6 +28,7 @@ defmodule Relay.Flows.Document do
   `String.to_atom/1`. An unrecognized value is an `{:error, message}`, not a new atom.
   """
 
+  alias Schemas.Card
   alias Schemas.Flow
   alias Schemas.NodeExecution
   alias Schemas.Stage
@@ -78,6 +80,7 @@ defmodule Relay.Flows.Document do
     |> Map.new(fn field -> {Atom.to_string(field), json_value(Map.get(item, field))} end)
   end
 
+  defp json_value(list) when is_list(list), do: Enum.map(list, &json_value/1)
   defp json_value(value) when is_atom(value) and not is_boolean(value), do: Atom.to_string(value)
   defp json_value(value), do: value
 
@@ -203,8 +206,13 @@ defmodule Relay.Flows.Document do
   defp node_attrs(node) do
     with :ok <- reject_unknown(Map.keys(node), field_names(Flow.Node.fields()), "node field"),
          {:ok, _key} <- required_string(node, "key"),
-         {:ok, type} <- required_enum(node, "type", Flow.Node.types()) do
-      {:ok, node |> dense(Flow.Node.fields(), %Flow.Node{}) |> Map.put(:type, type)}
+         {:ok, type} <- required_enum(node, "type", Flow.Node.types()),
+         {:ok, reads} <- enum_list(node, "reads", Card.contract_fields()),
+         {:ok, writes} <- enum_list(node, "writes", Card.contract_fields()) do
+      {:ok,
+       node
+       |> dense(Flow.Node.fields(), %Flow.Node{})
+       |> Map.merge(%{type: type, reads: reads, writes: writes})}
     end
   end
 
@@ -269,4 +277,29 @@ defmodule Relay.Flows.Document do
   end
 
   defp to_enum(_value, key, _values), do: {:error, "#{key} must be a string"}
+
+  # An array-of-enum field (RE244's reads/writes). A missing key AND an explicit null both
+  # decode to the schema default [] — same reason dense/3 does it for scalars. Every name goes
+  # through the vocabulary via to_enum/3; never String.to_atom/1.
+  defp enum_list(map, key, values) do
+    case Map.get(map, key) do
+      nil -> {:ok, []}
+      list when is_list(list) -> reduce_enum_list(list, key, values)
+      _other -> {:error, "#{key} must be an array"}
+    end
+  end
+
+  defp reduce_enum_list(list, key, values) do
+    list
+    |> Enum.reduce_while({:ok, []}, fn value, {:ok, acc} ->
+      case to_enum(value, key, values) do
+        {:ok, atom} -> {:cont, {:ok, [atom | acc]}}
+        {:error, message} -> {:halt, {:error, message}}
+      end
+    end)
+    |> case do
+      {:ok, acc} -> {:ok, Enum.reverse(acc)}
+      error -> error
+    end
+  end
 end

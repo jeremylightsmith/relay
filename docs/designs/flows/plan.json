@@ -3,7 +3,14 @@
   "isolation": "shared_clean",
   "trigger": { "pulls_from": "Spec:Done", "works_in": "Plan", "lands_on": "Plan:Done" },
   "nodes": [
-    { "key": "write_plan", "type": "agent", "run": "/write-plan {ref}", "max_retries": 1 }
+    {
+      "key": "write_plan",
+      "type": "agent",
+      "run": "/write-plan {ref}",
+      "max_retries": 1,
+      "reads": ["spec", "acceptance_criteria"],
+      "writes": ["plan"]
+    }
   ],
   "edges": [
     { "from": "start", "to": "write_plan" },

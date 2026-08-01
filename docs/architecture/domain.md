@@ -18,7 +18,11 @@ sharing behavior.
   `"done"`/`"needs_input"` are edge sentinels (`"needs_input"` is `to`-only and parks the run —
   RLY-194); nodes carry an optional `timeout_minutes` (validated `> 0`) and an agent-only
   `expects_commits` boolean (default `false`, RLY-194) marking a node whose reported success
-  `RunServer` may override if it produced no commits. The invariant that no `:agent`/`:gate`
+  `RunServer` may override if it produced no commits.
+  Every node also carries a `reads`/`writes` **card-field contract** (RE244; vocabulary
+  `Schemas.Card.contract_fields/0`) — `writes` is enforced at run time by
+  `RunServer.override_missing_writes/4`, `reads` is advisory.
+  The invariant that no `:agent`/`:gate`
   node in any shipped flow leaves `:failed` unrouted is enforced by
   `default_library_test.exs`.
   `Relay.Flows.seed_default_flows!/1` idempotently seeds the default spec/plan/code library

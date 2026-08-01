@@ -92,7 +92,16 @@ defmodule Relay.FlowsManagementTest do
 
       {:ok, flow} =
         Flows.update_flow(Flows.get_flow!(board, "spec"), %{
-          nodes: [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref} --deep", max_retries: 2}],
+          nodes: [
+            %{
+              key: "brainstorm",
+              type: :agent,
+              run: "/brainstorm {ref} --deep",
+              max_retries: 2,
+              reads: [:description],
+              writes: [:spec, :acceptance_criteria]
+            }
+          ],
           edges: [
             %{from: "start", to: "brainstorm"},
             %{from: "brainstorm", to: "done", on: :succeeded},
