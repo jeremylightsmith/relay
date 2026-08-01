@@ -28,6 +28,11 @@ defmodule Mix.Tasks.Relay.PublishConfig do
                   verification-before-completion)
   @flow_commands ~w(write-plan)
 
+  # Standalone tooling a scaffolded project wants even though no flow node invokes it —
+  # `relay-doctor` checks a board's flow against this repo's factory, exactly what you reach for
+  # when wiring Relay into a repo or after adding/renaming an agent.
+  @tooling_skills ~w(relay-doctor)
+
   @impl Mix.Task
   def run(args) do
     src = File.cwd!()
@@ -139,7 +144,7 @@ defmodule Mix.Tasks.Relay.PublishConfig do
     dir = Path.join(src, ".claude/skills")
 
     for skill <- ls_sorted(dir),
-        skill in @flow_skills,
+        skill in (@flow_skills ++ @tooling_skills),
         rel = ".claude/skills/#{skill}/SKILL.md",
         File.regular?(Path.join(src, rel)) do
       {name, desc} = frontmatter(Path.join(src, rel))
