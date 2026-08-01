@@ -3,7 +3,14 @@
   "isolation": "shared_clean",
   "trigger": { "pulls_from": "Next up", "works_in": "Spec", "lands_on": "Spec:Review" },
   "nodes": [
-    { "key": "brainstorm", "type": "agent", "run": "/brainstorm {ref}", "max_retries": 1 }
+    {
+      "key": "brainstorm",
+      "type": "agent",
+      "run": "/brainstorm {ref}",
+      "max_retries": 1,
+      "reads": ["description"],
+      "writes": ["spec", "acceptance_criteria"]
+    }
   ],
   "edges": [
     { "from": "start", "to": "brainstorm" },

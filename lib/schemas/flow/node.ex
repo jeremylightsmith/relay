@@ -20,6 +20,16 @@ defmodule Schemas.Flow.Node do
   reported `:succeeded` back to `:failed` when HEAD didn't move. `"needs_input"`
   is reserved alongside `"start"`/`"done"` as an edge-endpoint sentinel, so no
   node may be keyed with it.
+
+  `reads` / `writes` (RE244) are the node's **card-field contract** — which of
+  `Schemas.Card.contract_fields/0` it consumes and which it must fill. Unlike
+  `agent`/`expects_commits` these are valid on **every** node type: the Code flow's
+  `branch` node is a `shell` node that writes `branch`. `writes` is **enforced at run
+  time** — `RunServer` rewrites a reported `:succeeded` to `:failed` when a declared
+  field is still blank. `reads` is **advisory only** (doctor-only, never a run-time
+  precondition): plenty of legitimate cards carry a title and no description, so a read
+  precondition would fail the Spec flow on every one of them. Do not "complete the
+  symmetry".
   """
 
   use Ecto.Schema
@@ -36,7 +46,9 @@ defmodule Schemas.Flow.Node do
     :timeout_minutes,
     :foreach,
     :agent,
-    :expects_commits
+    :expects_commits,
+    :reads,
+    :writes
   ]
   @types [:agent, :shell, :gate, :parallel, :human]
 
@@ -52,6 +64,8 @@ defmodule Schemas.Flow.Node do
     field :foreach, :string
     field :agent, :string
     field :expects_commits, :boolean, default: false
+    field :reads, {:array, Ecto.Enum}, values: Schemas.Card.contract_fields(), default: []
+    field :writes, {:array, Ecto.Enum}, values: Schemas.Card.contract_fields(), default: []
   end
 
   @doc """

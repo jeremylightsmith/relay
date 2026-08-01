@@ -190,6 +190,41 @@ defmodule Relay.FlowsTest do
       assert {:error, changeset} = Flows.create_flow(board, bad)
       assert %{nodes: [%{expects_commits: ["is only valid on an agent node"]}]} = errors_on(changeset)
     end
+
+    test "the card contract casts on any node type, defaults to empty, and rejects an unknown field" do
+      %{board: board} = board_with_stages()
+
+      ok =
+        valid_attrs(%{
+          nodes: [%{key: "work", type: :agent, run: "a", reads: [:spec], writes: [:plan]}]
+        })
+
+      assert {:ok, flow} = Flows.create_flow(board, ok)
+      assert %{reads: [:spec], writes: [:plan]} = Enum.find(flow.nodes, &(&1.key == "work"))
+
+      default = valid_attrs(%{key: "custom-c0", nodes: [%{key: "work", type: :agent, run: "a"}]})
+      assert {:ok, flow} = Flows.create_flow(board, default)
+      assert %{reads: [], writes: []} = Enum.find(flow.nodes, &(&1.key == "work"))
+
+      # NOT agent-only: the Code flow's `branch` node is a shell node that writes `branch`.
+      shell =
+        valid_attrs(%{
+          key: "custom-c1",
+          nodes: [%{key: "work", type: :shell, run: "true", writes: [:branch]}]
+        })
+
+      assert {:ok, flow} = Flows.create_flow(board, shell)
+      assert %{writes: [:branch]} = Enum.find(flow.nodes, &(&1.key == "work"))
+
+      bad =
+        valid_attrs(%{
+          key: "custom-c2",
+          nodes: [%{key: "work", type: :agent, run: "a", writes: [:nonsense_field]}]
+        })
+
+      assert {:error, changeset} = Flows.create_flow(board, bad)
+      assert %{nodes: [%{writes: ["is invalid"]}]} = errors_on(changeset)
+    end
   end
 
   describe "duplicate_flow/1 and save_definition/2 round-trip foreach/when (regression)" do

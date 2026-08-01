@@ -84,4 +84,24 @@ defmodule Schemas.VocabularyTest do
   test "the edge `when` enum equals when_values/0" do
     assert Ecto.Enum.values(Edge, :when) == Edge.when_values()
   end
+
+  test "the node contract enums are the card's contract vocabulary, not a second copy (RE244)" do
+    assert Ecto.Enum.values(Schemas.Flow.Node, :reads) == Schemas.Card.contract_fields()
+    assert Ecto.Enum.values(Schemas.Flow.Node, :writes) == Schemas.Card.contract_fields()
+  end
+
+  test "reads and writes are node fields, and every contract field is a real card field (RE244)" do
+    assert :reads in Schemas.Flow.Node.fields()
+    assert :writes in Schemas.Flow.Node.fields()
+
+    known = Schemas.Card.__schema__(:fields) ++ Schemas.Card.__schema__(:associations)
+
+    for field <- Schemas.Card.contract_fields() do
+      assert field in known, "#{field} is not a Schemas.Card field or association"
+    end
+  end
+
+  test "`commits` is not a contract field — expects_commits keeps its own field (RE244)" do
+    refute :commits in Schemas.Card.contract_fields()
+  end
 end

@@ -176,4 +176,28 @@ defmodule Relay.FlowsSeedTest do
     assert {:error, changeset} = Flows.enable_flow(plan_flow)
     assert %{lands_on_stage_id: ["must be set before the flow can be enabled"]} = errors_on(changeset)
   end
+
+  test "the seeded flows carry the card contract and still read as uncustomized (RE244)" do
+    ctx = library_board()
+    :ok = Flows.seed_default_flows!(ctx.board)
+
+    brainstorm = Enum.find(Flows.get_flow(ctx.board, "spec").nodes, &(&1.key == "brainstorm"))
+    assert brainstorm.reads == [:description]
+    assert brainstorm.writes == [:spec, :acceptance_criteria]
+
+    write_plan = Enum.find(Flows.get_flow(ctx.board, "plan").nodes, &(&1.key == "write_plan"))
+    assert write_plan.reads == [:spec, :acceptance_criteria]
+    assert write_plan.writes == [:plan]
+
+    code = Flows.get_flow(ctx.board, "code")
+    assert Enum.find(code.nodes, &(&1.key == "branch")).writes == [:branch]
+    assert Enum.find(code.nodes, &(&1.key == "post")).writes == [:ai_result]
+    assert Enum.find(code.nodes, &(&1.key == "merge")).writes == [:pr_url]
+
+    # The atom-vs-string regression: a sparse library map must compare EQUAL to the dense
+    # embedded struct, or customized?/1 flags every default flow as customized forever.
+    for key <- ~w(spec plan code) do
+      refute Flows.customized?(Flows.get_flow!(ctx.board, key)), "#{key} must not read as customized"
+    end
+  end
 end

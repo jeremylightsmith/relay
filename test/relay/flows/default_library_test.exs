@@ -220,4 +220,46 @@ defmodule Relay.Flows.DefaultLibraryTest do
       assert Relay.Runs.executor_outdated?(%Schemas.Executor{version: 17})
     end
   end
+
+  test "the shipped flows declare exactly the RE244 card contract" do
+    declared =
+      for flow <- DefaultLibrary.all(),
+          node <- flow.nodes,
+          node.reads != [] or node.writes != [],
+          into: %{},
+          do: {{flow.key, node.key}, {node.reads, node.writes}}
+
+    assert declared == %{
+             {"spec", "brainstorm"} => {[:description], [:spec, :acceptance_criteria]},
+             {"plan", "write_plan"} => {[:spec, :acceptance_criteria], [:plan]},
+             {"code", "branch"} => {[:plan], [:branch]},
+             {"code", "post"} => {[], [:ai_result]},
+             {"code", "merge"} => {[], [:pr_url]}
+           }
+  end
+
+  # RLY-165: sub_tasks are seeded server-side at Code-run start from card.plan, so no node
+  # may claim to write them — a declared write is ENFORCED and would fail write_plan.
+  test "no shipped node declares it writes sub_tasks" do
+    for flow <- DefaultLibrary.all(), node <- flow.nodes do
+      refute :sub_tasks in node.writes, "#{flow.key}/#{node.key} must not declare sub_tasks"
+    end
+  end
+
+  test "the branch node records the branch on the card, last in the chain (RE244 §5)" do
+    flow = Enum.find(DefaultLibrary.all(), &(&1.key == "code"))
+    branch = Enum.find(flow.nodes, &(&1.key == "branch"))
+
+    # Last deliberately: if the plan is missing, the node fails and no branch is recorded.
+    assert String.ends_with?(branch.run, "&& {relay} branch {ref} {branch}")
+  end
+
+  test "the post node records the structured ai_result, not just a comment (RE244 §5)" do
+    flow = Enum.find(DefaultLibrary.all(), &(&1.key == "code"))
+    post = Enum.find(flow.nodes, &(&1.key == "post"))
+
+    assert post.run =~ "{relay} result {ref}"
+    # `bin/relay result` does json.loads(text) — the argument must be a JSON object, not prose.
+    assert post.run =~ "JSON object"
+  end
 end
