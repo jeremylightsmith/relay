@@ -260,6 +260,41 @@ defmodule RelayWeb.FlowEditorComponents do
           </div>
         </div>
 
+        <div
+          :if={contract?(@node)}
+          id="inspector-card-contract"
+          style="display:flex;flex-direction:column;gap:7px;"
+        >
+          <span style="font-size:10px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
+            CARD CONTRACT
+          </span>
+          <%!-- Display only (RE244): a declared `writes` is ENFORCED at run time, so authoring
+          it belongs to `flow-push` + /relay-doctor's establish dialogue, never an inline
+          control that could ship an aspirational declaration. --%>
+          <div
+            id="inspector-card-contract-value"
+            style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:oklch(0.40 0.02 255);"
+          >
+            <span :if={@node.reads != []}>reads</span>
+            <span
+              :if={@node.reads != []}
+              style="font-family:ui-monospace,monospace;color:oklch(0.30 0.02 255);"
+            >
+              {Enum.join(@node.reads, ", ")}
+            </span>
+            <span :if={@node.reads != [] and @node.writes != []} style="color:oklch(0.70 0.02 255);">
+              ·
+            </span>
+            <span :if={@node.writes != []}>writes</span>
+            <span
+              :if={@node.writes != []}
+              style="font-family:ui-monospace,monospace;color:oklch(0.30 0.02 255);"
+            >
+              {Enum.join(@node.writes, ", ")}
+            </span>
+          </div>
+        </div>
+
         <div style="display:flex;flex-direction:column;gap:9px;">
           <span style="font-size:10px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
             OUTGOING EDGES · routed on outcome
@@ -551,6 +586,9 @@ defmodule RelayWeb.FlowEditorComponents do
   defp main_label(:shell), do: "COMMAND"
   defp main_label(:gate), do: "CONDITION"
   defp main_label(_), do: "RUN PROMPT"
+
+  # Omitted entirely when the node declares neither, so today's undeclared flows look unchanged.
+  defp contract?(node), do: node.reads != [] or node.writes != []
 
   defp model_selected?(%{model: nil}, "inherit"), do: true
   defp model_selected?(%{model: model}, model), do: true

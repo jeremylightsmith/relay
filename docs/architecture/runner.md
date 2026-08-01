@@ -481,7 +481,7 @@ becomes the context handed to the next node. Which outcomes exist and what each 
 run and the card is [state.md](state.md#node-outcomes)'s "Node outcomes" table — the schema owns
 that set, not this page.
 
-Three executor-side rules sit on top of it:
+Four rules sit on top of it:
 
 - **Silence is failure.** A node that exits without declaring is reported `failed` whatever its
   exit code — a node that did nothing is indistinguishable from one that exited early, so it must
@@ -489,6 +489,9 @@ Three executor-side rules sit on top of it:
 - **A success claim must be backed by a commit.** On a node marked `expects_commits`, a
   `succeeded` that left HEAD unmoved is rewritten to `failed` before finalize
   ([failures.md](failures.md) A6).
+- **A declared card write must actually land.** On a node declaring `writes`, a `succeeded` that
+  left one of those card fields blank is rewritten to `failed` before finalize
+  ([failures.md](failures.md) A10). `reads` is never checked at run time — it is advisory.
 - **Asking a human wins.** If the node moved the card to `needs_input`, that is the outcome even
   if the node also declared something else.
 

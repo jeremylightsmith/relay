@@ -226,7 +226,11 @@ defmodule RelayWeb.FlowEditorLive do
       model: nil,
       effort: nil,
       max_retries: nil,
-      timeout_minutes: nil
+      timeout_minutes: nil,
+      # RE244: the inspector dereferences these, so a freshly added node must carry them or
+      # selecting it raises KeyError.
+      reads: [],
+      writes: []
     }
 
     {:noreply,

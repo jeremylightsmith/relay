@@ -472,6 +472,42 @@ defmodule RelayWeb.FlowEditorLiveTest do
     refute Flows.customized?(Flows.get_flow!(board, "code"))
   end
 
+  test "the node inspector shows the card contract, read-only (RE244)", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/plan")
+
+    view |> element(~s([data-node="write_plan"])) |> render_click()
+
+    assert has_element?(view, "#inspector-card-contract", "CARD CONTRACT")
+    assert has_element?(view, "#inspector-card-contract-value", "spec, acceptance_criteria")
+    assert has_element?(view, "#inspector-card-contract-value", "plan")
+    assert render(view) =~ ~r/reads.*spec, acceptance_criteria.*·.*writes.*plan/s
+
+    # Display only — authoring is flow-push + /relay-doctor, never an inline control.
+    refute has_element?(view, "#inspector-card-contract [phx-click]")
+    refute has_element?(view, "#inspector-card-contract input")
+    refute has_element?(view, "#inspector-card-contract select")
+  end
+
+  test "a node declaring no contract shows no contract block (RE244)", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    view |> element(~s([data-node="precommit"])) |> render_click()
+
+    assert has_element?(view, "#inspector-node-name")
+    refute has_element?(view, "#inspector-card-contract")
+  end
+
+  # Without reads/writes in the "add_node" map the inspector raises KeyError the moment it
+  # dereferences @node.reads on a freshly added node.
+  test "a freshly added node selects cleanly with no contract block (RE244)", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/plan")
+
+    view |> element("#palette-shell") |> render_click()
+
+    assert has_element?(view, "#inspector-node-name")
+    refute has_element?(view, "#inspector-card-contract")
+  end
+
   defp count_edges(html), do: ~r/data-edge="\d+"/ |> Regex.scan(html) |> length()
 
   # helper: return the code flow's nodes with implement.run changed (as attr maps)

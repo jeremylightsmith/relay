@@ -79,6 +79,8 @@ in `lib/relay/flows.ex` — check the two still agree:
 | 5 | a fresh executor advertises capacity in the flow's `isolation` class | per flow | **warning** |
 | 6 | at least one connected executor is **not** `outdated` | board-wide | **warning** |
 | 7 | a repo `.claude/agents/*.md` that no **enabled** flow node names | board-wide | **warning** |
+| 8 | a node with a declared `reads`/`writes` contract whose skill/agent shows no evidence of honoring it | nodes with `reads`/`writes` | **warning** ("couldn't confirm") |
+| 9 | a node with **no** declared contract in a flow whose stage implies one | agent + shell nodes | **warning** → the establish dialogue |
 
 **error** = the node cannot possibly run as written. **warning** = something is off but the
 flow could still run right now.
@@ -99,6 +101,35 @@ warns only when *no* connected executor is current (the board can then place no 
 
 **Check 7 scans the repo's `.claude/agents/` only** — `~/.claude` globals are not this
 repo's dead code.
+
+**Checks 8–9 read the card contract off the flow document.** `./bin/relay flow --json` already
+returns every node's `reads`/`writes` — no new gathering command, and this skill still adds no
+code.
+
+**Where doctor looks for evidence.** The node's `agent` field → `.claude/agents/<name>.md`; the
+leading `/name` token of an **agent** node's `run` → `.claude/skills/<name>/SKILL.md` **or**
+`.claude/commands/<name>.md`. Check both: `/write-plan` is a *command* in this repo, not a
+skill, and looking only under `skills/` reports a false miss on the whole Plan flow. A `shell`
+or `gate` node's evidence is its own `run` string. A file doctor cannot locate (a built-in, a
+`~/.claude` global) is **"couldn't confirm"**, never a violation.
+
+**Write evidence** is a `bin/relay` writer token appearing in that file:
+
+| field | write evidence |
+|---|---|
+| `description` | `relay describe` |
+| `spec` | `relay spec` |
+| `acceptance_criteria` | `relay criteria` |
+| `plan` | `relay plan` |
+| `sub_tasks` | `relay sub-tasks` |
+| `branch` | `relay branch` |
+| `pr_url` | `relay pr` |
+| `ai_result` | `relay result` |
+
+**Read evidence is card-level, not per-field.** `relay card <ref>` (in any form) shows the node
+reads the card, but not *which* field it uses. Say so in the report rather than claiming
+precision you don't have: a node with any `reads` declared is confirmed by a single `relay card`
+occurrence.
 
 ## The report
 
@@ -131,6 +162,20 @@ all-clear.
    explicit confirmation first. Never push a document the user has not seen.
 4. **Blast radius:** `.claude/` files and flow documents only. Never cards, git branches,
    commits, or any other board state.
+5. **Check 9's fix path — establish the contract, don't assume it.** A hand-declared contract
+   just moves the "is it correct?" question, so for a node with no declared I/O:
+   1. **Infer** a proposal from two signals — the node's flow/stage role (a node in a flow
+      landing on Plan probably writes `plan`) *and* what its skill actually does (a `relay plan`
+      call is evidence it writes `plan`).
+   2. **Confirm per node** — "`write_plan`: reads `spec`, `acceptance_criteria`; writes `plan`?
+      [y / adjust / skip]". Never assume: the human confirmation is what breaks the
+      infer-from-the-skill-then-check-the-skill circle.
+   3. **Warn, in the confirm step, that a declared `writes` is ENFORCED at run time** — the
+      server rewrites the node's `succeeded` to `failed` when the field is still blank. Declare
+      what the skill does **today**, not what you wish it did.
+   4. **Push once per flow, not once per node** — collect the confirmed nodes, show the exact
+      node-level diff, get explicit confirmation, then one `./bin/relay flow-push`. This is the
+      existing "never push a document the user has not seen" rule; do not weaken it.
 
 ## Common mistakes
 
@@ -141,3 +186,7 @@ all-clear.
 - **Reporting an unloadable inventory as "everything missing"** — skip checks 1 and 2 and
   say why.
 - **Running this from a flow node** — it is interactive by design.
+- **Declaring a contract the skill doesn't honor yet** — `writes` is enforced at run time, so an
+  aspirational declaration turns a working flow into a failing one.
+- **Looking for a `/name` only under `.claude/skills/`** — `/write-plan` is a *command*; check
+  `.claude/commands/<name>.md` too, or check 8 reports a false miss on the Plan flow.
