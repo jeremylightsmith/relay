@@ -17,7 +17,16 @@ defmodule Relay.Runs.ListenerTest do
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Listener Board"})
     {:ok, flow} = board |> Relay.Flows.get_flow!("spec") |> Relay.Flows.enable_flow()
     stage = Enum.find(board.stages, &(&1.name == "Next up"))
-    {:ok, card} = Relay.Cards.create_card(stage, %{title: "Pass the baton"})
+    # The scripted executor here runs no real skill, so the card arrives already carrying the
+    # fields the shipped spec flow declares it writes (RE244) — otherwise every `succeeded` is
+    # rewritten to `failed` by the missing-writes guard.
+    {:ok, card} =
+      Relay.Cards.create_card(stage, %{
+        title: "Pass the baton",
+        spec: "# Spec (pre-seeded — the spec flow's brainstorm declares it writes this, RE244)",
+        acceptance_criteria: "1. It works."
+      })
+
     :ok = Runs.subscribe(board.id)
     %{user: user, board: board, flow: flow, card: card}
   end

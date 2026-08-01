@@ -52,9 +52,22 @@ defmodule Relay.Runs.CodeFlowE2ETest do
     |> Enum.map_join("\n\n", fn {title, n} -> "### Task #{n}: #{title}\n\n- [ ] do it" end)
   end
 
+  # The scripted executor runs no real commands, so the Code flow's declared card writes
+  # (branch → `branch`, post → `ai_result`, merge → `pr_url`, RE244) are pre-filled here.
+  # The run-time guard asks only that a declared field is non-blank when the node ends; a blank
+  # one rewrites that node's `succeeded` to `failed`. `branch` is the deterministic name
+  # `Runs.build_payload/4` derives anyway, so pre-filling it changes no dispatched var.
   defp code_card(board, titles) do
     {:ok, card} = Cards.create_card(stage(board, "Plan:Done"), %{title: "Ship the thing"})
-    {:ok, card} = Cards.update_card(card, %{plan: plan_with(titles)})
+
+    {:ok, card} =
+      Cards.update_card(card, %{
+        plan: plan_with(titles),
+        branch: "relay/code-e2e",
+        pr_url: "https://github.com/relay/relay/pull/1",
+        ai_result: %{"summary" => "scripted"}
+      })
+
     card
   end
 

@@ -29,9 +29,23 @@ defmodule Relay.RunsTest do
     flow
   end
 
+  # The scripted/fake executors here run no real skill, so a card fed to a SHIPPED flow arrives
+  # already carrying the fields those flows declare they write (RE244) — otherwise every
+  # `succeeded` is rewritten to `failed` by the missing-writes guard. The guard asks only that
+  # the field is non-blank when the node ends, never that the node changed it. The seeded plan
+  # is deliberately PROSE with no `## Task N:` heading, so "a non-foreach flow with an
+  # unparseable plan is unaffected" below still tests what it says it does.
   defp card_in(board, stage_name, title \\ "Try the engine") do
     stage = Enum.find(board.stages, &(&1.name == stage_name))
-    {:ok, card} = Relay.Cards.create_card(stage, %{title: title})
+
+    {:ok, card} =
+      Relay.Cards.create_card(stage, %{
+        title: title,
+        spec: "# Spec (pre-seeded, see card_in/3)",
+        acceptance_criteria: "1. It works.",
+        plan: "A plan with no task headings (pre-seeded, see card_in/3)."
+      })
+
     card
   end
 

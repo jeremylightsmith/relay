@@ -471,6 +471,30 @@ defmodule Relay.Cards do
   end
 
   @doc """
+  The subset of `fields` that are blank on `card`, in the order given — the run-time half of a
+  flow node's declared `writes` contract (RE244). The rule is deliberately "non-blank NOW", not
+  "changed during the node": a delta check would fail an honest re-entry (a brainstorm returning
+  from `needs-input` and concluding the existing spec still stands).
+
+  `fields` come from `Schemas.Card.contract_fields/0`. `:sub_tasks` requires the association
+  preloaded — an unloaded one raises rather than silently reporting "blank".
+  """
+  def blank_contract_fields(%Card{} = card, fields) when is_list(fields) do
+    Enum.filter(fields, &blank_contract_field?(card, &1))
+  end
+
+  defp blank_contract_field?(%Card{sub_tasks: %Ecto.Association.NotLoaded{}}, :sub_tasks) do
+    raise ArgumentError, "Relay.Cards.blank_contract_fields/2 requires :sub_tasks to be preloaded"
+  end
+
+  defp blank_contract_field?(%Card{sub_tasks: sub_tasks}, :sub_tasks), do: sub_tasks == []
+  defp blank_contract_field?(%Card{ai_result: ai_result}, :ai_result), do: ai_result in [nil, %{}]
+  defp blank_contract_field?(%Card{} = card, field), do: card |> Map.fetch!(field) |> blank_text?()
+
+  defp blank_text?(nil), do: true
+  defp blank_text?(text) when is_binary(text), do: String.trim(text) == ""
+
+  @doc """
   Sets the card's baton status (`:ready | :working | :needs_input |
   :in_review`) from `attrs`, attributed to `actor` (`:agent |
   {:user, user_id}`, defaults to `:agent`), returning `{:ok, card}`

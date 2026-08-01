@@ -71,7 +71,16 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
 
   test "a card in Next up runs the Spec flow end to end: claim -> logs -> needs_input -> answer -> resume -> Spec:Review",
        %{board: board, exec: exec, human: human, next_up: next_up} do
-    {:ok, card} = Cards.create_card(next_up, %{title: "Design the widget"})
+    # The scripted executor here runs no real skill, so the card arrives already carrying the
+    # fields the shipped spec flow declares it writes (RE244) — otherwise the brainstorm node's
+    # `succeeded` below is rewritten to `failed` by the missing-writes guard.
+    {:ok, card} =
+      Cards.create_card(next_up, %{
+        title: "Design the widget",
+        spec: "# Spec (pre-seeded — the spec flow's brainstorm declares it writes this, RE244)",
+        acceptance_criteria: "1. It works."
+      })
+
     ref = card_ref(board, card)
 
     # 1-3. Advertise capacity; the capacity broadcast wakes the scheduler (no tick wait),
@@ -148,8 +157,20 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
 
   test "advertised capacity is respected: 2 cards, cap 1 -> one dispatches, the second waits",
        %{board: board, exec: exec, next_up: next_up} do
-    {:ok, _card_a} = Cards.create_card(next_up, %{title: "First card"})
-    {:ok, _card_b} = Cards.create_card(next_up, %{title: "Second card"})
+    # Same RE244 seeding as above: both cards' brainstorm nodes report succeeded below.
+    {:ok, _card_a} =
+      Cards.create_card(next_up, %{
+        title: "First card",
+        spec: "# Spec (pre-seeded, RE244)",
+        acceptance_criteria: "1. It works."
+      })
+
+    {:ok, _card_b} =
+      Cards.create_card(next_up, %{
+        title: "Second card",
+        spec: "# Spec (pre-seeded, RE244)",
+        acceptance_criteria: "1. It works."
+      })
 
     Exec.heartbeat(exec, "exec-1", %{"shared_clean" => 1})
     assert_receive {:run_started, run1}, 2_000
