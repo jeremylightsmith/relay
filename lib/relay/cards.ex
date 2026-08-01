@@ -494,6 +494,13 @@ defmodule Relay.Cards do
   defp blank_text?(nil), do: true
   defp blank_text?(text) when is_binary(text), do: String.trim(text) == ""
 
+  # The fallback vocabulary is all strings today, but `contract_fields/0` is a growing closed
+  # set and this runs inside `RunServer.apply_outcome/5`: a missing clause would crash the run
+  # server on an outcome report instead of producing a legible node failure. A present
+  # non-string value counts as written; a field needing its own blank rule (as `:ai_result` and
+  # `:sub_tasks` do) gets its own `blank_contract_field?/2` clause above.
+  defp blank_text?(_present), do: false
+
   @doc """
   Sets the card's baton status (`:ready | :working | :needs_input |
   :in_review`) from `attrs`, attributed to `actor` (`:agent |

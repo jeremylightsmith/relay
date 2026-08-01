@@ -55,8 +55,10 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   # The scripted executor runs no real commands, so the Code flow's declared card writes
   # (branch → `branch`, post → `ai_result`, merge → `pr_url`, RE244) are pre-filled here.
   # The run-time guard asks only that a declared field is non-blank when the node ends; a blank
-  # one rewrites that node's `succeeded` to `failed`. `branch` is the deterministic name
-  # `Runs.build_payload/4` derives anyway, so pre-filling it changes no dispatched var.
+  # one rewrites that node's `succeeded` to `failed`. Pre-filling `branch` does change the
+  # dispatched `{branch}` var — `Runs.build_payload/4` prefers `card.branch` over
+  # `default_branch/2`'s derived `<board-key>-<ref>-<slug>` — but nothing here asserts on it,
+  # and that derivation stays pinned by `test/fixtures/executor_contract.json`.
   defp code_card(board, titles) do
     {:ok, card} = Cards.create_card(stage(board, "Plan:Done"), %{title: "Ship the thing"})
 

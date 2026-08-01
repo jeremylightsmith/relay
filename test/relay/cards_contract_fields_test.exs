@@ -42,6 +42,18 @@ defmodule Relay.CardsContractFieldsTest do
     assert Cards.blank_contract_fields(Repo.preload(card, :sub_tasks, force: true), [:sub_tasks]) == []
   end
 
+  # The fallback clause pipes any not-specially-handled field through `blank_text?/1`, and that
+  # runs inside `RunServer.apply_outcome/5`. Today's fallback vocabulary is all strings, but the
+  # closed set is meant to grow: the next non-string contract field must get a legible verdict
+  # rather than a `FunctionClauseError` that crashes the run server on an outcome report.
+  # `:ref_number` (an integer) stands in for that future field.
+  test "a non-string field value counts as written rather than raising" do
+    card = card()
+
+    assert is_integer(card.ref_number)
+    assert Cards.blank_contract_fields(card, [:ref_number]) == []
+  end
+
   # Silently reporting "blank" for an unloaded association would fail an honest node.
   # `Cards.create_card/2` always preloads `sub_tasks` (cards travel with theirs), so an
   # unloaded association only shows up on a card fetched without that preload — build the
