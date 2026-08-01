@@ -106,6 +106,16 @@ repo's dead code.
 returns every node's `reads`/`writes` — no new gathering command, and this skill still adds no
 code.
 
+**Check 9 does NOT apply to a node whose output is commits.** A node with
+`expects_commits: true`, or any node in a Code-style flow whose only product is a branch, is
+*correctly* undeclared (`docs/designs/flows/README.md`) — the commit guard is its contract, and
+`writes` is not a legal place to say "commits". In this repo that exempts most of the Code flow
+(`implement`, the reviewers, the fixers, the rebasers, `precommit`, `smoke`, `acceptance`, …);
+only `branch`, `post` and `merge` produce a card field. Check 9 targets a node that clearly
+produces a **card field** and hasn't said so. Warning on a commits-only node pushes the human
+toward exactly the footgun "Common mistakes" names — an aspirational `writes` is enforced at run
+time and turns a working flow into a failing one.
+
 **Where doctor looks for evidence.** The node's `agent` field → `.claude/agents/<name>.md`; the
 leading `/name` token of an **agent** node's `run` → `.claude/skills/<name>/SKILL.md` **or**
 `.claude/commands/<name>.md`. Check both: `/write-plan` is a *command* in this repo, not a

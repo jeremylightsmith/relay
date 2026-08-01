@@ -158,9 +158,13 @@ became comment-free JSON (RLY-241). Keyed by node.
   `acceptance_criteria`, writes `plan`; `code·branch` reads `plan`, writes `branch`;
   `code·post` writes `ai_result`; `code·merge` writes `pr_url`. Every other node declares
   neither — its output is commits. `sub_tasks` is never declared: it is seeded server-side at
-  Code-run start from `card.plan` (RLY-165). Existing boards are **not** migrated; their
-  persisted flows keep today's undeclared nodes, and `/relay-doctor`'s establish dialogue is the
-  upgrade path.
+  Code-run start from `card.plan` (RLY-165). Existing boards pick the contract up automatically:
+  `Relay.Flows.sync_defaults!/0` runs at deploy (`Relay.Release.migrate/0`) and re-syncs every
+  **library-managed** (`version == 1`) flow to the new default, so the contract and the run
+  strings that satisfy it land together in one transaction. A **hand-customized** flow
+  (`version > 1`) is skipped and keeps its undeclared nodes — `/relay-doctor`'s establish
+  dialogue is the upgrade path for those. An undeclared node never fires the guard, so a skipped
+  flow behaves exactly as it does today.
 
 ## Open modeling questions (settle in RLY-131/132)
 

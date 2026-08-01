@@ -88,7 +88,8 @@ defmodule Relay.Runs.MissingWritesGuardTest do
     assert outcome_of(job).outcome == :failed
   end
 
-  # Why an existing board whose persisted flows predate RE244 is entirely unaffected.
+  # Why a node that declares nothing stays unaffected — which is what protects a hand-customized
+  # (version > 1) flow that `Flows.sync_defaults!/0` skips at deploy.
   test "a node declaring no contract is untouched, even on a wholly blank card", ctx do
     flow = contract_flow(ctx.board, %{})
     job = start_work(ctx.board, flow, %{})
