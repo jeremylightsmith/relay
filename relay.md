@@ -23,6 +23,10 @@ runner config file. `bin/relay` knows the REST API and nothing about any board's
    export RELAY_API_KEY="relay_xxxxxxxxxxxx_…"
    ```
 3. **Confirm:** `./bin/relay board` should print your board.
+4. **Wire the repo to a flow:** in Claude Code, run `/relay-onboard`. It reconciles this repo's
+   `.claude/` factory against the board's flows — seeding the defaults, adopting what you already
+   have, or both — until `/relay-doctor` reports zero errors, then offers to enable the flows.
+   (Already wired and one node broke? Reach for `/relay-doctor` directly.)
 
 Full reference for any of the below: `$RELAY_URL/docs` (CLI, API, auth, statuses).
 

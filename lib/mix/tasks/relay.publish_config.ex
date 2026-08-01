@@ -30,8 +30,10 @@ defmodule Mix.Tasks.Relay.PublishConfig do
 
   # Standalone tooling a scaffolded project wants even though no flow node invokes it —
   # `relay-doctor` checks a board's flow against this repo's factory, exactly what you reach for
-  # when wiring Relay into a repo or after adding/renaming an agent.
-  @tooling_skills ~w(relay-doctor)
+  # after adding or renaming an agent; `relay-onboard` is the first-run loop that drives a fresh
+  # repo to a green doctor; `writing-skills` ships because `relay-onboard` tells the human to
+  # author a missing step with it, and a scaffold without it would dangle that instruction.
+  @tooling_skills ~w(relay-doctor relay-onboard writing-skills)
 
   @impl Mix.Task
   def run(args) do
@@ -82,6 +84,9 @@ defmodule Mix.Tasks.Relay.PublishConfig do
         "· executor.version #{version} → #{dst}"
     )
   end
+
+  @doc "Skills that ship in the scaffold without any flow node naming them."
+  def tooling_skills, do: @tooling_skills
 
   # ---- item builders ----
 
