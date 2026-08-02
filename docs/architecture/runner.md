@@ -499,6 +499,39 @@ The reminder is appended to every agent node's prompt automatically, so the requ
 with every invocation. `shell` and `gate` nodes are exempt — their exit status is already an
 unambiguous verdict.
 
+### What an agent node's prompt is made of
+
+`bin/relay` composes an agent node's prompt from up to three parts, in this order
+(`compose_node_prompt`):
+
+1. **the node's own `run`**, rendered — `{ref}`, `{branch}`, `{relay}` and the rest substituted
+   from the job's `vars`;
+2. **the findings block**, appended only when the job carries a non-blank `vars["findings"]`
+   (RE251);
+3. **the outcome contract**, rendered, appended to every agent node.
+
+`shell` and `gate` nodes get part 1 only: their `run` is a command line, not a prompt.
+
+#### The findings block (RE251)
+
+On a loop-back the engine sets `findings` on the next job's payload — the reviewer's detail on a
+transition, and the ORIGINATING findings plus this attempt's failure detail on a retry
+(`RunServer.apply_decision/4`). Substitution alone was never enough to deliver it: it only fires
+for placeholders a template contains, and no shipped flow node contains `{findings}`, so every fix
+node in the system was told to fix findings it was never handed. Appending the block in the
+executor makes it universal — every agent node, every flow, every repo, and nothing for a flow
+author to remember.
+
+The block states that this is a loop-back and the findings are the subject of the run, carries the
+findings, requires the node to account for every one of them in its outcome detail (fixed, or
+rebutted with a reason), and makes "no finding needs a change" an escalation (`needs-input`)
+rather than a `succeeded`. It points at the outcome contract below it for the exact commands, so
+there is one rendered copy of each command per prompt.
+
+**The findings text is spliced verbatim and never rendered.** Findings are free-form reviewer
+prose: a reviewer who writes `{ref}` must see those characters reach the model, and reviewer text
+must never be able to reach into the var namespace. The static wrapper carries no placeholders.
+
 ### Agent node → `.claude/agents` definition
 
 A flow node of type `agent` may name an `agent` (e.g. `plan-implementer`). The server
@@ -528,7 +561,8 @@ it to build something it can see is wrong.
 This needed **no engine change**. `needs_input` is decided before any edge is consulted
 (`Relay.Runs.Engine`), so it consumes no `max_loops` budget, does not increment the visit count,
 and is not degraded to `:failed`. The command itself reaches every agent node for free —
-`bin/relay` appends its outcome contract, already rendered, to every agent prompt.
+`bin/relay` appends its outcome contract, already rendered, to every agent prompt (see
+[What an agent node's prompt is made of](#what-an-agent-nodes-prompt-is-made-of)).
 
 **The human's answer, not the plan, is authoritative for the remainder of the run.** This is a
 deliberate decision, and the tempting alternative — have the human edit the card's plan and treat

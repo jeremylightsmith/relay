@@ -19,7 +19,7 @@
       "expects_commits": true,
       "foreach": "card.sub_tasks",
       "agent": "plan-implementer",
-      "run": "Implement the task named {sub_task} from the card's plan with strict red/green TDD. One task only — do not start the next one. If reviewer findings are attached, address them."
+      "run": "Implement the task named {sub_task} from the card's plan with strict red/green TDD. One task only — do not start the next one."
     },
     {
       "key": "spec_review",

@@ -68,8 +68,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 26
-EXECUTOR_FINGERPRINT = "73fcee89e08095a013f88a79e6d43b894de9944f92e7e65982068edd8c06fbb6"
+EXECUTOR_VERSION = 27
+EXECUTOR_FINGERPRINT = "14e9ef17349a9c927856e33b5a777c2322be812fcadda2ff9957e1d8c8db9292"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1807,6 +1807,63 @@ declare an outcome. Exiting without either is reported as `failed`, because a no
 declares nothing cannot be distinguished from one that did nothing."""
 
 
+# Appended to an agent node's prompt BETWEEN its own rendered `run` and the outcome contract, and
+# ONLY when the job carries a non-blank `findings` var (RE251). The engine has always computed
+# findings on a loop-back and shipped them in the payload — but substitution only fires for
+# placeholders a template CONTAINS, and no shipped flow node contains `{findings}`, so every fix
+# node in the system was told to fix findings it was never handed. Appending here, exactly like
+# the outcome contract, makes it universal: every agent node, every flow, every repo, and nothing
+# for a flow author to remember.
+FINDINGS_CONTRACT_HEAD = """
+
+---
+THIS IS A LOOP-BACK. A reviewer or a guard sent this node back, and the findings below are the
+SUBJECT of this run — not background, not something to notice if you happen to look. Read them
+first and treat addressing them as the job. Do NOT open by diffing the code against the plan and
+concluding it already matches: that is exactly the failure this block exists to prevent.
+
+FINDINGS:
+
+"""
+
+# Closes the block after the verbatim findings text. Points at the outcome contract that follows
+# for the exact commands rather than restating them, so there is one rendered copy of each
+# command per prompt.
+FINDINGS_CONTRACT_TAIL = """
+
+ACCOUNT FOR EVERY ONE of the findings above in your outcome detail: each one either FIXED (say
+what you changed) or REBUTTED (say why it does not hold). A finding you do not mention is a
+finding you skipped.
+
+If you conclude that no finding needs a change — that you would rebut all of them — that is an
+ESCALATION, not a success. Park the run for a human with the `needs-input` command in the outcome
+contract below and stop. Reporting `succeeded` with nothing committed is never the right answer
+on a loop-back.
+"""
+
+
+def findings_block(vars):
+    """The findings block for `vars`, or "" when the job carries none.
+
+    The findings text is spliced VERBATIM and never passed through render(): findings are
+    free-form reviewer prose, so a reviewer who writes `{ref}` must see those characters reach the
+    model unchanged, and reviewer text must never be able to reach into the var namespace. The
+    static wrapper carries no placeholders, so nothing here needs rendering at all."""
+    findings = str(vars.get("findings") or "").strip()
+    if not findings:
+        return ""
+    return FINDINGS_CONTRACT_HEAD + findings + FINDINGS_CONTRACT_TAIL
+
+
+def compose_node_prompt(job, cmd, vars):
+    """The exact text handed to one node: its own rendered `run`, then the findings block, then
+    the outcome contract. Shell and gate nodes get their command line unchanged — their `run` is a
+    command, not a prompt, and their exit status is already an unambiguous verdict."""
+    if job.get("node_type") != "agent":
+        return cmd
+    return cmd + findings_block(vars) + render(OUTCOME_CONTRACT, vars)
+
+
 def run_node_job(job, slot_path, control, partition=None):
     """Run one claimed node-job in `slot_path`; return (outcome, detail, git_sha, session_id).
     Reuses the streaming primitives, tagged per job. Does NOT report — the caller POSTs the
@@ -1826,7 +1883,11 @@ def run_node_job(job, slot_path, control, partition=None):
     resolves `vars`. `relay`/`url` are not server-sent vars at all — supply them here.
     `is not None` matters: build_payload puts prior_detail/findings in vars as `nil`
     (-> None) when absent, and a naive str(v) would splice the literal string "None"
-    into the command."""
+    into the command.
+
+    Prompt composition is compose_node_prompt's job, for BOTH branches: an agent gets its
+    rendered `run` + the findings block (RE251) + the outcome contract, a shell/gate node gets
+    its command line unchanged."""
     ref = (job.get("vars") or {}).get("ref") or job["id"]
     tag = f"[{ref}] "
     raw_vars = dict(job.get("vars") or {})
@@ -1858,7 +1919,7 @@ def run_node_job(job, slot_path, control, partition=None):
         outcome_path = os.path.join(outcome_dir, "outcome.json")
         try:
             ok, session_id = _stream_claude_job(
-                cmd + render(OUTCOME_CONTRACT, vars), cwd=slot_path, tag=tag,
+                compose_node_prompt(job, cmd, vars), cwd=slot_path, tag=tag,
                 session_id=job.get("resume_session"),
                 outcome_path=outcome_path, on_proc=control.register, agent=job.get("agent"),
                 partition=partition, scratch=scratch, plan=plan)
@@ -1867,8 +1928,9 @@ def run_node_job(job, slot_path, control, partition=None):
             shutil.rmtree(outcome_dir, ignore_errors=True)
     else:  # shell | gate
         tail = []
-        ok = _stream_shell(cmd, slot_path, tag, sink=tail, on_proc=control.register,
-                           partition=partition, scratch=scratch, plan=plan)
+        ok = _stream_shell(compose_node_prompt(job, cmd, vars), slot_path, tag, sink=tail,
+                           on_proc=control.register, partition=partition, scratch=scratch,
+                           plan=plan)
         outcome = "succeeded" if ok else "failed"
         detail = "" if ok else "\n".join(tail).strip()
     sha_proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=slot_path,

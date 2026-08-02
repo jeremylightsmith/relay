@@ -1880,6 +1880,87 @@ class RunNodeJobTest(unittest.TestCase):
         relay.run_node_job(shell_job, "/tmp/wt", self.control)
         self.assertNotIn("RELAY_NODE_OUTCOME", seen["cmd"])
 
+    def test_a_loop_back_prompt_carries_the_findings(self):
+        """The composition helper is only worth anything if run_node_job actually uses it."""
+        seen = {}
+
+        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None):
+            seen["prompt"] = prompt
+            return True, "sess-1"
+
+        relay._stream_claude_job = fake_stream
+        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+
+        j = job(node_type="agent", run="implement {ref}", id="nj-251", run_id="r1",
+                vars={"ref": "RE251", "findings": "assert on CSV bytes"})
+        relay.run_node_job(j, "/tmp/wt", self.control)
+
+        self.assertTrue(seen["prompt"].startswith("implement RE251"))
+        self.assertIn("THIS IS A LOOP-BACK", seen["prompt"])
+        self.assertIn("assert on CSV bytes", seen["prompt"])
+        self.assertIn("outcome succeeded --detail", seen["prompt"])
+
+
+class FindingsContractTest(unittest.TestCase):
+    """RE251: on a loop-back the engine ships the reviewer's findings in the payload as
+    vars["findings"] — and until this block existed the executor rendered them away. Substitution
+    only fires for placeholders a template CONTAINS, and no shipped flow node contains
+    `{findings}`, so every fix node in the system was told to fix findings it was never handed.
+    Appending the block here, like the outcome contract, makes it universal: every agent node,
+    every flow, every repo, nothing for a flow author to remember."""
+
+    def test_an_agent_job_with_findings_carries_them_verbatim(self):
+        j = job(node_type="agent", run="implement it", vars={"findings": "assert on CSV bytes"})
+        prompt = relay.compose_node_prompt(j, "implement it", j["vars"])
+
+        self.assertIn("assert on CSV bytes", prompt)
+        self.assertIn("THIS IS A LOOP-BACK", prompt)
+        # Order: the node's own run, then the findings, then the outcome contract.
+        self.assertTrue(prompt.startswith("implement it"))
+        self.assertLess(prompt.index("assert on CSV bytes"),
+                        prompt.index("outcome succeeded --detail"))
+
+    def test_a_job_without_findings_carries_no_block(self):
+        for value in (None, "", "   "):
+            j = job(node_type="agent", run="implement it", vars={"findings": value})
+            prompt = relay.compose_node_prompt(j, "implement it", j["vars"])
+            self.assertNotIn("THIS IS A LOOP-BACK", prompt, f"findings={value!r}")
+            self.assertIn("outcome succeeded --detail", prompt)
+
+    def test_a_shell_or_gate_job_carries_no_block(self):
+        """Exempt exactly as they are from the outcome contract: their `run` is a command line,
+        not a prompt, and their exit status is already an unambiguous verdict."""
+        for node_type in ("shell", "gate"):
+            j = job("exclusive_shell", node_type=node_type, run="mix precommit",
+                    vars={"findings": "a reviewer said no"})
+            self.assertEqual(
+                relay.compose_node_prompt(j, "mix precommit", j["vars"]), "mix precommit",
+                f"node_type={node_type!r}")
+
+    def test_findings_text_is_never_substituted_into(self):
+        """Findings are free-form reviewer prose. A reviewer who writes `{ref}` must see those
+        characters reach the model unchanged, and reviewer text must never be able to reach into
+        the var namespace."""
+        j = job(node_type="agent", run="implement it",
+                vars={"ref": "RE251",
+                      "findings": "the test asserts on {ref} but should assert on {branch}"})
+        prompt = relay.compose_node_prompt(j, "implement it", j["vars"])
+
+        self.assertIn("asserts on {ref} but should assert on {branch}", prompt)
+
+    def test_the_block_demands_per_finding_accounting_and_escalation(self):
+        j = job(node_type="agent", run="implement it", vars={"findings": "one finding"})
+        prompt = relay.compose_node_prompt(j, "implement it", j["vars"])
+
+        self.assertIn("ACCOUNT FOR EVERY ONE", prompt)
+        self.assertIn("needs-input", prompt)
+
+    def test_the_wrapper_carries_no_placeholders_of_its_own(self):
+        """The block is never rendered, so a placeholder in the STATIC wrapper would reach the
+        model literally — the unexpanded-placeholder bug RLY-135 caught in run_node_job."""
+        self.assertNotIn("{", relay.FINDINGS_CONTRACT_HEAD)
+        self.assertNotIn("{", relay.FINDINGS_CONTRACT_TAIL)
+
 
 class JobControlTest(unittest.TestCase):
     def test_cancel_terminates_a_registered_running_proc(self):
