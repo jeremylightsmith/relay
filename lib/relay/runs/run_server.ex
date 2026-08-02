@@ -25,7 +25,11 @@ defmodule Relay.Runs.RunServer do
       or lazily started by `report_outcome/2`).
 
   Both re-entry modes pass the last failed execution's detail forward as
-  `findings`, so a node re-entered after a failure sees why.
+  `findings`, so a node re-entered after a failure sees why. A `{:retry, node}`
+  goes further (RE251): it carries the ORIGINATING findings — what sent the node
+  here in the first place — alongside this attempt's failure detail, re-derived
+  from execution history rather than read back off the previous attempt's payload
+  (which already holds a merged string and would compound on every retry).
 
   Under a `foreach` node each execution carries the `sub_task_id` of the
   iteration it belongs to: entering the loop head resolves the first undone
@@ -51,6 +55,11 @@ defmodule Relay.Runs.RunServer do
   alias Schemas.Run
   alias Schemas.Stage
   alias Schemas.SubTask
+
+  # RE251: the fixed separator between a retry's ORIGIN findings and the latest attempt's failure
+  # detail. Labelling the second half is what lets the agent tell the reviewer's words from the
+  # commit guard's.
+  @retry_marker "\n\n--- The previous attempt failed; its detail follows. The findings above still apply. ---\n\n"
 
   def start_link(opts) do
     run_id = Keyword.fetch!(opts, :run_id)
@@ -202,12 +211,8 @@ defmodule Relay.Runs.RunServer do
   defp apply_decision({:retry, node}, run, flow, execution) do
     next = Runs.insert_execution!(run, node, execution.visit, execution.attempt + 1, execution.sub_task_id)
 
-    job =
-      Runs.insert_job!(
-        run,
-        next,
-        Runs.build_payload(run, flow, node, findings: execution.detail, sub_task_id: execution.sub_task_id)
-      )
+    opts = [findings: retry_findings(run, execution), sub_task_id: execution.sub_task_id]
+    job = Runs.insert_job!(run, next, Runs.build_payload(run, flow, node, opts))
 
     {next, job}
   end
@@ -367,6 +372,51 @@ defmodule Relay.Runs.RunServer do
         limit: 1,
         select: e.git_sha
     )
+  end
+
+  # RE251: what a retry hands forward as `findings` — the ORIGIN (what sent this node here) plus
+  # the LATEST failure (why this attempt failed). Handing only the latest forward loses the
+  # reviewer's words the moment the commit guard flips a no-op to :failed, so from attempt 2 on
+  # each retry drifted further from the real problem. Origin nil => `execution.detail`,
+  # byte-identical to before.
+  defp retry_findings(run, execution) do
+    case origin_findings(run, execution) do
+      nil -> execution.detail
+      origin -> origin <> @retry_marker <> to_string(execution.detail)
+    end
+  end
+
+  # The detail of the last outcome-bearing execution PRECEDING the first attempt of this
+  # {node_key, visit} — i.e. what sent the node here — when that execution failed. Same rule the
+  # transition path applies inline, read back off history.
+  #
+  # Derived from execution history, NEVER from the previous attempt's job payload: that payload
+  # already holds a merged string, so reading it back would compound the origin on every retry.
+  # Re-deriving keeps every attempt at exactly one origin plus one latest, and is restart-safe by
+  # construction — the same property Relay.Runs.Engine is built on.
+  defp origin_findings(run, %NodeExecution{node_key: node_key, visit: visit}) do
+    first_attempt_id =
+      Repo.one(
+        from e in NodeExecution,
+          where: e.run_id == ^run.id and e.node_key == ^node_key and e.visit == ^visit and e.attempt == 1,
+          order_by: [asc: e.id],
+          limit: 1,
+          select: e.id
+      )
+
+    with id when is_integer(id) <- first_attempt_id,
+         {:failed, detail} <-
+           Repo.one(
+             from e in NodeExecution,
+               where: e.run_id == ^run.id and e.id < ^id and not is_nil(e.outcome),
+               order_by: [desc: e.id],
+               limit: 1,
+               select: {e.outcome, e.detail}
+           ) do
+      detail
+    else
+      _other -> nil
+    end
   end
 
   # Human sentence first, machine token in parens — the engine.ex convention. The 7-char
