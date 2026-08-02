@@ -25,6 +25,7 @@ defmodule Relay.Runs do
   alias Relay.Activity
   alias Relay.Cards
   alias Relay.Repo
+  alias Relay.Runs.Audit
   alias Relay.Runs.Capacity
   alias Relay.Runs.Engine
   alias Relay.Runs.PlanTasks
@@ -260,6 +261,43 @@ defmodule Relay.Runs do
       total_spend: flow_total_spend(flow, since),
       median_end_to_end: round_secs(run_stats.median)
     }
+  end
+
+  # ---- Board-health audit (RE249) ----
+
+  @doc """
+  The flow's runs within `opts[:window]` (one of `metric_windows/0`, default `default_window/0`)
+  with `:node_executions` preloaded, ordered `started_at` ASC then `id` ASC, executions ordered
+  by `id`. `Relay.Runs.Audit` reasons about "the next execution", so a stable order is part of
+  the contract, not a convenience.
+  """
+  def recent_runs_for_flow(%Flow{} = flow, opts \\ []) do
+    since = opts |> Keyword.get(:window, default_window()) |> normalize_window() |> window_since()
+    executions = from(ne in NodeExecution, order_by: [asc: ne.id])
+
+    from(r in Run,
+      join: c in Card,
+      on: c.id == r.card_id,
+      where: c.board_id == ^flow.board_id and r.flow_key == ^flow.key,
+      order_by: [asc: r.started_at, asc: r.id],
+      preload: [node_executions: ^executions]
+    )
+    |> filter_runs_since(since)
+    |> Repo.all()
+  end
+
+  @doc """
+  Board-health findings for `flow` over `opts[:window]` — `Relay.Runs.Audit.findings/2` over
+  `recent_runs_for_flow/2`. The web layer's only door to the audit, so it never reaches past the
+  Runs boundary.
+
+  Returns `%{runs: how_many_were_examined, findings: [...]}`: the count is what the report's
+  `(30d, 14 runs)` header states, and producing it here avoids a second query or a
+  boundary-crossing load in the controller.
+  """
+  def audit(%Flow{} = flow, opts \\ []) do
+    runs = recent_runs_for_flow(flow, opts)
+    %{runs: length(runs), findings: Audit.findings(flow, runs)}
   end
 
   # One grouped pass over node_executions for the numeric columns. percentile_cont ignores NULLs,

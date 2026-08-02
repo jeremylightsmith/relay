@@ -13,8 +13,13 @@ checks that binding until a run dies on it. This skill checks it, reports every
 disagreement, and then fixes each one **with the user** — "grow the repo or shrink the
 flow?" is a question, not a computation.
 
-**Core principle:** resolve names with the executor's own resolver, never a copy of it —
-and change nothing without asking.
+The doctor now answers **two** questions: "do these names resolve?" (checks 1–9) and **"is this
+board's history clean?"** (the audit). The gap between those was the whole bug — RE249 was filed
+after a green doctor was followed, hours later, by five Relay bugs on one card, none of which
+was a naming problem.
+
+**Core principle:** never re-implement a check — resolution comes from the executor's own
+resolver, board health from `relay audit` — and change nothing without asking.
 
 `/relay-doctor` with no argument checks **every** flow, disabled ones included and marked
 `(disabled)` — the flow you are about to enable is exactly the one worth doctoring.
@@ -38,6 +43,7 @@ Everything comes from commands that already exist — this skill adds no code.
 ./bin/relay flow --json          # every flow: full document (nodes, edges, trigger, enabled, version, isolation)
 ./bin/relay flow <key> --json    # one flow, same shape
 ./bin/relay executors --json     # capacity per class, freshness, stale?, version, outdated, jobs
+./bin/relay audit --json          # board health: run-history findings + CI parity (advisory, exits 0)
 ls .claude/agents/*.md           # check 7 ONLY — repo-local, never ~/.claude
 ```
 
@@ -141,6 +147,26 @@ reads the card, but not *which* field it uses. Say so in the report rather than 
 precision you don't have: a node with any `reads` declared is confirmed by a single `relay card`
 occurrence.
 
+## Board health (the audit)
+
+`./bin/relay audit --json` answers the second question, and like everything else here the skill
+**reads it, never re-derives it**. Its findings share the checks' shape — severity, the node,
+the evidence, the fix — and split in two:
+
+| finding | means |
+|---|---|
+| `findings_dropped` (ERROR) | a review failed inside a `foreach` iteration and the loop-back target's next execution carried a **different** sub-task: the findings were never addressed |
+| `verdict_flipped` (WARNING, ERROR at two nodes in one run) | the same node, same visit, same `git_sha` went `failed` → `succeeded` on a retry: a retry laundered a failure into a pass |
+| `ci_parity` (WARNING) | `.github/workflows/*.yml` requires a verify command that **no enabled flow's gate node runs** — every gate can pass and the PR still fails required CI |
+
+`ci_parity` is a **heuristic about the files in *this* working directory** — a line-based read
+of the workflow YAML, because `bin/relay` is stdlib-only. Say so in the finding, exactly as
+check 4 does about PATH. A step carrying `# relay-audit: ignore` on its `run:` line or the line
+above is a deliberate divergence and is already silenced.
+
+Append the audit's sections to the report below **after** the nine checks, then give **one**
+combined summary line covering both halves.
+
 ## The report
 
 Grouped by flow, errors before warnings. Every finding names three things — node, expected
@@ -186,6 +212,10 @@ all-clear.
    4. **Push once per flow, not once per node** — collect the confirmed nodes, show the exact
       node-level diff, get explicit confirmation, then one `./bin/relay flow-push`. This is the
       existing "never push a document the user has not seen" rule; do not weaken it.
+6. **Audit findings are reported and stopped at.** A `findings_dropped` ERROR is about a
+   *shipped card* — a run that already happened — and this skill's blast radius is `.claude/`
+   files and flow documents only (item 4). Cards, branches and commits are out. Report it, name
+   the run, and stop; do not try to "fix" a run.
 
 ## Common mistakes
 
@@ -200,3 +230,8 @@ all-clear.
   aspirational declaration turns a working flow into a failing one.
 - **Looking for a `/name` only under `.claude/skills/`** — `/write-plan` is a *command*; check
   `.claude/commands/<name>.md` too, or check 8 reports a false miss on the Plan flow.
+- **Reporting a CI-parity warning as certain** — it is a heuristic about the workflow files in
+  *this* working directory, on *this* machine, against the flows enabled *right now*.
+- **Branching on a finding's `check` id in `bin/relay`** — check ids are deliberately not pinned
+  by the executor contract; the executor prints them opaquely so the server can add a check
+  without an executor bump.

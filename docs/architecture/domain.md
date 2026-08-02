@@ -92,23 +92,23 @@ sharing behavior.
   `Runs` reads it to answer whether anyone can actually satisfy it.
 - **Runs** — the workflow execution engine (ADR 0006 card 02 / RLY-132): a run executes a
   `Schemas.Flow` graph against a card as a supervised, Postgres-backed state machine. This
-  boundary owns four things.
+  boundary owns five things.
   **The engine** (`Relay.Runs.Engine` / `RunServer`): outcome routing, per-node `max_retries`,
-  per-edge `max_loops`, the visit cap and the failure-signature circuit breaker, needs-input
-  parking, restart resume — budgets are per-`foreach`-iteration, the breaker is whole-run.
-  **The scheduler brain**: `Relay.Runs.Scheduler.plan/1`, a pure `Snapshot → Plan` function behind
-  a per-board `Scheduler.Server`, plus `capacity_diagnosis/1` — the one place an empty, refusing
-  or silent executor roster becomes a verdict.
+  per-edge `max_loops`, the visit cap, the failure-signature breaker (whole-run), needs-input
+  parking and restart resume — budgets are per-`foreach`-iteration.
+  **The scheduler brain**: `Relay.Runs.Scheduler.plan/1`, a pure `Snapshot → Plan` behind a
+  per-board `Scheduler.Server`; `capacity_diagnosis/1` turns an empty/silent roster into a verdict.
   **The read side**: `list_runs_for_card/1`, `latest_run/1`, `run_summaries_for_board/1`,
-  `run_summary_for_card/1`, `happy_path/1`, `queued_flow/4`, `face_summary/4` — every summary
-  built through one shared private builder, so the shape is defined exactly once.
+  `run_summary_for_card/1`, `happy_path/1`, `queued_flow/4`, `face_summary/4` — one shared
+  private builder, so the summary shape is defined exactly once.
+  **The board-health audit** (RE249): `Relay.Runs.audit/2` / `Relay.Runs.Audit.findings/2`, a
+  pure function over runs (`:node_executions` preloaded) on the metrics' `metric_windows/0`
+  vocabulary, answering *is this board's history clean?*; owns `severities/0`/`checks/0`, advisory.
   **The dispatcher seam**: the `Relay.Runs.Dispatcher` behaviour (`config :relay, :runs_dispatcher`).
-  All card writes go through `Relay.Cards`, so ADR 0003/0004 rules apply automatically.
-  Run/node/job statuses and their transitions are in [state.md](state.md); dispatch, the executor,
-  worktrees and the transport are in [runner.md](runner.md); the failure grid is in
-  [failures.md](failures.md). The *why* is [ADR 0006](../adr/0006-workflow-orchestration.md) and
-  [ADR 0007](../adr/0007-card-lifecycle-and-failure-states.md); per-function detail lives in the
-  `Relay.Runs` `@moduledoc` and the functions' own `@doc`s.
+  Card writes go through `Relay.Cards`, so ADR 0003/0004 rules apply automatically.
+  Run/node/job statuses are in [state.md](state.md); dispatch, the executor, worktrees and the
+  transport in [runner.md](runner.md); the failure grid in [failures.md](failures.md). Why:
+  [ADR 0006](../adr/0006-workflow-orchestration.md), [ADR 0007](../adr/0007-card-lifecycle-and-failure-states.md); per-function detail in the `Relay.Runs` `@moduledoc`.
 - **Cards** — the card lifecycle: create/edit/move/archive, status (`working`,
   `needs_input`, `failed`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject,
   needs-input questions. `failed` (RLY-179) is set only by `Relay.Cards.mark_failed/3` when a

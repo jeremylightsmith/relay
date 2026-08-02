@@ -2800,6 +2800,12 @@ class ExecutorVocabularyContractTest(unittest.TestCase):
     def test_isolation_classes_match_the_fixture_order_insensitively(self):
         self.assertEqual(set(relay.ISOLATION_CLASSES), set(self.vocab["isolation"]))
 
+    def test_audit_severities_match_the_fixture(self):
+        # RE249: the report BRANCHES on severity (errors first, the summary counts), so a
+        # drift from Relay.Runs.Audit.severities/0 must break CI. `check` ids are deliberately
+        # not pinned — bin/relay prints them opaquely and must never branch on them.
+        self.assertEqual(relay.AUDIT_SEVERITIES, tuple(self.vocab["audit_severities"]))
+
 
 class ExecutorIdentTest(unittest.TestCase):
     """The `executor` dict both claim and heartbeat put on the wire. Pure and named for the
@@ -3845,6 +3851,247 @@ class FieldSelectorTest(unittest.TestCase):
             source = f.read()
         body = source.split("# ============================ CLI commands")[1]
         self.assertNotIn("print(json.dumps(", body)
+
+
+class AuditCiParityTest(unittest.TestCase):
+    """RE249: the CI-parity half of `relay audit` — a line-based read of .github/workflows
+    matched against the `run` strings of ENABLED flows' shell/gate nodes.
+
+    Line-based on purpose: bin/relay is stdlib-only, so there is no YAML parser here. That is
+    why every finding says 'heuristic', exactly as doctor check 4 does about PATH."""
+
+    WORKFLOW = """\
+name: CI
+jobs:
+  test:
+    steps:
+      - run: mix deps.get
+      - run: mix precommit
+      - run: mix test --only playwright --max-cases 1
+      - if: steps.npm-cache.outputs.cache-hit != 'true'
+        run: npm --prefix assets ci || npm --prefix assets i
+      - name: two of them
+        run: |
+          mix format --check-formatted
+          npm ci
+"""
+
+    FLOWS = [
+        {"key": "code", "enabled": True, "nodes": [
+            {"key": "precommit", "type": "gate", "run": "mix precommit"},
+            # An agent node whose PROMPT quotes the CI command verbatim: never coverage.
+            {"key": "implement", "type": "agent",
+             "run": "make sure mix test --only playwright --max-cases 1 passes"},
+        ]},
+        # Disabled: its gate does not run, so it is not coverage either.
+        {"key": "plan", "enabled": False, "nodes": [
+            {"key": "verify", "type": "gate", "run": "mix format --check-formatted"},
+        ]},
+    ]
+
+    def _workflows(self, body, name="ci.yml"):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d)
+        wf = os.path.join(d, ".github", "workflows")
+        os.makedirs(wf)
+        with open(os.path.join(wf, name), "w", encoding="utf-8") as f:
+            f.write(body)
+        return d
+
+    def test_extracts_inline_and_block_commands_with_line_numbers(self):
+        root = self._workflows(self.WORKFLOW)
+        found = relay.extract_ci_commands(os.path.join(root, ".github", "workflows", "ci.yml"))
+        cmds = [c for _line, c in found]
+        self.assertIn("mix precommit", cmds)
+        self.assertIn("mix test --only playwright --max-cases 1", cmds)
+        # `a || b` is two commands; a `run: |` block is one command per line
+        self.assertIn("npm --prefix assets ci", cmds)
+        self.assertIn("npm --prefix assets i", cmds)
+        self.assertIn("mix format --check-formatted", cmds)
+        self.assertIn("npm ci", cmds)
+        self.assertEqual(next(n for n, c in found if c == "mix precommit"), 6)
+
+    def test_the_verify_filter_rejects_setup_steps(self):
+        for cmd in ("mix deps.get", "npm ci", "npx --prefix assets playwright install chromium",
+                    "mix assets.build", "flutter pub get"):
+            self.assertFalse(relay.verify_command(cmd), cmd)
+        for cmd in ("mix precommit", "mix test --only playwright", "npm test", "make test"):
+            self.assertTrue(relay.verify_command(cmd), cmd)
+
+    def test_a_gated_command_produces_no_finding(self):
+        findings, note = relay.ci_parity_findings(self.FLOWS, root=self._workflows(self.WORKFLOW))
+        self.assertIsNone(note)
+        self.assertFalse([f for f in findings if "mix precommit" in f["summary"]])
+
+    def test_an_ungated_verify_command_warns_and_names_the_file_and_line(self):
+        findings, _note = relay.ci_parity_findings(self.FLOWS, root=self._workflows(self.WORKFLOW))
+        [play] = [f for f in findings if "playwright" in f["summary"]]
+        self.assertEqual(play["severity"], "warning")
+        self.assertEqual(play["check"], "ci_parity")
+        self.assertIsNone(play["flow_key"])
+        self.assertIsNone(play["node_key"])
+        self.assertIsNone(play["run_id"])
+        self.assertTrue(play["evidence"].endswith("ci.yml:7"), play["evidence"])
+        self.assertIn("relay-audit: ignore", play["fix"])
+
+    def test_an_agent_nodes_prompt_is_never_coverage(self):
+        # The only node quoting the playwright command is `implement`, an AGENT node — its
+        # `run` is a prompt, not a shell line. Matching it would launder the command into
+        # "covered" and hide exactly the gap this check exists to find.
+        findings, _note = relay.ci_parity_findings(self.FLOWS, root=self._workflows(self.WORKFLOW))
+        self.assertTrue([f for f in findings if "playwright" in f["summary"]])
+
+    def test_a_disabled_flows_gate_is_not_coverage(self):
+        findings, _note = relay.ci_parity_findings(self.FLOWS, root=self._workflows(self.WORKFLOW))
+        self.assertTrue([f for f in findings if "mix format --check-formatted" in f["summary"]])
+
+    def test_the_ignore_marker_on_the_run_line_silences_a_step(self):
+        body = self.WORKFLOW.replace(
+            "      - run: mix test --only playwright --max-cases 1",
+            "      - run: mix test --only playwright --max-cases 1  # relay-audit: ignore")
+        findings, _note = relay.ci_parity_findings(self.FLOWS, root=self._workflows(body))
+        self.assertFalse([f for f in findings if "playwright" in f["summary"]])
+
+    def test_the_ignore_marker_on_the_line_above_silences_a_step(self):
+        body = self.WORKFLOW.replace(
+            "      - run: mix test --only playwright",
+            "      # relay-audit: ignore\n      - run: mix test --only playwright")
+        findings, _note = relay.ci_parity_findings(self.FLOWS, root=self._workflows(body))
+        self.assertFalse([f for f in findings if "playwright" in f["summary"]])
+
+    def test_the_ignore_marker_silences_a_whole_block_scalar(self):
+        body = self.WORKFLOW.replace("        run: |", "        run: |  # relay-audit: ignore")
+        findings, _note = relay.ci_parity_findings(self.FLOWS, root=self._workflows(body))
+        self.assertFalse([f for f in findings if "mix format --check-formatted" in f["summary"]])
+
+    def test_no_workflows_directory_is_a_note_not_a_finding(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d)
+        findings, note = relay.ci_parity_findings(self.FLOWS, root=d)
+        self.assertEqual(findings, [])
+        self.assertIn("CI parity skipped", note)
+
+    def test_this_repos_own_playwright_gap_is_caught(self):
+        """The self-test that matters (RE249). These checks are worthless if they miss the gap
+        that is ALREADY here: ci.yml requires the browser suite to merge, `mix precommit`
+        excludes `:playwright`, and no flow gate runs it."""
+        flows = [{"key": "code", "enabled": True,
+                  "nodes": [{"key": "precommit", "type": "gate", "run": "mix precommit"}]}]
+        findings, note = relay.ci_parity_findings(flows, root=relay.ROOT)
+        self.assertIsNone(note)
+        summaries = [f["summary"] for f in findings]
+        self.assertTrue(any("--only playwright" in s for s in summaries), summaries)
+        for setup in ("deps.get", "npm ci", "playwright install"):
+            self.assertFalse(any(setup in s for s in summaries), summaries)
+
+
+class AuditReportTest(unittest.TestCase):
+    """RE249: the merged report. Errors before warnings, every finding naming node, evidence and
+    fix, one combined summary line, and an explicit all-clear rather than silence."""
+
+    SECTIONS = [{
+        "flow_key": "code", "window": "30d", "runs": 14,
+        "findings": [{
+            "severity": "error", "check": "findings_dropped", "flow_key": "code",
+            "node_key": "spec_review", "run_id": 236,
+            "summary": "node `spec_review` failed on sub_task 41; the next `implement` "
+                       "execution carried sub_task 42",
+            "evidence": "relay runs <ref> --json — run 236",
+            "fix": "re-open that task and re-run it",
+        }],
+    }]
+
+    PARITY = [{
+        "severity": "warning", "check": "ci_parity", "flow_key": None, "node_key": None,
+        "run_id": None,
+        "summary": ".github/workflows/ci.yml:97 runs `mix test --only playwright` — "
+                   "no enabled flow's gate node runs it",
+        "evidence": ".github/workflows/ci.yml:97",
+        "fix": "add a gate node that runs it, or mark the CI step `# relay-audit: ignore`",
+    }]
+
+    def test_the_flat_findings_list_puts_errors_first(self):
+        report = relay.build_audit_report(self.SECTIONS, self.PARITY, None)
+        self.assertEqual([f["severity"] for f in report["findings"]], ["error", "warning"])
+        self.assertEqual(report["summary"], {"errors": 1, "warnings": 1, "flows": 1})
+
+    def test_every_flat_finding_carries_the_documented_keys(self):
+        report = relay.build_audit_report(self.SECTIONS, self.PARITY, None)
+        for f in report["findings"]:
+            self.assertEqual(sorted(f), sorted(
+                ["severity", "check", "flow_key", "node_key", "run_id", "summary", "evidence", "fix"]))
+
+    def test_the_report_renders_both_sections_and_one_summary_line(self):
+        out = relay.format_audit(relay.build_audit_report(self.SECTIONS, self.PARITY, None))
+        self.assertIn("code flow — run audit (30d, 14 runs)", out)
+        self.assertIn("ERROR", out)
+        self.assertIn("fix: re-open that task and re-run it", out)
+        self.assertIn("board — CI parity (heuristic", out)
+        self.assertEqual(out.splitlines()[-1], "1 error, 1 warning across 1 flow")
+
+    def test_a_clean_board_says_so_explicitly(self):
+        clean = [{"flow_key": "code", "window": "30d", "runs": 0, "findings": []}]
+        out = relay.format_audit(relay.build_audit_report(clean, [], None))
+        self.assertIn("no findings", out)
+        self.assertTrue(out.splitlines()[-1].endswith("— all clear"), out)
+
+    def test_a_missing_workflows_dir_prints_the_note_instead_of_findings(self):
+        out = relay.format_audit(
+            relay.build_audit_report(self.SECTIONS, [], "no .github/workflows here"))
+        self.assertIn("no .github/workflows here", out)
+
+    def test_the_cli_wires_audit_with_an_optional_flow_key(self):
+        parser = relay.build_parser()
+        args = parser.parse_args(["audit"])
+        self.assertEqual(args.func, relay.cmd_audit)
+        self.assertIsNone(args.key)
+        args = parser.parse_args(["audit", "code", "--window", "all", "--json"])
+        self.assertEqual(args.key, "code")
+        self.assertEqual(args.window, "all")
+        self.assertTrue(args.json)
+
+    def test_audit_fetches_every_flow_when_no_key_is_given(self):
+        calls = []
+
+        def fake_api(method, path, *a, **k):
+            calls.append(path)
+            if path == "/api/flows":
+                return {"data": [{"key": "code", "enabled": True, "nodes": []},
+                                 {"key": "plan", "enabled": True, "nodes": []}]}
+            return {"data": {"flow_key": path.split("/")[3], "window": "30d",
+                             "runs": 0, "findings": []}}
+
+        _api = relay.api
+        relay.api = fake_api
+        self.addCleanup(setattr, relay, "api", _api)
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d)
+        args = argparse.Namespace(cmd="audit", key=None, window=None, json=False, field=None,
+                                  root=d)
+        out = capture(relay.cmd_audit, args)
+        self.assertEqual(calls, ["/api/flows", "/api/flows/code/audit", "/api/flows/plan/audit"])
+        self.assertIn("code flow — run audit", out)
+        self.assertIn("plan flow — run audit", out)
+
+    def test_audit_passes_the_window_and_narrows_to_one_flow(self):
+        calls = []
+
+        def fake_api(method, path, *a, **k):
+            calls.append(path)
+            if path == "/api/flows":
+                return {"data": [{"key": "code", "enabled": True, "nodes": []},
+                                 {"key": "plan", "enabled": True, "nodes": []}]}
+            return {"data": {"flow_key": "code", "window": "all", "runs": 0, "findings": []}}
+
+        _api = relay.api
+        relay.api = fake_api
+        self.addCleanup(setattr, relay, "api", _api)
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d)
+        args = argparse.Namespace(cmd="audit", key="code", window="all", json=False, field=None,
+                                  root=d)
+        capture(relay.cmd_audit, args)
+        self.assertEqual(calls, ["/api/flows", "/api/flows/code/audit?window=all"])
 
 
 class DiscoverabilityTest(unittest.TestCase):

@@ -71,6 +71,7 @@ no `jq`). Non-zero exit on any error. Long text args accept `-` (stdin) or `@pat
 | `bin/relay why RLY-12` | **Why isn't this card moving?** One plain-language answer |
 | `bin/relay runs RLY-12` | The card's runs + node executions, full failure detail |
 | `bin/relay executors` | Who's connected, their capacity, the jobs they hold |
+| `bin/relay audit [code]` | **Board health:** run-history findings + CI parity — advisory, always exits 0; `--window` |
 | `bin/relay flow-stats code` | Per-node metrics for a flow (duration, cost, attempts, verdicts); `--window` |
 | `bin/relay flow` · `bin/relay flow code` | The board's flows, or one flow's definition; `--json` **is the pull** |
 | `bin/relay flow-push code code.json` | Push an edited flow document back (`-` reads stdin) |
