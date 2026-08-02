@@ -1678,9 +1678,12 @@ defmodule RelayWeb.CoreComponents do
     parked_run = latest && latest.status == :parked && assigns.card.status == :needs_input && latest
 
     # RE253 — which face the panel wears is decided by park provenance, and `Relay.Runs.park_kind/1`
-    # is the ONE place that decision lives. nil when this card has no parked run at all (a card
-    # blocked before any run started still renders the question face).
-    park_kind = parked_run && Relay.Runs.park_kind(parked_run)
+    # is the ONE place that decision lives. It is nil for a card with no parked run at all, and for
+    # a park that is neither A1 nor A4 (e.g. an :executor_gone re-park of an already-blocked card).
+    # Both degrade to the question face, and that nil policy is applied ONCE here so all three call
+    # sites share it — passing nil down would fall outside the components' declared
+    # `values: [:question, :escalation]` and silently drop the banner's "paused at" line.
+    park_kind = (parked_run && Relay.Runs.park_kind(parked_run)) || :question
 
     assigns =
       assigns
@@ -1890,7 +1893,7 @@ defmodule RelayWeb.CoreComponents do
                   answer_values={@answer_values}
                   answer_form={@answer_form}
                   body_loading={@body_loading}
-                  park_kind={@park_kind || :question}
+                  park_kind={@park_kind}
                   node={@latest_detail && @latest_detail.current_node}
                   attempt={@latest_detail && @latest_detail.parked_attempt}
                   failure_detail={@latest_detail && @latest_detail.last_failure_detail}

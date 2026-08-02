@@ -114,7 +114,7 @@ defmodule Relay.Runs.RestartTest do
 
   describe "restart_stalled/2 + restartable_count/1" do
     # A flow whose failed edge parks the run on needs_input (the RLY-194 shape), so a
-    # reported :failed produces a real died-agent park the sweep can revive in place.
+    # reported :failed produces a real escalation park the sweep can revive in place.
     defp park_flow(board) do
       next_up = Enum.find(board.stages, &(&1.name == "Next up"))
       spec = Enum.find(board.stages, &(&1.name == "Spec"))

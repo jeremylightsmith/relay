@@ -1969,10 +1969,10 @@ defmodule Relay.Runs do
     result =
       try do
         # From-state is the run's OWN current status, not a hardcoded :failed: `restartable?/1`
-        # (checked by `check_retryable/1` above) also revives a :parked run whose
-        # `parked_reason` is :needs_input but whose latest execution actually failed (RLY-179's
-        # failure masquerading as a question) — both {:failed, :running} and {:parked, :running}
-        # are legal edges, so guarding on the run's actual status covers either origin exactly.
+        # (checked by `check_retryable/1` above) also revives an escalation park — a :parked run
+        # `park_kind/1` classifies :escalation (A4: a node failure routed to a human, not a
+        # question asked of one) — and both {:failed, :running} and {:parked, :running} are legal
+        # edges, so guarding on the run's actual status covers either origin exactly.
         Transitions.transition(run, [run.status], :running,
           set: [
             parked_reason: nil,

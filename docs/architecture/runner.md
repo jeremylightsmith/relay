@@ -267,9 +267,16 @@ Success is `200 {"data": {"status": "ok", "run_id", "node", "retries"}}`. A refu
 `422 {"error": {"code", "message"}}` where `code` is one of `not_failed`, `awaiting_answer`,
 `active_run_exists`, `no_flow`, `unknown_node`, `executor_unavailable` — the message names the
 specific status, node key or executor that blocked it. An unknown run/card, another board's
-run, or a card that has never run is `404`. RLY-228 widened retry to a **died-agent park**
-(`:parked`/`needs_input` whose latest execution actually `:failed`); a genuine `:needs_input`
-question is refused `awaiting_answer` instead.
+run, or a card that has never run is `404`. RLY-228 widened retry to an **escalation park** —
+a `:parked`/`needs_input` run that `Relay.Runs.park_kind/1` classifies `:escalation` (its latest
+execution reported something other than `:needs_input`, so a node failure was routed to a human,
+not a question asked of one). A `:question` park is refused `awaiting_answer` instead. See
+"Telling A1 from A4" in [failures.md](failures.md) for the classifier — `park_kind/1` is the one
+place that distinction lives; do not re-derive it here.
+
+A successful retry also clears the card's block: `revive_run/4` calls `clear_card_block/2`, so a
+card sitting `:failed` or `:needs_input` behind the retried run returns to its unblocked status
+and the board stops showing a blocked card whose run is already live again.
 
 The guard is split, because worktrees and branches are executor-side state Phoenix cannot
 see. Server-side, the endpoint refuses up front for the six reasons above — including an

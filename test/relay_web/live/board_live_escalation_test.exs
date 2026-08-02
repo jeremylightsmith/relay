@@ -121,6 +121,29 @@ defmodule RelayWeb.BoardLiveEscalationTest do
     assert_receive {:dispatched, %NodeJob{node_key: "brainstorm"}}
   end
 
+  # `park_kind/1` returns nil for any park that is neither A1 nor A4 — reachable when the agent
+  # calls `relay needs-input` (card blocks, run parks :needs_input) and the executor then dies
+  # before reporting, so the reaper re-parks the run :executor_gone. The card is still
+  # :needs_input, so the drawer still renders the panel; every call site must degrade that nil to
+  # the question face rather than pass nil through and silently drop the banner's paused-at line.
+  test "a park neither A1 nor A4 degrades to the question face on both tabs", ctx do
+    {card, run} = park(ctx.board, ctx.flow, "Executor died", :needs_input, "Which auth model?")
+
+    run
+    |> Ecto.Changeset.change(parked_reason: :executor_gone)
+    |> Relay.Repo.update!()
+
+    assert is_nil(Runs.park_kind(Runs.get_run!(run.id)))
+
+    view = open(ctx.conn, ctx.board, card)
+
+    assert has_element?(view, "#run-needs-input-panel", "RELAY AI NEEDS YOUR INPUT")
+    assert has_element?(view, "#needs-input-panel", "RELAY AI NEEDS YOUR INPUT")
+    # the banner's question-only line survives instead of being dropped by a nil park_kind
+    assert has_element?(view, ".run-banner-parked", "paused at")
+    refute render(view) =~ "NODE FAILED"
+  end
+
   test "a genuine question keeps today's face, with no Retry and no escalation copy", ctx do
     {card, _run} = park(ctx.board, ctx.flow, "Real question", :needs_input, "Which auth model?")
     view = open(ctx.conn, ctx.board, card)
