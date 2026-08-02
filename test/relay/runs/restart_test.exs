@@ -13,10 +13,11 @@ defmodule Relay.Runs.RestartTest do
     %{board: board, stage: stage, user: user}
   end
 
-  # A run parked as a died-agent masquerade: :parked/:needs_input with the latest
-  # NodeExecution.outcome == :failed (RLY-179). Built with factories, no engine.
-  defp died_agent_park(stage) do
-    {:ok, card} = Relay.Cards.create_card(stage, %{title: "Agent died"})
+  # A run parked because a node FAILED and the flow's `--on failed --> needs_input` edge escalated
+  # it to a human (A4): :parked/:needs_input with the latest NodeExecution.outcome == :failed.
+  # Built with factories, no engine.
+  defp escalation_park(stage) do
+    {:ok, card} = Relay.Cards.create_card(stage, %{title: "Escalated"})
     run = insert(:run, card: card, status: :parked, parked_reason: :needs_input, current_node: nil)
     insert(:node_execution, run: run, node: "brainstorm", outcome: :failed)
     Runs.get_run!(run.id)
@@ -42,8 +43,8 @@ defmodule Relay.Runs.RestartTest do
       assert Runs.restartable?(clean_failed(stage))
     end
 
-    test "a died-agent park (latest outcome :failed) is restartable", %{stage: stage} do
-      assert Runs.restartable?(died_agent_park(stage))
+    test "an escalation park (latest outcome :failed) is restartable", %{stage: stage} do
+      assert Runs.restartable?(escalation_park(stage))
     end
 
     test "a genuine :needs_input question (latest outcome :needs_input) is NOT restartable", %{stage: stage} do
@@ -63,6 +64,51 @@ defmodule Relay.Runs.RestartTest do
         run = insert(:run, card: card, status: status)
         refute Runs.restartable?(Runs.get_run!(run.id)), "expected #{status} not restartable"
       end
+    end
+  end
+
+  describe "park_kind/1 — the one place park provenance is decided (RE253)" do
+    test "a park whose latest execution asked is a :question", %{stage: stage} do
+      assert Runs.park_kind(genuine_question(stage)) == :question
+    end
+
+    test "a park whose latest execution failed is an :escalation", %{stage: stage} do
+      assert Runs.park_kind(escalation_park(stage)) == :escalation
+    end
+
+    test "a run that is not a needs_input park has no park kind", %{stage: stage} do
+      assert Runs.park_kind(clean_failed(stage)) == nil
+
+      {:ok, card} = Relay.Cards.create_card(stage, %{title: "Executor gone"})
+      gone = insert(:run, card: card, status: :parked, parked_reason: :executor_gone)
+      insert(:node_execution, run: gone, node: "brainstorm", outcome: :failed)
+      assert Runs.park_kind(Runs.get_run!(gone.id)) == nil
+
+      {:ok, other} = Relay.Cards.create_card(stage, %{title: "Running"})
+      running = insert(:run, card: other, status: :running, current_node: "brainstorm")
+      assert Runs.park_kind(Runs.get_run!(running.id)) == nil
+    end
+
+    test "the 3-arity form classifies without touching the database" do
+      assert Runs.park_kind(:parked, :needs_input, :needs_input) == :question
+      assert Runs.park_kind(:parked, :needs_input, :failed) == :escalation
+      assert Runs.park_kind(:parked, :needs_input, nil) == :escalation
+      assert Runs.park_kind(:parked, :executor_gone, :failed) == nil
+      assert Runs.park_kind(:failed, nil, :failed) == nil
+      assert Runs.park_kind(:running, nil, nil) == nil
+    end
+
+    # Re-expressing restartable?/1 and retry eligibility through park_kind/3 must not move a
+    # single verdict: the board's stalled badge and the "Restart all stalled" sweep read them.
+    test "retry eligibility is byte-for-byte unchanged across all four shapes", %{stage: stage} do
+      assert Runs.restartable?(clean_failed(stage))
+      assert Runs.restartable?(escalation_park(stage))
+      refute Runs.restartable?(genuine_question(stage))
+
+      {:ok, card} = Relay.Cards.create_card(stage, %{title: "Executor gone 2"})
+      gone = insert(:run, card: card, status: :parked, parked_reason: :executor_gone)
+      insert(:node_execution, run: gone, node: "brainstorm", outcome: :failed)
+      refute Runs.restartable?(Runs.get_run!(gone.id))
     end
   end
 
@@ -124,6 +170,22 @@ defmodule Relay.Runs.RestartTest do
       assert Runs.get_run!(ask.id).status == :parked
       assert Runs.get_run!(ask.id).parked_reason == :needs_input
       assert Runs.restartable_count(ctx.board) == 0
+    end
+
+    # RE253 / AC4 — reviving an escalation park must leave the card agreeing with the run. A card
+    # still reading :needs_input beside a :running run shows a question nobody can answer.
+    test "reviving an escalation park unblocks its card", ctx do
+      stage = Enum.find(ctx.board.stages, &(&1.name == "Next up"))
+      {:ok, card} = Relay.Cards.create_card(stage, %{title: "Commit guard"})
+      run = park_a_run(card, ctx.flow, :failed, "commit guard failed")
+
+      assert Relay.Cards.get_card(ctx.board, card.id).status == :needs_input
+
+      assert {:ok, _revived} = Runs.retry_run(run)
+
+      reloaded = Relay.Cards.get_card(ctx.board, card.id)
+      assert reloaded.status == :working
+      assert reloaded.blocked_since == nil
     end
   end
 
