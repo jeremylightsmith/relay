@@ -1677,10 +1677,10 @@ defmodule RelayWeb.CoreComponents do
     # baton, before the engine's own run row update lands.
     parked_run = latest && latest.status == :parked && assigns.card.status == :needs_input && latest
 
-    # RLY-228 — split the parked branch by the latest-outcome discriminator: a died-agent park
-    # (restartable) gets the honest Restart banner; a genuine question keeps the needs_input form.
-    # `!!` coerces to a plain boolean so the template's `not @died_agent_park` is always defined.
-    died_agent_park = !!(parked_run && Relay.Runs.restartable?(parked_run))
+    # RE253 — which face the panel wears is decided by park provenance, and `Relay.Runs.park_kind/1`
+    # is the ONE place that decision lives. nil when this card has no parked run at all (a card
+    # blocked before any run started still renders the question face).
+    park_kind = parked_run && Relay.Runs.park_kind(parked_run)
 
     assigns =
       assigns
@@ -1689,7 +1689,7 @@ defmodule RelayWeb.CoreComponents do
       |> assign(:latest_run, latest)
       |> assign(:latest_detail, latest && Relay.Runs.run_detail(latest, assigns.run_flow))
       |> assign(:parked_run, parked_run)
-      |> assign(:died_agent_park, died_agent_park)
+      |> assign(:park_kind, park_kind)
       |> assign(:show_run_tab?, assigns.runs != [] or assigns.queued_flow != nil)
 
     ~H"""
@@ -1882,7 +1882,7 @@ defmodule RelayWeb.CoreComponents do
                   </div>
                 </section>
                 <.needs_input_panel
-                  :if={@card.status == :needs_input and !@archived and !@parked_run}
+                  :if={@card.status == :needs_input and !@archived}
                   card={@card}
                   question={@question}
                   answer_questions={@answer_questions}
@@ -1890,6 +1890,10 @@ defmodule RelayWeb.CoreComponents do
                   answer_values={@answer_values}
                   answer_form={@answer_form}
                   body_loading={@body_loading}
+                  park_kind={@park_kind || :question}
+                  node={@latest_detail && @latest_detail.current_node}
+                  attempt={@latest_detail && @latest_detail.parked_attempt}
+                  failure_detail={@latest_detail && @latest_detail.last_failure_detail}
                 />
                 <section
                   :if={@card.status == :in_review and !@archived}
@@ -2384,11 +2388,13 @@ defmodule RelayWeb.CoreComponents do
                       detail={@latest_detail}
                     />
                     <RunComponents.run_state_banner
-                      :if={@parked_run && not @died_agent_park}
+                      :if={@parked_run}
                       variant={:parked}
+                      park_kind={@park_kind}
                       detail={@latest_detail}
                     >
                       <.needs_input_panel
+                        id_prefix="run-needs-input"
                         card={@card}
                         question={@question}
                         answer_questions={@answer_questions}
@@ -2396,13 +2402,12 @@ defmodule RelayWeb.CoreComponents do
                         answer_values={@answer_values}
                         answer_form={@answer_form}
                         body_loading={@body_loading}
+                        park_kind={@park_kind}
+                        node={@latest_detail.current_node}
+                        attempt={@latest_detail.parked_attempt}
+                        failure_detail={@latest_detail.last_failure_detail}
                       />
                     </RunComponents.run_state_banner>
-                    <RunComponents.run_state_banner
-                      :if={@died_agent_park}
-                      variant={:stopped}
-                      detail={@latest_detail}
-                    />
                     <RunComponents.run_mini_graph
                       :if={@latest_detail.status == :running and @run_flow}
                       path={Relay.Runs.happy_path(@run_flow)}
@@ -2826,11 +2831,40 @@ defmodule RelayWeb.CoreComponents do
   attr :answer_form, :any, default: nil
   attr :body_loading, :boolean, default: false
 
+  attr :id_prefix, :string,
+    default: "needs-input",
+    doc: "RE253: namespace for every DOM id, so the drawer can render the panel on two tabs at once"
+
+  attr :park_kind, :atom,
+    default: :question,
+    values: [:question, :escalation],
+    doc: "RE253: from `Relay.Runs.park_kind/1` — :question is an agent ask (A1), :escalation a routed node failure (A4)"
+
+  attr :node, :string, default: nil, doc: "RE253: the failed node's key, for the :escalation sentence"
+  attr :attempt, :integer, default: nil, doc: "RE253: attempts spent on that node"
+  attr :failure_detail, :string, default: nil, doc: "RE253: the failed execution's detail text"
+
   @doc """
-  The needs-input answer panel (RLY-71/RLY-109): structured stepper when
-  questions exist, single composer otherwise. Rendered in exactly ONE place
-  per state — the Run tab's parked banner when a parked run exists, the
-  Detail tab otherwise — because its DOM ids are static.
+  The needs-input answer panel (RLY-71/RLY-109/RE253): structured stepper when questions exist,
+  single composer otherwise.
+
+  Two faces, chosen by `park_kind` — the classification lives in `Relay.Runs.park_kind/1`, never
+  here:
+
+    * `:question` (A1) — the agent asked something. Renders exactly as it always has.
+    * `:escalation` (A4) — a node failed and the flow's `--on failed --> needs_input` edge handed
+      the card to a human. Names the node and its attempts, shows the failure output in the dark
+      `<pre>` the `:failed` banner uses, and offers Retry beside the answer box. The markdown
+      question is suppressed: the engine posts the failure detail *as* the question
+      (`ensure_card_blocked/2`), so the `<pre>` already carries that same text, and multi-line
+      failure output renders badly through `Relay.Markdown.to_html/1`.
+
+  Answering either face is the same event (`answer_input`) and the same resume: `Cards.answer_input/3`
+  unblocks the card, the Listener resumes the run in the same visit with the human's note as
+  `findings` and the agent's Claude session restored.
+
+  Every DOM id is `\#{id_prefix}-…`, which is what makes it legal to render this panel twice — the
+  drawer puts one copy on the Detail tab and one inside the Run tab's parked banner.
   """
   def needs_input_panel(assigns) do
     assigns =
@@ -2842,7 +2876,7 @@ defmodule RelayWeb.CoreComponents do
 
     ~H"""
     <section
-      id="needs-input-panel"
+      id={"#{@id_prefix}-panel"}
       class="flex flex-col gap-4 rounded-[10px] p-5"
       style="background:oklch(0.975 0.025 75);border:1px solid oklch(0.87 0.07 75);"
     >
@@ -2851,29 +2885,47 @@ defmodule RelayWeb.CoreComponents do
           class="font-mono text-[10px] font-semibold tracking-[0.05em]"
           style="color:oklch(0.52 0.11 65);"
         >
-          RELAY AI NEEDS YOUR INPUT
+          {panel_label(@park_kind)}
         </span>
         <span
           :if={@card.blocked_since}
-          id="needs-input-waiting"
+          id={"#{@id_prefix}-waiting"}
           class="font-mono text-[10px]"
           style="color:oklch(0.52 0.11 65);"
         >
           {waiting_label(@card.blocked_since)}
         </span>
       </div>
-      <%!-- RLY-71 stepper: one structured question at a time --%>
-      <div :if={@answer_questions} id="needs-input-stepper" class="flex flex-col gap-4">
+      <%!-- RE253 (A4): the flow escalated a node failure to a human. Say which node, how many
+      attempts, and show the output — the old :stopped banner had this text and showed none of it. --%>
+      <div
+        :if={@park_kind == :escalation}
+        id={"#{@id_prefix}-escalation"}
+        class="flex flex-col gap-3"
+      >
+        <p class="text-[13px] leading-normal" style="color:oklch(0.33 0.03 65);">
+          <strong>{@node}</strong>
+          failed after {attempt_label(@attempt)} — the flow handed this card to you.
+        </p>
+        <pre
+          :if={@failure_detail}
+          id={"#{@id_prefix}-failure-detail"}
+          style="background:oklch(0.20 0.02 255);color:oklch(0.94 0.006 255);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0;overflow-x:auto;"
+        ><%= @failure_detail %></pre>
+      </div>
+      <%!-- RLY-71 stepper: one structured question at a time. An A4 park never reaches this
+      branch — a plain-string block writes no meta["questions"], so answer_questions is nil. --%>
+      <div :if={@answer_questions} id={"#{@id_prefix}-stepper"} class="flex flex-col gap-4">
         <div
-          id="needs-input-progress"
+          id={"#{@id_prefix}-progress"}
           class="font-mono text-[10px]"
           style="color:oklch(0.52 0.11 65);"
         >
           Question {@answer_step + 1} of {length(@answer_questions)}
         </div>
         <div
-          id="needs-input-question"
-          class="md text-[13.5px] leading-normal break-words"
+          id={"#{@id_prefix}-question"}
+          class="needs-input-question md text-[13.5px] leading-normal break-words"
           style="color:oklch(0.33 0.03 65);"
         >
           {Relay.Markdown.to_html(@stepper_question["prompt"])}
@@ -2886,7 +2938,7 @@ defmodule RelayWeb.CoreComponents do
           <button
             :for={{option, index} <- Enum.with_index(@stepper_question["options"])}
             type="button"
-            id={"needs-input-option-#{index}"}
+            id={"#{@id_prefix}-option-#{index}"}
             phx-click="answer_select"
             phx-value-index={@answer_step}
             phx-value-option={option}
@@ -2915,12 +2967,12 @@ defmodule RelayWeb.CoreComponents do
         </div>
         <form
           :if={@stepper_question["allow_text"]}
-          id="needs-input-text-form"
+          id={"#{@id_prefix}-text-form"}
           phx-change="answer_custom"
         >
           <input type="hidden" name="answer[index]" value={@answer_step} />
           <textarea
-            id="needs-input-text"
+            id={"#{@id_prefix}-text"}
             name="answer[text]"
             rows="3"
             autocomplete="off"
@@ -2941,7 +2993,7 @@ defmodule RelayWeb.CoreComponents do
         <div class="flex items-center justify-between">
           <button
             :if={@answer_step > 0}
-            id="needs-input-back"
+            id={"#{@id_prefix}-back"}
             type="button"
             phx-click="answer_back"
             class="btn btn-sm btn-ghost rounded-[7px]"
@@ -2951,7 +3003,7 @@ defmodule RelayWeb.CoreComponents do
           <span :if={@answer_step == 0}></span>
           <button
             :if={@answer_step < length(@answer_questions) - 1}
-            id="needs-input-next"
+            id={"#{@id_prefix}-next"}
             type="button"
             phx-click="answer_next"
             disabled={not Map.has_key?(@answer_values, @answer_step)}
@@ -2962,7 +3014,7 @@ defmodule RelayWeb.CoreComponents do
           </button>
           <button
             :if={@answer_step == length(@answer_questions) - 1}
-            id="needs-input-send"
+            id={"#{@id_prefix}-send"}
             type="button"
             phx-click="answer_submit"
             disabled={not Map.has_key?(@answer_values, @answer_step)}
@@ -2977,50 +3029,74 @@ defmodule RelayWeb.CoreComponents do
       <div :if={is_nil(@answer_questions)}>
         <div
           :if={@body_loading}
-          id="needs-input-question-skeleton"
+          id={"#{@id_prefix}-question-skeleton"}
           class="skeleton h-5 w-3/4 rounded"
         >
         </div>
         <div
-          :if={!@body_loading and @question}
-          id="needs-input-question"
-          class="md text-[13.5px] leading-normal"
+          :if={!@body_loading && @question && @park_kind != :escalation}
+          id={"#{@id_prefix}-question"}
+          class="needs-input-question md text-[13.5px] leading-normal"
           style="color:oklch(0.33 0.03 65);"
         >
           {Relay.Markdown.to_html(@question)}
         </div>
         <.form
           for={@answer_form}
-          id="needs-input-form"
+          id={"#{@id_prefix}-form"}
           class="flex flex-col items-start gap-[11px]"
           phx-submit="answer_input"
         >
           <div class="w-full">
             <.boxed_field
-              id="needs-input-answer"
+              id={"#{@id_prefix}-answer"}
               commit={:form}
               multiline
               rows="3"
               form={@answer_form}
               field={:body}
               input_class="w-full"
-              placeholder="Type your answer — the AI picks up where it left off…"
+              placeholder={answer_placeholder(@park_kind)}
               phx-hook="SubmitOnCmdEnter"
             />
           </div>
-          <button
-            id="needs-input-send"
-            type="submit"
-            class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
-            style="background:oklch(0.70 0.13 65);"
-          >
-            Send to AI →
-          </button>
+          <div class="flex items-center gap-2">
+            <button
+              id={"#{@id_prefix}-send"}
+              type="submit"
+              class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
+              style="background:oklch(0.70 0.13 65);"
+            >
+              Send to AI →
+            </button>
+            <%!-- Retry differs from answering and stays useful: it re-enters with NO session and
+            +1 retry-budget bonus, where an answer resumes the session with the note as findings. --%>
+            <button
+              :if={@park_kind == :escalation}
+              id={"#{@id_prefix}-retry"}
+              type="button"
+              phx-click="retry_run"
+              class="btn btn-sm rounded-[7px] font-semibold"
+              style="background:transparent;border:1px solid oklch(0.86 0.05 75);color:oklch(0.42 0.08 65);"
+            >
+              Retry {@node}
+            </button>
+          </div>
         </.form>
       </div>
     </section>
     """
   end
+
+  defp panel_label(:escalation), do: "NODE FAILED · YOUR CALL"
+  defp panel_label(_kind), do: "RELAY AI NEEDS YOUR INPUT"
+
+  defp answer_placeholder(:escalation), do: "Tell the agent what to do differently — it retries this node with your note…"
+
+  defp answer_placeholder(_kind), do: "Type your answer — the AI picks up where it left off…"
+
+  defp attempt_label(n) when is_integer(n) and n > 1, do: "#{n} attempts"
+  defp attempt_label(_n), do: "1 attempt"
 
   # SUB-TASKS progress bar width; an empty list is 0% (never divides by zero).
   defp sub_task_pct(%{total: 0}), do: 0

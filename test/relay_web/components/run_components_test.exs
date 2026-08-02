@@ -288,6 +288,25 @@ defmodule RelayWeb.RunComponentsTest do
       refute html =~ "attempt 1"
     end
 
+    # RE253 — for an escalation the panel supplies its own mono label and sentence, so the banner
+    # must not double it up. The amber frame, baton chip and Parked footer stay.
+    test "parked variant omits its own heading for an escalation park" do
+      assigns = %{detail: detail(%{status: :parked, flow_key: "code", current_node: "implement"}, [])}
+
+      html =
+        rendered_to_string(~H"""
+        <RunComponents.run_state_banner variant={:parked} park_kind={:escalation} detail={@detail}>
+          <div id="embedded-panel">panel goes here</div>
+        </RunComponents.run_state_banner>
+        """)
+
+      refute html =~ "RELAY AI NEEDS YOUR INPUT"
+      refute html =~ "paused at implement"
+      assert html =~ ~s(id="embedded-panel")
+      assert html =~ "oklch(0.975 0.025 75)"
+      assert html =~ "Parked"
+    end
+
     test "reentry and revoked variants carry their copy" do
       rejection = %{
         note: "stream it",

@@ -229,16 +229,18 @@
    markdown numbered list. The global .md list styling is deliberately compact
    (for dense spec/plan bodies), which leaves a multi-question ask cramped and
    indented. Scope a roomier, flush-left treatment to this panel only so the
-   questions are easy to read and line up with the rest of the panel. */
-#needs-input-question { text-align: left; }
-#needs-input-question ol,
-#needs-input-question ul {
+   questions are easy to read and line up with the rest of the panel.
+   Scoped by class, not id (RE253): the panel now renders on two drawer tabs at
+   once with different id prefixes, so a class hook is what reaches both. */
+.needs-input-question { text-align: left; }
+.needs-input-question ol,
+.needs-input-question ul {
   margin: 0.75em 0;
   padding-left: 0;
   list-style-position: inside;
 }
-#needs-input-question li { margin: 0.7em 0; }
-#needs-input-question li::marker { font-weight: 600; }
+.needs-input-question li { margin: 0.7em 0; }
+.needs-input-question li::marker { font-weight: 600; }
 
 /* --- Public docs site (RLY-64): chrome + content styles.
    Matches docs/designs/Relay Docs.dc.html (anchor: Relay Landing.dc.html + design system).

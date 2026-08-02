@@ -170,11 +170,13 @@ defmodule RelayWeb.BoardLiveRunTabTest do
     view = open(ctx.conn, ctx.board, ref)
 
     refute has_element?(view, "#card-drawer-tab-panel-run.hidden")
-    assert has_element?(view, "#card-drawer-tab-panel-run #needs-input-stepper")
-    refute has_element?(view, "#card-drawer-tab-panel-detail #needs-input-panel")
+    assert has_element?(view, "#card-drawer-tab-panel-run #run-needs-input-stepper")
+    # RE253 — both tabs render the panel now (namespaced by id_prefix), so a parked run
+    # no longer suppresses the Detail tab's copy.
+    assert has_element?(view, "#card-drawer-tab-panel-detail #needs-input-panel")
 
-    view |> element("#needs-input-option-0") |> render_click()
-    view |> element("#needs-input-send") |> render_click()
+    view |> element("#run-needs-input-option-0") |> render_click()
+    view |> element("#run-needs-input-send") |> render_click()
 
     card = Relay.Repo.reload!(card)
     assert card.status == :working

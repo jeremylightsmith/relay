@@ -1233,6 +1233,115 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  describe "needs_input_panel/1" do
+    defp panel(extra) do
+      base = %{
+        card: %{blocked_since: nil},
+        question: nil,
+        answer_questions: nil,
+        answer_step: 0,
+        answer_values: %{},
+        answer_form: to_form(%{"body" => ""}, as: :answer),
+        body_loading: false
+      }
+
+      render_component(&CoreComponents.needs_input_panel/1, Map.merge(base, extra))
+    end
+
+    test "a question park keeps today's label, markdown question and placeholder, with no Retry" do
+      html = panel(%{question: "Billing timezone or the viewer's?"})
+
+      assert html =~ "RELAY AI NEEDS YOUR INPUT"
+      assert html =~ ~s(id="needs-input-question")
+      assert html =~ "Billing timezone"
+      assert html =~ "Type your answer"
+      assert html =~ ~s(id="needs-input-send")
+      refute html =~ ~s(id="needs-input-retry")
+      refute html =~ "NODE FAILED"
+    end
+
+    test "an escalation park names the node, shows the failure output and offers Retry" do
+      detail = "✗ commit guard: the working tree is dirty\n  M lib/relay/exports.ex"
+
+      html =
+        panel(%{
+          park_kind: :escalation,
+          node: "implement",
+          attempt: 3,
+          question: detail,
+          failure_detail: detail
+        })
+
+      assert html =~ "NODE FAILED · YOUR CALL"
+      assert html =~ "implement"
+      assert html =~ "3 attempts"
+
+      # the failure text the old :stopped banner threw away, in the dark <pre> the :failed
+      # banner already uses
+      assert html =~ ~s(id="needs-input-failure-detail")
+      assert html =~ "M lib/relay/exports.ex"
+      assert html =~ "background:oklch(0.20 0.02 255)"
+
+      # answering is the primary action; Retry sits beside it
+      assert html =~ ~s(id="needs-input-send")
+      assert html =~ "Tell the agent what to do differently"
+      assert html =~ ~s(id="needs-input-retry")
+      assert html =~ "Retry implement"
+
+      # the markdown question block is suppressed — the <pre> carries that same text
+      refute html =~ ~s(id="needs-input-question")
+      refute html =~ "AGENT STOPPED"
+    end
+
+    test "a single attempt reads singular" do
+      html = panel(%{park_kind: :escalation, node: "branch", attempt: 1, failure_detail: "boom"})
+
+      assert html =~ "1 attempt"
+      refute html =~ "1 attempts"
+    end
+
+    test "an escalation park with no captured failure detail renders no empty pre" do
+      html = panel(%{park_kind: :escalation, node: "post", attempt: 2})
+
+      assert html =~ "NODE FAILED · YOUR CALL"
+      refute html =~ ~s(id="needs-input-failure-detail")
+    end
+
+    test "id_prefix namespaces every DOM id, so the panel is legal to render twice" do
+      html =
+        panel(%{
+          id_prefix: "run-needs-input",
+          park_kind: :escalation,
+          node: "implement",
+          attempt: 2,
+          failure_detail: "boom"
+        })
+
+      for suffix <- ~w(panel escalation failure-detail form answer send retry) do
+        assert html =~ ~s(id="run-needs-input-#{suffix}"), "missing run-needs-input-#{suffix}"
+        refute html =~ ~s(id="needs-input-#{suffix}"), "leaked unprefixed needs-input-#{suffix}"
+      end
+    end
+
+    test "the RLY-71 stepper branch is untouched, only namespaced" do
+      html =
+        panel(%{
+          id_prefix: "run-needs-input",
+          answer_questions: [
+            %{"prompt" => "Which timezone?", "options" => ["Billing", "Viewer"], "allow_text" => true}
+          ]
+        })
+
+      assert html =~ ~s(id="run-needs-input-stepper")
+      assert html =~ ~s(id="run-needs-input-progress")
+      assert html =~ ~s(id="run-needs-input-question")
+      assert html =~ ~s(id="run-needs-input-option-0")
+      assert html =~ ~s(id="run-needs-input-text-form")
+      assert html =~ ~s(id="run-needs-input-send")
+      assert html =~ "Question 1 of 1"
+    end
+  end
+
   # RLY-148 — the collapsed log strip, full artboard fidelity. Every value below is
   # pinned to docs/designs/Relay Card Activity.dc.html §02; the light theme's
   # --color-secondary/-warning/-error are byte-identical to the artboard's violet/amber/rose.
