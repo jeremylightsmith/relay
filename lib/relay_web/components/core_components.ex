@@ -2858,9 +2858,12 @@ defmodule RelayWeb.CoreComponents do
     * `:escalation` (A4) — a node failed and the flow's `--on failed --> needs_input` edge handed
       the card to a human. Names the node and its attempts, shows the failure output in the dark
       `<pre>` the `:failed` banner uses, and offers Retry beside the answer box. The markdown
-      question is suppressed: the engine posts the failure detail *as* the question
-      (`ensure_card_blocked/2`), so the `<pre>` already carries that same text, and multi-line
-      failure output renders badly through `Relay.Markdown.to_html/1`.
+      question is suppressed *only when that `<pre>` renders*: the engine posts the failure detail
+      as the question (`ensure_card_blocked/2`), so it is usually the same text twice, and
+      multi-line failure output renders badly through `Relay.Markdown.to_html/1`. The two
+      derivations are not equivalent, though — `RunDetail.last_failure_detail/1` keeps `:failed`
+      executions only, so an A9 (`:partial`) escalation has no `<pre>`, and there the question is
+      the only surviving copy of the failure text. Never suppress both (RE253).
 
   Answering either face is the same event (`answer_input`) and the same resume: `Cards.answer_input/3`
   unblocks the card, the Listener resumes the run in the same visit with the human's note as
@@ -3037,7 +3040,7 @@ defmodule RelayWeb.CoreComponents do
         >
         </div>
         <div
-          :if={!@body_loading && @question && @park_kind != :escalation}
+          :if={!@body_loading && @question && !(@park_kind == :escalation && @failure_detail)}
           id={"#{@id_prefix}-question"}
           class="needs-input-question md text-[13.5px] leading-normal"
           style="color:oklch(0.33 0.03 65);"

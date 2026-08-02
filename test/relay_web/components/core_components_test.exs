@@ -1307,6 +1307,19 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ ~s(id="needs-input-failure-detail")
     end
 
+    # RE253: an A9 (`:partial`) park is an escalation whose ONLY copy of the failure text is the
+    # question — `RunDetail.last_failure_detail/1` keeps `:failed` executions only, so the <pre>
+    # is empty. Suppressing the question there left the human with no explanation at all.
+    test "an escalation park with no <pre> still shows the failure text as the question" do
+      detail = "implement reported partial: 2 of 5 tasks left unimplemented"
+
+      html = panel(%{park_kind: :escalation, node: "implement", attempt: 1, question: detail})
+
+      refute html =~ ~s(id="needs-input-failure-detail")
+      assert html =~ ~s(id="needs-input-question")
+      assert html =~ "2 of 5 tasks left unimplemented"
+    end
+
     test "id_prefix namespaces every DOM id, so the panel is legal to render twice" do
       html =
         panel(%{

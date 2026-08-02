@@ -60,6 +60,20 @@ defmodule Storybook.CoreComponents.NeedsInputPanel do
           failure_detail: @guard,
           answer_form: answer_form()
         }
+      },
+      # RE253 — an A9 (`:partial`) escalation. `last_failure_detail/1` keeps `:failed` executions
+      # only, so there is no dark <pre> here and the question carries the failure text instead.
+      %Variation{
+        id: :escalation_without_failure_detail,
+        attributes: %{
+          id_prefix: "sb-escalation-partial",
+          card: card(),
+          park_kind: :escalation,
+          node: "implement",
+          attempt: 1,
+          question: "implement reported `partial`: 2 of 5 plan tasks were left unimplemented.",
+          answer_form: answer_form()
+        }
       }
     ]
   end
