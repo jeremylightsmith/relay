@@ -200,6 +200,7 @@ defmodule RelayWeb.Router do
     get "/flows", FlowController, :index
     get "/flows/:key", FlowController, :show
     get "/flows/:key/metrics", FlowMetricsController, :metrics
+    get "/flows/:key/audit", AuditController, :audit
     put "/flows/:key", FlowController, :update
     patch "/cards/:ref", CardController, :update
     patch "/cards/:ref/sub-tasks/:id", CardController, :toggle_sub_task

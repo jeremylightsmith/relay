@@ -128,6 +128,15 @@ never 403s):
   rollup for a flow over a `?window=7d|30d|all` window (default `30d`): a `summary` stat band and
   a `nodes` array (`runs`, `duration_p50/p95`, `cost_p50/p95` — `null` until executors report
   spend — `attempts_mean`, `verdict_split`, `loop_laps`). Read-only, board-scoped.
+- `GET /api/flows/:key/audit` (`RelayWeb.Api.AuditController.audit/2`) — run-history health
+  findings for a flow over a `?window=7d|30d|all` window (default `30d`), composing
+  `Relay.Runs.audit/2` (`Relay.Runs.Audit.findings/2` over `Relay.Runs.recent_runs_for_flow/2`).
+  Returns `flow_key`, the echoed `window`, the `runs` count examined, and a `findings` array of
+  `severity` / `check` / `flow_key` / `node_key` / `run_id` / `summary` / `evidence` / `fix`.
+  Two checks today: `findings_dropped` (a foreach cursor advanced past a failed review) and
+  `verdict_flipped` (a retry turned `failed` into `succeeded` at the same `git_sha`). The
+  other half of `relay audit` — CI parity — is computed in `bin/relay`, because the server has
+  no checkout of any board's repo. Read-only, board-scoped, advisory.
 - `GET /api/flows` (`RelayWeb.Api.FlowController.index/2`) — every flow on the board, fully
   serialized in stable `key` order. One round trip is all `relay doctor` (RLY-240) needs.
 - `GET /api/flows/:key` (`RelayWeb.Api.FlowController.show/2`) — one flow as the canonical

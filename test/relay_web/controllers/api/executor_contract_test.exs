@@ -90,6 +90,7 @@ defmodule RelayWeb.Api.ExecutorContractTest do
           "terminal" => stringify(Schemas.Run.terminal_statuses())
         },
         "outcomes" => stringify(Schemas.NodeExecution.outcomes()),
+        "audit_severities" => stringify(Relay.Runs.Audit.severities()),
         "isolation" => stringify(Schemas.Flow.isolation_classes()),
         "node_types" => %{"runnable" => stringify(Schemas.Flow.Node.runnable_types())}
       },
