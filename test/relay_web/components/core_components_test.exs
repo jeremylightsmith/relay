@@ -1638,4 +1638,68 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(aria-label="Close")
     end
   end
+
+  describe "card_drawer/1 ai_result changes rendering" do
+    # Regression (TH8 prod crash loop): an agent wrote `ai_result["changes"]` as a list of
+    # structured maps (%{"change"=>_, "file"=>_, "lines"=>_}) instead of plain strings. The
+    # drawer rendered each with `{change}`, and HEEx cannot interpolate a Map (no
+    # Phoenix.HTML.Safe impl) → Protocol.UndefinedError on every mount → crash loop.
+    defp drawer_assigns(ai_result) do
+      %{
+        id: "test-drawer",
+        ref: "RLY-9",
+        board_slug: "b",
+        card: %{
+          title: "Card",
+          description: "d",
+          acceptance_criteria: nil,
+          spec: nil,
+          tag: nil,
+          status: :working,
+          progress: nil,
+          blocked_since: nil,
+          branch: nil,
+          plan: nil,
+          pr_url: nil,
+          rejection: nil,
+          sub_tasks: [],
+          ai_result: ai_result,
+          owners: [],
+          inserted_at: ~U[2026-07-01 09:00:00Z],
+          updated_at: ~U[2026-07-06 15:30:00Z]
+        },
+        stage_name: "Code",
+        stage_owner: :ai,
+        active_owner: :ai,
+        current_user_id: 1,
+        health: :live,
+        close_patch: "/x",
+        title_form: to_form(%{"title" => "Card"}, as: :card),
+        status_form: to_form(%{"status" => "working"}, as: :card),
+        stages: [%{id: 4, name: "Code"}],
+        conversation: [],
+        activity: [],
+        comment_form: to_form(%{"body" => ""}, as: :comment)
+      }
+    end
+
+    test "renders structured (map) changes without crashing" do
+      ai_result = %{
+        "summary" => "did the thing",
+        "changes" => [%{"change" => "rewrote the query", "file" => "lib/foo.ex", "lines" => "10-20"}]
+      }
+
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
+
+      assert html =~ "rewrote the query"
+    end
+
+    test "still renders plain string changes" do
+      ai_result = %{"summary" => "s", "changes" => ["fixed the login bug"]}
+
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
+
+      assert html =~ "fixed the login bug"
+    end
+  end
 end
