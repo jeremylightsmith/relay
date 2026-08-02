@@ -71,9 +71,23 @@ Say what's stuck, what you tried, and what would unblock you. Never silently shi
 doubt.
 
 ## If a reviewer sent you back
-The message carries the findings. Address EVERY one in a single pass, then re-run the tests
-covering the amended code (the reviewer won't). Don't argue correct findings; if one is wrong,
-say why and what you did instead — reasoning, not defensiveness.
+**The findings arrive in an appended block at the end of your prompt**, between the task and the
+outcome contract, headed `THIS IS A LOOP-BACK`. They are the SUBJECT of this run — not the plan.
+Read them first. Do NOT open by diffing the code against `$RELAY_PLAN` and concluding it already
+matches: that is the failure mode the block exists to prevent, and it is how a loop-back turns
+into a no-op that burns a retry and teaches the next attempt nothing.
+
+Address EVERY finding in a single pass, then re-run the tests covering the amended code (the
+reviewer won't). **Account for every one of them in your outcome detail** — each either FIXED
+(what you changed) or REBUTTED (why it does not hold). A finding you do not mention is a finding
+you skipped. Don't argue correct findings; if one is wrong, say why and what you did instead —
+reasoning, not defensiveness.
+
+If you conclude that NO finding needs a change, that is an escalation, not a success: park the run
+for a human with the `needs-input` command from the outcome contract and stop, exactly as
+described in "When you're in over your head" above. Reporting `succeeded` with nothing committed
+is never the right answer on a loop-back — the commit guard rewrites it to `failed`, and the next
+attempt starts no better informed than this one.
 
 **A finding that carries a quoted human authorization to deviate outranks `plan.md` for this
 task.** When a reviewer escalated a plan-mandated defect and a human answered "fix the code

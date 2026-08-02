@@ -297,7 +297,7 @@ Every row involved (abridged JSON; timestamps trimmed):
 { "id": "nj_c88", "run": "run_7f3a", "node": "implement", "state": "claimed",
   "executor_id": 3, "claimed_at": "…T18:41:55Z",
   "payload": { "isolation": "exclusive", "resume_session": "s_a41…", "agent": "plan-implementer",
-               "run": "Implement the task named {sub_task} from the card's plan with strict red/green TDD. One task only — do not start the next one. If reviewer findings are attached, address them.",
+               "run": "Implement the task named {sub_task} from the card's plan with strict red/green TDD. One task only — do not start the next one.",
                "vars": { "ref": "RLY-150", "branch": "rly-150-csv-export",
                          "sub_task": "Wire the export button up",
                          "findings": "export test asserts on private struct internals; …" } } }
