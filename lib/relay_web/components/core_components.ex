@@ -2173,7 +2173,7 @@ defmodule RelayWeb.CoreComponents do
                         class="flex items-start gap-2 text-sm"
                       >
                         <.icon name="hero-check" class="mt-0.5 size-4 shrink-0 text-success" />
-                        <span>{change}</span>
+                        <span>{ai_change_text(change)}</span>
                       </li>
                     </ul>
                     <div
@@ -4084,4 +4084,18 @@ defmodule RelayWeb.CoreComponents do
   def translate_errors(errors, field) when is_list(errors) do
     for {^field, {msg, opts}} <- errors, do: translate_error({msg, opts})
   end
+
+  # `ai_result["changes"]` items may be plain strings (the documented shape) or structured maps
+  # (%{"change"=>_, "file"=>_, "lines"=>_}) that some agents write. HEEx cannot interpolate a map
+  # (no Phoenix.HTML.Safe impl) — `{change}` on one crashed the whole drawer (TH8 crash loop). Coerce
+  # any shape to a string here so the render can never raise on a caller's blob.
+  defp ai_change_text(change) when is_binary(change), do: change
+
+  defp ai_change_text(%{} = change) do
+    text = change["change"] || change["summary"] || change["description"] || ""
+    loc = [change["file"], change["lines"]] |> Enum.reject(&(&1 in [nil, ""])) |> Enum.join(":")
+    if loc == "", do: text, else: "#{text} (#{loc})"
+  end
+
+  defp ai_change_text(other), do: inspect(other)
 end
