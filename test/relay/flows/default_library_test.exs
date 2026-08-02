@@ -159,7 +159,8 @@ defmodule Relay.Flows.DefaultLibraryTest do
           "git push --force-with-lease origin HEAD:refs/heads/{branch} && " <>
           "url=$(gh pr view {branch} --json url -q .url 2>/dev/null || " <>
           "gh pr create --fill --head {branch} --base main) && " <>
-          "{relay} pr {ref} \"$url\" && gh pr merge {branch} --squash"
+          "{relay} pr {ref} \"$url\" && " <>
+          "(gh pr merge {branch} --squash --auto || gh pr merge {branch} --squash)"
 
       assert n.run == expected
 
@@ -168,6 +169,13 @@ defmodule Relay.Flows.DefaultLibraryTest do
       assert n.run =~ "gh pr view {branch} --json url"
       assert n.run =~ "|| gh pr create"
       assert n.run =~ "if [ \"$state\" = MERGED ]; then"
+
+      # RE254 / TH13: a bare `gh pr merge --squash` demands an immediate merge and dies on a repo
+      # whose branch policy still has checks IN_PROGRESS ("add the `--auto` flag"), then burns its
+      # retries against a policy no retry can satisfy. `--auto` queues the squash-merge until the
+      # required checks pass; the `|| ... --squash` fallback covers repos where auto-merge is off.
+      assert n.run =~ "gh pr merge {branch} --squash --auto"
+      assert n.run =~ "|| gh pr merge {branch} --squash)"
       assert n.run =~ "exit 0; fi;"
 
       # RLY-199 regression guard: no plain non-force push may remain.
