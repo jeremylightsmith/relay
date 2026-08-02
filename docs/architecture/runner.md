@@ -152,7 +152,8 @@ never 403s):
   that no longer matches (absent `version` = last-write-wins).
 - CLI: `bin/relay why REF` / `bin/relay runs REF` / `bin/relay executors` /
   `bin/relay version` / `bin/relay flow-stats KEY` / `bin/relay flow [KEY]` /
-  `bin/relay flow-push KEY FILE`, documented in [`../../relay.md`](../../relay.md).
+  `bin/relay flow-push KEY FILE` / `bin/relay audit [KEY]`, documented in
+  [`../../relay.md`](../../relay.md).
 
 ## Bootstrap surface (RLY-208)
 

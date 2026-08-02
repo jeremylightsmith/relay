@@ -15,6 +15,7 @@ Executor-local config: .relay/executor.json (worktree namespace + capacity)
   relay why REF [--json]      # why isn't this card moving? — one plain-language answer
   relay runs REF [--json]     # the card's runs + node executions, detail untruncated
   relay executors [--json]    # who is connected, their capacity, and the jobs they hold
+  relay audit [FLOW] [--window 7d|30d|all]   # board health: run history + CI parity (advisory)
   relay version [--json]      # the git SHA the deployed app was built from — no RELAY_API_KEY needed
   relay comment REF TEXT      relay move REF STAGE        relay status REF STATUS
   relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF [Q] [--questions @file]
@@ -68,8 +69,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 27
-EXECUTOR_FINGERPRINT = "14e9ef17349a9c927856e33b5a777c2322be812fcadda2ff9957e1d8c8db9292"
+EXECUTOR_VERSION = 28
+EXECUTOR_FINGERPRINT = "58751d904aafb05467d92634eccb44a4f4903e4004c2fe3b423f1d6478734a8c"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -833,6 +834,215 @@ def format_flow_push(key, before, returned):
     if before == returned:
         return f"{key}: unchanged (v{version})"
     return f"{key}: saved as v{version}"
+
+
+# ============================ board-health audit (RE249) ============================
+#
+# `/relay-doctor`'s nine checks all ask "does this name resolve?", so a green doctor means "this
+# flow can start", not "this board is sound". `relay audit` asks the other question. The run
+# history half lives on the server (only it has the data); the CI-parity half is computed HERE,
+# because the server has no checkout of any board's repo and never will.
+
+# Pinned to Relay.Runs.Audit.severities/0 by test/fixtures/executor_contract.json: the report
+# branches on severity (errors first, the summary counts), so drift must break CI. `check` ids
+# are deliberately NOT pinned — they are printed opaquely and must never be branched on, so the
+# server can add a check without an executor bump.
+AUDIT_SEVERITIES = ("error", "warning")
+
+# A CI step is worth comparing against a flow gate only when it starts with one of these. A
+# naive "every CI step must be gated" check is mostly false positives (deps.get, npm ci, cache
+# warms, browser installs) and would be worse than no check. Defined once; extend here.
+VERIFY_COMMAND_PREFIXES = (
+    "mix test", "mix precommit", "mix credo", "mix dialyzer", "mix sobelow", "mix format",
+    "npm test", "npm run test", "yarn test", "pytest", "cargo test", "go test",
+    "rspec", "bundle exec rspec", "make test",
+)
+
+# How a deliberate divergence is silenced: on the `run:` line itself, or the line above it.
+AUDIT_IGNORE_MARKER = "# relay-audit: ignore"
+
+_RUN_INLINE_RE = re.compile(r"^(\s*)-?\s*run:\s*(\S.*)$")
+_RUN_BLOCK_RE = re.compile(r"^(\s*)-?\s*run:\s*[|>][-+]?\s*(#.*)?$")
+
+
+def workflow_files(root="."):
+    """Every workflow file under <root>/.github/workflows, or None when there is no such dir.
+
+    None means UNKNOWN, not empty: the caller skips CI parity with a note instead of reporting
+    findings — the same rule doctor applies to a capabilities inventory it cannot load."""
+    d = os.path.join(root, ".github", "workflows")
+    if not os.path.isdir(d):
+        return None
+    return [os.path.join(d, n) for n in sorted(os.listdir(d)) if n.endswith((".yml", ".yaml"))]
+
+
+def extract_ci_commands(path):
+    """[(line_number, command)] for every shell command a workflow's `run:` steps invoke.
+
+    LINE-BASED HEURISTIC — this file is stdlib-only, so there is no YAML parser, and every
+    finding says so. Handles the two shapes that actually occur: an inline `run: cmd`, and a
+    `run: |` / `run: >` block scalar whose more-indented lines are each one command. A step
+    carrying AUDIT_IGNORE_MARKER on the `run:` line or the line immediately above is skipped."""
+    with open(path, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+
+    found = []
+    i = 0
+    while i < len(lines):
+        block = _RUN_BLOCK_RE.match(lines[i])
+        if block:
+            indent, ignored = len(block.group(1)), _audit_ignored(lines, i)
+            i += 1
+            while i < len(lines) and (not lines[i].strip() or _indent_of(lines[i]) > indent):
+                if lines[i].strip() and not ignored:
+                    found.extend((i + 1, c) for c in _split_shell(lines[i]))
+                i += 1
+            continue
+        inline = _RUN_INLINE_RE.match(lines[i])
+        if inline and not _audit_ignored(lines, i):
+            found.extend((i + 1, c) for c in _split_shell(inline.group(2)))
+        i += 1
+    return found
+
+
+def _indent_of(line):
+    return len(line) - len(line.lstrip())
+
+
+def _audit_ignored(lines, index):
+    above = lines[index - 1] if index else ""
+    return AUDIT_IGNORE_MARKER in lines[index] or AUDIT_IGNORE_MARKER in above
+
+
+def _split_shell(text):
+    return [" ".join(p.split()) for p in re.split(r"&&|\|\||;", text) if p.strip()]
+
+
+def verify_command(cmd):
+    """Whether a CI command is one a flow gate could plausibly be expected to run."""
+    return any(cmd == p or cmd.startswith(p + " ") for p in VERIFY_COMMAND_PREFIXES)
+
+
+def gate_commands(flows):
+    """Every `run` string of a shell/gate node in an ENABLED flow — the board's real gates.
+
+    Disabled flows do not run, so their gates are not coverage. An `agent` node's `run` is a
+    PROMPT, never a shell line: matching against it would launder any command into 'covered'."""
+    return [n.get("run") or ""
+            for f in flows if f.get("enabled")
+            for n in (f.get("nodes") or []) if n.get("type") in ("shell", "gate")]
+
+
+def ci_parity_findings(flows, root="."):
+    """(findings, note) — CI verify commands that no enabled flow's gate node runs.
+
+    Board-wide, computed once: a command covered by the code flow's gate must not warn when
+    someone audits the plan flow, so these findings carry no flow_key."""
+    files = workflow_files(root)
+    if files is None:
+        return [], "no .github/workflows in this working directory — CI parity skipped"
+
+    gates = gate_commands(flows)
+    findings = []
+    for path in files:
+        for lineno, cmd in extract_ci_commands(path):
+            if not verify_command(cmd) or any(cmd in gate for gate in gates):
+                continue
+            findings.append({
+                "severity": "warning",
+                "check": "ci_parity",
+                "flow_key": None,
+                "node_key": None,
+                "run_id": None,
+                "summary": f"{path}:{lineno} runs `{cmd}` — no enabled flow's gate node runs it",
+                "evidence": f"{path}:{lineno}",
+                "fix": "add a gate node that runs it, or mark the CI step "
+                       "`# relay-audit: ignore`",
+            })
+    return findings, None
+
+
+def build_audit_report(sections, parity, note):
+    """The one report dict: `--json` prints it whole, format_audit renders it.
+
+    `findings` is the FLAT list (run history + CI parity), most severe first, so a consumer
+    never has to know which half produced a finding."""
+    findings = sorted([f for s in sections for f in s["findings"]] + parity, key=_severity_rank)
+    counts = {s: sum(1 for f in findings if f["severity"] == s) for s in AUDIT_SEVERITIES}
+    return {
+        "findings": findings,
+        "flows": sections,
+        "board": {"ci_parity": {"findings": parity, "note": note}},
+        "summary": {"errors": counts["error"], "warnings": counts["warning"],
+                    "flows": len(sections)},
+    }
+
+
+def _severity_rank(finding):
+    """Errors first. An unrecognized severity sorts LAST rather than raising: the server may add
+    one, and this file must keep printing rather than die on it."""
+    severity = finding.get("severity")
+    return AUDIT_SEVERITIES.index(severity) if severity in AUDIT_SEVERITIES else len(AUDIT_SEVERITIES)
+
+
+def format_audit(report):
+    lines = []
+    for section in report["flows"]:
+        lines.append(f"{section['flow_key']} flow — run audit "
+                     f"({section['window']}, {_plural(section['runs'], 'run')})")
+        lines.extend(_audit_finding_lines(section["findings"]))
+        lines.append("")
+    parity = report["board"]["ci_parity"]
+    lines.append("board — CI parity (heuristic, from .github/workflows on this machine)")
+    if parity["note"]:
+        lines.append(f"  {parity['note']}")
+    else:
+        lines.extend(_audit_finding_lines(parity["findings"]))
+    lines.append("")
+    s = report["summary"]
+    summary = (f"{_plural(s['errors'], 'error')}, {_plural(s['warnings'], 'warning')} "
+               f"across {_plural(s['flows'], 'flow')}")
+    lines.append(summary if s["errors"] or s["warnings"] else summary + " — all clear")
+    return "\n".join(lines)
+
+
+def _audit_finding_lines(findings):
+    """Three lines per finding — verdict + summary, the evidence, the fix — mirroring the
+    doctor's report so the skill can splice this in unchanged. An empty section says so."""
+    if not findings:
+        return ["  no findings"]
+    out = []
+    for f in findings:
+        out.append(f"  {f['severity'].upper():<7} {f['summary']}")
+        out.append(f"          {f['evidence']}")
+        out.append(f"          fix: {f['fix']}")
+    return out
+
+
+def _plural(n, noun):
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def cmd_audit(args):
+    """`relay audit [FLOW]` — board health: run-history findings from the server, CI parity
+    computed locally against this working directory's .github/workflows.
+
+    ALWAYS EXITS 0. Advisory, exactly like every doctor check: nothing here gates.
+
+    `args.root` is a test seam with no CLI flag — in real use the CI half always reads the
+    current working directory."""
+    flows = api("GET", "/api/flows")["data"]
+    keys = [args.key] if getattr(args, "key", None) else [f["key"] for f in flows]
+    window = getattr(args, "window", None)
+
+    sections = []
+    for key in keys:
+        path = f"/api/flows/{key}/audit" + (f"?window={window}" if window else "")
+        sections.append(api("GET", path)["data"])
+
+    parity, note = ci_parity_findings(flows, root=getattr(args, "root", None) or ".")
+    report = build_audit_report(sections, parity, note)
+    emit(args, report, lambda: print(format_audit(report)))
 
 
 def cmd_version(args):
@@ -2580,6 +2790,9 @@ def build_parser():
     fl = add("flow", cmd_flow, json_flag=True)
     fl.add_argument("key", nargs="?")
     add("flow-push", cmd_flow_push, "key", "file", json_flag=True)
+    au = add("audit", cmd_audit, json_flag=True)
+    au.add_argument("key", nargs="?")
+    au.add_argument("--window")
     add("version", cmd_version, json_flag=True)
     add("git-fetch", cmd_git_fetch)
     oc = add("outcome", cmd_outcome, "outcome")
