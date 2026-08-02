@@ -171,6 +171,26 @@ defmodule Relay.RunDetailTest do
       assert detail.totals == %{duration_s: 180, cost: Decimal.new("1.50"), nodes: 2, attempts: 3}
     end
 
+    test "last_failure_detail names the parking :partial, not an earlier :failed (RE253/A9)" do
+      # A :partial degrades onto the node's :failed edge and parks (Engine.degrade_to_failed).
+      # The run parked on attempt 2, so the drawer's failure text must be attempt 2's detail —
+      # matching the question, which also comes from the parking execution. Keeping only :failed
+      # here surfaced attempt 1 instead, so the escalation panel disagreed with its own question.
+      r =
+        run(%{
+          status: :parked,
+          current_node: "implement",
+          node_executions: [
+            ne("implement", 1, :failed, %{detail: "3 credo warnings"}),
+            ne("implement", 2, :partial, %{detail: "2 of 5 plan tasks left unimplemented"})
+          ]
+        })
+
+      detail = Runs.run_detail(r, nil)
+
+      assert detail.last_failure_detail == "2 of 5 plan tasks left unimplemented"
+    end
+
     test "parked attempt reflects the paused node's highest attempt" do
       r =
         run(%{
