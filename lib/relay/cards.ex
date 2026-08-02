@@ -1453,10 +1453,11 @@ defmodule Relay.Cards do
   end
 
   @doc """
-  The inverse of `mark_failed/3` (RLY-189): a human retried the card's failed
-  run, so the card must stop reading `:failed` — otherwise the board disagrees
-  with a live run, and the scheduler (which skips `:failed` cards by rule,
-  `Relay.Runs.Scheduler`) would keep treating it as dead.
+  The inverse of `mark_failed/3` (RLY-189) and of an escalation park (RE253): a human retried the
+  card's stalled run, so the card must stop reading `:failed` — or, for a `needs_input` park that
+  a node failure escalated, stop reading blocked. Otherwise the board disagrees with a live run,
+  and the scheduler (which skips `:failed` cards by rule, `Relay.Runs.Scheduler`) would keep
+  treating it as dead.
 
   Logs one `:action` entry rather than clearing history, so the timeline reads
   as one story: it failed here, a human retried, it carried on.

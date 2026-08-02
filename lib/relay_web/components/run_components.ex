@@ -460,10 +460,17 @@ defmodule RelayWeb.RunComponents do
 
   # ---------- run_state_banner ----------
 
-  attr :variant, :atom, required: true, values: [:reentry, :revoked, :circuit, :failed, :parked, :stopped]
+  attr :variant, :atom, required: true, values: [:reentry, :revoked, :circuit, :failed, :parked]
   attr :detail, :map, default: nil
   attr :card, :any, default: nil
   attr :claimer, :string, default: nil
+
+  attr :park_kind, :atom,
+    default: :question,
+    values: [:question, :escalation],
+    doc:
+      "RE253: from `Relay.Runs.park_kind/1`. On :escalation the slot's panel supplies the label and sentence, so the banner omits its own to avoid a doubled heading."
+
   slot :inner_block
 
   def run_state_banner(%{variant: :reentry} = assigns) do
@@ -581,11 +588,13 @@ defmodule RelayWeb.RunComponents do
         baton → <span style="font-weight:700;color:oklch(0.44 0.02 255);">YOU</span>
       </div>
       <div style="background:oklch(0.975 0.025 75);border-radius:8px;padding:14px 16px;">
-        <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.48 0.11 65);margin-bottom:2px;">
-          RELAY AI NEEDS YOUR INPUT
-        </div>
-        <div style="font-size:12px;color:oklch(0.55 0.06 65);margin-bottom:10px;">
-          · paused at {@detail.current_node} · attempt {@attempt}
+        <div :if={@park_kind == :question}>
+          <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.48 0.11 65);margin-bottom:2px;">
+            RELAY AI NEEDS YOUR INPUT
+          </div>
+          <div style="font-size:12px;color:oklch(0.55 0.06 65);margin-bottom:10px;">
+            · paused at {@detail.current_node} · attempt {@attempt}
+          </div>
         </div>
         {render_slot(@inner_block)}
       </div>
@@ -597,35 +606,6 @@ defmodule RelayWeb.RunComponents do
           Parked {ago(DateTime.utc_now(), @detail.started_at)}
         </span>
       </div>
-    </div>
-    """
-  end
-
-  # RLY-228 — the honest banner for a run that PARKED because its agent died environmentally
-  # (spend limit, crash), which RLY-179 stores as a plain-string "question" with no real ask.
-  # It replaces the fake needs_input form with a Restart control wired to the same `retry_run`
-  # event RLY-189's :failed banner uses (Task 1 made this run restartable). Red frame like
-  # :failed — an honest "the agent stopped," not a fabricated question.
-  def run_state_banner(%{variant: :stopped} = assigns) do
-    assigns = assign(assigns, :attempt, assigns.detail.parked_attempt)
-
-    ~H"""
-    <div
-      id="run-stopped-banner"
-      class="run-banner run-banner-stopped"
-      style="border-left:3px solid oklch(0.62 0.16 22);background:oklch(0.975 0.025 22);border-radius:8px;padding:14px 16px;"
-    >
-      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.52 0.16 22);margin-bottom:6px;">
-        ⊗ AGENT STOPPED
-      </div>
-      <p style="font-size:13px;color:oklch(0.34 0.02 255);margin:0 0 10px 0;">
-        This run's agent stopped before it could finish · paused at
-        <strong>{@detail.current_node}</strong>
-        · attempt {@attempt}
-      </p>
-      <button id="run-restart" type="button" class="btn btn-sm btn-primary" phx-click="retry_run">
-        Agent stopped — Restart
-      </button>
     </div>
     """
   end

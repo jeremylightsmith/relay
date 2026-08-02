@@ -199,6 +199,45 @@ run =
 
 add_ne.(run, %{node: "brainstorm", outcome: :needs_input, duration_s: 190, cost: cost.("0.15")})
 
+# 3b · Escalated failure (A4, RE253): `implement` failed 3× and the flow's
+# `--on failed --> needs_input` edge handed the card to a human. The drawer must offer an answer
+# box + Retry with the failure output visible — NOT a dead-end "agent stopped" banner.
+commit_guard_detail = """
+✗ commit guard: the working tree is dirty after `mix precommit`
+
+  M lib/relay/exports.ex
+  M test/relay/exports_test.exs
+
+  mix format rewrote two files the implementer already committed, so the
+  node ends with uncommitted changes and cannot hand the branch on.
+
+→ returned outcome=failed, retry budget spent, routed to needs_input
+"""
+
+escalated = new_card.("Code", "Export the board as CSV")
+{:ok, escalated} = Cards.request_input(escalated, commit_guard_detail, :agent)
+
+run =
+  add_run.(escalated, %{
+    status: :parked,
+    parked_reason: :needs_input,
+    current_node: "implement",
+    started_at: minutes_ago.(26)
+  })
+
+add_ne.(run, %{node: "branch", duration_s: 8, cost: cost.("0.00")})
+
+for {attempt, duration, spend} <- [{1, 210, "1.05"}, {2, 190, "0.98"}, {3, 205, "1.02"}] do
+  add_ne.(run, %{
+    node: "implement",
+    attempt: attempt,
+    outcome: :failed,
+    duration_s: duration,
+    cost: cost.(spend),
+    detail: commit_guard_detail
+  })
+end
+
 # 4 · Baton revoked: a human claimed the card mid-run; run cancelled, work preserved.
 revoked = new_card.("Code", "Legacy import cleanup")
 {:ok, revoked} = Cards.set_owners(revoked, [{:user, user.id}], {:user, user.id})

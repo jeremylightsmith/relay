@@ -1842,31 +1842,49 @@ defmodule Relay.Runs do
     end
   end
 
-  # A genuine human question, not a died-agent masquerade: parked on needs_input with the latest
-  # execution actually a needs_input ask. The one non-restartable state retry names by itself, so
-  # a human is told to answer it rather than "restart" it (RLY-228).
-  defp awaiting_human_answer?(%Run{status: :parked, parked_reason: :needs_input} = run),
-    do: latest_execution_outcome(run) == :needs_input
+  @doc """
+  Which kind of `needs_input` park this is — the ONE place park provenance is decided (RE253).
 
-  defp awaiting_human_answer?(_run), do: false
+    * `:question`   — the node reported `:needs_input`; a human is being asked something (A1).
+    * `:escalation` — a `--on failed --> needs_input` edge routed a node failure to a human (A4).
+    * `nil`         — not a `needs_input` park.
+
+  The inference is exact, so no schema column is needed to tell the two apart: a `:needs_input`
+  outcome parks in `Relay.Runs.Engine.decide/4` *before* edge routing is ever reached, so the two
+  cases can never collide. See `docs/architecture/failures.md` (A1 vs A4).
+
+  The 3-arity form exists because `restartable_runs/1` reads latest outcomes in ONE grouped query
+  and must classify without a per-run round trip; the 1-arity form is the convenience wrapper.
+  """
+  def park_kind(:parked, :needs_input, :needs_input), do: :question
+  def park_kind(:parked, :needs_input, _outcome), do: :escalation
+  def park_kind(_status, _parked_reason, _outcome), do: nil
+
+  def park_kind(%Run{status: status, parked_reason: parked_reason} = run),
+    do: park_kind(status, parked_reason, latest_execution_outcome(run))
+
+  # A genuine human question, not an escalated node failure. The one non-restartable state retry
+  # names by itself, so a human is told to answer it rather than "restart" it (RLY-228).
+  defp awaiting_human_answer?(%Run{} = run), do: park_kind(run) == :question
 
   @doc """
   Whether `run` stalled in a way retry can revive in place — the ONE eligibility rule shared by
-  per-run retry (`check_retryable/1`), the bulk sweep (`restart_stalled/2`), and the drawer's
-  honest-Restart split (RLY-228). True for a clean `:failed` run, and for a died-agent park
-  (`:parked`, `parked_reason: :needs_input`, latest `NodeExecution.outcome == :failed` —
-  RLY-179's failure masquerading as a question). False for a genuine `:needs_input` question, any
-  `:executor_gone` park (RLY-199 auto-resumes those), and `:running`/`:done`/`:cancelled`.
+  per-run retry (`check_retryable/1`), the bulk sweep (`restart_stalled/2`), and the board's
+  stalled badge (`restartable_count/1`). True for a clean `:failed` run, and for an escalation
+  park (`park_kind/3 == :escalation` — a node failure routed to a human, RLY-194/A4). False for a
+  genuine `:needs_input` question, any `:executor_gone` park (RLY-199 auto-resumes those), and
+  `:running`/`:done`/`:cancelled`.
   """
   def restartable?(%Run{status: status, parked_reason: parked_reason} = run),
     do: restartable_by_outcome?(status, parked_reason, latest_execution_outcome(run))
 
   # The eligibility rule, expressed exactly once (AGENTS.md "a magic value is defined once"):
-  # a run is revivable-in-place iff it FAILED cleanly, or it PARKED as needs_input while its
-  # latest node execution actually FAILED (a died agent masquerading as a question).
+  # a run is revivable-in-place iff it FAILED cleanly, or its park was an escalated node failure.
+  # Park provenance itself is not re-derived here — `park_kind/3` owns that.
   defp restartable_by_outcome?(:failed, _parked_reason, _latest_outcome), do: true
-  defp restartable_by_outcome?(:parked, :needs_input, :failed), do: true
-  defp restartable_by_outcome?(_status, _parked_reason, _latest_outcome), do: false
+
+  defp restartable_by_outcome?(status, parked_reason, latest_outcome),
+    do: park_kind(status, parked_reason, latest_outcome) == :escalation
 
   @doc "The `outcome` of `run`'s most recent NodeExecution, or nil when it has none."
   def latest_execution_outcome(%Run{id: run_id}) do
@@ -1951,10 +1969,10 @@ defmodule Relay.Runs do
     result =
       try do
         # From-state is the run's OWN current status, not a hardcoded :failed: `restartable?/1`
-        # (checked by `check_retryable/1` above) also revives a :parked run whose
-        # `parked_reason` is :needs_input but whose latest execution actually failed (RLY-179's
-        # failure masquerading as a question) — both {:failed, :running} and {:parked, :running}
-        # are legal edges, so guarding on the run's actual status covers either origin exactly.
+        # (checked by `check_retryable/1` above) also revives an escalation park — a :parked run
+        # `park_kind/1` classifies :escalation (A4: a node failure routed to a human, not a
+        # question asked of one) — and both {:failed, :running} and {:parked, :running} are legal
+        # edges, so guarding on the run's actual status covers either origin exactly.
         Transitions.transition(run, [run.status], :running,
           set: [
             parked_reason: nil,
@@ -1975,7 +1993,7 @@ defmodule Relay.Runs do
 
     case result do
       {:ok, run} ->
-        clear_card_failure(run, actor)
+        clear_card_block(run, actor)
         broadcast_runs(board_id_of(run), {:run_resumed, run})
         {:ok, _pid} = ensure_server(run, mode)
         {:ok, run}
@@ -1992,12 +2010,15 @@ defmodule Relay.Runs do
     end
   end
 
-  # RLY-179 marks the card :failed when a run dies, and the scheduler skips :failed
-  # cards — so a retry that left the card alone would put the board in permanent
-  # disagreement with a live run.
-  defp clear_card_failure(%Run{card_id: card_id}, actor) do
+  # RE253 — retry must leave the card agreeing with the run. A `:failed` card stops reading failed
+  # (RLY-189); an escalation-parked `:needs_input` card must ALSO unblock, or the board shows a
+  # blocked card asking a question while its run is already live again. This two-element list is
+  # an ad-hoc "card state retry has to clear" predicate, NOT a domain partition — do not replace
+  # it with a Card status vocabulary function. Genuine questions and `:executor_gone` parks never
+  # reach here: `check_retryable/1` refuses them.
+  defp clear_card_block(%Run{card_id: card_id}, actor) do
     card = Repo.get!(Card, card_id)
-    if card.status == :failed, do: {:ok, _card} = Cards.clear_failure(card, actor)
+    if card.status in [:failed, :needs_input], do: {:ok, _card} = Cards.clear_failure(card, actor)
     :ok
   end
 

@@ -16,16 +16,28 @@ is [runner.md](runner.md).
 
 | # | Failure | Trigger | Handling | Ends as |
 | --- | --- | --- | --- | --- |
-| A1 | **Genuine human question** | node reports `needs_input` | park run `:needs_input`, block card; Listener resumes on answer with the stored `claude --resume` session (`listener.ex:108`) | `parked/needs_input` |
+| A1 | **Genuine human question** | node reports `needs_input` | park run `:needs_input`, block card; Listener resumes on answer with the stored `claude --resume` session (`listener.ex:108`); classified `:question` by `Relay.Runs.park_kind/1` | `parked/needs_input` |
 | A2 | **Recoverable node failure** | node reports `failed`, retry budget left | re-enter the same node (`{:retry}`, `engine.ex:85`) | continues |
 | A3 | **Routed failure → fixer** | `failed` with a `:failed` edge to a fix node | follow it (`precommit→final_fix`, `smoke→smoke_fix`, `sync→sync_fix`, …) | continues |
-| A4 | **Escalated failure** | `failed` with a `:failed → needs_input` edge (RLY-194: `implement`, `*_fix`, `post`, `branch`) | park `:needs_input` for a human | `parked/needs_input` |
+| A4 | **Escalated failure** | `failed` with a `:failed → needs_input` edge (RLY-194: `implement`, `*_fix`, `post`, `branch`) | park `:needs_input` for a human; classified `:escalation` by `Relay.Runs.park_kind/1` | `parked/needs_input` |
 | A5 | **No route** | `failed` with no `:failed` edge, or budgets spent | `{:fail}` → run `failed` → `mark_failed` → card `failed` | `failed` |
 | A6 | **Silent no-op** | `expects_commits` node reports `succeeded` but HEAD didn't move | rewritten to `failed` before finalize (`override_no_op_success/4`, `run_server.ex:337`) → routes as A2–A5 | as A2–A5 |
 | A7 | **Same error looping** | 3 identical `failure_signature`s | circuit breaker `{:fail}` even with budget left (`engine.ex:82`) | `failed` |
 | A8 | **Runaway** | `max_loops` on an edge, or 20 node visits, exceeded | `{:fail}` | `failed` |
 | A9 | **Unrouted non-failed outcome** | outcome (e.g. `partial`) with no matching edge | `degrade_to_failed` — follow the node's `:failed` edge, spending *its* budget (`engine.ex:145`) | as A3–A5 |
 | A10 | **Broken baton** | a node declaring `writes` reports `succeeded` with a declared card field still blank | rewritten to `failed` before finalize (`override_missing_writes/4`, `run_server.ex`) → routes as A2–A5 | as A2–A5 |
+
+**Telling A1 from A4 (RE253).** Both end as `parked/needs_input`, and the only surviving difference
+in the database is the latest `NodeExecution.outcome` — `:needs_input` for A1, `:failed` for A4.
+`Relay.Runs.park_kind/1` is the one function that reads that difference, and the inference is
+exact: a `:needs_input` outcome parks in `Engine.decide/4` *before* edge routing is ever reached, so
+the two cases cannot collide and no `parked_reason` value or schema column is needed to separate
+them. The drawer renders A1 as the question the agent asked, and A4 as an answerable escalation —
+the failed node and its attempt count, the failure output in a dark `<pre>`, an answer box that
+resumes the node with the human's note as `findings`, and a Retry beside it. There is deliberately
+no "agent stopped" dead end: an agent that dies environmentally reports `failed` exactly like a node
+that ran and honestly failed, so the two are not distinguishable from the data and the UI must not
+pretend otherwise.
 
 ## B. Plan / foreach
 

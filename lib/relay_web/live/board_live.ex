@@ -658,7 +658,7 @@ defmodule RelayWeb.BoardLive do
         save_card_acceptance_criteria save_card_spec save_card_plan
         add_owner remove_owner take_over post_comment answer_input
         answer_select answer_custom answer_next answer_back answer_goto answer_submit
-        review_approve review_reject retry_card confirm_move cancel_move
+        review_approve review_reject retry_card retry_run confirm_move cancel_move
         archive_card restore_card toggle_sub_task
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}

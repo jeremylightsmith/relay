@@ -125,6 +125,9 @@ defmodule Relay.DocsTaxonomyTest do
         assert failures =~ "| #{id} |", "failures.md is missing row #{id}"
       end
 
+      # RE253 — the A1/A4 split is only useful if the page names the function that decides it.
+      assert failures =~ "Relay.Runs.park_kind/1"
+
       assert failures =~ "*Sources of truth:"
     end
 
