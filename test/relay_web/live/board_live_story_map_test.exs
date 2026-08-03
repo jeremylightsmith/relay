@@ -605,11 +605,12 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
   end
 
   describe "RE263 — nothing from RE261 leaked in" do
-    test "no delete button, no drag grip, and a name is not an editable field", %{conn: conn} = ctx do
+    test "no delete button, no rename grip, and a name is not an editable field", %{conn: conn} = ctx do
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
 
       # Scoped to the map itself — the surrounding board chrome is not this card's business.
-      refute has_element?(view, "#story-map [draggable]")
+      # NOTE: cards ARE `[draggable]` — that is RE262's own drag-and-drop (this branch), not a
+      # leak from RE261; see the "dragging a card" describe block above.
       # The map's ONLY text input is the create draft, and none is open here.
       refute has_element?(view, "#story-map input[type=text]")
       refute has_element?(view, "#story-map-grid", "✕")

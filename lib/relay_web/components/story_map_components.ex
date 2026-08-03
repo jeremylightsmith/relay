@@ -176,7 +176,6 @@ defmodule RelayWeb.StoryMapComponents do
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
   attr :compose, :any, default: nil, doc: "the {column_key, lane_key} whose composer is open, or nil"
   attr :compose_form, :any, default: nil, doc: "the shared card composer form (BoardLive's :compose_form)"
-  attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
 
   def story_map(assigns) do
     ~H"""

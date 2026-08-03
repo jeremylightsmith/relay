@@ -646,7 +646,9 @@ defmodule RelayWeb.StoryMapComponentsTest do
     end
   end
 
-  defp cell_column, do: %{key: "t:10", activity: nil, task: nil, no_task?: false, last_of_activity?: true}
+  defp cell_column,
+    do: %{key: "t:10", activity: nil, task: nil, no_task?: false, bare?: false, draft?: false, last_of_activity?: true}
+
   defp cell_lane, do: %{key: "r:100", release: nil, count: 0}
 
   defp cell_html(overrides) do
