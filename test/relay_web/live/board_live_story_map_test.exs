@@ -10,6 +10,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Events
+  alias Relay.Repo
   alias Relay.StoryMap
 
   setup :register_and_log_in_user
@@ -207,6 +208,134 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       Events.broadcast(ctx.board.id, {:story_map_changed, ctx.board.id})
 
       assert render(view) =~ "board-viewport"
+    end
+  end
+
+  describe "dragging a card" do
+    test "assign_card moves a card from one cell to another", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, ctx.sso),
+        "column" => "t:#{ctx.organize.id}",
+        "lane" => "r:#{ctx.later.id}",
+        "index" => 0
+      })
+
+      target = "#story-map-cell-t-#{ctx.organize.id}-r-#{ctx.later.id}"
+      source = "#story-map-cell-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}"
+
+      assert has_element?(view, "#{target} ##{card_dom_id(ctx.board, ctx.sso)}")
+      refute has_element?(view, "#{source} ##{card_dom_id(ctx.board, ctx.sso)}")
+    end
+
+    test "assign_card from the tray places the card and drops the tray count",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-tray-count", "1")
+
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, ctx.dashboards),
+        "column" => "t:#{ctx.sign_in.id}",
+        "lane" => "r:#{ctx.mvp.id}",
+        "index" => 0
+      })
+
+      cell = "#story-map-cell-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}"
+      assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, ctx.dashboards)}")
+      # Nothing is unmapped any more, so the tray disappears entirely (artboard `trayShown`).
+      refute has_element?(view, "#story-map-tray")
+    end
+
+    test "assign_card onto a No task yet column sets the activity and leaves the task nil",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, ctx.dashboards),
+        "column" => "nt:#{ctx.onboard.id}",
+        "lane" => "r:#{ctx.mvp.id}",
+        "index" => 0
+      })
+
+      cell = "#story-map-cell-nt-#{ctx.onboard.id}-r-#{ctx.mvp.id}"
+      assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, ctx.dashboards)}")
+
+      placed = Cards.get_card_by_ref(ctx.board, Cards.ref(ctx.board, ctx.dashboards))
+      assert placed.story_activity_id == ctx.onboard.id
+      assert placed.story_task_id == nil
+      assert placed.release_id == ctx.mvp.id
+    end
+
+    test "the index the hook sends orders the cell, and never touches the board's order",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      {:ok, second} =
+        StoryMap.assign_card(ctx.dashboards, %{
+          story_task_id: ctx.sign_in.id,
+          release_id: ctx.mvp.id
+        })
+
+      board_positions = fn -> Enum.map([ctx.sso, second], &Repo.get!(Schemas.Card, &1.id).position) end
+      before = board_positions.()
+
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, second),
+        "column" => "t:#{ctx.sign_in.id}",
+        "lane" => "r:#{ctx.mvp.id}",
+        "index" => 0
+      })
+
+      assert Repo.get!(Schemas.Card, second.id).story_map_position == 1
+      assert Repo.get!(Schemas.Card, ctx.sso.id).story_map_position == 2
+      assert board_positions.() == before
+    end
+
+    test "unassign_card returns a mapped card to the tray and expands a collapsed tray",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-tray-toggle") |> render_click()
+      refute has_element?(view, "#story-map-tray ##{tray_dom_id(ctx.board, ctx.dashboards)}")
+
+      render_hook(view, "unassign_card", %{"ref" => Cards.ref(ctx.board, ctx.audit)})
+
+      # The artboard's onTrayDrop sets trayOpen:true — the drop re-expands the rail.
+      assert has_element?(view, "#story-map-tray ##{tray_dom_id(ctx.board, ctx.audit)}")
+      assert has_element?(view, "#story-map-tray-count", "2")
+      refute has_element?(view, "##{card_dom_id(ctx.board, ctx.audit)}")
+
+      cleared = Cards.get_card_by_ref(ctx.board, Cards.ref(ctx.board, ctx.audit))
+      assert cleared.story_map_position == nil
+    end
+
+    test "an undecodable column key and an unknown ref are both silent no-ops",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, ctx.sso),
+        "column" => "garbage",
+        "lane" => "r:#{ctx.mvp.id}",
+        "index" => 0
+      })
+
+      render_hook(view, "assign_card", %{
+        "ref" => "NOPE-999",
+        "column" => "t:#{ctx.organize.id}",
+        "lane" => "r:#{ctx.mvp.id}",
+        "index" => 0
+      })
+
+      render_hook(view, "unassign_card", %{"ref" => "NOPE-999"})
+
+      # The page still renders and the card never moved.
+      assert has_element?(view, "#story-map-grid")
+
+      source = "#story-map-cell-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}"
+      assert has_element?(view, "#{source} ##{card_dom_id(ctx.board, ctx.sso)}")
     end
   end
 

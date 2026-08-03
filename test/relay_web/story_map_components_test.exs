@@ -200,6 +200,20 @@ defmodule RelayWeb.StoryMapComponentsTest do
   end
 
   describe "story_map_card/1 — the artboard's full-zoom face" do
+    test "the card face is draggable and carries its ref — the StoryMapDnD contract" do
+      html =
+        render_component(&StoryMapComponents.story_map_card/1,
+          id: "story-map-card-RLY1",
+          ref: "RLY1",
+          title: "Add SSO",
+          badge: "BACKLOG"
+        )
+
+      assert html =~ ~s(draggable="true")
+      assert html =~ ~s(class="story-map-card")
+      assert html =~ ~s(data-ref="RLY1")
+    end
+
     test "renders the ref, title, mono badge and the 3px bottom bar with the artboard's tokens" do
       html =
         render_component(&StoryMapComponents.story_map_card/1,
@@ -337,6 +351,26 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ ~s(id="story-map-card-RLY1")
       assert html =~ ~s(id="story-map-card-RLY2")
     end
+
+    test "every body cell is a drop zone keyed by its column and lane" do
+      html = grid_html()
+
+      cell =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#story-map-cell-t-10-r-100")
+
+      assert LazyHTML.attribute(cell, "class") == ["story-map-drop"]
+      assert LazyHTML.attribute(cell, "data-column") == ["t:10"]
+      assert LazyHTML.attribute(cell, "data-lane") == ["r:100"]
+
+      no_task =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#story-map-cell-nt-1-r-100")
+
+      assert LazyHTML.attribute(no_task, "data-column") == ["nt:1"]
+    end
   end
 
   describe "unmapped_tray/1" do
@@ -348,14 +382,27 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ "UNMAPPED"
       assert html =~ ~s(id="story-map-tray-count")
       assert html =~ ">2<"
-      assert html =~ "No activity yet."
-      refute html =~ "Drag onto the map"
+      # RE262 restores the artboard's full sentence (line ~91): dragging is real now.
+      assert html =~ "No activity yet. Drag onto the map to place — or drop a card here to unmap it."
       assert html =~ ~s(id="story-map-tray-card-RLY7")
       assert html =~ ~s(id="story-map-tray-card-RLY8")
       # tray card — artboard line ~472
       assert html =~ "border-left:3px solid oklch(0.62 0.12"
       assert html =~ ~s(id="story-map-tray-toggle")
       assert html =~ ~s(phx-click="toggle_story_map_tray")
+    end
+
+    test "the tray is a drop zone and its cards are draggable" do
+      html = tray(true)
+
+      tray_el = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-tray")
+      assert LazyHTML.attribute(tray_el, "class") == ["story-map-drop-tray"]
+
+      card = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-tray-card-RLY7")
+      assert LazyHTML.attribute(card, "draggable") == ["true"]
+      assert LazyHTML.attribute(card, "data-ref") == ["RLY7"]
+      # The same class the cell cards carry, so ONE hook selector covers both.
+      assert LazyHTML.attribute(card, "class") == ["story-map-tray-card story-map-card"]
     end
 
     test "collapsed: a 42px vertical rail keeping the chevron, the count and the label" do
@@ -366,6 +413,8 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ ~s(id="story-map-tray-count")
       refute html =~ "No activity yet."
       refute html =~ ~s(id="story-map-tray-card-RLY7")
+      # The rail is still a drop target — the artboard's onTrayDrop expands it.
+      assert html =~ ~s(class="story-map-drop-tray")
     end
   end
 

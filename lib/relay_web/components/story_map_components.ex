@@ -3,12 +3,13 @@ defmodule RelayWeb.StoryMapComponents do
   The story map's rendering (RE264): pure function components over
   `RelayWeb.StoryMapGrid`'s view model, matching `docs/designs/Relay Story Map.dc.html`.
 
-  Read-only and full zoom, **except** RE263's three create affordances — the trailing `＋` add-
-  activity column, the `＋ Add task` on each activity header and on a bare placeholder, and the
-  `＋ Release` row — which this module renders and `RelayWeb.BoardLive` handles. The artboard's
-  drag handles, `⠿` grips, `▾` collapse, `✦` suggest, `◎` focus, `✎` rename, the `✕` deletes and
-  the ZOOM/FILTER chrome are still deliberately not rendered — RE260/RE261/RE262 own them, and
-  the filter bar's owner chips, Needs-input toggle and `+ filter` own no card today.
+  Full zoom, **except** two affordances that are live: RE263's three create affordances — the
+  trailing `＋` add-activity column, the `＋ Add task` on each activity header and on a bare
+  placeholder, and the `＋ Release` row — which this module renders and `RelayWeb.BoardLive`
+  handles; and RE262's drag and drop (below). The artboard's `⠿` grips, `▾` collapse, `✦`
+  suggest, `◎` focus, `✎` rename, the `✕` deletes and the ZOOM/FILTER chrome are still
+  deliberately not rendered — RE260/RE261 own them, and the filter bar's owner chips,
+  Needs-input toggle and `+ filter` own no card today.
 
   **Two derivations the artboard needs and our data does not carry**, each written exactly once
   here (`card_face/4`) and used for both the badge and the card's tint:
@@ -21,9 +22,12 @@ defmodule RelayWeb.StoryMapComponents do
 
   The percentage itself is `Relay.Cards.sub_task_pct/1` — the same number `board_card/1` draws.
 
-  One deliberate copy change from the artboard: the tray's helper reads "No activity yet."
-  Dragging does not exist until RE262, which restores the full sentence when the affordance is
-  real.
+  **Drag and drop (RE262).** Every card face — cell and tray alike — is `draggable` and carries
+  `.story-map-card[data-ref]`; every body cell is a `.story-map-drop[data-column][data-lane]`
+  zone and the tray is `.story-map-drop-tray`. The hovered state is CSS
+  (`.story-map-drop.drag-over` in `app.css`, the artboard's blue tint plus a 2px inset ring), not
+  an assign — a hover never costs a round trip. `assets/js/hooks/story_map_dnd.js` reads exactly
+  those four selectors and nothing else.
   """
 
   use Phoenix.Component
@@ -287,6 +291,9 @@ defmodule RelayWeb.StoryMapComponents do
       <%= for {column, ci} <- Enum.with_index(@grid.columns), {lane, li} <- Enum.with_index(@grid.lanes) do %>
         <div
           id={StoryMapGrid.cell_dom_id(column.key, lane.key)}
+          class="story-map-drop"
+          data-column={column.key}
+          data-lane={lane.key}
           style={cell_style(column, ci, li)}
         >
           <.story_map_card
@@ -325,6 +332,7 @@ defmodule RelayWeb.StoryMapComponents do
       style={card_shell(@hue, @done)}
       role="button"
       tabindex="0"
+      draggable="true"
       data-ref={@ref}
       data-hue={@hue}
       data-done={to_string(@done)}
@@ -364,7 +372,7 @@ defmodule RelayWeb.StoryMapComponents do
 
   def unmapped_tray(assigns) do
     ~H"""
-    <div id="story-map-tray" style={tray_style(@open)}>
+    <div id="story-map-tray" class="story-map-drop-tray" style={tray_style(@open)}>
       <div :if={@open} style="display:flex;flex-direction:column;min-height:0;height:100%;">
         <button
           type="button"
@@ -382,7 +390,7 @@ defmodule RelayWeb.StoryMapComponents do
           <span style="font-size:11px;color:oklch(0.5 0.02 255);">‹</span>
         </button>
         <div style="font-size:11px;line-height:1.35;color:oklch(0.55 0.02 255);padding:0 14px 10px;">
-          No activity yet.
+          No activity yet. Drag onto the map to place — or drop a card here to unmap it.
         </div>
         <div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:0 12px 14px;">
           <.tray_card
@@ -518,9 +526,10 @@ defmodule RelayWeb.StoryMapComponents do
     ~H"""
     <div
       id={"story-map-tray-card-#{@face.ref}"}
-      class="story-map-tray-card"
+      class="story-map-tray-card story-map-card"
       role="button"
       tabindex="0"
+      draggable="true"
       data-ref={@face.ref}
       phx-click="select_card"
       phx-value-ref={@face.ref}
@@ -716,13 +725,13 @@ defmodule RelayWeb.StoryMapComponents do
       "border-right:#{border_right};#{background}"
   end
 
-  # The artboard's full-zoom `boxStyle` (cardVM, lines ~332-334), with `cursor:grab` swapped for
-  # `cursor:pointer` — there is no drag until RE262.
+  # The artboard's full-zoom `boxStyle` (cardVM, lines ~332-334). `cursor:grab` — RE262 makes
+  # every card face draggable.
   defp card_shell(_hue, true) do
     "background:oklch(0.97 0.015 150);border:1px solid oklch(0.88 0.04 150);border-radius:9px;" <>
       "padding:9px 10px;display:flex;flex-direction:column;gap:8px;" <>
       "box-shadow:0 1px 2.5px oklch(0.4 0.05 260/0.1);position:relative;overflow:hidden;" <>
-      "cursor:pointer;opacity:0.8;border-left:3px solid oklch(0.6 0.13 155);"
+      "cursor:grab;opacity:0.8;border-left:3px solid oklch(0.6 0.13 155);"
   end
 
   defp card_shell(hue, _done) do
@@ -731,7 +740,7 @@ defmodule RelayWeb.StoryMapComponents do
     "background:#{background};border:1px solid #{border};border-radius:9px;padding:9px 10px;" <>
       "display:flex;flex-direction:column;gap:8px;" <>
       "box-shadow:0 1px 2.5px oklch(0.4 0.05 260/0.1);position:relative;overflow:hidden;" <>
-      "cursor:pointer;"
+      "cursor:grab;"
   end
 
   defp tint(:green), do: {"oklch(0.965 0.028 155)", "oklch(0.9 0.04 155)"}

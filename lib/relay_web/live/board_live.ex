@@ -32,6 +32,10 @@ defmodule RelayWeb.BoardLive do
   untouched by `refresh_story_map/1`, so a realtime refresh from another tab never eats what
   you are typing. Creates append via `Relay.StoryMap.next_position/1` and let the resulting
   `{:story_map_changed, board_id}` broadcast do the refetch — the creating tab included.
+
+  RE262 makes it writable: `"assign_card"` / `"unassign_card"` come from the `StoryMapDnD`
+  hook rooted on `#story-map`, and both re-render through the `{:card_upserted, _}` echo rather
+  than touching story-map assigns directly.
   """
 
   use RelayWeb, :live_view
@@ -646,6 +650,7 @@ defmodule RelayWeb.BoardLive do
     ~H"""
     <div
       id="story-map"
+      phx-hook="StoryMapDnD"
       class={["flex min-h-0", if(@embed, do: "h-dvh", else: "h-[calc(100dvh_-_53px)]")]}
       style="background:oklch(0.95 0.006 255);"
     >
@@ -844,7 +849,8 @@ defmodule RelayWeb.BoardLive do
 
   @impl true
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
-        compose create_card move_card save_card_title save_card_tag save_card_description
+        compose create_card move_card assign_card unassign_card save_card_title save_card_tag
+        save_card_description
         save_card_acceptance_criteria save_card_spec save_card_plan
         add_owner remove_owner take_over post_comment answer_input
         answer_select answer_custom answer_next answer_back answer_goto answer_submit
@@ -1065,6 +1071,36 @@ defmodule RelayWeb.BoardLive do
       move_or_prompt(socket, ref, card, stage, index)
     else
       _ -> {:noreply, socket}
+    end
+  end
+
+  # RE262 — a story-map drop. The client sends the target cell's column and lane keys, which
+  # RelayWeb.StoryMapGrid (their one definition) decodes; the activity is derived from the task
+  # by StoryMap.assign_card/2, so a drop never sends one. `index` is the 0-based slot within the
+  # cell, the same contract move_card uses. Every failure is a silent no-op — an unknown ref, an
+  # undecodable key, or a foreign id — the contract move_card already uses for a stale drop.
+  #
+  # The re-render is NOT done here: the write broadcasts {:card_upserted, card}, and this socket
+  # receives its own echo, whose handle_info already runs refresh_story_map/1. One path, so a
+  # second tab and the acting tab can never disagree.
+  def handle_event("assign_card", %{"ref" => ref, "column" => column, "lane" => lane} = params, socket) do
+    with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
+         {:ok, placement} <- StoryMapGrid.decode_placement(column, lane),
+         {:ok, _assigned} <- StoryMap.assign_card(card, Map.put(placement, :position, parse_int(params["index"]))) do
+      {:noreply, socket}
+    else
+      _other -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("unassign_card", %{"ref" => ref}, socket) do
+    with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
+         {:ok, _cleared} <- StoryMap.unassign_card(card) do
+      # The artboard's `onTrayDrop` sets `trayOpen:true` (line ~565): a drop onto the collapsed
+      # 42px rail expands it, so the card you just unmapped is visible where it landed.
+      {:noreply, assign(socket, :story_map_tray_open, true)}
+    else
+      _other -> {:noreply, socket}
     end
   end
 

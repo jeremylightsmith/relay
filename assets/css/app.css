@@ -142,6 +142,22 @@
   pointer-events: none;
 }
 
+/* RE262 — the story map's drop states (artboard `Relay Story Map.dc.html`, lines ~526 and
+   ~562). !important because the cell's own background and the tray's own border/background are
+   INLINE artboard values on the element, and an inline declaration beats a stylesheet rule; the
+   drop state has to win over both. */
+.story-map-drop.drag-over {
+  background: oklch(0.95 0.04 250 / 0.55) !important;
+  box-shadow: inset 0 0 0 2px oklch(0.6 0.14 250) !important;
+}
+.story-map-drop-tray.drag-over {
+  border-right-color: oklch(0.6 0.14 250) !important;
+  background: oklch(0.96 0.03 250) !important;
+}
+.story-map-card.dragging {
+  opacity: 0.5;
+}
+
 /* --- Rendered markdown — one global house style (card description / spec / plan /
    comments / AI result / rejection note / needs-input question, RLY-3 · RLY-58).
    Restyled to docs/designs/Relay Design System.dc.html §05 Markdown. --- */
