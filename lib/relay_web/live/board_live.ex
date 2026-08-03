@@ -72,10 +72,9 @@ defmodule RelayWeb.BoardLive do
           :if={@stalled_count > 0 and not @read_only?}
           type="button"
           id="restart-stalled-button"
-          phx-click="restart_stalled"
-          data-confirm={"Restart #{@stalled_count} stalled cards?"}
+          phx-click="open_stalled"
           class="btn btn-warning btn-sm min-h-[44px]"
-          aria-label={"Restart #{@stalled_count} stalled cards"}
+          aria-label={"Review #{@stalled_count} stalled cards"}
         >
           <.icon name="hero-arrow-path" class="size-4" />
           <span class="hidden sm:inline">Restart stalled</span>
@@ -467,6 +466,66 @@ defmodule RelayWeb.BoardLive do
         <label class="modal-backdrop" phx-click="close_archived">Close</label>
       </div>
       <div
+        :if={@stalled_open}
+        id="stalled-modal"
+        class="modal modal-open"
+        role="dialog"
+        aria-label="Stalled cards"
+      >
+        <div class="modal-box max-w-2xl">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold">Stalled cards</h3>
+            <button
+              type="button"
+              id="stalled-modal-close"
+              phx-click="close_stalled"
+              class="btn btn-sm btn-circle btn-ghost"
+              aria-label="Close"
+            >
+              <.icon name="hero-x-mark" class="size-4" />
+            </button>
+          </div>
+          <ul id="stalled-list" class="mt-4 divide-y divide-base-200">
+            <li
+              :for={%{card: card, reason: reason} <- @stalled_cards}
+              id={"stalled-row-#{card.id}"}
+              class="flex items-center gap-3 py-2.5"
+            >
+              <button
+                type="button"
+                id={"open-stalled-card-#{card.id}"}
+                phx-click="open_stalled_card"
+                phx-value-ref={Cards.ref(@board, card)}
+                class="min-w-0 flex-1 text-left"
+              >
+                <div class="flex items-baseline gap-2">
+                  <span class="font-mono text-xs text-base-content/60">
+                    {Cards.ref(@board, card)}
+                  </span>
+                  <span class="truncate font-medium">{card.title}</span>
+                </div>
+                <div class="text-xs text-base-content/50">
+                  {drawer_stage_name(card.stage, @board.stages)} · {reason}
+                </div>
+              </button>
+              <button
+                type="button"
+                id={"stalled-restart-#{card.id}"}
+                phx-click="restart_one"
+                phx-value-ref={Cards.ref(@board, card)}
+                class="btn btn-sm btn-warning"
+              >
+                Restart
+              </button>
+            </li>
+            <li :if={@stalled_cards == []} class="py-3 text-sm text-base-content/50">
+              No stalled cards.
+            </li>
+          </ul>
+        </div>
+        <label class="modal-backdrop" phx-click="close_stalled">Close</label>
+      </div>
+      <div
         :if={@pending_move}
         id="stranded-move-modal"
         class="modal modal-open"
@@ -553,7 +612,8 @@ defmodule RelayWeb.BoardLive do
       socket
       |> assign(:page_title, board.name)
       |> assign(:board, board)
-      |> assign_stalled_count()
+      |> assign_stalled()
+      |> assign(:stalled_open, false)
       |> assign(:read_only?, Board.archived?(board))
       |> assign(:archived_count, Cards.count_archived_cards(board))
       |> assign(:archived_open, false)
@@ -659,7 +719,7 @@ defmodule RelayWeb.BoardLive do
         add_owner remove_owner take_over post_comment answer_input
         answer_select answer_custom answer_next answer_back answer_goto answer_submit
         review_approve review_reject retry_card retry_run confirm_move cancel_move
-        archive_card restore_card toggle_sub_task
+        archive_card restore_card toggle_sub_task restart_one
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -837,6 +897,29 @@ defmodule RelayWeb.BoardLive do
     {:noreply,
      socket
      |> assign(:archived_open, false)
+     |> push_patch(to: ~p"/board/#{socket.assigns.board.slug}?card=#{ref}")}
+  end
+
+  # RE247 — the stalled dialog. Naming the cards is the whole point, so the list is refetched
+  # at open time rather than rendered from whatever the last run-event flush cached.
+  def handle_event("open_stalled", _params, socket) do
+    {:noreply, socket |> assign_stalled() |> assign(:stalled_open, true)}
+  end
+
+  def handle_event("close_stalled", _params, socket) do
+    {:noreply, assign(socket, :stalled_open, false)}
+  end
+
+  # A row click: close the modal and open that card — bridged to the shell in embed mode
+  # (RLY-94), the URL-driven drawer otherwise. Mirrors "open_archived_card" exactly.
+  def handle_event("open_stalled_card", %{"ref" => ref}, %{assigns: %{embed: true}} = socket) do
+    {:noreply, socket |> assign(:stalled_open, false) |> push_card_tap(ref)}
+  end
+
+  def handle_event("open_stalled_card", %{"ref" => ref}, socket) do
+    {:noreply,
+     socket
+     |> assign(:stalled_open, false)
      |> push_patch(to: ~p"/board/#{socket.assigns.board.slug}?card=#{ref}")}
   end
 
@@ -1382,18 +1465,20 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("retry_run", _params, socket), do: {:noreply, socket}
 
-  # RLY-228 — bulk restart of every environmentally-stalled run on the board (a spend-limit
-  # outage stalls many at once). Reuses each run's own revive path via Runs.restart_stalled/2,
-  # which skips genuine questions. revive_run's {:run_resumed, _} broadcasts refresh every other
-  # session's strips and badge; the acting socket recomputes the count synchronously.
-  def handle_event("restart_stalled", _params, socket) do
-    %{restarted: restarted} = Runs.restart_stalled(socket.assigns.board, current_actor(socket))
-    noun = if restarted == 1, do: "card", else: "cards"
-
-    {:noreply,
-     socket
-     |> assign_stalled_count()
-     |> put_flash(:info, "Restarted #{restarted} stalled #{noun}.")}
+  # RE247 — one row's Restart. The ref is resolved through THIS board (never a client-supplied
+  # run id), then revived through retry_run/2 — the identical path the drawer's retry and the
+  # API's bulk sweep use, so its guards (active run, executor liveness, genuine-question
+  # refusal) still apply and refuse by name. An unknown ref, or a card with no run at all, is
+  # a silent no-op like move_card. revive_run's {:run_resumed, _} broadcast refreshes every
+  # other session; this socket recomputes synchronously so the row leaves the list in the same
+  # round-trip.
+  def handle_event("restart_one", %{"ref" => ref}, socket) do
+    with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
+         %Run{} = run <- Runs.latest_run_for_retry(card) do
+      {:noreply, after_restart_one(socket, ref, Runs.retry_run(run, actor: current_actor(socket)))}
+    else
+      _missing -> {:noreply, socket}
+    end
   end
 
   # MMF 15 — the drawer's green review panel: the four human review actions,
@@ -1585,7 +1670,7 @@ defmodule RelayWeb.BoardLive do
 
     {:noreply,
      socket
-     |> assign_stalled_count()
+     |> assign_stalled()
      |> assign(:dirty_run_cards, MapSet.new())
      |> assign(:run_flush_events, 0)
      |> assign(:run_flush_pending?, false)}
@@ -1955,10 +2040,30 @@ defmodule RelayWeb.BoardLive do
   # human; the :agent default on the Cards mutators is the API's (MMF 09).
   defp current_actor(socket), do: {:user, socket.assigns.current_scope.user.id}
 
-  # RLY-228 — the board-header badge count: how many of the board's cards currently show a
-  # restartable (stalled) face. Recomputed on mount and on every coalesced run-event flush so
-  # it tracks new stalls/revives without a per-event query.
-  defp assign_stalled_count(socket), do: assign(socket, :stalled_count, Runs.restartable_count(socket.assigns.board))
+  # RE247 — the header badge AND the dialog's rows from ONE Runs.stalled_cards/1 call, so the
+  # count can never claim a different set than the list names (it replaces RLY-228's
+  # count-only assign). Recomputed on mount, on every coalesced run-event flush, when the
+  # dialog opens, and after each per-row restart.
+  defp assign_stalled(socket) do
+    stalled = Runs.stalled_cards(socket.assigns.board)
+
+    socket
+    |> assign(:stalled_cards, stalled)
+    |> assign(:stalled_count, length(stalled))
+  end
+
+  # The list is refreshed either way, so a refused restart still re-renders honest rows.
+  # Emptying the list closes the dialog: the header control that opened it is about to
+  # disappear, and an empty modal would strand the user behind a backdrop.
+  defp after_restart_one(socket, ref, {:ok, _run}) do
+    socket = socket |> assign_stalled() |> put_flash(:info, "Restarted #{ref}.")
+
+    if socket.assigns.stalled_cards == [], do: assign(socket, :stalled_open, false), else: socket
+  end
+
+  defp after_restart_one(socket, _ref, {:error, reason}) do
+    socket |> assign_stalled() |> put_flash(:error, Runs.retry_refusal_message(reason))
+  end
 
   # RLY-94 — the card-tap bridge payload. `kind` tells the shell which native
   # action bar to render without a fetch: "in_review" at a review gate,

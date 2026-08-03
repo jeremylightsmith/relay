@@ -42,34 +42,131 @@ defmodule RelayWeb.BoardLiveRestartStalledTest do
     flow
   end
 
+  # Runs a card through the park flow and reports `outcome`, returning both the card (for
+  # refs and DOM ids) and the resulting run (for status assertions).
   defp park(board, flow, title, outcome) do
     stage = Enum.find(board.stages, &(&1.name == "Next up"))
     {:ok, card} = Cards.create_card(stage, %{title: title})
-    {:ok, run} = Runs.start_run(card, flow)
+    {:ok, _run} = Runs.start_run(card, flow)
     assert_receive {:dispatched, %NodeJob{} = job}
-    {:ok, _run} = Runs.report_outcome(job, %{outcome: outcome, detail: "x", session_id: "s"})
-    run
+    {:ok, run} = Runs.report_outcome(job, %{outcome: outcome, detail: "x", session_id: "s"})
+    %{card: card, run: run}
   end
 
-  test "the header control shows the stalled count and bulk-revives on click", ctx do
-    died = park(ctx.board, ctx.flow, "Died A", :failed)
-    died2 = park(ctx.board, ctx.flow, "Died B", :failed)
+  defp open_dialog(view) do
+    view |> element("#restart-stalled-button") |> render_click()
+    view
+  end
+
+  test "the header control opens a dialog naming every stalled card", ctx do
+    a = park(ctx.board, ctx.flow, "Died A", :failed)
+    b = park(ctx.board, ctx.flow, "Died B", :failed)
     ask = park(ctx.board, ctx.flow, "Real question", :needs_input)
 
     {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
 
     assert has_element?(view, "#restart-stalled-button", "2")
+    refute has_element?(view, "#stalled-modal")
 
-    view |> element("#restart-stalled-button") |> render_click()
+    open_dialog(view)
 
-    assert Runs.get_run!(died.id).status == :running
-    assert Runs.get_run!(died2.id).status == :running
-    assert Runs.get_run!(ask.id).status == :parked
+    assert has_element?(view, "#stalled-modal")
+    assert has_element?(view, "#stalled-row-#{a.card.id}", Cards.ref(ctx.board, a.card))
+    assert has_element?(view, "#stalled-row-#{a.card.id}", "Died A")
+    assert has_element?(view, "#stalled-row-#{a.card.id}", "Agent died at brainstorm")
+    assert has_element?(view, "#stalled-row-#{b.card.id}", "Died B")
+    refute has_element?(view, "#stalled-row-#{ask.card.id}")
+  end
+
+  test "opening the dialog restarts nothing", ctx do
+    a = park(ctx.board, ctx.flow, "Died A", :failed)
+    b = park(ctx.board, ctx.flow, "Died B", :failed)
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    open_dialog(view)
+
+    assert Runs.get_run!(a.run.id).status == :parked
+    assert Runs.get_run!(b.run.id).status == :parked
+    assert has_element?(view, "#restart-stalled-button", "2")
+
+    view |> element("#stalled-modal-close") |> render_click()
+
+    refute has_element?(view, "#stalled-modal")
+    assert Runs.get_run!(a.run.id).status == :parked
+    assert has_element?(view, "#restart-stalled-button", "2")
+  end
+
+  test "there is no browser confirm and no bulk Restart-all", ctx do
+    _a = park(ctx.board, ctx.flow, "Died A", :failed)
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+
+    refute view |> element("#restart-stalled-button") |> render() =~ "data-confirm"
+
+    open_dialog(view)
+
+    refute render(view) =~ "Restart all"
+  end
+
+  test "a row's Restart revives only that card and drops it from the list", ctx do
+    a = park(ctx.board, ctx.flow, "Died A", :failed)
+    b = park(ctx.board, ctx.flow, "Died B", :failed)
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    open_dialog(view)
+
+    view |> element("#stalled-restart-#{a.card.id}") |> render_click()
+
+    assert Runs.get_run!(a.run.id).status == :running
+    assert Runs.get_run!(b.run.id).status == :parked
+    refute has_element?(view, "#stalled-row-#{a.card.id}")
+    assert has_element?(view, "#stalled-row-#{b.card.id}")
+    assert has_element?(view, "#stalled-modal")
+    assert has_element?(view, "#restart-stalled-button", "1")
+  end
+
+  test "restarting the last stalled card closes the dialog and hides the control", ctx do
+    only = park(ctx.board, ctx.flow, "Only one", :failed)
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    open_dialog(view)
+
+    view |> element("#stalled-restart-#{only.card.id}") |> render_click()
+
+    assert Runs.get_run!(only.run.id).status == :running
+    refute has_element?(view, "#stalled-modal")
     refute has_element?(view, "#restart-stalled-button")
+  end
+
+  test "clicking a row closes the dialog and opens that card's drawer", ctx do
+    a = park(ctx.board, ctx.flow, "Died A", :failed)
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    open_dialog(view)
+
+    view |> element("#open-stalled-card-#{a.card.id}") |> render_click()
+
+    assert_patch(view, ~p"/board/#{ctx.board.slug}?card=#{Cards.ref(ctx.board, a.card)}")
+    refute has_element?(view, "#stalled-modal")
+    assert has_element?(view, "#card-drawer")
+  end
+
+  test "the dialog reuses the archived-modal shell", ctx do
+    _a = park(ctx.board, ctx.flow, "Died A", :failed)
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    open_dialog(view)
+
+    assert has_element?(view, "#stalled-modal.modal.modal-open[role=dialog]")
+    assert has_element?(view, "#stalled-modal .modal-box.max-w-2xl")
+    assert has_element?(view, "#stalled-list.divide-y.divide-base-200")
+    assert has_element?(view, "#stalled-modal .font-mono.text-xs")
+    assert has_element?(view, "#stalled-modal label.modal-backdrop")
   end
 
   test "the control is hidden when nothing is stalled", ctx do
     {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
     refute has_element?(view, "#restart-stalled-button")
+    refute has_element?(view, "#stalled-modal")
   end
 end
