@@ -161,17 +161,26 @@ sharing behavior.
   `{:card_upserted, card}` via `Cards.notify_upserted/1`. `Relay.Boards` deliberately does
   **not** depend on this context — `StoryMap → Cards → Boards` already exists, so the reverse
   edge would close a boundary cycle; the release seed therefore lives in `Boards`.
-  **View (RE264):** the read-only backbone × releases grid at `/board/:slug/story-map`, a
+  **View (RE264, RE263):** the backbone × releases grid at `/board/:slug/story-map`, a
   `:story_map` live_action on `RelayWeb.BoardLive` rather than its own LiveView — clicking a
   card must open the card drawer *in place*, and the drawer's ~50 assigns and ~40 event
   handlers live in `BoardLive`; a separate LiveView could only honour that by duplicating them
   or extracting the drawer's whole state machine. The grid itself is isolated: the pure,
-  unit-tested `RelayWeb.StoryMapGrid.build/4` (`(activities, tasks, releases, cards)` → bands,
-  columns, lanes, cells, unmapped — every card placed exactly once, an activity-less card in
-  the tray, a release-less mapped card in the LAST lane, a release-less board in one synthetic
-  `(No release)` lane) plus `RelayWeb.StoryMapComponents` for the render.
-  `RelayWeb.CoreComponents.board_view_tabs/1` is the Board ↔ Story map switch. Read-only and
-  full zoom: drag/add (RE262), create (RE263), edit (RE261) and zoom (RE260) are later cards.
+  unit-tested `RelayWeb.StoryMapGrid.build/5`
+  (`(activities, tasks, releases, cards, draft)` → bands, columns, lanes, cells, unmapped —
+  every card placed exactly once, an activity-less card in the tray, a release-less mapped card
+  in the LAST lane, a release-less board in one synthetic `(No release)` lane) plus
+  `RelayWeb.StoryMapComponents` for the render.
+  `RelayWeb.CoreComponents.board_view_tabs/1` is the Board ↔ Story map switch.
+  **Create (RE263):** three affordances — a trailing `＋` add-activity column, a per-activity
+  `＋ Add task`, and an `＋ Release` row — all committing through one `inline_name_input/1`.
+  Which one is open is the single `:story_map_draft` assign on `BoardLive`
+  (`nil | :activity | :release | {:task, activity_id}`, one draft at a time board-wide), and it
+  is the `draft` argument to `build/5`: the draft materializes a `"draft:<activity_id>"` column
+  that carries no `cells`, and every column gains `bare?` / `draft?`. Names are capped by
+  `Schemas.StoryActivity.max_name_length/0` — the one definition, shared by `StoryTask` and
+  `Release`, so an over-long paste is an error changeset rather than a Postgrex 22001 crash.
+  Still to come: drag/add (RE262), edit (RE261) and zoom (RE260).
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
 
 ## Core schemas

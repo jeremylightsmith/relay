@@ -391,6 +391,22 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
     end
   end
 
+  describe "RE263 — an invalid name" do
+    test "an over-long name creates nothing, flashes the field, and leaves the draft intact",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-add-activity") |> render_click()
+      long = String.duplicate("a", 81)
+      html = submit_draft(view, long)
+
+      assert length(StoryMap.list_activities(ctx.board)) == 2
+      assert html =~ "name should be at most 80 character(s)"
+      assert has_element?(view, "#story-map-draft-input")
+      assert render(view) =~ ~s(value="#{long}")
+    end
+  end
+
   describe "RE263 — realtime and the draft" do
     test "a second tab sees a newly created activity without a reload", %{conn: conn} = ctx do
       {:ok, first, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")

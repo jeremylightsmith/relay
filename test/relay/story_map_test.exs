@@ -85,6 +85,23 @@ defmodule Relay.StoryMapTest do
       assert "can't be blank" in errors_on(changeset).name
     end
 
+    test "an over-long name is an error changeset, not a Postgres crash", %{board: board} do
+      # All three `name` columns are varchar(255); without a length validation `Repo.insert/1`
+      # raises Postgrex 22001 instead of returning `{:error, changeset}`, and RE263 is the
+      # first path that lets an end user supply these names.
+      long = String.duplicate("a", 81)
+
+      assert {:error, activity_cs} = StoryMap.create_activity(board, %{name: long, position: 1})
+      assert "should be at most 80 character(s)" in errors_on(activity_cs).name
+
+      activity = insert(:story_activity, board: board)
+      assert {:error, task_cs} = StoryMap.create_task(activity, %{name: long, position: 1})
+      assert "should be at most 80 character(s)" in errors_on(task_cs).name
+
+      assert {:error, release_cs} = StoryMap.create_release(board, %{name: long, position: 1})
+      assert "should be at most 80 character(s)" in errors_on(release_cs).name
+    end
+
     test "update_activity/2 renames", %{board: board} do
       activity = insert(:story_activity, board: board, name: "Old")
 
