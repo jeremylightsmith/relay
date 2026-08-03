@@ -662,6 +662,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
     test "a No task yet cell creates the card with an activity and no task", %{conn: conn} = ctx do
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
 
+      cell = "#story-map-cell-nt-#{ctx.onboard.id}-r-#{ctx.mvp.id}"
       add = "#story-map-add-nt-#{ctx.onboard.id}-r-#{ctx.mvp.id}"
       compose = "#story-map-compose-nt-#{ctx.onboard.id}-r-#{ctx.mvp.id}"
 
@@ -669,6 +670,14 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       view |> form(compose, card: %{title: "Audit the audit"}) |> render_submit()
 
       created = card_by_title(ctx.board, "Audit the audit")
+
+      # Sync with the view before asserting on the DB: render_submit returns as soon as
+      # handle_event completes, but the write broadcasts {:card_upserted, _} and the view
+      # re-renders off that echo. Without waiting for it, the test process (the sandbox
+      # connection owner) can exit while the view is still mid-query, logging a spurious
+      # Postgrex disconnect.
+      assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, created)}")
+
       assert created.story_activity_id == ctx.onboard.id
       assert created.story_task_id == nil
       assert created.release_id == ctx.mvp.id

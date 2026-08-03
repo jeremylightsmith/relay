@@ -126,6 +126,31 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
       assert html =~ "(read-only)"
     end
 
+    # RE262 — same reasoning as assign_card above: a fresh view per event, so an earlier
+    # iteration's "(read-only)" flash can't mask a missing compose_cell/create_card_in_cell
+    # guard entry.
+    test "rejects compose_cell as read-only", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      html = render_hook(view, "compose_cell", %{"column" => "t:1", "lane" => "r:1"})
+
+      assert html =~ "(read-only)"
+    end
+
+    test "rejects create_card_in_cell as read-only", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      html =
+        render_hook(view, "create_card_in_cell", %{
+          "column" => "t:1",
+          "lane" => "r:1",
+          "card" => %{"title" => "sneaky"}
+        })
+
+      assert html =~ "(read-only)"
+      assert Cards.list_cards(board) == []
+    end
+
     test "Restore re-activates the board and clears read-only",
          %{conn: conn, user: user, board: board} do
       stage = hd(board.stages)

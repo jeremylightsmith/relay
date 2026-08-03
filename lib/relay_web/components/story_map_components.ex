@@ -329,6 +329,9 @@ defmodule RelayWeb.StoryMapComponents do
   attr :compose_form, :any, default: nil, doc: "required when composing"
 
   def story_map_cell(assigns) do
+    assigns =
+      assign(assigns, :compose_id, StoryMapGrid.cell_element_id("compose", assigns.column.key, assigns.lane.key))
+
     ~H"""
     <div
       id={StoryMapGrid.cell_dom_id(@column.key, @lane.key)}
@@ -344,7 +347,7 @@ defmodule RelayWeb.StoryMapComponents do
       <.form
         :if={@composing}
         for={@compose_form}
-        id={StoryMapGrid.cell_element_id("compose", @column.key, @lane.key)}
+        id={@compose_id}
         phx-change="validate_card"
         phx-submit="create_card_in_cell"
         phx-click-away="cancel_compose_cell"
@@ -355,7 +358,7 @@ defmodule RelayWeb.StoryMapComponents do
         <span style="color:oklch(0.6 0.14 250);font-size:14px;line-height:1;">+</span>
         <input
           type="text"
-          id={StoryMapGrid.cell_element_id("compose", @column.key, @lane.key) <> "-input"}
+          id={@compose_id <> "-input"}
           name="card[title]"
           value={Phoenix.HTML.Form.normalize_value("text", @compose_form[:title].value)}
           placeholder="Add card… ↵"
@@ -367,7 +370,7 @@ defmodule RelayWeb.StoryMapComponents do
         />
         <button
           type="button"
-          id={StoryMapGrid.cell_element_id("compose", @column.key, @lane.key) <> "-cancel"}
+          id={@compose_id <> "-cancel"}
           phx-click="cancel_compose_cell"
           aria-label="Close the composer"
           style="font-size:11px;color:oklch(0.6 0.02 255);"
