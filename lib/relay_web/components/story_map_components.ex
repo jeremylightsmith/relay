@@ -176,6 +176,7 @@ defmodule RelayWeb.StoryMapComponents do
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
   attr :compose, :any, default: nil, doc: "the {column_key, lane_key} whose composer is open, or nil"
   attr :compose_form, :any, default: nil, doc: "the shared card composer form (BoardLive's :compose_form)"
+  attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
 
   def story_map(assigns) do
     ~H"""
@@ -302,6 +303,7 @@ defmodule RelayWeb.StoryMapComponents do
           stalled_ids={@stalled_ids}
           composing={@compose == {column.key, lane.key}}
           compose_form={@compose_form}
+          read_only={@read_only}
         />
       <% end %>
     </div>
@@ -316,6 +318,10 @@ defmodule RelayWeb.StoryMapComponents do
   Drop target: `.story-map-drop` + `data-column` / `data-lane` — `assets/js/hooks/story_map_dnd.js`
   reads exactly those three. The hovered state is CSS (`.story-map-drop.drag-over`), not an
   assign, so a hover never costs a round trip.
+
+  `read_only` hides both the `＋` and the composer, the way `board_column/1` hides its own
+  add-work button: an archived board's server-side guard already rejects `compose_cell` and
+  `create_card_in_cell`, so rendering the affordance would only offer a dead button per cell.
   """
   attr :column, :map, required: true, doc: "one entry of the grid's `columns`"
   attr :lane, :map, required: true, doc: "one entry of the grid's `lanes`"
@@ -327,6 +333,7 @@ defmodule RelayWeb.StoryMapComponents do
   attr :lane_index, :integer, required: true, doc: "0-based, for grid-row"
   attr :composing, :boolean, default: false
   attr :compose_form, :any, default: nil, doc: "required when composing"
+  attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
 
   def story_map_cell(assigns) do
     assigns =
@@ -345,7 +352,7 @@ defmodule RelayWeb.StoryMapComponents do
         {card_face(card, @board, @stages, @stalled_ids)}
       />
       <.form
-        :if={@composing}
+        :if={@composing and not @read_only}
         for={@compose_form}
         id={@compose_id}
         phx-change="validate_card"
@@ -379,7 +386,7 @@ defmodule RelayWeb.StoryMapComponents do
         </button>
       </.form>
       <button
-        :if={not @composing}
+        :if={not @composing and not @read_only}
         type="button"
         id={StoryMapGrid.cell_element_id("add", @column.key, @lane.key)}
         phx-click="compose_cell"

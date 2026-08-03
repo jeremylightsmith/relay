@@ -386,6 +386,7 @@ defmodule RelayWeb.BoardLive do
         compose={@story_map_compose}
         compose_form={@compose_form}
         embed={@embed}
+        read_only={@read_only?}
       />
       <.card_drawer
         :if={@selected_card}
@@ -637,6 +638,7 @@ defmodule RelayWeb.BoardLive do
   attr :compose, :any, required: true
   attr :compose_form, :any, required: true
   attr :embed, :boolean, required: true
+  attr :read_only, :boolean, required: true
 
   defp story_map_viewport(assigns) do
     assigns =
@@ -680,6 +682,7 @@ defmodule RelayWeb.BoardLive do
           read_only={@read_only}
           compose={@compose}
           compose_form={@compose_form}
+          read_only={@read_only}
         />
         <StoryMapComponents.story_map_empty
           :if={@grid.bands == []}

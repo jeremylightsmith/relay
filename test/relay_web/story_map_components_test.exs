@@ -679,6 +679,19 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ ~s(id="story-map-card-RLY1")
     end
 
+    test "read_only hides both the ＋ and the composer, keeping the cell a drop zone" do
+      html =
+        cell_html(%{
+          read_only: true,
+          composing: true,
+          compose_form: Phoenix.Component.to_form(%{"title" => ""}, as: :card)
+        })
+
+      refute html =~ ~s(id="story-map-add-t-10-r-100")
+      refute html =~ ~s(id="story-map-compose-t-10-r-100")
+      assert html =~ ~s(class="story-map-drop")
+    end
+
     test "the open composer replaces the ＋ with the artboard's bordered input" do
       html =
         cell_html(%{

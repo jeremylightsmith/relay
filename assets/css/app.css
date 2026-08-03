@@ -143,9 +143,9 @@
 }
 
 /* RE262 — the story map's drop states (artboard `Relay Story Map.dc.html`, lines ~526 and
-   ~562). !important because the cell's own background and the tray's own border/background are
-   INLINE artboard values on the element, and an inline declaration beats a stylesheet rule; the
-   drop state has to win over both. */
+   ~562). !important because the cell's own background, the tray's own border/background and a
+   done card's own `opacity:0.8` are INLINE artboard values on the element, and an inline
+   declaration beats a stylesheet rule; the drop and drag states have to win over all three. */
 .story-map-drop.drag-over {
   background: oklch(0.95 0.04 250 / 0.55) !important;
   box-shadow: inset 0 0 0 2px oklch(0.6 0.14 250) !important;
@@ -155,7 +155,7 @@
   background: oklch(0.96 0.03 250) !important;
 }
 .story-map-card.dragging {
-  opacity: 0.5;
+  opacity: 0.5 !important;
 }
 
 /* --- Rendered markdown — one global house style (card description / spec / plan /

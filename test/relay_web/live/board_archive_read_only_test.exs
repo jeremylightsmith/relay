@@ -5,6 +5,7 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
 
   alias Relay.Boards
   alias Relay.Cards
+  alias Relay.StoryMap
 
   setup :register_and_log_in_user
 
@@ -149,6 +150,22 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
 
       assert html =~ "(read-only)"
       assert Cards.list_cards(board) == []
+    end
+
+    # RE262 — the server-side guard above rejects compose_cell, but the story map must not
+    # render the affordance either: every body cell would otherwise show a dead `＋` whose
+    # only outcome is a "(read-only)" flash, the way the board hides its own add-work button.
+    test "the story map renders no inline add button", %{conn: conn, board: board} do
+      {:ok, activity} = StoryMap.create_activity(board, %{name: "Onboard", position: 1})
+      {:ok, task} = StoryMap.create_task(activity, %{name: "Sign in", position: 1})
+      [release | _rest] = StoryMap.list_releases(board)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/story-map")
+
+      # The grid itself renders — this is the read-only gate, not an empty story map.
+      assert has_element?(view, "#story-map-cell-t-#{task.id}-r-#{release.id}")
+      refute has_element?(view, "#story-map-add-t-#{task.id}-r-#{release.id}")
+      refute has_element?(view, "[id^='story-map-add-']")
     end
 
     test "Restore re-activates the board and clears read-only",
