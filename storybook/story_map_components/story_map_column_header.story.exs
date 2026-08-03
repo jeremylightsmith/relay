@@ -44,6 +44,8 @@ defmodule Storybook.StoryMapComponents.StoryMapColumnHeader do
         no_task?: false,
         bare?: false,
         draft?: false,
+        merged?: false,
+        task_count: 0,
         last_of_activity?: true,
         count: 0
       },
