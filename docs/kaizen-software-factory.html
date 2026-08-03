@@ -1,0 +1,579 @@
+<title>Kaizen in a Software Factory — Relay's improvement log</title>
+
+<style>
+  :root {
+    /* neutrals — cool blue-slate, deliberately not warm cream */
+    --paper:      #EEF1F5;
+    --panel:      #FFFFFF;
+    --panel-2:    #F5F7FA;
+    --ink:        #131822;
+    --ink-soft:   #414A59;
+    --ink-faint:  #6B7484;
+    --line:       #D8DEE7;
+    --line-soft:  #E7ECF2;
+
+    /* semantic — from Relay's actor/status palette */
+    --problem:    #C57E12;   /* amber — blocked / defect */
+    --problem-bg: #FBF0DC;
+    --solved:     #2E8B4E;   /* green — done / resolved */
+    --solved-bg:  #E1F1E6;
+    --human:      #3B6FD4;   /* blue — human holds the baton */
+    --ai:         #7048C8;   /* violet — AI holds the baton (accent) */
+    --ai-bg:      #EDE7FA;
+
+    --shadow: 0 1px 2px rgba(19,24,34,.05), 0 8px 24px -12px rgba(19,24,34,.18);
+
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Menlo", "Cascadia Code", "Roboto Mono", monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:     #0C1016;
+      --panel:     #141A22;
+      --panel-2:   #19212B;
+      --ink:       #E8EDF4;
+      --ink-soft:  #AAB4C3;
+      --ink-faint: #778196;
+      --line:      #26303C;
+      --line-soft: #1E2732;
+      --problem:   #E0A94B;
+      --problem-bg:#2C2211;
+      --solved:    #56C079;
+      --solved-bg: #12271A;
+      --human:     #6C99EA;
+      --ai:        #A588EC;
+      --ai-bg:     #221A38;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px -14px rgba(0,0,0,.7);
+    }
+  }
+  /* explicit toggle overrides — must beat the media query in both directions */
+  :root[data-theme="light"] {
+    --paper:#EEF1F5; --panel:#FFFFFF; --panel-2:#F5F7FA; --ink:#131822;
+    --ink-soft:#414A59; --ink-faint:#6B7484; --line:#D8DEE7; --line-soft:#E7ECF2;
+    --problem:#C57E12; --problem-bg:#FBF0DC; --solved:#2E8B4E; --solved-bg:#E1F1E6;
+    --human:#3B6FD4; --ai:#7048C8; --ai-bg:#EDE7FA;
+    --shadow:0 1px 2px rgba(19,24,34,.05), 0 8px 24px -12px rgba(19,24,34,.18);
+  }
+  :root[data-theme="dark"] {
+    --paper:#0C1016; --panel:#141A22; --panel-2:#19212B; --ink:#E8EDF4;
+    --ink-soft:#AAB4C3; --ink-faint:#778196; --line:#26303C; --line-soft:#1E2732;
+    --problem:#E0A94B; --problem-bg:#2C2211; --solved:#56C079; --solved-bg:#12271A;
+    --human:#6C99EA; --ai:#A588EC; --ai-bg:#221A38;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 32px -14px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: clamp(28px, 5vw, 72px) clamp(20px, 5vw, 40px) 96px; }
+
+  /* ---------- type ---------- */
+  h1, h2, h3 { text-wrap: balance; line-height: 1.12; letter-spacing: -0.02em; font-weight: 780; }
+  h1 { font-size: clamp(2.1rem, 5.4vw, 3.5rem); margin: 0; }
+  h2 { font-size: clamp(1.35rem, 3vw, 1.85rem); margin: 0 0 4px; }
+  h3 { font-size: 1.06rem; letter-spacing: -0.01em; font-weight: 720; margin: 0; }
+  p { margin: 0 0 1em; color: var(--ink-soft); max-width: 66ch; }
+  strong { color: var(--ink); font-weight: 680; }
+  a { color: var(--ai); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: .72rem;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--ai);
+    font-weight: 600;
+    margin: 0 0 18px;
+  }
+  .mono { font-family: var(--mono); }
+
+  /* ---------- header ---------- */
+  header { padding-bottom: 8px; }
+  .lede {
+    font-size: clamp(1.05rem, 2.2vw, 1.22rem);
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin-top: 22px;
+  }
+  .lede b { color: var(--ink); font-weight: 640; }
+
+  /* legend */
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 8px 20px;
+    margin: 28px 0 4px; padding: 0;
+    font-family: var(--mono); font-size: .76rem; letter-spacing: .02em;
+    color: var(--ink-faint);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 8px; }
+  .swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+
+  /* stat band */
+  .stats {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 1px; margin: 34px 0 8px;
+    background: var(--line-soft);
+    border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+  }
+  .stat { background: var(--panel); padding: 18px 18px 16px; }
+  .stat .n { font-family: var(--mono); font-size: 1.75rem; font-weight: 620; letter-spacing: -0.03em; color: var(--ink); line-height: 1; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: .78rem; color: var(--ink-faint); margin-top: 8px; line-height: 1.35; }
+  @media (max-width: 620px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+
+  /* ---------- section rhythm ---------- */
+  section { margin-top: 60px; }
+  .section-head { margin-bottom: 22px; }
+  .section-head .eyebrow { margin-bottom: 10px; }
+  .section-head h2 + p { margin-top: 8px; }
+
+  /* ---------- blueprint / mermaid card ---------- */
+  .blueprint {
+    background: #F7F9FC;
+    border: 1px solid #D8DEE7;
+    border-radius: 16px;
+    padding: 26px 20px 20px;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+  }
+  .blueprint .cap {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .12em;
+    text-transform: uppercase; color: #6B7484; margin: 6px 4px 0; text-align: center;
+  }
+  .mermaid { display: flex; justify-content: center; min-width: 520px; }
+  .mermaid svg { max-width: 100%; height: auto; }
+
+  /* ---------- timeline ---------- */
+  .timeline { position: relative; margin-top: 8px; padding-left: 0; }
+  .phase-label {
+    font-family: var(--mono); font-size: .74rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 40px 0 14px; padding-left: 34px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .phase-label::before { content: ""; height: 1px; flex: 1; background: var(--line); }
+
+  .event { position: relative; padding: 0 0 8px 34px; }
+  /* spine */
+  .event::before {
+    content: ""; position: absolute; left: 9px; top: 6px; bottom: -20px;
+    width: 2px; background: var(--line);
+  }
+  .event:last-child::before { bottom: 8px; }
+  /* node */
+  .event .node {
+    position: absolute; left: 3px; top: 5px; width: 14px; height: 14px; border-radius: 50%;
+    background: var(--problem); border: 3px solid var(--paper);
+    box-shadow: 0 0 0 1px var(--problem);
+  }
+  .event.solved .node { background: var(--solved); box-shadow: 0 0 0 1px var(--solved); }
+  .event.systemic .node { background: var(--ai); box-shadow: 0 0 0 1px var(--ai); width: 17px; height: 17px; left: 1px; }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: var(--shadow); overflow: hidden; margin-bottom: 8px;
+  }
+  .card.hero { border-color: color-mix(in oklab, var(--ai) 45%, var(--line)); }
+  .card-top {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px;
+    padding: 15px 20px 12px; border-bottom: 1px solid var(--line-soft);
+  }
+  .date { font-family: var(--mono); font-size: .76rem; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+  .ref {
+    font-family: var(--mono); font-size: .72rem; font-weight: 600; letter-spacing: .02em;
+    padding: 2px 8px; border-radius: 999px; background: var(--panel-2);
+    border: 1px solid var(--line); color: var(--ink-soft);
+  }
+  .card-top h3 { flex-basis: 100%; margin-top: 2px; }
+
+  .flow { display: grid; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 640px) { .flow { grid-template-columns: 1fr; } }
+  .cell { padding: 14px 20px 16px; }
+  .cell.problem { background: var(--problem-bg); }
+  .cell.solved  { background: var(--solved-bg); border-left: 1px solid var(--line-soft); }
+  @media (max-width: 640px) { .cell.solved { border-left: none; border-top: 1px solid var(--line-soft); } }
+  .cell .tag {
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .12em; text-transform: uppercase;
+    font-weight: 600; margin: 0 0 6px; display: flex; align-items: center; gap: 7px;
+  }
+  .cell.problem .tag { color: var(--problem); }
+  .cell.solved .tag  { color: var(--solved); }
+  .cell p { margin: 0; font-size: .92rem; color: var(--ink-soft); line-height: 1.5; }
+  .cell p b { color: var(--ink); }
+  .rootcause {
+    padding: 11px 20px; font-size: .86rem; color: var(--ink-soft);
+    background: var(--panel-2); border-top: 1px solid var(--line-soft);
+    display: flex; gap: 9px; align-items: baseline;
+  }
+  .rootcause .k {
+    font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-faint); flex: none; padding-top: 1px;
+  }
+  .rootcause b { color: var(--ink); }
+  .commit {
+    font-family: var(--mono); font-size: .72rem; color: var(--ink-faint);
+    padding: 9px 20px; border-top: 1px solid var(--line-soft);
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .commit .sha { color: var(--solved); font-weight: 600; }
+  .arrow { color: var(--ink-faint); }
+
+  /* ---------- feature panel ---------- */
+  .feature {
+    margin-top: 26px;
+    background: linear-gradient(180deg, var(--ai-bg), var(--panel));
+    border: 1px solid color-mix(in oklab, var(--ai) 40%, var(--line));
+    border-radius: 18px; padding: clamp(24px, 4vw, 40px);
+    box-shadow: var(--shadow);
+  }
+  .feature .eyebrow { color: var(--ai); }
+  .feature h2 { margin-bottom: 12px; }
+  .feature p { max-width: 64ch; }
+  .feature .pull {
+    font-size: clamp(1.15rem, 2.6vw, 1.5rem); font-weight: 640; letter-spacing: -0.015em;
+    color: var(--ink); line-height: 1.28; max-width: 30ch; margin: 4px 0 20px; text-wrap: balance;
+  }
+  .feature .pull em { color: var(--ai); font-style: normal; }
+
+  /* takeaways */
+  .takeaways { list-style: none; padding: 0; margin: 18px 0 0; display: grid; gap: 12px; }
+  .takeaways li { display: flex; gap: 13px; align-items: flex-start; color: var(--ink-soft); font-size: .96rem; }
+  .takeaways .term {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .04em; font-weight: 600;
+    color: var(--ai); background: var(--ai-bg); border: 1px solid color-mix(in oklab, var(--ai) 30%, var(--line));
+    padding: 3px 9px; border-radius: 7px; flex: none; margin-top: 1px; min-width: 88px; text-align: center;
+  }
+  .takeaways b { color: var(--ink); }
+
+  /* ---------- footer ---------- */
+  footer {
+    margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--line);
+    font-family: var(--mono); font-size: .76rem; color: var(--ink-faint); line-height: 1.7;
+  }
+  footer b { color: var(--ink-soft); font-weight: 600; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .event .node { transition: transform .2s ease; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">Kaizen · Software Factory · A field study</p>
+    <h1>The factory that debugged itself</h1>
+    <p class="lede">
+      <b>Relay is a software factory</b> — an autonomous line where AI executors move a card from
+      spec to plan to implementation, through review and smoke and acceptance gates, to a merged
+      pull request. Over twelve days we ran the line on <b>its own source code</b>. It surfaced its
+      own defects, the quality gates stopped the line on each one, and every stop became an
+      improvement. This is that improvement log — real cards, real commits, in the order they happened.
+    </p>
+
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--problem)"></i> Problem — line stopped</span>
+      <span><i class="swatch" style="background:var(--solved)"></i> Resolved — merged</span>
+      <span><i class="swatch" style="background:var(--human)"></i> Human baton</span>
+      <span><i class="swatch" style="background:var(--ai)"></i> AI baton</span>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="n">12</div><div class="l">days on the line<br>Jul 22 – Aug 3, 2026</div></div>
+      <div class="stat"><div class="n">6</div><div class="l">flow defects filed in one dogfooding pass (RE249–254)</div></div>
+      <div class="stat"><div class="n">10+</div><div class="l">countermeasures merged to <span class="mono">main</span></div></div>
+      <div class="stat"><div class="n">1</div><div class="l">systemic fix that closed the loop</div></div>
+    </div>
+  </header>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">The improvement kata</p>
+      <h2>One loop, run over and over</h2>
+      <p>
+        Kaizen isn't heroics — it's a loop you turn until it's boring. The factory floor already
+        speaks this language: <b>jidoka</b> (a machine that stops itself the instant it makes a bad
+        part), the <b>andon</b> cord (stop the line, pull a human), <b>gemba</b> (the actual place
+        the work happens). Relay's gates <em>are</em> jidoka; a parked card <em>is</em> the andon.
+        The catch is where most software teams leak value — the last edge:
+      </p>
+    </div>
+
+    <div class="blueprint">
+      <pre class="mermaid">
+flowchart TD
+  R["Run the line<br/>an AI executor works a card"]:::ai
+  G{"Quality gate<br/>precommit · review · smoke"}:::neutral
+  Done(["Card done → merged"]):::fix
+  P["Defect caught<br/>the line stops — <b>jidoka</b>"]:::problem
+  A["Card parks<br/><b>andon</b>: pull a human"]:::human
+  C["Root cause<br/>+ countermeasure card"]:::human
+  M["Merge the fix to main"]:::fix
+  D["Self-update<br/>ships the fix to the line"]:::fix
+
+  R --> G
+  G -- pass --> Done
+  G -- defect --> P
+  P --> A --> C --> M --> D --> R
+
+  classDef ai fill:#7048C8,color:#ffffff,stroke:#5233A6,stroke-width:1px;
+  classDef human fill:#3B6FD4,color:#ffffff,stroke:#2B54A8,stroke-width:1px;
+  classDef problem fill:#E9A63B,color:#3A2A08,stroke:#B87516,stroke-width:1px;
+  classDef fix fill:#3E9E5B,color:#08240F,stroke:#2C7343,stroke-width:1px;
+  classDef neutral fill:#E3E7EC,color:#1A1F27,stroke:#9AA4B2,stroke-width:1px;
+      </pre>
+      <div class="cap">The last edge — self-update — is the one this log is really about</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">The log · problem → countermeasure</p>
+      <h2>Every stop, and what it taught the line</h2>
+      <p>
+        Read top to bottom: each entry is a real defect the factory hit, the root cause we traced it
+        to, and the countermeasure that shipped. The order matters — it builds to a recurrence, and
+        the recurrence is the whole point.
+      </p>
+    </div>
+
+    <div class="timeline">
+
+      <div class="phase-label">Warm-up · hardening the line itself</div>
+
+      <div class="event solved">
+        <div class="node"></div>
+        <div class="card">
+          <div class="card-top">
+            <span class="date">Jul 22–23</span><span class="ref">RE237</span>
+            <h3>A half-built dark mode was showing to users</h3>
+          </div>
+          <div class="flow">
+            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>The theme toggle exposed an unfinished dark mode that rendered broken.</p></div>
+            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>Force light mode and hide the control — <b>poka-yoke</b>: remove the way to reach the bad state — then card the real removal.</p></div>
+          </div>
+          <div class="rootcause"><span class="k">Root cause</span><p>An incomplete feature was reachable in production before it was ready.</p></div>
+          <div class="commit"><span class="sha">09ba22f</span> <span class="arrow">·</span> comment out darkmode</div>
+        </div>
+      </div>
+
+      <div class="event solved">
+        <div class="node"></div>
+        <div class="card">
+          <div class="card-top">
+            <span class="date">Jul 23</span><span class="ref">precommit</span>
+            <h3><span class="mono">mix precommit</span> was flaky — the gate itself was unreliable</h3>
+          </div>
+          <div class="flow">
+            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>Executor-lock tests fought live executors for one real lock directory, so the suite went red at random.</p></div>
+            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>Hermetic test isolation — each run gets a private lock dir. A gate you can't trust can't stop the line.</p></div>
+          </div>
+          <div class="rootcause"><span class="k">Root cause</span><p>Tests shared mutable global state (the singleton lock) with running processes.</p></div>
+          <div class="commit"><span class="sha">3b8a2bf</span> <span class="arrow">·</span> fix isolation</div>
+        </div>
+      </div>
+
+      <div class="event solved">
+        <div class="node"></div>
+        <div class="card">
+          <div class="card-top">
+            <span class="date">Jul 28–31</span><span class="ref">RE239 · 240 · 244</span>
+            <h3>Knowledge sprawl — no rule for where anything lived</h3>
+          </div>
+          <div class="flow">
+            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>Docs duplicated and drifted; <span class="mono">relay.md</span> had bloated; nothing said where a given fact belonged.</p></div>
+            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p><b>Standardize</b>: ADR 0008 defines nine homes — one fact, one home — and a <span class="mono">relay-doctor</span> check that fails the build on flow/factory drift.</p></div>
+          </div>
+          <div class="rootcause"><span class="k">Root cause</span><p>No single source of truth meant two copies of a fact could silently disagree.</p></div>
+          <div class="commit"><span class="sha">#192</span> <span class="arrow">→</span> <span class="sha">#195</span> <span class="arrow">→</span> <span class="sha">#197</span> <span class="arrow">·</span> taxonomy + doctor alignment checks</div>
+        </div>
+      </div>
+
+      <div class="phase-label">Dogfooding · the factory finds its own bugs</div>
+
+      <div class="event solved">
+        <div class="node"></div>
+        <div class="card">
+          <div class="card-top">
+            <span class="date">Aug 1</span><span class="ref">TH8 → #199</span>
+            <h3>A production card crash-looped the whole page</h3>
+          </div>
+          <div class="flow">
+            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>Opening one card drawer threw <span class="mono">Protocol.UndefinedError</span> and reload-looped the browser — a live outage.</p></div>
+            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>The render now coerces any shape of change and never crashes — proven with a failing test first (TDD), then deployed.</p></div>
+          </div>
+          <div class="rootcause"><span class="k">Root cause</span><p>The drawer assumed one shape for an AI's change record; real data came back as a map.</p></div>
+          <div class="commit"><span class="sha">5593883</span> <span class="arrow">·</span> handle crashloop for ai changes</div>
+        </div>
+      </div>
+
+      <div class="event solved">
+        <div class="node"></div>
+        <div class="card">
+          <div class="card-top">
+            <span class="date">Aug 1–2</span><span class="ref">RE249–254</span>
+            <h3>One dogfooding pass surfaced six flow defects at once</h3>
+          </div>
+          <div class="flow">
+            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>Running real work through the line exposed six ways the flow engine itself mishandled a card.</p></div>
+            <div class="cell solved"><p class="tag"><span>✓</span> The andon</p><p>Each was filed as a <span class="mono">relay-bug</span> card and sequenced at the top of the board — pull the cord, make the defects visible, work them in order.</p></div>
+          </div>
+          <div class="rootcause"><span class="k">Note</span><p>The next four entries are these cards, resolved one at a time on Aug 2.</p></div>
+          <div class="commit"><span class="arrow">↓</span> RE254 · RE253 · RE251 · RE249 · RE252 (and RE250, the deepest, still queued)</div>
+        </div>
+      </div>
+
+      <div class="event solved">
+        <div class="node"></div>
+        <div class="card">
+          <div class="card-top">
+            <span class="date">Aug 2</span><span class="ref">RE254</span>
+            <h3>The merge node raced CI — it couldn't merge on a protected branch</h3>
+          </div>
+          <div class="flow">
+            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>The flow tried to merge before required checks were green, so the merge just failed.</p></div>
+            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>Merge with <span class="mono">--auto</span> (let the platform merge once checks pass) and fall back to a direct squash.</p></div>
+          </div>
+          <div class="rootcause"><span class="k">Root cause</span><p>The step modeled merging as instantaneous instead of gated on CI.</p></div>
+          <div class="commit"><span class="sha">d9042cc</span> <span class="arrow">·</span> merge node uses gh pr merge --auto</div>
+        </div>
+      </div>
+
+      <div class="event solved">
+        <div class="node"></div>
+        <div class="card">
+          <div class="card-top">
+            <span class="date">Aug 2</span><span class="ref">RE253</span>
+            <h3>A card asked a human a question no one could answer</h3>
+          </div>
+          <div class="flow">
+            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>An engine-raised <span class="mono">needs_input</span> park rendered with no way to reply — the andon pulled, but the cord had no handle.</p></div>
+            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p><span class="mono">park_kind</span> classifies A1 questions vs A4 escalations; the drawer makes an engine-raised park answerable.</p></div>
+          </div>
+          <div class="rootcause"><span class="k">Root cause</span><p>The UI only knew how to answer human-authored questions, not engine-raised ones.</p></div>
+          <div class="commit"><span class="sha">e243772</span> <span class="arrow">·</span> engine-raised needs_input parks are answerable</div>
+        </div>
+      </div>
+
+      <div class="event solved">
+        <div class="node"></div>
+        <div class="card">
+          <div class="card-top">
+            <span class="date">Aug 2</span><span class="ref">RE251</span>
+            <h3>Implementation intermittently did nothing on a retry</h3>
+          </div>
+          <div class="flow">
+            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>When review sent a task back, the retry sometimes produced no commits — the fix request never reached the worker.</p></div>
+            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>Every loop-back prompt now carries the reviewer's actual findings, not just the guard's generic message (executor v27).</p></div>
+          </div>
+          <div class="rootcause"><span class="k">Root cause</span><p>The retry dropped the payload that told the worker <em>what to change</em>.</p></div>
+          <div class="commit"><span class="sha">4c0e31a</span> <span class="arrow">·</span> loop-back nodes receive the reviewer's findings</div>
+        </div>
+      </div>
+
+      <div class="event solved">
+        <div class="node"></div>
+        <div class="card">
+          <div class="card-top">
+            <span class="date">Aug 2</span><span class="ref">RE249</span>
+            <h3>The health check was too shallow to catch any of this</h3>
+          </div>
+          <div class="flow">
+            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p><span class="mono">relay-doctor</span> only checked name resolution — it couldn't see a broken run history.</p></div>
+            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>A new <span class="mono">relay audit</span> — endpoint + CLI + doctor board-health — checks run history and CI parity. Sharpen the instrument that finds defects.</p></div>
+          </div>
+          <div class="rootcause"><span class="k">Root cause</span><p>Monitoring measured configuration, not the behavior that actually broke.</p></div>
+          <div class="commit"><span class="sha">9d85a40</span> <span class="arrow">·</span> relay audit with CI parity + board-health</div>
+        </div>
+      </div>
+
+      <div class="event solved">
+        <div class="node"></div>
+        <div class="card">
+          <div class="card-top">
+            <span class="date">Aug 2</span><span class="ref">RE252</span>
+            <h3>A failed review still advanced the batch</h3>
+          </div>
+          <div class="flow">
+            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>A failed <span class="mono">quality_review</span> advanced the <span class="mono">foreach</span> loop to the next task instead of stopping — a bad part rolled downstream.</p></div>
+            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>A failing review holds the loop. This is jidoka in one line: don't pass defects to the next station.</p></div>
+          </div>
+          <div class="rootcause"><span class="k">Root cause</span><p>The loop advanced on completion, not on success.</p></div>
+          <div class="commit"><span class="sha">#201</span> <span class="arrow">·</span> failed quality_review no longer advances the foreach</div>
+        </div>
+      </div>
+
+      <div class="phase-label">The recurrence · the fix that fixes fixing</div>
+
+      <div class="event systemic">
+        <div class="node"></div>
+        <div class="card hero">
+          <div class="card-top">
+            <span class="date">Aug 2–3</span><span class="ref" style="border-color:var(--ai);color:var(--ai)">RE185 · systemic</span>
+            <h3>The fixes were merged. The bugs kept happening anyway.</h3>
+          </div>
+          <div class="flow">
+            <div class="cell problem"><p class="tag"><span>◆</span> The real problem</p><p>Cards kept no-op'ing even after the fix was on <span class="mono">main</span>. The line was running executor <b>v24</b> — <b>four versions of fixes behind</b>. "Merged" had never meant "running."</p></div>
+            <div class="cell solved"><p class="tag"><span>✓</span> The systemic fix</p><p>Executors now <b>self-update</b>: verified download, atomic install, and a restart at a safe job boundary. The countermeasure reaches the <b>gemba</b> on its own.</p></div>
+          </div>
+          <div class="rootcause"><span class="k">Root cause</span><p>The deepest waste wasn't any single bug — it was <b>improvement latency</b>: the gap between a fix landing in the repo and running on the line.</p></div>
+          <div class="commit"><span class="sha">c919e00</span> <span class="arrow">·</span> executors self-update — download + verified install + restart</div>
+        </div>
+      </div>
+
+      <div class="event solved">
+        <div class="node"></div>
+        <div class="card">
+          <div class="card-top">
+            <span class="date">Aug 3</span><span class="ref">RE185 · follow-up</span>
+            <h3>The self-update's own guard miscounted — caught by the gate</h3>
+          </div>
+          <div class="flow">
+            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>A benign "nothing newer" check burned the anti-thrash budget, and failed updates weren't counted correctly.</p></div>
+            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>Fixed so a no-op update never counts against the cap. Notably, the <b>whole-branch review gate caught this</b> — jidoka on the machine that delivers jidoka.</p></div>
+          </div>
+          <div class="rootcause"><span class="k">Root cause</span><p>The safety valve counted the wrong events.</p></div>
+          <div class="commit"><span class="sha">e494502</span> <span class="arrow">·</span> <span class="sha">7cd44c4</span> <span class="arrow">·</span> a benign "nothing newer" never counts toward the cap</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="feature">
+    <p class="eyebrow">The lesson worth teaching</p>
+    <h2>The waste that mattered wasn't a bug</h2>
+    <p class="pull">The gates caught every defect. But value only lands when the countermeasure reaches the line — and <em>that</em> was the gap.</p>
+    <p>
+      Count the defects and it looks like a normal bug-fix week. Read the order and a different story
+      shows up: the line's <b>jidoka</b> gates worked — every bad part was caught, every card parked,
+      every root cause found. The improvement that mattered most wasn't in that list. It was the
+      realization that a merged fix sitting in the repo is <b>inventory, not value</b> — the classic
+      <b>muda</b> of work-in-progress that never ships. Self-update collapsed the distance from
+      "merged" to "running" to zero.
+    </p>
+    <p style="margin-bottom:0">That's the kaizen move a software factory makes that a person rarely does: don't just fix the defect — fix the mechanism that delivers fixes. Improve the system that produces the work.</p>
+
+    <ul class="takeaways">
+      <li><span class="term">jidoka</span><span>The gates <b>stop the line on a defect</b> rather than passing it downstream — RE252 is this in one commit.</span></li>
+      <li><span class="term">andon</span><span>A parked card <b>pulls a human</b> and makes the problem visible — but the cord needs a handle (RE253).</span></li>
+      <li><span class="term">poka-yoke</span><span>Remove the path to the bad state, don't just warn about it — force light mode (RE237), coerce any shape (TH8).</span></li>
+      <li><span class="term">gemba</span><span>Improvements have to reach <b>where the work happens</b> — the running executor, not the repo (RE185).</span></li>
+      <li><span class="term">standardize</span><span>Every fix becomes a permanent check — one home per fact (ADR 0008), a sharper <span class="mono">audit</span> (RE249).</span></li>
+    </ul>
+  </section>
+
+  <footer>
+    <b>Sources.</b> Every card ref, commit SHA, and date is drawn from the live Relay board (the RE
+    and TH boards on relayboard.fly.dev) and the git history on <span class="mono">main</span>.<br>
+    <b>Window.</b> Jul 22 – Aug 3, 2026 · a continuous dogfooding session running Relay on its own codebase.<br>
+    <b>Reading it.</b> Amber = the line stopped · green = merged · violet = a systemic fix. Top to bottom is chronological.
+  </footer>
+
+</div>
