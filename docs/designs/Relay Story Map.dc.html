@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.30 0.02 255);background:oklch(0.95 0.006 255);-webkit-font-smoothing:antialiased;}
+  a{color:oklch(0.60 0.14 250);text-decoration:none;} a:hover{text-decoration:underline;}
+  button{font-family:inherit;cursor:pointer;border:none;background:none;}
+  input{font-family:inherit;}
+  ::-webkit-scrollbar{width:11px;height:11px;}
+  ::-webkit-scrollbar-thumb{background:oklch(0.85 0.01 255);border-radius:6px;border:2px solid oklch(0.95 0.006 255);}
+  ::-webkit-scrollbar-track{background:transparent;}
+  @keyframes smcursorA{0%{transform:translate(0,0);}50%{transform:translate(60px,40px);}100%{transform:translate(0,0);}}
+  @keyframes smcursorB{0%{transform:translate(0,0);}50%{transform:translate(-48px,28px);}100%{transform:translate(0,0);}}
+  @keyframes smpop{0%{transform:scale(0.96);opacity:0;}100%{transform:scale(1);opacity:1;}}
+</style>
+</helmet>
+
+<div style="height:100vh;display:flex;flex-direction:column;background:oklch(0.95 0.006 255);overflow:hidden;">
+
+  <!-- top chrome -->
+  <div style="height:50px;flex:0 0 auto;display:flex;align-items:center;gap:13px;padding:0 18px;border-bottom:1px solid oklch(0.91 0.006 255);background:oklch(1 0 0);z-index:60;">
+    <div style="width:22px;height:22px;border-radius:6px;background:oklch(0.60 0.14 250);display:flex;align-items:center;justify-content:center;position:relative;flex:0 0 auto;"><div style="width:7px;height:7px;border-radius:50%;background:white;"></div><div style="position:absolute;right:3px;top:3px;width:4px;height:4px;border-radius:50%;background:oklch(0.60 0.14 250);box-shadow:0 0 0 1.5px white;"></div></div>
+    <span style="font-size:13px;color:oklch(0.55 0.02 255);">Product workspace</span>
+    <span style="color:oklch(0.8 0.02 255);">/</span>
+    <div style="display:flex;background:oklch(0.955 0.006 255);border-radius:8px;padding:2px;">
+      <span style="font-size:12px;font-weight:600;color:oklch(0.5 0.02 255);padding:4px 11px;border-radius:6px;">Board</span>
+      <span style="font-size:12px;font-weight:600;color:oklch(0.32 0.02 255);padding:4px 11px;border-radius:6px;background:white;box-shadow:0 1px 2px oklch(0 0 0/0.08);">Story map</span>
+    </div>
+    <span style="flex:1;"></span>
+    <span style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.55 0.02 255);">ZOOM</span>
+    <div style="display:flex;background:oklch(0.955 0.006 255);border-radius:8px;padding:3px;">
+      <button onClick="{{ setMap }}" style="font-size:12px;font-weight:600;padding:4px 12px;border-radius:6px;color:{{ zMapFg }};background:{{ zMapBg }};">Map</button>
+      <button onClick="{{ setCompact }}" style="font-size:12px;font-weight:600;padding:4px 12px;border-radius:6px;color:{{ zCompactFg }};background:{{ zCompactBg }};">Compact</button>
+      <button onClick="{{ setFull }}" style="font-size:12px;font-weight:600;padding:4px 12px;border-radius:6px;color:{{ zFullFg }};background:{{ zFullBg }};">Full</button>
+    </div>
+    <button onClick="{{ toggleHideTasks }}" style="font-size:12px;font-weight:600;padding:5px 11px;border-radius:8px;color:{{ htFg }};background:{{ htBg }};border:1px solid {{ htBorder }};">{{ htLabel }}</button>
+    <sc-if value="{{ showPresence }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:8px;margin-left:2px;">
+        <div style="display:flex;">
+          <div style="width:26px;height:26px;border-radius:50%;background:oklch(0.62 0.13 250);color:white;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;border:2px solid white;">DK</div>
+          <div style="width:26px;height:26px;border-radius:50%;background:oklch(0.62 0.13 195);color:white;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;border:2px solid white;margin-left:-8px;">ML</div>
+          <div style="width:26px;height:26px;border-radius:50%;background:oklch(0.62 0.13 15);color:white;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;border:2px solid white;margin-left:-8px;">JR</div>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+
+  <!-- filter bar -->
+  <div style="min-height:48px;flex:0 0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 18px;border-bottom:1px solid oklch(0.92 0.006 255);background:oklch(0.972 0.005 255);z-index:55;">
+    <span style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.5 0.02 255);">FILTER</span>
+    <span style="font-size:11px;color:oklch(0.55 0.02 255);margin-right:2px;">Owner</span>
+    <sc-for list="{{ ownerChips }}" as="chip" hint-placeholder-count="4">
+      <button onClick="{{ chip.onClick }}" style="{{ chip.style }}"><span style="{{ chip.dot }}">{{ chip.init }}</span></button>
+    </sc-for>
+    <span style="width:1px;height:20px;background:oklch(0.9 0.006 255);margin:0 4px;"></span>
+    <button onClick="{{ toggleNeeds }}" style="{{ needsStyle }}"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.7 0.13 65);"></span>Needs input</button>
+    <button style="border-radius:8px;padding:5px 10px;font-size:11.5px;font-weight:600;background:white;color:oklch(0.5 0.02 255);border:1px dashed oklch(0.85 0.006 255);">+ filter</button>
+    <sc-if value="{{ focusOn }}" hint-placeholder-val="{{ false }}">
+      <button onClick="{{ exitFocus }}" style="display:flex;align-items:center;gap:6px;border-radius:8px;padding:5px 10px;font-size:11.5px;font-weight:600;background:oklch(0.97 0.02 292);color:oklch(0.46 0.14 292);border:1px solid oklch(0.88 0.05 292);">◎ Focusing: {{ focusName }} ✕</button>
+    </sc-if>
+    <span style="flex:1;"></span>
+    <sc-if value="{{ filterActive }}" hint-placeholder-val="{{ false }}"><button onClick="{{ clearFilters }}" style="font-size:11px;font-weight:600;color:oklch(0.55 0.14 250);">Clear</button></sc-if>
+    <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:oklch(0.5 0.02 255);">{{ countLabel }}</span>
+  </div>
+
+  <div style="flex:1;display:flex;min-height:0;">
+
+  <!-- unmapped tray (left rail) -->
+  <sc-if value="{{ trayShown }}" hint-placeholder-val="{{ true }}">
+    <div style="{{ trayStyle }}" onDragOver="{{ onTrayOver }}" onDragLeave="{{ onTrayLeave }}" onDrop="{{ onTrayDrop }}">
+      <sc-if value="{{ trayOpen }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;min-height:0;height:100%;">
+          <button onClick="{{ toggleTray }}" style="display:flex;align-items:center;gap:8px;padding:11px 14px 9px;text-align:left;">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.5 0.02 255);">UNMAPPED</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;color:white;background:oklch(0.55 0.02 255);border-radius:20px;padding:2px 7px;">{{ unmappedCount }}</span>
+            <span style="flex:1;"></span>
+            <span style="font-size:11px;color:oklch(0.5 0.02 255);">‹</span>
+          </button>
+          <div style="font-size:11px;line-height:1.35;color:oklch(0.55 0.02 255);padding:0 14px 10px;">No activity yet. Drag onto the map to place — or drop a card here to unmap it.</div>
+          <div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:0 12px 14px;">
+            <sc-for list="{{ unmapped }}" as="u" hint-placeholder-count="3">
+              <div style="{{ u.style }}" draggable="{{ dragTrue }}" onDragStart="{{ u.onDragStart }}">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <span style="{{ u.refStyle }}">{{ u.ref }}</span>
+                  <span style="{{ u.avatarStyle }}">{{ u.owner }}</span>
+                </div>
+                <div style="{{ u.titleStyle }}">{{ u.title }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+      <sc-if value="{{ trayClosed }}" hint-placeholder-val="{{ false }}">
+        <button onClick="{{ toggleTray }}" style="height:100%;width:100%;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;">
+          <span style="font-size:11px;color:oklch(0.5 0.02 255);">›</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;color:white;background:oklch(0.55 0.02 255);border-radius:20px;padding:2px 6px;">{{ unmappedCount }}</span>
+          <span style="writing-mode:vertical-rl;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.5 0.02 255);">UNMAPPED</span>
+        </button>
+      </sc-if>
+    </div>
+  </sc-if>
+
+  <!-- map body -->
+  <div style="flex:1;position:relative;overflow:auto;">
+    <sc-if value="{{ showPresence }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;left:480px;top:180px;z-index:40;animation:smcursorA 9s ease-in-out infinite;pointer-events:none;">
+        <svg width="16" height="16" viewBox="0 0 16 16"><path d="M1 1 L1 12 L4 9 L6.5 14 L8.5 13 L6 8 L10 8 Z" fill="oklch(0.62 0.13 195)" stroke="white" stroke-width="1"></path></svg>
+        <span style="position:absolute;left:14px;top:12px;background:oklch(0.62 0.13 195);color:white;font-size:9.5px;font-weight:600;padding:2px 6px;border-radius:5px;white-space:nowrap;font-family:'JetBrains Mono',monospace;">Mara</span>
+      </div>
+    </sc-if>
+
+    <div style="{{ gridStyle }}">
+      <!-- sticky corner -->
+      <div style="{{ cornerStyle }}"><span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.05em;color:oklch(0.55 0.02 255);">RELEASE ↓</span></div>
+      <!-- sticky header backing bands -->
+      <div style="{{ bandTop1 }}"></div>
+      <div style="{{ bandTop2 }}"></div>
+      <!-- release lane striping -->
+      <sc-for list="{{ rowBands }}" as="b" hint-placeholder-count="3"><div style="{{ b.style }}"></div></sc-for>
+
+      <!-- release labels (sticky left) -->
+      <sc-for list="{{ relLabels }}" as="r" hint-placeholder-count="3">
+        <div style="{{ r.style }}">
+          <div style="display:flex;align-items:center;gap:5px;"><span style="{{ r.dotStyle }}"></span><span style="font-size:12.5px;font-weight:600;color:oklch(0.3 0.02 255);">{{ r.name }}</span><span style="font-size:11px;color:oklch(0.7 0.02 255);">✎</span></div>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:oklch(0.6 0.02 255);">{{ r.sub }}</span>
+        </div>
+      </sc-for>
+
+      <!-- backbone (sticky top) -->
+      <sc-for list="{{ topCells }}" as="h" hint-placeholder-count="5">
+        <sc-if value="{{ h.stub }}" hint-placeholder-val="{{ false }}">
+          <button style="{{ h.style }}" onClick="{{ h.onClick }}" draggable="{{ dragTrue }}" onDragStart="{{ h.onDragStart }}" onDragOver="{{ h.onDragOver }}" onDrop="{{ h.onDrop }}">
+            <span style="font-size:12px;color:{{ h.arrow }};">▸</span>
+            <span style="{{ h.vertStyle }}">{{ h.name }}</span>
+            <span style="{{ h.badgeStyle }}">{{ h.count }}</span>
+          </button>
+        </sc-if>
+        <sc-if value="{{ h.expanded }}" hint-placeholder-val="{{ true }}">
+          <div style="{{ h.style }}" draggable="{{ dragTrue }}" onDragStart="{{ h.onDragStart }}" onDragOver="{{ h.onDragOver }}" onDrop="{{ h.onDrop }}">
+            <div style="display:flex;align-items:center;gap:6px;cursor:pointer;" onClick="{{ h.onCollapse }}">
+              <span style="font-size:11px;color:{{ h.arrow }};">▾</span>
+              <span style="font-size:12px;color:oklch(0.7 0.03 255);cursor:grab;">⠿</span>
+              <span style="{{ h.nameStyle }}">{{ h.name }}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+              <span style="{{ h.badgeStyle }}">{{ h.count }}</span>
+              <span style="flex:1;"></span>
+              <button style="{{ h.iconStyle }}" onClick="{{ h.onSuggest }}">✦</button>
+              <button style="{{ h.iconStyle }}" onClick="{{ h.onFocus }}">◎</button>
+            </div>
+          </div>
+        </sc-if>
+      </sc-for>
+
+      <!-- task headers (sticky top) -->
+      <sc-for list="{{ taskCells }}" as="t" hint-placeholder-count="8">
+        <div style="{{ t.style }}" draggable="{{ dragTrue }}" onDragStart="{{ t.onDragStart }}" onDragOver="{{ t.onDragOver }}" onDrop="{{ t.onDrop }}">
+          <sc-if value="{{ t.grip }}" hint-placeholder-val="{{ true }}"><span style="font-size:11px;color:oklch(0.72 0.03 255);cursor:grab;">⠿</span></sc-if>
+          <span>{{ t.name }}</span>
+        </div>
+      </sc-for>
+
+      <!-- body cells -->
+      <sc-for list="{{ bodyCells }}" as="cell" hint-placeholder-count="12">
+        <div style="{{ cell.style }}" onDragOver="{{ cell.onDragOver }}" onDrop="{{ cell.onDrop }}">
+          <sc-for list="{{ cell.cards }}" as="card" hint-placeholder-count="1">
+            <sc-if value="{{ card.map }}" hint-placeholder-val="{{ false }}">
+              <div style="{{ card.lineStyle }}" draggable="{{ dragTrue }}" onDragStart="{{ card.onDragStart }}">{{ card.title }}</div>
+            </sc-if>
+            <sc-if value="{{ card.box }}" hint-placeholder-val="{{ true }}">
+              <div style="{{ card.boxStyle }}" draggable="{{ dragTrue }}" onDragStart="{{ card.onDragStart }}">
+                <sc-if value="{{ card.showMeta }}" hint-placeholder-val="{{ true }}">
+                  <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <span style="{{ card.refStyle }}">{{ card.ref }}</span>
+                    <span style="{{ card.avatarStyle }}">{{ card.avatarText }}</span>
+                  </div>
+                </sc-if>
+                <div style="{{ card.titleStyle }}">{{ card.title }}</div>
+                <sc-if value="{{ card.showMeta }}" hint-placeholder-val="{{ true }}">
+                  <span style="{{ card.stageStyle }}">{{ card.stageText }}</span>
+                </sc-if>
+                <sc-if value="{{ card.hasBar }}" hint-placeholder-val="{{ false }}">
+                  <div style="{{ card.barStyle }}"></div>
+                </sc-if>
+              </div>
+            </sc-if>
+          </sc-for>
+
+          <sc-for list="{{ cell.suggestions }}" as="sug" hint-placeholder-count="0">
+            <div style="background:oklch(0.98 0.02 292);border:1.5px dashed oklch(0.72 0.1 292);border-radius:9px;padding:9px 10px;display:flex;flex-direction:column;gap:7px;animation:smpop 0.25s ease;">
+              <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:600;color:oklch(0.5 0.14 292);">✦ RELAY SUGGESTS</span>
+              <div style="font-size:12px;line-height:1.3;font-weight:500;color:oklch(0.32 0.04 292);">{{ sug.text }}</div>
+              <div style="display:flex;gap:6px;">
+                <button onClick="{{ sug.onKeep }}" style="font-size:10px;font-weight:600;color:oklch(0.46 0.14 292);background:oklch(0.94 0.04 292);border-radius:5px;padding:3px 8px;">Keep</button>
+                <button onClick="{{ sug.onDismiss }}" style="font-size:10px;color:oklch(0.55 0.02 255);padding:3px 6px;">Dismiss</button>
+              </div>
+            </div>
+          </sc-for>
+
+          <sc-if value="{{ cell.addActive }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;gap:6px;background:white;border:1.5px solid oklch(0.6 0.14 250);border-radius:9px;padding:7px 9px;">
+              <span style="color:oklch(0.6 0.14 250);font-size:14px;line-height:1;">+</span>
+              <input value="{{ draft }}" onChange="{{ onDraftChange }}" onKeyDown="{{ cell.onKey }}" placeholder="Add card… ↵" autoFocus="{{ autofocus }}" style="border:none;outline:none;font-size:11.5px;width:100%;background:transparent;color:oklch(0.3 0.02 255);"></input>
+              <button onClick="{{ closeAdd }}" style="font-size:11px;color:oklch(0.6 0.02 255);">✕</button>
+            </div>
+          </sc-if>
+          <sc-if value="{{ cell.showAddBtn }}" hint-placeholder-val="{{ false }}">
+            <button onClick="{{ cell.onAdd }}" style="{{ cell.addBtnStyle }}">＋</button>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showPresence&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Collaboration&quot;},&quot;startZoom&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;full&quot;,&quot;compact&quot;,&quot;map&quot;],&quot;default&quot;:&quot;compact&quot;,&quot;tsType&quot;:&quot;'full'|'compact'|'map'&quot;,&quot;section&quot;:&quot;View&quot;},&quot;hideTasksDefault&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;View&quot;}}">
+const PEOPLE = { DK:250, ML:195, JR:15, SY:150 };
+const ACTIVITIES = [
+  { id:'onboard', name:'Onboard & access', h:250, tasks:[{id:'signin',name:'Sign in'},{id:'firstrun',name:'First-run'}] },
+  { id:'plan', name:'Plan the backlog', h:195, tasks:[{id:'organize',name:'Organize cards'},{id:'export',name:'Export & share'}] },
+  { id:'ship', name:'Ship work with AI', h:292, tasks:[{id:'watch',name:'Watch it live'},{id:'bigchanges',name:'Run big changes'}] },
+  { id:'review', name:'Review & polish', h:15, tasks:[{id:'aiout',name:'Review AI output'},{id:'polish',name:'Visual polish'}] },
+  { id:'report', name:'Report & share', h:150, tasks:[{id:'reach',name:'Reach more users'},{id:'weekly',name:'Weekly reporting'}] },
+];
+const ACT = {}; ACTIVITIES.forEach(a=>ACT[a.id]=a);
+const TASKMAP = {}; const TASK_HUE = {};
+ACTIVITIES.forEach(a=>a.tasks.forEach(t=>{ TASKMAP[t.id]=t; TASK_HUE[t.id]=a.h; }));
+const RELEASES = [
+  { id:'mvp', name:'MVP', h:250, sub:'ship first' },
+  { id:'ff', name:'Fast follow', h:195, sub:'' },
+  { id:'later', name:'Later', h:0, sub:'parking lot' },
+];
+const CARDS = [
+  { ref:'RLY-100', title:'Add SSO for enterprise accounts', owner:'DK', task:'signin', rel:'mvp', stage:'BACKLOG' },
+  { ref:'RLY-107', title:'Rewrite the onboarding tooltips', owner:'ML', task:'firstrun', rel:'mvp', stage:'NEEDS YOU', needs:true },
+  { ref:'RLY-101', title:'Redesign the empty states', owner:'ML', task:'firstrun', rel:'ff', stage:'BACKLOG' },
+  { ref:'RLY-102', title:'Bulk-edit for board cards', owner:'JR', task:'organize', rel:'mvp', stage:'NEXT' },
+  { ref:'RLY-110', title:'Add keyboard shortcuts', owner:'DK', task:'organize', rel:'later', stage:'DONE', done:true },
+  { ref:'RLY-103', title:'Export the board to CSV', owner:'DK', task:'export', rel:'mvp', stage:'SPEC' },
+  { ref:'RLY-104', title:'Slack notifications v2', owner:'ML', task:'export', rel:'ff', stage:'SPEC' },
+  { ref:'RLY-105', title:'Realtime cursors on the board', owner:'SY', task:'watch', rel:'mvp', stage:'PLAN', pct:44 },
+  { ref:'RLY-106', title:'Migrate 40 blog posts to the new CMS', owner:'DK', task:'bigchanges', rel:'mvp', stage:'CODE', pct:62 },
+  { ref:'RLY-108', title:'Generate the API client from OpenAPI', owner:'DK', task:'bigchanges', rel:'ff', stage:'STALLED', needs:true },
+  { ref:'RLY-109', title:'Deploy the search reindex job', owner:'DK', task:'bigchanges', rel:'ff', stage:'DEPLOY', pct:70 },
+  { ref:'RLY-111', title:'Refactor the pricing page copy', owner:'DK', task:'aiout', rel:'mvp', stage:'REVIEW' },
+  { ref:'RLY-113', title:'Refresh the homepage hero image', owner:'ML', task:'polish', rel:'ff', stage:'REVIEW' },
+  { ref:'RLY-115', title:'Dark mode polish', owner:'ML', task:'polish', rel:'later', stage:'DONE', done:true },
+  { ref:'RLY-112', title:'Translate the landing page to Spanish', owner:'ML', task:'reach', rel:'ff', stage:'DEPLOY' },
+  { ref:'RLY-114', title:'Compile the weekly metrics report', owner:'DK', task:'weekly', rel:'mvp', stage:'DONE', done:true },
+  { ref:'RLY-116', title:'Audit every auth error message', owner:'ML', act:'onboard', task:null, rel:'ff', stage:'BACKLOG' },
+  { ref:'RLY-117', title:'Rate limits for bulk runs', owner:'SY', act:'ship', task:null, rel:'mvp', stage:'SPEC' },
+  { ref:'RLY-118', title:'Shared team dashboards', owner:'JR', act:null, task:null, rel:null, stage:'BACKLOG' },
+  { ref:'RLY-119', title:'Let people star a board', owner:'ML', act:null, task:null, rel:null, stage:'BACKLOG' },
+  { ref:'RLY-120', title:'Audit log for workspace admins', owner:'DK', act:null, task:null, rel:null, stage:'NEEDS YOU', needs:true },
+];
+const SUGGESTIONS = {
+  onboard:[{text:'Product tour on first login'},{text:'Sample board for new workspaces'}],
+  plan:[{text:'Saved filter presets'},{text:'Card templates library'}],
+  ship:[{text:'Batch re-run failed cards'},{text:'Cost guardrails per run'}],
+  review:[{text:'Side-by-side diff on AI edits'},{text:'One-click approve & merge'}],
+  report:[{text:'Auto-post digest to Slack'},{text:'Exec summary generator'}],
+};
+const GL_LIGHT = '1px solid oklch(0.92 0.006 255)';
+const GL_STRONG = '2px solid oklch(0.83 0.02 255)';
+const H1 = 56, H2 = 40; // sticky header row heights
+
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    this.state = {
+      zoom: (props && props.startZoom) || 'full',
+      hideTasks: !!(props && props.hideTasksDefault),
+      owners: [], needs: false,
+      collapsed: [], focus: null,
+      draft:'', added:[], nextRef:121, trayOpen:true, trayDrop:false,
+      addKey:null, addMeta:null,
+      suggestFor:null, suggestItems:[],
+      actOrder: ACTIVITIES.map(a=>a.id),
+      taskOrder: ACTIVITIES.reduce((o,a)=>{ o[a.id]=a.tasks.map(t=>t.id); return o; },{}),
+      moved:{}, dropCell:null, dropHeader:null,
+    };
+    this._drag = null;
+  }
+
+  stageColor(s){
+    if(s==='DONE') return ['oklch(0.94 0.04 155)','oklch(0.44 0.11 155)'];
+    if(s==='NEEDS YOU'||s==='STALLED') return ['oklch(0.96 0.05 65)','oklch(0.5 0.13 65)'];
+    if(s==='PLAN'||s==='CODE'||s==='DEPLOY') return ['oklch(0.95 0.035 292)','oklch(0.48 0.14 292)'];
+    if(s==='SPEC'||s==='REVIEW') return ['oklch(0.95 0.03 250)','oklch(0.46 0.12 250)'];
+    return ['oklch(0.94 0.006 255)','oklch(0.5 0.02 255)'];
+  }
+  ownerAct(taskId){ const to=this.state.taskOrder; for(const k in to){ if(to[k].indexOf(taskId)>=0) return k; } return null; }
+  firstTask(actId){ const arr=this.state.taskOrder[actId]; return arr && arr.length ? arr[0] : null; }
+  eff(c){
+    const m=this.state.moved[c.ref]||{};
+    const task = ('task' in m) ? m.task : c.task;
+    let act = task ? this.ownerAct(task) : (('act' in m) ? m.act : (c.act||null));
+    let rel = ('rel' in m) ? m.rel : (c.rel||null);
+    if(act && !rel) rel='later';
+    return { task, rel, act };
+  }
+  allCards(){ return CARDS.concat(this.state.added); }
+  pass(c){ const o=this.state.owners; if(o.length && o.indexOf(c.owner)<0) return false; if(this.state.needs && !c.needs) return false; return true; }
+
+  statusHue(c){
+    if(c.done) return 155;
+    if(c.needs || c.stage==='STALLED') return 65;
+    if(c.stage==='PLAN'||c.stage==='CODE'||c.stage==='DEPLOY') return 292;
+    return 250;
+  }
+  cardVM(c, _h){
+    const z=this.state.zoom, map=z==='map', full=z==='full';
+    const h=this.statusHue(c);
+    const [sbg,sfg]=this.stageColor(c.stage);
+    let avatarBg='oklch(0.62 0.13 '+(PEOPLE[c.owner]||255)+')', avatarText=c.owner;
+    if(c.done){ avatarBg='oklch(0.6 0.13 155)'; avatarText='✓'; }
+    else if(c.needs){ avatarBg='oklch(0.72 0.13 65)'; avatarText='!'; }
+    const boxStyle = full
+      ? 'background:'+(c.done?'oklch(0.97 0.015 150)':'oklch(0.965 0.028 '+h+')')+';border:1px solid '+(c.done?'oklch(0.88 0.04 150)':'oklch(0.9 0.04 '+h+')')+';border-radius:9px;padding:9px 10px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2.5px oklch(0.4 0.05 260/0.1);position:relative;overflow:hidden;cursor:grab;'+(c.done?'opacity:0.8;border-left:3px solid oklch(0.6 0.13 155);':'')
+      : 'background:white;border:1px solid oklch(0.92 0.006 255);border-left:3px solid '+(c.done?'oklch(0.6 0.13 155)':'oklch(0.62 0.12 '+h+')')+';border-radius:6px;padding:6px 8px;display:flex;flex-direction:column;cursor:grab;'+(c.done?'opacity:0.82;':'');
+    return {
+      ...c, map, box:!map, showMeta:full, boxStyle,
+      onDragStart:()=>{ this._drag={type:'card',ref:c.ref}; },
+      lineStyle:'font-size:9.5px;line-height:1.35;color:'+(c.done?'oklch(0.55 0.02 255)':'oklch(0.4 0.05 '+h+')')+';border-left:2px solid '+(c.done?'oklch(0.75 0.03 155)':'oklch(0.7 0.1 '+h+')')+';padding-left:5px;cursor:grab;'+(c.done?'text-decoration:line-through;text-decoration-color:oklch(0.75 0.05 155);':''),
+      titleStyle:'font-size:'+(full?'12.5px':'11.5px')+';line-height:1.3;font-weight:500;color:'+(c.done?'oklch(0.4 0.02 255)':'oklch(0.28 0.02 255)')+';',
+      refStyle:'font-family:\'JetBrains Mono\',monospace;font-size:9.5px;color:oklch(0.55 0.02 255);',
+      avatarStyle:'width:18px;height:18px;border-radius:50%;background:'+avatarBg+';color:white;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:'+(c.done||c.needs?'700':'600')+';flex:0 0 auto;',
+      avatarText,
+      stageStyle:'font-family:\'JetBrains Mono\',monospace;font-size:8.5px;font-weight:600;letter-spacing:0.05em;padding:2px 5px;border-radius:4px;background:'+sbg+';color:'+sfg+';width:fit-content;',
+      stageText: c.pct ? c.stage+' · '+c.pct+'%' : c.stage,
+      hasBar: full && !!c.pct,
+      barStyle:'position:absolute;left:0;bottom:0;height:3px;width:'+(c.pct||0)+'%;background:oklch(0.56 0.16 292);',
+    };
+  }
+
+  renderVals(){
+    const p=this.props||{}, st=this.state, z=st.zoom;
+    const all=this.allCards();
+    const collapsedSet=new Set(st.collapsed);
+    if(st.focus){ st.actOrder.forEach(id=>{ if(id!==st.focus) collapsedSet.add(id); }); }
+
+    const cols=[], topCells=[], taskCells=[];
+    let ci=2;
+    st.actOrder.forEach(actId=>{
+      const a=ACT[actId], tasks=st.taskOrder[actId]||[];
+      const cnt=all.filter(c=>{ const e=this.eff(c); return e.act===actId && this.pass(c); }).length;
+      const collapsed=collapsedSet.has(actId);
+      const badgeStyle='font-family:\'JetBrains Mono\',monospace;font-size:9px;font-weight:600;color:'+(collapsed?'white':'oklch(0.5 0.02 255)')+';background:'+(collapsed?'oklch(0.55 0.02 255)':'oklch(0.93 0.006 255)')+';border-radius:20px;padding:2px 6px;';
+      const hdrDrop = st.dropHeader===actId ? 'box-shadow:0 0 0 2px oklch(0.55 0.14 250);' : '';
+      if(collapsed){
+        cols.push({gc:ci, act:actId, stub:true, lastOfAct:true, h:a.h});
+        topCells.push({ stub:true, name:a.name, count:cnt, arrow:'oklch(0.5 0.02 255)',
+          style:'grid-column:'+ci+';grid-row:1 / -1;align-self:stretch;position:sticky;top:0;z-index:22;background:oklch(0.972 0.006 255);border-right:'+GL_STRONG+';border-bottom:'+GL_LIGHT+';display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:10px 0;cursor:pointer;'+hdrDrop,
+          vertStyle:'writing-mode:vertical-rl;transform:rotate(180deg);font-size:12px;font-weight:600;color:oklch(0.4 0.02 255);',
+          badgeStyle,
+          onClick: st.focus ? (()=>this.setFocus(actId)) : (()=>this.toggleCollapse(actId)),
+          onDragStart:()=>{ this._drag={type:'act',id:actId}; },
+          onDragOver:(e)=>this.overHeader(e,actId), onDrop:(e)=>this.onDropAct(e,actId),
+        });
+        ci++;
+      } else if(st.hideTasks){
+        cols.push({gc:ci, act:actId, task:this.firstTask(actId), merged:true, first:true, lastOfAct:true, h:a.h});
+        topCells.push({ expanded:true, name:a.name, count:cnt, arrow:'oklch(0.5 0.02 255)',
+          style:'grid-column:'+ci+';grid-row:1;align-self:stretch;position:sticky;top:0;z-index:22;background:oklch(0.972 0.006 255);border-right:'+GL_STRONG+';border-bottom:'+GL_LIGHT+';padding:8px 11px;display:flex;flex-direction:column;justify-content:center;cursor:grab;'+hdrDrop,
+          nameStyle:'font-size:13px;font-weight:600;color:oklch(0.34 0.02 255);', badgeStyle,
+          iconStyle:'font-size:12px;color:oklch(0.55 0.02 255);',
+          onCollapse:()=>this.toggleCollapse(actId), onSuggest:(e)=>this.toggleSuggest(e,actId), onFocus:(e)=>this.setFocusEv(e,actId),
+          onDragStart:()=>{ this._drag={type:'act',id:actId}; },
+          onDragOver:(e)=>this.overHeader(e,actId), onDrop:(e)=>this.onDropAct(e,actId),
+        });
+        taskCells.push({ name:tasks.length+' tasks · merged', grip:false,
+          style:'grid-column:'+ci+';grid-row:2;position:sticky;top:'+H1+'px;z-index:20;background:oklch(0.985 0.004 255);border-right:'+GL_STRONG+';border-bottom:'+GL_STRONG+';padding:7px 9px;font-size:10.5px;color:oklch(0.6 0.02 255);display:flex;align-items:center;gap:6px;',
+          onDragStart:()=>{}, onDragOver:(e)=>e.preventDefault(), onDrop:(e)=>e.preventDefault() });
+        ci++;
+      } else {
+        const start=ci;
+        const ntCount=all.filter(c=>{ const e=this.eff(c); return e.act===actId && !e.task && this.pass(c); }).length;
+        let span=tasks.length;
+        if(ntCount){
+          const ntDrop = st.dropHeader===('nt:'+actId) ? 'box-shadow:0 0 0 2px oklch(0.55 0.14 250);' : '';
+          cols.push({gc:ci, act:actId, task:null, noTask:true, first:true, lastOfAct:false, h:a.h});
+          taskCells.push({ name:'— No task yet', grip:false,
+            style:'grid-column:'+ci+';grid-row:2;position:sticky;top:'+H1+'px;z-index:20;background:oklch(0.978 0.004 255);border-right:1px dashed oklch(0.86 0.01 255);border-bottom:'+GL_STRONG+';padding:7px 9px;font-size:11.5px;font-weight:600;color:oklch(0.58 0.02 255);display:flex;align-items:center;gap:6px;'+ntDrop,
+            onDragStart:()=>{}, onDragOver:(e)=>this.overHeader(e,'nt:'+actId), onDrop:(e)=>{ e.preventDefault(); this.setState({dropHeader:null}); } });
+          ci++; span++;
+        }
+        tasks.forEach((tid,ti)=>{
+          const last=ti===tasks.length-1;
+          const tDrop = st.dropHeader===tid ? 'box-shadow:0 0 0 2px oklch(0.55 0.14 250);' : '';
+          cols.push({gc:ci, act:actId, task:tid, first:ti===0 && !ntCount, lastOfAct:last, h:a.h});
+          taskCells.push({ name:(TASKMAP[tid]||{}).name||tid, grip:true,
+            style:'grid-column:'+ci+';grid-row:2;position:sticky;top:'+H1+'px;z-index:20;background:white;border-right:'+(last?GL_STRONG:GL_LIGHT)+';border-bottom:'+GL_STRONG+';padding:7px 9px;font-size:11.5px;font-weight:600;color:oklch(0.36 0.02 255);display:flex;align-items:center;gap:6px;cursor:grab;'+tDrop,
+            onDragStart:()=>{ this._drag={type:'task',task:tid}; },
+            onDragOver:(e)=>this.overHeader(e,tid), onDrop:(e)=>this.onDropTask(e,actId,tid) });
+          ci++;
+        });
+        topCells.push({ expanded:true, name:a.name, count:cnt, arrow:'oklch(0.5 0.02 255)',
+          style:'grid-column:'+start+' / span '+Math.max(span,1)+';grid-row:1;align-self:stretch;position:sticky;top:0;z-index:22;background:oklch(0.972 0.006 255);border-right:'+GL_STRONG+';border-bottom:'+GL_LIGHT+';padding:8px 11px;display:flex;flex-direction:column;justify-content:center;cursor:grab;'+hdrDrop,
+          nameStyle:'font-size:13px;font-weight:600;color:oklch(0.34 0.02 255);', badgeStyle,
+          iconStyle:'font-size:12px;color:oklch(0.55 0.02 255);',
+          onCollapse:()=>this.toggleCollapse(actId), onSuggest:(e)=>this.toggleSuggest(e,actId), onFocus:(e)=>this.setFocusEv(e,actId),
+          onDragStart:()=>{ this._drag={type:'act',id:actId}; },
+          onDragOver:(e)=>this.overHeader(e,actId), onDrop:(e)=>this.onDropAct(e,actId),
+        });
+      }
+    });
+
+    const colTemplate='128px '+cols.map(c=> c.stub?'50px':(c.merged?'176px':'156px')).join(' ');
+    const rowsTemplate=H1+'px '+H2+'px '+RELEASES.map(()=>'auto').join(' ');
+    const gridStyle='display:grid;grid-template-columns:'+colTemplate+';grid-template-rows:'+rowsTemplate+';align-items:start;min-width:max-content;';
+
+    const cornerStyle='grid-column:1;grid-row:1 / span 2;position:sticky;top:0;left:0;z-index:35;background:oklch(0.96 0.006 255);border-right:'+GL_STRONG+';border-bottom:'+GL_STRONG+';display:flex;align-items:flex-end;padding:8px 12px;';
+    const bandTop1='grid-column:1 / -1;grid-row:1;position:sticky;top:0;z-index:8;background:oklch(0.96 0.006 255);';
+    const bandTop2='grid-column:1 / -1;grid-row:2;position:sticky;top:'+H1+'px;z-index:8;background:oklch(0.965 0.005 255);';
+    const rowBands=RELEASES.map((r,ri)=>({ style:'grid-column:1 / -1;grid-row:'+(3+ri)+';z-index:0;background:'+(ri%2?'oklch(0.975 0.004 255)':'transparent')+';border-bottom:'+GL_LIGHT+';' }));
+
+    const relLabels=RELEASES.map((r,ri)=>({
+      name:r.name, sub: r.sub || (all.filter(c=>this.eff(c).rel===r.id && this.pass(c)).length+' cards'),
+      dotStyle:'width:8px;height:8px;border-radius:50%;background:'+(r.h?'oklch(0.6 0.13 '+r.h+')':'oklch(0.7 0.02 255)')+';',
+      style:'grid-column:1;grid-row:'+(3+ri)+';position:sticky;left:0;z-index:16;background:oklch(0.96 0.006 255);border-right:'+GL_STRONG+';display:flex;flex-direction:column;gap:5px;padding:8px 12px;',
+    }));
+
+    const bodyCells=[];
+    cols.forEach(col=>{
+      RELEASES.forEach((r,ri)=>{
+        const cards=all.filter(c=>{ const e=this.eff(c); return e.act===col.act && (col.merged || (col.noTask ? !e.task : e.task===col.task)) && e.rel===r.id && this.pass(c); }).map(c=>this.cardVM(c, col.h));
+        const cellKey=col.gc+'|'+r.id;
+        const sugg=(st.suggestFor===col.act && r.id==='later' && col.first) ? st.suggestItems.map((s,i)=>({ text:s.text, onKeep:()=>this.keepSug(i), onDismiss:()=>this.dismissSug(i) })) : [];
+        const addActive=st.addKey===cellKey;
+        const isDrop=st.dropCell===cellKey;
+        bodyCells.push({
+          style:'grid-column:'+col.gc+';grid-row:'+(3+ri)+';display:flex;flex-direction:column;gap:'+(z==='map'?'3px':'7px')+';padding:8px;min-height:26px;border-right:'+(col.noTask?'1px dashed oklch(0.86 0.01 255)':(col.lastOfAct?GL_STRONG:GL_LIGHT))+';'+(col.noTask?'background:oklch(0.978 0.004 255);':'')+(isDrop?'background:oklch(0.95 0.04 250/0.55);box-shadow:inset 0 0 0 2px oklch(0.6 0.14 250);':''),
+          cards, suggestions:sugg, addActive, showAddBtn:z!=='map' && !addActive,
+          addBtnStyle:'border:1px dashed oklch(0.88 0.008 255);border-radius:8px;padding:'+(cards.length?'3px':'7px')+';color:oklch(0.72 0.02 255);font-size:12px;line-height:1;',
+          onAdd:()=>this.startAdd(cellKey, col.act, (col.merged||col.noTask) ? null : col.task, r.id),
+          onKey:(e)=>this.onAddKey(e),
+          onDragOver:(e)=>this.overCell(e,cellKey),
+          onDrop:(e)=>this.onDropCell(e, (col.merged||col.noTask) ? null : col.task, r.id, col.act),
+        });
+      });
+    });
+
+    const filterActive=st.owners.length>0 || st.needs;
+    const visible=all.filter(c=>this.pass(c)).length;
+    const seg=(v)=>({ bg:z===v?'white':'transparent', fg:z===v?'oklch(0.3 0.02 255)':'oklch(0.5 0.02 255)' });
+    const sF=seg('full'), sC=seg('compact'), sM=seg('map');
+    const focusA=st.focus?ACT[st.focus]:null;
+    const ownerChips=Object.keys(PEOPLE).map(init=>{ const on=st.owners.indexOf(init)>=0, hh=PEOPLE[init];
+      return { init, onClick:()=>this.toggleOwner(init),
+        style:'display:flex;align-items:center;border-radius:8px;padding:3px;background:'+(on?'oklch(0.95 0.03 '+hh+')':'white')+';border:1px solid '+(on?'oklch(0.75 0.08 '+hh+')':'oklch(0.9 0.006 255)')+';',
+        dot:'width:20px;height:20px;border-radius:50%;background:oklch(0.62 0.13 '+hh+');color:white;display:flex;align-items:center;justify-content:center;font-size:8.5px;font-weight:600;'+(on?'':'opacity:0.85;') };
+    });
+
+    const unmappedAll=all.filter(c=>{ const e=this.eff(c); return !e.act && !e.task; });
+    const unmapped=unmappedAll.filter(c=>this.pass(c)).map(c=>{
+      const hue=this.statusHue(c);
+      return { ref:c.ref, title:c.title, owner:c.owner,
+        style:'flex:0 0 auto;background:white;border:1px solid oklch(0.9 0.006 255);border-left:3px solid oklch(0.62 0.12 '+hue+');border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:7px;cursor:grab;box-shadow:0 1px 2px oklch(0.4 0.05 260/0.07);',
+        refStyle:'font-family:\'JetBrains Mono\',monospace;font-size:9.5px;color:oklch(0.55 0.02 255);',
+        avatarStyle:'width:18px;height:18px;border-radius:50%;background:oklch(0.62 0.13 '+(PEOPLE[c.owner]||255)+');color:white;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:600;flex:0 0 auto;',
+        titleStyle:'font-size:12px;line-height:1.3;font-weight:500;color:oklch(0.28 0.02 255);',
+        onDragStart:()=>{ this._drag={type:'card',ref:c.ref}; } };
+    });
+
+    return {
+      showPresence: p.showPresence ?? false, dragTrue:true, autofocus:true,
+      trayShown: unmappedAll.length>0, trayOpen: st.trayOpen, unmapped,
+      unmappedCount: unmapped.length, trayClosed: !st.trayOpen,
+      toggleTray:()=>this.setState(s=>({trayOpen:!s.trayOpen})),
+      trayStyle:'flex:0 0 auto;width:'+(st.trayOpen?'214px':'42px')+';border-right:2px solid '+(st.trayDrop?'oklch(0.6 0.14 250)':'oklch(0.88 0.02 255)')+';background:'+(st.trayDrop?'oklch(0.96 0.03 250)':'oklch(0.972 0.005 255)')+';z-index:50;overflow:hidden;',
+      onTrayOver:(e)=>{ e.preventDefault(); if(!st.trayDrop) this.setState({trayDrop:true,dropCell:null,dropHeader:null}); },
+      onTrayLeave:()=>{ if(st.trayDrop) this.setState({trayDrop:false}); },
+      onTrayDrop:(e)=>{ e.preventDefault(); const d=this._drag; this._drag=null; if(d&&d.type==='card'){ const ref=d.ref; this.setState(s=>({moved:{...s.moved,[ref]:{task:null,act:null,rel:null}}, trayDrop:false, trayOpen:true})); } else this.setState({trayDrop:false}); },
+      zFullBg:sF.bg, zFullFg:sF.fg, zCompactBg:sC.bg, zCompactFg:sC.fg, zMapBg:sM.bg, zMapFg:sM.fg,
+      setFull:()=>this.setState({zoom:'full'}), setCompact:()=>this.setState({zoom:'compact'}), setMap:()=>this.setState({zoom:'map'}),
+      htLabel: st.hideTasks?'Show tasks':'Hide tasks',
+      htBg: st.hideTasks?'oklch(0.95 0.035 292)':'white', htFg: st.hideTasks?'oklch(0.47 0.14 292)':'oklch(0.45 0.02 255)', htBorder: st.hideTasks?'oklch(0.85 0.06 292)':'oklch(0.9 0.006 255)',
+      toggleHideTasks:()=>this.setState(s=>({hideTasks:!s.hideTasks})),
+      ownerChips,
+      needsStyle:'display:flex;align-items:center;gap:6px;border-radius:8px;padding:5px 10px;font-size:11.5px;font-weight:600;background:'+(st.needs?'oklch(0.96 0.05 65)':'white')+';color:'+(st.needs?'oklch(0.5 0.13 65)':'oklch(0.5 0.02 255)')+';border:1px solid '+(st.needs?'oklch(0.82 0.09 65)':'oklch(0.9 0.006 255)')+';',
+      toggleNeeds:()=>this.setState(s=>({needs:!s.needs})),
+      filterActive, clearFilters:()=>this.setState({owners:[],needs:false}),
+      countLabel: filterActive ? (visible+' of '+all.length) : (all.length+' cards'),
+      focusOn:!!st.focus, focusName:focusA?focusA.name:'', exitFocus:()=>this.setState({focus:null}),
+      gridStyle, cornerStyle, bandTop1, bandTop2, rowBands, relLabels, topCells, taskCells, bodyCells,
+      draft: st.draft, onDraftChange:(e)=>this.setState({draft:e.target.value}), closeAdd:()=>this.setState({addKey:null,addMeta:null,draft:''}),
+    };
+  }
+
+  toggleOwner(init){ this.setState(s=>({ owners: s.owners.indexOf(init)>=0 ? s.owners.filter(o=>o!==init) : [...s.owners, init] })); }
+  toggleCollapse(id){ this.setState(s=>({ collapsed: s.collapsed.indexOf(id)>=0 ? s.collapsed.filter(x=>x!==id) : [...s.collapsed, id], focus:null })); }
+  setFocus(id){ this.setState({ focus:id }); }
+  setFocusEv(e,id){ e.stopPropagation(); this.setState(s=>({ focus: s.focus===id?null:id })); }
+  toggleSuggest(e,id){ e.stopPropagation(); this.setState(s=> s.suggestFor===id ? {suggestFor:null,suggestItems:[]} : {suggestFor:id, suggestItems:(SUGGESTIONS[id]||[]).map(x=>({...x}))}); }
+  startAdd(cellKey, act, task, rel){ this.setState({ addKey:cellKey, addMeta:{act,task,rel}, draft:'' }); }
+  onAddKey(e){
+    if(e.key==='Escape'){ this.setState({addKey:null,addMeta:null,draft:''}); return; }
+    if(e.key!=='Enter') return;
+    const lines=this.state.draft.split('\n').map(s=>s.trim()).filter(Boolean);
+    if(!lines.length) return;
+    const m=this.state.addMeta;
+    this.setState(s=>{ let n=s.nextRef; const nw=lines.map(t=>({ref:'RLY-'+(n++),title:t,owner:'DK',task:m.task||null,act:m.act,rel:m.rel,stage:'BACKLOG'})); return {added:[...s.added,...nw], draft:'', nextRef:n}; });
+  }
+  keepSug(i){ this.setState(s=>{ const it=s.suggestItems[i]; if(!it) return {}; const rest=s.suggestItems.filter((_,j)=>j!==i); return {added:[...s.added,{ref:'RLY-'+s.nextRef,title:it.text,owner:'DK',task:this.firstTask(s.suggestFor),rel:'later',stage:'BACKLOG'}], suggestItems:rest, nextRef:s.nextRef+1, suggestFor:rest.length?s.suggestFor:null}; }); }
+  dismissSug(i){ this.setState(s=>{ const rest=s.suggestItems.filter((_,j)=>j!==i); return {suggestItems:rest, suggestFor:rest.length?s.suggestFor:null}; }); }
+
+  /* drag & drop */
+  overCell(e,key){ e.preventDefault(); if(this.state.dropCell!==key) this.setState({dropCell:key,dropHeader:null}); }
+  onDropCell(e,task,rel,act){ e.preventDefault(); const d=this._drag; this._drag=null; if(d&&d.type==='card'){ const ref=d.ref; this.setState(s=>({ moved:{...s.moved,[ref]:{task,rel,act:act||null}}, dropCell:null })); } else { this.setState({dropCell:null}); } }
+  overHeader(e,id){ e.preventDefault(); if(this.state.dropHeader!==id) this.setState({dropHeader:id,dropCell:null}); }
+  reorder(arr,id,target){ if(id===target) return arr; const a=arr.filter(x=>x!==id); const i=a.indexOf(target); a.splice(i<0?a.length:i,0,id); return a; }
+  moveTask(s,taskId,targetAct,targetTask){ const to={}; Object.keys(s.taskOrder).forEach(k=>to[k]=s.taskOrder[k].filter(t=>t!==taskId)); const arr=to[targetAct]?to[targetAct].slice():[]; if(targetTask&&targetTask!==taskId){ const i=arr.indexOf(targetTask); arr.splice(i<0?arr.length:i,0,taskId); } else { arr.push(taskId); } to[targetAct]=arr; return {taskOrder:to}; }
+  onDropAct(e,targetAct){ e.preventDefault(); const d=this._drag; this._drag=null; this.setState(s=>{ let ns={dropHeader:null}; if(d&&d.type==='act'){ ns.actOrder=this.reorder(s.actOrder,d.id,targetAct); } else if(d&&d.type==='task'){ Object.assign(ns,this.moveTask(s,d.task,targetAct,null)); } return ns; }); }
+  onDropTask(e,targetAct,targetTask){ e.preventDefault(); const d=this._drag; this._drag=null; this.setState(s=>{ let ns={dropHeader:null}; if(d&&d.type==='task'){ Object.assign(ns,this.moveTask(s,d.task,targetAct,targetTask)); } else if(d&&d.type==='act'){ ns.actOrder=this.reorder(s.actOrder,d.id,targetAct); } return ns; }); }
+}
+</script>
+</body>
+</html>
