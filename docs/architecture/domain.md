@@ -177,9 +177,12 @@ sharing behavior.
   Which one is open is the single `:story_map_draft` assign on `BoardLive`
   (`nil | :activity | :release | {:task, activity_id}`, one draft at a time board-wide), and it
   is the `draft` argument to `build/5`: the draft materializes a `"draft:<activity_id>"` column
-  that carries no `cells`, and every column gains `bare?` / `draft?`. Names are capped by
-  `Schemas.StoryActivity.max_name_length/0` — the one definition, shared by `StoryTask` and
-  `Release`, so an over-long paste is an error changeset rather than a Postgrex 22001 crash.
+  that carries no `cells`, and every column gains `bare?` / `draft?`. Names are trimmed and
+  capped by `Schemas.StoryActivity.max_name_length/0` — the one definition, shared by
+  `StoryTask` and `Release`, so an over-long paste is an error changeset rather than a Postgrex
+  22001 crash. On an archived board the four write events are refused *and* the affordances are
+  not rendered (`read_only`, the same attr name and behaviour as the stage column's compose
+  `＋`).
   Still to come: drag/add (RE262), edit (RE261) and zoom (RE260).
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
 

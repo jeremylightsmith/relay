@@ -102,6 +102,20 @@ defmodule Relay.StoryMapTest do
       assert "should be at most 80 character(s)" in errors_on(release_cs).name
     end
 
+    test "a padded name is trimmed by the schema, not by the caller", %{board: board} do
+      # `Schemas.Board` pairs its name length cap with `update_change(:name, &String.trim/1)`;
+      # these three did not, so " Foo " stored its padding and every future write path
+      # (RE261's rename) would have to re-trim in the web layer to stay correct.
+      assert {:ok, activity} = StoryMap.create_activity(board, %{name: "  Onboard  ", position: 1})
+      assert activity.name == "Onboard"
+
+      assert {:ok, task} = StoryMap.create_task(activity, %{name: "  Sign in  ", position: 1})
+      assert task.name == "Sign in"
+
+      assert {:ok, release} = StoryMap.create_release(board, %{name: "  MVP 2  ", position: 9})
+      assert release.name == "MVP 2"
+    end
+
     test "update_activity/2 renames", %{board: board} do
       activity = insert(:story_activity, board: board, name: "Old")
 

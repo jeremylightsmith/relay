@@ -32,13 +32,14 @@ defmodule Schemas.StoryTask do
   `board_id` must already be set on the struct; the same-board rule for
   `story_activity_id` is enforced by `Relay.StoryMap.update_task/2`.
 
-  `name` is capped by `Schemas.StoryActivity.max_name_length/0` — the one definition of the
-  story-map name cap; the column is `varchar(255)`, so an unvalidated paste raises Postgrex
-  22001 instead of returning an error changeset.
+  `name` is trimmed and capped by `Schemas.StoryActivity.max_name_length/0` — the one
+  definition of the story-map name cap; the column is `varchar(255)`, so an unvalidated paste
+  raises Postgrex 22001 instead of returning an error changeset.
   """
   def changeset(task, attrs) do
     task
     |> cast(attrs, [:name, :position, :story_activity_id])
+    |> update_change(:name, &String.trim/1)
     |> validate_required([:name, :position, :story_activity_id])
     |> validate_length(:name, min: 1, max: Schemas.StoryActivity.max_name_length())
     |> foreign_key_constraint(:story_activity_id)

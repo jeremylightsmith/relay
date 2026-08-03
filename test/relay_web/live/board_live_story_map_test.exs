@@ -457,6 +457,34 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       refute has_element?(view, "#story-map-draft-input")
       assert length(StoryMap.list_activities(ctx.board)) == 2
     end
+
+    test "no create affordance renders at all, matching the board's stage columns",
+         %{conn: conn} = ctx do
+      # A task-less activity so the `＋ Add task` header branch is on the page too.
+      {:ok, shipped} = StoryMap.create_activity(ctx.board, %{name: "Ship work with AI", position: 3})
+      {:ok, _archived} = Boards.archive_board(ctx.board)
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-grid")
+      refute has_element?(view, "#story-map-add-activity")
+      refute has_element?(view, "#story-map-add-release")
+      refute has_element?(view, "#story-map-add-task-#{ctx.onboard.id}")
+
+      # The bare header falls through to the plain `— No task yet` label rather than the
+      # clickable button, so the column keeps its place in the grid without inviting a click.
+      assert has_element?(view, "#story-map-no-task-#{shipped.id}", "— No task yet")
+      refute has_element?(view, "#story-map-no-task-#{shipped.id}[phx-click]")
+    end
+
+    test "the empty-board panel offers no button either", %{conn: conn, user: user} do
+      {:ok, board} = Boards.create_board(user, %{name: "Empty map"})
+      {:ok, _archived} = Boards.archive_board(board)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-empty")
+      refute has_element?(view, "#story-map-empty-add-activity")
+    end
   end
 
   # Type into the open draft and press Enter — the phx-change every keystroke fires, then the

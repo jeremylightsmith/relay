@@ -376,6 +376,7 @@ defmodule RelayWeb.BoardLive do
         tray_open={@story_map_tray_open}
         draft={@story_map_draft}
         draft_name={@story_map_draft_name}
+        read_only={@read_only?}
         embed={@embed}
       />
       <.card_drawer
@@ -624,6 +625,7 @@ defmodule RelayWeb.BoardLive do
   attr :tray_open, :boolean, required: true
   attr :draft, :any, required: true
   attr :draft_name, :string, required: true
+  attr :read_only, :boolean, required: true
   attr :embed, :boolean, required: true
 
   defp story_map_viewport(assigns) do
@@ -664,11 +666,13 @@ defmodule RelayWeb.BoardLive do
           stalled_ids={@stalled_ids}
           draft={@draft}
           draft_name={@draft_name}
+          read_only={@read_only}
         />
         <StoryMapComponents.story_map_empty
           :if={@grid.bands == []}
           draft={@draft}
           draft_name={@draft_name}
+          read_only={@read_only}
         />
       </div>
     </div>

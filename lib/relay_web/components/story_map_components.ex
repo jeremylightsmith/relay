@@ -158,6 +158,7 @@ defmodule RelayWeb.StoryMapComponents do
   attr :stalled_ids, :any, required: true, doc: "MapSet of card ids whose run is stalled"
   attr :draft, :any, default: nil, doc: "nil | :activity | :release | {:task, activity_id}"
   attr :draft_name, :string, default: "", doc: "the open draft's text, tracked server-side"
+  attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
 
   def story_map(assigns) do
     ~H"""
@@ -198,7 +199,7 @@ defmodule RelayWeb.StoryMapComponents do
             label, in the sticky-left rail (artboard `addRelStyle`, line ~512 + lines ~152-155). --%>
       <div style={add_release_style(@grid)}>
         <button
-          :if={@draft != :release}
+          :if={@draft != :release and not @read_only}
           type="button"
           id="story-map-add-release"
           phx-click="story_map_add_release"
@@ -220,7 +221,7 @@ defmodule RelayWeb.StoryMapComponents do
             column's 156px while its draft is open (artboard `addActStyle`, line ~513). --%>
       <div style={add_activity_style(@grid, @draft)}>
         <button
-          :if={@draft != :activity}
+          :if={@draft != :activity and not @read_only}
           type="button"
           id="story-map-add-activity"
           title="Add activity"
@@ -253,6 +254,7 @@ defmodule RelayWeb.StoryMapComponents do
           </span>
           <span style="flex:1;"></span>
           <button
+            :if={not @read_only}
             type="button"
             id={"story-map-add-task-#{band.activity.id}"}
             title="Add task"
@@ -269,6 +271,7 @@ defmodule RelayWeb.StoryMapComponents do
         column={column}
         index={index}
         draft_name={@draft_name}
+        read_only={@read_only}
       />
       <%= for {column, ci} <- Enum.with_index(@grid.columns), {lane, li} <- Enum.with_index(@grid.lanes) do %>
         <div
@@ -397,12 +400,22 @@ defmodule RelayWeb.StoryMapComponents do
   end
 
   @doc """
-  The day-one panel: RE263 (create structure) lands after this card, so on the day this merges
-  every board has zero activities and this is the default experience, not an edge case. The
-  tray renders alongside it, so the page is never blank and no card is missing.
+  The day-one panel: what a board with zero activities shows, which every board is until
+  someone creates the first one. The tray renders alongside it, so the page is never blank and
+  no card is missing.
+
+  It is also the empty board's *entry point*: the grid's trailing `＋` column only exists once
+  the grid renders, so without the button here the first activity would be uncreatable. Opening
+  the draft sets the same `:activity` assign the grid uses, and committing flips the render
+  branch — the panel is replaced by the grid and the still-open draft reappears in the grid's
+  trailing cell, unchanged.
+
+  On a read-only (archived) board the button is not rendered, matching the stage column's
+  `read_only` compose affordance.
   """
   attr :draft, :any, default: nil, doc: "nil | :activity | :release | {:task, activity_id}"
   attr :draft_name, :string, default: "", doc: "the open draft's text, tracked server-side"
+  attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
 
   def story_map_empty(assigns) do
     ~H"""
@@ -417,12 +430,8 @@ defmodule RelayWeb.StoryMapComponents do
         Activities and their Tasks form the backbone across the top; Releases are the swimlanes
         down the left, and your cards fill the grid where the two cross.
       </p>
-      <%!-- RE263 — the trailing `＋` column only exists once the grid renders, so without this
-            button the FIRST activity on a board would be uncreatable. Committing here creates
-            it, the panel is replaced by the grid, and the draft carries over to the grid's
-            trailing cell: the assign is unchanged, only the render branch flips. --%>
       <button
-        :if={@draft != :activity}
+        :if={@draft != :activity and not @read_only}
         type="button"
         id="story-map-empty-add-activity"
         class="btn btn-primary btn-sm"
@@ -449,16 +458,18 @@ defmodule RelayWeb.StoryMapComponents do
   # RE263 — row 2 now has three shapes: the open draft's input; the `＋ Add task` invitation on
   # an activity that has neither tasks nor task-less cards (artboard `bare = !ntCount`, line
   # ~450), which is a real button because the WHOLE header is clickable; and a plain label for
-  # everything else.
+  # everything else. On a read-only board the bare column takes the plain-label branch, so it
+  # keeps its place in the grid without inviting a click that only flashes an error.
   attr :column, :map, required: true
   attr :index, :integer, required: true
   attr :draft_name, :string, required: true
+  attr :read_only, :boolean, required: true
 
   defp column_header(assigns) do
     ~H"""
     <div
       :if={@column.draft?}
-      id={"story-map-draft-#{@column.activity.id}"}
+      id={column_dom_id(@column)}
       style={column_header_style(@column, @index)}
     >
       <.inline_name_input
@@ -471,9 +482,9 @@ defmodule RelayWeb.StoryMapComponents do
       />
     </div>
     <button
-      :if={not @column.draft? and @column.bare?}
+      :if={not @column.draft? and @column.bare? and not @read_only}
       type="button"
-      id={"story-map-no-task-#{@column.activity.id}"}
+      id={column_dom_id(@column)}
       phx-click="story_map_add_task"
       phx-value-activity-id={@column.activity.id}
       style={column_header_style(@column, @index)}
@@ -481,7 +492,7 @@ defmodule RelayWeb.StoryMapComponents do
       ＋ Add task
     </button>
     <div
-      :if={not @column.draft? and not @column.bare?}
+      :if={not @column.draft? and (not @column.bare? or @read_only)}
       id={column_dom_id(@column)}
       style={column_header_style(@column, @index)}
     >
@@ -645,6 +656,10 @@ defmodule RelayWeb.StoryMapComponents do
       "display:flex;flex-direction:column;justify-content:center;"
   end
 
+  # The ONE owner of every column's DOM id — the plan's contract, which the tests and the card's
+  # acceptance criteria both address. All three column shapes are here, so the draft and the
+  # bare `＋ Add task` header cannot drift from the plain label they replace.
+  defp column_dom_id(%{draft?: true, activity: activity}), do: "story-map-draft-#{activity.id}"
   defp column_dom_id(%{no_task?: true, activity: activity}), do: "story-map-no-task-#{activity.id}"
   defp column_dom_id(%{task: task}), do: "story-map-task-#{task.id}"
 

@@ -65,9 +65,10 @@ defmodule RelayWeb.StoryMapComponentsTest do
     )
   end
 
-  # One activity, no tasks at all — the shape every board has before RE263 lets anyone create
-  # structure, and the case the artboard gives a strong (not dashed) header border.
-  defp bare_grid do
+  # One activity whose only column is the `— No task yet` placeholder, holding a task-less card:
+  # NOT `bare?` (that is `empty_activity_grid/1`), and the case the artboard gives a strong
+  # (not dashed) header border.
+  defp no_task_cards_grid do
     activity = %StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1}
     releases = [%Release{id: 100, board_id: 1, name: "MVP", position: 1}]
 
@@ -315,9 +316,9 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
     test "an activity with no tasks: its one column is the activity boundary, so strong" do
       # Artboard line ~456: `border-right:'+(tasks.length ? '1px dashed …' : GL_STRONG)`, with
-      # `lastOfAct:!tasks.length` on line ~453. RE263 (create structure) ships after this card,
-      # so a zero-task activity is the normal shape for a board just starting on the map.
-      html = grid_html(bare_grid())
+      # `lastOfAct:!tasks.length` on line ~453. A zero-task activity is the normal shape for a
+      # board just starting on the map.
+      html = grid_html(no_task_cards_grid())
 
       assert style_of(html, "#story-map-no-task-1") =~
                "border-right:2px solid oklch(0.83 0.02 255)"
