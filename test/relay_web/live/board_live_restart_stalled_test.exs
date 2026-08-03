@@ -58,6 +58,46 @@ defmodule RelayWeb.BoardLiveRestartStalledTest do
     view
   end
 
+  # A card whose run is pinned to an executor that never connected — `retry_run/2`
+  # refuses via `check_retry_executor/2` -> `check_executor_live/2` with
+  # `{:error, {:executor_unavailable, name}}` before it ever dispatches anything, so
+  # this needs no FakeDispatcher round trip (mirrors test/relay/runs/retry_test.exs's
+  # `exclusive_failed_run/2`, built straight from factories rather than through `park/4`).
+  defp refused_restart_card(board, executor_name) do
+    spec = Enum.find(board.stages, &(&1.name == "Spec"))
+
+    flow =
+      insert(:flow,
+        board: board,
+        isolation: :exclusive,
+        enabled: true,
+        nodes: [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref}"}],
+        edges: [%{from: "start", to: "brainstorm"}]
+      )
+
+    card = insert(:card, stage: spec, title: "Pinned dead")
+
+    run =
+      insert(:run,
+        card: card,
+        status: :failed,
+        current_node: nil,
+        flow_key: flow.key,
+        flow_id: flow.id
+      )
+
+    execution = insert(:node_execution, run: run, node_key: "brainstorm", outcome: :failed)
+
+    insert(:node_job,
+      node_execution: execution,
+      state: :done,
+      executor_name: executor_name,
+      payload: %{"isolation" => "exclusive"}
+    )
+
+    %{card: card, run: run}
+  end
+
   test "the header control opens a dialog naming every stalled card", ctx do
     a = park(ctx.board, ctx.flow, "Died A", :failed)
     b = park(ctx.board, ctx.flow, "Died B", :failed)
@@ -105,7 +145,7 @@ defmodule RelayWeb.BoardLiveRestartStalledTest do
 
     open_dialog(view)
 
-    refute render(view) =~ "Restart all"
+    refute render(view) =~ ~s(phx-click="restart_stalled")
   end
 
   test "a row's Restart revives only that card and drops it from the list", ctx do
@@ -149,6 +189,20 @@ defmodule RelayWeb.BoardLiveRestartStalledTest do
     assert_patch(view, ~p"/board/#{ctx.board.slug}?card=#{Cards.ref(ctx.board, a.card)}")
     refute has_element?(view, "#stalled-modal")
     assert has_element?(view, "#card-drawer")
+  end
+
+  test "a refused restart explains why inside the modal, not just as a toast", ctx do
+    refused = refused_restart_card(ctx.board, "mac-never-connected")
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    open_dialog(view)
+
+    view |> element("#stalled-restart-#{refused.card.id}") |> render_click()
+
+    assert Runs.get_run!(refused.run.id).status == :failed
+    assert has_element?(view, "#stalled-modal")
+    assert has_element?(view, "#stalled-modal", "mac-never-connected")
+    assert has_element?(view, "#stalled-row-#{refused.card.id}")
   end
 
   test "the dialog reuses the archived-modal shell", ctx do

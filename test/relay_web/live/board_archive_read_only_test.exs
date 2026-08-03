@@ -87,6 +87,17 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
       end
     end
 
+    # RE247 — a fresh view (not the shared one above, whose flash is already pinned to
+    # this exact sentence by an earlier iteration and would mask a regression here) so a
+    # missing `restart_one` guard entry fails this assertion for real.
+    test "rejects restart_one as read-only", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      html = render_hook(view, "restart_one", %{"ref" => "RLY-1"})
+
+      assert html =~ "(read-only)"
+    end
+
     test "Restore re-activates the board and clears read-only",
          %{conn: conn, user: user, board: board} do
       stage = hd(board.stages)

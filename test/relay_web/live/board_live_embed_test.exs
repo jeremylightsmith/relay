@@ -181,6 +181,20 @@ defmodule RelayWeb.BoardLiveEmbedTest do
       refute has_element?(view, "#card-drawer")
     end
 
+    test "a stalled-modal row tap bridges too (RE247)", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?embed=1")
+
+      # The embed layout suppresses the top bar (and its "Restart stalled" control), so
+      # drive the handler directly — mirrors "an archived-modal row tap bridges too" above,
+      # since open_stalled_card's embed clause is written to match open_archived_card's
+      # exactly (board_live.ex:915).
+      render_hook(view, "open_stalled_card", %{"ref" => "MY1"})
+
+      slug = board.slug
+      assert_push_event(view, "card-tap", %{ref: "MY1", board: ^slug, kind: nil})
+      refute has_element?(view, "#card-drawer")
+    end
+
     test "the payload carries the tapped column's ordered refs, each with its own kind (RLY-234)",
          %{conn: conn, board: board, backlog: backlog} do
       _second = insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)

@@ -485,6 +485,9 @@ defmodule RelayWeb.BoardLive do
               <.icon name="hero-x-mark" class="size-4" />
             </button>
           </div>
+          <div :if={@stalled_error} id="stalled-error" class="alert alert-error mt-4 text-sm">
+            {@stalled_error}
+          </div>
           <ul id="stalled-list" class="mt-4 divide-y divide-base-200">
             <li
               :for={%{card: card, reason: reason} <- @stalled_cards}
@@ -614,6 +617,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:board, board)
       |> assign_stalled()
       |> assign(:stalled_open, false)
+      |> assign(:stalled_error, nil)
       |> assign(:read_only?, Board.archived?(board))
       |> assign(:archived_count, Cards.count_archived_cards(board))
       |> assign(:archived_open, false)
@@ -903,11 +907,11 @@ defmodule RelayWeb.BoardLive do
   # RE247 — the stalled dialog. Naming the cards is the whole point, so the list is refetched
   # at open time rather than rendered from whatever the last run-event flush cached.
   def handle_event("open_stalled", _params, socket) do
-    {:noreply, socket |> assign_stalled() |> assign(:stalled_open, true)}
+    {:noreply, socket |> assign_stalled() |> assign(stalled_open: true, stalled_error: nil)}
   end
 
   def handle_event("close_stalled", _params, socket) do
-    {:noreply, assign(socket, :stalled_open, false)}
+    {:noreply, assign(socket, stalled_open: false, stalled_error: nil)}
   end
 
   # A row click: close the modal and open that card — bridged to the shell in embed mode
@@ -2056,13 +2060,28 @@ defmodule RelayWeb.BoardLive do
   # Emptying the list closes the dialog: the header control that opened it is about to
   # disappear, and an empty modal would strand the user behind a backdrop.
   defp after_restart_one(socket, ref, {:ok, _run}) do
-    socket = socket |> assign_stalled() |> put_flash(:info, "Restarted #{ref}.")
+    socket =
+      socket
+      |> assign_stalled()
+      |> assign(:stalled_error, nil)
+      |> put_flash(:info, "Restarted #{ref}.")
 
     if socket.assigns.stalled_cards == [], do: assign(socket, :stalled_open, false), else: socket
   end
 
+  # The dialog deliberately stays open on a refusal (RE247 review), so the toast alone is
+  # not enough feedback — it paints under the modal's 40% overlay (z-50 vs the modal's
+  # z-999), and the natural next click lands on the backdrop and dismisses the dialog
+  # instead of the flash. `:stalled_error` renders the same sentence inside `.modal-box`,
+  # where the refusal is actually visible; the flash is kept too for parity with the
+  # success path and any non-modal (embed) surface.
   defp after_restart_one(socket, _ref, {:error, reason}) do
-    socket |> assign_stalled() |> put_flash(:error, Runs.retry_refusal_message(reason))
+    message = Runs.retry_refusal_message(reason)
+
+    socket
+    |> assign_stalled()
+    |> assign(:stalled_error, message)
+    |> put_flash(:error, message)
   end
 
   # RLY-94 — the card-tap bridge payload. `kind` tells the shell which native
