@@ -927,6 +927,23 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       assert Repo.get!(Schemas.StoryTask, ctx.sign_in.id).position == 2
     end
 
+    # Unlike an activity dropped on itself (below), the artboard's moveTask/4 does NOT no-op a
+    # task self-drop: it always pushes the dragged task to the end of `targetAct`'s order. With
+    # a second task already after it, sign_in visibly moves — this pins that behavior rather
+    # than relying on it happening to fall out of the general "task onto task" clause.
+    test "dropping a task on itself moves it to the end of its own activity", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      {:ok, second} = StoryMap.create_task(ctx.onboard, %{name: "Reset password", position: 2})
+      assert has_element?(view, "#story-map-task-#{second.id}")
+
+      reorder(view, "task", ctx.sign_in.id, "task", ctx.sign_in.id)
+
+      assert Repo.get!(Schemas.StoryTask, second.id).position == 1
+      assert Repo.get!(Schemas.StoryTask, ctx.sign_in.id).position == 2
+      assert Repo.get!(Schemas.StoryTask, ctx.sign_in.id).story_activity_id == ctx.onboard.id
+    end
+
     test "release onto release reorders the swimlanes", %{conn: conn} = ctx do
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
 

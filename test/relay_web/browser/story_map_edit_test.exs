@@ -60,21 +60,28 @@ defmodule RelayWeb.Browser.StoryMapEditTest do
            ]
 
     # A real header drag: the LAST activity dropped on the FIRST becomes the leftmost.
-    # `drag/3` is PhoenixTest.Playwright's own wrapper around Frame.drag_and_drop/2 — the
-    # assert_has/2 after each call is what actually waits for the LiveView patch to land.
+    # `drag/3` is PhoenixTest.Playwright's own wrapper around Frame.drag_and_drop/2, which
+    # returns once the browser has dispatched the drop — NOT once the server has processed it.
+    # `assert_has("#story-map-grid")` matches before AND after the drag (the grid never
+    # disappears), so it resolves immediately and waits for nothing; reading the DB right after
+    # would race the async `story_map_reorder` push/patch. The real barrier has to be DOM that
+    # only holds true after the reorder lands — here, the band's own inline `grid-column`
+    # (`band_style/1`), which moves to column 2 only once `plan` is leftmost.
     session
     |> drag("#story-map-activity-#{plan.id}", to: "#story-map-activity-#{onboard.id}")
-    |> assert_has("#story-map-grid")
+    |> assert_has(~s(#story-map-activity-#{plan.id}[style^="grid-column:2 "]))
 
     assert Enum.map(StoryMap.list_activities(board), & &1.name) == [
              "Plan the backlog",
              "Onboarding v2"
            ]
 
-    # And a release drag, the swimlane rail's own reorder.
+    # And a release drag, the swimlane rail's own reorder. Same reasoning: wait on the swimlane
+    # label's inline `grid-row` (`lane_label_style/1`), which only reads 3 once `later` is the
+    # topmost lane.
     session
     |> drag("#story-map-release-#{later.id}", to: "#story-map-release-#{mvp.id}")
-    |> assert_has("#story-map-grid")
+    |> assert_has(~s(#story-map-release-#{later.id}[style*="grid-row:3;"]))
 
     assert Enum.map(StoryMap.list_releases(board), & &1.name) == ["Later", "MVP", "Fast follow"]
 

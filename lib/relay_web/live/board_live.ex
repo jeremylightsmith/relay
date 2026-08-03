@@ -3113,10 +3113,25 @@ defmodule RelayWeb.BoardLive do
     reorder_story_activities(socket, dragged.id, target.story_activity_id)
   end
 
+  # A task dropped on itself: the artboard's moveTask/4 does NOT no-op this (unlike an activity
+  # on itself, below) — `targetTask === taskId` takes the `else` branch and always pushes the
+  # dragged task to the end of its own activity's order. Handled as its own clause rather than
+  # falling into the general case below: that clause appends `dragged.id` to build a list for
+  # insert_before/3 to dedupe, but insert_before/3 short-circuits to a verbatim return when
+  # `id == target_id`, so the append would survive as a genuine duplicate id and renumber/3
+  # would assign it two positions, leaving a gap in the final numbering.
+  defp apply_story_map_reorder(socket, {:task, %{id: id} = dragged}, {:task, %{id: id}}) do
+    ids = Enum.reject(story_map_task_ids(socket, dragged.story_activity_id), &(&1 == id)) ++ [id]
+
+    _ = StoryMap.move_task(dragged, dragged.story_activity_id, ids)
+    socket
+  end
+
   defp apply_story_map_reorder(socket, {:task, dragged}, {:task, target}) do
     # The target activity's task ids WITH the dragged one appended, so insert_before/3's own
     # "remove every copy of `id` first" makes "already in this activity" and "arriving from
-    # another" the same list.
+    # another" the same list. `dragged.id != target.id` here — the self-drop clause above
+    # handles that case, where this append would instead create a genuine duplicate.
     ids =
       StoryMap.insert_before(
         story_map_task_ids(socket, target.story_activity_id) ++ [dragged.id],
