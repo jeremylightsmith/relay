@@ -25,6 +25,13 @@ defmodule RelayWeb.BoardLive do
   ~50 assigns and ~40 event handlers live here. The grid itself is fully isolated in those
   two modules; this LiveView grows only by its mount assigns, one render branch, the
   action-derived patch targets (`board_path/1` / `card_path/2`) and `refresh_story_map/1`.
+
+  RE263 adds the map's three create affordances. One assign, `:story_map_draft`
+  (`nil | :activity | :release | {:task, activity_id}`), holds at most one open inline draft
+  anywhere on the page, with `:story_map_draft_name` carrying its text; both are deliberately
+  untouched by `refresh_story_map/1`, so a realtime refresh from another tab never eats what
+  you are typing. Creates append via `Relay.StoryMap.next_position/1` and let the resulting
+  `{:story_map_changed, board_id}` broadcast do the refetch — the creating tab included.
   """
 
   use RelayWeb, :live_view
@@ -39,6 +46,7 @@ defmodule RelayWeb.BoardLive do
   alias Relay.Runs
   alias Relay.StoryMap
   alias Relay.Votes
+  alias RelayWeb.ChangesetErrors
   alias RelayWeb.StoryMapComponents
   alias RelayWeb.StoryMapGrid
   alias Schemas.Board
@@ -366,6 +374,8 @@ defmodule RelayWeb.BoardLive do
         cards={@story_map_cards}
         stalled_cards={@stalled_cards}
         tray_open={@story_map_tray_open}
+        draft={@story_map_draft}
+        draft_name={@story_map_draft_name}
         embed={@embed}
       />
       <.card_drawer
@@ -612,12 +622,23 @@ defmodule RelayWeb.BoardLive do
   attr :cards, :list, required: true
   attr :stalled_cards, :list, required: true
   attr :tray_open, :boolean, required: true
+  attr :draft, :any, required: true
+  attr :draft_name, :string, required: true
   attr :embed, :boolean, required: true
 
   defp story_map_viewport(assigns) do
     assigns =
       assigns
-      |> assign(:grid, StoryMapGrid.build(assigns.activities, assigns.tasks, assigns.releases, assigns.cards))
+      |> assign(
+        :grid,
+        StoryMapGrid.build(
+          assigns.activities,
+          assigns.tasks,
+          assigns.releases,
+          assigns.cards,
+          assigns.draft
+        )
+      )
       |> assign(:stalled_ids, MapSet.new(assigns.stalled_cards, & &1.card.id))
 
     ~H"""
@@ -641,8 +662,14 @@ defmodule RelayWeb.BoardLive do
           board={@board}
           stages={@board.stages}
           stalled_ids={@stalled_ids}
+          draft={@draft}
+          draft_name={@draft_name}
         />
-        <StoryMapComponents.story_map_empty :if={@grid.bands == []} />
+        <StoryMapComponents.story_map_empty
+          :if={@grid.bands == []}
+          draft={@draft}
+          draft_name={@draft_name}
+        />
       </div>
     </div>
     """
@@ -703,6 +730,13 @@ defmodule RelayWeb.BoardLive do
       |> assign(:releases, StoryMap.list_releases(board))
       |> assign(:story_map_cards, cards)
       |> assign(:story_map_tray_open, true)
+      # RE263 — the ONE open inline draft: nil | :activity | :release | {:task, activity_id}.
+      # Deliberately untouched by refresh_story_map/1, so another tab creating an activity never
+      # eats what you are typing. `story_map_draft_name` tracks the text server-side for the
+      # same reason `compose_form` does (see validate_card): LiveView only patches an input whose
+      # server-rendered value changed.
+      |> assign(:story_map_draft, nil)
+      |> assign(:story_map_draft_name, "")
       |> assign_stalled()
       |> assign(:stalled_open, false)
       |> assign(:stalled_error, nil)
@@ -812,6 +846,7 @@ defmodule RelayWeb.BoardLive do
         answer_select answer_custom answer_next answer_back answer_goto answer_submit
         review_approve review_reject retry_card retry_run confirm_move cancel_move
         archive_card restore_card toggle_sub_task restart_one
+        story_map_add_activity story_map_add_task story_map_add_release story_map_draft_submit
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -1367,6 +1402,42 @@ defmodule RelayWeb.BoardLive do
   # list above — it changes nothing on the board.
   def handle_event("toggle_story_map_tray", _params, socket) do
     {:noreply, assign(socket, :story_map_tray_open, not socket.assigns.story_map_tray_open)}
+  end
+
+  # RE263 — the three create affordances. Opening a draft replaces any other open one; the
+  # discarded draft creates nothing.
+  def handle_event("story_map_add_activity", _params, socket) do
+    {:noreply, open_story_map_draft(socket, :activity)}
+  end
+
+  # The activity is resolved from @story_activities — already board-scoped by mount_board/2,
+  # which gates on Boards.get_board!/2 — never by id from the database. A forged activity-id
+  # from another board finds nothing and is ignored.
+  def handle_event("story_map_add_task", %{"activity-id" => activity_id}, socket) do
+    case Enum.find(socket.assigns.story_activities, &(to_string(&1.id) == activity_id)) do
+      nil -> {:noreply, socket}
+      activity -> {:noreply, open_story_map_draft(socket, {:task, activity.id})}
+    end
+  end
+
+  def handle_event("story_map_add_release", _params, socket) do
+    {:noreply, open_story_map_draft(socket, :release)}
+  end
+
+  # Every keystroke, for the same reason validate_card exists: without the server's own copy of
+  # the text there is nothing to diff against when the input has to come back empty.
+  def handle_event("story_map_draft_change", %{"name" => name}, socket) do
+    {:noreply, assign(socket, :story_map_draft_name, name)}
+  end
+
+  def handle_event("story_map_draft_submit", %{"name" => name}, socket) do
+    {:noreply, commit_story_map_draft(socket, socket.assigns.story_map_draft, String.trim(name))}
+  end
+
+  # Escape and blur both land here. A no-op when no draft is open, which is what makes the blur
+  # that follows a commit harmless.
+  def handle_event("story_map_draft_cancel", _params, socket) do
+    {:noreply, close_story_map_draft(socket)}
   end
 
   # SUB-TASKS panel toggle (RLY-18): flip the item's done flag and refresh the
@@ -2712,6 +2783,73 @@ defmodule RelayWeb.BoardLive do
   end
 
   defp refresh_story_map(socket), do: socket
+
+  defp open_story_map_draft(socket, draft) do
+    socket
+    |> assign(:story_map_draft, draft)
+    |> assign(:story_map_draft_name, "")
+  end
+
+  defp close_story_map_draft(socket) do
+    socket
+    |> assign(:story_map_draft, nil)
+    |> assign(:story_map_draft_name, "")
+  end
+
+  # RE263 — commit. Everything appends: `position` is StoryMap.next_position/1 over the lists
+  # this socket has already loaded (for a task, that activity's tasks only), so no call site
+  # re-types `max + 1` and no extra query is issued. The create's own
+  # `{:story_map_changed, board_id}` broadcast does the refetch through refresh_story_map/1 —
+  # the creating tab included — so no clause here rebuilds the lists by hand.
+  defp commit_story_map_draft(socket, nil, _name), do: socket
+  defp commit_story_map_draft(socket, _draft, ""), do: socket
+
+  defp commit_story_map_draft(socket, :activity, name) do
+    position = StoryMap.next_position(socket.assigns.story_activities)
+
+    after_story_map_create(
+      socket,
+      StoryMap.create_activity(socket.assigns.board, %{name: name, position: position})
+    )
+  end
+
+  defp commit_story_map_draft(socket, :release, name) do
+    position = StoryMap.next_position(socket.assigns.releases)
+
+    after_story_map_create(
+      socket,
+      StoryMap.create_release(socket.assigns.board, %{name: name, position: position})
+    )
+  end
+
+  defp commit_story_map_draft(socket, {:task, activity_id}, name) do
+    case Enum.find(socket.assigns.story_activities, &(&1.id == activity_id)) do
+      nil ->
+        close_story_map_draft(socket)
+
+      activity ->
+        position =
+          socket.assigns.story_tasks
+          |> Enum.filter(&(&1.story_activity_id == activity_id))
+          |> StoryMap.next_position()
+
+        after_story_map_create(socket, StoryMap.create_task(activity, %{name: name, position: position}))
+    end
+  end
+
+  # The draft stays open either way. On success the input has to come back EMPTY and still
+  # focused, and only the client can do that — LiveView never patches a focused input's value
+  # (it would clobber active typing), so the InlineNameInput hook clears it on this event.
+  # Pushing on success only is what leaves the text intact on the error path.
+  defp after_story_map_create(socket, {:ok, _record}) do
+    socket
+    |> assign(:story_map_draft_name, "")
+    |> push_event("story_map_draft_cleared", %{})
+  end
+
+  defp after_story_map_create(socket, {:error, changeset}) do
+    put_flash(socket, :error, Enum.join(ChangesetErrors.messages(changeset), ", "))
+  end
 
   # After a stage reload, re-derive the open drawer's stage from the new
   # board (disable_lane refuses to remove a non-empty lane, so the
