@@ -511,4 +511,106 @@ defmodule RelayWeb.StoryMapGridTest do
       assert column_total + length(grid.unmapped) == grid.total
     end
   end
+
+  describe "RE260 — hide_tasks? merges each activity into one column" do
+    test "each activity becomes exactly one m: column with span 1" do
+      grid =
+        StoryMapGrid.build(
+          [activity(1, 1), activity(2, 2)],
+          [task(10, 1, 1), task(11, 1, 2), task(20, 2, 1)],
+          [release(100, 1)],
+          [],
+          nil,
+          true
+        )
+
+      assert Enum.map(grid.columns, & &1.key) == ["m:1", "m:2"]
+      assert Enum.all?(grid.columns, & &1.merged?)
+      assert Enum.all?(grid.columns, & &1.last_of_activity?)
+      assert [%{start: 0, span: 1}, %{start: 1, span: 1}] = grid.bands
+      # The label's number: the artboard's `tasks.length + ' tasks · merged'` (line ~442).
+      assert Enum.map(grid.columns, & &1.task_count) == [2, 1]
+    end
+
+    test "an activity with no tasks still merges, and reads zero tasks" do
+      grid = StoryMapGrid.build([activity(1, 1)], [], [release(100, 1)], [], nil, true)
+
+      assert [%{key: "m:1", merged?: true, task_count: 0, no_task?: false, bare?: false}] = grid.columns
+      assert [%{span: 1, start: 0, count: 0}] = grid.bands
+    end
+
+    test "tasked AND task-less cards land in the one merged column" do
+      grid =
+        StoryMapGrid.build(
+          [activity(1, 1)],
+          [task(10, 1, 1), task(11, 1, 2)],
+          [release(100, 1)],
+          [
+            card(5, story_activity_id: 1, story_task_id: 10, release_id: 100),
+            card(6, story_activity_id: 1, story_task_id: 11, release_id: 100),
+            card(7, story_activity_id: 1, release_id: 100)
+          ],
+          nil,
+          true
+        )
+
+      assert Map.keys(grid.cells) == [{"m:1", "r:100"}]
+      assert Enum.map(grid.cells[{"m:1", "r:100"}], & &1.id) == [5, 6, 7]
+      assert [%{count: 3}] = grid.bands
+      assert [%{count: 3}] = grid.lanes
+    end
+
+    test "the no-card-can-disappear invariant and total still hold while merged" do
+      cards = [
+        card(5, story_activity_id: 1, story_task_id: 10, release_id: 100),
+        card(6, story_activity_id: 2, release_id: 200),
+        card(7, story_activity_id: 1),
+        card(8, release_id: 100),
+        card(9, story_activity_id: 999)
+      ]
+
+      grid =
+        StoryMapGrid.build(
+          [activity(1, 1), activity(2, 2)],
+          [task(10, 1, 1)],
+          [release(100, 1), release(200, 2)],
+          cards,
+          nil,
+          true
+        )
+
+      placed = grid.cells |> Map.values() |> List.flatten() |> Enum.map(& &1.id)
+
+      assert Enum.sort(placed ++ Enum.map(grid.unmapped, & &1.id)) == [5, 6, 7, 8, 9]
+      assert grid.total == 5
+      # 8 has no activity and 9's activity is not on this board — both to the tray (rule 1).
+      assert Enum.map(grid.unmapped, & &1.id) == [8, 9]
+    end
+
+    test "decode_placement decodes a merged column to its activity" do
+      assert StoryMapGrid.decode_placement("m:5", "r:2") ==
+               {:ok, %{story_activity_id: 5, release_id: 2}}
+
+      assert StoryMapGrid.decode_placement("m:5", "r:none") ==
+               {:ok, %{story_activity_id: 5, release_id: nil}}
+
+      assert StoryMapGrid.decode_placement("m:0", "r:2") == :error
+      assert StoryMapGrid.decode_placement("m:abc", "r:2") == :error
+    end
+
+    test "merged_column?/1 is true only for the m: shape" do
+      assert StoryMapGrid.merged_column?("m:5")
+      refute StoryMapGrid.merged_column?("t:5")
+      refute StoryMapGrid.merged_column?("nt:5")
+      refute StoryMapGrid.merged_column?("draft:5")
+      refute StoryMapGrid.merged_column?("r:5")
+    end
+
+    test "hide_tasks? defaults to false, so every existing call site is unchanged" do
+      grid = StoryMapGrid.build([activity(1, 1)], [task(10, 1, 1)], [release(100, 1)], [])
+
+      assert Enum.map(grid.columns, & &1.key) == ["t:10"]
+      assert Enum.all?(grid.columns, &(not &1.merged?))
+    end
+  end
 end
