@@ -2486,12 +2486,27 @@ class AutoUpdateHandshakeTest(unittest.TestCase):
         state = relay.check_update_handshake(relay.new_auto_update_state())
         self.assertTrue(state["disabled"])
 
-    def test_the_attempt_count_survives_the_exec_and_caps_out(self):
-        os.environ["RELAY_UPDATED_FROM"] = str(relay.EXECUTOR_VERSION - 1)
+    def test_the_failure_count_survives_the_exec_and_caps_out(self):
+        # The cap is for restarts that did NOT advance the version — the one shape of "the
+        # update did not take" that could repeat. RELAY_UPDATED_FROM is left unset here so the
+        # seeded count alone is what disables: a process re-exec'd carrying failures.
         os.environ["RELAY_UPDATE_ATTEMPTS"] = str(relay.AUTO_UPDATE_MAX_ATTEMPTS)
         state = relay.check_update_handshake(relay.new_auto_update_state())
         self.assertEqual(state["attempts"], relay.AUTO_UPDATE_MAX_ATTEMPTS)
         self.assertTrue(state["disabled"])
+        self.assertTrue(any("without the version advancing" in m for m in self.logs))
+
+    def test_a_genuine_upgrade_resets_the_count_instead_of_capping_out(self):
+        # The regression this guards: counting *successful* updates disabled auto-update on a
+        # healthy machine that had simply picked up three releases. An update that took is not
+        # thrash, so it clears the count no matter how high the count was.
+        os.environ["RELAY_UPDATED_FROM"] = str(relay.EXECUTOR_VERSION - 1)
+        os.environ["RELAY_UPDATE_ATTEMPTS"] = str(relay.AUTO_UPDATE_MAX_ATTEMPTS)
+        state = relay.check_update_handshake(relay.new_auto_update_state())
+        self.assertEqual(state["attempts"], 0)
+        self.assertFalse(state["disabled"])
+        self.assertTrue(any("restarted into version" in m for m in self.logs))
+        self.assertFalse(any("thrashing" in m for m in self.logs))
 
 
 class MaybeAutoUpdateTest(unittest.TestCase):
@@ -2534,8 +2549,15 @@ class MaybeAutoUpdateTest(unittest.TestCase):
     def test_a_newer_version_is_installed_and_restarts(self):
         self.assertTrue(self._run(self.new))
         self.assertEqual(self.installed, [self.new])
-        self.assertEqual(self.restarts, [(relay.EXECUTOR_VERSION, 1)])
+        # Hands 0 across the exec: the cap counts FAILED updates, and this one worked.
+        self.assertEqual(self.restarts, [(relay.EXECUTOR_VERSION, 0)])
         self.assertTrue(any(f"{relay.EXECUTOR_VERSION} → {self.new}" in m for m in self.logs))
+
+    def test_a_successful_update_does_not_count_toward_the_cap(self):
+        self.state["attempts"] = relay.AUTO_UPDATE_MAX_ATTEMPTS - 1
+        self.assertTrue(self._run(self.new))
+        self.assertEqual(self.state["attempts"], relay.AUTO_UPDATE_MAX_ATTEMPTS - 1)
+        self.assertFalse(self.state["disabled"])
 
     def test_opting_out_does_nothing_at_all(self):
         self.cfg["auto_update"] = False
@@ -2574,11 +2596,33 @@ class MaybeAutoUpdateTest(unittest.TestCase):
         relay.download_executor = lambda url: None
         self.assertFalse(self._run(self.new))
         self.assertEqual((self.installed, self.restarts), ([], []))
+        self.assertEqual(self.state["attempts"], 1)     # THIS is what the cap counts
 
     def test_a_failed_install_does_not_restart(self):
         relay.install_executor = lambda src, v, path=None: False
         self.assertFalse(self._run(self.new))
         self.assertEqual(self.restarts, [])
+        self.assertEqual(self.state["attempts"], 1)
+
+    def test_repeated_failures_reach_the_cap_and_disable(self):
+        relay.download_executor = lambda url: None
+        for _ in range(relay.AUTO_UPDATE_MAX_ATTEMPTS):
+            self.state["last"] = 0                     # skip the cooldown, not the cap
+            self.assertFalse(self._run(self.new))
+        self.state["last"] = 0
+        self.assertFalse(self._run(self.new))
+        self.assertTrue(self.state["disabled"])
+        self.assertTrue(any("without the version advancing" in m for m in self.logs))
+
+    def test_a_skipped_dirty_file_is_not_counted_as_a_failed_attempt(self):
+        # A human's uncommitted bin/relay is a deliberate, side-effect-free skip that already
+        # warns once — counting it would disable auto-update on every dev box within minutes.
+        relay._safe_to_overwrite = lambda path: False
+        for _ in range(relay.AUTO_UPDATE_MAX_ATTEMPTS + 1):
+            self.state["last"] = 0
+            self.assertFalse(self._run(self.new))
+        self.assertEqual(self.state["attempts"], 0)
+        self.assertFalse(self.state["disabled"])
 
 
 class RestartExecutorTest(unittest.TestCase):

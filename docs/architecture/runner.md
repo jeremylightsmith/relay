@@ -540,7 +540,9 @@ silently billed to the paid API.
 - **Auto-update (RE185).** When the beat's `latest_executor_version` exceeds the running
   `EXECUTOR_VERSION`, `maybe_auto_update` fires from the claim loop — but only at a **job
   boundary** (nothing in flight), never under `--once`, and never more often than
-  `auto_update_min_interval` or more than three times in one process's life. It downloads
+  `auto_update_min_interval`, and never again after three *failed* updates in one process's
+  life (a refused download or a failed install — a successful one never counts, so an executor
+  that has been up for months and picked up ten releases is unaffected). It downloads
   `bin/relay` from relay-config (`RELAY_CONFIG_URL`) through `download_executor`, the one
   verified download path `relay init` also uses: HTTPS, UTF-8, a leading `#!`, an
   `EXECUTOR_VERSION` parsed **from the downloaded bytes** (authoritative — a board ahead of
@@ -562,9 +564,10 @@ silently billed to the paid API.
   **required**, because RLY-193's flocks belong to open file descriptions that survive `execv`
   while the re-exec'd image opens new descriptors and would die "already running" — then
   `os.execv`s with `RELAY_UPDATED_FROM`/`RELAY_UPDATE_ATTEMPTS` set. On the way back up
-  `check_update_handshake` compares: newer, and it logs the transition; same or older, and
-  auto-update is disabled for that process, leaving RLY-184's fail-stop as the behaviour. Three
-  attempts disable it the same way. Opt out with `"auto_update": false`.
+  `check_update_handshake` compares: newer, and it logs the transition **and clears the failure
+  count** (the update took, so nothing before it was thrash); same or older, and auto-update is
+  disabled for that process, leaving RLY-184's fail-stop as the behaviour. Three failed attempts
+  disable it the same way. Opt out with `"auto_update": false`.
 
 ### Declaring an outcome
 

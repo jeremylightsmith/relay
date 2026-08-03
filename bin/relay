@@ -69,8 +69,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 31
-EXECUTOR_FINGERPRINT = "f4589c4a4a5d30be01c01d78cf5b20d2faa0394910f7e1e3b08f99a1e22a2bbf"
+EXECUTOR_VERSION = 32
+EXECUTOR_FINGERPRINT = "fc2a04c1d8402017ac297e063e8de254cc774078a5480d20108a1f207a73a1bc"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -2344,7 +2344,7 @@ def release_executor_locks():
 # decision, so the rejections in download_executor() ARE the trust boundary. Nothing downloaded
 # is ever executed in this process; it is only written to disk after it compiles.
 
-AUTO_UPDATE_MAX_ATTEMPTS = 3    # per process lifetime; the anti-thrash backstop
+AUTO_UPDATE_MAX_ATTEMPTS = 3    # failed updates per process lifetime; the anti-thrash backstop
 
 # Single-sourced so load_executor_config's merged defaults and maybe_auto_update's guards read
 # the SAME values (AGENTS.md: a policy number is defined exactly once) — cfg["auto_update"] /
@@ -2508,9 +2508,14 @@ def install_executor(source, version, path=None):
 def new_auto_update_state():
     """Per-process auto-update bookkeeping.
 
-    `attempts` is seeded from the environment so the cap survives a re-exec — otherwise a
-    process that restarts into working-but-still-behind code would reset its own counter and
-    thrash forever.
+    `attempts` counts update attempts that FAILED to advance the running version — a refused
+    download or a failed install. (The other failure shape, a restart that landed back on the
+    same code, check_update_handshake disables outright rather than counting.) Counting
+    successes instead would disable auto-update on a perfectly healthy machine that had simply
+    picked up three releases, which is the opposite of the job. It is seeded from the
+    environment so the count survives a re-exec — otherwise a process that restarted into code
+    that still cannot update itself would reset its own counter and thrash forever — and
+    check_update_handshake clears it as soon as a restart proves the version really moved.
     """
     try:
         attempts = int(os.environ.get("RELAY_UPDATE_ATTEMPTS") or 0)
@@ -2529,7 +2534,7 @@ def _cap_attempts(state):
     """
     if state["attempts"] >= AUTO_UPDATE_MAX_ATTEMPTS:
         state["disabled"] = True
-        log(f"auto-update: {state['attempts']} attempts already in this process's lifetime — "
+        log(f"auto-update: {state['attempts']} update attempts without the version advancing — "
             "disabled to avoid thrashing. Restart `relay execute` by hand to pick up new code.",
             kind="error")
     return state["disabled"]
@@ -2551,6 +2556,10 @@ def check_update_handshake(state):
         except ValueError:
             previous = None
         if previous is not None and EXECUTOR_VERSION > previous:
+            # The update took, so nothing carried across the exec was thrash: clear the failure
+            # count BEFORE the cap is checked. Without this a healthy long-lived executor that
+            # picked up three releases would disable itself on the third one.
+            state["attempts"] = 0
             log(f"auto-update: restarted into version {EXECUTOR_VERSION} (was {previous})")
         else:
             state["disabled"] = True
@@ -2610,13 +2619,17 @@ def maybe_auto_update(cfg, hb, state, config_url):
                 'them. Commit or stash them, or set "auto_update": false in '
                 ".relay/executor.json.", kind="error")
         return False
+    # Only the two paths below count toward the cap: an attempt that reached out for new code
+    # and did not end up running it. The skip above does not (a human's uncommitted bin/relay
+    # is deliberate and already warned about), and neither does the success below.
     result = download_executor(config_url)
     if result is None:
+        state["attempts"] += 1
         return False
     source, version = result
     if not install_executor(source, version):
+        state["attempts"] += 1
         return False
-    state["attempts"] += 1
     log(f"auto-update: rewrote {HERE} {EXECUTOR_VERSION} → {version} from {config_url}. "
         "That file is git-tracked here, so this is the `git status` entry you are about to "
         "see. Restarting at a job boundary…")
