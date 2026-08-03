@@ -200,7 +200,7 @@ that stays server-side.
   `{"shared_clean": 0, "exclusive": 0}` so nothing queues behind it, finishes in-flight work,
   and wears an `OUTDATED` badge on the runners view until a human restarts it.
 - `POST /api/node-jobs/:id/outcome` (`.outcome/2`) — `Relay.Runs.get_claimed_job/2` (board-
-  scoped) returns a three-way result: a `claimed`/`running` job runs
+  scoped) returns a three-way result: a `claimed` job runs
   `Relay.Runs.report_outcome/2` against the closed outcome set (422 `unknown_outcome` on a bad
   value); an already-finalized (`:done`) job is **first-writer-wins** — 200 with the run's
   recorded `run_state`, ignoring the resent payload, so a retried outcome POST after a dropped

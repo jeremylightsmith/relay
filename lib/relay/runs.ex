@@ -110,7 +110,7 @@ defmodule Relay.Runs do
     Repo.all(from e in NodeExecution, where: e.run_id == ^run_id, order_by: [asc: e.id])
   end
 
-  @doc "The run's single queued/claimed/running job, or nil."
+  @doc "The run's single queued or claimed job, or nil."
   def active_job(%Run{id: run_id}) do
     Repo.one(from j in NodeJob, where: j.run_id == ^run_id and j.state in ^NodeJob.active_states())
   end
@@ -809,7 +809,7 @@ defmodule Relay.Runs do
   Reports a node outcome for `job` — `%{outcome:, detail:, git_sha:,
   session_id:, cost:}`, outcome required from the closed set. Finalizes
   the execution + job and hands the outcome to the run's `RunServer`
-  (serialized per run). Jobs not in queued/claimed/running are rejected
+  (serialized per run). Jobs not in queued/claimed are rejected
   with `{:error, :job_not_active}` — a revoked job's late report is
   dropped.
   """
@@ -837,9 +837,6 @@ defmodule Relay.Runs do
   def claim_job(%NodeJob{} = job, executor_name) when is_binary(executor_name) do
     transition_job(job, [:queued], state: :claimed, executor_name: executor_name, claimed_at: now())
   end
-
-  @doc "claimed → running."
-  def start_job(%NodeJob{} = job), do: transition_job(job, [:claimed], state: :running)
 
   defp transition_job(job, from_states, sets) do
     query = from j in NodeJob, where: j.id == ^job.id and j.state in ^from_states, select: j
@@ -1222,7 +1219,7 @@ defmodule Relay.Runs do
   The board's node-job `id` (integer or numeric string — the controller hands
   in a raw path param) resolved against its claim state:
 
-    * `{:ok, job}` — held by a live claim (`state in [:claimed, :running]`).
+    * `{:ok, job}` — held by a live claim (`state in NodeJob.claimed_states/0`).
     * `{:already_finalized, run}` — the job is already `:done`; a duplicate/stray
       outcome POST for it is first-writer-wins (RLY-202), so the controller answers
       success with the run's recorded state rather than a conflict.
@@ -1595,11 +1592,9 @@ defmodule Relay.Runs do
   # A job is stranded when it is old enough to rule out normal latency AND the executor
   # named on it is stale (or nothing is named and nothing on this board is fresh).
   # Reuses `executor_stale?/2` rather than inventing a second threshold, so "stranded"
-  # can never disagree with what the reclaim sweep would act on. A `:running` job is
-  # excluded: the executor is demonstrably alive enough to have started it, and the
-  # heartbeat's staleness is what the reclaim sweep is for.
+  # can never disagree with what the reclaim sweep would act on. A claimed job under a
+  # live executor needs no special clause — `any_live_executor?/3` already excludes it.
   defp stranded?(nil, _board, _now), do: false
-  defp stranded?(%NodeJob{state: :running}, _board, _now), do: false
 
   defp stranded?(%NodeJob{} = job, board, now) do
     age = DateTime.diff(now, job.claimed_at || job.inserted_at, :second)

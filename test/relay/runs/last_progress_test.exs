@@ -49,7 +49,7 @@ defmodule Relay.Runs.LastProgressTest do
     assert Runs.last_progress_by_run(board) == %{run.id => Runs.last_progress_at(run)}
   end
 
-  test "working_run_ids includes a running job on a live executor, excludes a queued one",
+  test "working_run_ids includes a claimed job on a live executor, excludes a queued one",
        %{board: board, works: works} do
     now = DateTime.truncate(DateTime.utc_now(), :second)
     insert(:executor, board: board, name: "live", last_heartbeat: now)
@@ -57,7 +57,7 @@ defmodule Relay.Runs.LastProgressTest do
     card_a = insert(:card, stage: works)
     run_a = insert(:run, card: card_a)
     exec_a = insert(:node_execution, run: run_a, outcome: nil, finished_at: nil)
-    insert(:node_job, node_execution: exec_a, state: :running, executor_name: "live", claimed_at: now)
+    insert(:node_job, node_execution: exec_a, state: :claimed, executor_name: "live", claimed_at: now)
 
     card_b = insert(:card, stage: works)
     run_b = insert(:run, card: card_b)

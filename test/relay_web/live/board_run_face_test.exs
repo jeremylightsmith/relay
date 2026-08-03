@@ -162,35 +162,6 @@ defmodule RelayWeb.BoardRunFaceTest do
       assert has_element?(view, ~s(#card-#{face_ref(board, card)}-run-face[data-stalled="true"]))
     end
 
-    test "a claimed, running job stays neutral however old it is (the long-node case)",
-         %{conn: conn, board: board, works: works} do
-      now = DateTime.truncate(DateTime.utc_now(), :second)
-      insert(:executor, board: board, name: "live", last_heartbeat: now)
-      card = insert(:card, stage: works, status: :working)
-      run = insert(:run, card: card, status: :running, current_node: "implement")
-
-      exec =
-        insert(:node_execution,
-          run: run,
-          node_key: "implement",
-          outcome: nil,
-          finished_at: nil,
-          inserted_at: DateTime.add(now, -3600, :second)
-        )
-
-      insert(:node_job,
-        node_execution: exec,
-        state: :running,
-        executor_name: "live",
-        claimed_at: DateTime.add(now, -3600, :second)
-      )
-
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
-
-      assert has_element?(view, ~s(#card-#{face_ref(board, card)}-run-face[data-stalled="false"]))
-      assert has_element?(view, "#card-#{face_ref(board, card)}-run-age")
-    end
-
     test "a claimed job on a live executor stays neutral and keeps its age readout",
          %{conn: conn, board: board, works: works} do
       now = DateTime.truncate(DateTime.utc_now(), :second)

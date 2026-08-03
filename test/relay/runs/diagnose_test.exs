@@ -103,7 +103,7 @@ defmodule Relay.Runs.DiagnoseTest do
     card = insert(:card, stage: works, status: :working)
     run = insert(:run, card: card, status: :running, current_node: "implement")
     execution = insert(:node_execution, run: run, node_key: "implement", outcome: nil, finished_at: nil)
-    insert(:node_job, node_execution: execution, state: :running, executor_name: "mac", claimed_at: now)
+    insert(:node_job, node_execution: execution, state: :claimed, executor_name: "mac", claimed_at: now)
     insert(:executor, board: board, name: "mac", last_heartbeat: now)
 
     assert %{verdict: :run_active, evidence: %{current_node: "implement"}} = Runs.diagnose(board, card, now)

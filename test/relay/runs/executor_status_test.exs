@@ -115,14 +115,14 @@ defmodule Relay.Runs.ExecutorStatusTest do
       insert(:executor, board: board, name: "e1")
 
       %{card: card, job: job} =
-        active_job(board, stage, "e1", node_key: "implement", title: "Ship it", state: :running)
+        active_job(board, stage, "e1", node_key: "implement", title: "Ship it", state: :claimed)
 
       assert [%{jobs: [listed]}] = Runs.list_executor_status(board, now)
       assert listed.job_id == job.id
       assert listed.ref == "#{board.key}#{card.ref_number}"
       assert listed.title == "Ship it"
       assert listed.node_key == "implement"
-      assert listed.state == :running
+      assert listed.state == :claimed
     end
 
     test "finished and revoked jobs are not listed", %{board: board, stage: stage} do

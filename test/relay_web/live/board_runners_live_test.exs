@@ -33,7 +33,7 @@ defmodule RelayWeb.BoardRunnersLiveTest do
       insert(:node_job,
         node_execution: ne,
         executor_name: executor_name,
-        state: opts[:state] || :running,
+        state: opts[:state] || :claimed,
         payload: %{"isolation" => opts[:isolation] || "shared_clean"}
       )
 

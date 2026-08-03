@@ -15,7 +15,7 @@ what each term *means*; the sections below say what each value *does*.
 | --- | --- | --- |
 | Card status | `ready` · `working` · `needs_input` · `in_review` · `queued` · `failed` | `Schemas.Card.statuses/0` |
 | Node outcome | `succeeded` · `failed` · `partial` · `needs_input` | `Schemas.NodeExecution.outcomes/0` |
-| Node-job state | `queued` · `claimed` · `running` · `done` · `revoked` | `Schemas.NodeJob.states/0` |
+| Node-job state | `queued` · `claimed` · `done` · `revoked` | `Schemas.NodeJob.states/0` |
 | Run parked reason | `needs_input` · `claimed` · `executor_gone` | `Schemas.Run.parked_reasons/0` |
 | Run status | `running` · `parked` · `done` · `failed` · `cancelled` | `Schemas.Run.statuses/0` |
 | Stage category | `unstarted` · `planning` · `in_progress` · `complete` | `Schemas.Stage.categories/0` |
@@ -124,8 +124,7 @@ claims it, runs it, and reports back.
 | State | Meaning | Next |
 | --- | --- | --- |
 | `queued` | Written by the engine; no executor holds it. | `claimed` (an executor takes it) or `revoked`. |
-| `claimed` | An executor has taken the job but has not started. | `running` or `revoked`. |
-| `running` | The executor is executing the node. | `done` or `revoked`. |
+| `claimed` | An executor holds the job and is executing the node — it claims and starts its worker in one step, so there is no separate started state (RE255). | `done` or `revoked`. |
 | `done` | The executor reported a typed outcome. Terminal. | — |
 | `revoked` | Withdrawn — the run was cancelled, or the executor stopped heartbeating and the reaper took the job back for re-dispatch. Terminal. | — |
 
