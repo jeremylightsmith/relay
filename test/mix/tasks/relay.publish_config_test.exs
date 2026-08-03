@@ -18,9 +18,18 @@ defmodule Mix.Tasks.Relay.PublishConfigTest do
   # test, turned a review fix into a disk-filling regression. Copy only what `publish/2` reads
   # (`lib/mix/tasks/relay.publish_config.ex:127-146`) and build it once in `setup_all`, not per
   # test — `.claude/agents`, `.claude/commands`, and `.claude/skills` alone are under 200K.
+  #
+  # RE185 review (round 3): the destination must be unique per test run, not a fixed
+  # machine-global path. This repo runs several concurrent executor jobs per host (each in its
+  # own worktree, each ending in `mix precommit` -> `mix test`); two overlapping runs sharing
+  # one fixed tmp path would have run B's setup_all/on_exit rm_rf delete the tree run A is
+  # mid-publish from, raising File.Error for reasons unrelated to either branch.
   setup_all do
-    src = Path.join(System.tmp_dir!(), "relay_publish_config_test_src")
-    File.rm_rf!(src)
+    src =
+      Path.join(
+        System.tmp_dir!(),
+        "relay_publish_config_test_src_#{System.pid()}_#{System.unique_integer([:positive])}"
+      )
 
     for rel <- ~w(bin relay.md .claude/agents .claude/commands .claude/skills) do
       dest = Path.join(src, rel)
