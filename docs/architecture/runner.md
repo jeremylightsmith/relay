@@ -81,11 +81,11 @@ than double-booking (YAGNI: no multi-board reservation yet).
   running: [job-ids], bound_runs: [run-ids]}` to `POST /api/node-jobs/heartbeat` every
   `heartbeat_interval`s (RLY-164) and reads back `{revoked: [job-ids],
   release_runs: [{run_id, status}], want_capabilities, executor_outdated,
-  required_version}`. It terminates each revoked job's live subprocess via its `JobControl`
-  (see "Node-job transport" and "Executor mode" below). The advertised `capacity` is the
-  executor's configured per-class total; `running` is the jobs it believes it holds, so the
-  server can name the ones it no longer considers live. `bound_runs` (RLY-218) is the
-  run-ids of per-card worktrees the executor holds *without* a live job; `release_runs` is
+  required_version, latest_executor_version}`. It terminates each revoked job's live subprocess
+  via its `JobControl` (see "Node-job transport" and "Executor mode" below). The advertised
+  `capacity` is the executor's configured per-class total; `running` is the jobs it believes it
+  holds, so the server can name the ones it no longer considers live. `bound_runs` (RLY-218) is
+  the run-ids of per-card worktrees the executor holds *without* a live job; `release_runs` is
   the run-scoped analogue of `revoked` — the subset now terminal server-side, named with its
   `status` (`done`/`failed`/`cancelled`, `Relay.Runs.terminal_among/2`, RLY-231) so the
   executor's recovery teardown can remove (done/cancelled) or retain (failed) that worktree
@@ -93,7 +93,10 @@ than double-booking (YAGNI: no multi-board reservation yet).
   `running` list also refreshes card liveness (RLY-226, `Runs.refresh_running_card_liveness/2`):
   the server stamps `agent_heartbeat_at` on the cards whose reported job is still active, the
   positive complement of the revoke query, so a live-but-quiet agent never falsely reads `:stale`
-  in `Cards.health/1`.
+  in `Cards.health/1`. `latest_executor_version` (RE185) is the newest `bin/relay` the public
+  relay-config repo actually serves — `Relay.Runs.latest_executor_version/0`, read from the
+  committed `.relay/published.json` marker. It is a **target**, distinct from
+  `required_version`'s **floor**; an executor with `auto_update` on updates itself against it.
 - **Run ids**: each executor worker tags its log lines with the claimed job's `run_id`
   (RLY-112) so a card's timeline can group lines by run.
 
@@ -164,6 +167,13 @@ the same base) — the board server is no longer in the scaffolding path. The bo
 (`RELAY_URL`) is still needed at runtime, for the API key `relay execute` authenticates
 with, and is still named in `init`'s closing checklist.
 
+`mix relay.publish_config` also writes **`.relay/published.json`** in this repo, recording the
+`EXECUTOR_VERSION` it published. That marker is the only truthful answer to "what can an
+executor actually download", since `bin/relay` here routinely runs ahead of what a human has
+pushed to relay-config. `mix relay.publish_config --check` exits non-zero when the source is
+ahead of the marker; `--check --warn` prints the same comparison as a banner and always exits 0,
+and is what `mix precommit` runs so iterating on `bin/relay` is never blocked.
+
 ## Node-job transport (RLY-134, ADR 0006 card 04)
 
 The first slice of ADR 0006's target shape: a pure REST transport on top of the runs engine
@@ -198,7 +208,11 @@ that stays server-side.
   the beat is how it stays on the roster and how revokes still reach it — and its reply carries
   `executor_outdated` / `required_version`. A refused executor stays alive, advertises
   `{"shared_clean": 0, "exclusive": 0}` so nothing queues behind it, finishes in-flight work,
-  and wears an `OUTDATED` badge on the runners view until a human restarts it.
+  and wears an `OUTDATED` badge on the runners view until a human restarts it. **Auto-update
+  (RE185).** The heartbeat reply also carries `latest_executor_version`, and an executor with
+  `auto_update` on downloads that version from relay-config and re-execs at a job boundary, so
+  being refused is normally self-healing. The fail-stop below is unchanged and remains the
+  floor: when auto-update is off, refused, or does not take, the executor still stops loudly.
 - `POST /api/node-jobs/:id/outcome` (`.outcome/2`) — `Relay.Runs.get_claimed_job/2` (board-
   scoped) returns a three-way result: a `claimed` job runs
   `Relay.Runs.report_outcome/2` against the closed outcome set (422 `unknown_outcome` on a bad
@@ -406,8 +420,10 @@ silently billed to the paid API.
   `cache_dir` (a warm dep/build cache dir passed to the prepare hook), `prepare` (path to a
   project-specific prepare hook, default `.relay/prepare-worktree.sh`), and
   `max_retained_failed` (how many failed-run worktrees to keep for post-mortem before the
-  oldest is evicted, default 3). Missing file → sensible defaults, including all three new
-  keys; capacity is the field a developer routinely edits.
+  oldest is evicted, default 3), and two auto-update keys (RE185): `auto_update` (default
+  `true`) and `auto_update_min_interval` (seconds between update attempts, default 300).
+  Missing file → sensible defaults, including all three new keys; capacity is the field a
+  developer routinely edits.
 
   > **Running more than one `exclusive` slot?** Concurrent runs each work in their own
   > worktree, so make sure they don't share mutable state — most importantly, **give each run
@@ -504,8 +520,9 @@ silently billed to the paid API.
 - **Heartbeat-borne revoke.** `ExecutorHeartbeat` POSTs `{executor, capacity,
   running: [job-ids], bound_runs: [run-ids]}` to `POST /api/node-jobs/heartbeat` every
   `heartbeat_interval`s and reads `{revoked: [job-ids],
-  release_runs: [{run_id, status}]}` back (RLY-164, status shape RLY-231), terminating each
-  revoked job's live subprocess via its `JobControl`. `release_runs` is the run-scoped
+  release_runs: [{run_id, status}], latest_executor_version}` back (RLY-164, status shape
+  RLY-231), terminating each revoked job's live subprocess via its `JobControl`. `release_runs`
+  is the run-scoped
   analogue of `revoked` (RLY-218): the executor advertises the run-ids of per-card worktrees
   it holds with no live job (`bound_runs`), and the server names the subset gone terminal
   server-side — with the status needed to choose remove vs retain
@@ -520,6 +537,34 @@ silently billed to the paid API.
   reset-on-revoke for exclusive jobs is gone: no reset is ever needed mid-run now that a
   worktree's identity is the card itself. Either way, no outcome is reported for a revoked
   job — the server already knows a revoked job never finished.
+- **Auto-update (RE185).** When the beat's `latest_executor_version` exceeds the running
+  `EXECUTOR_VERSION`, `maybe_auto_update` fires from the claim loop — but only at a **job
+  boundary** (nothing in flight), never under `--once`, and never more often than
+  `auto_update_min_interval` or more than three times in one process's life. It downloads
+  `bin/relay` from relay-config (`RELAY_CONFIG_URL`) through `download_executor`, the one
+  verified download path `relay init` also uses: HTTPS, UTF-8, a leading `#!`, an
+  `EXECUTOR_VERSION` parsed **from the downloaded bytes** (authoritative — a board ahead of
+  relay-config is then harmless, not a chase), a `compile()` syntax check, and strictly newer.
+  Verification is deliberately HTTPS + parse only: no checksum, no signature. Any rejection logs
+  why and the running version keeps serving; a bad update can never leave a machine with a broken
+  executor.
+
+  The install writes the **tracked** `bin/relay` in place (`os.replace`, so a concurrent
+  `bin/relay card …` never reads a half-written file). `_safe_to_overwrite` is what makes that
+  tolerable: untracked or not-a-repo is fine, tracked-and-clean is fine, and tracked-and-dirty is
+  allowed **only** when the file's sha256 matches a write recorded in `~/.relay/auto-update.json`
+  — otherwise the dirt is a human's uncommitted edit and the update is skipped with a one-time
+  log line. That ledger is not a nicety: after the first auto-update the file is permanently
+  dirty against HEAD, so a clean-only rule would wedge every later update. The accepted cost is
+  that `bin/relay` shows as modified in `git status` on the machine running the executor.
+
+  The restart stops the heartbeat and the log forwarder, calls `release_executor_locks()` —
+  **required**, because RLY-193's flocks belong to open file descriptions that survive `execv`
+  while the re-exec'd image opens new descriptors and would die "already running" — then
+  `os.execv`s with `RELAY_UPDATED_FROM`/`RELAY_UPDATE_ATTEMPTS` set. On the way back up
+  `check_update_handshake` compares: newer, and it logs the transition; same or older, and
+  auto-update is disabled for that process, leaving RLY-184's fail-stop as the behaviour. Three
+  attempts disable it the same way. Opt out with `"auto_update": false`.
 
 ### Declaring an outcome
 

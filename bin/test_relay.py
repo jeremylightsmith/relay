@@ -2449,6 +2449,168 @@ class AutoUpdateInstallTest(unittest.TestCase):
                                                 os.path.join(self.tmp, "nope", "relay")))
 
 
+class AutoUpdateHandshakeTest(unittest.TestCase):
+    """RE185 anti-thrash: the ONLY thing standing between a bad restart and an infinite
+    restart loop is what we read out of RELAY_UPDATED_FROM on the way back up."""
+
+    def setUp(self):
+        self.addCleanup(setattr, relay, "log", relay.log)
+        self.logs = []
+        relay.log = lambda msg, **k: self.logs.append(msg)
+        for k in ("RELAY_UPDATED_FROM", "RELAY_UPDATE_ATTEMPTS"):
+            prev = os.environ.get(k)
+            self.addCleanup(lambda k=k, v=prev: os.environ.__setitem__(k, v)
+                            if v is not None else os.environ.pop(k, None))
+            os.environ.pop(k, None)
+
+    def test_a_fresh_process_is_enabled_and_says_nothing(self):
+        state = relay.check_update_handshake(relay.new_auto_update_state())
+        self.assertFalse(state["disabled"])
+        self.assertEqual(self.logs, [])
+
+    def test_landing_on_newer_code_logs_the_transition(self):
+        os.environ["RELAY_UPDATED_FROM"] = str(relay.EXECUTOR_VERSION - 1)
+        state = relay.check_update_handshake(relay.new_auto_update_state())
+        self.assertFalse(state["disabled"])
+        self.assertTrue(any("restarted into version" in m for m in self.logs))
+        self.assertNotIn("RELAY_UPDATED_FROM", os.environ)
+
+    def test_landing_on_the_same_code_disables_auto_update_loudly(self):
+        os.environ["RELAY_UPDATED_FROM"] = str(relay.EXECUTOR_VERSION)
+        state = relay.check_update_handshake(relay.new_auto_update_state())
+        self.assertTrue(state["disabled"])
+        self.assertTrue(any("did not take" in m for m in self.logs))
+
+    def test_a_garbage_marker_disables_rather_than_trusting_it(self):
+        os.environ["RELAY_UPDATED_FROM"] = "not-a-number"
+        state = relay.check_update_handshake(relay.new_auto_update_state())
+        self.assertTrue(state["disabled"])
+
+    def test_the_attempt_count_survives_the_exec_and_caps_out(self):
+        os.environ["RELAY_UPDATED_FROM"] = str(relay.EXECUTOR_VERSION - 1)
+        os.environ["RELAY_UPDATE_ATTEMPTS"] = str(relay.AUTO_UPDATE_MAX_ATTEMPTS)
+        state = relay.check_update_handshake(relay.new_auto_update_state())
+        self.assertEqual(state["attempts"], relay.AUTO_UPDATE_MAX_ATTEMPTS)
+        self.assertTrue(state["disabled"])
+
+
+class MaybeAutoUpdateTest(unittest.TestCase):
+    """RE185 unit E: the guard ladder, in order. Every guard that fails must leave the running
+    executor untouched."""
+
+    CONFIG = "http://config.test"
+
+    def setUp(self):
+        isolate_relay_state(self)
+        self.addCleanup(setattr, relay, "log", relay.log)
+        self.logs = []
+        relay.log = lambda msg, **k: self.logs.append(msg)
+        self.addCleanup(setattr, relay, "download_executor", relay.download_executor)
+        self.addCleanup(setattr, relay, "install_executor", relay.install_executor)
+        self.addCleanup(setattr, relay, "_safe_to_overwrite", relay._safe_to_overwrite)
+        self.addCleanup(setattr, relay, "restart_executor", relay.restart_executor)
+        self.addCleanup(setattr, relay, "FORWARDER", relay.FORWARDER)
+        relay.FORWARDER = None
+        self.new = relay.EXECUTOR_VERSION + 1
+        self.installed, self.restarts = [], []
+        relay.download_executor = lambda url: (VALID_STUB.format(self.new), self.new)
+        relay.install_executor = lambda src, v, path=None: (self.installed.append(v) or True)
+        relay._safe_to_overwrite = lambda path: True
+        relay.restart_executor = lambda frm, attempts: self.restarts.append((frm, attempts))
+        self.cfg = {"auto_update": True, "auto_update_min_interval": 300}
+        self.state = relay.new_auto_update_state()
+
+    def _hb(self, latest):
+        hb = relay.ExecutorHeartbeat({"name": "b", "host": "h"}, lambda: [],
+                                     lambda jid: None, interval=15)
+        hb.latest_version = latest
+        return hb
+
+    def _run(self, latest):
+        return relay.maybe_auto_update(self.cfg, self._hb(latest), self.state, self.CONFIG)
+
+    def test_a_newer_version_is_installed_and_restarts(self):
+        self.assertTrue(self._run(self.new))
+        self.assertEqual(self.installed, [self.new])
+        self.assertEqual(self.restarts, [(relay.EXECUTOR_VERSION, 1)])
+        self.assertTrue(any(f"{relay.EXECUTOR_VERSION} → {self.new}" in m for m in self.logs))
+
+    def test_opting_out_does_nothing_at_all(self):
+        self.cfg["auto_update"] = False
+        self.assertFalse(self._run(self.new))
+        self.assertEqual((self.installed, self.restarts), ([], []))
+
+    def test_a_disabled_process_does_nothing(self):
+        self.state["disabled"] = True
+        self.assertFalse(self._run(self.new))
+        self.assertEqual(self.restarts, [])
+
+    def test_no_announcement_or_an_older_one_does_nothing(self):
+        for latest in (None, "29", relay.EXECUTOR_VERSION, relay.EXECUTOR_VERSION - 1):
+            self.assertFalse(self._run(latest))
+        self.assertEqual(self.restarts, [])
+
+    def test_the_cooldown_stops_a_second_attempt(self):
+        self.assertTrue(self._run(self.new))
+        self.assertFalse(self._run(self.new))
+        self.assertEqual(len(self.restarts), 1)
+
+    def test_the_attempt_cap_disables_auto_update(self):
+        self.state["attempts"] = relay.AUTO_UPDATE_MAX_ATTEMPTS
+        self.assertFalse(self._run(self.new))
+        self.assertTrue(self.state["disabled"])
+
+    def test_local_modifications_are_never_clobbered_and_warn_once(self):
+        relay._safe_to_overwrite = lambda path: False
+        self.assertFalse(self._run(self.new))
+        self.state["last"] = 0        # skip the cooldown to prove the warning is one-time
+        self.assertFalse(self._run(self.new))
+        self.assertEqual((self.installed, self.restarts), ([], []))
+        self.assertEqual(sum("local modifications" in m for m in self.logs), 1)
+
+    def test_a_refused_download_leaves_the_running_version_alone(self):
+        relay.download_executor = lambda url: None
+        self.assertFalse(self._run(self.new))
+        self.assertEqual((self.installed, self.restarts), ([], []))
+
+    def test_a_failed_install_does_not_restart(self):
+        relay.install_executor = lambda src, v, path=None: False
+        self.assertFalse(self._run(self.new))
+        self.assertEqual(self.restarts, [])
+
+
+class RestartExecutorTest(unittest.TestCase):
+    """RE185 unit E step 10. Releasing the flocks BEFORE the exec is required, not tidy:
+    RLY-193's locks belong to open file descriptions that survive execv, and the re-exec'd
+    image opens NEW descriptors — it would fail to take its own locks and die 'already
+    running'."""
+
+    def setUp(self):
+        self.addCleanup(setattr, relay, "release_executor_locks", relay.release_executor_locks)
+        self.addCleanup(setattr, relay.os, "execv", relay.os.execv)
+        for k in ("RELAY_UPDATED_FROM", "RELAY_UPDATE_ATTEMPTS"):
+            prev = os.environ.get(k)
+            self.addCleanup(lambda k=k, v=prev: os.environ.__setitem__(k, v)
+                            if v is not None else os.environ.pop(k, None))
+            os.environ.pop(k, None)
+        self.order, self.execs = [], []
+        relay.release_executor_locks = lambda: self.order.append("release")
+        relay.os.execv = lambda path, argv: (self.order.append("execv")
+                                             or self.execs.append((path, argv)))
+
+    def test_the_argv_reruns_this_interpreter_on_the_same_command_line(self):
+        self.assertEqual(relay.auto_update_argv(), [relay.sys.executable] + relay.sys.argv)
+
+    def test_it_releases_the_locks_before_exec_and_hands_over_the_handshake(self):
+        relay.restart_executor(28, 2)
+        self.assertEqual(self.order, ["release", "execv"])
+        self.assertEqual(os.environ["RELAY_UPDATED_FROM"], "28")
+        self.assertEqual(os.environ["RELAY_UPDATE_ATTEMPTS"], "2")
+        (path, argv), = self.execs
+        self.assertEqual(path, relay.sys.executable)
+        self.assertEqual(argv, relay.auto_update_argv())
+
+
 class ExecuteOnePrepareHookTest(unittest.TestCase):
     """RLY-231: on a reset (first job / reclaim) execute_one creates-or-rebaselines the worktree
     and runs the prepare hook BEFORE the flow node; a nonzero hook fails the run fail-fast."""
@@ -2767,6 +2929,19 @@ class ExecuteLoopTest(unittest.TestCase):
         relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
 
         self.assertEqual(self.reports[0][:2], ("nj-10", "failed"))
+
+    def test_once_never_auto_updates(self):
+        """A single-job invocation restarting itself would re-run the whole command; the job
+        boundary that makes a restart safe only exists in the long-running loop."""
+        self.addCleanup(setattr, relay, "maybe_auto_update", relay.maybe_auto_update)
+        calls = []
+        relay.maybe_auto_update = lambda *a, **k: calls.append(a)
+        relay.claim_node_job = lambda executor, capacity, timeout: None
+        relay.report_outcome = lambda *a: None
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+
+        self.assertEqual(calls, [])
 
 
 class ExecuteParserTest(unittest.TestCase):

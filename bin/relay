@@ -69,8 +69,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 29
-EXECUTOR_FINGERPRINT = "cc64b28e75ac4b00436135297a32ad768b5b354d5ed4481b758cd46a25ec4ace"
+EXECUTOR_VERSION = 30
+EXECUTOR_FINGERPRINT = "8f9f89a7140a1f143de34bfe05484b8fb650605b3bb2fb92b8d8959c86026972"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -2499,12 +2499,127 @@ def install_executor(source, version, path=None):
     return True
 
 
+def new_auto_update_state():
+    """Per-process auto-update bookkeeping.
+
+    `attempts` is seeded from the environment so the cap survives a re-exec — otherwise a
+    process that restarts into working-but-still-behind code would reset its own counter and
+    thrash forever.
+    """
+    try:
+        attempts = int(os.environ.get("RELAY_UPDATE_ATTEMPTS") or 0)
+    except ValueError:
+        attempts = 0
+    return {"disabled": False, "attempts": attempts, "last": 0.0, "warned_dirty": False}
+
+
+def check_update_handshake(state):
+    """Read (and clear) the RELAY_UPDATED_FROM handshake the process that exec'd into us left.
+
+    A restart that landed on the SAME or OLDER code means the update did not take — a symlinked
+    bin/relay, a read-only mount, a `python -m` wrapper. Looping on that would restart forever,
+    so auto-update is disabled for this process and RLY-184's fail-stop is left as the
+    behaviour: refused, visible, loud, and waiting for a human.
+    """
+    raw = os.environ.pop("RELAY_UPDATED_FROM", None)
+    os.environ.pop("RELAY_UPDATE_ATTEMPTS", None)
+    if raw is not None:
+        try:
+            previous = int(raw)
+        except ValueError:
+            previous = None
+        if previous is not None and EXECUTOR_VERSION > previous:
+            log(f"auto-update: restarted into version {EXECUTOR_VERSION} (was {previous})")
+        else:
+            state["disabled"] = True
+            log(f"auto-update: restarted but this process is still version {EXECUTOR_VERSION} "
+                f"(was {raw}) — the update did not take. Auto-update is disabled for this "
+                "process; restart `relay execute` by hand to pick up new code.", kind="error")
+    if state["attempts"] >= AUTO_UPDATE_MAX_ATTEMPTS:
+        state["disabled"] = True
+        log(f"auto-update: {state['attempts']} attempts already in this process's lifetime — "
+            "disabled to avoid thrashing.", kind="error")
+    return state
+
+
+def auto_update_argv():
+    """The argv the re-exec runs: this interpreter, re-running the same command line."""
+    return [sys.executable] + sys.argv
+
+
+def restart_executor(from_version, attempts):
+    """Re-exec this process in place, into the freshly installed bin/relay. Does not return.
+
+    Releasing the singleton flocks FIRST is required, not tidy: RLY-193's locks belong to open
+    file descriptions that survive execv, and the re-exec'd image opens NEW descriptors — it
+    would fail to acquire its own locks and die "already running". The env vars are the
+    handshake check_update_handshake() reads on the way back up.
+    """
+    release_executor_locks()
+    os.environ["RELAY_UPDATED_FROM"] = str(from_version)
+    os.environ["RELAY_UPDATE_ATTEMPTS"] = str(attempts)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    argv = auto_update_argv()
+    os.execv(argv[0], argv)
+
+
+def maybe_auto_update(cfg, hb, state, config_url):
+    """Install a newer bin/relay and hand off to restart_executor, when every guard passes.
+
+    Called from the claim loop with NOTHING in flight — that is what makes the restart safe at a
+    job boundary (card §3). Returns True only when it handed off to restart_executor (which does
+    not return in production); False every other time, having changed nothing. The guards are
+    ordered cheapest-and-side-effect-free first.
+    """
+    if state["disabled"] or not cfg.get("auto_update", True):
+        return False
+    latest = getattr(hb, "latest_version", None)
+    if not isinstance(latest, int) or isinstance(latest, bool) or latest <= EXECUTOR_VERSION:
+        return False
+    if state["attempts"] >= AUTO_UPDATE_MAX_ATTEMPTS:
+        state["disabled"] = True
+        log(f"auto-update: already attempted {state['attempts']} times in this process — "
+            "disabled to avoid thrashing. Restart by hand to pick up new code.", kind="error")
+        return False
+    now = time.time()
+    if state["last"] and now - state["last"] < cfg.get("auto_update_min_interval", 300):
+        return False
+    state["last"] = now
+    if not _safe_to_overwrite(HERE):
+        if not state["warned_dirty"]:
+            state["warned_dirty"] = True
+            log(f"auto-update: the board serves version {latest} but {HERE} has local "
+                "modifications this executor did not write — skipping rather than clobbering "
+                'them. Commit or stash them, or set "auto_update": false in '
+                ".relay/executor.json.", kind="error")
+        return False
+    result = download_executor(config_url)
+    if result is None:
+        return False
+    source, version = result
+    if not install_executor(source, version):
+        return False
+    state["attempts"] += 1
+    log(f"auto-update: rewrote {HERE} {EXECUTOR_VERSION} → {version} from {config_url}. "
+        "That file is git-tracked here, so this is the `git status` entry you are about to "
+        "see. Restarting at a job boundary…")
+    if hb:
+        hb.stop()
+    if FORWARDER and not DRY:
+        FORWARDER.stop()
+    restart_executor(EXECUTOR_VERSION, state["attempts"])
+    return True
+
+
 def cmd_execute(args):
     """The runner mode (ADR 0006): claim node-jobs from the server, run each in an executor
     worktree, and report a typed outcome."""
     global DRY, FORWARDER
     DRY = args.dry_run
     cfg = load_executor_config()
+    update_state = check_update_handshake(new_auto_update_state())
+    config_url = _config_url(args)
     poll_timeout = args.interval or cfg["poll_timeout"]
     env("RELAY_URL"), env("RELAY_API_KEY")
     acquire_executor_locks(cfg)   # RLY-193: refuse a colliding second executor before any work
@@ -2587,6 +2702,14 @@ def cmd_execute(args):
         + (" (dry-run)" if DRY else "") + (" — one job" if args.once else ""))
 
     while not stop.is_set():
+        # RE185: a job boundary — nothing in flight — is the only place a restart is free.
+        # Deliberately BEFORE the `outdated` branch: for a refused executor, auto-update is
+        # the usual way out of that state. `--once` never restarts itself; the boundary that
+        # makes it safe only exists in the long-running loop.
+        with lock:
+            idle = not in_flight
+        if idle and not args.once and maybe_auto_update(cfg, hb, update_state, config_url):
+            return
         if outdated:
             # Refused by the server: stop claiming, but keep beating (zero capacity) so the
             # process stays on the roster wearing its OUTDATED badge instead of vanishing.

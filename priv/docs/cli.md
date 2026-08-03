@@ -15,7 +15,7 @@ exits non-zero.
 
 | Command | What it does |
 | --- | --- |
-| `bin/relay init` | Interactively scaffold this project from the `relay-config` repo: `relay.md`, `.claude/` agents + skills, `AGENTS.md`/`CLAUDE.md`. Flags: `--config-url` (relay-config base, else `RELAY_CONFIG_URL`), `--url` (board host for the closing checklist, else `RELAY_URL`), `--no-self-update` (skip the upgrade-only `bin/relay` refresh). See [Getting started](/docs) |
+| `bin/relay init` | Interactively scaffold this project from the `relay-config` repo: `relay.md`, `.claude/` agents + skills, `AGENTS.md`/`CLAUDE.md`. Flags: `--config-url` (relay-config base, else `RELAY_CONFIG_URL`), `--url` (board host for the closing checklist, else `RELAY_URL`), `--no-self-update` (skip the upgrade-only, verified `bin/relay` refresh). See [Getting started](/docs) |
 | `bin/relay board` | The board: stages with their cards |
 | `bin/relay card RLY-12` | One card: description, plan, branch, timeline |
 | `bin/relay why RLY-12` | **Why isn't this card moving?** One plain-language answer |
@@ -50,5 +50,28 @@ git log -1 --format=%B | bin/relay comment RLY-12 -
 
 Every `--json` command also takes `--field PATH` to print a single dotted-path value bare —
 `bin/relay card RLY-12 --field status` prints `working`, with no quotes and no `jq`.
+
+## Keeping `bin/relay` current
+
+`bin/relay execute` keeps itself up to date (RE185). Each heartbeat reply names
+`latest_executor_version` — the newest CLI the public `relay-config` repo actually serves — and
+when the executor is behind it downloads that file, verifies it parses, writes it over its own
+`bin/relay`, and restarts **at a job boundary**, so a running node is never interrupted. A
+download that will not compile is refused and the previous version keeps running, and a
+`bin/relay` with local modifications this executor did not write is never overwritten.
+
+Two `.relay/executor.json` keys control it:
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `auto_update` | `true` | Set `false` to pin this machine's CLI. It then falls back to RLY-184's behaviour: once the board's minimum passes it by, it stops claiming and says so loudly. |
+| `auto_update_min_interval` | `300` | Seconds between update attempts. |
+
+`RELAY_CONFIG_URL` overrides where the CLI is fetched from.
+
+Publishing stays a human step: `mix relay.publish_config` regenerates the `relay-config` tree and
+records what it published in `.relay/published.json`. `mix relay.publish_config --check` exits
+non-zero when `bin/relay` is ahead of that marker (i.e. executors cannot yet fetch your change);
+`mix precommit` runs the `--check --warn` form, which prints the same warning without failing.
 
 For the autonomous runner and its operating rules, see [the runner](/docs/architecture-runner).
