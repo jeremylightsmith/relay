@@ -34,17 +34,99 @@ A card's status says whose turn it is and whether anything is holding it. Which 
 valid depends on the **stage type** it sits on (ADR 0003) — the stage type also fixes the
 status a card takes on entry.
 
+Every arrow below is a status change, and each goes through one writer — `Relay.Cards.set_status/3`
+— **never as a silent side effect of a move**. A cross-stage move re-snaps status only when the
+carried value is *invalid* for the destination stage type (`snap_status/3`, `cards.ex:1174`); a
+status still valid for the new stage rides across unchanged. That **valid-but-stale** branch is the
+seam where a card arrives in a new stage still reading `working`, `needs_input`, or `failed` from
+the last one. Only three writers correct status around a move: `start_run` forces `working` on
+entering the work lane (`runs.ex:711`), `reject` forces `ready` on sending a card back
+(`cards.ex:1334`), and `approve_in_place` forces `ready` in place at the terminal stage
+(`cards.ex:1670`). The non-terminal `approve` and every plain drag trust the snap alone.
+
+Each box's second line is the **stage types** that status is valid on (`Stage.valid_status?/2`).
+
+```mermaid
+stateDiagram-v2
+    direction TB
+    state "ready<br/>queue · work · planning · done" as ready
+    state "queued<br/>queue · done" as queued
+    state "working<br/>work · planning" as working
+    state "needs_input<br/>work · planning" as needs_input
+    state "in_review<br/>review" as in_review
+    state "failed<br/>work · planning" as failed
+
+    [*] --> ready
+
+    ready --> queued: no executor slot
+    queued --> ready: pull withdrawn
+    ready --> working: run starts
+    queued --> working: run starts
+
+    working --> needs_input: needs input · parks
+    working --> failed: run dies
+    working --> in_review: done → review
+    working --> ready: done · mark done
+
+    needs_input --> working: answered
+    failed --> working: retry
+    in_review --> working: approve → work
+    in_review --> in_review: approve → review
+    in_review --> ready: reject · approve at end
+
+    note right of ready
+        ready on the terminal
+        done stage = Done (derived)
+    end note
+```
+
+### Manual moves and the other triggers
+
+The run flow above isn't the only thing that moves a card's status. A human **dragging a card
+between columns** changes status through the *same* snap rule: if the carried status is invalid for
+the destination stage type it snaps to that type's default; if it is still valid, the card just
+moves and its status is untouched. Because the snap only ever writes a stage type's *default*, the
+result depends solely on the destination:
+
+```mermaid
+flowchart LR
+    Q["drag onto a queue / done column"] --> R(["snaps to ready"])
+    W["drag onto a work / planning column"] --> K(["snaps to working"])
+    V["drag onto a review column"] --> I(["snaps to in_review"])
+```
+
+So a drag produces edges the lifecycle diagram doesn't: `failed → in_review` or
+`needs_input → in_review` (dropped on Review), `working → ready` or `in_review → ready` (dropped on
+a queue/done column), `in_review → working` (dropped on a work stage). A `failed` card dropped on
+another work/planning stage **stays `failed`** — the status is valid there, so nothing snaps (the
+seam above). The snap never yields `needs_input`, `failed`, or `queued`; those come only from their
+own writers.
+
+Two more triggers complete the set:
+
+- **Editing a stage's type** re-snaps every card already sitting in it (`snap_cards_in/1`,
+  `cards.ex:1230`) — the same rule fired by an admin change instead of a move.
+- **The untrusted API write** `PATCH /api/cards/:ref` (`set_status_snapped/3`, `cards.ex:536`)
+  coerces the requested status to one valid for the card's *current* stage type — so `failed` can
+  be set directly on a card in a work/planning stage, making `failed` reachable from
+  `ready`/`needs_input`, not only from `working`.
+
+That is the whole set. A card's status changes through exactly these paths — the run engine
+(start / park / finish / fail), the review gate (approve / reject), a human answer / retry /
+mark-done, the scheduler's capacity marking (`ready ↔ queued`), a manual drag or a stage-type edit
+(the snap rule), and the untrusted API write. Nothing else writes `card.status`.
+
 | Stage type | Valid statuses | Default on entry |
 | --- | --- | --- |
 | `queue` | `ready`, `queued` | `ready` |
 | `work` / `planning` | `working`, `ready`, `needs_input`, `failed` | `working` |
-| `review` | `in_review`, `ready` | `in_review` |
+| `review` | `in_review` | `in_review` |
 | `done` | `ready`, `queued` | `ready` |
 
 | Status | Meaning | Typical transition into it |
 | --- | --- | --- |
 | `ready` | Nothing is running; the card is available. | A run finishes, or a human drops the card on a queue stage. |
-| `queued` | The scheduler has picked the card but no run has started yet. | The scheduler admits the card on a `queue` or `done` stage. |
+| `queued` | Capacity-blocked: the scheduler would start a run but no executor has a free isolation slot. Still pullable — the moment a slot frees it dispatches to `working`. | The scheduler finds the card eligible with WIP room but no free executor slot (`Scheduler.place_fresh/4`). A WIP-full column leaves the card `ready`, not `queued`. |
 | `working` | A run is executing a node against this card. | The run starts, or resumes after a park. |
 | `needs_input` | Blocked on a human. The card shows in the "needs you" rollup. | A node reports the `needs_input` outcome. |
 | `in_review` | Waiting at a review gate for a human to approve or reject. | The card lands on a `review` stage. |
