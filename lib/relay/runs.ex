@@ -2164,8 +2164,8 @@ defmodule Relay.Runs do
 
   defp stall_sentence(%Run{status: :failed}, nil), do: "Failed"
   defp stall_sentence(%Run{status: :failed}, node), do: "Failed at #{node}"
-  defp stall_sentence(_run, nil), do: "Agent died"
-  defp stall_sentence(_run, node), do: "Agent died at #{node}"
+  defp stall_sentence(%Run{status: :parked, parked_reason: :needs_input}, nil), do: "Agent died"
+  defp stall_sentence(%Run{status: :parked, parked_reason: :needs_input}, node), do: "Agent died at #{node}"
 
   # The board's restartable runs: the LATEST run per card (exactly the run_summaries_for_board/1
   # model, so the badge counts cards showing a stalled face and the sweep never revives a

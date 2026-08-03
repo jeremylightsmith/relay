@@ -38,15 +38,11 @@ defmodule Relay.Runs.RestartTest do
     Runs.get_run!(run.id)
   end
 
-  # A run parked because the agent died mid-node — same shape as escalation_park/1
-  # (:parked/:needs_input with the latest NodeExecution.outcome == :failed), named for what
-  # RE247's stalled-cards tests are asserting about it: "Agent died at <node>".
-  defp died_agent_park(stage) do
-    {:ok, card} = Relay.Cards.create_card(stage, %{title: "Died"})
-    run = insert(:run, card: card, status: :parked, parked_reason: :needs_input, current_node: nil)
-    insert(:node_execution, run: run, node: "brainstorm", outcome: :failed)
-    Runs.get_run!(run.id)
-  end
+  # A run parked because the agent died mid-node — the SAME persisted state as escalation_park/1
+  # (:parked/:needs_input with the latest NodeExecution.outcome == :failed; the engine records no
+  # distinction between the two). Named separately only so RE247's stalled-cards tests read as
+  # what they're asserting: "Agent died at <node>".
+  defp died_agent_park(stage), do: escalation_park(stage)
 
   describe "restartable?/1 truth table" do
     test "a clean :failed run is restartable", %{stage: stage} do
@@ -219,6 +215,21 @@ defmodule Relay.Runs.RestartTest do
       assert summary.restarted + summary.refused == 1
       assert Runs.get_run!(done_run.id).status == :failed
     end
+
+    test "a failed run on a card in a Spec:Done SUB-LANE (not the board's final Done column) is also excluded", ctx do
+      spec_done = Enum.find(ctx.board.stages, &(&1.name == "Spec:Done"))
+      assert spec_done.type == :done
+
+      {:ok, sub_lane_card} = Relay.Cards.create_card(spec_done, %{title: "Spec shipped"})
+      sub_lane_run = insert(:run, card: sub_lane_card, status: :failed, current_node: nil, failure_detail: "boom")
+      insert(:node_execution, run: sub_lane_run, node: "brainstorm", outcome: :failed)
+
+      working = clean_failed(ctx.stage)
+
+      assert Runs.restartable_count(ctx.board) == 1
+      assert [%{card: listed}] = Runs.stalled_cards(ctx.board)
+      assert listed.id == working.card_id
+    end
   end
 
   describe "stalled_cards/1" do
@@ -275,6 +286,15 @@ defmodule Relay.Runs.RestartTest do
 
       assert Runs.stall_reason(Runs.get_run!(failed.id)) == "Failed"
       assert Runs.stall_reason(Runs.get_run!(parked.id)) == "Agent died"
+    end
+
+    test "an executor_gone park — the one state actually true of 'agent died' — is not restartable, and stall_reason refuses to describe it",
+         %{stage: stage} do
+      {:ok, card} = Relay.Cards.create_card(stage, %{title: "Executor gone"})
+      run = insert(:run, card: card, status: :parked, parked_reason: :executor_gone, current_node: "code")
+
+      refute Runs.restartable?(Runs.get_run!(run.id))
+      assert_raise FunctionClauseError, fn -> Runs.stall_reason(Runs.get_run!(run.id)) end
     end
   end
 
