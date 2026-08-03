@@ -52,7 +52,15 @@ defmodule Relay.Runs.PublishMarkerTest do
              PublishMarker.version(PublishMarker.path(File.cwd!()))
   end
 
-  test "latest_executor_version/0 is an integer or nil" do
-    assert is_integer(Runs.latest_executor_version()) or is_nil(Runs.latest_executor_version())
+  test "the Dockerfile copies .relay into the build stage before compiling, so the marker is not silently nil in prod" do
+    # Compile-time embedding (@external_resource) means `mix compile` in the builder stage is
+    # what bakes `latest_executor_version/0`'s answer into the release. If `.relay` never lands
+    # in the build context, `PublishMarker.version/1` quietly returns nil (its documented
+    # behaviour for "no file") and every deployed heartbeat reports `latest_executor_version:
+    # null` — indistinguishable from "nothing published yet".
+    dockerfile = File.read!("Dockerfile")
+    [pre_compile, _] = String.split(dockerfile, ~r/^RUN mix compile$/m, parts: 2)
+
+    assert pre_compile =~ ~r/^COPY \.relay \.relay$/m
   end
 end

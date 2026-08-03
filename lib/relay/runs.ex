@@ -963,14 +963,7 @@ defmodule Relay.Runs do
   correct answer when there is nothing to fetch.
   """
   @spec latest_executor_version() :: integer() | nil
-  # Routed through `identity/1` so the compiler's type checker treats this repo's CURRENT
-  # `.relay/published.json` value (a concrete literal at compile time, e.g. `28`) as the
-  # declared `integer() | nil`, not as a narrower singleton type — otherwise a non-nil marker
-  # makes `is_integer(latest_executor_version())` a compile warning ("always succeeds"), which
-  # `mix precommit` treats as a build failure.
-  def latest_executor_version, do: identity(@latest_executor_version)
-
-  defp identity(value), do: value
+  def latest_executor_version, do: @latest_executor_version
 
   @doc """
   Whether this executor is running code older than the server requires.

@@ -51,7 +51,7 @@ defmodule Mix.Tasks.Relay.PublishConfig do
     {opts, rest} = OptionParser.parse!(args, strict: [check: :boolean, warn: :boolean])
 
     if opts[:check] do
-      check(File.cwd!(), opts[:warn] || false)
+      check(List.first(rest) || File.cwd!(), opts[:warn] || false)
     else
       publish(File.cwd!(), List.first(rest))
     end
@@ -61,8 +61,10 @@ defmodule Mix.Tasks.Relay.PublishConfig do
   Whether `bin/relay` is ahead of what was last published to relay-config.
 
   `{:ok, version}` when the source and `.relay/published.json` agree; `{:drift, source,
-  published}` otherwise (`published` is `nil` when nothing has been published). ONE comparison
-  behind all three callers — the task's own post-publish report, `--check`, and `--check --warn`.
+  published}` otherwise (`published` is `nil` when nothing has been published). The ONE
+  comparison behind `check/2`'s two modes (`--check` and `--check --warn`) — `publish/2` never
+  calls it, because publishing always writes the marker to match `bin/relay`, so there is never
+  drift to report right after a publish.
   """
   def drift(src) do
     source = executor_version(src)
@@ -111,7 +113,11 @@ defmodule Mix.Tasks.Relay.PublishConfig do
     """
   end
 
-  defp publish(src, dst_arg) do
+  @doc false
+  # Public (not just private) so tests can publish from an isolated copy of the source tree
+  # instead of `File.cwd!()` — this repo's TRACKED `.relay/published.json` must never be a test
+  # side effect (RE185 review).
+  def publish(src, dst_arg) do
     dst = dst_arg || Path.expand("../relay-config", src)
     File.mkdir_p!(dst)
 

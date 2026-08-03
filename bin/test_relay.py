@@ -241,7 +241,6 @@ class ReverseContractTest(unittest.TestCase):
         relay-config actually serves), which is a DIFFERENT number from `required_version`
         (the floor below which work is refused)."""
         self.assertIn("latest_executor_version", CONTRACT["heartbeat"]["response"])
-        self.assertNotEqual("latest_executor_version", "required_version")
 
 
 class PrintCardTest(unittest.TestCase):

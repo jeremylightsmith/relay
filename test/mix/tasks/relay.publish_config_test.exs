@@ -1,6 +1,7 @@
 defmodule Mix.Tasks.Relay.PublishConfigTest do
-  # async: false — publishing writes THIS repo's `.relay/published.json` (the publish marker),
-  # so the run must not race another test, and the setup below restores the committed file.
+  # async: false — the drift/--check describe block below writes fixtures under its own
+  # `tmp_dir`, and publishing (see setup below) copies real source files; keep the run serial
+  # so a slow copy on one test doesn't overlap another.
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO
@@ -10,19 +11,23 @@ defmodule Mix.Tasks.Relay.PublishConfigTest do
 
   @moduletag :tmp_dir
 
+  # RE185 review: publishing writes a `.relay/published.json` marker at `src`. Publishing
+  # straight from `File.cwd!()` would make every test run write THIS repo's TRACKED marker —
+  # a hard-killed `mix test` would then leave the working tree claiming a version was
+  # published when it wasn't. Instead, copy just what `publish/2` reads (bin/relay, .claude/,
+  # relay.md) into a scratch `src` under `tmp_dir`, so the marker it writes lands there too.
   setup %{tmp_dir: tmp_dir} do
-    marker = PublishMarker.path(File.cwd!())
-    saved = File.read(marker)
+    src = Path.join(tmp_dir, "_src")
 
-    on_exit(fn ->
-      case saved do
-        {:ok, body} -> File.write!(marker, body)
-        {:error, _} -> File.rm_rf!(marker)
-      end
-    end)
+    for rel <- ~w(bin .claude relay.md) do
+      dest = Path.join(src, rel)
+      dest |> Path.dirname() |> File.mkdir_p!()
+      File.cp_r!(Path.join(File.cwd!(), rel), dest)
+    end
 
-    capture_io(fn -> PublishConfig.run([tmp_dir]) end)
-    {:ok, manifest: Jason.decode!(File.read!(Path.join(tmp_dir, "manifest.json")))}
+    capture_io(fn -> PublishConfig.publish(src, tmp_dir) end)
+
+    {:ok, manifest: Jason.decode!(File.read!(Path.join(tmp_dir, "manifest.json"))), src: src}
   end
 
   test "the manifest lists every tooling skill", %{manifest: manifest} do
@@ -53,9 +58,20 @@ defmodule Mix.Tasks.Relay.PublishConfigTest do
     assert manifest["executor"]["version"] == String.to_integer(version)
   end
 
-  test "publishing records what it published in the marker" do
-    assert PublishMarker.version(PublishMarker.path(File.cwd!())) ==
-             PublishConfig.executor_version(File.cwd!())
+  test "publishing records what it published in the marker", %{src: src} do
+    assert PublishMarker.version(PublishMarker.path(src)) ==
+             PublishConfig.executor_version(src)
+  end
+
+  test "the fixture publishes from an isolated copy of the source tree, not this repo's cwd", %{
+    src: src,
+    tmp_dir: tmp_dir
+  } do
+    # RE185 review: this repo's TRACKED .relay/published.json must never be a test's side
+    # effect — a hard-killed `mix test` would leave the working tree claiming a version was
+    # published when it wasn't. `src` must be a copy under `tmp_dir`, never `File.cwd!()`.
+    assert String.starts_with?(src, tmp_dir)
+    refute src == File.cwd!()
   end
 
   test "the scaffolded executor.json advertises the auto-update knob", %{tmp_dir: tmp_dir} do
@@ -100,6 +116,14 @@ defmodule Mix.Tasks.Relay.PublishConfigTest do
       assert error.message =~ "42"
       assert error.message =~ "41"
       assert error.message =~ "mix relay.publish_config"
+    end
+
+    test "run/1 with --check and a path argument checks that path, not the cwd", %{src: src} do
+      # `src` is drifted (nothing published); this repo's own cwd is not. If `--check`'s path
+      # argument were silently discarded, run/1 would fall back to checking cwd and never raise.
+      assert_raise Mix.Error, fn ->
+        capture_io(fn -> PublishConfig.run(["--check", src]) end)
+      end
     end
 
     test "--check --warn warns loudly and never fails", %{src: src} do
