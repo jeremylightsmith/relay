@@ -99,8 +99,8 @@ defmodule RelayWeb.BoardLiveRestartStalledTest do
   end
 
   test "the header control opens a dialog naming every stalled card", ctx do
-    a = park(ctx.board, ctx.flow, "Died A", :failed)
-    b = park(ctx.board, ctx.flow, "Died B", :failed)
+    a = park(ctx.board, ctx.flow, "Escalated A", :failed)
+    b = park(ctx.board, ctx.flow, "Escalated B", :failed)
     ask = park(ctx.board, ctx.flow, "Real question", :needs_input)
 
     {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
@@ -112,15 +112,15 @@ defmodule RelayWeb.BoardLiveRestartStalledTest do
 
     assert has_element?(view, "#stalled-modal")
     assert has_element?(view, "#stalled-row-#{a.card.id}", Cards.ref(ctx.board, a.card))
-    assert has_element?(view, "#stalled-row-#{a.card.id}", "Died A")
-    assert has_element?(view, "#stalled-row-#{a.card.id}", "Agent died at brainstorm")
-    assert has_element?(view, "#stalled-row-#{b.card.id}", "Died B")
+    assert has_element?(view, "#stalled-row-#{a.card.id}", "Escalated A")
+    assert has_element?(view, "#stalled-row-#{a.card.id}", "brainstorm failed — your call")
+    assert has_element?(view, "#stalled-row-#{b.card.id}", "Escalated B")
     refute has_element?(view, "#stalled-row-#{ask.card.id}")
   end
 
   test "opening the dialog restarts nothing", ctx do
-    a = park(ctx.board, ctx.flow, "Died A", :failed)
-    b = park(ctx.board, ctx.flow, "Died B", :failed)
+    a = park(ctx.board, ctx.flow, "Escalated A", :failed)
+    b = park(ctx.board, ctx.flow, "Escalated B", :failed)
 
     {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
     open_dialog(view)
@@ -137,7 +137,7 @@ defmodule RelayWeb.BoardLiveRestartStalledTest do
   end
 
   test "there is no browser confirm and no bulk Restart-all", ctx do
-    _a = park(ctx.board, ctx.flow, "Died A", :failed)
+    _a = park(ctx.board, ctx.flow, "Escalated A", :failed)
 
     {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
 
@@ -149,8 +149,8 @@ defmodule RelayWeb.BoardLiveRestartStalledTest do
   end
 
   test "a row's Restart revives only that card and drops it from the list", ctx do
-    a = park(ctx.board, ctx.flow, "Died A", :failed)
-    b = park(ctx.board, ctx.flow, "Died B", :failed)
+    a = park(ctx.board, ctx.flow, "Escalated A", :failed)
+    b = park(ctx.board, ctx.flow, "Escalated B", :failed)
 
     {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
     open_dialog(view)
@@ -179,7 +179,7 @@ defmodule RelayWeb.BoardLiveRestartStalledTest do
   end
 
   test "clicking a row closes the dialog and opens that card's drawer", ctx do
-    a = park(ctx.board, ctx.flow, "Died A", :failed)
+    a = park(ctx.board, ctx.flow, "Escalated A", :failed)
 
     {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
     open_dialog(view)
@@ -206,7 +206,7 @@ defmodule RelayWeb.BoardLiveRestartStalledTest do
   end
 
   test "the dialog reuses the archived-modal shell", ctx do
-    _a = park(ctx.board, ctx.flow, "Died A", :failed)
+    _a = park(ctx.board, ctx.flow, "Escalated A", :failed)
 
     {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
     open_dialog(view)

@@ -38,12 +38,6 @@ defmodule Relay.Runs.RestartTest do
     Runs.get_run!(run.id)
   end
 
-  # A run parked because the agent died mid-node — the SAME persisted state as escalation_park/1
-  # (:parked/:needs_input with the latest NodeExecution.outcome == :failed; the engine records no
-  # distinction between the two). Named separately only so RE247's stalled-cards tests read as
-  # what they're asserting: "Agent died at <node>".
-  defp died_agent_park(stage), do: escalation_park(stage)
-
   describe "restartable?/1 truth table" do
     test "a clean :failed run is restartable", %{stage: stage} do
       assert Runs.restartable?(clean_failed(stage))
@@ -234,14 +228,14 @@ defmodule Relay.Runs.RestartTest do
 
   describe "stalled_cards/1" do
     test "it carries the card with its stage, a reason, and sorts by ref_number", ctx do
-      died = died_agent_park(ctx.stage)
+      escalated = escalation_park(ctx.stage)
       failed = clean_failed(ctx.stage)
 
       assert [first, second] = Runs.stalled_cards(ctx.board)
 
-      assert first.card.id == died.card_id
-      assert first.run.id == died.id
-      assert first.reason == "Agent died at brainstorm"
+      assert first.card.id == escalated.card_id
+      assert first.run.id == escalated.id
+      assert first.reason == "brainstorm failed — your call"
       assert %Schemas.Stage{} = first.card.stage
 
       assert second.card.id == failed.card_id
@@ -251,7 +245,7 @@ defmodule Relay.Runs.RestartTest do
     end
 
     test "it lists exactly the runs restartable_count/1 counts", ctx do
-      _died = died_agent_park(ctx.stage)
+      _escalated = escalation_park(ctx.stage)
       _failed = clean_failed(ctx.stage)
       _question = genuine_question(ctx.stage)
 
@@ -261,12 +255,14 @@ defmodule Relay.Runs.RestartTest do
   end
 
   describe "stall_reason/1" do
-    test "a failed run names the node it died on", %{stage: stage} do
+    test "a failed run names the node it failed on", %{stage: stage} do
       assert Runs.stall_reason(clean_failed(stage)) == "Failed at brainstorm"
     end
 
-    test "a died-agent park names the node it died on", %{stage: stage} do
-      assert Runs.stall_reason(died_agent_park(stage)) == "Agent died at brainstorm"
+    # The escalation sentence must describe an A4 hand-off, not a crash — it names the same board
+    # state the card drawer labels "NODE FAILED · YOUR CALL" (RE253), so the two must agree.
+    test "an escalation park names the node that failed and says it's the human's call", %{stage: stage} do
+      assert Runs.stall_reason(escalation_park(stage)) == "brainstorm failed — your call"
     end
 
     test "a live parked run reads its own current_node", %{stage: stage} do
@@ -274,10 +270,10 @@ defmodule Relay.Runs.RestartTest do
       run = insert(:run, card: card, status: :parked, parked_reason: :needs_input, current_node: "code")
       insert(:node_execution, run: run, node: "code", outcome: :failed)
 
-      assert Runs.stall_reason(Runs.get_run!(run.id)) == "Agent died at code"
+      assert Runs.stall_reason(Runs.get_run!(run.id)) == "code failed — your call"
     end
 
-    test "no node at all omits the dangling \" at \"", %{stage: stage} do
+    test "no node at all omits the dangling node clause", %{stage: stage} do
       {:ok, failed_card} = Relay.Cards.create_card(stage, %{title: "No executions"})
       failed = insert(:run, card: failed_card, status: :failed, current_node: nil)
 
@@ -285,10 +281,13 @@ defmodule Relay.Runs.RestartTest do
       parked = insert(:run, card: parked_card, status: :parked, parked_reason: :needs_input, current_node: nil)
 
       assert Runs.stall_reason(Runs.get_run!(failed.id)) == "Failed"
-      assert Runs.stall_reason(Runs.get_run!(parked.id)) == "Agent died"
+      assert Runs.stall_reason(Runs.get_run!(parked.id)) == "Node failed — your call"
     end
 
-    test "an executor_gone park — the one state actually true of 'agent died' — is not restartable, and stall_reason refuses to describe it",
+    # stall_reason/1 describes exactly the states restartable?/1 admits and refuses anything else,
+    # so the dialog can never render a sentence for a card it does not list. :executor_gone is the
+    # nearest miss: a park restartable?/1 rejects (RLY-199 auto-resumes those instead).
+    test "it refuses a run restartable?/1 rejects, such as an executor_gone park",
          %{stage: stage} do
       {:ok, card} = Relay.Cards.create_card(stage, %{title: "Executor gone"})
       run = insert(:run, card: card, status: :parked, parked_reason: :executor_gone, current_node: "code")
