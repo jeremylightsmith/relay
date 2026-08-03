@@ -190,6 +190,34 @@ defmodule RelayWeb.BoardRunFaceTest do
       assert has_element?(view, ~s(#card-#{face_ref(board, card)}-run-face[data-stalled="false"]))
       assert has_element?(view, "#card-#{face_ref(board, card)}-run-age")
     end
+
+    test "a claimed job on a live executor stays neutral and keeps its age readout",
+         %{conn: conn, board: board, works: works} do
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      old = DateTime.add(now, -600, :second)
+      insert(:executor, board: board, name: "live", last_heartbeat: now)
+      card = insert(:card, stage: works, status: :working)
+      run = insert(:run, card: card, status: :running, current_node: "implement")
+
+      exec =
+        insert(:node_execution,
+          run: run,
+          node_key: "implement",
+          outcome: nil,
+          finished_at: nil,
+          inserted_at: old
+        )
+
+      insert(:node_job, node_execution: exec, state: :claimed, executor_name: "live", claimed_at: old)
+
+      ref = face_ref(board, card)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, ~s(#card-#{ref}-run-face[data-stalled="false"]))
+      refute has_element?(view, "#card-#{ref}-run-face .run-face-stalled-note")
+      # Decision 3: the elapsed-time readout is preserved, not coupled to @stalled?.
+      assert has_element?(view, "#card-#{ref}-run-age")
+    end
   end
 
   # RLY-204: BoardLive coalesces run events behind a ~150ms debounce (mark_run_dirty/2 +

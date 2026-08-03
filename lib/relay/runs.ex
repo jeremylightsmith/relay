@@ -468,9 +468,10 @@ defmodule Relay.Runs do
   """
   def run_detail(run, flow), do: Relay.Runs.RunDetail.build(run, flow)
 
-  # A live run whose node-job is stuck (queued/unclaimed/held by a silent executor) this long
-  # has stopped moving. Well above a legitimate long node's own claimed runtime — a 40-minute
-  # plan-implementer node is *running*, not stalled, and stays neutral (see run_stalled?/3).
+  # A live run whose node-job is stuck (queued/unclaimed, or held by a silent executor) this long
+  # has stopped moving. It never applies to a job a live executor is holding: working_run_ids/2
+  # excludes those first, so a 40-minute plan-implementer node stays neutral no matter how far
+  # past this threshold it runs (see run_stalled?/3, and RE255 for why that used to be false).
   @run_stale_after_s 300
 
   @doc """
@@ -501,10 +502,15 @@ defmodule Relay.Runs do
   end
 
   @doc """
-  Run ids whose current node-job is actively `:running` on a non-stale executor at `now`. The
-  complement — queued, unclaimed, or held by a silent executor — is what BoardLive treats as a
-  candidate for the stalled run-face treatment. Reuses `executor_stale?/2`, so "working" can
-  never disagree with what the reclaim sweep would act on.
+  Run ids whose current node-job is held by a live claim (`NodeJob.claimed_states/0`) on a
+  non-stale executor at `now`. The complement — queued, unclaimed, or held by a silent executor —
+  is what BoardLive treats as a candidate for the stalled run-face treatment. Reuses
+  `executor_stale?/2`, so "working" can never disagree with what the reclaim sweep would act on.
+
+  A claim IS the start signal: `bin/relay` claims a job and spawns its worker thread in the same
+  loop iteration, so there is no meaningful claimed-but-not-working window (RE255). There is
+  deliberately no time ceiling here — a hung-but-claimed agent is `Cards.health/1`'s signal, and
+  a job on an executor that has gone silent is already excluded by `executor_stale?/2`.
   """
   @spec working_run_ids(Board.t(), DateTime.t()) :: MapSet.t()
   def working_run_ids(%Board{} = board, %DateTime{} = now) do
@@ -519,7 +525,7 @@ defmodule Relay.Runs do
       on: r.id == j.run_id,
       join: c in Card,
       on: c.id == r.card_id,
-      where: c.board_id == ^board.id and j.state == :running,
+      where: c.board_id == ^board.id and j.state in ^NodeJob.claimed_states(),
       select: {j.run_id, j.executor_name}
     )
     |> Repo.all()
@@ -1528,10 +1534,12 @@ defmodule Relay.Runs do
     reason in [:executor_outdated, :no_executor, :executor_gone] and not job_working?(job, board, now)
   end
 
-  defp job_working?(%NodeJob{state: :running, executor_name: name}, board, now) when is_binary(name) do
-    case Repo.get_by(Executor, board_id: board.id, name: name) do
-      nil -> false
-      executor -> not executor_stale?(executor, now)
+  defp job_working?(%NodeJob{state: state, executor_name: name}, board, now) when is_binary(name) do
+    with true <- state in NodeJob.claimed_states(),
+         %Executor{} = executor <- Repo.get_by(Executor, board_id: board.id, name: name) do
+      not executor_stale?(executor, now)
+    else
+      _not_working -> false
     end
   end
 
