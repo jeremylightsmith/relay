@@ -33,6 +33,14 @@ defmodule RelayWeb.BoardLive do
   you are typing. Creates append via `Relay.StoryMap.next_position/1` and let the resulting
   `{:story_map_changed, board_id}` broadcast do the refetch — the creating tab included.
 
+  RE260 adds the map's two view-only chrome controls: `:story_map_zoom` (`:map` | `:compact` |
+  `:full`, defaulting to `:compact`) and `:story_map_hide_tasks`. Both are socket assigns only —
+  they reset on reload exactly like `:story_map_tray_open`, and `refresh_story_map/1` never
+  touches them, so another tab's broadcast cannot reset your view. `:story_map_hide_tasks` is
+  the sixth argument to `StoryMapGrid.build/6`; `:story_map_zoom` reaches only the renderer.
+  Opening a `{:task, _}` draft turns Hide tasks off, because a new task column has nowhere to
+  render while the activity is merged.
+
   RE262 makes it writable: `"assign_card"` / `"unassign_card"` come from the `StoryMapDnD`
   hook rooted on `#story-map`, and both re-render through the `{:card_upserted, _}` echo rather
   than touching story-map assigns directly; `"compose_cell"` / `"cancel_compose_cell"` /
@@ -110,6 +118,11 @@ defmodule RelayWeb.BoardLive do
         >
           {length(@story_map_cards)} cards
         </span>
+        <StoryMapComponents.story_map_toolbar
+          :if={@live_action == :story_map}
+          zoom={@story_map_zoom}
+          hide_tasks={@story_map_hide_tasks}
+        />
         <button
           :if={@stalled_count > 0 and not @read_only?}
           type="button"
@@ -394,6 +407,8 @@ defmodule RelayWeb.BoardLive do
         compose={@story_map_compose}
         compose_form={@compose_form}
         embed={@embed}
+        zoom={@story_map_zoom}
+        hide_tasks={@story_map_hide_tasks}
       />
       <.card_drawer
         :if={@selected_card}
@@ -647,6 +662,8 @@ defmodule RelayWeb.BoardLive do
   attr :compose, :any, required: true
   attr :compose_form, :any, required: true
   attr :embed, :boolean, required: true
+  attr :zoom, :atom, required: true
+  attr :hide_tasks, :boolean, required: true
 
   defp story_map_viewport(assigns) do
     assigns =
@@ -658,7 +675,8 @@ defmodule RelayWeb.BoardLive do
           assigns.tasks,
           assigns.releases,
           assigns.cards,
-          assigns.draft
+          assigns.draft,
+          assigns.hide_tasks
         )
       )
       |> assign(:stalled_ids, MapSet.new(assigns.stalled_cards, & &1.card.id))
@@ -697,6 +715,7 @@ defmodule RelayWeb.BoardLive do
           read_only={@read_only}
           compose={@compose}
           compose_form={@compose_form}
+          zoom={@zoom}
         />
         <StoryMapComponents.story_map_empty
           :if={@grid.bands == []}
@@ -780,6 +799,12 @@ defmodule RelayWeb.BoardLive do
       # itself is the board's existing :compose_form: one composer is open at a time anywhere
       # on this socket, so one form assign is the whole state.
       |> assign(:story_map_compose, nil)
+      # RE260 — the two view-only chrome assigns. Compact is the DEFAULT face (a deliberate
+      # change from RE264's Full). Both are socket-only, exactly like :story_map_tray_open —
+      # no URL param, no localStorage — and both are deliberately untouched by
+      # refresh_story_map/1, so another tab's broadcast never resets your view.
+      |> assign(:story_map_zoom, :compact)
+      |> assign(:story_map_hide_tasks, false)
       |> assign_stalled()
       |> assign(:stalled_open, false)
       |> assign(:stalled_error, nil)
@@ -1123,7 +1148,13 @@ defmodule RelayWeb.BoardLive do
   def handle_event("assign_card", %{"ref" => ref, "column" => column, "lane" => lane} = params, socket) do
     with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
          {:ok, placement} <- StoryMapGrid.decode_placement(column, lane),
-         {:ok, _assigned} <- StoryMap.assign_card(card, Map.put(placement, :position, parse_int(params["index"]))) do
+         {:ok, _assigned} <-
+           StoryMap.assign_card(
+             card,
+             placement
+             |> merged_drop_attrs(column, card, socket.assigns.story_tasks)
+             |> Map.put(:position, parse_int(params["index"]))
+           ) do
       {:noreply, socket}
     else
       _other -> {:noreply, socket}
@@ -1520,6 +1551,21 @@ defmodule RelayWeb.BoardLive do
   # list above — it changes nothing on the board.
   def handle_event("toggle_story_map_tray", _params, socket) do
     {:noreply, assign(socket, :story_map_tray_open, not socket.assigns.story_map_tray_open)}
+  end
+
+  # RE260 — the two view-only chrome controls. `parse_zoom/1` is the ONLY parser for the closed
+  # set and never calls String.to_atom/1, so a forged value is a silent no-op rather than a new
+  # atom. Neither event is in the read_only? guard above: an archived board is still readable,
+  # and zoom changes nothing on it.
+  def handle_event("set_story_map_zoom", %{"zoom" => zoom}, socket) do
+    case StoryMapComponents.parse_zoom(zoom) do
+      {:ok, level} -> {:noreply, assign(socket, :story_map_zoom, level)}
+      :error -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("toggle_story_map_hide_tasks", _params, socket) do
+    {:noreply, assign(socket, :story_map_hide_tasks, not socket.assigns.story_map_hide_tasks)}
   end
 
   # RE263 — the three create affordances. Opening a draft replaces any other open one; the
@@ -2536,6 +2582,30 @@ defmodule RelayWeb.BoardLive do
 
   defp parse_int(_value), do: nil
 
+  # RE260 — a merged (Hide tasks) column names an ACTIVITY, not a task, and
+  # StoryMap.resolve_placement/2 is total: passing the decoded `%{story_activity_id: _}` straight
+  # through would write `story_task_id: nil`. So a user who hides tasks and drags a card one lane
+  # down to change its RELEASE would silently lose the card's task — data loss from a gesture
+  # that looks purely vertical. The artboard does exactly that (`onDropCell(e, (col.merged ||
+  # col.noTask) ? null : …)`, line ~530) and gets away with it because the mock persists nothing.
+  #
+  # Rule instead: keep the existing task when it belongs to the activity being dropped on, and
+  # clear it only when the card genuinely changes activities. A `nt:` (`— No task yet`) drop is a
+  # different key and still clears — that is the point of that column.
+  defp merged_drop_attrs(placement, column, card, tasks) do
+    if StoryMapGrid.merged_column?(column) and keeps_task?(card, placement, tasks) do
+      placement |> Map.delete(:story_activity_id) |> Map.put(:story_task_id, card.story_task_id)
+    else
+      placement
+    end
+  end
+
+  defp keeps_task?(%Card{story_task_id: nil}, _placement, _tasks), do: false
+
+  defp keeps_task?(%Card{story_task_id: task_id}, %{story_activity_id: activity_id}, tasks) do
+    Enum.any?(tasks, &(&1.id == task_id and &1.story_activity_id == activity_id))
+  end
+
   defp resolve_actor(%{"actor_type" => "agent"}), do: :agent
 
   defp resolve_actor(%{"actor_type" => "user", "user_id" => user_id}) do
@@ -2967,7 +3037,14 @@ defmodule RelayWeb.BoardLive do
     # open_story_map_edit/3 enforces.
     |> assign(:story_map_edit, nil)
     |> assign(:story_map_edit_name, "")
+    |> show_tasks_for_draft(draft)
   end
+
+  # RE260 — a task draft is a NEW TASK COLUMN, and there is nowhere to render one while the
+  # activity is merged. The user asked to add a task, so showing tasks is the coherent response;
+  # the other two draft shapes (activity, release) are unaffected.
+  defp show_tasks_for_draft(socket, {:task, _activity_id}), do: assign(socket, :story_map_hide_tasks, false)
+  defp show_tasks_for_draft(socket, _draft), do: socket
 
   defp close_story_map_draft(socket) do
     socket

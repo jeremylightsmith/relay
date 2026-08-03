@@ -1169,6 +1169,221 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
     end
   end
 
+  describe "RE260 — zoom" do
+    test "a fresh mount opens at Compact, with no ref, badge or bar on a card",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert attr_of(view, "#story-map-zoom-compact", "aria-pressed") == "true"
+      assert attr_of(view, "#story-map-zoom-map", "aria-pressed") == "false"
+      assert attr_of(view, "#story-map-zoom-full", "aria-pressed") == "false"
+
+      face = card_face_html(view, ctx.board, ctx.sso)
+      assert face =~ "border-radius:6px;"
+      refute face =~ "BACKLOG"
+    end
+
+    test "clicking Full re-renders every face with its ref, badge and 9px box",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-zoom-full") |> render_click()
+
+      face = card_face_html(view, ctx.board, ctx.sso)
+      assert face =~ "border-radius:9px;"
+      assert face =~ "BACKLOG"
+      assert attr_of(view, "#story-map-zoom-full", "aria-pressed") == "true"
+    end
+
+    test "clicking Map renders title lines and hides every cell's ＋", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-add-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}")
+
+      view |> element("#story-map-zoom-map") |> render_click()
+
+      face = card_face_html(view, ctx.board, ctx.sso)
+      assert face =~ "border-left:2px solid"
+      refute face =~ "border-radius"
+      refute face =~ "BACKLOG"
+
+      refute has_element?(view, "#story-map-add-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}")
+    end
+
+    test "a card stays draggable and clickable at Map zoom", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-zoom-map") |> render_click()
+
+      ref = Cards.ref(ctx.board, ctx.sso)
+      assert has_element?(view, ".story-map-card[data-ref='#{ref}'][draggable='true']")
+
+      # And the drop the hook would send still lands.
+      render_hook(view, "assign_card", %{
+        "ref" => ref,
+        "column" => "t:#{ctx.organize.id}",
+        "lane" => "r:#{ctx.later.id}",
+        "index" => 0
+      })
+
+      cell = "#story-map-cell-t-#{ctx.organize.id}-r-#{ctx.later.id}"
+      assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, ctx.sso)}")
+    end
+
+    test "an unknown zoom off the wire is a silent no-op", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      render_click(view, "set_story_map_zoom", %{"zoom" => "gigantic"})
+
+      assert attr_of(view, "#story-map-zoom-compact", "aria-pressed") == "true"
+      assert card_face_html(view, ctx.board, ctx.sso) =~ "border-radius:6px;"
+    end
+
+    test "the toolbar is absent on the board view", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}")
+
+      refute has_element?(view, "#story-map-toolbar")
+    end
+  end
+
+  describe "RE260 — Hide tasks" do
+    test "merges each activity into one column and flips the button's label",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-task-#{ctx.sign_in.id}")
+
+      view |> element("#story-map-hide-tasks") |> render_click()
+
+      assert has_element?(view, "#story-map-merged-#{ctx.onboard.id}", "1 tasks · merged")
+      assert has_element?(view, "#story-map-merged-#{ctx.plan.id}", "1 tasks · merged")
+      refute has_element?(view, "#story-map-task-#{ctx.sign_in.id}")
+      refute has_element?(view, "#story-map-no-task-#{ctx.onboard.id}")
+      assert has_element?(view, "#story-map-hide-tasks", "Show tasks")
+
+      # The tasked card and the task-less card share the activity's one cell.
+      cell = "#story-map-cell-m-#{ctx.onboard.id}-r-#{ctx.mvp.id}"
+      assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, ctx.sso)}")
+      assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, ctx.audit)}")
+    end
+
+    test "clicking again shows the tasks", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-hide-tasks") |> render_click()
+      view |> element("#story-map-hide-tasks") |> render_click()
+
+      assert has_element?(view, "#story-map-task-#{ctx.sign_in.id}")
+      assert has_element?(view, "#story-map-hide-tasks", "Hide tasks")
+    end
+
+    test "opening a task draft turns Hide tasks off — there is nowhere to render a new column",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-hide-tasks") |> render_click()
+      view |> element("#story-map-add-task-#{ctx.onboard.id}") |> render_click()
+
+      assert has_element?(view, "#story-map-hide-tasks", "Hide tasks")
+      assert has_element?(view, "#story-map-task-#{ctx.sign_in.id}")
+      assert has_element?(view, "#story-map-draft-#{ctx.onboard.id}")
+    end
+
+    test "zoom and Hide tasks reset on reload", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-zoom-map") |> render_click()
+      view |> element("#story-map-hide-tasks") |> render_click()
+
+      {:ok, reloaded, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert attr_of(reloaded, "#story-map-zoom-compact", "aria-pressed") == "true"
+      assert has_element?(reloaded, "#story-map-hide-tasks", "Hide tasks")
+    end
+  end
+
+  describe "RE260 — a merged drop keeps the card's task" do
+    test "within one activity it changes only the release", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-hide-tasks") |> render_click()
+
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, ctx.sso),
+        "column" => "m:#{ctx.onboard.id}",
+        "lane" => "r:#{ctx.later.id}",
+        "index" => 0
+      })
+
+      moved = Cards.get_card_by_ref(ctx.board, Cards.ref(ctx.board, ctx.sso))
+      assert moved.story_task_id == ctx.sign_in.id
+      assert moved.story_activity_id == ctx.onboard.id
+      assert moved.release_id == ctx.later.id
+
+      # And with tasks shown again it is still in its task's column, one lane down.
+      view |> element("#story-map-hide-tasks") |> render_click()
+      cell = "#story-map-cell-t-#{ctx.sign_in.id}-r-#{ctx.later.id}"
+      assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, ctx.sso)}")
+    end
+
+    test "across activities it clears the task, which belonged to the old activity",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-hide-tasks") |> render_click()
+
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, ctx.sso),
+        "column" => "m:#{ctx.plan.id}",
+        "lane" => "r:#{ctx.mvp.id}",
+        "index" => 0
+      })
+
+      moved = Cards.get_card_by_ref(ctx.board, Cards.ref(ctx.board, ctx.sso))
+      assert moved.story_task_id == nil
+      assert moved.story_activity_id == ctx.plan.id
+      assert moved.release_id == ctx.mvp.id
+
+      view |> element("#story-map-hide-tasks") |> render_click()
+      cell = "#story-map-cell-nt-#{ctx.plan.id}-r-#{ctx.mvp.id}"
+      assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, ctx.sso)}")
+    end
+
+    test "a card with no task still has none after a merged drop", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-hide-tasks") |> render_click()
+
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, ctx.audit),
+        "column" => "m:#{ctx.onboard.id}",
+        "lane" => "r:#{ctx.later.id}",
+        "index" => 0
+      })
+
+      moved = Cards.get_card_by_ref(ctx.board, Cards.ref(ctx.board, ctx.audit))
+      assert moved.story_task_id == nil
+      assert moved.story_activity_id == ctx.onboard.id
+      assert moved.release_id == ctx.later.id
+    end
+
+    test "a No task yet drop still CLEARS the task — that is the point of that column",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, ctx.sso),
+        "column" => "nt:#{ctx.onboard.id}",
+        "lane" => "r:#{ctx.mvp.id}",
+        "index" => 0
+      })
+
+      moved = Cards.get_card_by_ref(ctx.board, Cards.ref(ctx.board, ctx.sso))
+      assert moved.story_task_id == nil
+      assert moved.story_activity_id == ctx.onboard.id
+    end
+  end
+
   # Type into the open draft and press Enter — the phx-change every keystroke fires, then the
   # phx-submit. Both are needed: the change is what lets the server clear the box afterwards.
   defp submit_draft(view, name) do
@@ -1198,6 +1413,19 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
   defp card_by_title(board, title) do
     board |> Cards.list_cards() |> Enum.find(&(&1.title == title))
+  end
+
+  defp attr_of(view, selector, attribute) do
+    view
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query(selector)
+    |> LazyHTML.attribute(attribute)
+    |> List.first()
+  end
+
+  defp card_face_html(view, board, card) do
+    view |> element("##{card_dom_id(board, card)}") |> render()
   end
 
   defp card_dom_id(board, card), do: "story-map-card-#{Cards.ref(board, card)}"
