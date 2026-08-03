@@ -110,7 +110,7 @@ defmodule Relay.Runs do
     Repo.all(from e in NodeExecution, where: e.run_id == ^run_id, order_by: [asc: e.id])
   end
 
-  @doc "The run's single queued/claimed/running job, or nil."
+  @doc "The run's single queued or claimed job, or nil."
   def active_job(%Run{id: run_id}) do
     Repo.one(from j in NodeJob, where: j.run_id == ^run_id and j.state in ^NodeJob.active_states())
   end
@@ -468,9 +468,10 @@ defmodule Relay.Runs do
   """
   def run_detail(run, flow), do: Relay.Runs.RunDetail.build(run, flow)
 
-  # A live run whose node-job is stuck (queued/unclaimed/held by a silent executor) this long
-  # has stopped moving. Well above a legitimate long node's own claimed runtime — a 40-minute
-  # plan-implementer node is *running*, not stalled, and stays neutral (see run_stalled?/3).
+  # A live run whose node-job is stuck (queued/unclaimed, or held by a silent executor) this long
+  # has stopped moving. It never applies to a job a live executor is holding: working_run_ids/2
+  # excludes those first, so a 40-minute plan-implementer node stays neutral no matter how far
+  # past this threshold it runs (see run_stalled?/3, and RE255 for why that used to be false).
   @run_stale_after_s 300
 
   @doc """
@@ -501,10 +502,15 @@ defmodule Relay.Runs do
   end
 
   @doc """
-  Run ids whose current node-job is actively `:running` on a non-stale executor at `now`. The
-  complement — queued, unclaimed, or held by a silent executor — is what BoardLive treats as a
-  candidate for the stalled run-face treatment. Reuses `executor_stale?/2`, so "working" can
-  never disagree with what the reclaim sweep would act on.
+  Run ids whose current node-job is held by a live claim (`NodeJob.claimed_states/0`) on a
+  non-stale executor at `now`. The complement — queued, unclaimed, or held by a silent executor —
+  is what BoardLive treats as a candidate for the stalled run-face treatment. Reuses
+  `executor_stale?/2`, so "working" can never disagree with what the reclaim sweep would act on.
+
+  A claim IS the start signal: `bin/relay` claims a job and spawns its worker thread in the same
+  loop iteration, so there is no meaningful claimed-but-not-working window (RE255). There is
+  deliberately no time ceiling here — a hung-but-claimed agent is `Cards.health/1`'s signal, and
+  a job on an executor that has gone silent is already excluded by `executor_stale?/2`.
   """
   @spec working_run_ids(Board.t(), DateTime.t()) :: MapSet.t()
   def working_run_ids(%Board{} = board, %DateTime{} = now) do
@@ -519,7 +525,7 @@ defmodule Relay.Runs do
       on: r.id == j.run_id,
       join: c in Card,
       on: c.id == r.card_id,
-      where: c.board_id == ^board.id and j.state == :running,
+      where: c.board_id == ^board.id and j.state in ^NodeJob.claimed_states(),
       select: {j.run_id, j.executor_name}
     )
     |> Repo.all()
@@ -803,7 +809,7 @@ defmodule Relay.Runs do
   Reports a node outcome for `job` — `%{outcome:, detail:, git_sha:,
   session_id:, cost:}`, outcome required from the closed set. Finalizes
   the execution + job and hands the outcome to the run's `RunServer`
-  (serialized per run). Jobs not in queued/claimed/running are rejected
+  (serialized per run). Jobs not in queued/claimed are rejected
   with `{:error, :job_not_active}` — a revoked job's late report is
   dropped.
   """
@@ -831,9 +837,6 @@ defmodule Relay.Runs do
   def claim_job(%NodeJob{} = job, executor_name) when is_binary(executor_name) do
     transition_job(job, [:queued], state: :claimed, executor_name: executor_name, claimed_at: now())
   end
-
-  @doc "claimed → running."
-  def start_job(%NodeJob{} = job), do: transition_job(job, [:claimed], state: :running)
 
   defp transition_job(job, from_states, sets) do
     query = from j in NodeJob, where: j.id == ^job.id and j.state in ^from_states, select: j
@@ -1216,7 +1219,7 @@ defmodule Relay.Runs do
   The board's node-job `id` (integer or numeric string — the controller hands
   in a raw path param) resolved against its claim state:
 
-    * `{:ok, job}` — held by a live claim (`state in [:claimed, :running]`).
+    * `{:ok, job}` — held by a live claim (`state in NodeJob.claimed_states/0`).
     * `{:already_finalized, run}` — the job is already `:done`; a duplicate/stray
       outcome POST for it is first-writer-wins (RLY-202), so the controller answers
       success with the run's recorded state rather than a conflict.
@@ -1528,10 +1531,12 @@ defmodule Relay.Runs do
     reason in [:executor_outdated, :no_executor, :executor_gone] and not job_working?(job, board, now)
   end
 
-  defp job_working?(%NodeJob{state: :running, executor_name: name}, board, now) when is_binary(name) do
-    case Repo.get_by(Executor, board_id: board.id, name: name) do
-      nil -> false
-      executor -> not executor_stale?(executor, now)
+  defp job_working?(%NodeJob{state: state, executor_name: name}, board, now) when is_binary(name) do
+    with true <- state in NodeJob.claimed_states(),
+         %Executor{} = executor <- Repo.get_by(Executor, board_id: board.id, name: name) do
+      not executor_stale?(executor, now)
+    else
+      _not_working -> false
     end
   end
 
@@ -1587,11 +1592,9 @@ defmodule Relay.Runs do
   # A job is stranded when it is old enough to rule out normal latency AND the executor
   # named on it is stale (or nothing is named and nothing on this board is fresh).
   # Reuses `executor_stale?/2` rather than inventing a second threshold, so "stranded"
-  # can never disagree with what the reclaim sweep would act on. A `:running` job is
-  # excluded: the executor is demonstrably alive enough to have started it, and the
-  # heartbeat's staleness is what the reclaim sweep is for.
+  # can never disagree with what the reclaim sweep would act on. A claimed job under a
+  # live executor needs no special clause — `any_live_executor?/3` already excludes it.
   defp stranded?(nil, _board, _now), do: false
-  defp stranded?(%NodeJob{state: :running}, _board, _now), do: false
 
   defp stranded?(%NodeJob{} = job, board, now) do
     age = DateTime.diff(now, job.claimed_at || job.inserted_at, :second)
@@ -1802,7 +1805,7 @@ defmodule Relay.Runs do
   @doc false
   # Revokes any lingering active job regardless of the run's current status
   # FIRST — the job that triggered this reclaim must never stay stuck
-  # :claimed/:running under a dead executor's name, even if the run itself
+  # :claimed under a dead executor's name, even if the run itself
   # already moved on (e.g. parked/finished via a concurrent path) by the time
   # this runs — then, only for a still-:running run, flips it to
   # :parked/:executor_gone (affinity is absolute; the run waits for its

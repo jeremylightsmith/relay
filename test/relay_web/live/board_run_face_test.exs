@@ -162,9 +162,10 @@ defmodule RelayWeb.BoardRunFaceTest do
       assert has_element?(view, ~s(#card-#{face_ref(board, card)}-run-face[data-stalled="true"]))
     end
 
-    test "a claimed, running job stays neutral however old it is (the long-node case)",
+    test "a claimed job on a live executor stays neutral and keeps its age readout",
          %{conn: conn, board: board, works: works} do
       now = DateTime.truncate(DateTime.utc_now(), :second)
+      old = DateTime.add(now, -600, :second)
       insert(:executor, board: board, name: "live", last_heartbeat: now)
       card = insert(:card, stage: works, status: :working)
       run = insert(:run, card: card, status: :running, current_node: "implement")
@@ -175,20 +176,18 @@ defmodule RelayWeb.BoardRunFaceTest do
           node_key: "implement",
           outcome: nil,
           finished_at: nil,
-          inserted_at: DateTime.add(now, -3600, :second)
+          inserted_at: old
         )
 
-      insert(:node_job,
-        node_execution: exec,
-        state: :running,
-        executor_name: "live",
-        claimed_at: DateTime.add(now, -3600, :second)
-      )
+      insert(:node_job, node_execution: exec, state: :claimed, executor_name: "live", claimed_at: old)
 
+      ref = face_ref(board, card)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, ~s(#card-#{face_ref(board, card)}-run-face[data-stalled="false"]))
-      assert has_element?(view, "#card-#{face_ref(board, card)}-run-age")
+      assert has_element?(view, ~s(#card-#{ref}-run-face[data-stalled="false"]))
+      refute has_element?(view, "#card-#{ref}-run-face .run-face-stalled-note")
+      # Decision 3: the elapsed-time readout is preserved, not coupled to @stalled?.
+      assert has_element?(view, "#card-#{ref}-run-age")
     end
   end
 

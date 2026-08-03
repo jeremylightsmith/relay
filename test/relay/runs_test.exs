@@ -366,8 +366,8 @@ defmodule Relay.RunsTest do
     end
   end
 
-  describe "claim_job/2 and start_job/1" do
-    test "queued → claimed → running; wrong-state transitions are rejected", %{board: board} do
+  describe "claim_job/2" do
+    test "queued → claimed; a second claim on the same job is rejected", %{board: board} do
       flow = enabled_spec_flow(board)
       card = card_in(board, "Next up")
       {:ok, _run} = Runs.start_run(card, flow)
@@ -376,8 +376,6 @@ defmodule Relay.RunsTest do
       assert {:ok, %NodeJob{state: :claimed, executor_name: "mac-1"} = claimed} = Runs.claim_job(job, "mac-1")
       assert claimed.claimed_at
       assert Runs.claim_job(job, "mac-2") == {:error, :job_not_active}
-      assert {:ok, %NodeJob{state: :running} = running} = Runs.start_job(claimed)
-      assert Runs.start_job(running) == {:error, :job_not_active}
     end
   end
 
@@ -1218,8 +1216,8 @@ defmodule Relay.RunsTest do
       {card, job}
     end
 
-    test "stamps a fresh agent_heartbeat_at on a card whose job is running", %{board: board} do
-      {card, job} = liveness_card(board, :running)
+    test "stamps a fresh agent_heartbeat_at on a card whose job is claimed", %{board: board} do
+      {card, job} = liveness_card(board, :claimed)
       assert card.agent_heartbeat_at == nil
 
       assert {1, nil} = Runs.refresh_running_card_liveness(board, [job.id])
@@ -1228,9 +1226,9 @@ defmodule Relay.RunsTest do
     end
 
     test "stamps only cards with an active reported job, never an idle one", %{board: board} do
-      {running, job} = liveness_card(board, :running)
+      {running, job} = liveness_card(board, :claimed)
       # A second running card whose id is NOT passed stands in for an idle card.
-      {idle, _idle_job} = liveness_card(board, :running)
+      {idle, _idle_job} = liveness_card(board, :claimed)
 
       assert {1, nil} = Runs.refresh_running_card_liveness(board, [job.id])
 
@@ -1238,10 +1236,10 @@ defmodule Relay.RunsTest do
       assert Relay.Repo.get!(Card, idle.id).agent_heartbeat_at == nil
     end
 
-    test "two running jobs both stamp; returns {2, nil}", %{board: board} do
-      {a, job_a} = liveness_card(board, :running)
-      {b, job_b} = liveness_card(board, :running)
-      {idle, _} = liveness_card(board, :running)
+    test "two claimed jobs both stamp; returns {2, nil}", %{board: board} do
+      {a, job_a} = liveness_card(board, :claimed)
+      {b, job_b} = liveness_card(board, :claimed)
+      {idle, _} = liveness_card(board, :claimed)
 
       assert {2, nil} = Runs.refresh_running_card_liveness(board, [job_a.id, job_b.id])
 
@@ -1259,7 +1257,7 @@ defmodule Relay.RunsTest do
 
     test "never stamps another board's card (board scoping)", %{board: board} do
       {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other"})
-      {card, job} = liveness_card(other, :running)
+      {card, job} = liveness_card(other, :claimed)
 
       assert {0, nil} = Runs.refresh_running_card_liveness(board, [job.id])
       assert Relay.Repo.get!(Card, card.id).agent_heartbeat_at == nil
@@ -1270,8 +1268,8 @@ defmodule Relay.RunsTest do
       assert {0, nil} = Runs.refresh_running_card_liveness(board, ["not-an-int", 999_999])
     end
 
-    test "a running-but-quiet card reads :live after refresh, :stale without", %{board: board} do
-      {card, job} = liveness_card(board, :running)
+    test "a claimed-but-quiet card reads :live after refresh, :stale without", %{board: board} do
+      {card, job} = liveness_card(board, :claimed)
       now = DateTime.utc_now()
       # Newest Activity older than @stale_after (90s) — health/1 takes explicit inputs, so an
       # in-memory struct is enough; :moved keeps Activity.kind out of the :failure branch.
@@ -1290,7 +1288,7 @@ defmodule Relay.RunsTest do
     end
 
     test "a fresh heartbeat never masks a genuinely failed agent (:stopped wins)", %{board: board} do
-      {card, job} = liveness_card(board, :running)
+      {card, job} = liveness_card(board, :claimed)
       now = DateTime.utc_now()
       failure = %Schemas.Activity{type: :failure, inserted_at: DateTime.truncate(now, :second)}
 
@@ -1306,6 +1304,33 @@ defmodule Relay.RunsTest do
       }
 
       assert Relay.Cards.health(inputs) == :stopped
+    end
+  end
+
+  describe "the dropped :running node-job state" do
+    test "is no longer in the enum, and start_job/1 no longer exists" do
+      refute :running in NodeJob.states()
+      refute :running in NodeJob.active_states()
+      refute :running in NodeJob.claimed_states()
+      refute function_exported?(Runs, :start_job, 1)
+    end
+
+    test "a legacy 'running' row loads as :claimed after the migration's rewrite", %{board: board} do
+      stage = insert(:stage, board: board, name: "Legacy", position: 20, type: :work)
+      card = insert(:card, stage: stage)
+      run = insert(:run, card: card)
+      execution = insert(:node_execution, run: run, node_key: "implement")
+      job = insert(:node_job, node_execution: execution, state: :claimed, executor_name: "mac")
+
+      # Write the legacy value past the enum, exactly as a pre-migration row holds it.
+      Relay.Repo.query!("UPDATE node_jobs SET state = 'running' WHERE id = $1", [job.id])
+      # Ecto 3.14 raises ArgumentError (not Ecto.ChangeError) loading a value outside the enum.
+      assert_raise ArgumentError, fn -> Relay.Repo.get(NodeJob, job.id) end
+
+      # The migration body, run against this row.
+      Relay.Repo.query!("UPDATE node_jobs SET state = 'claimed' WHERE state = 'running'")
+
+      assert %NodeJob{state: :claimed} = Relay.Repo.get(NodeJob, job.id)
     end
   end
 end

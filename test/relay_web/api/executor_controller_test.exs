@@ -66,14 +66,14 @@ defmodule RelayWeb.Api.ExecutorControllerTest do
     card = insert(:card, stage: stage)
     run = insert(:run, card: card)
     execution = insert(:node_execution, run: run, node_key: "implement")
-    insert(:node_job, node_execution: execution, state: :running, executor_name: "mac")
+    insert(:node_job, node_execution: execution, state: :claimed, executor_name: "mac")
     insert(:executor, board: board, name: "mac")
 
     [body] = conn |> get(~p"/api/executors") |> json_response(200) |> Map.fetch!("data")
 
     assert [job] = body["jobs"]
     assert job["node_key"] == "implement"
-    assert job["state"] == "running"
+    assert job["state"] == "claimed"
     assert job["ref"] == Cards.ref(board, card)
   end
 

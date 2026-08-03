@@ -65,6 +65,22 @@ defmodule Relay.Runs.DiagnoseTest do
     assert detail =~ "requires v#{Runs.min_executor_version()}"
   end
 
+  # The other side of that branch: once the outdated executor has actually CLAIMED the job it is
+  # working it, so the roster-blocked correction must not clobber :run_active with
+  # :executor_outdated. The OUTDATED badge on the runners view is the separate, correct signal.
+  # Pins job_working?/3's true path, which nothing else exercises (RE255).
+  test "a live run whose job is claimed by an outdated-but-beating executor stays run_active",
+       %{board: board, works: works} do
+    now = DateTime.truncate(DateTime.utc_now(), :second)
+    insert(:executor, board: board, name: "old", version: 0, last_heartbeat: now)
+    card = insert(:card, stage: works, status: :working)
+    run = insert(:run, card: card, status: :running, current_node: "implement")
+    exec = insert(:node_execution, run: run, node_key: "implement", outcome: nil, finished_at: nil)
+    insert(:node_job, node_execution: exec, state: :claimed, executor_name: "old", claimed_at: now)
+
+    assert %{verdict: :run_active} = Runs.diagnose(board, card, now)
+  end
+
   test "a failed run names the node and carries the whole failure detail", %{board: board, works: works} do
     card = insert(:card, stage: works, status: :working)
     detail = String.duplicate("boom.\n\n", 400)
@@ -103,7 +119,7 @@ defmodule Relay.Runs.DiagnoseTest do
     card = insert(:card, stage: works, status: :working)
     run = insert(:run, card: card, status: :running, current_node: "implement")
     execution = insert(:node_execution, run: run, node_key: "implement", outcome: nil, finished_at: nil)
-    insert(:node_job, node_execution: execution, state: :running, executor_name: "mac", claimed_at: now)
+    insert(:node_job, node_execution: execution, state: :claimed, executor_name: "mac", claimed_at: now)
     insert(:executor, board: board, name: "mac", last_heartbeat: now)
 
     assert %{verdict: :run_active, evidence: %{current_node: "implement"}} = Runs.diagnose(board, card, now)
