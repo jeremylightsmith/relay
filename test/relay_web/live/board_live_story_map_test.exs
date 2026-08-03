@@ -1554,4 +1554,99 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       assert has_element?(view_c, "#story-map-tray-toggle[aria-expanded='false']")
     end
   end
+
+  describe "live cursors (RE257)" do
+    test "the map renders the cursor overlay the hook owns", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-surface")
+
+      assert has_element?(
+               view,
+               ~s(#story-map-cursor-layer[phx-hook="StoryMapCursors"][phx-update="ignore"])
+             )
+    end
+
+    test "a cursor move relays to the other session, coloured, and never to itself",
+         %{conn: conn} = ctx do
+      {other, other_conn} = second_member(ctx.board)
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      render_hook(view_b, "cursor_moved", %{"x" => 120, "y" => 340})
+      _ = render(view_a)
+      _ = render(view_b)
+
+      other_id = other.id
+      color = RelayWeb.CoreComponents.identity_color(other.email)
+
+      assert_push_event(view_a, "story_map_cursor", %{
+        user_id: ^other_id,
+        name: _name,
+        color: ^color,
+        x: 120,
+        y: 340
+      })
+
+      refute_push_event(view_b, "story_map_cursor", %{})
+    end
+
+    test "the server-side floor drops a too-fast second move", %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      # Two synchronous round trips, microseconds apart against a 40ms floor.
+      render_hook(view_b, "cursor_moved", %{"x" => 1, "y" => 1})
+      render_hook(view_b, "cursor_moved", %{"x" => 2, "y" => 2})
+      _ = render(view_a)
+
+      assert_push_event(view_a, "story_map_cursor", %{x: 1, y: 1})
+      refute_push_event(view_a, "story_map_cursor", %{x: 2, y: 2})
+    end
+
+    test "cursor_left clears the cursor everywhere else", %{conn: conn} = ctx do
+      {other, other_conn} = second_member(ctx.board)
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      render_hook(view_b, "cursor_left", %{})
+      _ = render(view_a)
+
+      other_id = other.id
+      assert_push_event(view_a, "story_map_cursor_gone", %{user_id: ^other_id})
+    end
+
+    test "a presence leave clears a cursor only when that person is really gone",
+         %{conn: conn} = ctx do
+      {other, other_conn} = second_member(ctx.board)
+      {:ok, _view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      _ = render(view_a)
+
+      # One of their TABS closed while they are still on the map: the cursor must stay, because
+      # the other tab is still driving it.
+      send(view_a.pid, presence_diff(ctx.board, %{to_string(other.id) => %{metas: []}}))
+      _ = render(view_a)
+      refute_push_event(view_a, "story_map_cursor_gone", %{})
+
+      # Someone the fresh roster no longer knows: their cursor goes.
+      ghost_id = other.id + 10_000
+      send(view_a.pid, presence_diff(ctx.board, %{to_string(ghost_id) => %{metas: []}}))
+      _ = render(view_a)
+      assert_push_event(view_a, "story_map_cursor_gone", %{user_id: ^ghost_id})
+    end
+
+    test "the kanban board never relays a cursor", %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      # A forged cursor_moved from the board view must reach nobody.
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}")
+
+      render_hook(view_b, "cursor_moved", %{"x" => 5, "y" => 5})
+      _ = render(view_a)
+
+      refute_push_event(view_a, "story_map_cursor", %{})
+    end
+  end
 end
