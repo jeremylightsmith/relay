@@ -145,7 +145,7 @@ defmodule RelayWeb.StoryMapComponents do
   The segments are rendered from `zoom_levels/0` and their event is parsed by `parse_zoom/1`,
   so a level can only ever be added in one place.
   """
-  attr :zoom, :atom, values: [:map, :compact, :full], required: true
+  attr :zoom, :atom, values: @zoom_levels, required: true
   attr :hide_tasks, :boolean, required: true
 
   def story_map_toolbar(assigns) do
@@ -344,7 +344,7 @@ defmodule RelayWeb.StoryMapComponents do
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
   attr :compose, :any, default: nil, doc: "the {column_key, lane_key} whose composer is open, or nil"
   attr :compose_form, :any, default: nil, doc: "the shared card composer form (BoardLive's :compose_form)"
-  attr :zoom, :atom, values: [:map, :compact, :full], default: :full
+  attr :zoom, :atom, values: @zoom_levels, default: :full
 
   def story_map(assigns) do
     ~H"""
@@ -554,7 +554,7 @@ defmodule RelayWeb.StoryMapComponents do
   attr :composing, :boolean, default: false
   attr :compose_form, :any, default: nil, doc: "required when composing"
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
-  attr :zoom, :atom, values: [:map, :compact, :full], default: :full
+  attr :zoom, :atom, values: @zoom_levels, default: :full
 
   def story_map_cell(assigns) do
     assigns =
@@ -658,7 +658,7 @@ defmodule RelayWeb.StoryMapComponents do
   attr :avatar, :atom, values: [:check, :bang, :owners], default: :owners
   attr :owners, :list, default: []
   attr :active_owner, :atom, values: [:human, :ai, nil], default: nil
-  attr :zoom, :atom, values: [:map, :compact, :full], default: :full
+  attr :zoom, :atom, values: @zoom_levels, default: :full
 
   def story_map_card(assigns) do
     ~H"""

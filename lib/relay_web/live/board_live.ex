@@ -646,7 +646,7 @@ defmodule RelayWeb.BoardLive do
 
   # RE264 — the story-map viewport: the tray on the left, the scrolling map body on the right
   # (artboard line ~78). The grid is built HERE, once, so both the tray and the grid read the
-  # same view model without a second `StoryMapGrid.build/5`.
+  # same view model without a second `StoryMapGrid.build/6`.
   attr :board, :any, required: true
   attr :activities, :list, required: true
   attr :tasks, :list, required: true

@@ -805,6 +805,21 @@ defmodule RelayWeb.StoryMapComponentsTest do
       # Even the right atom arriving as an atom is :error — the wire carries strings only.
       assert StoryMapComponents.parse_zoom(:map) == :error
     end
+
+    test "every `attr :zoom` value list derives from zoom_levels/0 rather than re-typing it" do
+      levels = StoryMapComponents.zoom_levels()
+
+      zoom_attrs =
+        for {_name, meta} <- StoryMapComponents.__components__(),
+            attr <- meta.attrs,
+            attr.name == :zoom,
+            do: attr.opts[:values]
+
+      # Every component that takes a zoom must accept exactly the closed set — a fourth level
+      # added to @zoom_levels reaches the toolbar AND the renderers in one edit.
+      assert zoom_attrs != []
+      assert Enum.all?(zoom_attrs, &(&1 == levels))
+    end
   end
 
   describe "RE260 — story_map_toolbar/1" do

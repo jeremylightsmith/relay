@@ -1,11 +1,11 @@
 defmodule RelayWeb.StoryMapGrid do
   @moduledoc """
-  The story map's pure view model (RE264): `(activities, tasks, releases, cards, draft)` in, a
-  fully placed grid out. No Ecto, no LiveView, no side effects — every placement rule the
+  The story map's pure view model (RE264): `(activities, tasks, releases, cards, draft,
+  hide_tasks?)` in, a fully placed grid out. No Ecto, no LiveView, no side effects — every placement rule the
   artboard (`docs/designs/Relay Story Map.dc.html`, `eff/1`) encodes lives here, so the rules
   are unit-testable without mounting a LiveView.
 
-  **The invariant: no card can disappear.** Every card handed to `build/5` lands exactly once —
+  **The invariant: no card can disappear.** Every card handed to `build/6` lands exactly once —
   in one `cells` entry or in `unmapped` — and `total` is the input count. The rules are ordered
   and the last one is total:
 
