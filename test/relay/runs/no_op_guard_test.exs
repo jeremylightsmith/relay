@@ -210,6 +210,6 @@ defmodule Relay.Runs.NoOpGuardTest do
       sub_task_id: nil
     }
 
-    assert Relay.Runs.Engine.decide(code, [current], current) == {:transition, "implement"}
+    assert Relay.Runs.Engine.decide(code, [current], current) == {:transition, "implement", nil}
   end
 end

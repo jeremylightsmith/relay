@@ -28,8 +28,14 @@ defmodule Relay.Runs.Engine do
   @default_breaker_threshold 3
   @default_visit_cap 20
 
+  @typedoc """
+  A foreach `when` guard. The RUNTIME closed set is `Schemas.Flow.Edge.when_values/0` —
+  this is its type-level shadow and must stay in step with it.
+  """
+  @type guard :: :foreach_remaining | :foreach_exhausted
+
   @type decision ::
-          {:transition, String.t()}
+          {:transition, String.t(), guard() | nil}
           | {:retry, String.t()}
           | {:park, :needs_input}
           | {:finish, :done}
@@ -67,6 +73,15 @@ defmodule Relay.Runs.Engine do
   the filter the identity function, so every node outside a `foreach` behaves
   exactly as it did before W13. `opts[:foreach_remaining]` (default 0) is the
   guard input, computed by RunServer — the engine stays pure.
+
+  A `{:transition, target, guard}` carries the `when` of the edge `select_edge/3`
+  actually chose — `:foreach_remaining`, `:foreach_exhausted`, or `nil` when
+  unguarded — including on the RLY-179 degrade path, where it is the guard of the
+  `:failed` edge degraded onto. Routing is unchanged; the guard is purely additive.
+  The engine reports it rather than letting a caller re-select the edge, because a
+  second copy of edge selection would already disagree here: on the degrade path
+  `execution.outcome` is the UNROUTED outcome, so a re-selection filtering on it
+  finds no edge at all. RunServer keys the foreach cursor off this guard (RE252).
   """
   @spec decide(Flow.t(), [map()], map(), keyword()) :: decision()
   def decide(%Flow{} = flow, history, current, opts \\ []) do
@@ -196,7 +211,7 @@ defmodule Relay.Runs.Engine do
         {:fail, visit_cap_reason(edge, visit_cap)}
 
       true ->
-        {:transition, edge.to}
+        {:transition, edge.to, edge.when}
     end
   end
 

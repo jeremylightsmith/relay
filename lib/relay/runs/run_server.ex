@@ -217,7 +217,11 @@ defmodule Relay.Runs.RunServer do
     {next, job}
   end
 
-  defp apply_decision({:transition, node}, run, flow, execution) do
+  # `_guard` is the `when` of the edge the engine followed. It rides on the decision so the
+  # foreach binding rule can key off it instead of re-selecting the edge here — a second copy of
+  # edge selection would disagree with the engine on the RLY-179 degrade path, where
+  # `execution.outcome` is the unrouted outcome and matches no edge at all.
+  defp apply_decision({:transition, node, _guard}, run, flow, execution) do
     run = run |> Ecto.Changeset.change(current_node: node) |> Repo.update!()
     sub_task_id = binding_for(run, flow, node, execution)
     next = Runs.insert_execution!(run, node, next_visit(run, node), 1, sub_task_id)
