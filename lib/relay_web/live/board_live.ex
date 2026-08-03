@@ -17,6 +17,14 @@ defmodule RelayWeb.BoardLive do
   card_moved, timeline_appended, stages_changed) idempotently to the streams,
   counts, and open drawer — whether the change came from another browser
   session or from the REST API.
+
+  RE264 adds the story map as a `:story_map` live_action at `/board/:slug/story-map` —
+  the backbone × releases grid rendered by `RelayWeb.StoryMapComponents` over
+  `RelayWeb.StoryMapGrid`'s pure view model. It is an action on THIS LiveView rather than
+  its own, because clicking a card must open the full card drawer in place, and the drawer's
+  ~50 assigns and ~40 event handlers live here. The grid itself is fully isolated in those
+  two modules; this LiveView grows only by its mount assigns, one render branch, the
+  action-derived patch targets (`board_path/1` / `card_path/2`) and `refresh_story_map/1`.
   """
 
   use RelayWeb, :live_view
@@ -29,7 +37,10 @@ defmodule RelayWeb.BoardLive do
   alias Relay.Flows
   alias Relay.Members
   alias Relay.Runs
+  alias Relay.StoryMap
   alias Relay.Votes
+  alias RelayWeb.StoryMapComponents
+  alias RelayWeb.StoryMapGrid
   alias Schemas.Board
   alias Schemas.Card
   alias Schemas.Run
@@ -66,8 +77,19 @@ defmodule RelayWeb.BoardLive do
         <span id="board-name" class="truncate max-w-[58vw] sm:max-w-[280px]">
           {@board.name}
         </span>
+        <.board_view_tabs
+          board_slug={@board.slug}
+          active={if(@live_action == :story_map, do: :story_map, else: :board)}
+        />
       </:title>
       <:actions>
+        <span
+          :if={@live_action == :story_map}
+          id="story-map-count"
+          style="font-family:var(--font-mono);font-size:11px;color:oklch(0.5 0.02 255);"
+        >
+          {length(@story_map_cards)} cards
+        </span>
         <button
           :if={@stalled_count > 0 and not @read_only?}
           type="button"
@@ -115,7 +137,7 @@ defmodule RelayWeb.BoardLive do
         </li>
       </:menu_items>
       <div
-        :if={@live_action != :card}
+        :if={@live_action not in [:card, :story_map]}
         id="board-viewport"
         class={[
           "flex min-h-0 flex-col",
@@ -335,12 +357,23 @@ defmodule RelayWeb.BoardLive do
           </div>
         </div>
       </div>
+      <.story_map_viewport
+        :if={@live_action == :story_map}
+        board={@board}
+        activities={@story_activities}
+        tasks={@story_tasks}
+        releases={@releases}
+        cards={@story_map_cards}
+        stalled_cards={@stalled_cards}
+        tray_open={@story_map_tray_open}
+        embed={@embed}
+      />
       <.card_drawer
         :if={@selected_card}
         id="card-drawer"
         board_slug={@board.slug}
         embed={@embed}
-        card_nav_enabled={not @embed and @live_action != :card}
+        card_nav_enabled={not @embed and @live_action not in [:card, :story_map]}
         prev_ref={@prev_ref}
         next_ref={@next_ref}
         ref={Cards.ref(@board, @selected_card)}
@@ -351,7 +384,7 @@ defmodule RelayWeb.BoardLive do
         active_owner={Cards.active_owner_type(@selected_card)}
         health={health_state(@health_by_card, @selected_card.id)}
         done={Cards.done?(@selected_card, @board.stages)}
-        close_patch={~p"/board/#{@board.slug}"}
+        close_patch={board_path(assigns)}
         title_form={@title_form}
         editing_title={@editing_title}
         editing_tag={@editing_tag}
@@ -569,6 +602,52 @@ defmodule RelayWeb.BoardLive do
     """
   end
 
+  # RE264 — the story-map viewport: the tray on the left, the scrolling map body on the right
+  # (artboard line ~78). The grid is built HERE, once, so both the tray and the grid read the
+  # same view model without a second `StoryMapGrid.build/4`.
+  attr :board, :any, required: true
+  attr :activities, :list, required: true
+  attr :tasks, :list, required: true
+  attr :releases, :list, required: true
+  attr :cards, :list, required: true
+  attr :stalled_cards, :list, required: true
+  attr :tray_open, :boolean, required: true
+  attr :embed, :boolean, required: true
+
+  defp story_map_viewport(assigns) do
+    assigns =
+      assigns
+      |> assign(:grid, StoryMapGrid.build(assigns.activities, assigns.tasks, assigns.releases, assigns.cards))
+      |> assign(:stalled_ids, MapSet.new(assigns.stalled_cards, & &1.card.id))
+
+    ~H"""
+    <div
+      id="story-map"
+      class={["flex min-h-0", if(@embed, do: "h-dvh", else: "h-[calc(100dvh_-_53px)]")]}
+      style="background:oklch(0.95 0.006 255);"
+    >
+      <StoryMapComponents.unmapped_tray
+        :if={@grid.unmapped != []}
+        cards={@grid.unmapped}
+        board={@board}
+        stages={@board.stages}
+        stalled_ids={@stalled_ids}
+        open={@tray_open}
+      />
+      <div class="relative min-w-0 flex-1 overflow-auto">
+        <StoryMapComponents.story_map
+          :if={@grid.bands != []}
+          grid={@grid}
+          board={@board}
+          stages={@board.stages}
+          stalled_ids={@stalled_ids}
+        />
+        <StoryMapComponents.story_map_empty :if={@grid.bands == []} />
+      </div>
+    </div>
+    """
+  end
+
   @impl true
   def mount(%{"slug" => slug}, _session, socket), do: mount_board(socket, slug)
 
@@ -615,6 +694,15 @@ defmodule RelayWeb.BoardLive do
       socket
       |> assign(:page_title, board.name)
       |> assign(:board, board)
+      # RE264 — the story map's inputs, loaded unconditionally: three small board-scoped indexed
+      # selects, negligible next to the ~10 queries already here, and unconditional means there
+      # is no stale-assign branch to get wrong. `story_map_cards` is the SAME list this mount
+      # already loaded — no extra query.
+      |> assign(:story_activities, StoryMap.list_activities(board))
+      |> assign(:story_tasks, StoryMap.list_tasks(board))
+      |> assign(:releases, StoryMap.list_releases(board))
+      |> assign(:story_map_cards, cards)
+      |> assign(:story_map_tray_open, true)
       |> assign_stalled()
       |> assign(:stalled_open, false)
       |> assign(:stalled_error, nil)
@@ -795,7 +883,7 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("select_card", %{"ref" => ref}, socket) do
-    {:noreply, push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}?card=#{ref}")}
+    {:noreply, push_patch(socket, to: card_path(socket.assigns, ref))}
   end
 
   # Card mode (/cards/:ref) has no board behind the drawer to close back to — the native
@@ -805,7 +893,7 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("close_drawer", _params, socket) do
-    {:noreply, push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}")}
+    {:noreply, push_patch(socket, to: board_path(socket.assigns))}
   end
 
   # RLY-227 — step to the prev/next card in the open card's stage column. The refs
@@ -837,7 +925,7 @@ defmodule RelayWeb.BoardLive do
       {:noreply,
        socket
        |> apply_archive(archived)
-       |> push_patch(to: ~p"/board/#{socket.assigns.board.slug}")
+       |> push_patch(to: board_path(socket.assigns))
        |> put_flash(:info, "Card archived.")}
     else
       _ -> {:noreply, socket}
@@ -901,7 +989,7 @@ defmodule RelayWeb.BoardLive do
     {:noreply,
      socket
      |> assign(:archived_open, false)
-     |> push_patch(to: ~p"/board/#{socket.assigns.board.slug}?card=#{ref}")}
+     |> push_patch(to: card_path(socket.assigns, ref))}
   end
 
   # RE247 — the stalled dialog. Naming the cards is the whole point, so the list is refetched
@@ -924,7 +1012,7 @@ defmodule RelayWeb.BoardLive do
     {:noreply,
      socket
      |> assign(:stalled_open, false)
-     |> push_patch(to: ~p"/board/#{socket.assigns.board.slug}?card=#{ref}")}
+     |> push_patch(to: card_path(socket.assigns, ref))}
   end
 
   # One move path, two entry points (drag-and-drop hook and the drawer's
@@ -1275,6 +1363,12 @@ defmodule RelayWeb.BoardLive do
     {:noreply, update(socket, :expanded_plan?, &(!&1))}
   end
 
+  # RE264 — the UNMAPPED tray's collapse/expand. Deliberately NOT in the read_only? guard
+  # list above — it changes nothing on the board.
+  def handle_event("toggle_story_map_tray", _params, socket) do
+    {:noreply, assign(socket, :story_map_tray_open, not socket.assigns.story_map_tray_open)}
+  end
+
   # SUB-TASKS panel toggle (RLY-18): flip the item's done flag and refresh the
   # drawer + board card so the done/total count and stage badge stay in sync.
   def handle_event("toggle_sub_task", %{"id" => id}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
@@ -1560,7 +1654,8 @@ defmodule RelayWeb.BoardLive do
        |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, cards_by_stage))
        |> assign_archived_count()
        |> refresh_face_runs(cards_by_stage)
-       |> maybe_refresh_drawer(card)}
+       |> maybe_refresh_drawer(card)
+       |> refresh_story_map()}
     else
       # The card sits in a stage this socket hasn't loaded yet (e.g. a
       # just-enabled sub-lane racing its stages_changed event): rebuild.
@@ -1576,7 +1671,8 @@ defmodule RelayWeb.BoardLive do
        socket
        |> refresh_card_health(moved.id)
        |> apply_move(from_stage_id, moved)
-       |> refresh_face_runs(cards_by_stage)}
+       |> refresh_face_runs(cards_by_stage)
+       |> refresh_story_map()}
     else
       {:noreply, reload_board(socket)}
     end
@@ -1587,7 +1683,7 @@ defmodule RelayWeb.BoardLive do
   # drawer if the archived card is the one open here.
   def handle_info({:card_archived, %Card{} = card}, socket) do
     if find_stage_by_id(socket, card.stage_id) do
-      {:noreply, socket |> apply_archive(card) |> close_drawer_if_selected(card)}
+      {:noreply, socket |> apply_archive(card) |> close_drawer_if_selected(card) |> refresh_story_map()}
     else
       {:noreply, reload_board(socket)}
     end
@@ -1607,12 +1703,12 @@ defmodule RelayWeb.BoardLive do
     {:noreply, reload_board(socket)}
   end
 
-  # RE265 — the story map is a second lens onto the same board and rides the
-  # shared "board:<id>" topic, so this socket receives the event even though
-  # the kanban view renders none of that structure. No-op on purpose: without
-  # a clause the unmatched message is a FunctionClauseError that kills the
-  # LiveView (it exports handle_info/2, so LiveView dispatches everything here).
-  def handle_info({:story_map_changed, _board_id}, socket), do: {:noreply, socket}
+  # RE265/RE264 — the story map is a second lens onto the same board and rides the shared
+  # "board:<id>" topic, so this socket receives the event even when it is rendering the kanban
+  # view. refresh_story_map/1 no-ops off the story map, so an open board pays nothing; a clause
+  # is required either way (LiveView dispatches every message here, and an unmatched one is a
+  # FunctionClauseError that kills the LiveView).
+  def handle_info({:story_map_changed, _board_id}, socket), do: {:noreply, refresh_story_map(socket)}
 
   # RLY-69 — a vote toggled somewhere (this board, the public board, another
   # session). Refresh the affected card's count (and, if its drawer is open,
@@ -2260,7 +2356,7 @@ defmodule RelayWeb.BoardLive do
   end
 
   defp close_drawer_after_action(socket) do
-    push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}")
+    push_patch(socket, to: board_path(socket.assigns))
   end
 
   # RLY-115 — an answered block resumes the card, so the drawer's job is done:
@@ -2470,7 +2566,7 @@ defmodule RelayWeb.BoardLive do
   # Close the drawer when the just-archived card is the one open here.
   defp close_drawer_if_selected(socket, %Card{id: id}) do
     case socket.assigns.selected_card do
-      %Card{id: ^id} -> push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}")
+      %Card{id: ^id} -> push_patch(socket, to: board_path(socket.assigns))
       _other -> socket
     end
   end
@@ -2599,7 +2695,23 @@ defmodule RelayWeb.BoardLive do
       stream_stage(acc, stage.id, cards_by_stage, reset: true)
     end)
     |> refresh_selected_stage()
+    |> refresh_story_map()
   end
+
+  # RE264 — refetch-and-reassign, the same coarse contract PublicBoardLive uses: cards move
+  # between cells and the tray live, and RE263's new activities appear without a reload. It
+  # no-ops unless this socket is actually rendering the map.
+  defp refresh_story_map(%{assigns: %{live_action: :story_map}} = socket) do
+    board = socket.assigns.board
+
+    socket
+    |> assign(:story_activities, StoryMap.list_activities(board))
+    |> assign(:story_tasks, StoryMap.list_tasks(board))
+    |> assign(:releases, StoryMap.list_releases(board))
+    |> assign(:story_map_cards, Cards.list_cards(board))
+  end
+
+  defp refresh_story_map(socket), do: socket
 
   # After a stage reload, re-derive the open drawer's stage from the new
   # board (disable_lane refuses to remove a non-empty lane, so the
@@ -2748,6 +2860,17 @@ defmodule RelayWeb.BoardLive do
   # per stage is safe.
   # sobelow_skip ["DOS.BinToAtom"]
   defp stream_name(stage_id), do: :"stage_cards_#{stage_id}"
+
+  # RE264 — the board URL this socket belongs to. On the story map, closing the drawer (or an
+  # archive/review/answer that dismisses it) must land back on the map, not bounce the user to
+  # the kanban board. Both take the **assigns map**, not the socket, so `render/1` can call
+  # them for the drawer's close_patch with the `assigns` it already has.
+  defp board_path(%{live_action: :story_map, board: board}), do: ~p"/board/#{board.slug}/story-map"
+  defp board_path(%{board: board}), do: ~p"/board/#{board.slug}"
+
+  defp card_path(%{live_action: :story_map, board: board}, ref), do: ~p"/board/#{board.slug}/story-map?card=#{ref}"
+
+  defp card_path(%{board: board}, ref), do: ~p"/board/#{board.slug}?card=#{ref}"
 
   defp empty_compose_form, do: to_form(%{"title" => ""}, as: :card)
 

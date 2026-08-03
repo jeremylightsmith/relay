@@ -161,6 +161,17 @@ sharing behavior.
   `{:card_upserted, card}` via `Cards.notify_upserted/1`. `Relay.Boards` deliberately does
   **not** depend on this context — `StoryMap → Cards → Boards` already exists, so the reverse
   edge would close a boundary cycle; the release seed therefore lives in `Boards`.
+  **View (RE264):** the read-only backbone × releases grid at `/board/:slug/story-map`, a
+  `:story_map` live_action on `RelayWeb.BoardLive` rather than its own LiveView — clicking a
+  card must open the card drawer *in place*, and the drawer's ~50 assigns and ~40 event
+  handlers live in `BoardLive`; a separate LiveView could only honour that by duplicating them
+  or extracting the drawer's whole state machine. The grid itself is isolated: the pure,
+  unit-tested `RelayWeb.StoryMapGrid.build/4` (`(activities, tasks, releases, cards)` → bands,
+  columns, lanes, cells, unmapped — every card placed exactly once, an activity-less card in
+  the tray, a release-less mapped card in the LAST lane, a release-less board in one synthetic
+  `(No release)` lane) plus `RelayWeb.StoryMapComponents` for the render.
+  `RelayWeb.CoreComponents.board_view_tabs/1` is the Board ↔ Story map switch. Read-only and
+  full zoom: drag/add (RE262), create (RE263), edit (RE261) and zoom (RE260) are later cards.
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
 
 ## Core schemas

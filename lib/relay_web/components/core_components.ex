@@ -866,6 +866,52 @@ defmodule RelayWeb.CoreComponents do
   defp user_name(user), do: Map.get(user, :name) || Map.get(user, :email)
 
   @doc """
+  The Board ↔ Story map switch (RE264) — shared board chrome, so it lives here with the rest of
+  it. Renders `docs/designs/Relay Story Map.dc.html`'s segmented control (lines ~37-40) as two
+  `<.link navigate=…>` segments; `RelayWeb.BoardLive` renders it in `Layouts.app`'s `<:title>`
+  slot, immediately after the board name, on both of its board actions.
+  """
+  attr :board_slug, :string, required: true
+  attr :active, :atom, values: [:board, :story_map], required: true
+
+  def board_view_tabs(assigns) do
+    ~H"""
+    <div
+      id="board-view-tabs"
+      role="navigation"
+      aria-label="Board view"
+      style="display:flex;background:oklch(0.955 0.006 255);border-radius:8px;padding:2px;flex:0 0 auto;margin-left:13px;"
+    >
+      <.link
+        navigate={~p"/board/#{@board_slug}"}
+        id="board-view-tab-board"
+        aria-current={@active == :board && "page"}
+        style={board_view_tab_style(@active == :board)}
+      >
+        Board
+      </.link>
+      <.link
+        navigate={~p"/board/#{@board_slug}/story-map"}
+        id="board-view-tab-story-map"
+        aria-current={@active == :story_map && "page"}
+        style={board_view_tab_style(@active == :story_map)}
+      >
+        Story map
+      </.link>
+    </div>
+    """
+  end
+
+  defp board_view_tab_style(true) do
+    "font-size:12px;font-weight:600;color:oklch(0.32 0.02 255);padding:4px 11px;" <>
+      "border-radius:6px;background:oklch(1 0 0);box-shadow:0 1px 2px oklch(0 0 0/0.08);"
+  end
+
+  defp board_view_tab_style(_active) do
+    "font-size:12px;font-weight:600;color:oklch(0.5 0.02 255);padding:4px 11px;border-radius:6px;"
+  end
+
+  @doc """
   The boards-home overlapping member avatar stack (RLY-32) — mockup
   "Relay Board.dc.html" lines ~114-124. Up to `limit` 24×24 colored-initials
   circles (2px white ring, -7px overlap), then a neutral +N overflow chip.
@@ -1688,7 +1734,7 @@ defmodule RelayWeb.CoreComponents do
     assigns =
       assigns
       |> assign(:sub_task_progress, Cards.sub_task_progress(assigns.card))
-      |> assign(:working_progress, board_card_progress(assigns.card))
+      |> assign(:working_progress, Cards.sub_task_pct(assigns.card))
       |> assign(:latest_run, latest)
       |> assign(:latest_detail, latest && Relay.Runs.run_detail(latest, assigns.run_flow))
       |> assign(:parked_run, parked_run)
@@ -2228,7 +2274,7 @@ defmodule RelayWeb.CoreComponents do
                     <div class="h-1 max-w-[120px] flex-1 overflow-hidden rounded-full bg-base-300">
                       <div
                         class="h-full rounded-full bg-success transition-all"
-                        style={"width:#{sub_task_pct(@sub_task_progress)}%"}
+                        style={"width:#{Cards.sub_task_pct(@sub_task_progress) || 0}%"}
                       />
                     </div>
                   </div>
@@ -3104,23 +3150,6 @@ defmodule RelayWeb.CoreComponents do
   defp attempt_label(n) when is_integer(n) and n > 1, do: "#{n} attempts"
   defp attempt_label(_n), do: "1 attempt"
 
-  # SUB-TASKS progress bar width; an empty list is 0% (never divides by zero).
-  defp sub_task_pct(%{total: 0}), do: 0
-  defp sub_task_pct(%{done: done, total: total}), do: round(done * 100 / total)
-
-  # Working progress is derived from the card's sub-tasks (RLY-37): done/total as
-  # a percentage, or nil when there are none — a working card with no checklist
-  # shows no bar and a plain "working" label. Real cards always carry a loaded
-  # sub_tasks list (card_preloads/0); the fallback clause tolerates bare test maps.
-  defp board_card_progress(%{sub_tasks: sub_tasks}) when is_list(sub_tasks) do
-    case Cards.sub_task_progress(%{sub_tasks: sub_tasks}) do
-      %{total: 0} -> nil
-      %{done: done, total: total} -> round(done * 100 / total)
-    end
-  end
-
-  defp board_card_progress(_card), do: nil
-
   # ---------- RLY-137: Run tab helpers ----------
 
   # RLY-207: prior runs are terminal, so a `nil` flow is behavior-neutral — the
@@ -3598,7 +3627,7 @@ defmodule RelayWeb.CoreComponents do
                       stage_type={@type}
                       done={@terminal and card.status == :ready}
                       question={Map.get(@questions, card.id)}
-                      progress={board_card_progress(card)}
+                      progress={Cards.sub_task_pct(card)}
                       owners={card.owners}
                       active_owner={Cards.active_owner_type(card)}
                       lane={:main}
@@ -3711,7 +3740,7 @@ defmodule RelayWeb.CoreComponents do
                   stage_type={sub.lane}
                   done={false}
                   question={Map.get(@questions, card.id)}
-                  progress={board_card_progress(card)}
+                  progress={Cards.sub_task_pct(card)}
                   owners={card.owners}
                   active_owner={Cards.active_owner_type(card)}
                   lane={sub.lane}

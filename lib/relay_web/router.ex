@@ -89,6 +89,11 @@ defmodule RelayWeb.Router do
         ) ++ [{RelayWeb.Auth, :require_authenticated}, {RelayWeb.Auth, :mount_embed}] do
       live "/boards", BoardsLive
       live "/board/:slug", BoardLive
+      # RE264 — the story map is a second lens on the SAME board, and clicking a card must open
+      # the full card drawer in place. The drawer's ~50 assigns and ~40 events live in
+      # BoardLive, so this is a live_action on it, not a separate LiveView. If a third view ever
+      # needs the drawer, extract it then — that is the trigger, not this route.
+      live "/board/:slug/story-map", BoardLive, :story_map
       live "/board/:slug/settings", BoardSettingsLive
       live "/board/:slug/runners", BoardRunnersLive
       live "/board/:slug/flows/:key", FlowEditorLive

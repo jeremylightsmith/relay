@@ -164,6 +164,25 @@ defmodule Relay.CardsTest do
       assert [%Schemas.SubTask{title: "todo"}] = loaded.sub_tasks
     end
 
+    test "loads the story-map placement columns (RE264 — the grid reads them off this list)",
+         %{board: board, stage: stage} do
+      activity = insert(:story_activity, board: board)
+      task = insert(:story_task, story_activity: activity)
+      release = insert(:release, board: board)
+
+      insert(:card,
+        stage: stage,
+        story_activity_id: activity.id,
+        story_task_id: task.id,
+        release_id: release.id
+      )
+
+      assert [loaded] = Cards.list_cards(board)
+      assert loaded.story_activity_id == activity.id
+      assert loaded.story_task_id == task.id
+      assert loaded.release_id == release.id
+    end
+
     test "preserves the rejection embed through the trim", %{board: board, stage: stage} do
       card = insert(:card, stage: stage)
 

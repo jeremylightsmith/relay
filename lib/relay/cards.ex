@@ -54,6 +54,11 @@ defmodule Relay.Cards do
     :ai_result,
     :board_id,
     :stage_id,
+    # RE264 — the story map's placement, read straight off this list by
+    # RelayWeb.StoryMapGrid.build/4. Without them every card comes back unplaced.
+    :story_activity_id,
+    :story_task_id,
+    :release_id,
     :posted_by_user_id,
     :rejection,
     :inserted_at,
@@ -164,6 +169,8 @@ defmodule Relay.Cards do
   those heavy text bodies must fetch the full card via `get_card_by_ref/2`
   (the drawer already does). Every other column, the `owners: :user` and
   ordered `sub_tasks` preloads, and the `rejection` embed are populated.
+  That includes the three story-map columns (`story_activity_id`, `story_task_id`,
+  `release_id`), which `RelayWeb.StoryMapGrid` places the card by (RE264).
 
   `opts`:
     * `:exclude_stage_ids` — a list of stage ids to drop from the result
@@ -469,6 +476,21 @@ defmodule Relay.Cards do
   def sub_task_progress(%{sub_tasks: sub_tasks}) when is_list(sub_tasks) do
     %{done: Enum.count(sub_tasks, & &1.done), total: length(sub_tasks)}
   end
+
+  @doc """
+  The card's checklist completion as a whole percentage, or `nil` when there is no checklist —
+  **the one definition of that formula** (RE264). `board_card/1`'s working bar, the drawer's
+  SUB-TASKS bar and the story map card's 3px bar all call it, so they can never disagree.
+
+  Takes either a map with a **loaded** `sub_tasks` list (a Card struct or a bare test/story
+  map) or a `sub_task_progress/1` result. Anything else is `nil`.
+  """
+  def sub_task_pct(%{sub_tasks: sub_tasks} = card) when is_list(sub_tasks),
+    do: card |> sub_task_progress() |> sub_task_pct()
+
+  def sub_task_pct(%{total: 0}), do: nil
+  def sub_task_pct(%{done: done, total: total}), do: round(done * 100 / total)
+  def sub_task_pct(_other), do: nil
 
   @doc """
   The subset of `fields` that are blank on `card`, in the order given — the run-time half of a
