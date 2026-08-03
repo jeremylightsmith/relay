@@ -2339,10 +2339,13 @@ class AutoUpdateDownloadTest(unittest.TestCase):
         self.assertIsNone(relay.download_executor("http://config.test"))
         self.assertTrue(any("does not compile" in m for m in self.logs))
 
-    def test_an_equal_or_older_version_is_refused(self):
+    def test_an_equal_or_older_version_is_a_benign_noop_not_a_failure(self):
+        # relay-config serving <= the running version is the EXPECTED publish-window state (a board
+        # ahead of relay-config), not a refusal — so it returns NOTHING_NEWER, distinct from the
+        # None that a genuine failure returns, so it never burns the anti-thrash budget (RE185).
         for v in (relay.EXECUTOR_VERSION, relay.EXECUTOR_VERSION - 1):
             self.body = VALID_STUB.format(v).encode()
-            self.assertIsNone(relay.download_executor("http://config.test"))
+            self.assertIs(relay.download_executor("http://config.test"), relay.NOTHING_NEWER)
 
     def test_a_fetch_failure_is_reported_not_raised(self):
         def boom(url, timeout=30):
@@ -2556,6 +2559,16 @@ class MaybeAutoUpdateTest(unittest.TestCase):
     def test_a_successful_update_does_not_count_toward_the_cap(self):
         self.state["attempts"] = relay.AUTO_UPDATE_MAX_ATTEMPTS - 1
         self.assertTrue(self._run(self.new))
+        self.assertEqual(self.state["attempts"], relay.AUTO_UPDATE_MAX_ATTEMPTS - 1)
+        self.assertFalse(self.state["disabled"])
+
+    def test_a_benign_nothing_newer_does_not_count_toward_the_cap(self):
+        # RE185 round-3: relay-config serving nothing newer is the expected window while a publish
+        # is committed but not yet pushed — every heartbeat hits it, so counting it would cap out
+        # and PERMANENTLY disable self-update over a non-problem. Only genuine failures (None) count.
+        relay.download_executor = lambda url: relay.NOTHING_NEWER
+        self.state["attempts"] = relay.AUTO_UPDATE_MAX_ATTEMPTS - 1
+        self.assertFalse(self._run(self.new))
         self.assertEqual(self.state["attempts"], relay.AUTO_UPDATE_MAX_ATTEMPTS - 1)
         self.assertFalse(self.state["disabled"])
 

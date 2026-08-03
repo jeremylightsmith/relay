@@ -69,8 +69,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 32
-EXECUTOR_FINGERPRINT = "fc2a04c1d8402017ac297e063e8de254cc774078a5480d20108a1f207a73a1bc"
+EXECUTOR_VERSION = 33
+EXECUTOR_FINGERPRINT = "fd1c1d0e4bb3f578934b93e6f4becc7a3b802f85a25591c59d0c001f2a8a0963"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -2404,6 +2404,13 @@ def parse_executor_version(source):
     return int(m.group(1)) if m else None
 
 
+# `download_executor`'s benign result when relay-config serves a version that is NOT newer than the
+# running one — the expected state while a publish is committed here but not yet pushed to
+# relay-config. Distinct from None (a genuine fetch/parse/compile failure) so it never counts
+# toward the anti-thrash cap (RE185).
+NOTHING_NEWER = object()
+
+
 def download_executor(config_url):
     """Fetch and verify bin/relay from relay-config; returns (source_text, version) or None.
 
@@ -2443,7 +2450,7 @@ def download_executor(config_url):
         # a board ahead of relay-config is then harmless rather than a chase.
         log(f"auto-update: relay-config serves version {version}, not newer than the running "
             f"{EXECUTOR_VERSION} — nothing to do")
-        return None
+        return NOTHING_NEWER
     return source, version
 
 
@@ -2619,10 +2626,15 @@ def maybe_auto_update(cfg, hb, state, config_url):
                 'them. Commit or stash them, or set "auto_update": false in '
                 ".relay/executor.json.", kind="error")
         return False
-    # Only the two paths below count toward the cap: an attempt that reached out for new code
-    # and did not end up running it. The skip above does not (a human's uncommitted bin/relay
-    # is deliberate and already warned about), and neither does the success below.
+    # Only a GENUINE failure counts toward the cap: an attempt that reached out for new code and
+    # could not run it (fetch/parse/compile → None). The skip above does not (a human's uncommitted
+    # bin/relay is deliberate and already warned about), the success below does not, and
+    # NOTHING_NEWER does not — relay-config serving nothing newer is the expected window while a
+    # publish is committed here but not yet pushed, so counting it would cap out and permanently
+    # disable self-update over a non-problem (RE185).
     result = download_executor(config_url)
+    if result is NOTHING_NEWER:
+        return False
     if result is None:
         state["attempts"] += 1
         return False
@@ -2929,7 +2941,7 @@ def _self_update(config_url, target_version):
     if target_version <= EXECUTOR_VERSION:
         return None
     result = download_executor(config_url)
-    if result is None:
+    if result is None or result is NOTHING_NEWER:
         return None
     source, version = result
     return version if install_executor(source, version) else None
