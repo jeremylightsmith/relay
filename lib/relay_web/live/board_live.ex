@@ -1597,6 +1597,24 @@ defmodule RelayWeb.BoardLive do
     end
   end
 
+  # RE261 — a header drop. The client sends IDS ONLY; the server resolves both ends from its
+  # board-scoped assigns, computes the new order with StoryMap.insert_before/3 and calls the
+  # context, so a forged payload can at worst reorder something the user can already see. Every
+  # failure is a silent no-op — the contract assign_card already uses for a stale drop. The
+  # re-render comes from the write's own {:story_map_changed, _} broadcast.
+  def handle_event(
+        "story_map_reorder",
+        %{"kind" => kind, "id" => id, "target_kind" => target_kind, "target_id" => target_id},
+        socket
+      ) do
+    with {_kind, _record} = dragged <- resolve_story_map_target(socket, kind, id),
+         {_target_kind, _target} = target <- resolve_story_map_target(socket, target_kind, target_id) do
+      {:noreply, apply_story_map_reorder(socket, dragged, target)}
+    else
+      _other -> {:noreply, socket}
+    end
+  end
+
   # SUB-TASKS panel toggle (RLY-18): flip the item's done flag and refresh the
   # drawer + board card so the done/total count and stage badge stay in sync.
   def handle_event("toggle_sub_task", %{"id" => id}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
@@ -3082,6 +3100,71 @@ defmodule RelayWeb.BoardLive do
   defp apply_story_map_delete(socket, {:ok, _record}), do: socket
   defp apply_story_map_delete(socket, {:error, :not_empty}), do: put_flash(socket, :error, "Move its cards out first.")
   defp apply_story_map_delete(socket, {:error, _changeset}), do: socket
+
+  # The artboard's onDropAct / onDropTask (Relay Story Map.dc.html, lines ~681-682) as one
+  # total function. Every pair the matrix does not name — a release onto the backbone, a
+  # backbone header onto a release — falls through to the no-op clause.
+  defp apply_story_map_reorder(socket, {:activity, dragged}, {:activity, target}) do
+    reorder_story_activities(socket, dragged.id, target.id)
+  end
+
+  # Dropping an activity on a TASK header targets that task's activity.
+  defp apply_story_map_reorder(socket, {:activity, dragged}, {:task, target}) do
+    reorder_story_activities(socket, dragged.id, target.story_activity_id)
+  end
+
+  defp apply_story_map_reorder(socket, {:task, dragged}, {:task, target}) do
+    # The target activity's task ids WITH the dragged one appended, so insert_before/3's own
+    # "remove every copy of `id` first" makes "already in this activity" and "arriving from
+    # another" the same list.
+    ids =
+      StoryMap.insert_before(
+        story_map_task_ids(socket, target.story_activity_id) ++ [dragged.id],
+        dragged.id,
+        target.id
+      )
+
+    _ = StoryMap.move_task(dragged, target.story_activity_id, ids)
+    socket
+  end
+
+  # The artboard's `moveTask(s, task, targetAct, null)`: dropped on an activity header, the task
+  # goes to the END of that activity.
+  defp apply_story_map_reorder(socket, {:task, dragged}, {:activity, target}) do
+    ids = Enum.reject(story_map_task_ids(socket, target.id), &(&1 == dragged.id)) ++ [dragged.id]
+
+    _ = StoryMap.move_task(dragged, target.id, ids)
+    socket
+  end
+
+  defp apply_story_map_reorder(socket, {:release, dragged}, {:release, target}) do
+    ids = StoryMap.insert_before(Enum.map(socket.assigns.releases, & &1.id), dragged.id, target.id)
+
+    _ = StoryMap.reorder_releases(socket.assigns.board, ids)
+    socket
+  end
+
+  defp apply_story_map_reorder(socket, _dragged, _target), do: socket
+
+  defp reorder_story_activities(socket, dragged_id, target_activity_id) do
+    ids =
+      StoryMap.insert_before(
+        Enum.map(socket.assigns.story_activities, & &1.id),
+        dragged_id,
+        target_activity_id
+      )
+
+    _ = StoryMap.reorder_activities(socket.assigns.board, ids)
+    socket
+  end
+
+  # `@story_tasks` is already ordered by (activity, position), so this is that activity's task
+  # order as the user sees it.
+  defp story_map_task_ids(socket, activity_id) do
+    socket.assigns.story_tasks
+    |> Enum.filter(&(&1.story_activity_id == activity_id))
+    |> Enum.map(& &1.id)
+  end
 
   # After a stage reload, re-derive the open drawer's stage from the new
   # board (disable_lane refuses to remove a non-empty lane, so the

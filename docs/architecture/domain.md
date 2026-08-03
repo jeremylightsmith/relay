@@ -199,7 +199,21 @@ sharing behavior.
   that same module defines, and the `StoryMapDnD` hook (`assets/js/hooks/story_map_dnd.js`)
   pushes `{ref, column, lane, index}` — no optimistic client move, so a second tab follows for
   free.
-  Still to come: edit (RE261) and zoom (RE260).
+  **Edit (RE261):** the structure is editable in place — click a name to rename (one open
+  rename page-wide, the `:story_map_edit` / `:story_map_edit_name` assigns, mutually exclusive
+  with the create draft, and a blank name cancels rather than writes); a ✕ per structure that is
+  `disabled` and greyed while it still holds cards, its tooltip naming the count
+  `RelayWeb.StoryMapGrid` renders (`columns[].count` joins the existing `bands[].count` and
+  `lanes[].count`, so display and guard come from one number) and the board's last release
+  showing no ✕ at all; and drag-reorder by header — the `StoryMapDnD` hook gains a second
+  draggable kind (`.story-map-header[data-kind][data-id]`, dropping on
+  `.story-map-header-drop`) that pushes `story_map_reorder` with **ids only**, and `BoardLive`
+  computes the order with `StoryMap.insert_before/3` and writes through
+  `reorder_activities/2`, `move_task/3` or `reorder_releases/2`. Reordering releases moves the
+  last-lane fallback with it, which is a display move only — no stored `release_id` changes.
+  Every new event joins the `read_only?` guard list and none of the affordances render on an
+  archived board.
+  Still to come: zoom (RE260).
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
 
 ## Core schemas

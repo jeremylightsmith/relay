@@ -861,6 +861,168 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
     end
   end
 
+  describe "RE261 — dragging a header to reorder" do
+    test "activity onto activity reorders the backbone", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      reorder(view, "activity", ctx.plan.id, "activity", ctx.onboard.id)
+
+      assert Enum.map(StoryMap.list_activities(ctx.board), & &1.name) == [
+               "Plan the backlog",
+               "Onboard & access"
+             ]
+    end
+
+    test "activity onto a TASK header targets that task's activity", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      reorder(view, "activity", ctx.plan.id, "task", ctx.sign_in.id)
+
+      assert Enum.map(StoryMap.list_activities(ctx.board), & &1.name) == [
+               "Plan the backlog",
+               "Onboard & access"
+             ]
+    end
+
+    test "task onto a task in another activity moves it there, at the target's index, with its cards",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      reorder(view, "task", ctx.sign_in.id, "task", ctx.organize.id)
+
+      moved = Repo.get!(Schemas.StoryTask, ctx.sign_in.id)
+      assert moved.story_activity_id == ctx.plan.id
+      assert moved.position == 1
+      assert Repo.get!(Schemas.StoryTask, ctx.organize.id).position == 2
+
+      # The cards came with it — and none landed in the tray.
+      assert Repo.get!(Schemas.Card, ctx.sso.id).story_activity_id == ctx.plan.id
+      assert Repo.get!(Schemas.Card, ctx.limits.id).story_activity_id == ctx.plan.id
+      assert has_element?(view, "#story-map-tray-count", "1")
+    end
+
+    test "task onto an ACTIVITY header appends it last in that activity", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      reorder(view, "task", ctx.sign_in.id, "activity", ctx.plan.id)
+
+      moved = Repo.get!(Schemas.StoryTask, ctx.sign_in.id)
+      assert moved.story_activity_id == ctx.plan.id
+      assert moved.position == 2
+      assert Repo.get!(Schemas.StoryTask, ctx.organize.id).position == 1
+    end
+
+    test "task onto a task in its OWN activity is a pure renumber", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      {:ok, second} = StoryMap.create_task(ctx.onboard, %{name: "Reset password", position: 2})
+      # Force the {:story_map_changed, _} refresh to land before the drop, so @story_tasks
+      # actually holds the new column when the server computes the order.
+      assert has_element?(view, "#story-map-task-#{second.id}")
+
+      reorder(view, "task", second.id, "task", ctx.sign_in.id)
+
+      assert Repo.get!(Schemas.StoryTask, second.id).position == 1
+      assert Repo.get!(Schemas.StoryTask, second.id).story_activity_id == ctx.onboard.id
+      assert Repo.get!(Schemas.StoryTask, ctx.sign_in.id).position == 2
+    end
+
+    test "release onto release reorders the swimlanes", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      [mvp, _fast_follow, later] = StoryMap.list_releases(ctx.board)
+      reorder(view, "release", later.id, "release", mvp.id)
+
+      assert Enum.map(StoryMap.list_releases(ctx.board), & &1.name) == [
+               "Later",
+               "MVP",
+               "Fast follow"
+             ]
+    end
+
+    test "a release dropped on the backbone, and a backbone header dropped on a release, do nothing",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      before_activities = Enum.map(StoryMap.list_activities(ctx.board), & &1.id)
+      before_releases = Enum.map(StoryMap.list_releases(ctx.board), & &1.id)
+
+      reorder(view, "release", ctx.mvp.id, "activity", ctx.onboard.id)
+      reorder(view, "activity", ctx.onboard.id, "release", ctx.mvp.id)
+      reorder(view, "task", ctx.sign_in.id, "release", ctx.mvp.id)
+
+      assert Enum.map(StoryMap.list_activities(ctx.board), & &1.id) == before_activities
+      assert Enum.map(StoryMap.list_releases(ctx.board), & &1.id) == before_releases
+      assert Repo.get!(Schemas.StoryTask, ctx.sign_in.id).story_activity_id == ctx.onboard.id
+    end
+
+    test "dropping a header on itself changes nothing", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      reorder(view, "activity", ctx.onboard.id, "activity", ctx.onboard.id)
+
+      assert Enum.map(StoryMap.list_activities(ctx.board), & &1.name) == [
+               "Onboard & access",
+               "Plan the backlog"
+             ]
+    end
+
+    test "a forged id on either end is a silent no-op", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      foreign = insert(:story_activity, board: insert(:board))
+      reorder(view, "activity", foreign.id, "activity", ctx.onboard.id)
+      reorder(view, "activity", ctx.onboard.id, "activity", foreign.id)
+      reorder(view, "nonsense", ctx.onboard.id, "activity", ctx.plan.id)
+
+      assert has_element?(view, "#story-map-grid")
+
+      assert Enum.map(StoryMap.list_activities(ctx.board), & &1.name) == [
+               "Onboard & access",
+               "Plan the backlog"
+             ]
+    end
+
+    test "the headers carry the drag contract the hook reads", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      band = view |> element("#story-map-activity-#{ctx.onboard.id}") |> render()
+      assert band =~ ~s(data-kind="activity")
+      assert band =~ ~s(data-id="#{ctx.onboard.id}")
+      assert band =~ "story-map-header-drop"
+      assert band =~ ~s(draggable="true")
+
+      column = view |> element("#story-map-task-#{ctx.sign_in.id}") |> render()
+      assert column =~ ~s(data-kind="task")
+      assert column =~ "story-map-header-drop"
+
+      lane = view |> element("#story-map-release-#{ctx.mvp.id}") |> render()
+      assert lane =~ ~s(data-kind="release")
+      assert lane =~ "story-map-header-drop"
+    end
+
+    test "an archived board refuses the reorder event and drops the drag contract",
+         %{conn: conn} = ctx do
+      {:ok, _archived} = Boards.archive_board(ctx.board)
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      refute render(view) =~ "story-map-header-drop"
+      assert view |> element("#story-map-activity-#{ctx.onboard.id}") |> render() =~ ~s(draggable="false")
+
+      assert render_hook(view, "story_map_reorder", %{
+               "kind" => "activity",
+               "id" => to_string(ctx.plan.id),
+               "target_kind" => "activity",
+               "target_id" => to_string(ctx.onboard.id)
+             }) =~ "archived"
+
+      assert Enum.map(StoryMap.list_activities(ctx.board), & &1.name) == [
+               "Onboard & access",
+               "Plan the backlog"
+             ]
+    end
+  end
+
   describe "RE263 — an archived board cannot create structure" do
     test "the create events are refused with the read-only flash", %{conn: conn} = ctx do
       {:ok, _archived} = Boards.archive_board(ctx.board)
@@ -1005,6 +1167,16 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
     view
     |> form("#story-map-rename-#{kind}-#{id}-form", %{"name" => name})
     |> render_submit()
+  end
+
+  # Exactly what assets/js/hooks/story_map_dnd.js pushes on a header drop: ids only, as strings.
+  defp reorder(view, kind, id, target_kind, target_id) do
+    render_hook(view, "story_map_reorder", %{
+      "kind" => kind,
+      "id" => to_string(id),
+      "target_kind" => target_kind,
+      "target_id" => to_string(target_id)
+    })
   end
 
   defp card_by_title(board, title) do
