@@ -435,4 +435,34 @@ defmodule Relay.BoardsTest do
       assert Boards.top_level_done_stage_ids(stages) == [done.id]
     end
   end
+
+  describe "intake_stage/1" do
+    test "is the first top-level stage by position, whatever it is named" do
+      board = insert(:board)
+      insert(:stage, board: board, name: "Code", position: 2)
+      first = insert(:stage, board: board, name: "Renamed intake", position: 1)
+
+      assert Boards.intake_stage(board).id == first.id
+    end
+
+    test "ignores sub-lanes — a column is a top-level stage" do
+      board = insert(:board)
+      parent = insert(:stage, board: board, name: "Spec", position: 2)
+      insert(:stage, board: board, name: "Review", position: 1, parent_id: parent.id)
+
+      assert Boards.intake_stage(board).id == parent.id
+    end
+
+    test "is nil for a board with no stages" do
+      assert Boards.intake_stage(insert(:board)) == nil
+    end
+
+    test "the seeded board's intake is its first seeded stage" do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      [first | _rest] = Enum.filter(board.stages, &is_nil(&1.parent_id))
+
+      assert Boards.intake_stage(board).id == first.id
+    end
+  end
 end

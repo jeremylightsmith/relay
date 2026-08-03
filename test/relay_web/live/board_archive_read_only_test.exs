@@ -5,6 +5,7 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
 
   alias Relay.Boards
   alias Relay.Cards
+  alias Relay.StoryMap
 
   setup :register_and_log_in_user
 
@@ -96,6 +97,75 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
       html = render_hook(view, "restart_one", %{"ref" => "RLY-1"})
 
       assert html =~ "(read-only)"
+    end
+
+    # RE262 — same reasoning as restart_one above: a fresh view per event, because folding
+    # these into the shared "every drawer mutation" list above would let an earlier
+    # iteration's "(read-only)" flash persist across render_hook calls and mask a missing
+    # assign_card/unassign_card guard entry (verified by temporarily dropping both from the
+    # guard clause: appended to the shared list the suite stayed green regardless; in a
+    # fresh view it fails as expected).
+    test "rejects assign_card as read-only", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      html =
+        render_hook(view, "assign_card", %{
+          "ref" => "RLY-1",
+          "column" => "t:1",
+          "lane" => "r:1",
+          "index" => 0
+        })
+
+      assert html =~ "(read-only)"
+    end
+
+    test "rejects unassign_card as read-only", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      html = render_hook(view, "unassign_card", %{"ref" => "RLY-1"})
+
+      assert html =~ "(read-only)"
+    end
+
+    # RE262 — same reasoning as assign_card above: a fresh view per event, so an earlier
+    # iteration's "(read-only)" flash can't mask a missing compose_cell/create_card_in_cell
+    # guard entry.
+    test "rejects compose_cell as read-only", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      html = render_hook(view, "compose_cell", %{"column" => "t:1", "lane" => "r:1"})
+
+      assert html =~ "(read-only)"
+    end
+
+    test "rejects create_card_in_cell as read-only", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      html =
+        render_hook(view, "create_card_in_cell", %{
+          "column" => "t:1",
+          "lane" => "r:1",
+          "card" => %{"title" => "sneaky"}
+        })
+
+      assert html =~ "(read-only)"
+      assert Cards.list_cards(board) == []
+    end
+
+    # RE262 — the server-side guard above rejects compose_cell, but the story map must not
+    # render the affordance either: every body cell would otherwise show a dead `＋` whose
+    # only outcome is a "(read-only)" flash, the way the board hides its own add-work button.
+    test "the story map renders no inline add button", %{conn: conn, board: board} do
+      {:ok, activity} = StoryMap.create_activity(board, %{name: "Onboard", position: 1})
+      {:ok, task} = StoryMap.create_task(activity, %{name: "Sign in", position: 1})
+      [release | _rest] = StoryMap.list_releases(board)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/story-map")
+
+      # The grid itself renders — this is the read-only gate, not an empty story map.
+      assert has_element?(view, "#story-map-cell-t-#{task.id}-r-#{release.id}")
+      refute has_element?(view, "#story-map-add-t-#{task.id}-r-#{release.id}")
+      refute has_element?(view, "[id^='story-map-add-']")
     end
 
     test "Restore re-activates the board and clears read-only",

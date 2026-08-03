@@ -10,6 +10,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Events
+  alias Relay.Repo
   alias Relay.StoryMap
 
   setup :register_and_log_in_user
@@ -189,8 +190,11 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       cell = "#story-map-cell-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}"
       assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, ctx.dashboards)}")
-      # Nothing is unmapped any more, so the tray disappears entirely (artboard: `trayShown`).
-      refute has_element?(view, "#story-map-tray")
+      # The card leaves the tray list, but the tray itself stays: it is the only drop target
+      # that unmaps a card, so it may never vanish (see "the tray is a permanent rail").
+      refute has_element?(view, "#story-map-tray ##{tray_dom_id(ctx.board, ctx.dashboards)}")
+      assert has_element?(view, "#story-map-tray")
+      assert has_element?(view, "#story-map-tray-count", "0")
     end
 
     test "an archived card leaves the map", %{conn: conn} = ctx do
@@ -207,6 +211,162 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       Events.broadcast(ctx.board.id, {:story_map_changed, ctx.board.id})
 
       assert render(view) =~ "board-viewport"
+    end
+  end
+
+  describe "dragging a card" do
+    test "assign_card moves a card from one cell to another", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, ctx.sso),
+        "column" => "t:#{ctx.organize.id}",
+        "lane" => "r:#{ctx.later.id}",
+        "index" => 0
+      })
+
+      target = "#story-map-cell-t-#{ctx.organize.id}-r-#{ctx.later.id}"
+      source = "#story-map-cell-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}"
+
+      assert has_element?(view, "#{target} ##{card_dom_id(ctx.board, ctx.sso)}")
+      refute has_element?(view, "#{source} ##{card_dom_id(ctx.board, ctx.sso)}")
+    end
+
+    test "assign_card from the tray places the card and drops the tray count",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-tray-count", "1")
+
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, ctx.dashboards),
+        "column" => "t:#{ctx.sign_in.id}",
+        "lane" => "r:#{ctx.mvp.id}",
+        "index" => 0
+      })
+
+      cell = "#story-map-cell-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}"
+      assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, ctx.dashboards)}")
+      assert has_element?(view, "#story-map-tray-count", "0")
+    end
+
+    test "assign_card onto a No task yet column sets the activity and leaves the task nil",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, ctx.dashboards),
+        "column" => "nt:#{ctx.onboard.id}",
+        "lane" => "r:#{ctx.mvp.id}",
+        "index" => 0
+      })
+
+      cell = "#story-map-cell-nt-#{ctx.onboard.id}-r-#{ctx.mvp.id}"
+      assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, ctx.dashboards)}")
+
+      placed = Cards.get_card_by_ref(ctx.board, Cards.ref(ctx.board, ctx.dashboards))
+      assert placed.story_activity_id == ctx.onboard.id
+      assert placed.story_task_id == nil
+      assert placed.release_id == ctx.mvp.id
+    end
+
+    test "the index the hook sends orders the cell, and never touches the board's order",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      {:ok, second} =
+        StoryMap.assign_card(ctx.dashboards, %{
+          story_task_id: ctx.sign_in.id,
+          release_id: ctx.mvp.id
+        })
+
+      board_positions = fn -> Enum.map([ctx.sso, second], &Repo.get!(Schemas.Card, &1.id).position) end
+      before = board_positions.()
+
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, second),
+        "column" => "t:#{ctx.sign_in.id}",
+        "lane" => "r:#{ctx.mvp.id}",
+        "index" => 0
+      })
+
+      # Sync with the view before asserting: render_hook returns as soon as handle_event
+      # completes, but the write broadcasts {:card_upserted, _} and the view re-renders off
+      # that echo. Without waiting for it, the test process (the sandbox connection owner)
+      # can exit while the view is still mid-query, logging a spurious Postgrex disconnect.
+      cell = "#story-map-cell-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}"
+      assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, second)}")
+
+      assert Repo.get!(Schemas.Card, second.id).story_map_position == 1
+      assert Repo.get!(Schemas.Card, ctx.sso.id).story_map_position == 2
+      assert board_positions.() == before
+    end
+
+    test "unassign_card returns a mapped card to the tray and expands a collapsed tray",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-tray-toggle") |> render_click()
+      refute has_element?(view, "#story-map-tray ##{tray_dom_id(ctx.board, ctx.dashboards)}")
+
+      render_hook(view, "unassign_card", %{"ref" => Cards.ref(ctx.board, ctx.audit)})
+
+      # The artboard's onTrayDrop sets trayOpen:true — the drop re-expands the rail.
+      assert has_element?(view, "#story-map-tray ##{tray_dom_id(ctx.board, ctx.audit)}")
+      assert has_element?(view, "#story-map-tray-count", "2")
+      refute has_element?(view, "##{card_dom_id(ctx.board, ctx.audit)}")
+
+      cleared = Cards.get_card_by_ref(ctx.board, Cards.ref(ctx.board, ctx.audit))
+      assert cleared.story_map_position == nil
+    end
+
+    test "unmapping still works once every card is placed", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      # Place the last unmapped card: the tray list is now empty, which is the steady state
+      # this feature drives a board toward. The tray is the ONLY drop target that unmaps,
+      # so if it renders away here, unmapping is unreachable through the UI.
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, ctx.dashboards),
+        "column" => "t:#{ctx.sign_in.id}",
+        "lane" => "r:#{ctx.mvp.id}",
+        "index" => 0
+      })
+
+      assert has_element?(view, "#story-map-tray-count", "0")
+
+      render_hook(view, "unassign_card", %{"ref" => Cards.ref(ctx.board, ctx.audit)})
+
+      assert has_element?(view, "#story-map-tray ##{tray_dom_id(ctx.board, ctx.audit)}")
+      assert has_element?(view, "#story-map-tray-count", "1")
+      refute has_element?(view, "##{card_dom_id(ctx.board, ctx.audit)}")
+    end
+
+    test "an undecodable column key and an unknown ref are both silent no-ops",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, ctx.sso),
+        "column" => "garbage",
+        "lane" => "r:#{ctx.mvp.id}",
+        "index" => 0
+      })
+
+      render_hook(view, "assign_card", %{
+        "ref" => "NOPE-999",
+        "column" => "t:#{ctx.organize.id}",
+        "lane" => "r:#{ctx.mvp.id}",
+        "index" => 0
+      })
+
+      render_hook(view, "unassign_card", %{"ref" => "NOPE-999"})
+
+      # The page still renders and the card never moved.
+      assert has_element?(view, "#story-map-grid")
+
+      source = "#story-map-cell-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}"
+      assert has_element?(view, "#{source} ##{card_dom_id(ctx.board, ctx.sso)}")
     end
   end
 
@@ -445,11 +605,12 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
   end
 
   describe "RE263 — nothing from RE261 leaked in" do
-    test "no delete button, no drag grip, and a name is not an editable field", %{conn: conn} = ctx do
+    test "no delete button, no rename grip, and a name is not an editable field", %{conn: conn} = ctx do
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
 
       # Scoped to the map itself — the surrounding board chrome is not this card's business.
-      refute has_element?(view, "#story-map [draggable]")
+      # NOTE: cards ARE `[draggable]` — that is RE262's own drag-and-drop (this branch), not a
+      # leak from RE261; see the "dragging a card" describe block above.
       # The map's ONLY text input is the create draft, and none is open here.
       refute has_element?(view, "#story-map input[type=text]")
       refute has_element?(view, "#story-map-grid", "✕")
@@ -498,11 +659,105 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
     end
   end
 
+  describe "the inline ＋ add-card" do
+    test "creates a real card in the board's intake column, places it, and reopens the composer",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      cell = "#story-map-cell-t-#{ctx.organize.id}-r-#{ctx.mvp.id}"
+      add = "#story-map-add-t-#{ctx.organize.id}-r-#{ctx.mvp.id}"
+      compose = "#story-map-compose-t-#{ctx.organize.id}-r-#{ctx.mvp.id}"
+
+      assert has_element?(view, add)
+      view |> element(add) |> render_click()
+      assert has_element?(view, compose)
+
+      view |> form(compose, card: %{title: "Export to CSV"}) |> render_submit()
+
+      created = card_by_title(ctx.board, "Export to CSV")
+      assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, created)}")
+      # Q4 — the composer reopens empty in the same cell, so a whole cell can be typed.
+      assert has_element?(view, compose)
+
+      assert created.stage_id == Boards.intake_stage(ctx.board).id
+      assert created.story_task_id == ctx.organize.id
+      assert created.release_id == ctx.mvp.id
+    end
+
+    test "a No task yet cell creates the card with an activity and no task", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      cell = "#story-map-cell-nt-#{ctx.onboard.id}-r-#{ctx.mvp.id}"
+      add = "#story-map-add-nt-#{ctx.onboard.id}-r-#{ctx.mvp.id}"
+      compose = "#story-map-compose-nt-#{ctx.onboard.id}-r-#{ctx.mvp.id}"
+
+      view |> element(add) |> render_click()
+      view |> form(compose, card: %{title: "Audit the audit"}) |> render_submit()
+
+      created = card_by_title(ctx.board, "Audit the audit")
+
+      # Sync with the view before asserting on the DB: render_submit returns as soon as
+      # handle_event completes, but the write broadcasts {:card_upserted, _} and the view
+      # re-renders off that echo. Without waiting for it, the test process (the sandbox
+      # connection owner) can exit while the view is still mid-query, logging a spurious
+      # Postgrex disconnect.
+      assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, created)}")
+
+      assert created.story_activity_id == ctx.onboard.id
+      assert created.story_task_id == nil
+      assert created.release_id == ctx.mvp.id
+    end
+
+    test "a blank title creates nothing and keeps the composer open", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      before = length(Cards.list_cards(ctx.board))
+      compose = "#story-map-compose-t-#{ctx.organize.id}-r-#{ctx.mvp.id}"
+
+      view |> element("#story-map-add-t-#{ctx.organize.id}-r-#{ctx.mvp.id}") |> render_click()
+      view |> form(compose, card: %{title: ""}) |> render_submit()
+
+      assert length(Cards.list_cards(ctx.board)) == before
+      assert has_element?(view, compose)
+    end
+
+    test "cancel closes the composer and brings the ＋ back", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      add = "#story-map-add-t-#{ctx.organize.id}-r-#{ctx.mvp.id}"
+      compose = "#story-map-compose-t-#{ctx.organize.id}-r-#{ctx.mvp.id}"
+
+      view |> element(add) |> render_click()
+      refute has_element?(view, add)
+
+      view |> element("#{compose}-cancel") |> render_click()
+      assert has_element?(view, add)
+      refute has_element?(view, compose)
+    end
+
+    test "only one cell's composer is open at a time", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      first = "#story-map-compose-t-#{ctx.organize.id}-r-#{ctx.mvp.id}"
+      second = "#story-map-compose-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}"
+
+      view |> element("#story-map-add-t-#{ctx.organize.id}-r-#{ctx.mvp.id}") |> render_click()
+      view |> element("#story-map-add-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}") |> render_click()
+
+      assert has_element?(view, second)
+      refute has_element?(view, first)
+    end
+  end
+
   # Type into the open draft and press Enter — the phx-change every keystroke fires, then the
   # phx-submit. Both are needed: the change is what lets the server clear the box afterwards.
   defp submit_draft(view, name) do
     render_change(view, "story_map_draft_change", %{"name" => name})
     view |> form("#story-map-draft-input-form", %{"name" => name}) |> render_submit()
+  end
+
+  defp card_by_title(board, title) do
+    board |> Cards.list_cards() |> Enum.find(&(&1.title == title))
   end
 
   defp card_dom_id(board, card), do: "story-map-card-#{Cards.ref(board, card)}"

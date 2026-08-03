@@ -149,9 +149,9 @@ sharing behavior.
   board is seeded with `Schemas.Release.seed_names/0` by `Boards.create_board/2`, every
   pre-existing board by the `backfill_story_map_releases` migration, which carries the one
   deliberately frozen copy of that list). Cards carry three nilable FKs —
-  `story_activity_id`, `story_task_id`, `release_id` — cast only through
-  `Schemas.Card.story_map_changeset/2`, starting fully UNMAPPED, with release independent of
-  activity/task. *A set `story_task_id` implies the matching `story_activity_id`*, enforced by
+  `story_activity_id`, `story_task_id`, `release_id` — plus (RE262) `story_map_position`, all
+  cast only through `Schemas.Card.story_map_changeset/2`, starting fully UNMAPPED, with release
+  independent of activity/task. *A set `story_task_id` implies the matching `story_activity_id`*, enforced by
   derivation in `assign_card/2` (the task supplies its activity; a conflicting one passed
   alongside is ignored), by `update_task/2` (moving a task to another activity rewrites its
   mapped cards' `story_activity_id` in the same transaction), and by the changeset as a
@@ -183,7 +183,17 @@ sharing behavior.
   22001 crash. On an archived board the four write events are refused *and* the affordances are
   not rendered (`read_only`, the same attr name and behaviour as the stage column's compose
   `＋`).
-  Still to come: drag/add (RE262), edit (RE261) and zoom (RE260).
+  **Assignment (RE262):** the map is writable — drag a card between cells, drag it out of or
+  onto the UNMAPPED tray, and an inline `＋` per cell that creates a real board card in
+  `Boards.intake_stage/1` (the board's first top-level stage by position — the one definition of
+  "where a card created outside a column lands") and places it. `StoryMap.assign_card/2` takes
+  an optional 0-based `:position` and renumbers the whole target DB cell `1..n` in one
+  transaction; `unassign_card/1` nils the position with the three FKs, so a card in the tray has
+  no story-map position. `RelayWeb.StoryMapGrid.decode_placement/2` parses the column/lane keys
+  that same module defines, and the `StoryMapDnD` hook (`assets/js/hooks/story_map_dnd.js`)
+  pushes `{ref, column, lane, index}` — no optimistic client move, so a second tab follows for
+  free.
+  Still to come: edit (RE261) and zoom (RE260).
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
 
 ## Core schemas
@@ -233,6 +243,15 @@ A `Card` additionally carries an optional story-map placement — `story_activit
 `story_task_id` and `release_id`, all nilable, all nilified rather than cascaded when the
 structure they point at is deleted. Release is a **new axis orthogonal to stage**: a card has
 both.
+
+A `Card` also carries `story_map_position`: its order **within its story-map cell**, nullable
+and independent of `cards.position` (its order within its stage column). The two orderings never
+affect each other — dragging on the map rewrites one, dragging on the board the other. `nil`
+means nobody has ordered the card on the map yet, and nil sorts **last** inside a cell. Placing a
+card renumbers its whole target cell, and the **siblings** are renumbered with a bare
+`update_all` so their `updated_at` is untouched — that column is the recency proxy behind the
+Done column's render window and the needs-you feed, both board-lens orderings that would
+otherwise be silently reshuffled by a drag on the map.
 
 ---
 *Sources of truth: `lib/relay.ex` (`exports`), `lib/schemas/*.ex`, ADRs 0002–0004, 0006.*

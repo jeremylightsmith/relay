@@ -21,6 +21,20 @@ defmodule Schemas.CardStoryMapChangesetTest do
     assert get_field(changeset, :release_id) == nil
   end
 
+  test "casts :story_map_position alongside the three columns — one story-map cast path" do
+    changeset = Card.story_map_changeset(%Card{}, %{story_activity_id: 1, story_map_position: 3})
+
+    assert changeset.valid?
+    assert get_field(changeset, :story_map_position) == 3
+  end
+
+  test "a nil story_map_position is valid — the tray state" do
+    changeset = Card.story_map_changeset(%Card{story_map_position: 7}, %{story_map_position: nil})
+
+    assert changeset.valid?
+    assert get_field(changeset, :story_map_position) == nil
+  end
+
   test "an activity with no task is valid — the 'No task yet' state" do
     changeset = Card.story_map_changeset(%Card{}, %{story_activity_id: 1})
 

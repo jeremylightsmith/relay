@@ -363,6 +363,153 @@ defmodule Relay.StoryMapTest do
     end
   end
 
+  describe "story-map position" do
+    setup %{board: board, stage: stage} do
+      activity = insert(:story_activity, board: board)
+      task = insert(:story_task, story_activity: activity)
+      other_task = insert(:story_task, story_activity: activity, position: 2)
+      release = insert(:release, board: board)
+
+      %{activity: activity, task: task, other_task: other_task, release: release, stage: stage}
+    end
+
+    test "without :position a card is appended last, and the whole cell is renumbered 1..n", ctx do
+      place(ctx.stage, "First", ctx.task, ctx.release)
+      place(ctx.stage, "Second", ctx.task, ctx.release)
+      third = place(ctx.stage, "Third", ctx.task, ctx.release)
+
+      assert cell_order(ctx.task, ctx.release) == ["First", "Second", "Third"]
+      assert third.story_map_position == 3
+
+      positions =
+        Card
+        |> where([c], c.story_task_id == ^ctx.task.id)
+        |> Repo.all()
+        |> Enum.map(& &1.story_map_position)
+        |> Enum.sort()
+
+      assert positions == [1, 2, 3]
+    end
+
+    test "with :position the card lands at that 0-based index", ctx do
+      place(ctx.stage, "First", ctx.task, ctx.release)
+      place(ctx.stage, "Second", ctx.task, ctx.release)
+      moved = place(ctx.stage, "Jumped", ctx.task, ctx.release, %{position: 1})
+
+      assert cell_order(ctx.task, ctx.release) == ["First", "Jumped", "Second"]
+      assert moved.story_map_position == 2
+    end
+
+    test "the first-ever drag into an all-nil cell still lands where it was dropped", ctx do
+      # Every card here is nil-positioned — exactly the day-one state, so the cards are inserted
+      # already mapped rather than through assign_card/2 (which would position them). Writing
+      # only the moved card's position would slam it to the top however far down the user
+      # dropped it; renumbering the whole cell is what makes this land at the bottom.
+      mapped = [
+        story_activity_id: ctx.activity.id,
+        story_task_id: ctx.task.id,
+        release_id: ctx.release.id
+      ]
+
+      insert(:card, [stage: ctx.stage, title: "A", position: 1] ++ mapped)
+      insert(:card, [stage: ctx.stage, title: "B", position: 2] ++ mapped)
+
+      dropped = place(ctx.stage, "Dropped", ctx.task, ctx.release, %{position: 2})
+
+      assert cell_order(ctx.task, ctx.release) == ["A", "B", "Dropped"]
+      assert dropped.story_map_position == 3
+    end
+
+    test "an out-of-range index is clamped, not an error", ctx do
+      place(ctx.stage, "First", ctx.task, ctx.release)
+      high = place(ctx.stage, "High", ctx.task, ctx.release, %{position: 99})
+      low = place(ctx.stage, "Low", ctx.task, ctx.release, %{position: -5})
+
+      assert high.story_map_position == 2
+      assert low.story_map_position == 1
+      assert cell_order(ctx.task, ctx.release) == ["Low", "First", "High"]
+    end
+
+    test "the renumber is scoped to the target cell", ctx do
+      other_column = place(ctx.stage, "Other column", ctx.other_task, ctx.release)
+      other_lane_release = insert(:release, board: ctx.board, position: 2)
+      other_lane = place(ctx.stage, "Other lane", ctx.task, other_lane_release)
+
+      place(ctx.stage, "Target A", ctx.task, ctx.release)
+      place(ctx.stage, "Target B", ctx.task, ctx.release, %{position: 0})
+
+      assert Repo.get!(Card, other_column.id).story_map_position == other_column.story_map_position
+      assert Repo.get!(Card, other_lane.id).story_map_position == other_lane.story_map_position
+      assert cell_order(ctx.task, ctx.release) == ["Target B", "Target A"]
+    end
+
+    test "unassign_card/1 nils story_map_position along with the three columns", ctx do
+      card = place(ctx.stage, "Mapped", ctx.task, ctx.release)
+      assert card.story_map_position == 1
+
+      {:ok, cleared} = StoryMap.unassign_card(card)
+
+      assert cleared.story_activity_id == nil
+      assert cleared.story_task_id == nil
+      assert cleared.release_id == nil
+      assert cleared.story_map_position == nil
+    end
+
+    test "a foreign id writes nothing at all — including no renumber", ctx do
+      first = place(ctx.stage, "First", ctx.task, ctx.release)
+      second = place(ctx.stage, "Second", ctx.task, ctx.release)
+      foreign = insert(:release, board: insert(:board))
+      intruder = insert(:card, stage: ctx.stage, title: "Intruder")
+
+      assert {:error, _changeset} =
+               StoryMap.assign_card(intruder, %{story_task_id: ctx.task.id, release_id: foreign.id})
+
+      assert Repo.get!(Card, first.id).story_map_position == 1
+      assert Repo.get!(Card, second.id).story_map_position == 2
+      assert Repo.get!(Card, intruder.id).story_map_position == nil
+    end
+
+    test "a renumbered sibling keeps its updated_at; the moved card's is refreshed", ctx do
+      # `updated_at` is this app's recency proxy behind two board-side orderings the story map
+      # never shows — the Done column's render window (Cards.list_stage_cards/2) and everyone's
+      # needs-you feed (Cards.needs_you_feed/1). A cell spans every stage by construction, so
+      # re-stamping a sibling on a map drag would silently reorder both lenses.
+      sibling = place(ctx.stage, "Sibling", ctx.task, ctx.release)
+      moved = place(ctx.stage, "Moved", ctx.task, ctx.release)
+
+      stale = ~U[2020-01-01 00:00:00Z]
+
+      {2, _} =
+        Repo.update_all(from(c in Card, where: c.id in ^[sibling.id, moved.id]), set: [updated_at: stale])
+
+      {:ok, _} =
+        StoryMap.assign_card(Repo.get!(Card, moved.id), %{
+          story_task_id: ctx.task.id,
+          release_id: ctx.release.id,
+          position: 0
+        })
+
+      renumbered = Repo.get!(Card, sibling.id)
+      assert renumbered.story_map_position == 2
+      assert renumbered.updated_at == stale
+
+      assert Repo.get!(Card, moved.id).updated_at != stale
+    end
+
+    test "exactly one {:card_upserted, _} is broadcast per placement — the moved card", ctx do
+      place(ctx.stage, "First", ctx.task, ctx.release)
+      place(ctx.stage, "Second", ctx.task, ctx.release)
+
+      :ok = Events.subscribe(ctx.board.id)
+
+      moved = place(ctx.stage, "Third", ctx.task, ctx.release, %{position: 0})
+      moved_id = moved.id
+
+      assert_receive {:card_upserted, %Card{id: ^moved_id}}
+      refute_receive {:card_upserted, _other}, 100
+    end
+  end
+
   describe "realtime" do
     setup %{board: board} do
       :ok = Events.subscribe(board.id)
@@ -416,5 +563,22 @@ defmodule Relay.StoryMapTest do
 
       assert_receive {:card_upserted, %Card{id: ^card_id, story_activity_id: nil}}
     end
+  end
+
+  # The cell's cards in the order the grid would render them: story_map_position ascending
+  # (nils last), ties broken by the board order list_cards/1 returns.
+  defp cell_order(task, release) do
+    Card
+    |> where([c], c.story_task_id == ^task.id and c.release_id == ^release.id)
+    |> order_by([c], asc: c.story_map_position, asc: c.stage_id, asc: c.position, asc: c.id)
+    |> Repo.all()
+    |> Enum.map(& &1.title)
+  end
+
+  defp place(stage, title, task, release, attrs \\ %{}) do
+    card = insert(:card, stage: stage, title: title)
+    attrs = Map.merge(%{story_task_id: task.id, release_id: release.id}, attrs)
+    {:ok, placed} = StoryMap.assign_card(card, attrs)
+    placed
   end
 end

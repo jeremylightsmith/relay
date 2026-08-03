@@ -200,6 +200,20 @@ defmodule RelayWeb.StoryMapComponentsTest do
   end
 
   describe "story_map_card/1 — the artboard's full-zoom face" do
+    test "the card face is draggable and carries its ref — the StoryMapDnD contract" do
+      html =
+        render_component(&StoryMapComponents.story_map_card/1,
+          id: "story-map-card-RLY1",
+          ref: "RLY1",
+          title: "Add SSO",
+          badge: "BACKLOG"
+        )
+
+      assert html =~ ~s(draggable="true")
+      assert html =~ ~s(class="story-map-card")
+      assert html =~ ~s(data-ref="RLY1")
+    end
+
     test "renders the ref, title, mono badge and the 3px bottom bar with the artboard's tokens" do
       html =
         render_component(&StoryMapComponents.story_map_card/1,
@@ -337,6 +351,26 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ ~s(id="story-map-card-RLY1")
       assert html =~ ~s(id="story-map-card-RLY2")
     end
+
+    test "every body cell is a drop zone keyed by its column and lane" do
+      html = grid_html()
+
+      cell =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#story-map-cell-t-10-r-100")
+
+      assert LazyHTML.attribute(cell, "class") == ["story-map-drop"]
+      assert LazyHTML.attribute(cell, "data-column") == ["t:10"]
+      assert LazyHTML.attribute(cell, "data-lane") == ["r:100"]
+
+      no_task =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#story-map-cell-nt-1-r-100")
+
+      assert LazyHTML.attribute(no_task, "data-column") == ["nt:1"]
+    end
   end
 
   describe "unmapped_tray/1" do
@@ -348,14 +382,44 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ "UNMAPPED"
       assert html =~ ~s(id="story-map-tray-count")
       assert html =~ ">2<"
-      assert html =~ "No activity yet."
-      refute html =~ "Drag onto the map"
+      # RE262 restores the artboard's full sentence (line ~91): dragging is real now.
+      assert html =~ "No activity yet. Drag onto the map to place — or drop a card here to unmap it."
       assert html =~ ~s(id="story-map-tray-card-RLY7")
       assert html =~ ~s(id="story-map-tray-card-RLY8")
       # tray card — artboard line ~472
       assert html =~ "border-left:3px solid oklch(0.62 0.12"
       assert html =~ ~s(id="story-map-tray-toggle")
       assert html =~ ~s(phx-click="toggle_story_map_tray")
+    end
+
+    test "the tray is a drop zone and its cards are draggable" do
+      html = tray(true)
+
+      tray_el = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-tray")
+      assert LazyHTML.attribute(tray_el, "class") == ["story-map-drop-tray"]
+
+      card = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-tray-card-RLY7")
+      assert LazyHTML.attribute(card, "draggable") == ["true"]
+      assert LazyHTML.attribute(card, "data-ref") == ["RLY7"]
+      # The same class the cell cards carry, so ONE hook selector covers both.
+      assert LazyHTML.attribute(card, "class") == ["story-map-tray-card story-map-card"]
+    end
+
+    test "with nothing unmapped it still renders the drop rail, count 0 and the helper" do
+      html =
+        render_component(&StoryMapComponents.unmapped_tray/1,
+          cards: [],
+          board: board(),
+          stages: stages(),
+          stalled_ids: MapSet.new(),
+          open: true
+        )
+
+      assert html =~ ~s(id="story-map-tray")
+      assert html =~ ~s(class="story-map-drop-tray")
+      assert html =~ ~s(id="story-map-tray-count")
+      assert html =~ ">0<"
+      assert html =~ "No activity yet. Drag onto the map to place — or drop a card here to unmap it."
     end
 
     test "collapsed: a 42px vertical rail keeping the chevron, the count and the label" do
@@ -366,6 +430,8 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ ~s(id="story-map-tray-count")
       refute html =~ "No activity yet."
       refute html =~ ~s(id="story-map-tray-card-RLY7")
+      # The rail is still a drop target — the artboard's onTrayDrop expands it.
+      assert html =~ ~s(class="story-map-drop-tray")
     end
   end
 
@@ -577,6 +643,119 @@ defmodule RelayWeb.StoryMapComponentsTest do
       refute html =~ ~s(id="story-map-empty-add-activity")
       assert html =~ ~s(id="story-map-draft-input")
       assert html =~ ~s(value="Onboard")
+    end
+  end
+
+  defp cell_column,
+    do: %{key: "t:10", activity: nil, task: nil, no_task?: false, bare?: false, draft?: false, last_of_activity?: true}
+
+  defp cell_lane, do: %{key: "r:100", release: nil, count: 0}
+
+  defp cell_html(overrides) do
+    defaults = %{
+      column: cell_column(),
+      lane: cell_lane(),
+      cards: [],
+      board: board(),
+      stages: stages(),
+      stalled_ids: MapSet.new(),
+      column_index: 0,
+      lane_index: 0
+    }
+
+    render_component(&StoryMapComponents.story_map_cell/1, Map.merge(defaults, overrides))
+  end
+
+  describe "story_map_cell/1 — the drop zone, the ＋ and the composer" do
+    test "an empty cell renders the dashed ＋ with the artboard's 7px padding" do
+      html = cell_html(%{})
+
+      add = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-add-t-10-r-100")
+      style = add |> LazyHTML.attribute("style") |> List.first()
+
+      # artboard addBtnStyle, line ~527
+      assert style =~ "border:1px dashed oklch(0.88 0.008 255)"
+      assert style =~ "border-radius:8px"
+      assert style =~ "padding:7px"
+      assert style =~ "color:oklch(0.72 0.02 255)"
+      assert LazyHTML.attribute(add, "phx-click") == ["compose_cell"]
+      assert LazyHTML.attribute(add, "phx-value-column") == ["t:10"]
+      assert LazyHTML.attribute(add, "phx-value-lane") == ["r:100"]
+      assert html =~ "＋"
+    end
+
+    test "a cell with cards tightens the ＋ padding to the artboard's 3px" do
+      html = cell_html(%{cards: [card(1, story_task_id: 10)]})
+
+      style =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#story-map-add-t-10-r-100")
+        |> LazyHTML.attribute("style")
+        |> List.first()
+
+      assert style =~ "padding:3px"
+      assert html =~ ~s(id="story-map-card-RLY1")
+    end
+
+    test "read_only hides both the ＋ and the composer, keeping the cell a drop zone" do
+      html =
+        cell_html(%{
+          read_only: true,
+          composing: true,
+          compose_form: Phoenix.Component.to_form(%{"title" => ""}, as: :card)
+        })
+
+      refute html =~ ~s(id="story-map-add-t-10-r-100")
+      refute html =~ ~s(id="story-map-compose-t-10-r-100")
+      assert html =~ ~s(class="story-map-drop")
+    end
+
+    test "the open composer replaces the ＋ with the artboard's bordered input" do
+      html =
+        cell_html(%{
+          composing: true,
+          compose_form: Phoenix.Component.to_form(%{"title" => ""}, as: :card)
+        })
+
+      refute html =~ ~s(id="story-map-add-t-10-r-100")
+
+      form = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-compose-t-10-r-100")
+      style = form |> LazyHTML.attribute("style") |> List.first()
+
+      # artboard composer, lines ~248-252
+      assert style =~ "border:1.5px solid oklch(0.6 0.14 250)"
+      assert style =~ "border-radius:9px"
+      assert style =~ "padding:7px 9px"
+      assert LazyHTML.attribute(form, "phx-submit") == ["create_card_in_cell"]
+      assert LazyHTML.attribute(form, "phx-change") == ["validate_card"]
+      assert LazyHTML.attribute(form, "phx-click-away") == ["cancel_compose_cell"]
+
+      input = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-compose-t-10-r-100-input")
+      assert LazyHTML.attribute(input, "placeholder") == ["Add card… ↵"]
+      assert LazyHTML.attribute(input, "name") == ["card[title]"]
+      assert LazyHTML.attribute(input, "phx-key") == ["escape"]
+
+      assert html
+             |> LazyHTML.from_fragment()
+             |> LazyHTML.query("#story-map-compose-t-10-r-100-cancel")
+             |> LazyHTML.attribute("phx-click") == ["cancel_compose_cell"]
+
+      # the cell's placement travels with the submit
+      assert html =~ ~s(name="column")
+      assert html =~ ~s(name="lane")
+      # the blue + glyph, artboard line ~250
+      assert html =~ "color:oklch(0.6 0.14 250);font-size:14px;line-height:1"
+    end
+
+    test "the cell is still the drop zone Task 2 defined" do
+      html = cell_html(%{})
+
+      cell = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-cell-t-10-r-100")
+
+      assert LazyHTML.attribute(cell, "class") == ["story-map-drop"]
+      assert LazyHTML.attribute(cell, "data-column") == ["t:10"]
+      assert LazyHTML.attribute(cell, "data-lane") == ["r:100"]
     end
   end
 

@@ -19,9 +19,12 @@ defmodule Relay.DocsStoryMapTest do
       assert domain =~ schema, "domain.md should name the #{schema} schema"
     end
 
-    for column <- ["story_activity_id", "story_task_id", "release_id"] do
+    for column <- ["story_activity_id", "story_task_id", "release_id", "story_map_position"] do
       assert domain =~ column, "domain.md should name the #{column} card column"
     end
+
+    assert domain =~ "independent of `cards.position`",
+           "domain.md should say story_map_position is independent of the board's own ordering"
   end
 
   test "runtime.md lists the new board event" do
