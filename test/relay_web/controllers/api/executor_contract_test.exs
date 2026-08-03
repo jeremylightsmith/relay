@@ -186,7 +186,11 @@ defmodule RelayWeb.Api.ExecutorContractTest do
     "id" => "<node-job-id>",
     "run_id" => "<run-id>",
     "resume_session" => "<session-id>",
-    "session_id" => "<session-id>"
+    "session_id" => "<session-id>",
+    # RE185: the VALUE moves on every publish, but the contract is the key and its presence —
+    # a literal would make this fixture churn (and fail) every time `.relay/published.json`
+    # moves, which is not a transport change.
+    "latest_executor_version" => "<latest-executor-version>"
   }
 
   defp normalize(map) when is_map(map) do

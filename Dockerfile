@@ -59,6 +59,13 @@ COPY docs docs
 COPY .claude .claude
 COPY bin bin
 
+# RE185: Relay.Runs.latest_executor_version/0 reads .relay/published.json via @external_resource
+# at COMPILE time — same reasoning as docs/.claude/bin just above. Without this, `mix compile`
+# below sees no marker, the value bakes in as nil, and every deployed heartbeat silently reports
+# latest_executor_version: null (nothing ever auto-updates). Guarded by
+# test/relay/runs/publish_marker_test.exs.
+COPY .relay .relay
+
 # Compile the release
 RUN mix compile
 

@@ -148,6 +148,7 @@ defmodule Relay.MixProject do
         "relay.gen_state --check",
         "relay.gen_vocab --check",
         "relay.deps_graph --check",
+        "relay.publish_config --check --warn",
         "test",
         "cmd python3 bin/test_relay.py"
       ]

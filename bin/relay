@@ -69,8 +69,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 28
-EXECUTOR_FINGERPRINT = "58751d904aafb05467d92634eccb44a4f4903e4004c2fe3b423f1d6478734a8c"
+EXECUTOR_VERSION = 33
+EXECUTOR_FINGERPRINT = "fd1c1d0e4bb3f578934b93e6f4becc7a3b802f85a25591c59d0c001f2a8a0963"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -343,6 +343,10 @@ class ExecutorHeartbeat:
         # Last inventory hash the server ACKNOWLEDGED. None ⇒ send on the next beat, so the
         # first beat after startup always carries it.
         self._caps_hash = None
+        # RE185: the newest bin/relay relay-config actually serves, as of the last successful
+        # beat. None — an older board that does not send the key, or a beat that has not landed
+        # — reads as "never auto-update", which is the safe answer.
+        self.latest_version = None
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
@@ -372,6 +376,7 @@ class ExecutorHeartbeat:
             # without this nudge a recreated row shows a permanent, FALSE "missing agents".
             if resp.get("want_capabilities"):
                 self._caps_hash = None
+            self.latest_version = resp.get("latest_executor_version")
             for job_id in resp.get("revoked", []):
                 self.on_revoke(job_id)
             for item in resp.get("release_runs", []):
@@ -1108,6 +1113,11 @@ def load_executor_config():
         "poll_timeout": 25,
         "heartbeat_interval": 15,
         "max_retained_failed": 3,
+        # RE185: auto-update is ON by default (a repo-less project has no other way to move
+        # forward); opt out with "auto_update": false. The interval floors how often an
+        # executor may ATTEMPT an update, so a flapping board cannot make it thrash.
+        # (AUTO_UPDATE_DEFAULTS is defined further down, beside the rest of the auto-update code.)
+        **AUTO_UPDATE_DEFAULTS,
     }
     try:
         with open(EXECUTOR_CONFIG_PATH) as f:
@@ -2323,12 +2333,334 @@ def release_executor_locks():
     _EXECUTOR_LOCKS.clear()
 
 
+# ============================ auto-update (RE185) ============================
+#
+# RLY-184 made a stale executor STOP; this makes it HEAL. The board's heartbeat reply names
+# `latest_executor_version` — what relay-config actually serves — and an executor that is behind
+# downloads that file, verifies it, writes it over its own `bin/relay`, and re-execs at a job
+# boundary (see restart_executor / maybe_auto_update below).
+#
+# Trust model: HTTPS to relay-config plus a parse check. No checksum, no signature — a settled
+# decision, so the rejections in download_executor() ARE the trust boundary. Nothing downloaded
+# is ever executed in this process; it is only written to disk after it compiles.
+
+AUTO_UPDATE_MAX_ATTEMPTS = 3    # failed updates per process lifetime; the anti-thrash backstop
+
+# Single-sourced so load_executor_config's merged defaults and maybe_auto_update's guards read
+# the SAME values (AGENTS.md: a policy number is defined exactly once) — cfg["auto_update"] /
+# cfg["auto_update_min_interval"] below can then index directly, with no second fallback that
+# could silently drift from this one.
+AUTO_UPDATE_DEFAULTS = {"auto_update": True, "auto_update_min_interval": 300}
+
+
+def _state_dir():
+    """Machine-local relay state (~/.relay). Overridable so tests never touch a dev box's."""
+    d = os.environ.get("RELAY_STATE_DIR") or os.path.expanduser("~/.relay")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def auto_update_state_path():
+    """The ledger of bin/relay files THIS machine auto-updated, keyed by absolute path."""
+    return os.path.join(_state_dir(), "auto-update.json")
+
+
+def _read_auto_update_state():
+    try:
+        with open(auto_update_state_path(), encoding="utf-8") as f:
+            state = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _record_auto_update(path, digest, version):
+    """Remember that we wrote `path`. Best-effort: an unwritable ledger costs the NEXT update
+    (the file reads as a human's edit), never this one."""
+    state = _read_auto_update_state()
+    state[path] = {"sha256": digest, "version": version}
+    try:
+        with open(auto_update_state_path(), "w", encoding="utf-8") as f:
+            json.dump(state, f)
+    except OSError as e:
+        log(f"auto-update: could not record the write in {auto_update_state_path()}: {e}",
+            kind="error")
+
+
+def _sha256_file(path):
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return None
+
+
+EXECUTOR_VERSION_RE = re.compile(r"(?m)^EXECUTOR_VERSION\s*=\s*(\d+)")
+
+
+def parse_executor_version(source):
+    """The EXECUTOR_VERSION a bin/relay SOURCE declares, or None. The one parse of it."""
+    m = EXECUTOR_VERSION_RE.search(source)
+    return int(m.group(1)) if m else None
+
+
+# `download_executor`'s benign result when relay-config serves a version that is NOT newer than the
+# running one — the expected state while a publish is committed here but not yet pushed to
+# relay-config. Distinct from None (a genuine fetch/parse/compile failure) so it never counts
+# toward the anti-thrash cap (RE185).
+NOTHING_NEWER = object()
+
+
+def download_executor(config_url):
+    """Fetch and verify bin/relay from relay-config; returns (source_text, version) or None.
+
+    The ONLY download path — `relay init`'s _self_update calls it too, so init gains the same
+    verification. Every rejection logs its reason and returns None, and the running version
+    keeps serving: a bad update must never be able to leave a machine with a broken executor.
+    """
+    url = config_url.rstrip("/") + "/bin/relay"
+    try:
+        body = _fetch(url)
+    except OSError as e:                    # HTTPError/URLError both subclass OSError
+        log(f"auto-update: GET {url} failed: {e}", kind="error")
+        return None
+    try:
+        source = body.decode("utf-8")
+    except UnicodeDecodeError as e:
+        log(f"auto-update: {url} is not UTF-8 text ({e}) — refusing it", kind="error")
+        return None
+    if not source.startswith("#!"):
+        # An empty body, or an HTML error/login page served where a script should be.
+        log(f"auto-update: {url} did not return a script (no leading #!) — refusing it",
+            kind="error")
+        return None
+    version = parse_executor_version(source)
+    if version is None:
+        log(f"auto-update: {url} declares no EXECUTOR_VERSION — refusing it", kind="error")
+        return None
+    try:
+        # A syntax check with no execution and no .pyc side effect.
+        compile(source, "<relay-update>", "exec")
+    except (SyntaxError, ValueError) as e:
+        log(f"auto-update: downloaded version {version} does not compile ({e}) — refusing it "
+            f"and staying on {EXECUTOR_VERSION}", kind="error")
+        return None
+    if version <= EXECUTOR_VERSION:
+        # The DOWNLOADED file's version is authoritative, never the number the board announced:
+        # a board ahead of relay-config is then harmless rather than a chase.
+        log(f"auto-update: relay-config serves version {version}, not newer than the running "
+            f"{EXECUTOR_VERSION} — nothing to do")
+        return NOTHING_NEWER
+    return source, version
+
+
+def _safe_to_overwrite(path):
+    """Whether auto-update may rewrite `path`.
+
+    Auto-update deliberately writes the TRACKED bin/relay in place, so this guard is what makes
+    that tolerable:
+
+      * not a git repo, or the file is untracked  -> safe (the repo-less case)
+      * tracked and clean against HEAD            -> safe
+      * tracked and DIRTY                         -> safe ONLY if the file's sha256 is one this
+        machine recorded writing. Without that record the dirt is a human's uncommitted edit and
+        must never be clobbered. The record is not optional: after the first auto-update the file
+        is permanently dirty against HEAD, so a clean-only rule would wedge every later update.
+    """
+    cwd = os.path.dirname(path) or "."
+
+    def git(*args):
+        return subprocess.run(["git"] + list(args), cwd=cwd,
+                              stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL).returncode
+
+    try:
+        if git("rev-parse", "--git-dir") != 0:
+            return True                                     # not a repo
+        if git("ls-files", "--error-unmatch", path) != 0:
+            return True                                     # untracked
+        if git("diff", "--quiet", "HEAD", "--", path) == 0:
+            return True                                     # tracked and clean
+    except OSError:
+        return True                                         # no git on PATH
+    recorded = _read_auto_update_state().get(path, {}).get("sha256")
+    return recorded is not None and recorded == _sha256_file(path)
+
+
+def install_executor(source, version, path=None):
+    """Atomically replace `path` (default: this file) with `source`. True on success.
+
+    os.replace() is atomic, so a concurrent `bin/relay card …` invocation reads either the old
+    file or the new one, never a half-written one. The write is recorded so the write-safety
+    guard recognizes the resulting dirt as ours next time.
+    """
+    path = path or HERE
+    data = source.encode("utf-8")
+    tmp = None
+    try:
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.chmod(tmp, 0o755)
+        os.replace(tmp, path)
+    except OSError as e:
+        log(f"auto-update: could not write {path}: {e}", kind="error")
+        if tmp and os.path.exists(tmp):
+            os.unlink(tmp)
+        return False
+    _record_auto_update(path, hashlib.sha256(data).hexdigest(), version)
+    return True
+
+
+def new_auto_update_state():
+    """Per-process auto-update bookkeeping.
+
+    `attempts` counts update attempts that FAILED to advance the running version — a refused
+    download or a failed install. (The other failure shape, a restart that landed back on the
+    same code, check_update_handshake disables outright rather than counting.) Counting
+    successes instead would disable auto-update on a perfectly healthy machine that had simply
+    picked up three releases, which is the opposite of the job. It is seeded from the
+    environment so the count survives a re-exec — otherwise a process that restarted into code
+    that still cannot update itself would reset its own counter and thrash forever — and
+    check_update_handshake clears it as soon as a restart proves the version really moved.
+    """
+    try:
+        attempts = int(os.environ.get("RELAY_UPDATE_ATTEMPTS") or 0)
+    except ValueError:
+        attempts = 0
+    return {"disabled": False, "attempts": attempts, "last": 0.0, "warned_dirty": False}
+
+
+def _cap_attempts(state):
+    """The ONE place the anti-thrash attempt cap is checked and logged.
+
+    check_update_handshake (on the way back up from a restart) and maybe_auto_update (before
+    attempting another one) both need this rule; a copy in each drifted into two different
+    wordings for one condition (AGENTS.md: a policy number/rule is defined exactly once).
+    Mutates state["disabled"] and returns it.
+    """
+    if state["attempts"] >= AUTO_UPDATE_MAX_ATTEMPTS:
+        state["disabled"] = True
+        log(f"auto-update: {state['attempts']} update attempts without the version advancing — "
+            "disabled to avoid thrashing. Restart `relay execute` by hand to pick up new code.",
+            kind="error")
+    return state["disabled"]
+
+
+def check_update_handshake(state):
+    """Read (and clear) the RELAY_UPDATED_FROM handshake the process that exec'd into us left.
+
+    A restart that landed on the SAME or OLDER code means the update did not take — a symlinked
+    bin/relay, a read-only mount, a `python -m` wrapper. Looping on that would restart forever,
+    so auto-update is disabled for this process and RLY-184's fail-stop is left as the
+    behaviour: refused, visible, loud, and waiting for a human.
+    """
+    raw = os.environ.pop("RELAY_UPDATED_FROM", None)
+    os.environ.pop("RELAY_UPDATE_ATTEMPTS", None)
+    if raw is not None:
+        try:
+            previous = int(raw)
+        except ValueError:
+            previous = None
+        if previous is not None and EXECUTOR_VERSION > previous:
+            # The update took, so nothing carried across the exec was thrash: clear the failure
+            # count BEFORE the cap is checked. Without this a healthy long-lived executor that
+            # picked up three releases would disable itself on the third one.
+            state["attempts"] = 0
+            log(f"auto-update: restarted into version {EXECUTOR_VERSION} (was {previous})")
+        else:
+            state["disabled"] = True
+            log(f"auto-update: restarted but this process is still version {EXECUTOR_VERSION} "
+                f"(was {raw}) — the update did not take. Auto-update is disabled for this "
+                "process; restart `relay execute` by hand to pick up new code.", kind="error")
+    _cap_attempts(state)
+    return state
+
+
+def auto_update_argv():
+    """The argv the re-exec runs: this interpreter, re-running the same command line."""
+    return [sys.executable] + sys.argv
+
+
+def restart_executor(from_version, attempts):
+    """Re-exec this process in place, into the freshly installed bin/relay. Does not return.
+
+    Releasing the singleton flocks FIRST is required, not tidy: RLY-193's locks belong to open
+    file descriptions that survive execv, and the re-exec'd image opens NEW descriptors — it
+    would fail to acquire its own locks and die "already running". The env vars are the
+    handshake check_update_handshake() reads on the way back up.
+    """
+    release_executor_locks()
+    os.environ["RELAY_UPDATED_FROM"] = str(from_version)
+    os.environ["RELAY_UPDATE_ATTEMPTS"] = str(attempts)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    argv = auto_update_argv()
+    os.execv(argv[0], argv)
+
+
+def maybe_auto_update(cfg, hb, state, config_url):
+    """Install a newer bin/relay and hand off to restart_executor, when every guard passes.
+
+    Called from the claim loop with NOTHING in flight — that is what makes the restart safe at a
+    job boundary (card §3). Returns True only when it handed off to restart_executor (which does
+    not return in production); False every other time, having changed nothing. The guards are
+    ordered cheapest-and-side-effect-free first.
+    """
+    if state["disabled"] or not cfg["auto_update"]:
+        return False
+    latest = getattr(hb, "latest_version", None)
+    if not isinstance(latest, int) or isinstance(latest, bool) or latest <= EXECUTOR_VERSION:
+        return False
+    if _cap_attempts(state):
+        return False
+    now = time.time()
+    if state["last"] and now - state["last"] < cfg["auto_update_min_interval"]:
+        return False
+    state["last"] = now
+    if not _safe_to_overwrite(HERE):
+        if not state["warned_dirty"]:
+            state["warned_dirty"] = True
+            log(f"auto-update: the board serves version {latest} but {HERE} has local "
+                "modifications this executor did not write — skipping rather than clobbering "
+                'them. Commit or stash them, or set "auto_update": false in '
+                ".relay/executor.json.", kind="error")
+        return False
+    # Only a GENUINE failure counts toward the cap: an attempt that reached out for new code and
+    # could not run it (fetch/parse/compile → None). The skip above does not (a human's uncommitted
+    # bin/relay is deliberate and already warned about), the success below does not, and
+    # NOTHING_NEWER does not — relay-config serving nothing newer is the expected window while a
+    # publish is committed here but not yet pushed, so counting it would cap out and permanently
+    # disable self-update over a non-problem (RE185).
+    result = download_executor(config_url)
+    if result is NOTHING_NEWER:
+        return False
+    if result is None:
+        state["attempts"] += 1
+        return False
+    source, version = result
+    if not install_executor(source, version):
+        state["attempts"] += 1
+        return False
+    log(f"auto-update: rewrote {HERE} {EXECUTOR_VERSION} → {version} from {config_url}. "
+        "That file is git-tracked here, so this is the `git status` entry you are about to "
+        "see. Restarting at a job boundary…")
+    if hb:
+        hb.stop()
+    if FORWARDER and not DRY:
+        FORWARDER.stop()
+    restart_executor(EXECUTOR_VERSION, state["attempts"])
+    return True
+
+
 def cmd_execute(args):
     """The runner mode (ADR 0006): claim node-jobs from the server, run each in an executor
     worktree, and report a typed outcome."""
     global DRY, FORWARDER
     DRY = args.dry_run
     cfg = load_executor_config()
+    update_state = check_update_handshake(new_auto_update_state())
+    config_url = _config_url(args)
     poll_timeout = args.interval or cfg["poll_timeout"]
     env("RELAY_URL"), env("RELAY_API_KEY")
     acquire_executor_locks(cfg)   # RLY-193: refuse a colliding second executor before any work
@@ -2411,6 +2743,14 @@ def cmd_execute(args):
         + (" (dry-run)" if DRY else "") + (" — one job" if args.once else ""))
 
     while not stop.is_set():
+        # RE185: a job boundary — nothing in flight — is the only place a restart is free.
+        # Deliberately BEFORE the `outdated` branch: for a refused executor, auto-update is
+        # the usual way out of that state. `--once` never restarts itself; the boundary that
+        # makes it safe only exists in the long-running loop.
+        with lock:
+            idle = not in_flight
+        if idle and not args.once and maybe_auto_update(cfg, hb, update_state, config_url):
+            return
         if outdated:
             # Refused by the server: stop claiming, but keep beating (zero capacity) so the
             # process stays on the roster wearing its OUTDATED badge instead of vanishing.
@@ -2595,20 +2935,16 @@ def _self_update(config_url, target_version):
     version, or None if it did not fire.
 
     Only ever UPGRADES: pointing a checkout at an older config must not clobber that checkout's
-    CLI. An unwritable target is reported, never fatal — a read-only install can still scaffold."""
+    CLI. Shares RE185's verified download path, so `init` gets the same parse check as
+    auto-update, and an unwritable target is reported, never fatal — a read-only install can
+    still scaffold."""
     if target_version <= EXECUTOR_VERSION:
         return None
-    try:
-        body = _fetch(config_url + "/bin/relay")
-        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(HERE))
-        with os.fdopen(fd, "wb") as f:
-            f.write(body)
-        os.chmod(tmp, 0o755)
-        os.replace(tmp, HERE)
-    except OSError as e:
-        print(f"  ! could not update {HERE}: {e}")
+    result = download_executor(config_url)
+    if result is None or result is NOTHING_NEWER:
         return None
-    return target_version
+    source, version = result
+    return version if install_executor(source, version) else None
 
 
 def _env_report():

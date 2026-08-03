@@ -91,6 +91,7 @@
     },
     "response": {
       "executor_outdated": false,
+      "latest_executor_version": "<latest-executor-version>",
       "release_runs": [],
       "required_version": 21,
       "revoked": [],

@@ -74,7 +74,9 @@ defmodule RelayWeb.Api.NodeJobController do
     * **Version.** The beat still succeeds for an outdated executor (RLY-184) — it is how that
       process stays visible on the roster and how revokes still reach it. The reply carries
       `executor_outdated` / `required_version` so an executor idling with nothing to claim
-      still learns why.
+      still learns why. The reply also carries `latest_executor_version` (RE185) — the newest
+      `bin/relay` relay-config actually serves — which an executor with `auto_update` on uses to
+      update itself.
 
     * **Liveness (RLY-226).** The same `running` list is a positive signal: each id maps to a
       card, and `Relay.Runs.refresh_running_card_liveness/2` stamps `agent_heartbeat_at` fresh on
@@ -124,7 +126,11 @@ defmodule RelayWeb.Api.NodeJobController do
         # beat that DID carry capabilities has already stored them and this reads false.
         want_capabilities: is_nil(executor.capabilities),
         executor_outdated: Runs.executor_outdated?(executor),
-        required_version: Runs.min_executor_version()
+        required_version: Runs.min_executor_version(),
+        # RE185: the floor above says what is REFUSED; this says what can be FETCHED —
+        # `.relay/published.json`, i.e. what relay-config actually serves. `nil` when nothing
+        # has been published, which the executor reads as "never auto-update".
+        latest_executor_version: Runs.latest_executor_version()
       })
     end
   end

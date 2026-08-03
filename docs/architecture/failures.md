@@ -56,7 +56,7 @@ pretend otherwise.
 | C2 | WIP-blocked | works-in stage at its `wip_limit` → flow halts, card stays `:ready` (does **not** queue) |
 | C3 | `no_executor` | executor roster empty |
 | C4 | `executor_gone` | roster non-empty but every executor's freshness is `:gone` |
-| C5 | `executor_outdated` | every live executor is below `min_executor_version` (21) → claims get 409 `executor_outdated` (`node_job_controller.ex:37`) |
+| C5 | `executor_outdated` | every live executor is below `min_executor_version` (21) → claims get 409 `executor_outdated` (`node_job_controller.ex:37`). Normally transient: with `auto_update` on (the default) the refused executor upgrades itself and the card pulls on a later poll — see D4 |
 
 ## D. Executor lifecycle
 
@@ -65,7 +65,7 @@ pretend otherwise.
 | D1 | **Executor died** | `last_heartbeat` older than `max(60s, 2×interval)` → `:gone` (`runs.ex:1172`) | reaper (30s) requeues `shared_clean` jobs to `:queued`; parks `exclusive` runs `:executor_gone` (keeps the pin) | `queued` / `parked/executor_gone` |
 | D2 | **Executor returns** | scheduler sees capacity | `Policy.resumable?/2` resumes `executor_gone` parks onto the pinned executor (`scheduler.ex:85`) | `running` |
 | D3 | **Human take-over mid-run** | owner becomes `:human` | Listener revokes the job and parks `:claimed`; resumes fresh if handed back to AI (`listener.ex:100`) | `parked/claimed` |
-| D4 | **Outdated executor** | version < 21 | 409 on claim; heartbeat still 200 but returns `required_version` | card waits (C5) |
+| D4 | **Outdated executor** | version < 21 | 409 on claim; heartbeat still 200 and returns `required_version` **and** `latest_executor_version` (`node_job_controller.ex:133`). With `auto_update` on — the default in both `AUTO_UPDATE_DEFAULTS` and the scaffolded `.relay/executor.json` — the executor downloads that version from relay-config and re-execs at a job boundary (RE185, `bin/relay:maybe_auto_update`; [runner.md "Auto-update (RE185)"](runner.md)). RLY-184's fail-stop is the fallback: auto-update off, refused, or it didn't take | **self-heals (auto-update)**; else card waits (C5) |
 | D5 | **Two executors, one host** | second `relay execute` starts | singleton flock refuses it with the holder's pid (`bin/relay:1919`) | second process exits |
 
 ## E. Worktree (exclusive runs)
