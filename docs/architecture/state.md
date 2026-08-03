@@ -49,12 +49,12 @@ Each box's second line is the **stage types** that status is valid on (`Stage.va
 ```mermaid
 stateDiagram-v2
     direction TB
-    state "ready<br/>queue · work · planning · done" as ready
-    state "queued<br/>queue · done" as queued
-    state "working<br/>work · planning" as working
-    state "needs_input<br/>work · planning" as needs_input
-    state "in_review<br/>review" as in_review
-    state "failed<br/>work · planning" as failed
+    state "ready<br/>(in queue, work, planning, done)" as ready
+    state "queued<br/>(in queue, done)" as queued
+    state "working<br/>(in work, planning)" as working
+    state "needs_input<br/>(in work, planning)" as needs_input
+    state "in_review<br/>(in review)" as in_review
+    state "failed<br/>(in work, planning)" as failed
 
     [*] --> ready
 
