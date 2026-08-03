@@ -544,6 +544,25 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert body["executor_outdated"] == false
     end
 
+    test "the beat names the newest fetchable executor version (RE185)", %{conn: conn} do
+      # The floor (`required_version`) and the target (`latest_executor_version`) are different
+      # numbers answering different questions; an executor auto-updates against the target.
+      body =
+        conn
+        |> post(
+          ~p"/api/node-jobs/heartbeat",
+          Jason.encode!(%{
+            "executor" => %{"name" => "box", "host" => "h", "version" => Runs.min_executor_version()},
+            "capacity" => %{"shared_clean" => 1},
+            "running" => []
+          })
+        )
+        |> json_response(200)
+
+      assert Map.has_key?(body, "latest_executor_version")
+      assert body["latest_executor_version"] == Runs.latest_executor_version()
+    end
+
     test "a beat listing a running job refreshes that card's liveness", %{conn: conn, board: board} do
       flow = four_outcome_flow(board)
       {run, _job} = start_queued_job(board, flow)

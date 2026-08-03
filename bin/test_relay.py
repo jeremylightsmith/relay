@@ -236,6 +236,13 @@ class ReverseContractTest(unittest.TestCase):
         self.assertIn("executor_outdated", CONTRACT["heartbeat"]["response"])
         self.assertIn("required_version", CONTRACT["heartbeat"]["response"])
 
+    def test_the_heartbeat_response_carries_the_latest_fetchable_version(self):
+        """RE185: the executor auto-updates against `latest_executor_version` (what
+        relay-config actually serves), which is a DIFFERENT number from `required_version`
+        (the floor below which work is refused)."""
+        self.assertIn("latest_executor_version", CONTRACT["heartbeat"]["response"])
+        self.assertNotEqual("latest_executor_version", "required_version")
+
 
 class PrintCardTest(unittest.TestCase):
     def test_print_card_shows_changes_requested_banner_before_the_ref_line(self):

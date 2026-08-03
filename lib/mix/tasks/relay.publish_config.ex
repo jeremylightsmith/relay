@@ -11,11 +11,22 @@ defmodule Mix.Tasks.Relay.PublishConfig do
       mix relay.publish_config /path/to/relay-config
 
   Idempotent — re-run whenever those sources change so the scaffold never drifts. It writes
-  files only; committing and pushing `relay-config` stays a human step.
+  files only; committing and pushing `relay-config` stays a human step. Publishing also records
+  the `bin/relay` `EXECUTOR_VERSION` it just wrote into this repo's `.relay/published.json`
+  (RE185) — the marker `Relay.Runs.latest_executor_version/0` reads at compile time, so an
+  executor never auto-updates to code relay-config does not actually serve yet.
+
+      mix relay.publish_config --check          # non-zero exit if bin/relay is ahead of the marker
+      mix relay.publish_config --check --warn   # same check, but only warns — never fails
+
+  `--check` is a real gate (finish/merge time); `--check --warn` is the reminder wired into
+  `mix precommit` so iterating on `bin/relay` is never blocked mid-branch.
   """
 
   use Mix.Task
   use Boundary, check: [in: false, out: false]
+
+  alias Relay.Runs.PublishMarker
 
   @generated ~w(bin .claude starters .relay relay.md manifest.json)
 
@@ -37,8 +48,71 @@ defmodule Mix.Tasks.Relay.PublishConfig do
 
   @impl Mix.Task
   def run(args) do
-    src = File.cwd!()
-    dst = args |> List.first() |> Kernel.||(Path.expand("../relay-config", src))
+    {opts, rest} = OptionParser.parse!(args, strict: [check: :boolean, warn: :boolean])
+
+    if opts[:check] do
+      check(File.cwd!(), opts[:warn] || false)
+    else
+      publish(File.cwd!(), List.first(rest))
+    end
+  end
+
+  @doc """
+  Whether `bin/relay` is ahead of what was last published to relay-config.
+
+  `{:ok, version}` when the source and `.relay/published.json` agree; `{:drift, source,
+  published}` otherwise (`published` is `nil` when nothing has been published). ONE comparison
+  behind all three callers — the task's own post-publish report, `--check`, and `--check --warn`.
+  """
+  def drift(src) do
+    source = executor_version(src)
+    published = PublishMarker.version(PublishMarker.path(src))
+
+    if source == published, do: {:ok, source}, else: {:drift, source, published}
+  end
+
+  @doc """
+  Report publish drift. Raises `Mix.Error` (non-zero exit) unless `warn?`, in which case it
+  prints a banner and returns `:ok`.
+
+  Two modes on purpose: `mix precommit` runs the warning form so iterating on `bin/relay` is
+  never blocked, while the finish/merge-time `--check` is a real gate.
+  """
+  def check(src, warn?) do
+    case drift(src) do
+      {:ok, version} ->
+        Mix.shell().info("relay-config: bin/relay and #{PublishMarker.rel_path()} agree at executor version #{version}.")
+
+        :ok
+
+      {:drift, source, published} ->
+        message = drift_message(source, published)
+
+        if warn? do
+          Mix.shell().info("\n!! relay-config publish drift !!\n\n" <> message)
+          :ok
+        else
+          Mix.raise(message)
+        end
+    end
+  end
+
+  defp drift_message(source, published) do
+    """
+    bin/relay is at EXECUTOR_VERSION #{source} but #{PublishMarker.rel_path()} records \
+    #{published || "nothing published yet"}.
+
+    Executors auto-update to what relay-config actually SERVES (RE185), so until this is
+    published no executor can pick up the new code. To fix:
+
+        mix relay.publish_config
+        cd ../relay-config && git add -A && git commit -m "publish executor #{source}" && git push
+        # then commit this repo's #{PublishMarker.rel_path()}
+    """
+  end
+
+  defp publish(src, dst_arg) do
+    dst = dst_arg || Path.expand("../relay-config", src)
     File.mkdir_p!(dst)
 
     # Clear only what we generate — leave .git, LICENSE, and a hand-edited README alone.
@@ -83,6 +157,13 @@ defmodule Mix.Tasks.Relay.PublishConfig do
       "relay-config: #{length(items)} items (#{req} required, #{length(items) - req} optional) " <>
         "· executor.version #{version} → #{dst}"
     )
+
+    PublishMarker.write!(version, PublishMarker.path(src))
+
+    Mix.shell().info(
+      "recorded executor version #{version} in #{PublishMarker.rel_path()} — commit it here, " <>
+        "and commit + push #{dst}. Until both land, `mix relay.publish_config --check` reports drift."
+    )
   end
 
   @doc "Skills that ship in the scaffold without any flow node naming them."
@@ -113,7 +194,9 @@ defmodule Mix.Tasks.Relay.PublishConfig do
           {"capacity", ordered([{"shared_clean", 1}, {"exclusive", 1}])},
           {"poll_timeout", 25},
           {"heartbeat_interval", 15},
-          {"max_retained_failed", 3}
+          {"max_retained_failed", 3},
+          {"auto_update", true},
+          {"auto_update_min_interval", 300}
         ]),
         pretty: true
       )
@@ -124,7 +207,8 @@ defmodule Mix.Tasks.Relay.PublishConfig do
       ".relay/executor.json",
       ".relay/executor.json",
       "executor config",
-      "How many jobs this machine runs at once and in which isolation class.",
+      "How many jobs this machine runs at once and in which isolation class, " <>
+        "and whether it updates bin/relay itself.",
       required: true
     )
   end
@@ -198,7 +282,8 @@ defmodule Mix.Tasks.Relay.PublishConfig do
     )
   end
 
-  defp executor_version(src) do
+  @doc "The `EXECUTOR_VERSION` declared by `src`'s `bin/relay`. The ONE regex parse of it."
+  def executor_version(src) do
     [_, v] = Regex.run(~r/^EXECUTOR_VERSION\s*=\s*(\d+)/m, File.read!(Path.join(src, "bin/relay")))
     String.to_integer(v)
   end
