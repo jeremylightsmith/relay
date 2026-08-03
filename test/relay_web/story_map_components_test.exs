@@ -48,7 +48,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
     )
   end
 
-  defp grid do
+  defp grid(draft \\ nil) do
     activity = %StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1}
     task = %StoryTask{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}
     releases = [%Release{id: 100, board_id: 1, name: "MVP", position: 1}]
@@ -60,7 +60,8 @@ defmodule RelayWeb.StoryMapComponentsTest do
       [
         card(1, story_activity_id: 1, story_task_id: 10, release_id: 100),
         card(2, story_activity_id: 1, release_id: 100)
-      ]
+      ],
+      draft
     )
   end
 
@@ -73,12 +74,23 @@ defmodule RelayWeb.StoryMapComponentsTest do
     StoryMapGrid.build([activity], [], releases, [card(1, story_activity_id: 1, release_id: 100)])
   end
 
-  defp grid_html(grid \\ nil) do
+  # One activity with nothing under it at all — no tasks, no task-less cards. This is the
+  # artboard's `bare = !ntCount` (line ~450): the placeholder invites the first task.
+  defp empty_activity_grid(draft \\ nil) do
+    activity = %StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1}
+    releases = [%Release{id: 100, board_id: 1, name: "MVP", position: 1}]
+
+    StoryMapGrid.build([activity], [], releases, [], draft)
+  end
+
+  defp grid_html(grid \\ nil, draft \\ nil, draft_name \\ "") do
     render_component(&StoryMapComponents.story_map/1,
       grid: grid || grid(),
       board: board(),
       stages: stages(),
-      stalled_ids: MapSet.new()
+      stalled_ids: MapSet.new(),
+      draft: draft,
+      draft_name: draft_name
     )
   end
 
@@ -90,6 +102,12 @@ defmodule RelayWeb.StoryMapComponentsTest do
     |> LazyHTML.attribute("style")
     |> List.first()
     |> Kernel.||("")
+  end
+
+  # Whether `selector` matches anything — the tag-sensitive companion to `style_of/2`, used to
+  # prove the bare placeholder header is a real <button> rather than a labelled <div>.
+  defp matches?(html, selector) do
+    html |> LazyHTML.from_fragment() |> LazyHTML.query(selector) |> LazyHTML.attribute("id") != []
   end
 
   defp tray(open) do
@@ -358,6 +376,189 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ "Activities"
       assert html =~ "Tasks"
       assert html =~ "Releases"
+    end
+  end
+
+  describe "RE263 — the add-activity affordance" do
+    test "a 58px trailing column pinned past the last band, holding the artboard's dashed ＋" do
+      html = grid_html()
+
+      # colTemplate ends ' 58px' (artboard line ~492); rowsTemplate ends ' 44px' (line ~493).
+      assert html =~ "grid-template-columns:128px 156px 156px 58px"
+      assert html =~ "grid-template-rows:56px 40px auto 44px"
+
+      button = style_of(html, "#story-map-add-activity")
+      assert button =~ "width:34px;height:34px"
+      assert button =~ "border-radius:9px"
+      assert button =~ "border:1px dashed oklch(0.82 0.01 255)"
+      assert button =~ "font-size:15px"
+      assert html =~ ~s(title="Add activity")
+      assert html =~ ~s(phx-click="story_map_add_activity")
+    end
+
+    test "the trailing cell spans both header rows, past the last column (artboard addActStyle)" do
+      html = grid_html()
+
+      # Two columns of grid content, so the add-activity cell is grid-column 4 (1 = the rail).
+      assert html =~ "grid-column:4;grid-row:1 / span 2;position:sticky;top:0;z-index:22;"
+      assert html =~ "background:oklch(0.965 0.006 255);border-bottom:1px solid oklch(0.92 0.006 255)"
+    end
+
+    test "with the :activity draft open the column widens to 156px and the ＋ becomes the input" do
+      html = grid_html(nil, :activity, "Ship")
+
+      assert html =~ "grid-template-columns:128px 156px 156px 156px"
+      refute html =~ ~s(id="story-map-add-activity")
+      assert html =~ ~s(id="story-map-draft-input")
+      assert html =~ ~s(placeholder="Activity name… ↵")
+      assert html =~ ~s(value="Ship")
+    end
+  end
+
+  describe "RE263 — the add-release affordance" do
+    test "a dashed ＋ Release button in a row directly below the last swimlane label" do
+      html = grid_html()
+
+      # One lane, so the add-release row is grid-row 4 (artboard addRelStyle, line ~512).
+      assert html =~ "grid-column:1;grid-row:4;position:sticky;left:0;z-index:16;"
+      assert html =~ "border-top:1px solid oklch(0.92 0.006 255)"
+
+      button = style_of(html, "#story-map-add-release")
+      assert button =~ "border:1px dashed oklch(0.85 0.008 255)"
+      assert button =~ "border-radius:8px"
+      assert button =~ "font-size:11.5px;font-weight:600"
+      assert button =~ "padding:4px 9px;width:100%"
+      assert html =~ "＋ Release"
+      assert html =~ ~s(phx-click="story_map_add_release")
+    end
+
+    test "with the :release draft open the button becomes the input" do
+      html = grid_html(nil, :release, "Someday")
+
+      refute html =~ ~s(id="story-map-add-release")
+      assert html =~ ~s(id="story-map-draft-input")
+      assert html =~ ~s(placeholder="Release name… ↵")
+      assert html =~ ~s(value="Someday")
+    end
+  end
+
+  describe "RE263 — the add-task affordances" do
+    test "the activity header's second line carries a spacer and a 12px ＋ (artboard iconStyle)" do
+      html = grid_html()
+
+      assert style_of(html, "#story-map-add-task-1") == "font-size:12px;color:oklch(0.55 0.02 255);"
+      assert html =~ ~s(title="Add task")
+      assert html =~ ~s(phx-click="story_map_add_task")
+      assert html =~ ~s(phx-value-activity-id="1")
+      assert html =~ ~s(<span style="flex:1;">)
+    end
+
+    test "a bare placeholder header reads ＋ Add task, is a button and is clickable" do
+      html = grid_html(empty_activity_grid())
+
+      # A real <button>, not the <div> a labelled column renders — the WHOLE header is the
+      # affordance (artboard line ~451, `onRename: bare ? (()=>this.addTask(actId)) : …`).
+      assert matches?(html, "button#story-map-no-task-1")
+      assert html =~ "＋ Add task"
+      refute html =~ "— No task yet"
+      assert style_of(html, "#story-map-no-task-1") =~ "cursor:pointer;"
+      assert html =~ ~s(phx-value-activity-id="1")
+    end
+
+    test "a placeholder holding task-less cards still reads — No task yet and is not a button" do
+      html = grid_html()
+
+      assert html =~ "— No task yet"
+      refute html =~ "＋ Add task"
+      refute matches?(html, "button#story-map-no-task-1")
+      refute style_of(html, "#story-map-no-task-1") =~ "cursor:pointer;"
+    end
+
+    test "the draft column's header holds the input and its body cells are empty and dashed" do
+      html = grid_html(grid({:task, 1}), {:task, 1}, "Watch it live")
+
+      assert html =~ ~s(id="story-map-draft-1")
+      assert html =~ ~s(id="story-map-draft-input")
+      assert html =~ ~s(placeholder="Task name… ↵")
+      assert html =~ ~s(value="Watch it live")
+
+      cell = style_of(html, "#story-map-cell-draft-1-r-100")
+      assert cell =~ "border-right:1px dashed oklch(0.86 0.01 255)"
+      assert cell =~ "background:oklch(0.978 0.004 255)"
+    end
+
+    test "on an activity with nothing under it the draft replaces the ＋ Add task placeholder" do
+      html = grid_html(empty_activity_grid({:task, 1}), {:task, 1}, "")
+
+      assert html =~ ~s(id="story-map-draft-1")
+      refute html =~ ~s(id="story-map-no-task-1")
+      refute html =~ "＋ Add task"
+    end
+  end
+
+  describe "inline_name_input/1 — the shared editor RE261 reuses for rename" do
+    test "one autofocused input in a form, with the artboard's inputStyle and all three events" do
+      html =
+        render_component(&StoryMapComponents.inline_name_input/1,
+          id: "story-map-draft-input",
+          value: "Onboard",
+          placeholder: "Activity name… ↵",
+          submit: "story_map_draft_submit",
+          change: "story_map_draft_change",
+          cancel: "story_map_draft_cancel"
+        )
+
+      assert html =~ ~s(id="story-map-draft-input-form")
+      assert html =~ ~s(phx-submit="story_map_draft_submit")
+      assert html =~ ~s(phx-change="story_map_draft_change")
+      assert html =~ ~s(phx-blur="story_map_draft_cancel")
+      assert html =~ ~s(phx-keydown="story_map_draft_cancel")
+      assert html =~ ~s(phx-key="Escape")
+      assert html =~ ~s(phx-hook="InlineNameInput")
+      assert html =~ ~s(name="name")
+      assert html =~ ~s(value="Onboard")
+      assert html =~ ~s(placeholder="Activity name… ↵")
+
+      # Artboard inputStyle, line ~404.
+      style = style_of(html, "#story-map-draft-input")
+      assert style =~ "border:1.5px solid oklch(0.6 0.14 250)"
+      assert style =~ "border-radius:5px"
+      assert style =~ "padding:2px 5px"
+      assert style =~ "font-size:12px;font-weight:600"
+      assert style =~ "flex:1;min-width:0"
+    end
+
+    test "hook: nil renders without the hook, for storybook" do
+      html =
+        render_component(&StoryMapComponents.inline_name_input/1,
+          id: "demo",
+          hook: nil,
+          submit: "s",
+          change: "c",
+          cancel: "x"
+        )
+
+      refute html =~ "phx-hook"
+      assert html =~ ~s(id="demo")
+    end
+  end
+
+  describe "RE263 — the empty panel invites the first activity" do
+    test "renders a primary button instead of the coming-soon copy" do
+      html = render_component(&StoryMapComponents.story_map_empty/1, [])
+
+      assert html =~ ~s(id="story-map-empty-add-activity")
+      assert html =~ "Add your first activity"
+      assert html =~ ~s(phx-click="story_map_add_activity")
+      refute html =~ "coming soon"
+    end
+
+    test "with the :activity draft open the panel holds the input instead" do
+      html = render_component(&StoryMapComponents.story_map_empty/1, draft: :activity, draft_name: "Onboard")
+
+      refute html =~ ~s(id="story-map-empty-add-activity")
+      assert html =~ ~s(id="story-map-draft-input")
+      assert html =~ ~s(value="Onboard")
     end
   end
 
