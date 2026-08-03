@@ -172,8 +172,9 @@ sharing behavior.
   card must open the card drawer *in place*, and the drawer's ~50 assigns and ~40 event
   handlers live in `BoardLive`; a separate LiveView could only honour that by duplicating them
   or extracting the drawer's whole state machine. The grid itself is isolated: the pure,
-  unit-tested `RelayWeb.StoryMapGrid.build/5`
-  (`(activities, tasks, releases, cards, draft)` → bands, columns, lanes, cells, unmapped —
+  unit-tested `RelayWeb.StoryMapGrid.build/6`
+  (`(activities, tasks, releases, cards, draft, hide_tasks?)` → bands, columns, lanes, cells,
+  unmapped —
   every card placed exactly once, an activity-less card in the tray, a release-less mapped card
   in the LAST lane, a release-less board in one synthetic `(No release)` lane) plus
   `RelayWeb.StoryMapComponents` for the render.
@@ -182,7 +183,7 @@ sharing behavior.
   `＋ Add task`, and an `＋ Release` row — all committing through one `inline_name_input/1`.
   Which one is open is the single `:story_map_draft` assign on `BoardLive`
   (`nil | :activity | :release | {:task, activity_id}`, one draft at a time board-wide), and it
-  is the `draft` argument to `build/5`: the draft materializes a `"draft:<activity_id>"` column
+  is the `draft` argument to `build/6`: the draft materializes a `"draft:<activity_id>"` column
   that carries no `cells`, and every column gains `bare?` / `draft?`. Names are trimmed and
   capped by `Schemas.StoryActivity.max_name_length/0` — the one definition, shared by
   `StoryTask` and `Release`, so an over-long paste is an error changeset rather than a Postgrex
@@ -213,7 +214,17 @@ sharing behavior.
   last-lane fallback with it, which is a display move only — no stored `release_id` changes.
   Every new event joins the `read_only?` guard list and none of the affordances render on an
   archived board.
-  Still to come: zoom (RE260).
+  **Zoom (RE260):** two view-only chrome controls, socket assigns on `BoardLive` that no
+  broadcast touches, so another tab cannot reset your view. `:story_map_zoom` is the closed set
+  `RelayWeb.StoryMapComponents.zoom_levels/0` (`:map` | `:compact` | `:full`, defaulting to
+  `:compact`) parsed off the wire by `parse_zoom/1`; it reaches only the renderer, which sizes
+  the card face — Map is a title-only chip, Full adds the meta row and progress bar.
+  `:story_map_hide_tasks` is the sixth argument to `build/6`: it collapses each activity's task
+  columns into one merged `"m:<activity_id>"` column (the fourth column-key shape
+  `decode_placement/2` parses, alongside `"t:"`, `"nt:"` and `"draft:"`). Dropping a card into a
+  merged column keeps its `story_task_id` when that task still belongs to the target activity —
+  a purely vertical drag changes release only and must not silently unset the task; the
+  activity is then derived from the task by `StoryMap.resolve_placement/2`.
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
 
 ## Core schemas

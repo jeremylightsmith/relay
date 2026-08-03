@@ -1,11 +1,11 @@
 defmodule RelayWeb.StoryMapGrid do
   @moduledoc """
-  The story map's pure view model (RE264): `(activities, tasks, releases, cards, draft)` in, a
-  fully placed grid out. No Ecto, no LiveView, no side effects — every placement rule the
+  The story map's pure view model (RE264): `(activities, tasks, releases, cards, draft,
+  hide_tasks?)` in, a fully placed grid out. No Ecto, no LiveView, no side effects — every placement rule the
   artboard (`docs/designs/Relay Story Map.dc.html`, `eff/1`) encodes lives here, so the rules
   are unit-testable without mounting a LiveView.
 
-  **The invariant: no card can disappear.** Every card handed to `build/5` lands exactly once —
+  **The invariant: no card can disappear.** Every card handed to `build/6` lands exactly once —
   in one `cells` entry or in `unmapped` — and `total` is the input count. The rules are ordered
   and the last one is total:
 
@@ -32,8 +32,16 @@ defmodule RelayWeb.StoryMapGrid do
   `if(ntCount)`) — except for an activity with no tasks at all, which still gets one empty
   column so its band has something to span (the artboard's `Math.max(span, 1)`).
 
+  **Hide tasks (RE260).** With `hide_tasks?` true each activity collapses to a SINGLE column
+  keyed `"m:<activity_id>"`, holding every card of that activity — cards on any of its tasks
+  *and* its task-less cards alike (the artboard's `col.merged ||` short circuit, line ~518).
+  The per-activity `— No task yet` column does not render separately while merged, every band's
+  `span` is 1, and the no-card-can-disappear invariant is untouched: the merge changes only
+  which column key a card's cell carries, never whether it has one.
+
   Keys are strings so they go straight into DOM ids: a task column is `"t:<task_id>"`, a
-  no-task column `"nt:<activity_id>"`, a lane `"r:<release_id>"` or `"r:none"`.
+  no-task column `"nt:<activity_id>"`, a merged column `"m:<activity_id>"`, a lane
+  `"r:<release_id>"` or `"r:none"`.
 
   No `use Boundary` — a pure web-layer helper inside the `RelayWeb` boundary, like
   `RelayWeb.FlowLayout`.
@@ -58,24 +66,32 @@ defmodule RelayWeb.StoryMapGrid do
   cards. Everything else about the grid — placement, lanes, the tray, `total` — is unchanged,
   so the no-card-can-disappear invariant holds with a draft open.
 
+  `hide_tasks?` (RE260) collapses each activity to one `"m:<activity_id>"` column — see the
+  module doc. It is deliberately a trailing defaulted parameter rather than a keyword-opts
+  refactor, so RE264's existing call sites and tests are untouched. A `{:task, _}` draft and
+  `hide_tasks?` never co-exist (`RelayWeb.BoardLive` turns Hide tasks off when a task draft
+  opens), and the merged branch ignores the draft outright, so the pair is still total.
+
   Fields of the returned struct:
 
     * `bands` — `[%{activity:, span:, count:, start:}]`, one per activity, left to right.
       `start` is the **0-based index into `columns`** of the band's first column; `span` how
       many columns it covers (always ≥ 1); `count` how many cards sit under it.
-    * `columns` — `[%{key:, activity:, task:, no_task?:, bare?:, draft?:, last_of_activity?:,
-      count:}]`, left to right. `bare?` marks a `— No task yet` column that holds no cards,
-      which the renderer turns into the clickable `＋ Add task` invitation (the artboard's
-      `bare`); `draft?` marks RE263's open new-task column, whose key is
-      `"draft:<activity_id>"` and which never appears in `cells`; `count` is how many cards sit
-      in it, and is what RE261's ✕ blocks on.
+    * `columns` — `[%{key:, activity:, task:, no_task?:, bare?:, draft?:, merged?:,
+      task_count:, last_of_activity?:, count:}]`, left to right. `bare?` marks a
+      `— No task yet` column that holds no cards, which the renderer turns into the clickable
+      `＋ Add task` invitation (the artboard's `bare`); `draft?` marks RE263's open new-task
+      column, whose key is `"draft:<activity_id>"` and which never appears in `cells`; `count`
+      is how many cards sit in it, and is what RE261's ✕ blocks on; `merged?` marks RE260's
+      Hide-tasks column, whose `task_count` is the activity's task count for the
+      `<n> tasks · merged` header (unrelated to `count`, the card tally).
     * `lanes` — `[%{key:, release:, count:}]`, top to bottom. `release` is `nil` on the
       synthetic `(No release)` lane.
     * `cells` — `%{{column_key, lane_key} => [card]}`. A pair with no cards is simply absent.
     * `unmapped` — the tray's cards.
     * `total` — `length(cards)`.
   """
-  def build(activities, tasks, releases, cards, draft \\ nil) do
+  def build(activities, tasks, releases, cards, draft \\ nil, hide_tasks? \\ false) do
     tasks_by_id = Map.new(tasks, &{&1.id, &1})
     activity_ids = MapSet.new(activities, & &1.id)
     tasks_by_activity = Enum.group_by(tasks, & &1.story_activity_id)
@@ -86,10 +102,10 @@ defmodule RelayWeb.StoryMapGrid do
       for {:grid, activity_id, nil, _card} <- placements, into: MapSet.new(), do: activity_id
 
     {columns, bands} =
-      backbone(activities, tasks_by_activity, no_task_ids, draft_activity_id(draft))
+      backbone(activities, tasks_by_activity, no_task_ids, draft_activity_id(draft), hide_tasks?)
 
     lanes = lane_list(releases)
-    {cells, unmapped} = fill(placements, MapSet.new(lanes, & &1.key), last_key(lanes))
+    {cells, unmapped} = fill(placements, MapSet.new(lanes, & &1.key), last_key(lanes), hide_tasks?)
     columns = count_columns(columns, cells)
 
     %__MODULE__{
@@ -145,11 +161,27 @@ defmodule RelayWeb.StoryMapGrid do
     end
   end
 
+  @doc """
+  Whether `column_key` is RE260's merged (Hide tasks) column. This module defines the key
+  formats, so it answers questions about them too — `RelayWeb.BoardLive` needs to know a drop
+  landed on an activity-wide column in order to preserve the card's task, and asks here rather
+  than string-matching on `"m:"` itself.
+  """
+  def merged_column?("m:" <> _activity_id), do: true
+  def merged_column?(_other), do: false
+
   defp decode_column("t:" <> id) do
     with {:ok, id} <- decode_id(id), do: {:ok, %{story_task_id: id}}
   end
 
   defp decode_column("nt:" <> id) do
+    with {:ok, id} <- decode_id(id), do: {:ok, %{story_activity_id: id}}
+  end
+
+  # RE260 — a merged column names an ACTIVITY, exactly like `nt:`. The two differ only in what
+  # the caller may do with a card's EXISTING task on a drop (`RelayWeb.BoardLive` asks via
+  # `merged_column?/1`), never in what they decode to.
+  defp decode_column("m:" <> id) do
     with {:ok, id} <- decode_id(id), do: {:ok, %{story_activity_id: id}}
   end
 
@@ -179,22 +211,17 @@ defmodule RelayWeb.StoryMapGrid do
     end
   end
 
-  defp backbone(activities, tasks_by_activity, no_task_ids, draft_activity_id) do
+  defp backbone(activities, tasks_by_activity, no_task_ids, draft_activity_id, hide_tasks?) do
     {grouped, _next} =
       Enum.map_reduce(activities, 0, fn activity, start ->
         tasks = Map.get(tasks_by_activity, activity.id, [])
-        draft? = activity.id == draft_activity_id
-        no_task_cards? = MapSet.member?(no_task_ids, activity.id)
-
-        # RE263 — the draft column stands in for the empty placeholder, so the user never sees
-        # `＋ Add task` and an open input side by side. An activity that still holds task-less
-        # CARDS keeps its `— No task yet` column: real cards live in it.
-        no_task? = no_task_cards? or (tasks == [] and not draft?)
 
         columns =
-          if(no_task?, do: [no_task_column(activity, not no_task_cards?)], else: []) ++
-            Enum.map(tasks, &task_column(activity, &1)) ++
-            if(draft?, do: [draft_column(activity)], else: [])
+          if hide_tasks? do
+            [merged_column(activity, length(tasks))]
+          else
+            unmerged_columns(activity, tasks, no_task_ids, draft_activity_id)
+          end
 
         columns = mark_last(columns)
         band = %{activity: activity, span: length(columns), count: 0, start: start}
@@ -205,6 +232,39 @@ defmodule RelayWeb.StoryMapGrid do
     {Enum.flat_map(grouped, &elem(&1, 0)), Enum.map(grouped, &elem(&1, 1))}
   end
 
+  defp unmerged_columns(activity, tasks, no_task_ids, draft_activity_id) do
+    draft? = activity.id == draft_activity_id
+    no_task_cards? = MapSet.member?(no_task_ids, activity.id)
+
+    # RE263 — the draft column stands in for the empty placeholder, so the user never sees
+    # `＋ Add task` and an open input side by side. An activity that still holds task-less
+    # CARDS keeps its `— No task yet` column: real cards live in it.
+    no_task? = no_task_cards? or (tasks == [] and not draft?)
+
+    if(no_task?, do: [no_task_column(activity, not no_task_cards?)], else: []) ++
+      Enum.map(tasks, &task_column(activity, &1)) ++
+      if(draft?, do: [draft_column(activity)], else: [])
+  end
+
+  # RE260 — Hide tasks. One column per activity, holding every card under it. `task_count` is
+  # the artboard's `tasks.length` for the `<n> tasks · merged` header (line ~442); it is the
+  # ONLY reason the count is carried here rather than derived by the renderer, which has no
+  # task list.
+  defp merged_column(activity, task_count) do
+    %{
+      key: "m:#{activity.id}",
+      activity: activity,
+      task: nil,
+      no_task?: false,
+      bare?: false,
+      draft?: false,
+      merged?: true,
+      task_count: task_count,
+      last_of_activity?: false,
+      count: 0
+    }
+  end
+
   defp task_column(activity, task) do
     %{
       key: "t:#{task.id}",
@@ -213,6 +273,8 @@ defmodule RelayWeb.StoryMapGrid do
       no_task?: false,
       bare?: false,
       draft?: false,
+      merged?: false,
+      task_count: 0,
       last_of_activity?: false,
       count: 0
     }
@@ -230,12 +292,14 @@ defmodule RelayWeb.StoryMapGrid do
       no_task?: true,
       bare?: bare?,
       draft?: false,
+      merged?: false,
+      task_count: 0,
       last_of_activity?: false,
       count: 0
     }
   end
 
-  # RE263 — the open `{:task, _}` draft's column. It never receives cards (`fill/3` produces no
+  # RE263 — the open `{:task, _}` draft's column. It never receives cards (`fill/4` produces no
   # `"draft:"` key), so its body cells render empty; `mark_last/1` gives it `last_of_activity?`
   # because it is appended last.
   defp draft_column(activity) do
@@ -246,6 +310,8 @@ defmodule RelayWeb.StoryMapGrid do
       no_task?: false,
       bare?: false,
       draft?: true,
+      merged?: false,
+      task_count: 0,
       last_of_activity?: false,
       count: 0
     }
@@ -263,14 +329,16 @@ defmodule RelayWeb.StoryMapGrid do
 
   defp last_key(lanes), do: lanes |> List.last() |> Map.fetch!(:key)
 
-  defp fill(placements, lane_keys, last_lane_key) do
+  defp fill(placements, lane_keys, last_lane_key, hide_tasks?) do
     {cells, unmapped} =
       Enum.reduce(placements, {%{}, []}, fn
         {:tray, card}, {cells, unmapped} ->
           {cells, [card | unmapped]}
 
         {:grid, activity_id, task_id, card}, {cells, unmapped} ->
-          key = {column_key(activity_id, task_id), lane_key(card, lane_keys, last_lane_key)}
+          key =
+            {column_key(activity_id, task_id, hide_tasks?), lane_key(card, lane_keys, last_lane_key)}
+
           {Map.update(cells, key, [card], &[card | &1]), unmapped}
       end)
 
@@ -285,8 +353,12 @@ defmodule RelayWeb.StoryMapGrid do
   # deliberately not sorted: an unmapped card has no position by construction.
   defp sort_cell(cards), do: Enum.sort_by(cards, & &1.story_map_position)
 
-  defp column_key(activity_id, nil), do: "nt:#{activity_id}"
-  defp column_key(_activity_id, task_id), do: "t:#{task_id}"
+  # RE260 — while merged, the activity IS the column: the artboard's `col.merged ||` short
+  # circuit (line ~518) written as a key rule, so `fill/4` stays one pass and the invariant
+  # holds without a second placement path.
+  defp column_key(activity_id, _task_id, true), do: "m:#{activity_id}"
+  defp column_key(activity_id, nil, _hide_tasks?), do: "nt:#{activity_id}"
+  defp column_key(_activity_id, task_id, _hide_tasks?), do: "t:#{task_id}"
 
   # Rules 4–6: the card's release when the board has it, else the last lane. With zero releases
   # the synthetic `(No release)` lane IS the last lane, so nothing needs a special case.

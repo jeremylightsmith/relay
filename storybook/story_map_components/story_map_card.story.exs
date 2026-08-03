@@ -64,6 +64,42 @@ defmodule Storybook.StoryMapComponents.StoryMapCard do
           done: true,
           avatar: :check
         }
+      },
+      %Variation{
+        id: :map_zoom,
+        attributes: %{
+          id: "story-map-card-6",
+          ref: "RLY-111",
+          title: "Add SSO for enterprise accounts",
+          badge: "CODE",
+          hue: :violet,
+          zoom: :map
+        }
+      },
+      %Variation{
+        id: :compact_zoom,
+        attributes: %{
+          id: "story-map-card-7",
+          ref: "RLY-112",
+          title: "Add SSO for enterprise accounts",
+          badge: "CODE",
+          hue: :violet,
+          zoom: :compact
+        }
+      },
+      %Variation{
+        id: :full_zoom,
+        attributes: %{
+          id: "story-map-card-8",
+          ref: "RLY-113",
+          title: "Add SSO for enterprise accounts",
+          badge: "CODE · 62%",
+          hue: :violet,
+          pct: 62,
+          zoom: :full,
+          active_owner: :ai,
+          owners: [%{actor_type: :agent}]
+        }
       }
     ]
   end
