@@ -7,9 +7,12 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
   import Phoenix.LiveViewTest
 
+  alias Phoenix.Socket.Broadcast
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Events
+  alias Relay.Members
+  alias Relay.Presence
   alias Relay.Repo
   alias Relay.StoryMap
 
@@ -1430,4 +1433,125 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
   defp card_dom_id(board, card), do: "story-map-card-#{Cards.ref(board, card)}"
   defp tray_dom_id(board, card), do: "story-map-tray-card-#{Cards.ref(board, card)}"
+
+  # RE257 — a second signed-in member of the same board, and their own connection. `insert/2`
+  # and `build_conn/0` come from ConnCase's `import Relay.Factory` / `import Phoenix.ConnTest`.
+  defp second_member(board) do
+    other = insert(:user, name: "Mara Lopez", avatar_url: nil)
+    {:ok, _membership} = Members.invite(board, other.email)
+
+    {other, log_in_user(build_conn(), other)}
+  end
+
+  # The presence roster is re-derived from Relay.Presence, never patched from the diff payload,
+  # so a synthetic diff exercises exactly the shipped code path — deterministically. The REAL
+  # diff is asynchronous (Phoenix computes it in a Task), and that it genuinely arrives is
+  # pinned by Relay.PresenceTest rather than raced here.
+  defp presence_diff(board, leaves \\ %{}) do
+    %Broadcast{
+      topic: Presence.presence_topic(board.id),
+      event: "presence_diff",
+      payload: %{joins: %{}, leaves: leaves}
+    }
+  end
+
+  defp deliver_presence_diff(view, board) do
+    send(view.pid, presence_diff(board))
+    render(view)
+  end
+
+  describe "live presence — the avatar stack (RE257)" do
+    test "alone on the map, no stack renders", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-count")
+      refute has_element?(view, "#story-map-presence")
+    end
+
+    test "a second viewer puts two faces in the stack, yours first", %{conn: conn} = ctx do
+      {other, other_conn} = second_member(ctx.board)
+      {:ok, _view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      # Mounting AFTER the other viewer is tracked reads the roster straight out of the
+      # tracker — no async diff to wait on.
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view_a, "#story-map-presence")
+      html = render(view_a)
+      assert html =~ "(you)"
+      assert html =~ other.name
+      assert :binary.match(html, "(you)") < :binary.match(html, other.name)
+    end
+
+    test "a viewer who joins while you watch appears without a reload", %{conn: conn} = ctx do
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      refute has_element?(view_a, "#story-map-presence")
+
+      {other, other_conn} = second_member(ctx.board)
+      {:ok, _view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      html = deliver_presence_diff(view_a, ctx.board)
+
+      assert html =~ ~s(id="story-map-presence")
+      assert html =~ other.name
+    end
+
+    test "the kanban board renders no stack and tracks nobody", %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, _view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}")
+
+      refute has_element?(view_a, "#story-map-presence")
+      # Only the story-map viewer is counted.
+      assert [%{user_id: _}] = Presence.list_people(ctx.board.id)
+    end
+
+    test "navigating off the map stops counting you", %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      :ok = Presence.subscribe(ctx.board.id)
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+      assert_receive %Broadcast{event: "presence_diff", payload: %{joins: joins}}, 1000
+      assert map_size(joins) == 1
+
+      assert {:error, {:live_redirect, %{to: to}}} =
+               view_b |> element("#board-view-tab-board") |> render_click()
+
+      assert to == "/board/#{ctx.board.slug}"
+      assert_receive %Broadcast{event: "presence_diff", payload: %{leaves: leaves}}, 1000
+      assert map_size(leaves) == 1
+      assert Presence.list_people(ctx.board.id) == []
+
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      refute has_element?(view_a, "#story-map-presence")
+    end
+  end
+
+  describe "shared map view settings (RE257)" do
+    test "a tray toggle in one session moves the tray in another", %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view_b, "#story-map-tray-toggle[aria-expanded='true']")
+
+      render_click(view_a, "toggle_story_map_tray")
+
+      # Local PubSub dispatch happens synchronously in the writer's process, so B's mailbox
+      # already holds the broadcast by the time render_click/2 returns.
+      assert has_element?(view_b, "#story-map-tray-toggle[aria-expanded='false']")
+      # The clicker re-renders from the SAME broadcast — one path, no optimistic assign.
+      assert has_element?(view_a, "#story-map-tray-toggle[aria-expanded='false']")
+      assert Repo.get!(Schemas.Board, ctx.board.id).story_map_view == %{"tray_open" => false}
+    end
+
+    test "a late joiner opens on the view everyone else is already on", %{conn: conn} = ctx do
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      render_click(view_a, "toggle_story_map_tray")
+
+      {:ok, view_c, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view_c, "#story-map-tray-toggle[aria-expanded='false']")
+    end
+  end
 end

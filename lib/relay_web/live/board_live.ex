@@ -52,6 +52,14 @@ defmodule RelayWeb.BoardLive do
   `refresh_story_map/1`, mutually exclusive with the draft). `"story_map_delete"` refuses a
   structure that still holds cards — the ✕ is already `disabled` in that state, so the flash is
   defence in depth. Every new event joins the `read_only?` guard list.
+
+  RE257 makes the map multi-user. `:presence_people` is `Relay.Presence`'s roster (empty
+  anywhere but the map, re-derived on every `"presence_diff"`), rendered by
+  `StoryMapComponents.presence_stack/1` in the `<:actions>` slot. `:story_map_tray_open` is no
+  longer a private socket assign: it is one key of the board-wide shared view
+  (`Relay.StoryMap.view/1` / `put_view/3`), so the toggle writes and re-renders from the write's
+  own broadcast — the clicker included, one path, no optimistic local assign. Tracking happens
+  only for `live_action == :story_map`; untracking is the LiveView's exit.
   """
 
   use RelayWeb, :live_view
@@ -63,6 +71,7 @@ defmodule RelayWeb.BoardLive do
   alias Relay.Events
   alias Relay.Flows
   alias Relay.Members
+  alias Relay.Presence
   alias Relay.Runs
   alias Relay.StoryMap
   alias Relay.Votes
@@ -118,6 +127,11 @@ defmodule RelayWeb.BoardLive do
         >
           {length(@story_map_cards)} cards
         </span>
+        <StoryMapComponents.presence_stack
+          :if={@live_action == :story_map}
+          people={@presence_people}
+          current_user_id={@current_scope.user.id}
+        />
         <StoryMapComponents.story_map_toolbar
           :if={@live_action == :story_map}
           zoom={@story_map_zoom}
@@ -759,11 +773,22 @@ defmodule RelayWeb.BoardLive do
   defp mount_board(socket, slug) do
     board = Boards.get_board!(socket.assigns.current_scope.user, slug)
 
-    if connected?(socket) do
+    live? = connected?(socket)
+    story_map? = socket.assigns.live_action == :story_map
+
+    if live? do
       Events.subscribe(board.id)
       Runs.subscribe(board.id)
       :timer.send_interval(@health_tick_ms, self(), :health_tick)
     end
+
+    # RE257 — presence is scoped to the STORY MAP (interview decision 3): only people viewing
+    # the map appear in the stack, so the kanban board neither tracks nor subscribes. There is
+    # no untrack call anywhere: Phoenix.Presence untracks on the tracked pid's exit, and the
+    # Board ↔ Story map switch is a `<.link navigate>`, which shuts this LiveView down.
+    if live? and story_map?, do: join_story_map_presence(board, socket.assigns.current_scope.user)
+
+    presence_people = if live? and story_map?, do: Presence.list_people(board.id), else: []
 
     cards = Cards.list_cards(board)
     flows = Flows.list_flows(board)
@@ -782,7 +807,16 @@ defmodule RelayWeb.BoardLive do
       |> assign(:story_tasks, StoryMap.list_tasks(board))
       |> assign(:releases, StoryMap.list_releases(board))
       |> assign(:story_map_cards, cards)
-      |> assign(:story_map_tray_open, true)
+      # RE257 — the tray's open state is a SHARED, board-wide view setting now, not a per-socket
+      # assign: every viewer of a board must be looking at the same map, which is what makes a
+      # raw-pixel cursor land on the right card. Seeded from the persisted view so a late joiner
+      # opens on what everyone else is already on, and re-assigned only from the write's own
+      # {:story_map_view_changed, _, _} broadcast.
+      |> assign(:story_map_tray_open, StoryMap.view(board)["tray_open"])
+      # RE257 — the story-map roster, [] anywhere but the map. Re-derived from Relay.Presence on
+      # every diff, never patched from the diff payload: one person with three tabs is three
+      # joins and one avatar, and only list_people/1 knows that.
+      |> assign(:presence_people, presence_people)
       # RE263 — the ONE open inline draft: nil | :activity | :release | {:task, activity_id}.
       # Deliberately untouched by refresh_story_map/1, so another tab creating an activity never
       # eats what you are typing. `story_map_draft_name` tracks the text server-side for the
@@ -1547,10 +1581,14 @@ defmodule RelayWeb.BoardLive do
     {:noreply, update(socket, :expanded_plan?, &(!&1))}
   end
 
-  # RE264 — the UNMAPPED tray's collapse/expand. Deliberately NOT in the read_only? guard
-  # list above — it changes nothing on the board.
+  # RE257 — the tray's open state is SHARED board-wide, so the click writes through
+  # Relay.StoryMap.put_view/3 and assigns nothing here: the write's own broadcast lands in this
+  # socket's mailbox too (local PubSub dispatch is synchronous in the writer's process) and
+  # re-assigns in handle_info/2. One path, so the clicker and every other viewer can never
+  # disagree. Still deliberately OUTSIDE the read_only? guard list — it changes no card data.
   def handle_event("toggle_story_map_tray", _params, socket) do
-    {:noreply, assign(socket, :story_map_tray_open, not socket.assigns.story_map_tray_open)}
+    _ = StoryMap.put_view(socket.assigns.board, "tray_open", not socket.assigns.story_map_tray_open)
+    {:noreply, socket}
   end
 
   # RE260 — the two view-only chrome controls. `parse_zoom/1` is the ONLY parser for the closed
@@ -2001,6 +2039,19 @@ defmodule RelayWeb.BoardLive do
   # is required either way (LiveView dispatches every message here, and an unmatched one is a
   # FunctionClauseError that kills the LiveView).
   def handle_info({:story_map_changed, _board_id}, socket), do: {:noreply, refresh_story_map(socket)}
+
+  # RE257 — the roster changed (someone opened or closed the map, or a tab died). Re-derived
+  # from Relay.Presence rather than patched from the diff payload: the payload counts tabs, the
+  # stack counts people.
+  def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
+    {:noreply, assign(socket, :presence_people, Presence.list_people(socket.assigns.board.id))}
+  end
+
+  # RE257 — a shared view setting changed, here or in someone else's tab. The whole view arrives
+  # in the payload, so there is nothing to refetch.
+  def handle_info({:story_map_view_changed, _board_id, view}, socket) do
+    {:noreply, assign(socket, :story_map_tray_open, view["tray_open"])}
+  end
 
   # RLY-69 — a vote toggled somewhere (this board, the public board, another
   # session). Refresh the affected card's count (and, if its drawer is open,
@@ -3028,6 +3079,15 @@ defmodule RelayWeb.BoardLive do
   end
 
   defp refresh_story_map(socket), do: socket
+
+  # RE257 — one place that joins everything the map's realtime surfaces need: the roster, the
+  # cursor stream and the shared view.
+  defp join_story_map_presence(board, user) do
+    Presence.track_viewer(self(), board.id, user)
+    Presence.subscribe(board.id)
+    StoryMap.subscribe_view(board.id)
+    :ok
+  end
 
   defp open_story_map_draft(socket, draft) do
     socket

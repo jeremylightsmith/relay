@@ -36,6 +36,10 @@ defmodule RelayWeb.StoryMapComponents do
   (`.story-map-drop.drag-over` in `app.css`, the artboard's blue tint plus a 2px inset ring), not
   an assign — a hover never costs a round trip. `assets/js/hooks/story_map_dnd.js` reads exactly
   those four selectors and nothing else.
+
+  RE257 adds `presence_stack/1`, the artboard's `showPresence` avatar stack. It is the only
+  part of this module that is not a pure function of the board's data — it renders
+  `Relay.Presence`'s live roster.
   """
 
   use Phoenix.Component
@@ -61,6 +65,11 @@ defmodule RelayWeb.StoryMapComponents do
   # from this list and `parse_zoom/1` validates against it, so the control and the parser cannot
   # drift apart.
   @zoom_levels [:map, :compact, :full]
+
+  # RE257 — the presence stack's artboard tokens (lines 49-56): 26px circles, five faces before
+  # the +N chip, an 8px tuck between them (Tailwind `-ml-2`).
+  @presence_size 26
+  @presence_faces 5
 
   @doc """
   The zoom levels, in the artboard's left-to-right order (line ~44-46). The single source of
@@ -185,6 +194,85 @@ defmodule RelayWeb.StoryMapComponents do
       </button>
     </div>
     """
+  end
+
+  @doc """
+  The collaborator avatar stack (RE257) — `docs/designs/Relay Story Map.dc.html` lines 49-56,
+  the artboard's `showPresence` mode: 26px identity-hued circles with a 2px white border, each
+  after the first tucked -8px under its neighbour, capped at five faces with a neutral `+N` chip
+  beyond.
+
+  Renders **nothing when fewer than two people are present** — your own avatar alone is noise.
+  You come first, with a `title` reading `"<name> (you)"`; everyone else follows in
+  `Relay.Presence.list_people/1`'s roster order, which is the same for every viewer.
+
+  Circles are drawn by `RelayWeb.CoreComponents.avatar/1` — the app's one definition of a
+  person's circle — so a person looks the same here as in the member stack and the card owner
+  cluster, and their cursor (`assets/js/hooks/story_map_cursors.js`) is the same colour because
+  both read `CoreComponents.identity_color/1`.
+
+  One deliberate deviation from the artboard: `avatar/1` sizes initials at
+  `round(size * 0.42)` = 11px where the mockup hand-wrote 10px. Forking that ratio for one pixel
+  would fork the app's avatar typography; size, fill, weight, colour, border and tuck all match.
+
+  Placement is also a deliberate deviation (per the spec): the artboard puts this stack in the
+  map's own toolbar beside ZOOM, and `BoardLive` renders it in the app layout's `<:actions>`
+  slot after the `#story-map-count` chip until RE260's toolbar can host it.
+  """
+  attr :people, :list, required: true, doc: "Relay.Presence.list_people/1's shape"
+  attr :current_user_id, :integer, required: true
+
+  def presence_stack(assigns) do
+    {mine, others} = Enum.split_with(assigns.people, &(&1.user_id == assigns.current_user_id))
+    ordered = mine ++ others
+    shown = Enum.take(ordered, @presence_faces)
+
+    assigns =
+      assigns
+      |> assign(:size, @presence_size)
+      |> assign(:faces, shown |> Enum.map(&presence_face(&1, assigns.current_user_id)) |> Enum.with_index())
+      |> assign(:overflow, length(ordered) - length(shown))
+
+    ~H"""
+    <div :if={length(@people) > 1} id="story-map-presence" style="display:flex;align-items:center;">
+      <CoreComponents.avatar
+        :for={{person, index} <- @faces}
+        src={person.avatar_url}
+        name={person.name}
+        email={person.email}
+        title={person.title}
+        size={@size}
+        tint={:identity}
+        class={presence_avatar_class(index)}
+      />
+      <span :if={@overflow > 0} id="story-map-presence-overflow" style={presence_overflow_style()}>
+        +{@overflow}
+      </span>
+    </div>
+    """
+  end
+
+  defp presence_face(person, current_user_id) do
+    label = person.name || person.email || ""
+
+    Map.put(person, :title, if(person.user_id == current_user_id, do: "#{label} (you)", else: label))
+  end
+
+  # Artboard line ~51-53: `border:2px solid white` on every circle, `margin-left:-8px` on every
+  # one after the first. Tailwind rather than inline style because `avatar/1` owns the style
+  # attribute; `-ml-2` is 0.5rem = 8px, and `avatar/1`'s `box-sizing:border-box` matches the
+  # artboard's own `*{box-sizing:border-box}` so 26px is the outer size in both.
+  defp presence_avatar_class(0), do: "border-2 border-white"
+  defp presence_avatar_class(_index), do: "border-2 border-white -ml-2"
+
+  # The artboard's mock has three faces and so shows no overflow chip. This borrows the board's
+  # existing +N chip colours (`CoreComponents.member_stack/1`, `Relay Board.dc.html` ~1596) at
+  # the presence stack's 26px, so the two stacks read as one system.
+  defp presence_overflow_style do
+    "width:#{@presence_size}px;height:#{@presence_size}px;border-radius:50%;" <>
+      "background:oklch(0.94 0.006 255);color:oklch(0.50 0.02 255);display:flex;" <>
+      "align-items:center;justify-content:center;font-size:10px;font-weight:600;" <>
+      "flex:0 0 auto;box-sizing:border-box;border:2px solid oklch(1 0 0);margin-left:-8px;"
   end
 
   @doc """

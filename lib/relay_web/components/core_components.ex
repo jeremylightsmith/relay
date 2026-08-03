@@ -647,6 +647,9 @@ defmodule RelayWeb.CoreComponents do
   `tint={:role}` fills with `--color-primary` (human=blue is load-bearing);
   `tint={:identity}` seeds a stable hue from the email, so one person keeps
   one color across surfaces.
+
+  `title` overrides the tooltip without touching the initials — RE257's presence stack marks
+  your own face `"<name> (you)"`, and folding that into `name` would corrupt the initials.
   """
   attr :src, :string, default: nil, doc: "the avatar_url; ignored when actor={:ai}"
   attr :name, :string, default: nil, doc: "display name — title text + initials"
@@ -658,6 +661,8 @@ defmodule RelayWeb.CoreComponents do
   attr :grayed, :boolean, default: false
   attr :class, :string, default: nil
 
+  attr :title, :string, default: nil, doc: "tooltip override; defaults to name || email"
+
   def avatar(%{actor: :ai} = assigns) do
     assigns = assign(assigns, :mark_size, round(assigns.size * 0.36))
 
@@ -665,7 +670,7 @@ defmodule RelayWeb.CoreComponents do
     <span
       class={@class}
       style={avatar_circle_style(@size, "var(--color-secondary)", @ring, @grayed)}
-      title="Relay AI"
+      title={@title || "Relay AI"}
       data-avatar="ai"
     >
       <span style={"width:#{@mark_size}px;height:#{@mark_size}px;border-radius:50%;border:1.5px solid oklch(1 0 0);display:block"}>
@@ -679,7 +684,7 @@ defmodule RelayWeb.CoreComponents do
     <span
       class={@class}
       style={avatar_circle_style(@size, nil, @ring, @grayed) <> ";overflow:hidden"}
-      title={@name || @email}
+      title={@title || @name || @email}
       data-avatar="photo"
     >
       <img
@@ -693,7 +698,7 @@ defmodule RelayWeb.CoreComponents do
   end
 
   def avatar(assigns) do
-    fill = if assigns.tint == :role, do: "var(--color-primary)", else: avatar_fill(assigns.email)
+    fill = if assigns.tint == :role, do: "var(--color-primary)", else: identity_color(assigns.email)
 
     # Spread as dynamic attrs, and keep the child on the tag's own line: with
     # a bare-text child, mix format's HEEx formatter (unlike for element
@@ -705,7 +710,7 @@ defmodule RelayWeb.CoreComponents do
         attrs: %{
           class: assigns.class,
           style: avatar_circle_style(assigns.size, fill, assigns.ring, assigns.grayed),
-          title: assigns.name || assigns.email,
+          title: assigns.title || assigns.name || assigns.email,
           "data-avatar": "initials"
         },
         initials: avatar_initials(assigns.name, assigns.email)
@@ -761,12 +766,19 @@ defmodule RelayWeb.CoreComponents do
     end
   end
 
-  # The identity fill (RLY-90 [E2]): one hue per email, everywhere — the same
-  # oklch(0.62 0.13 h) formula the member stack and board settings already used.
-  defp avatar_fill(email) do
-    hue = rem(:erlang.phash2(email || ""), 360)
-    "oklch(0.62 0.13 #{hue})"
-  end
+  @doc """
+  The identity **hue** for `email` (RLY-90 [E2]) — one integer per person, the seed behind every
+  identity-tinted surface. Public since RE257: the story-map cursor arrow and its name chip must
+  be the same colour as that person's avatar, and a second copy of
+  `rem(:erlang.phash2(email), 360)` would be a second definition of who is what colour.
+  """
+  def identity_hue(email), do: rem(:erlang.phash2(email || ""), 360)
+
+  @doc """
+  `identity_hue/1` as a fill — the same `oklch(0.62 0.13 <hue>)` formula the member stack, board
+  settings and the card owner cluster already draw, and the ONE definition of a person's colour.
+  """
+  def identity_color(email), do: "oklch(0.62 0.13 #{identity_hue(email)})"
 
   @doc """
   Renders the owner avatar cluster for a card — the mockup's "who holds the
