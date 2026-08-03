@@ -786,4 +786,260 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ ~r/id="board-view-tab-board"[^>]*aria-current="page"/
     end
   end
+
+  describe "RE260 — zoom_levels/0 and parse_zoom/1" do
+    test "the closed set is Map, Compact, Full, in the artboard's order" do
+      assert StoryMapComponents.zoom_levels() == [:map, :compact, :full]
+    end
+
+    test "every level round-trips through parse_zoom/1, so the buttons and the parser cannot drift" do
+      for level <- StoryMapComponents.zoom_levels() do
+        assert StoryMapComponents.parse_zoom(to_string(level)) == {:ok, level}
+      end
+    end
+
+    test "anything else is :error — the parser is total and never builds an atom" do
+      assert StoryMapComponents.parse_zoom("gigantic") == :error
+      assert StoryMapComponents.parse_zoom("") == :error
+      assert StoryMapComponents.parse_zoom(nil) == :error
+      # Even the right atom arriving as an atom is :error — the wire carries strings only.
+      assert StoryMapComponents.parse_zoom(:map) == :error
+    end
+  end
+
+  describe "RE260 — story_map_toolbar/1" do
+    test "the active segment is the artboard's white pill and the others are transparent" do
+      html = toolbar(:compact, false)
+
+      assert style_of(html, "#story-map-zoom") ==
+               "display:flex;background:oklch(0.955 0.006 255);border-radius:8px;padding:3px;"
+
+      assert style_of(html, "#story-map-zoom-compact") =~ "background:oklch(1 0 0);"
+      assert style_of(html, "#story-map-zoom-compact") =~ "color:oklch(0.3 0.02 255);"
+
+      assert style_of(html, "#story-map-zoom-compact") =~
+               "font-size:12px;font-weight:600;padding:4px 12px;border-radius:6px;"
+
+      assert style_of(html, "#story-map-zoom-map") =~ "background:transparent;"
+      assert style_of(html, "#story-map-zoom-map") =~ "color:oklch(0.5 0.02 255);"
+    end
+
+    test "aria-pressed marks exactly the active segment, for each zoom" do
+      for level <- StoryMapComponents.zoom_levels() do
+        html = toolbar(level, false)
+
+        for other <- StoryMapComponents.zoom_levels() do
+          assert attr_of(html, "#story-map-zoom-#{other}", "aria-pressed") ==
+                   to_string(other == level)
+        end
+      end
+
+      assert attr_of(toolbar(:compact, false), "#story-map-zoom", "role") == "group"
+      assert attr_of(toolbar(:compact, false), "#story-map-zoom", "aria-label") == "Zoom"
+    end
+
+    test "Hide tasks is white when off and violet when on, and its label flips" do
+      off = toolbar(:compact, false)
+      on = toolbar(:compact, true)
+
+      assert style_of(off, "#story-map-hide-tasks") ==
+               "font-size:12px;font-weight:600;padding:5px 11px;border-radius:8px;" <>
+                 "color:oklch(0.45 0.02 255);background:oklch(1 0 0);border:1px solid oklch(0.9 0.006 255);"
+
+      assert style_of(on, "#story-map-hide-tasks") ==
+               "font-size:12px;font-weight:600;padding:5px 11px;border-radius:8px;" <>
+                 "color:oklch(0.47 0.14 292);background:oklch(0.95 0.035 292);border:1px solid oklch(0.85 0.06 292);"
+
+      assert off =~ "Hide tasks"
+      assert attr_of(off, "#story-map-hide-tasks", "aria-pressed") == "false"
+      assert on =~ "Show tasks"
+      assert attr_of(on, "#story-map-hide-tasks", "aria-pressed") == "true"
+    end
+  end
+
+  describe "RE260 — the three card faces" do
+    test "Map is a bare title line with the artboard's 2px hued border and 5px pad" do
+      html = card_html(:map, [])
+
+      assert style_of(html, "#story-map-card-RLY1") ==
+               "font-size:9.5px;line-height:1.35;color:oklch(0.4 0.05 292);" <>
+                 "border-left:2px solid oklch(0.7 0.1 292);padding-left:5px;cursor:grab;"
+
+      # No ref row, no badge, no bar — the artboard renders only `{{ card.title }}` (line ~216).
+      refute html =~ "justify-content:space-between"
+      refute html =~ "CODE"
+      refute html =~ "story-map-card-bar"
+    end
+
+    test "a done card at Map zoom is struck through and muted" do
+      html = card_html(:map, hue: :green, done: true, badge: "DONE", avatar: :check)
+
+      style = style_of(html, "#story-map-card-RLY1")
+      assert style =~ "color:oklch(0.55 0.02 255);"
+      assert style =~ "border-left:2px solid oklch(0.75 0.03 155);"
+      assert style =~ "text-decoration:line-through;text-decoration-color:oklch(0.75 0.05 155);"
+    end
+
+    test "Compact is a white box with a 3px hued left border, 6px radius and no meta" do
+      html = card_html(:compact, [])
+
+      assert style_of(html, "#story-map-card-RLY1") ==
+               "background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);" <>
+                 "border-left:3px solid oklch(0.62 0.12 292);border-radius:6px;padding:6px 8px;" <>
+                 "display:flex;flex-direction:column;cursor:grab;"
+
+      assert html =~ "font-size:11.5px;line-height:1.3;font-weight:500;"
+      refute html =~ "justify-content:space-between"
+      refute html =~ "CODE"
+      refute html =~ "story-map-card-bar"
+    end
+
+    test "a done card at Compact zoom keeps the green left border at 0.82 opacity" do
+      html = card_html(:compact, hue: :green, done: true, badge: "DONE", avatar: :check)
+
+      style = style_of(html, "#story-map-card-RLY1")
+      assert style =~ "border-left:3px solid oklch(0.6 0.13 155);"
+      assert style =~ "opacity:0.82;"
+    end
+
+    test "Full is today's face, unchanged: ref, avatar, badge, bar and a 9px tinted box" do
+      html = card_html(:full, pct: 62, badge: "CODE · 62%")
+
+      assert style_of(html, "#story-map-card-RLY1") =~ "border-radius:9px;padding:9px 10px;"
+      assert html =~ "CODE · 62%"
+      assert html =~ "font-size:12.5px;line-height:1.3;font-weight:500;"
+      assert html =~ "story-map-card-bar"
+      assert style_of(html, ".story-map-card-bar") =~ "width:62%;"
+    end
+
+    test "the progress bar never renders below Full, even with a percentage" do
+      refute card_html(:map, pct: 62) =~ "story-map-card-bar"
+      refute card_html(:compact, pct: 62) =~ "story-map-card-bar"
+    end
+
+    test "EVERY zoom keeps the drag-and-drop and click contract" do
+      # assets/js/hooks/story_map_dnd.js keys off exactly `.story-map-card[data-ref]`; a Map face
+      # that dropped them would silently kill drag and drop.
+      for level <- StoryMapComponents.zoom_levels() do
+        html = card_html(level, [])
+
+        assert matches?(html, ".story-map-card[data-ref='RLY1'][draggable='true']")
+        assert attr_of(html, "#story-map-card-RLY1", "phx-click") == "select_card"
+        assert attr_of(html, "#story-map-card-RLY1", "phx-value-ref") == "RLY1"
+        assert attr_of(html, "#story-map-card-RLY1", "role") == "button"
+      end
+    end
+  end
+
+  describe "RE260 — zoom's two effects outside the card face" do
+    test "the body cell's gap is 3px at Map and 7px elsewhere" do
+      assert style_of(grid_html_at(:map), "#story-map-cell-t-10-r-100") =~ "gap:3px;"
+      assert style_of(grid_html_at(:compact), "#story-map-cell-t-10-r-100") =~ "gap:7px;"
+      assert style_of(grid_html_at(:full), "#story-map-cell-t-10-r-100") =~ "gap:7px;"
+    end
+
+    test "the inline ＋ add-card is hidden at Map only" do
+      refute matches?(grid_html_at(:map), "#story-map-add-t-10-r-100")
+      assert matches?(grid_html_at(:compact), "#story-map-add-t-10-r-100")
+      assert matches?(grid_html_at(:full), "#story-map-add-t-10-r-100")
+    end
+  end
+
+  describe "RE260 — the merged column" do
+    test "its header reads <n> tasks · merged, muted and smaller than a task header" do
+      html = grid_html(merged_grid())
+
+      assert matches?(html, "#story-map-merged-1")
+      assert html =~ "1 tasks · merged"
+
+      assert style_of(html, "#story-map-merged-1") ==
+               "grid-column:2;grid-row:2;position:sticky;top:56px;z-index:20;" <>
+                 "background:oklch(0.985 0.004 255);border-right:2px solid oklch(0.83 0.02 255);" <>
+                 "border-bottom:2px solid oklch(0.83 0.02 255);padding:7px 9px;font-size:10.5px;" <>
+                 "color:oklch(0.6 0.02 255);display:flex;align-items:center;gap:6px;"
+    end
+
+    test "it is not a rename affordance, not a drag grip and not an add-task button" do
+      html = grid_html(merged_grid())
+
+      refute matches?(html, "button#story-map-merged-1")
+      refute matches?(html, "#story-map-draft-input")
+      refute html =~ "＋ Add task"
+    end
+
+    test "it is 176px wide where a task column is 156px" do
+      assert style_of(grid_html(merged_grid()), "#story-map-grid") =~
+               "grid-template-columns:128px 176px 58px;"
+
+      assert style_of(grid_html(), "#story-map-grid") =~ "grid-template-columns:128px 156px 156px 58px;"
+    end
+
+    test "both of the activity's cards render in its one cell" do
+      html = grid_html(merged_grid())
+
+      assert matches?(html, "#story-map-cell-m-1-r-100 #story-map-card-RLY1")
+      assert matches?(html, "#story-map-cell-m-1-r-100 #story-map-card-RLY2")
+    end
+  end
+
+  # RE260 — the same one-activity board as `grid/1`, merged.
+  defp merged_grid do
+    activity = %StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1}
+    task = %StoryTask{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}
+    releases = [%Release{id: 100, board_id: 1, name: "MVP", position: 1}]
+
+    StoryMapGrid.build(
+      [activity],
+      [task],
+      releases,
+      [
+        card(1, story_activity_id: 1, story_task_id: 10, release_id: 100),
+        card(2, story_activity_id: 1, release_id: 100)
+      ],
+      nil,
+      true
+    )
+  end
+
+  defp grid_html_at(zoom) do
+    render_component(&StoryMapComponents.story_map/1,
+      grid: grid(),
+      board: board(),
+      stages: stages(),
+      stalled_ids: MapSet.new(),
+      draft: nil,
+      draft_name: "",
+      zoom: zoom
+    )
+  end
+
+  defp card_html(zoom, overrides) do
+    attrs =
+      Map.merge(
+        %{
+          id: "story-map-card-RLY1",
+          ref: "RLY1",
+          title: "Add SSO for enterprise accounts",
+          badge: "CODE",
+          hue: :violet,
+          zoom: zoom
+        },
+        Map.new(overrides)
+      )
+
+    render_component(&StoryMapComponents.story_map_card/1, attrs)
+  end
+
+  defp toolbar(zoom, hide_tasks) do
+    render_component(&StoryMapComponents.story_map_toolbar/1, zoom: zoom, hide_tasks: hide_tasks)
+  end
+
+  # `style_of/2`'s companion for any other attribute.
+  defp attr_of(html, selector, attribute) do
+    html
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query(selector)
+    |> LazyHTML.attribute(attribute)
+    |> List.first()
+  end
 end

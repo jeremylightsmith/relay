@@ -57,6 +57,30 @@ defmodule RelayWeb.StoryMapComponents do
   # them — including the synthetic `(No release)` lane — takes the artboard's neutral dot.
   @lane_hues [250, 195]
 
+  # RE260 — the ONE definition of the zoom closed set. `story_map_toolbar/1` renders its buttons
+  # from this list and `parse_zoom/1` validates against it, so the control and the parser cannot
+  # drift apart.
+  @zoom_levels [:map, :compact, :full]
+
+  @doc """
+  The zoom levels, in the artboard's left-to-right order (line ~44-46). The single source of
+  truth for the closed set: the segmented control, the `attr :zoom` value lists and
+  `parse_zoom/1` all derive from it.
+  """
+  def zoom_levels, do: @zoom_levels
+
+  @doc """
+  Parses a zoom level off the wire. Explicit clauses, never `String.to_atom/1` — this is client
+  input, and an unknown value is `:error` rather than a new atom.
+
+      parse_zoom("compact") #=> {:ok, :compact}
+      parse_zoom("huge")    #=> :error
+  """
+  def parse_zoom("map"), do: {:ok, :map}
+  def parse_zoom("compact"), do: {:ok, :compact}
+  def parse_zoom("full"), do: {:ok, :full}
+  def parse_zoom(_other), do: :error
+
   @doc """
   The card face's derived values — badge, hue, percentage, avatar and DOM id — for one card.
   Both the cell card and the tray card go through here, so the two derivations exist once.
@@ -111,6 +135,57 @@ defmodule RelayWeb.StoryMapComponents do
   defp avatar(true, _needs?), do: :check
   defp avatar(_done?, true), do: :bang
   defp avatar(_done?, _needs?), do: :owners
+
+  @doc """
+  The top-chrome view controls (RE260, artboard lines ~42-48): the ZOOM segmented control and
+  the Hide tasks toggle. Both are view-only — `RelayWeb.BoardLive` holds each in one socket
+  assign and neither reads or writes anything else, so they reset on reload exactly like the
+  tray's open state.
+
+  The segments are rendered from `zoom_levels/0` and their event is parsed by `parse_zoom/1`,
+  so a level can only ever be added in one place.
+  """
+  attr :zoom, :atom, values: [:map, :compact, :full], required: true
+  attr :hide_tasks, :boolean, required: true
+
+  def story_map_toolbar(assigns) do
+    assigns = assign(assigns, :levels, zoom_levels())
+
+    ~H"""
+    <div id="story-map-toolbar" style="display:flex;align-items:center;gap:10px;">
+      <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.55 0.02 255);">
+        ZOOM
+      </span>
+      <div
+        id="story-map-zoom"
+        role="group"
+        aria-label="Zoom"
+        style="display:flex;background:oklch(0.955 0.006 255);border-radius:8px;padding:3px;"
+      >
+        <button
+          :for={level <- @levels}
+          type="button"
+          id={"story-map-zoom-#{level}"}
+          phx-click="set_story_map_zoom"
+          phx-value-zoom={level}
+          aria-pressed={to_string(level == @zoom)}
+          style={segment_style(level == @zoom)}
+        >
+          {zoom_label(level)}
+        </button>
+      </div>
+      <button
+        type="button"
+        id="story-map-hide-tasks"
+        phx-click="toggle_story_map_hide_tasks"
+        aria-pressed={to_string(@hide_tasks)}
+        style={hide_tasks_style(@hide_tasks)}
+      >
+        {hide_tasks_label(@hide_tasks)}
+      </button>
+    </div>
+    """
+  end
 
   @doc """
   The shared inline editor: one autofocused text input in a form, carrying the artboard's
@@ -269,6 +344,7 @@ defmodule RelayWeb.StoryMapComponents do
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
   attr :compose, :any, default: nil, doc: "the {column_key, lane_key} whose composer is open, or nil"
   attr :compose_form, :any, default: nil, doc: "the shared card composer form (BoardLive's :compose_form)"
+  attr :zoom, :atom, values: [:map, :compact, :full], default: :full
 
   def story_map(assigns) do
     ~H"""
@@ -442,6 +518,7 @@ defmodule RelayWeb.StoryMapComponents do
           composing={@compose == {column.key, lane.key}}
           compose_form={@compose_form}
           read_only={@read_only}
+          zoom={@zoom}
         />
       <% end %>
     </div>
@@ -460,6 +537,11 @@ defmodule RelayWeb.StoryMapComponents do
   `read_only` hides both the `＋` and the composer, the way `board_column/1` hides its own
   add-work button: an archived board's server-side guard already rejects `compose_cell` and
   `create_card_in_cell`, so rendering the affordance would only offer a dead button per cell.
+
+  RE260 — `zoom` reaches here for exactly two things the artboard puts on the CELL rather than
+  the card: the 3px/7px `gap` (line ~524) and the `＋`, which the artboard hides at Map only
+  (`showAddBtn: z!=='map'`, line ~525). At Map the cards are one-line and a per-cell button
+  would outweigh them; Compact and Full render it as today.
   """
   attr :column, :map, required: true, doc: "one entry of the grid's `columns`"
   attr :lane, :map, required: true, doc: "one entry of the grid's `lanes`"
@@ -472,6 +554,7 @@ defmodule RelayWeb.StoryMapComponents do
   attr :composing, :boolean, default: false
   attr :compose_form, :any, default: nil, doc: "required when composing"
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
+  attr :zoom, :atom, values: [:map, :compact, :full], default: :full
 
   def story_map_cell(assigns) do
     assigns =
@@ -483,10 +566,11 @@ defmodule RelayWeb.StoryMapComponents do
       class="story-map-drop"
       data-column={@column.key}
       data-lane={@lane.key}
-      style={cell_style(@column, @column_index, @lane_index)}
+      style={cell_style(@column, @column_index, @lane_index, @zoom)}
     >
       <.story_map_card
         :for={card <- @cards}
+        zoom={@zoom}
         {card_face(card, @board, @stages, @stalled_ids)}
       />
       <.form
@@ -524,7 +608,7 @@ defmodule RelayWeb.StoryMapComponents do
         </button>
       </.form>
       <button
-        :if={not @composing and not @read_only}
+        :if={not @composing and not @read_only and @zoom != :map}
         type="button"
         id={StoryMapGrid.cell_element_id("add", @column.key, @lane.key)}
         phx-click="compose_cell"
@@ -540,9 +624,27 @@ defmodule RelayWeb.StoryMapComponents do
   end
 
   @doc """
-  The full-zoom cell card: ref + owner avatar on the top row, the title, a mono stage badge, a
-  3px progress bar hugging the bottom edge, and a status-tinted background/border. A done card
-  gets the green left border and reduced opacity.
+  The cell card at one of the three zoom levels (RE260, the artboard's `cardVM`, lines ~366-388):
+
+    * `:map` — a bare title line, the artboard's `lineStyle`: no box, a 2px hued left border and
+      5px of left padding;
+    * `:compact` — the non-`full` `boxStyle`: a white box with a 1px neutral border, a 3px hued
+      left border, 6px radius and 6px/8px padding, title only;
+    * `:full` — the `full` `boxStyle`, today's face unchanged: ref + owner avatar on the top row,
+      the title, a mono stage badge, a 3px progress bar hugging the bottom edge and a
+      status-tinted background/border.
+
+  A done card is struck through and muted at Map, keeps its green left border at `opacity:0.82`
+  at Compact, and at `opacity:0.8` at Full.
+
+  **The zoom changes only what is RENDERED, never the element's contract**: at all three levels
+  the article keeps `class="story-map-card"`, `data-ref`, `draggable="true"` and
+  `phx-click="select_card"`, because `assets/js/hooks/story_map_dnd.js` keys off exactly that
+  class and attribute and a card must never be a dead end. `card_face/4` is likewise unchanged —
+  badge, hue, pct and avatar are derived identically at every zoom.
+
+  `zoom` defaults to `:full` so every caller that predates RE260 — including the storybook
+  variations — renders exactly what it rendered before.
   """
   attr :id, :string, required: true
   attr :ref, :string, required: true
@@ -556,34 +658,34 @@ defmodule RelayWeb.StoryMapComponents do
   attr :avatar, :atom, values: [:check, :bang, :owners], default: :owners
   attr :owners, :list, default: []
   attr :active_owner, :atom, values: [:human, :ai, nil], default: nil
+  attr :zoom, :atom, values: [:map, :compact, :full], default: :full
 
   def story_map_card(assigns) do
     ~H"""
     <article
       id={@id}
       class="story-map-card"
-      style={card_shell(@hue, @done)}
+      style={card_shell(@zoom, @hue, @done)}
       role="button"
       tabindex="0"
       draggable="true"
       data-ref={@ref}
       data-hue={@hue}
       data-done={to_string(@done)}
+      data-zoom={@zoom}
       phx-click="select_card"
       phx-value-ref={@ref}
     >
-      <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div :if={@zoom == :full} style="display:flex;align-items:center;justify-content:space-between;">
         <span style="font-family:var(--font-mono);font-size:9.5px;color:oklch(0.55 0.02 255);">
           {@ref}
         </span>
         <.face_avatar avatar={@avatar} owners={@owners} active_owner={@active_owner} />
       </div>
-      <span style={"font-size:12.5px;line-height:1.3;font-weight:500;color:#{title_color(@done)};"}>
-        {@title}
-      </span>
-      <span style={badge_style(@hue)}>{@badge}</span>
+      <span style={title_style(@zoom, @done)}>{@title}</span>
+      <span :if={@zoom == :full} style={badge_style(@hue)}>{@badge}</span>
       <div
-        :if={@pct && @pct > 0}
+        :if={@zoom == :full and (@pct && @pct > 0)}
         class="story-map-card-bar"
         style={"position:absolute;left:0;bottom:0;height:3px;width:#{@pct}%;background:oklch(0.56 0.16 292);"}
       >
@@ -731,6 +833,13 @@ defmodule RelayWeb.StoryMapComponents do
   def story_map_column_header(assigns) do
     ~H"""
     <div
+      :if={@column.merged?}
+      id={column_dom_id(@column)}
+      style={column_header_style(@column, @index)}
+    >
+      {column_name(@column)}
+    </div>
+    <div
       :if={@column.draft?}
       id={column_dom_id(@column)}
       style={column_header_style(@column, @index)}
@@ -755,7 +864,7 @@ defmodule RelayWeb.StoryMapComponents do
       ＋ Add task
     </button>
     <div
-      :if={not @column.draft? and not is_nil(@column.task)}
+      :if={not @column.draft? and not @column.merged? and not is_nil(@column.task)}
       id={column_dom_id(@column)}
       class={[not @read_only && "story-map-header story-map-header-drop"]}
       data-kind="task"
@@ -781,7 +890,10 @@ defmodule RelayWeb.StoryMapComponents do
       />
     </div>
     <div
-      :if={not @column.draft? and is_nil(@column.task) and (not @column.bare? or @read_only)}
+      :if={
+        not @column.draft? and not @column.merged? and is_nil(@column.task) and
+          (not @column.bare? or @read_only)
+      }
       id={column_dom_id(@column)}
       style={column_header_style(@column, @index)}
     >
@@ -803,7 +915,7 @@ defmodule RelayWeb.StoryMapComponents do
       data-ref={@face.ref}
       phx-click="select_card"
       phx-value-ref={@face.ref}
-      style={"flex:0 0 auto;background:oklch(1 0 0);border:1px solid oklch(0.9 0.006 255);border-left:3px solid #{tray_accent(@face)};border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:7px;cursor:pointer;box-shadow:0 1px 2px oklch(0.4 0.05 260/0.07);"}
+      style={"flex:0 0 auto;background:oklch(1 0 0);border:1px solid oklch(0.9 0.006 255);border-left:3px solid #{card_accent(@face.hue, @face.done)};border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:7px;cursor:pointer;box-shadow:0 1px 2px oklch(0.4 0.05 260/0.07);"}
     >
       <div style="display:flex;align-items:center;justify-content:space-between;">
         <span style="font-family:var(--font-mono);font-size:9.5px;color:oklch(0.55 0.02 255);">
@@ -846,8 +958,40 @@ defmodule RelayWeb.StoryMapComponents do
 
   # ---------- private styles (artboard values, one definition each) ----------
 
+  # Artboard `seg()` (line ~537): the active pill is white on the track, inactive is transparent.
+  defp segment_style(active?) do
+    {background, color} =
+      if active?,
+        do: {"oklch(1 0 0)", "oklch(0.3 0.02 255)"},
+        else: {"transparent", "oklch(0.5 0.02 255)"}
+
+    "font-size:12px;font-weight:600;padding:4px 12px;border-radius:6px;" <>
+      "color:#{color};background:#{background};"
+  end
+
+  defp zoom_label(:map), do: "Map"
+  defp zoom_label(:compact), do: "Compact"
+  defp zoom_label(:full), do: "Full"
+
+  # Artboard `htBg` / `htFg` / `htBorder` (line ~569): violet while hiding, white while not.
+  defp hide_tasks_style(true) do
+    "font-size:12px;font-weight:600;padding:5px 11px;border-radius:8px;" <>
+      "color:oklch(0.47 0.14 292);background:oklch(0.95 0.035 292);border:1px solid oklch(0.85 0.06 292);"
+  end
+
+  defp hide_tasks_style(_hiding) do
+    "font-size:12px;font-weight:600;padding:5px 11px;border-radius:8px;" <>
+      "color:oklch(0.45 0.02 255);background:oklch(1 0 0);border:1px solid oklch(0.9 0.006 255);"
+  end
+
+  # Artboard `htLabel` (line ~568): the button says what the click will DO.
+  defp hide_tasks_label(true), do: "Show tasks"
+  defp hide_tasks_label(_hiding), do: "Hide tasks"
+
   defp grid_style(grid, draft) do
-    columns = Enum.map_join(grid.columns, " ", fn _column -> "156px" end)
+    columns =
+      Enum.map_join(grid.columns, " ", fn column -> if column.merged?, do: "176px", else: "156px" end)
+
     rows = Enum.map_join(grid.lanes, " ", fn _lane -> "auto" end)
 
     # RE263 — the artboard's `colTemplate` ends `' 58px'` (line ~492) and `rowsTemplate` ends
@@ -955,12 +1099,25 @@ defmodule RelayWeb.StoryMapComponents do
   # The ONE owner of every column's DOM id — the plan's contract, which the tests and the card's
   # acceptance criteria both address. All three column shapes are here, so the draft and the
   # bare `＋ Add task` header cannot drift from the plain label they replace.
+  defp column_dom_id(%{merged?: true, activity: activity}), do: "story-map-merged-#{activity.id}"
   defp column_dom_id(%{draft?: true, activity: activity}), do: "story-map-draft-#{activity.id}"
   defp column_dom_id(%{no_task?: true, activity: activity}), do: "story-map-no-task-#{activity.id}"
   defp column_dom_id(%{task: task}), do: "story-map-task-#{task.id}"
 
+  # Artboard line ~442: always the plural, even at 1 — and `0 tasks · merged` for an activity
+  # with no tasks, which is the artboard's behaviour and left as is.
+  defp column_name(%{merged?: true, task_count: count}), do: "#{count} tasks · merged"
   defp column_name(%{no_task?: true}), do: "— No task yet"
   defp column_name(%{task: task}), do: task.name
+
+  # Artboard line ~443: the merged header is a LABEL — smaller, muted, no font-weight, no grip,
+  # no rename, no drop target. It names an activity, not a task, so there is nothing to edit.
+  defp column_header_style(%{merged?: true}, index) do
+    "grid-column:#{index + 2};grid-row:2;position:sticky;top:#{@h1}px;z-index:20;" <>
+      "background:oklch(0.985 0.004 255);border-right:#{@gl_strong};border-bottom:#{@gl_strong};" <>
+      "padding:7px 9px;font-size:10.5px;color:oklch(0.6 0.02 255);" <>
+      "display:flex;align-items:center;gap:6px;"
+  end
 
   defp column_header_style(column, index) do
     {background, border_right, color} =
@@ -983,7 +1140,7 @@ defmodule RelayWeb.StoryMapComponents do
       "display:flex;align-items:center;gap:6px;#{cursor}"
   end
 
-  defp cell_style(column, column_index, lane_index) do
+  defp cell_style(column, column_index, lane_index, zoom) do
     # RE263 — the draft column's body cells are empty and dashed, exactly like `— No task yet`.
     placeholder? = column.no_task? or column.draft?
 
@@ -996,8 +1153,11 @@ defmodule RelayWeb.StoryMapComponents do
 
     background = if placeholder?, do: "background:#{@no_task_bg};", else: ""
 
+    # Artboard line ~524: `gap:(z==='map'?'3px':'7px')`.
+    gap = if zoom == :map, do: "3px", else: "7px"
+
     "grid-column:#{column_index + 2};grid-row:#{lane_index + 3};display:flex;" <>
-      "flex-direction:column;gap:7px;padding:8px;min-height:26px;" <>
+      "flex-direction:column;gap:#{gap};padding:8px;min-height:26px;" <>
       "border-right:#{border_right};#{background}"
   end
 
@@ -1010,16 +1170,35 @@ defmodule RelayWeb.StoryMapComponents do
       "color:oklch(0.72 0.02 255);font-size:12px;line-height:1;"
   end
 
+  # The artboard's `lineStyle` (cardVM, line ~379): Map zoom is a bare title line, not a box, so
+  # the whole face is this ONE string and the title span adds no styling of its own.
+  defp card_shell(:map, hue, done?) do
+    strike =
+      if done?, do: "text-decoration:line-through;text-decoration-color:oklch(0.75 0.05 155);", else: ""
+
+    "font-size:9.5px;line-height:1.35;color:#{line_color(hue, done?)};" <>
+      "border-left:2px solid #{line_accent(hue, done?)};padding-left:5px;cursor:grab;" <> strike
+  end
+
+  # The artboard's non-`full` `boxStyle` (line ~375): a white box with a hued left edge.
+  defp card_shell(:compact, hue, done?) do
+    fade = if done?, do: "opacity:0.82;", else: ""
+
+    "background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);" <>
+      "border-left:3px solid #{card_accent(hue, done?)};border-radius:6px;padding:6px 8px;" <>
+      "display:flex;flex-direction:column;cursor:grab;" <> fade
+  end
+
   # The artboard's full-zoom `boxStyle` (cardVM, lines ~332-334). `cursor:grab` — RE262 makes
   # every card face draggable.
-  defp card_shell(_hue, true) do
+  defp card_shell(:full, _hue, true) do
     "background:oklch(0.97 0.015 150);border:1px solid oklch(0.88 0.04 150);border-radius:9px;" <>
       "padding:9px 10px;display:flex;flex-direction:column;gap:8px;" <>
       "box-shadow:0 1px 2.5px oklch(0.4 0.05 260/0.1);position:relative;overflow:hidden;" <>
       "cursor:grab;opacity:0.8;border-left:3px solid oklch(0.6 0.13 155);"
   end
 
-  defp card_shell(hue, _done) do
+  defp card_shell(:full, hue, _done) do
     {background, border} = tint(hue)
 
     "background:#{background};border:1px solid #{border};border-radius:9px;padding:9px 10px;" <>
@@ -1027,6 +1206,41 @@ defmodule RelayWeb.StoryMapComponents do
       "box-shadow:0 1px 2.5px oklch(0.4 0.05 260/0.1);position:relative;overflow:hidden;" <>
       "cursor:grab;"
   end
+
+  # Map zoom's text styling is part of the artboard's single `lineStyle` string, which
+  # `card_shell(:map, …)` owns — so the title span renders with no style attribute at all
+  # (`style={nil}` omits it). Compact and Full are the artboard's `titleStyle` (line ~380),
+  # whose only zoom-dependent value is the size: `full ? '12.5px' : '11.5px'`.
+  defp title_style(:map, _done?), do: nil
+
+  defp title_style(zoom, done?) do
+    size = if zoom == :full, do: "12.5px", else: "11.5px"
+
+    "font-size:#{size};line-height:1.3;font-weight:500;color:#{title_color(done?)};"
+  end
+
+  # The hued left edge of a Compact box and of a tray card — the artboard's
+  # `oklch(0.62 0.12 <h>)`, green when done. `statusHue` never yields a neutral, so `:neutral`
+  # takes this module's own neutral (chroma 0.02 at 255).
+  defp card_accent(_hue, true), do: "oklch(0.6 0.13 155)"
+  defp card_accent(:neutral, _done?), do: "oklch(0.7 0.02 255)"
+  defp card_accent(hue, _done?), do: "oklch(0.62 0.12 #{hue_deg(hue)})"
+
+  # Map zoom's 2px line border and its text colour (artboard `lineStyle`, line ~379).
+  defp line_accent(_hue, true), do: "oklch(0.75 0.03 155)"
+  defp line_accent(:neutral, _done?), do: "oklch(0.75 0.02 255)"
+  defp line_accent(hue, _done?), do: "oklch(0.7 0.1 #{hue_deg(hue)})"
+
+  defp line_color(_hue, true), do: "oklch(0.55 0.02 255)"
+  defp line_color(:neutral, _done?), do: "oklch(0.45 0.02 255)"
+  defp line_color(hue, _done?), do: "oklch(0.4 0.05 #{hue_deg(hue)})"
+
+  # The artboard's `statusHue` (line ~360) as a degree — the ONE place the four hues become
+  # numbers, for every border that interpolates one.
+  defp hue_deg(:green), do: 155
+  defp hue_deg(:amber), do: 65
+  defp hue_deg(:violet), do: 292
+  defp hue_deg(:blue), do: 250
 
   defp tint(:green), do: {"oklch(0.965 0.028 155)", "oklch(0.9 0.04 155)"}
   defp tint(:amber), do: {"oklch(0.965 0.028 65)", "oklch(0.9 0.04 65)"}
@@ -1050,15 +1264,6 @@ defmodule RelayWeb.StoryMapComponents do
     "font-family:var(--font-mono);font-size:8.5px;font-weight:600;letter-spacing:0.05em;" <>
       "padding:2px 5px;border-radius:4px;background:#{background};color:#{color};width:fit-content;"
   end
-
-  defp tray_accent(%{done: true}), do: "oklch(0.6 0.13 155)"
-  defp tray_accent(%{hue: :neutral}), do: "oklch(0.7 0.02 255)"
-  defp tray_accent(%{hue: hue}), do: "oklch(0.62 0.12 #{tray_hue(hue)})"
-
-  defp tray_hue(:green), do: 155
-  defp tray_hue(:amber), do: 65
-  defp tray_hue(:violet), do: 292
-  defp tray_hue(:blue), do: 250
 
   defp tray_style(open) do
     width = if open, do: "214px", else: "42px"
