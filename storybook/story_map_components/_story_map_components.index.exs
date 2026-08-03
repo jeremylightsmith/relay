@@ -7,4 +7,5 @@ defmodule Storybook.StoryMapComponents do
   def entry("story_map_card"), do: [icon: {:fa, "note-sticky", :thin}]
   def entry("inline_name_input"), do: [icon: {:fa, "i-cursor", :thin}]
   def entry("story_map_cell"), do: [icon: {:fa, "table-cells", :thin}]
+  def entry("story_map_column_header"), do: [icon: {:fa, "table-columns", :thin}]
 end

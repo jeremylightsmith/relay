@@ -38,6 +38,12 @@ defmodule RelayWeb.BoardLive do
   than touching story-map assigns directly; `"compose_cell"` / `"cancel_compose_cell"` /
   `"create_card_in_cell"` drive the per-cell inline composer, whose open cell is
   `:story_map_compose` and whose form is the board's own `:compose_form`.
+
+  RE261 makes the structure editable: `:story_map_edit` / `:story_map_edit_name` are the rename
+  pair, mirroring the draft pair exactly (one open rename page-wide, untouched by
+  `refresh_story_map/1`, mutually exclusive with the draft). `"story_map_delete"` refuses a
+  structure that still holds cards — the ✕ is already `disabled` in that state, so the flash is
+  defence in depth. Every new event joins the `read_only?` guard list.
   """
 
   use RelayWeb, :live_view
@@ -382,6 +388,8 @@ defmodule RelayWeb.BoardLive do
         tray_open={@story_map_tray_open}
         draft={@story_map_draft}
         draft_name={@story_map_draft_name}
+        edit={@story_map_edit}
+        edit_name={@story_map_edit_name}
         read_only={@read_only?}
         compose={@story_map_compose}
         compose_form={@compose_form}
@@ -633,6 +641,8 @@ defmodule RelayWeb.BoardLive do
   attr :tray_open, :boolean, required: true
   attr :draft, :any, required: true
   attr :draft_name, :string, required: true
+  attr :edit, :any, required: true
+  attr :edit_name, :string, required: true
   attr :read_only, :boolean, required: true
   attr :compose, :any, required: true
   attr :compose_form, :any, required: true
@@ -682,6 +692,8 @@ defmodule RelayWeb.BoardLive do
           stalled_ids={@stalled_ids}
           draft={@draft}
           draft_name={@draft_name}
+          edit={@edit}
+          edit_name={@edit_name}
           read_only={@read_only}
           compose={@compose}
           compose_form={@compose_form}
@@ -759,6 +771,11 @@ defmodule RelayWeb.BoardLive do
       # server-rendered value changed.
       |> assign(:story_map_draft, nil)
       |> assign(:story_map_draft_name, "")
+      # RE261 — the ONE open inline rename: nil | {:activity, id} | {:task, id} | {:release,
+      # id}, at most one anywhere on the page. Untouched by refresh_story_map/1 for exactly the
+      # reason the draft pair is: another tab's edit must never eat what you are typing.
+      |> assign(:story_map_edit, nil)
+      |> assign(:story_map_edit_name, "")
       # RE262 — the {column_key, lane_key} whose inline composer is open, or nil. The form
       # itself is the board's existing :compose_form: one composer is open at a time anywhere
       # on this socket, so one form assign is the whole state.
@@ -875,6 +892,8 @@ defmodule RelayWeb.BoardLive do
         review_approve review_reject retry_card retry_run confirm_move cancel_move
         archive_card restore_card toggle_sub_task restart_one
         story_map_add_activity story_map_add_task story_map_add_release story_map_draft_submit
+        story_map_rename_start story_map_rename_change story_map_rename_submit
+        story_map_rename_cancel story_map_delete story_map_reorder
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -1538,6 +1557,44 @@ defmodule RelayWeb.BoardLive do
   # `inline_name_input/1`). A no-op when no draft is open.
   def handle_event("story_map_draft_cancel", _params, socket) do
     {:noreply, close_story_map_draft(socket)}
+  end
+
+  # RE261 — the inline rename. `kind` and `id` arrive as strings and are resolved against the
+  # ALREADY board-scoped assigns, never by id from the database — the rule story_map_add_task
+  # established. An unknown kind or a forged id resolves to nil and the event is a no-op.
+  def handle_event("story_map_rename_start", %{"kind" => kind, "id" => id}, socket) do
+    case resolve_story_map_target(socket, kind, id) do
+      {kind_atom, record} -> {:noreply, open_story_map_edit(socket, {kind_atom, record.id}, record.name)}
+      nil -> {:noreply, socket}
+    end
+  end
+
+  # Every keystroke, for the same reason story_map_draft_change exists: LiveView only patches an
+  # input whose server-rendered value changed.
+  def handle_event("story_map_rename_change", %{"name" => name}, socket) do
+    {:noreply, assign(socket, :story_map_edit_name, name)}
+  end
+
+  def handle_event("story_map_rename_submit", %{"name" => name}, socket) do
+    {:noreply, commit_story_map_rename(socket, socket.assigns.story_map_edit, String.trim(name))}
+  end
+
+  # Escape and clicking away both land here — NOT blur, for the reason inline_name_input/1
+  # documents at length. A no-op when no rename is open.
+  def handle_event("story_map_rename_cancel", _params, socket) do
+    {:noreply, close_story_map_edit(socket)}
+  end
+
+  # RE261 — the ✕. The rendered button is `disabled` while the structure holds cards, so this
+  # is reachable only by a forged event or by a card assigned between render and click; the
+  # context refuses either way and the flash is the defence-in-depth message. The re-render
+  # comes from the delete's own {:story_map_changed, _} broadcast, like every other structure
+  # write on this page.
+  def handle_event("story_map_delete", %{"kind" => kind, "id" => id}, socket) do
+    case resolve_story_map_target(socket, kind, id) do
+      {kind_atom, record} -> {:noreply, apply_story_map_delete(socket, delete_structure(kind_atom, record))}
+      nil -> {:noreply, socket}
+    end
   end
 
   # SUB-TASKS panel toggle (RLY-18): flip the item's done flag and refresh the
@@ -2888,6 +2945,10 @@ defmodule RelayWeb.BoardLive do
     socket
     |> assign(:story_map_draft, draft)
     |> assign(:story_map_draft_name, "")
+    # RE261 — mutual exclusion with an open rename, the other direction of the same rule
+    # open_story_map_edit/3 enforces.
+    |> assign(:story_map_edit, nil)
+    |> assign(:story_map_edit_name, "")
   end
 
   defp close_story_map_draft(socket) do
@@ -2950,6 +3011,77 @@ defmodule RelayWeb.BoardLive do
   defp after_story_map_create(socket, {:error, changeset}) do
     put_flash(socket, :error, Enum.join(ChangesetErrors.messages(changeset), ", "))
   end
+
+  # RE261 — the three kinds, resolved from the assigns mount_board/2 already loaded
+  # board-scoped (it gates on Boards.get_board!/2). `kind` is mapped through a total function
+  # rather than String.to_atom/1, so a forged kind can never mint an atom.
+  defp resolve_story_map_target(socket, kind, id) do
+    with kind_atom when not is_nil(kind_atom) <- story_map_kind(kind),
+         %{} = record <- Enum.find(story_map_list(socket, kind_atom), &(to_string(&1.id) == to_string(id))) do
+      {kind_atom, record}
+    else
+      _other -> nil
+    end
+  end
+
+  defp story_map_kind("activity"), do: :activity
+  defp story_map_kind("task"), do: :task
+  defp story_map_kind("release"), do: :release
+  defp story_map_kind(_other), do: nil
+
+  defp story_map_list(socket, :activity), do: socket.assigns.story_activities
+  defp story_map_list(socket, :task), do: socket.assigns.story_tasks
+  defp story_map_list(socket, :release), do: socket.assigns.releases
+
+  defp open_story_map_edit(socket, edit, name) do
+    socket
+    |> assign(:story_map_edit, edit)
+    |> assign(:story_map_edit_name, name)
+    # Mutual exclusion with the create draft. phx-click-away already handles the common case
+    # (LiveView dispatches it before the clicked element's own phx-click), but clearing
+    # explicitly makes it deterministic rather than ordering-dependent.
+    |> assign(:story_map_draft, nil)
+    |> assign(:story_map_draft_name, "")
+  end
+
+  defp close_story_map_edit(socket) do
+    socket
+    |> assign(:story_map_edit, nil)
+    |> assign(:story_map_edit_name, "")
+  end
+
+  # The artboard's `commitEdit` (line ~590): a BLANK name cancels — the context is never
+  # called. On success the rename closes; on an invalid name (over-long) it stays open with the
+  # flash, exactly like the create draft, so the user can fix it rather than retype it.
+  defp commit_story_map_rename(socket, nil, _name), do: socket
+  defp commit_story_map_rename(socket, _edit, ""), do: close_story_map_edit(socket)
+
+  defp commit_story_map_rename(socket, {kind, id}, name) do
+    case Enum.find(story_map_list(socket, kind), &(&1.id == id)) do
+      nil ->
+        close_story_map_edit(socket)
+
+      record ->
+        case rename_structure(kind, record, name) do
+          {:ok, _renamed} -> close_story_map_edit(socket)
+          {:error, changeset} -> put_flash(socket, :error, Enum.join(ChangesetErrors.messages(changeset), ", "))
+        end
+    end
+  end
+
+  defp rename_structure(:activity, record, name), do: StoryMap.update_activity(record, %{name: name})
+  defp rename_structure(:task, record, name), do: StoryMap.update_task(record, %{name: name})
+  defp rename_structure(:release, record, name), do: StoryMap.update_release(record, %{name: name})
+
+  defp delete_structure(:activity, record), do: StoryMap.delete_activity(record)
+  defp delete_structure(:task, record), do: StoryMap.delete_task(record)
+  defp delete_structure(:release, record), do: StoryMap.delete_release(record)
+
+  # A stale :story_map_edit pointing at a just-deleted record simply matches nothing when the
+  # grid re-renders, so success needs no cleanup — the same contract a stale draft has.
+  defp apply_story_map_delete(socket, {:ok, _record}), do: socket
+  defp apply_story_map_delete(socket, {:error, :not_empty}), do: put_flash(socket, :error, "Move its cards out first.")
+  defp apply_story_map_delete(socket, {:error, _changeset}), do: socket
 
   # After a stage reload, re-derive the open drawer's stage from the new
   # board (disable_lane refuses to remove a non-empty lane, so the

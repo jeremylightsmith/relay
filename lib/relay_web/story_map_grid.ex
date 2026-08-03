@@ -63,11 +63,12 @@ defmodule RelayWeb.StoryMapGrid do
     * `bands` — `[%{activity:, span:, count:, start:}]`, one per activity, left to right.
       `start` is the **0-based index into `columns`** of the band's first column; `span` how
       many columns it covers (always ≥ 1); `count` how many cards sit under it.
-    * `columns` — `[%{key:, activity:, task:, no_task?:, bare?:, draft?:, last_of_activity?:}]`,
-      left to right. `bare?` marks a `— No task yet` column that holds no cards, which the
-      renderer turns into the clickable `＋ Add task` invitation (the artboard's `bare`);
-      `draft?` marks RE263's open new-task column, whose key is `"draft:<activity_id>"` and
-      which never appears in `cells`.
+    * `columns` — `[%{key:, activity:, task:, no_task?:, bare?:, draft?:, last_of_activity?:,
+      count:}]`, left to right. `bare?` marks a `— No task yet` column that holds no cards,
+      which the renderer turns into the clickable `＋ Add task` invitation (the artboard's
+      `bare`); `draft?` marks RE263's open new-task column, whose key is
+      `"draft:<activity_id>"` and which never appears in `cells`; `count` is how many cards sit
+      in it, and is what RE261's ✕ blocks on.
     * `lanes` — `[%{key:, release:, count:}]`, top to bottom. `release` is `nil` on the
       synthetic `(No release)` lane.
     * `cells` — `%{{column_key, lane_key} => [card]}`. A pair with no cards is simply absent.
@@ -89,9 +90,10 @@ defmodule RelayWeb.StoryMapGrid do
 
     lanes = lane_list(releases)
     {cells, unmapped} = fill(placements, MapSet.new(lanes, & &1.key), last_key(lanes))
+    columns = count_columns(columns, cells)
 
     %__MODULE__{
-      bands: count_bands(bands, columns, cells),
+      bands: count_bands(bands, columns),
       columns: columns,
       lanes: count_lanes(lanes, cells),
       cells: cells,
@@ -211,7 +213,8 @@ defmodule RelayWeb.StoryMapGrid do
       no_task?: false,
       bare?: false,
       draft?: false,
-      last_of_activity?: false
+      last_of_activity?: false,
+      count: 0
     }
   end
 
@@ -227,7 +230,8 @@ defmodule RelayWeb.StoryMapGrid do
       no_task?: true,
       bare?: bare?,
       draft?: false,
-      last_of_activity?: false
+      last_of_activity?: false,
+      count: 0
     }
   end
 
@@ -242,7 +246,8 @@ defmodule RelayWeb.StoryMapGrid do
       no_task?: false,
       bare?: false,
       draft?: true,
-      last_of_activity?: false
+      last_of_activity?: false,
+      count: 0
     }
   end
 
@@ -290,15 +295,18 @@ defmodule RelayWeb.StoryMapGrid do
     if key && MapSet.member?(lane_keys, key), do: key, else: last_lane_key
   end
 
-  defp count_bands(bands, columns, cells) do
+  # RE261 — the per-column tally was already computed inside count_bands/3 and thrown away;
+  # exposing it is what lets a task's ✕ and its "Move N cards out" tooltip come from the SAME
+  # numbers the band badge and the lane label show. One count, computed once, over exactly the
+  # cards the grid renders — so "the header says 3" and "the ✕ is blocked" can never disagree.
+  defp count_columns(columns, cells) do
     per_column = tally(cells, fn {column_key, _lane_key} -> column_key end)
+    Enum.map(columns, &%{&1 | count: Map.get(per_column, &1.key, 0)})
+  end
 
+  defp count_bands(bands, columns) do
     Enum.map(bands, fn band ->
-      count =
-        columns
-        |> Enum.slice(band.start, band.span)
-        |> Enum.reduce(0, &(&2 + Map.get(per_column, &1.key, 0)))
-
+      count = columns |> Enum.slice(band.start, band.span) |> Enum.reduce(0, &(&2 + &1.count))
       %{band | count: count}
     end)
   end

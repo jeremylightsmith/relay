@@ -604,19 +604,260 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
     end
   end
 
-  describe "RE263 — nothing from RE261 leaked in" do
-    test "no delete button, no rename grip, and a name is not an editable field", %{conn: conn} = ctx do
+  describe "RE261 — renaming a structure inline" do
+    test "clicking an activity name opens the input, and Enter renames it", %{conn: conn} = ctx do
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
 
-      # Scoped to the map itself — the surrounding board chrome is not this card's business.
-      # NOTE: cards ARE `[draggable]` — that is RE262's own drag-and-drop (this branch), not a
-      # leak from RE261; see the "dragging a card" describe block above.
-      # The map's ONLY text input is the create draft, and none is open here.
+      refute has_element?(view, "#story-map-rename-activity-#{ctx.onboard.id}")
+      view |> element("#story-map-name-activity-#{ctx.onboard.id}") |> render_click()
+      assert has_element?(view, "#story-map-rename-activity-#{ctx.onboard.id}")
+
+      submit_rename(view, "activity", ctx.onboard.id, "Onboarding v2")
+
+      refute has_element?(view, "#story-map-rename-activity-#{ctx.onboard.id}")
+      assert has_element?(view, "#story-map-activity-#{ctx.onboard.id}", "Onboarding v2")
+      assert Repo.get!(Schemas.StoryActivity, ctx.onboard.id).name == "Onboarding v2"
+    end
+
+    test "a task and a release rename through the same events", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-name-task-#{ctx.sign_in.id}") |> render_click()
+      submit_rename(view, "task", ctx.sign_in.id, "Sign in with SSO")
+      assert Repo.get!(Schemas.StoryTask, ctx.sign_in.id).name == "Sign in with SSO"
+
+      view |> element("#story-map-name-release-#{ctx.mvp.id}") |> render_click()
+      submit_rename(view, "release", ctx.mvp.id, "MVP 2")
+      assert Repo.get!(Schemas.Release, ctx.mvp.id).name == "MVP 2"
+    end
+
+    test "a blank name CANCELS rather than writing", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-name-task-#{ctx.sign_in.id}") |> render_click()
+      submit_rename(view, "task", ctx.sign_in.id, "   ")
+
+      refute has_element?(view, "#story-map-rename-task-#{ctx.sign_in.id}")
+      assert Repo.get!(Schemas.StoryTask, ctx.sign_in.id).name == "Sign in"
+      refute has_element?(view, "#flash-error")
+    end
+
+    test "Escape closes the rename and writes nothing", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-name-task-#{ctx.sign_in.id}") |> render_click()
+      view |> element("#story-map-rename-task-#{ctx.sign_in.id}") |> render_keydown(%{"key" => "Escape"})
+
+      refute has_element?(view, "#story-map-rename-task-#{ctx.sign_in.id}")
+      assert Repo.get!(Schemas.StoryTask, ctx.sign_in.id).name == "Sign in"
+    end
+
+    test "clicking away cancels, and blur is not bound at all", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-name-activity-#{ctx.onboard.id}") |> render_click()
+      input = view |> element("#story-map-rename-activity-#{ctx.onboard.id}") |> render()
+      assert input =~ ~s(phx-click-away="story_map_rename_cancel")
+      refute input =~ "phx-blur"
+
+      render_click(view, "story_map_rename_cancel", %{})
+      refute has_element?(view, "#story-map-rename-activity-#{ctx.onboard.id}")
+    end
+
+    test "an open rename survives a story_map_changed broadcast from another tab",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-name-activity-#{ctx.onboard.id}") |> render_click()
+      render_change(view, "story_map_rename_change", %{"name" => "Half typed"})
+
+      {:ok, _elsewhere} = StoryMap.create_activity(ctx.board, %{name: "From another tab", position: 9})
+
+      assert has_element?(view, "#story-map-rename-activity-#{ctx.onboard.id}")
+      assert render(view) =~ ~s(value="Half typed")
+    end
+
+    test "opening a rename closes an open create draft, and vice versa", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-add-activity") |> render_click()
+      assert has_element?(view, "#story-map-draft-input")
+
+      view |> element("#story-map-name-activity-#{ctx.onboard.id}") |> render_click()
+      refute has_element?(view, "#story-map-draft-input")
+      assert has_element?(view, "#story-map-rename-activity-#{ctx.onboard.id}")
+
+      view |> element("#story-map-add-activity") |> render_click()
+      refute has_element?(view, "#story-map-rename-activity-#{ctx.onboard.id}")
+      assert has_element?(view, "#story-map-draft-input")
+    end
+
+    test "only one rename is open anywhere on the page", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-name-activity-#{ctx.onboard.id}") |> render_click()
+      view |> element("#story-map-name-task-#{ctx.sign_in.id}") |> render_click()
+
+      refute has_element?(view, "#story-map-rename-activity-#{ctx.onboard.id}")
+      assert has_element?(view, "#story-map-rename-task-#{ctx.sign_in.id}")
+    end
+
+    test "an over-long name flashes and leaves the rename open", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-name-activity-#{ctx.onboard.id}") |> render_click()
+      submit_rename(view, "activity", ctx.onboard.id, String.duplicate("a", 81))
+
+      assert has_element?(view, "#flash-error")
+      assert has_element?(view, "#story-map-rename-activity-#{ctx.onboard.id}")
+      assert Repo.get!(Schemas.StoryActivity, ctx.onboard.id).name == "Onboard & access"
+    end
+
+    test "a forged kind or id is a silent no-op", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      other_board = insert(:board)
+      foreign = insert(:story_activity, board: other_board, name: "Elsewhere")
+
+      render_click(view, "story_map_rename_start", %{"kind" => "activity", "id" => to_string(foreign.id)})
+      render_click(view, "story_map_rename_start", %{"kind" => "nonsense", "id" => "1"})
+
+      assert has_element?(view, "#story-map-grid")
       refute has_element?(view, "#story-map input[type=text]")
-      refute has_element?(view, "#story-map-grid", "✕")
+      assert Repo.get!(Schemas.StoryActivity, foreign.id).name == "Elsewhere"
+    end
+  end
+
+  describe "RE261 — deleting a structure" do
+    test "an activity that still holds cards renders a disabled ✕ with the blocking tooltip",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      button = "#story-map-delete-activity-#{ctx.onboard.id}"
+      assert has_element?(view, "#{button}[disabled]")
+
+      html = view |> element(button) |> render()
+      assert html =~ "Move 3 cards out of this activity before deleting it"
+      # The artboard's `delOff` (line ~398), not the enabled `delStyle`.
+      assert html =~ "color:oklch(0.82 0.01 255);cursor:not-allowed;"
+
+      render_click(view, "story_map_delete", %{"kind" => "activity", "id" => to_string(ctx.onboard.id)})
+
+      assert Repo.get(Schemas.StoryActivity, ctx.onboard.id)
+      assert has_element?(view, "#flash-error")
+    end
+
+    test "the tooltip says card, singular, at one", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      html = view |> element("#story-map-delete-task-#{ctx.organize.id}") |> render()
+      assert html =~ "Move 1 card out of this task before deleting it"
+    end
+
+    test "an empty task's ✕ is enabled, deletes the column, and never loses a card",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      # Empty "Organize cards" by dragging its one card into the neighbouring task column.
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, ctx.bulk),
+        "column" => "t:#{ctx.sign_in.id}",
+        "lane" => "r:#{ctx.mvp.id}",
+        "index" => 0
+      })
+
+      button = "#story-map-delete-task-#{ctx.organize.id}"
+      refute has_element?(view, "#{button}[disabled]")
+      assert view |> element(button) |> render() =~ "Delete task"
+      # The artboard's enabled `delStyle` (line ~397).
+      assert view |> element(button) |> render() =~ "color:oklch(0.62 0.03 25);"
+
+      view |> element(button) |> render_click()
+
+      assert Repo.get(Schemas.StoryTask, ctx.organize.id) == nil
+      refute has_element?(view, "#story-map-task-#{ctx.organize.id}")
+      # The card that moved out is still on the board, in the column it was dropped into.
+      assert has_element?(
+               view,
+               "#story-map-cell-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id} ##{card_dom_id(ctx.board, ctx.bulk)}"
+             )
+    end
+
+    test "the last remaining release renders no ✕ at all", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      [mvp, fast_follow, later] = StoryMap.list_releases(ctx.board)
+      assert has_element?(view, "#story-map-delete-release-#{mvp.id}")
+
+      # `bulk` sits in Fast follow, and a swimlane holding a card cannot be deleted — empty it
+      # first (this is exactly the acceptance criterion's "emptying each one first").
+      {:ok, _} = StoryMap.assign_card(ctx.bulk, %{story_task_id: ctx.organize.id})
+      {:ok, _} = StoryMap.delete_release(fast_follow)
+      {:ok, _} = StoryMap.delete_release(later)
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-release-#{mvp.id}")
+      refute has_element?(view, "#story-map-delete-release-#{mvp.id}")
+    end
+
+    test "the synthetic (No release) lane carries no grip, rename or ✕", %{conn: conn, user: user} do
+      {:ok, board} = Boards.create_board(user, %{name: "No releases"})
+      {:ok, activity} = StoryMap.create_activity(board, %{name: "Onboard", position: 1})
+      for release <- StoryMap.list_releases(board), do: {:ok, _} = StoryMap.delete_release(release)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-activity-#{activity.id}")
+      assert has_element?(view, "#story-map-release-none")
+      refute has_element?(view, "#story-map-release-none [phx-click='story_map_rename_start']")
+      refute render(view) =~ "story-map-delete-release-"
+    end
+
+    test "a forged delete for another board's structure is a silent no-op",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      foreign = insert(:story_activity, board: insert(:board))
+      render_click(view, "story_map_delete", %{"kind" => "activity", "id" => to_string(foreign.id)})
+
+      assert Repo.get(Schemas.StoryActivity, foreign.id)
+      assert has_element?(view, "#story-map-grid")
+    end
+  end
+
+  describe "RE261 — an archived board shows no editing affordances" do
+    setup ctx do
+      {:ok, _archived} = Boards.archive_board(ctx.board)
+      :ok
+    end
+
+    test "no grips, no ✕ and no clickable names render", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-grid")
       refute has_element?(view, "#story-map-grid", "⠿")
-      refute render(view) =~ "story_map_rename"
-      refute render(view) =~ "story_map_delete"
+      refute render(view) =~ "story-map-delete-"
+      refute render(view) =~ "story_map_rename_start"
+      # The names are still THERE, just not clickable.
+      assert has_element?(view, "#story-map-name-activity-#{ctx.onboard.id}", "Onboard & access")
+      refute has_element?(view, "#story-map-name-activity-#{ctx.onboard.id}[phx-click]")
+    end
+
+    test "the rename and delete events are refused with the read-only flash",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert render_click(view, "story_map_rename_start", %{
+               "kind" => "activity",
+               "id" => to_string(ctx.onboard.id)
+             }) =~ "archived"
+
+      assert render_click(view, "story_map_delete", %{
+               "kind" => "task",
+               "id" => to_string(ctx.organize.id)
+             }) =~ "archived"
+
+      assert Repo.get(Schemas.StoryTask, ctx.organize.id)
     end
   end
 
@@ -754,6 +995,16 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
   defp submit_draft(view, name) do
     render_change(view, "story_map_draft_change", %{"name" => name})
     view |> form("#story-map-draft-input-form", %{"name" => name}) |> render_submit()
+  end
+
+  # Type into the open rename and press Enter — the phx-change every keystroke fires, then the
+  # phx-submit, exactly like submit_draft/2.
+  defp submit_rename(view, kind, id, name) do
+    render_change(view, "story_map_rename_change", %{"name" => name})
+
+    view
+    |> form("#story-map-rename-#{kind}-#{id}-form", %{"name" => name})
+    |> render_submit()
   end
 
   defp card_by_title(board, title) do

@@ -444,4 +444,71 @@ defmodule RelayWeb.StoryMapGridTest do
       assert StoryMapGrid.cell_element_id("add", "nt:3", "r:none") == "story-map-add-nt-3-r-none"
     end
   end
+
+  describe "columns[].count (RE261)" do
+    test "each column carries the number of cards in it, across every lane" do
+      grid =
+        StoryMapGrid.build(
+          [activity(1, 1)],
+          [task(10, 1, 1), task(11, 1, 2)],
+          [release(100, 1), release(200, 2)],
+          [
+            card(5, story_activity_id: 1, story_task_id: 10, release_id: 100),
+            card(6, story_activity_id: 1, story_task_id: 10, release_id: 200),
+            card(7, story_activity_id: 1, story_task_id: 11, release_id: 100)
+          ]
+        )
+
+      assert Enum.map(grid.columns, &{&1.key, &1.count}) == [{"t:10", 2}, {"t:11", 1}]
+      assert [%{count: 3}] = grid.bands
+    end
+
+    test "an empty task column counts 0 and a No task yet column counts its own cards" do
+      grid =
+        StoryMapGrid.build(
+          [activity(1, 1)],
+          [task(10, 1, 1)],
+          [release(100, 1)],
+          [card(5, story_activity_id: 1, release_id: 100)]
+        )
+
+      assert Enum.map(grid.columns, &{&1.key, &1.count}) == [{"nt:1", 1}, {"t:10", 0}]
+    end
+
+    test "the draft column counts 0 and the band total is the sum of its columns" do
+      grid =
+        StoryMapGrid.build(
+          [activity(1, 1), activity(2, 2)],
+          [task(10, 1, 1), task(20, 2, 1)],
+          [release(100, 1)],
+          [
+            card(5, story_activity_id: 1, story_task_id: 10, release_id: 100),
+            card(6, story_activity_id: 2, story_task_id: 20, release_id: 100)
+          ],
+          {:task, 1}
+        )
+
+      by_key = Map.new(grid.columns, &{&1.key, &1.count})
+      assert by_key["draft:1"] == 0
+      assert by_key["t:10"] == 1
+      assert Enum.map(grid.bands, & &1.count) == [1, 1]
+    end
+
+    test "the sum of every column count plus the tray is the total" do
+      grid =
+        StoryMapGrid.build(
+          [activity(1, 1)],
+          [task(10, 1, 1)],
+          [release(100, 1)],
+          [
+            card(5, story_activity_id: 1, story_task_id: 10, release_id: 100),
+            card(6, story_activity_id: 99, release_id: 100),
+            card(7)
+          ]
+        )
+
+      column_total = grid.columns |> Enum.map(& &1.count) |> Enum.sum()
+      assert column_total + length(grid.unmapped) == grid.total
+    end
+  end
 end
