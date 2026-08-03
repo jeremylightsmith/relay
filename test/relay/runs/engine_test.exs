@@ -49,7 +49,7 @@ defmodule Relay.Runs.EngineTest do
       ])
 
     current = execution(node_key: "a")
-    assert Engine.decide(flow, [current], current) == {:transition, "b"}
+    assert Engine.decide(flow, [current], current) == {:transition, "b", nil}
   end
 
   test "an edge to done finishes the run" do
@@ -87,12 +87,12 @@ defmodule Relay.Runs.EngineTest do
     flow = two_node_flow(work: [max_retries: 1])
     first = failed(detail: "boom-1")
     second = failed(detail: "boom-2", attempt: 2)
-    assert Engine.decide(flow, [first, second], second) == {:transition, "fallback"}
+    assert Engine.decide(flow, [first, second], second) == {:transition, "fallback", nil}
   end
 
   test "max_retries nil means zero retries" do
     current = failed([])
-    assert Engine.decide(two_node_flow(), [current], current) == {:transition, "fallback"}
+    assert Engine.decide(two_node_flow(), [current], current) == {:transition, "fallback", nil}
   end
 
   test "the circuit breaker fails the run on the Nth identical failure even with retry budget left" do
@@ -183,14 +183,14 @@ defmodule Relay.Runs.EngineTest do
     current = execution(node_key: "head", sub_task_id: 1)
 
     assert Engine.decide(foreach_flow(), [current], current, foreach_remaining: 2) ==
-             {:transition, "head"}
+             {:transition, "head", :foreach_remaining}
   end
 
   test "a foreach_exhausted guard leaves the loop when no items remain" do
     current = execution(node_key: "head", sub_task_id: 1)
 
     assert Engine.decide(foreach_flow(), [current], current, foreach_remaining: 0) ==
-             {:transition, "tail"}
+             {:transition, "tail", :foreach_exhausted}
   end
 
   test "an unguarded edge is the fallback when no guard is satisfied" do
@@ -205,7 +205,28 @@ defmodule Relay.Runs.EngineTest do
       )
 
     current = execution(node_key: "head", sub_task_id: 1)
-    assert Engine.decide(flow, [current], current, foreach_remaining: 0) == {:transition, "other"}
+    assert Engine.decide(flow, [current], current, foreach_remaining: 0) == {:transition, "other", nil}
+  end
+
+  # RE252: the decision must carry the guard of the edge ACTUALLY followed. RunServer's
+  # foreach binding keys off it, so a dropped guard is a silently mis-bound iteration.
+  test "the transition decision reports the followed edge's guard" do
+    current = execution(node_key: "head", sub_task_id: 1)
+
+    assert {:transition, "head", :foreach_remaining} =
+             Engine.decide(foreach_flow(), [current], current, foreach_remaining: 2)
+
+    assert {:transition, "tail", :foreach_exhausted} =
+             Engine.decide(foreach_flow(), [current], current, foreach_remaining: 0)
+
+    unguarded =
+      flow([[key: "a", type: :agent], [key: "b", type: :agent]], [
+        [from: "start", to: "a"],
+        [from: "a", to: "b", on: :succeeded]
+      ])
+
+    a = execution(node_key: "a")
+    assert {:transition, "b", nil} = Engine.decide(unguarded, [a], a)
   end
 
   # --- per-iteration budgets (decision 8) ---
@@ -233,7 +254,7 @@ defmodule Relay.Runs.EngineTest do
     current = List.last(history)
 
     assert Engine.decide(lap_flow(), history, current, sub_task_id: 2, foreach_remaining: 1) ==
-             {:transition, "head"}
+             {:transition, "head", nil}
   end
 
   test "max_loops still fires WITHIN one foreach iteration" do
@@ -267,7 +288,7 @@ defmodule Relay.Runs.EngineTest do
     ]
 
     current = List.last(history)
-    assert Engine.decide(flow, history, current, visit_cap: 2, sub_task_id: 2) == {:transition, "head"}
+    assert Engine.decide(flow, history, current, visit_cap: 2, sub_task_id: 2) == {:transition, "head", nil}
   end
 
   test "the circuit breaker stays GLOBAL across foreach iterations (deliberate asymmetry)" do
@@ -310,7 +331,7 @@ defmodule Relay.Runs.EngineTest do
         ])
 
       current = execution(node_key: "spec_review", outcome: :partial)
-      assert Engine.decide(flow, [current], current) == {:transition, "implement"}
+      assert Engine.decide(flow, [current], current) == {:transition, "implement", nil}
     end
 
     test "the degrade spends the :failed edge's max_loops budget rather than resetting it" do
@@ -360,8 +381,11 @@ defmodule Relay.Runs.EngineTest do
 
       current = execution(node_key: "quality_review", outcome: :partial)
 
-      assert Engine.decide(flow, [current], current, foreach_remaining: 2) == {:transition, "implement"}
-      assert Engine.decide(flow, [current], current, foreach_remaining: 0) == {:transition, "precommit"}
+      assert Engine.decide(flow, [current], current, foreach_remaining: 2) ==
+               {:transition, "implement", :foreach_remaining}
+
+      assert Engine.decide(flow, [current], current, foreach_remaining: 0) ==
+               {:transition, "precommit", :foreach_exhausted}
     end
 
     test "a parked (:needs_input) execution in history does not spend the :failed edge's budget" do
@@ -376,7 +400,7 @@ defmodule Relay.Runs.EngineTest do
       parked = execution(node_key: "review", visit: 1, outcome: :needs_input)
       current = execution(node_key: "review", visit: 2, outcome: :failed)
 
-      assert Engine.decide(flow, [parked, current], current) == {:transition, "fix"}
+      assert Engine.decide(flow, [parked, current], current) == {:transition, "fix", nil}
     end
   end
 
@@ -421,7 +445,7 @@ defmodule Relay.Runs.EngineTest do
       flow = two_node_flow(work: [max_retries: 0])
       current = failed(node_key: "work")
 
-      assert Engine.decide(flow, [current], current) == {:transition, "fallback"}
+      assert Engine.decide(flow, [current], current) == {:transition, "fallback", nil}
       assert Engine.decide(flow, [current], current, bonus: 1) == {:retry, "work"}
     end
 
@@ -435,7 +459,7 @@ defmodule Relay.Runs.EngineTest do
       assert reason =~ "circuit_breaker:"
 
       assert Engine.decide(flow, history, current, breaker_threshold: 2, bonus: 1) ==
-               {:transition, "fallback"}
+               {:transition, "fallback", nil}
     end
 
     test "bonus raises an edge's max_loops by exactly the bonus" do
@@ -454,7 +478,7 @@ defmodule Relay.Runs.EngineTest do
 
       assert {:fail, reason} = Engine.decide(flow, history, current)
       assert reason =~ "loop_budget_exhausted:"
-      assert Engine.decide(flow, history, current, bonus: 1) == {:transition, "fix"}
+      assert Engine.decide(flow, history, current, bonus: 1) == {:transition, "fix", nil}
     end
 
     test "bonus raises the visit cap by exactly the bonus" do
@@ -473,7 +497,7 @@ defmodule Relay.Runs.EngineTest do
 
       assert {:fail, reason} = Engine.decide(flow, history, current, visit_cap: 1)
       assert reason =~ "visit_cap_exceeded:"
-      assert Engine.decide(flow, history, current, visit_cap: 1, bonus: 1) == {:transition, "fix"}
+      assert Engine.decide(flow, history, current, visit_cap: 1, bonus: 1) == {:transition, "fix", nil}
     end
 
     test "an unlimited edge stays unlimited under a bonus" do
@@ -492,7 +516,7 @@ defmodule Relay.Runs.EngineTest do
       history = for attempt <- 1..4, do: failed(node_key: "work", attempt: attempt, detail: "one")
       current = List.last(history)
 
-      assert Engine.decide(flow, history, current, bonus: 3) == {:transition, "fix"}
+      assert Engine.decide(flow, history, current, bonus: 3) == {:transition, "fix", nil}
     end
   end
 

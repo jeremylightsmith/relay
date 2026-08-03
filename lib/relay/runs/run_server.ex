@@ -32,8 +32,11 @@ defmodule Relay.Runs.RunServer do
   (which already holds a merged string and would compound on every retry).
 
   Under a `foreach` node each execution carries the `sub_task_id` of the
-  iteration it belongs to: entering the loop head resolves the first undone
-  sub_task, a `:foreach_exhausted` edge unbinds, and everything else inherits.
+  iteration it belongs to. The derived cursor ("the first sub_task not done")
+  advances on exactly ONE thing: a `when: :foreach_remaining` edge. A
+  `:foreach_exhausted` edge unbinds, entering the head from outside the loop
+  resolves the first undone task, and everything else — a review's failure
+  loop-back included — inherits, so a re-run lands on the SAME task (RE252).
   The loop tail (the node whose outgoing edges carry a `when` guard) checks its
   sub_task off on `succeeded` — the ROW WRITE happens inside the transaction
   (before the remaining count is recomputed and handed to the engine), but,
@@ -217,9 +220,13 @@ defmodule Relay.Runs.RunServer do
     {next, job}
   end
 
-  defp apply_decision({:transition, node}, run, flow, execution) do
+  # `guard` is the `when` of the edge the engine followed. It rides on the decision so
+  # binding_for/5 can key off it instead of re-selecting the edge here — a second copy of edge
+  # selection would disagree with the engine on the RLY-179 degrade path, where
+  # `execution.outcome` is the unrouted outcome and matches no edge at all.
+  defp apply_decision({:transition, node, guard}, run, flow, execution) do
     run = run |> Ecto.Changeset.change(current_node: node) |> Repo.update!()
-    sub_task_id = binding_for(run, flow, node, execution)
+    sub_task_id = binding_for(run, flow, node, guard, execution)
     next = Runs.insert_execution!(run, node, next_visit(run, node), 1, sub_task_id)
 
     opts = [
@@ -278,25 +285,31 @@ defmodule Relay.Runs.RunServer do
     Relay.Cards.notify_upserted(card)
   end
 
-  # Which iteration the NEXT execution belongs to:
-  #   * entering the foreach head        -> resolve the first undone sub_task
-  #   * leaving via a :foreach_exhausted -> nil (we're out of the loop)
-  #   * anything else                    -> inherit (spec_review/quality_review and
-  #                                          retries stay bound to the same task)
-  defp binding_for(run, flow, node, execution) do
+  # Which iteration the NEXT execution belongs to. The DERIVED cursor
+  # (`Runs.next_sub_task_id/1` = "the first sub_task not done, by position") advances on
+  # EXACTLY ONE thing: the flow author's `when: :foreach_remaining` guard. Every other route
+  # into the foreach head is not an advance (RE252).
+  #
+  #   * :foreach_exhausted edge      -> nil; we've left the loop
+  #   * :foreach_remaining edge      -> the derived cursor. The loop tail already checked the
+  #                                     finished task off inside this same transaction, so
+  #                                     next_sub_task_id/1 returns the next one.
+  #   * unguarded edge into the head -> INHERIT, falling back to the derived cursor when
+  #                                     unbound (first entry from outside the loop, e.g.
+  #                                     branch → implement)
+  #   * anything else                -> inherit (spec_review/quality_review stay bound)
+  #
+  # Keying off the TARGET NODE instead was the RE252 bug. `done` is not a private engine
+  # cursor — the card drawer's checkbox and `relay check <ref> <id>` both write it — so a
+  # failure loop-back that re-derived the cursor jumped to the next task whenever anything
+  # else had checked the in-flight one off, and that task's findings reached nothing.
+  defp binding_for(run, flow, node, guard, execution) do
     cond do
-      node == Runs.foreach_node_key(flow) -> Runs.next_sub_task_id(run)
-      exits_loop?(flow, execution, node) -> nil
+      guard == :foreach_exhausted -> nil
+      guard == :foreach_remaining -> Runs.next_sub_task_id(run)
+      node == Runs.foreach_node_key(flow) -> execution.sub_task_id || Runs.next_sub_task_id(run)
       true -> execution.sub_task_id
     end
-  end
-
-  defp exits_loop?(flow, execution, node) do
-    Enum.any?(
-      flow.edges,
-      &(&1.from == execution.node_key and &1.to == node and &1.on == execution.outcome and
-          &1.when == :foreach_exhausted)
-    )
   end
 
   # The current node's binding, for a re-entry that starts a fresh attempt of the
