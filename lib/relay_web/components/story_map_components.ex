@@ -3,13 +3,13 @@ defmodule RelayWeb.StoryMapComponents do
   The story map's rendering (RE264): pure function components over
   `RelayWeb.StoryMapGrid`'s view model, matching `docs/designs/Relay Story Map.dc.html`.
 
-  Full zoom, **except** two affordances that are live: RE263's three create affordances — the
+  Full zoom, **except** the affordances that are live: RE263's three create affordances — the
   trailing `＋` add-activity column, the `＋ Add task` on each activity header and on a bare
   placeholder, and the `＋ Release` row — which this module renders and `RelayWeb.BoardLive`
-  handles; and RE262's drag and drop (below). The artboard's `⠿` grips, `▾` collapse, `✦`
-  suggest, `◎` focus, `✎` rename, the `✕` deletes and the ZOOM/FILTER chrome are still
-  deliberately not rendered — RE260/RE261 own them, and the filter bar's owner chips,
-  Needs-input toggle and `+ filter` own no card today.
+  handles; RE262's drag and drop (below); and RE262's inline `＋` add-card in every cell
+  (below). The artboard's `⠿` grips, `▾` collapse, `✦` suggest, `◎` focus, `✎` rename, the `✕`
+  deletes and the ZOOM/FILTER chrome are still deliberately not rendered — RE260/RE261 own
+  them, and the filter bar's owner chips, Needs-input toggle and `+ filter` own no card today.
 
   **Two derivations the artboard needs and our data does not carry**, each written exactly once
   here (`card_face/4`) and used for both the badge and the card's tint:
@@ -174,6 +174,8 @@ defmodule RelayWeb.StoryMapComponents do
   attr :draft, :any, default: nil, doc: "nil | :activity | :release | {:task, activity_id}"
   attr :draft_name, :string, default: "", doc: "the open draft's text, tracked server-side"
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
+  attr :compose, :any, default: nil, doc: "the {column_key, lane_key} whose composer is open, or nil"
+  attr :compose_form, :any, default: nil, doc: "the shared card composer form (BoardLive's :compose_form)"
 
   def story_map(assigns) do
     ~H"""
@@ -289,19 +291,102 @@ defmodule RelayWeb.StoryMapComponents do
         read_only={@read_only}
       />
       <%= for {column, ci} <- Enum.with_index(@grid.columns), {lane, li} <- Enum.with_index(@grid.lanes) do %>
-        <div
-          id={StoryMapGrid.cell_dom_id(column.key, lane.key)}
-          class="story-map-drop"
-          data-column={column.key}
-          data-lane={lane.key}
-          style={cell_style(column, ci, li)}
-        >
-          <.story_map_card
-            :for={card <- Map.get(@grid.cells, {column.key, lane.key}, [])}
-            {card_face(card, @board, @stages, @stalled_ids)}
-          />
-        </div>
+        <.story_map_cell
+          column={column}
+          lane={lane}
+          column_index={ci}
+          lane_index={li}
+          cards={Map.get(@grid.cells, {column.key, lane.key}, [])}
+          board={@board}
+          stages={@stages}
+          stalled_ids={@stalled_ids}
+          composing={@compose == {column.key, lane.key}}
+          compose_form={@compose_form}
+        />
       <% end %>
+    </div>
+    """
+  end
+
+  @doc """
+  One body cell (RE262): its cards, then either the dashed `＋` add button or the open
+  composer. Extracted from `story_map/1` so that function stays pure layout and the composer
+  has a unit to test and to storybook.
+
+  Drop target: `.story-map-drop` + `data-column` / `data-lane` — `assets/js/hooks/story_map_dnd.js`
+  reads exactly those three. The hovered state is CSS (`.story-map-drop.drag-over`), not an
+  assign, so a hover never costs a round trip.
+  """
+  attr :column, :map, required: true, doc: "one entry of the grid's `columns`"
+  attr :lane, :map, required: true, doc: "one entry of the grid's `lanes`"
+  attr :cards, :list, required: true, doc: "this cell's cards, already sorted by StoryMapGrid"
+  attr :board, :any, required: true
+  attr :stages, :list, required: true
+  attr :stalled_ids, :any, required: true
+  attr :column_index, :integer, required: true, doc: "0-based, for grid-column"
+  attr :lane_index, :integer, required: true, doc: "0-based, for grid-row"
+  attr :composing, :boolean, default: false
+  attr :compose_form, :any, default: nil, doc: "required when composing"
+
+  def story_map_cell(assigns) do
+    ~H"""
+    <div
+      id={StoryMapGrid.cell_dom_id(@column.key, @lane.key)}
+      class="story-map-drop"
+      data-column={@column.key}
+      data-lane={@lane.key}
+      style={cell_style(@column, @column_index, @lane_index)}
+    >
+      <.story_map_card
+        :for={card <- @cards}
+        {card_face(card, @board, @stages, @stalled_ids)}
+      />
+      <.form
+        :if={@composing}
+        for={@compose_form}
+        id={StoryMapGrid.cell_element_id("compose", @column.key, @lane.key)}
+        phx-change="validate_card"
+        phx-submit="create_card_in_cell"
+        phx-click-away="cancel_compose_cell"
+        style="display:flex;align-items:center;gap:6px;background:oklch(1 0 0);border:1.5px solid oklch(0.6 0.14 250);border-radius:9px;padding:7px 9px;"
+      >
+        <input type="hidden" name="column" value={@column.key} />
+        <input type="hidden" name="lane" value={@lane.key} />
+        <span style="color:oklch(0.6 0.14 250);font-size:14px;line-height:1;">+</span>
+        <input
+          type="text"
+          id={StoryMapGrid.cell_element_id("compose", @column.key, @lane.key) <> "-input"}
+          name="card[title]"
+          value={Phoenix.HTML.Form.normalize_value("text", @compose_form[:title].value)}
+          placeholder="Add card… ↵"
+          autofocus
+          autocomplete="off"
+          phx-keydown="cancel_compose_cell"
+          phx-key="escape"
+          style="border:none;outline:none;font-size:11.5px;width:100%;background:transparent;color:oklch(0.3 0.02 255);"
+        />
+        <button
+          type="button"
+          id={StoryMapGrid.cell_element_id("compose", @column.key, @lane.key) <> "-cancel"}
+          phx-click="cancel_compose_cell"
+          aria-label="Close the composer"
+          style="font-size:11px;color:oklch(0.6 0.02 255);"
+        >
+          ✕
+        </button>
+      </.form>
+      <button
+        :if={not @composing}
+        type="button"
+        id={StoryMapGrid.cell_element_id("add", @column.key, @lane.key)}
+        phx-click="compose_cell"
+        phx-value-column={@column.key}
+        phx-value-lane={@lane.key}
+        aria-label="Add a card to this cell"
+        style={add_button_style(@cards)}
+      >
+        ＋
+      </button>
     </div>
     """
   end
@@ -723,6 +808,15 @@ defmodule RelayWeb.StoryMapComponents do
     "grid-column:#{column_index + 2};grid-row:#{lane_index + 3};display:flex;" <>
       "flex-direction:column;gap:7px;padding:8px;min-height:26px;" <>
       "border-right:#{border_right};#{background}"
+  end
+
+  # Artboard `addBtnStyle` (line ~527): 7px of padding in an empty cell, 3px once it has cards —
+  # the button shrinks out of the way rather than competing with the content.
+  defp add_button_style(cards) do
+    padding = if cards == [], do: "7px", else: "3px"
+
+    "border:1px dashed oklch(0.88 0.008 255);border-radius:8px;padding:#{padding};" <>
+      "color:oklch(0.72 0.02 255);font-size:12px;line-height:1;"
   end
 
   # The artboard's full-zoom `boxStyle` (cardVM, lines ~332-334). `cursor:grab` — RE262 makes

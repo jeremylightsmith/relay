@@ -35,7 +35,9 @@ defmodule RelayWeb.BoardLive do
 
   RE262 makes it writable: `"assign_card"` / `"unassign_card"` come from the `StoryMapDnD`
   hook rooted on `#story-map`, and both re-render through the `{:card_upserted, _}` echo rather
-  than touching story-map assigns directly.
+  than touching story-map assigns directly; `"compose_cell"` / `"cancel_compose_cell"` /
+  `"create_card_in_cell"` drive the per-cell inline composer, whose open cell is
+  `:story_map_compose` and whose form is the board's own `:compose_form`.
   """
 
   use RelayWeb, :live_view
@@ -381,6 +383,8 @@ defmodule RelayWeb.BoardLive do
         draft={@story_map_draft}
         draft_name={@story_map_draft_name}
         read_only={@read_only?}
+        compose={@story_map_compose}
+        compose_form={@compose_form}
         embed={@embed}
       />
       <.card_drawer
@@ -630,6 +634,8 @@ defmodule RelayWeb.BoardLive do
   attr :draft, :any, required: true
   attr :draft_name, :string, required: true
   attr :read_only, :boolean, required: true
+  attr :compose, :any, required: true
+  attr :compose_form, :any, required: true
   attr :embed, :boolean, required: true
 
   defp story_map_viewport(assigns) do
@@ -672,6 +678,8 @@ defmodule RelayWeb.BoardLive do
           draft={@draft}
           draft_name={@draft_name}
           read_only={@read_only}
+          compose={@compose}
+          compose_form={@compose_form}
         />
         <StoryMapComponents.story_map_empty
           :if={@grid.bands == []}
@@ -746,6 +754,10 @@ defmodule RelayWeb.BoardLive do
       # server-rendered value changed.
       |> assign(:story_map_draft, nil)
       |> assign(:story_map_draft_name, "")
+      # RE262 — the {column_key, lane_key} whose inline composer is open, or nil. The form
+      # itself is the board's existing :compose_form: one composer is open at a time anywhere
+      # on this socket, so one form assign is the whole state.
+      |> assign(:story_map_compose, nil)
       |> assign_stalled()
       |> assign(:stalled_open, false)
       |> assign(:stalled_error, nil)
@@ -849,7 +861,8 @@ defmodule RelayWeb.BoardLive do
 
   @impl true
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
-        compose create_card move_card assign_card unassign_card save_card_title save_card_tag
+        compose create_card move_card assign_card unassign_card compose_cell create_card_in_cell
+        save_card_title save_card_tag
         save_card_description
         save_card_acceptance_criteria save_card_spec save_card_plan
         add_owner remove_owner take_over post_comment answer_input
@@ -1100,6 +1113,47 @@ defmodule RelayWeb.BoardLive do
       # 42px rail expands it, so the card you just unmapped is visible where it landed.
       {:noreply, assign(socket, :story_map_tray_open, true)}
     else
+      _other -> {:noreply, socket}
+    end
+  end
+
+  # RE262 — the inline ＋ in a story-map cell. `story_map_compose` holds the open cell's
+  # {column_key, lane_key}; the form is the board's own :compose_form, so one composer is open
+  # anywhere on this socket at a time and "validate_card" already tracks its value server-side
+  # (without that, resetting to empty_compose_form/0 below is a no-op diff and the
+  # just-submitted text stays in the browser).
+  def handle_event("compose_cell", %{"column" => column, "lane" => lane}, socket) do
+    {:noreply,
+     socket
+     |> assign(:story_map_compose, {column, lane})
+     |> assign(:compose_form, empty_compose_form())}
+  end
+
+  def handle_event("cancel_compose_cell", _params, socket) do
+    {:noreply, assign(socket, :story_map_compose, nil)}
+  end
+
+  # Creates THEN assigns, in that order — a card must exist before it can be placed. Both writes
+  # broadcast: the board's {:card_upserted, _} stream surgery puts the card in the intake column
+  # live, and refresh_story_map/1 puts it in the cell. On success the composer reopens empty in
+  # the same cell (Q4), so a whole cell can be typed without touching the mouse; Esc, the ✕ or a
+  # click away closes it. A blank title fails Cards.create_card/3's changeset: no card is
+  # created and the composer stays open showing the error.
+  def handle_event("create_card_in_cell", %{"column" => column, "lane" => lane, "card" => card_params}, socket) do
+    with {:ok, placement} <- StoryMapGrid.decode_placement(column, lane),
+         %Stage{} = stage <- Boards.intake_stage(socket.assigns.board),
+         {:ok, card} <- Cards.create_card(stage, card_params, current_actor(socket)) do
+      # A soft `_ =`: the ids came off the rendered grid, so the only way this fails is a race
+      # (the activity was deleted between render and submit). The card still exists in the
+      # intake column and simply shows up in the tray — never a crashed LiveView.
+      _ = StoryMap.assign_card(card, placement)
+
+      {:noreply,
+       socket
+       |> assign(:story_map_compose, {column, lane})
+       |> assign(:compose_form, empty_compose_form())}
+    else
+      {:error, %Ecto.Changeset{} = changeset} -> {:noreply, assign(socket, :compose_form, to_form(changeset))}
       _other -> {:noreply, socket}
     end
   end

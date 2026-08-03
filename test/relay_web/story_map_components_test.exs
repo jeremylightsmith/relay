@@ -629,6 +629,104 @@ defmodule RelayWeb.StoryMapComponentsTest do
     end
   end
 
+  defp cell_column, do: %{key: "t:10", activity: nil, task: nil, no_task?: false, last_of_activity?: true}
+  defp cell_lane, do: %{key: "r:100", release: nil, count: 0}
+
+  defp cell_html(overrides) do
+    defaults = %{
+      column: cell_column(),
+      lane: cell_lane(),
+      cards: [],
+      board: board(),
+      stages: stages(),
+      stalled_ids: MapSet.new(),
+      column_index: 0,
+      lane_index: 0
+    }
+
+    render_component(&StoryMapComponents.story_map_cell/1, Map.merge(defaults, overrides))
+  end
+
+  describe "story_map_cell/1 — the drop zone, the ＋ and the composer" do
+    test "an empty cell renders the dashed ＋ with the artboard's 7px padding" do
+      html = cell_html(%{})
+
+      add = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-add-t-10-r-100")
+      style = add |> LazyHTML.attribute("style") |> List.first()
+
+      # artboard addBtnStyle, line ~527
+      assert style =~ "border:1px dashed oklch(0.88 0.008 255)"
+      assert style =~ "border-radius:8px"
+      assert style =~ "padding:7px"
+      assert style =~ "color:oklch(0.72 0.02 255)"
+      assert LazyHTML.attribute(add, "phx-click") == ["compose_cell"]
+      assert LazyHTML.attribute(add, "phx-value-column") == ["t:10"]
+      assert LazyHTML.attribute(add, "phx-value-lane") == ["r:100"]
+      assert html =~ "＋"
+    end
+
+    test "a cell with cards tightens the ＋ padding to the artboard's 3px" do
+      html = cell_html(%{cards: [card(1, story_task_id: 10)]})
+
+      style =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#story-map-add-t-10-r-100")
+        |> LazyHTML.attribute("style")
+        |> List.first()
+
+      assert style =~ "padding:3px"
+      assert html =~ ~s(id="story-map-card-RLY1")
+    end
+
+    test "the open composer replaces the ＋ with the artboard's bordered input" do
+      html =
+        cell_html(%{
+          composing: true,
+          compose_form: Phoenix.Component.to_form(%{"title" => ""}, as: :card)
+        })
+
+      refute html =~ ~s(id="story-map-add-t-10-r-100")
+
+      form = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-compose-t-10-r-100")
+      style = form |> LazyHTML.attribute("style") |> List.first()
+
+      # artboard composer, lines ~248-252
+      assert style =~ "border:1.5px solid oklch(0.6 0.14 250)"
+      assert style =~ "border-radius:9px"
+      assert style =~ "padding:7px 9px"
+      assert LazyHTML.attribute(form, "phx-submit") == ["create_card_in_cell"]
+      assert LazyHTML.attribute(form, "phx-change") == ["validate_card"]
+      assert LazyHTML.attribute(form, "phx-click-away") == ["cancel_compose_cell"]
+
+      input = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-compose-t-10-r-100-input")
+      assert LazyHTML.attribute(input, "placeholder") == ["Add card… ↵"]
+      assert LazyHTML.attribute(input, "name") == ["card[title]"]
+      assert LazyHTML.attribute(input, "phx-key") == ["escape"]
+
+      assert html
+             |> LazyHTML.from_fragment()
+             |> LazyHTML.query("#story-map-compose-t-10-r-100-cancel")
+             |> LazyHTML.attribute("phx-click") == ["cancel_compose_cell"]
+
+      # the cell's placement travels with the submit
+      assert html =~ ~s(name="column")
+      assert html =~ ~s(name="lane")
+      # the blue + glyph, artboard line ~250
+      assert html =~ "color:oklch(0.6 0.14 250);font-size:14px;line-height:1"
+    end
+
+    test "the cell is still the drop zone Task 2 defined" do
+      html = cell_html(%{})
+
+      cell = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-cell-t-10-r-100")
+
+      assert LazyHTML.attribute(cell, "class") == ["story-map-drop"]
+      assert LazyHTML.attribute(cell, "data-column") == ["t:10"]
+      assert LazyHTML.attribute(cell, "data-lane") == ["r:100"]
+    end
+  end
+
   describe "board_view_tabs/1" do
     test "renders both segments with the artboard's segmented-control treatment" do
       html =

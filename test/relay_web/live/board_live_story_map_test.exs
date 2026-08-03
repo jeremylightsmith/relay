@@ -634,11 +634,96 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
     end
   end
 
+  describe "the inline ＋ add-card" do
+    test "creates a real card in the board's intake column, places it, and reopens the composer",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      cell = "#story-map-cell-t-#{ctx.organize.id}-r-#{ctx.mvp.id}"
+      add = "#story-map-add-t-#{ctx.organize.id}-r-#{ctx.mvp.id}"
+      compose = "#story-map-compose-t-#{ctx.organize.id}-r-#{ctx.mvp.id}"
+
+      assert has_element?(view, add)
+      view |> element(add) |> render_click()
+      assert has_element?(view, compose)
+
+      view |> form(compose, card: %{title: "Export to CSV"}) |> render_submit()
+
+      created = card_by_title(ctx.board, "Export to CSV")
+      assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, created)}")
+      # Q4 — the composer reopens empty in the same cell, so a whole cell can be typed.
+      assert has_element?(view, compose)
+
+      assert created.stage_id == Boards.intake_stage(ctx.board).id
+      assert created.story_task_id == ctx.organize.id
+      assert created.release_id == ctx.mvp.id
+    end
+
+    test "a No task yet cell creates the card with an activity and no task", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      add = "#story-map-add-nt-#{ctx.onboard.id}-r-#{ctx.mvp.id}"
+      compose = "#story-map-compose-nt-#{ctx.onboard.id}-r-#{ctx.mvp.id}"
+
+      view |> element(add) |> render_click()
+      view |> form(compose, card: %{title: "Audit the audit"}) |> render_submit()
+
+      created = card_by_title(ctx.board, "Audit the audit")
+      assert created.story_activity_id == ctx.onboard.id
+      assert created.story_task_id == nil
+      assert created.release_id == ctx.mvp.id
+    end
+
+    test "a blank title creates nothing and keeps the composer open", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      before = length(Cards.list_cards(ctx.board))
+      compose = "#story-map-compose-t-#{ctx.organize.id}-r-#{ctx.mvp.id}"
+
+      view |> element("#story-map-add-t-#{ctx.organize.id}-r-#{ctx.mvp.id}") |> render_click()
+      view |> form(compose, card: %{title: ""}) |> render_submit()
+
+      assert length(Cards.list_cards(ctx.board)) == before
+      assert has_element?(view, compose)
+    end
+
+    test "cancel closes the composer and brings the ＋ back", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      add = "#story-map-add-t-#{ctx.organize.id}-r-#{ctx.mvp.id}"
+      compose = "#story-map-compose-t-#{ctx.organize.id}-r-#{ctx.mvp.id}"
+
+      view |> element(add) |> render_click()
+      refute has_element?(view, add)
+
+      view |> element("#{compose}-cancel") |> render_click()
+      assert has_element?(view, add)
+      refute has_element?(view, compose)
+    end
+
+    test "only one cell's composer is open at a time", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      first = "#story-map-compose-t-#{ctx.organize.id}-r-#{ctx.mvp.id}"
+      second = "#story-map-compose-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}"
+
+      view |> element("#story-map-add-t-#{ctx.organize.id}-r-#{ctx.mvp.id}") |> render_click()
+      view |> element("#story-map-add-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}") |> render_click()
+
+      assert has_element?(view, second)
+      refute has_element?(view, first)
+    end
+  end
+
   # Type into the open draft and press Enter — the phx-change every keystroke fires, then the
   # phx-submit. Both are needed: the change is what lets the server clear the box afterwards.
   defp submit_draft(view, name) do
     render_change(view, "story_map_draft_change", %{"name" => name})
     view |> form("#story-map-draft-input-form", %{"name" => name}) |> render_submit()
+  end
+
+  defp card_by_title(board, title) do
+    board |> Cards.list_cards() |> Enum.find(&(&1.title == title))
   end
 
   defp card_dom_id(board, card), do: "story-map-card-#{Cards.ref(board, card)}"
