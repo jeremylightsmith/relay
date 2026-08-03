@@ -71,6 +71,18 @@ defmodule Relay.StoryMap do
     Repo.all(from r in Release, where: r.board_id == ^id, order_by: [asc: r.position, asc: r.id])
   end
 
+  @doc """
+  The `position` a newly appended activity, task or release takes: one past the highest in
+  `list`, or 1 when the list is empty. Ties are harmless — no structure has a unique index on
+  `position` and every read breaks ties by `id`.
+
+  Pure and query-free: it is called with lists the caller has already loaded (for a task, with
+  **that activity's** tasks only). `create_activity/2`, `create_task/2` and `create_release/2`
+  all *require* `position`, so this is the one definition of "goes at the end" — no call site
+  re-types `max + 1`.
+  """
+  def next_position(list), do: Enum.reduce(list, 0, &max(&1.position, &2)) + 1
+
   @doc "Creates an activity on `board`. `board_id` comes from the board, never from `attrs`."
   def create_activity(board, attrs) do
     id = board_id(board)

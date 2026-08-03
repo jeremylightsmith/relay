@@ -241,6 +241,104 @@ defmodule RelayWeb.StoryMapGridTest do
     end
   end
 
+  describe "the draft column (RE263)" do
+    test "build/4 still behaves exactly as before — the draft argument defaults to none" do
+      four = StoryMapGrid.build([activity(1, 1)], [task(10, 1, 1)], [release(100, 1)], [])
+      five = StoryMapGrid.build([activity(1, 1)], [task(10, 1, 1)], [release(100, 1)], [], nil)
+
+      assert four == five
+      assert Enum.map(four.columns, & &1.key) == ["t:10"]
+      assert Enum.all?(four.columns, &(&1.draft? == false and &1.bare? == false))
+    end
+
+    test "an :activity or :release draft is chrome — the view model is untouched" do
+      plain = StoryMapGrid.build([activity(1, 1)], [task(10, 1, 1)], [release(100, 1)], [])
+
+      assert StoryMapGrid.build([activity(1, 1)], [task(10, 1, 1)], [release(100, 1)], [], :activity) == plain
+      assert StoryMapGrid.build([activity(1, 1)], [task(10, 1, 1)], [release(100, 1)], [], :release) == plain
+    end
+
+    test "a {:task, id} draft appends one draft column, grows the span and takes last_of_activity?" do
+      grid =
+        StoryMapGrid.build(
+          [activity(1, 1), activity(2, 2)],
+          [task(10, 1, 1), task(11, 1, 2), task(20, 2, 1)],
+          [release(100, 1)],
+          [],
+          {:task, 1}
+        )
+
+      assert Enum.map(grid.columns, & &1.key) == ["t:10", "t:11", "draft:1", "t:20"]
+      assert [_first, second, draft, _other] = grid.columns
+      assert draft.draft? and draft.last_of_activity? and draft.task == nil
+      assert draft.activity.id == 1
+      refute second.last_of_activity?
+      assert [%{span: 3, start: 0}, %{span: 1, start: 3}] = grid.bands
+    end
+
+    test "for an activity with no tasks and no task-less cards the draft REPLACES the placeholder" do
+      grid = StoryMapGrid.build([activity(1, 1)], [], [release(100, 1)], [], {:task, 1})
+
+      assert [%{key: "draft:1", draft?: true, last_of_activity?: true}] = grid.columns
+      assert [%{span: 1, start: 0}] = grid.bands
+    end
+
+    test "an activity with task-less cards keeps its No task yet column beside the draft" do
+      grid =
+        StoryMapGrid.build(
+          [activity(1, 1)],
+          [],
+          [release(100, 1)],
+          [card(5, story_activity_id: 1, release_id: 100)],
+          {:task, 1}
+        )
+
+      assert Enum.map(grid.columns, & &1.key) == ["nt:1", "draft:1"]
+      assert [no_task, draft] = grid.columns
+      refute no_task.bare?
+      refute no_task.last_of_activity?
+      assert draft.last_of_activity?
+      assert [%Card{id: 5}] = grid.cells[{"nt:1", "r:100"}]
+    end
+
+    test "bare? marks the placeholder column that holds no cards, and only that one" do
+      bare = StoryMapGrid.build([activity(1, 1)], [], [release(100, 1)], [])
+      assert [%{key: "nt:1", bare?: true}] = bare.columns
+
+      occupied =
+        StoryMapGrid.build(
+          [activity(1, 1)],
+          [],
+          [release(100, 1)],
+          [card(5, story_activity_id: 1, release_id: 100)]
+        )
+
+      assert [%{key: "nt:1", bare?: false}] = occupied.columns
+    end
+
+    test "a draft naming an activity this board does not have changes nothing" do
+      plain = StoryMapGrid.build([activity(1, 1)], [task(10, 1, 1)], [release(100, 1)], [])
+
+      assert StoryMapGrid.build([activity(1, 1)], [task(10, 1, 1)], [release(100, 1)], [], {:task, 999}) == plain
+    end
+
+    test "the draft column gets no cells, and the invariant still holds with a draft open" do
+      cards = [
+        card(1, story_activity_id: 1, story_task_id: 10, release_id: 100),
+        card(2, story_activity_id: 1, release_id: 100),
+        card(3, release_id: 100)
+      ]
+
+      grid = StoryMapGrid.build([activity(1, 1)], [task(10, 1, 1)], [release(100, 1)], cards, {:task, 1})
+
+      refute Enum.any?(Map.keys(grid.cells), fn {column_key, _lane} -> column_key == "draft:1" end)
+
+      placed = grid.cells |> Map.values() |> List.flatten() |> Enum.map(& &1.id)
+      assert Enum.sort(placed ++ Enum.map(grid.unmapped, & &1.id)) == [1, 2, 3]
+      assert grid.total == 3
+    end
+  end
+
   describe "cell_dom_id/2" do
     test "turns the keys into a selector-safe id" do
       assert StoryMapGrid.cell_dom_id("t:10", "r:100") == "story-map-cell-t-10-r-100"

@@ -51,6 +51,25 @@ defmodule Relay.StoryMapTest do
     end
   end
 
+  describe "next_position/1 — the one definition of goes at the end" do
+    test "an empty list starts at 1" do
+      assert StoryMap.next_position([]) == 1
+    end
+
+    test "a list appends one past its highest position, sparse or out of order" do
+      assert StoryMap.next_position([%{position: 1}, %{position: 2}]) == 3
+      assert StoryMap.next_position([%{position: 7}, %{position: 2}]) == 8
+      assert StoryMap.next_position([%{position: 3}, %{position: 40}, %{position: 12}]) == 41
+    end
+
+    test "it composes with the board-scoped reads it is called with", %{board: board} do
+      insert(:story_activity, board: board, position: 4)
+      insert(:story_activity, board: insert(:board), position: 99)
+
+      assert StoryMap.next_position(StoryMap.list_activities(board)) == 5
+    end
+  end
+
   describe "structure writes" do
     test "create_activity/2 sets board_id from the board and never from input", %{board: board} do
       other = insert(:board)
