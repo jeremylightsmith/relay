@@ -246,7 +246,8 @@ defmodule Relay.StoryMap do
   `{:card_upserted, card}` via `Relay.Cards.notify_upserted/1` for the moved card **only**:
   every receiver's story-map refresh refetches the board's whole card list, so the renumbered
   siblings arrive with it, and broadcasting them individually would be N redundant re-renders
-  per drop.
+  per drop. The renumbered siblings also keep their `updated_at`: only the moved card is
+  re-stamped, so a map drag cannot reorder the board-lens surfaces that sort on recency.
   """
   def assign_card(%Card{} = card, attrs) when is_map(attrs) do
     case resolve_placement(card, attrs) do
@@ -282,15 +283,18 @@ defmodule Relay.StoryMap do
   # Unmapped: a card in the tray carries no position.
   defp renumber_cell(%Card{story_activity_id: nil} = card, _index), do: set_story_map_position(card, nil)
 
-  defp renumber_cell(%Card{} = card, index) do
+  defp renumber_cell(%Card{id: moved_id} = card, index) do
     others = Repo.all(cell_query(card))
     index = clamp_index(index, length(others))
 
     others
     |> List.insert_at(index, card)
     |> Enum.with_index(1)
-    |> Enum.map(fn {sibling, position} -> set_story_map_position(sibling, position) end)
-    |> Enum.find(&(&1.id == card.id))
+    |> Enum.map(fn
+      {%Card{id: ^moved_id} = moved, position} -> set_story_map_position(moved, position)
+      {sibling, position} -> set_sibling_position(sibling, position)
+    end)
+    |> Enum.find(&(&1.id == moved_id))
   end
 
   # The renumbered set is the **DB cell** — same board, same activity, same task, same release,
@@ -320,6 +324,22 @@ defmodule Relay.StoryMap do
   defp clamp_index(nil, count), do: count
   defp clamp_index(index, count) when is_integer(index), do: index |> max(0) |> min(count)
 
+  # A sibling is renumbered with a bare UPDATE of the one column, deliberately NOT the changeset
+  # path the moved card takes, so its `updated_at` is left alone. This diverges from
+  # `Cards.place_at/3`, on purpose: `updated_at` is this app's recency proxy behind two orderings
+  # that live in the *board* lens — the terminal Done column's render window
+  # (`Cards.list_stage_cards/2`) and `coalesce(blocked_since, updated_at)` in
+  # `Cards.needs_you_feed/1`. A story-map cell spans every stage by construction, so re-stamping a
+  # sibling would reorder the Done column and every member's needs-you feed off a drag those
+  # surfaces never show. Returns the struct it was given with the new position applied, so
+  # renumber_cell/2 still gets a full row back for the moved card's neighbours.
+  defp set_sibling_position(%Card{} = card, position) do
+    Repo.update_all(from(c in Card, where: c.id == ^card.id), set: [story_map_position: position])
+    %{card | story_map_position: position}
+  end
+
+  # The moved card DOES go through the changeset: it genuinely changed, so the `updated_at` bump
+  # is correct, and `Cards.notify_upserted/1` needs the reloaded struct.
   # force_change so the UPDATE always writes, even when a caller-held struct's in-memory value
   # coincidentally matches — the same guard Relay.Cards.reposition/2 uses.
   defp set_story_map_position(%Card{} = card, position) do

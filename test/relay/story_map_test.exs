@@ -469,6 +469,33 @@ defmodule Relay.StoryMapTest do
       assert Repo.get!(Card, intruder.id).story_map_position == nil
     end
 
+    test "a renumbered sibling keeps its updated_at; the moved card's is refreshed", ctx do
+      # `updated_at` is this app's recency proxy behind two board-side orderings the story map
+      # never shows — the Done column's render window (Cards.list_stage_cards/2) and everyone's
+      # needs-you feed (Cards.needs_you_feed/1). A cell spans every stage by construction, so
+      # re-stamping a sibling on a map drag would silently reorder both lenses.
+      sibling = place(ctx.stage, "Sibling", ctx.task, ctx.release)
+      moved = place(ctx.stage, "Moved", ctx.task, ctx.release)
+
+      stale = ~U[2020-01-01 00:00:00Z]
+
+      {2, _} =
+        Repo.update_all(from(c in Card, where: c.id in ^[sibling.id, moved.id]), set: [updated_at: stale])
+
+      {:ok, _} =
+        StoryMap.assign_card(Repo.get!(Card, moved.id), %{
+          story_task_id: ctx.task.id,
+          release_id: ctx.release.id,
+          position: 0
+        })
+
+      renumbered = Repo.get!(Card, sibling.id)
+      assert renumbered.story_map_position == 2
+      assert renumbered.updated_at == stale
+
+      assert Repo.get!(Card, moved.id).updated_at != stale
+    end
+
     test "exactly one {:card_upserted, _} is broadcast per placement — the moved card", ctx do
       place(ctx.stage, "First", ctx.task, ctx.release)
       place(ctx.stage, "Second", ctx.task, ctx.release)

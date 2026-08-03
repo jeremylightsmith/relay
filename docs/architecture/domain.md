@@ -247,7 +247,11 @@ both.
 A `Card` also carries `story_map_position`: its order **within its story-map cell**, nullable
 and independent of `cards.position` (its order within its stage column). The two orderings never
 affect each other — dragging on the map rewrites one, dragging on the board the other. `nil`
-means nobody has ordered the card on the map yet, and nil sorts **last** inside a cell.
+means nobody has ordered the card on the map yet, and nil sorts **last** inside a cell. Placing a
+card renumbers its whole target cell, and the **siblings** are renumbered with a bare
+`update_all` so their `updated_at` is untouched — that column is the recency proxy behind the
+Done column's render window and the needs-you feed, both board-lens orderings that would
+otherwise be silently reshuffled by a drag on the map.
 
 ---
 *Sources of truth: `lib/relay.ex` (`exports`), `lib/schemas/*.ex`, ADRs 0002–0004, 0006.*
