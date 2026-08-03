@@ -345,4 +345,103 @@ defmodule RelayWeb.StoryMapGridTest do
       assert StoryMapGrid.cell_dom_id("nt:1", "r:none") == "story-map-cell-nt-1-r-none"
     end
   end
+
+  describe "cell ordering — story_map_position, ascending, nils last" do
+    test "positioned cards sort ascending ahead of nil-position cards in the same cell" do
+      grid =
+        StoryMapGrid.build(
+          [activity(1, 1)],
+          [task(10, 1, 1)],
+          [release(100, 1)],
+          [
+            card(1, story_activity_id: 1, story_task_id: 10, release_id: 100),
+            card(2, story_activity_id: 1, story_task_id: 10, release_id: 100, story_map_position: 2),
+            card(3, story_activity_id: 1, story_task_id: 10, release_id: 100, story_map_position: 1)
+          ]
+        )
+
+      assert Enum.map(grid.cells[{"t:10", "r:100"}], & &1.id) == [3, 2, 1]
+    end
+
+    test "nil-position cards keep list_cards/1's board order beneath them" do
+      grid =
+        StoryMapGrid.build(
+          [activity(1, 1)],
+          [task(10, 1, 1)],
+          [release(100, 1)],
+          [
+            card(7, story_activity_id: 1, story_task_id: 10, release_id: 100),
+            card(8, story_activity_id: 1, story_task_id: 10, release_id: 100),
+            card(9, story_activity_id: 1, story_task_id: 10, release_id: 100, story_map_position: 5)
+          ]
+        )
+
+      assert Enum.map(grid.cells[{"t:10", "r:100"}], & &1.id) == [9, 7, 8]
+    end
+
+    test "the tray ignores story_map_position entirely" do
+      grid =
+        StoryMapGrid.build(
+          [activity(1, 1)],
+          [],
+          [release(100, 1)],
+          [card(1, story_map_position: 9), card(2, story_map_position: 1), card(3)]
+        )
+
+      assert Enum.map(grid.unmapped, & &1.id) == [1, 2, 3]
+    end
+  end
+
+  describe "decode_placement/2 — the key format, parsed where it is defined" do
+    test "a task column plus a release lane" do
+      assert StoryMapGrid.decode_placement("t:7", "r:2") == {:ok, %{story_task_id: 7, release_id: 2}}
+    end
+
+    test "a No task yet column carries the activity, never a task" do
+      assert StoryMapGrid.decode_placement("nt:3", "r:2") ==
+               {:ok, %{story_activity_id: 3, release_id: 2}}
+    end
+
+    test "the synthetic (No release) lane decodes to a nil release" do
+      assert StoryMapGrid.decode_placement("nt:3", "r:none") ==
+               {:ok, %{story_activity_id: 3, release_id: nil}}
+    end
+
+    test "round-trips every key shape build/4 emits" do
+      grid =
+        StoryMapGrid.build(
+          [activity(1, 1), activity(2, 2)],
+          [task(10, 1, 1)],
+          [release(100, 1)],
+          [card(5, story_activity_id: 1, release_id: 100)]
+        )
+
+      for column <- grid.columns, lane <- grid.lanes do
+        assert {:ok, _placement} = StoryMapGrid.decode_placement(column.key, lane.key)
+      end
+    end
+
+    test "garbage is :error, never a guess" do
+      for {column, lane} <- [
+            {"x:1", "r:1"},
+            {"t:", "r:1"},
+            {"t:abc", "r:1"},
+            {"t:1", "r:abc"},
+            {"t:1", "later"},
+            {"", ""},
+            {"t:0", "r:1"}
+          ] do
+        assert StoryMapGrid.decode_placement(column, lane) == :error,
+               "#{column} / #{lane} should not decode"
+      end
+    end
+  end
+
+  describe "cell_element_id/3 — the one definition of the : → - rule" do
+    test "cell_dom_id/2 is the cell prefix of the same rule" do
+      assert StoryMapGrid.cell_element_id("cell", "t:10", "r:100") == "story-map-cell-t-10-r-100"
+      assert StoryMapGrid.cell_dom_id("t:10", "r:100") == "story-map-cell-t-10-r-100"
+      assert StoryMapGrid.cell_element_id("add", "nt:3", "r:none") == "story-map-add-nt-3-r-none"
+    end
+  end
 end

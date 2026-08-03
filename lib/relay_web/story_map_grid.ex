@@ -46,8 +46,10 @@ defmodule RelayWeb.StoryMapGrid do
   @doc """
   Builds the grid. `activities`, `tasks` and `releases` are the board's structure in `position`
   order (`Relay.StoryMap.list_activities/1`, `list_tasks/1`, `list_releases/1`); `cards` is the
-  board's non-archived cards in `Relay.Cards.list_cards/1` order, which every cell and the tray
-  preserve.
+  board's non-archived cards in `Relay.Cards.list_cards/1`
+  order. The **tray** preserves that order exactly. A **cell** re-sorts it by
+  `story_map_position` ascending, nils last (RE262), so a cell nobody has dragged in still
+  renders in board order and a cell somebody has ordered renders in theirs.
 
   `draft` (RE263) is the page's open inline draft — `nil`, `:activity`, `:release`, or
   `{:task, activity_id}`. Only the last shape reaches the view model: it appends one draft
@@ -109,9 +111,58 @@ defmodule RelayWeb.StoryMapGrid do
   The DOM id of one body cell. `:` is not legal in a CSS selector, so the keys' colons become
   dashes — one definition, called by the renderer and by the tests that address a cell.
   """
-  def cell_dom_id(column_key, lane_key), do: "story-map-cell-#{dash(column_key)}-#{dash(lane_key)}"
+  def cell_dom_id(column_key, lane_key), do: cell_element_id("cell", column_key, lane_key)
+
+  @doc """
+  The DOM id of one of a cell's own elements (RE262): `cell_element_id("add", c, l)` is the
+  cell's `＋` button, `"compose"` its composer. `cell_dom_id/2` is the `"cell"` prefix of the
+  same rule, so the `:` → `-` substitution exists exactly once.
+  """
+  def cell_element_id(prefix, column_key, lane_key) do
+    "story-map-#{prefix}-#{dash(column_key)}-#{dash(lane_key)}"
+  end
 
   defp dash(key), do: String.replace(key, ":", "-")
+
+  @doc """
+  Decodes a column key + lane key into the placement attrs `Relay.StoryMap.assign_card/2`
+  takes. This module *defines* the key formats, so it also parses them — the format is written
+  once and `RelayWeb.BoardLive` never string-matches on `"nt:"`.
+
+      decode_placement("t:7", "r:2")     #=> {:ok, %{story_task_id: 7, release_id: 2}}
+      decode_placement("nt:3", "r:none") #=> {:ok, %{story_activity_id: 3, release_id: nil}}
+      decode_placement("x:1", "r:2")     #=> :error
+
+  A task column sends **only** the task: the activity is derived from it by `assign_card/2`,
+  so the client can never make a column and its band disagree.
+  """
+  def decode_placement(column_key, lane_key) do
+    with {:ok, column} <- decode_column(column_key),
+         {:ok, release_id} <- decode_lane(lane_key) do
+      {:ok, Map.put(column, :release_id, release_id)}
+    end
+  end
+
+  defp decode_column("t:" <> id) do
+    with {:ok, id} <- decode_id(id), do: {:ok, %{story_task_id: id}}
+  end
+
+  defp decode_column("nt:" <> id) do
+    with {:ok, id} <- decode_id(id), do: {:ok, %{story_activity_id: id}}
+  end
+
+  defp decode_column(_other), do: :error
+
+  defp decode_lane(@none_lane_key), do: {:ok, nil}
+  defp decode_lane("r:" <> id), do: decode_id(id)
+  defp decode_lane(_other), do: :error
+
+  defp decode_id(string) do
+    case Integer.parse(string) do
+      {id, ""} when id > 0 -> {:ok, id}
+      _other -> :error
+    end
+  end
 
   # Rules 1 vs 2/3, and the task → activity derivation, in one place. A task id that is not on
   # this board resolves to `nil`, so the card falls to rule 3 rather than off the grid.
@@ -218,8 +269,16 @@ defmodule RelayWeb.StoryMapGrid do
           {Map.update(cells, key, [card], &[card | &1]), unmapped}
       end)
 
-    {Map.new(cells, fn {key, cards} -> {key, Enum.reverse(cards)} end), Enum.reverse(unmapped)}
+    {Map.new(cells, fn {key, cards} -> {key, sort_cell(Enum.reverse(cards))} end), Enum.reverse(unmapped)}
   end
+
+  # RE262's sort rule, one line and total: `story_map_position` ascending, nils last, ties and
+  # nils broken by the board order the cards arrived in. Enum.sort_by/2 is stable and Elixir's
+  # term order puts every integer before `nil` (numbers sort before atoms), so positioned cards
+  # come first in their chosen order and unpositioned cards keep Cards.list_cards/1's
+  # (stage_id, position, id) order beneath them. No nil branch, no comparator. The TRAY is
+  # deliberately not sorted: an unmapped card has no position by construction.
+  defp sort_cell(cards), do: Enum.sort_by(cards, & &1.story_map_position)
 
   defp column_key(activity_id, nil), do: "nt:#{activity_id}"
   defp column_key(_activity_id, task_id), do: "t:#{task_id}"

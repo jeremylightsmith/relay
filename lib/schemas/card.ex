@@ -29,6 +29,8 @@ defmodule Schemas.Card do
   separate from `changeset/2` and `status_changeset/2` the way the baton is, so a title edit
   can never touch the map and a map edit can never touch the title. Cards start fully
   UNMAPPED.
+  `story_map_position` (RE262) orders the card *within* its cell and is independent of
+  `position`, which orders it within its stage column — the two never affect each other.
   """
 
   use Ecto.Schema
@@ -41,6 +43,10 @@ defmodule Schemas.Card do
     field :acceptance_criteria, :string
     field :spec, :string
     field :position, :integer
+    # RE262 — the card's order within its story-map CELL, wholly independent of `position` (its
+    # order within its stage column). Dragging on the map rewrites this one only; dragging on
+    # the board rewrites `position` only. nil = unordered on the map, and nils sort last.
+    field :story_map_position, :integer
     field :tag, :string
     field :ref_number, :integer
 
@@ -147,8 +153,9 @@ defmodule Schemas.Card do
 
   @doc """
   Changeset for the card's story-map placement (RE265): `:story_activity_id`,
-  `:story_task_id`, `:release_id`. All three are nilable and cast **only** here — never by
-  `changeset/2` or `status_changeset/2`.
+  `:story_task_id`, `:release_id`, and (RE262) `:story_map_position`. All four are nilable and
+  cast **only** here — never by `changeset/2` or `status_changeset/2`. This is the single cast
+  path for everything story-map on a card.
 
   Enforces the one invariant: **if `story_task_id` is set, `story_activity_id` is set**. The
   matching *value* is derived — `Relay.StoryMap.assign_card/2` reads the activity off the task
@@ -157,7 +164,7 @@ defmodule Schemas.Card do
   """
   def story_map_changeset(card, attrs) do
     card
-    |> cast(attrs, [:story_activity_id, :story_task_id, :release_id])
+    |> cast(attrs, [:story_activity_id, :story_task_id, :release_id, :story_map_position])
     |> validate_task_has_activity()
     |> foreign_key_constraint(:story_activity_id)
     |> foreign_key_constraint(:story_task_id)

@@ -59,6 +59,8 @@ defmodule Relay.Cards do
     :story_activity_id,
     :story_task_id,
     :release_id,
+    # RE262 — the card's order within its cell. Without it every cell falls back to board order.
+    :story_map_position,
     :posted_by_user_id,
     :rejection,
     :inserted_at,

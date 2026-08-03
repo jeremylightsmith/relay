@@ -240,6 +240,22 @@ defmodule Relay.Boards do
   end
 
   @doc """
+  The board's **intake column** — the first top-level (`parent_id == nil`) stage by `position`,
+  whatever it is named. Where a card created from *outside* a column lands (RE262's story-map
+  `＋`). The mirror of `terminal_stage/1`, and the one definition of that policy: "first by
+  position" is the intake column by construction and cannot break on a board that renamed or
+  deleted `Backlog`. `nil` for a board with no stages.
+  """
+  def intake_stage(%Board{id: board_id}) do
+    Repo.one(
+      from s in Stage,
+        where: s.board_id == ^board_id and is_nil(s.parent_id),
+        order_by: [asc: s.position, asc: s.id],
+        limit: 1
+    )
+  end
+
+  @doc """
   The ids of the board's **top-level** Done stages (`parent_id == nil`,
   `category == :complete`) from an in-memory `stages` list. Used by the API
   index to drop the Done column by default (RLY-67). A `:done` **sub-lane**

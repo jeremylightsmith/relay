@@ -19,6 +19,13 @@ defmodule Relay.StoryMap do
   cell with no release, and the artboard's "an activity with no release renders in the last
   lane" is a *display* rule owned by the story-map view (RE264), never a stored default.
 
+  **Two independent orderings (RE262).** `cards.position` orders a card within its stage
+  column; `cards.story_map_position` orders it within its story-map **cell**. They never touch
+  each other — `assign_card/2` rewrites only the latter, `Cards.move_card/3` only the former.
+  `story_map_position` is nullable and unbackfilled on purpose: nil means "nobody has ordered
+  this card on the map yet", and the display sort (ascending, nils last) makes that total
+  rather than an edge case.
+
   **Realtime.** Every structure write broadcasts `{:story_map_changed, board_id}` — coarse on
   purpose, mirroring `{:stages_changed, board_id}`; receivers refetch the structure. Card
   assignment emits no new event: it reuses `{:card_upserted, card}` through
@@ -222,20 +229,30 @@ defmodule Relay.StoryMap do
   @doc """
   Places `card` on the story map. `attrs` is an atom-keyed map of `:story_activity_id`,
   `:story_task_id` and `:release_id` — it sets the **whole** placement, so anything omitted is
-  cleared (`unassign_card/1` is the all-nil case).
+  cleared (`unassign_card/1` is the all-nil case) — plus an optional `:position`.
+
+  `:position` is a **0-based index among the target cell's other cards** — the same contract
+  `Relay.Cards.move_card/3` uses, so there is one meaning of "index" in the app. Omitted, the
+  card is appended last. The whole target cell is renumbered `1..n` inside the transaction,
+  exactly as `Cards.place_at/3` renumbers a stage: renumbering *all* of it is required for
+  correctness, because on the first-ever drag into a cell every other card is still `nil` and
+  writing only the moved card's position would slam it to the top however far down the user
+  dropped it.
 
   `story_activity_id` is **derived** from `story_task_id` when a task is given, so a
   conflicting activity passed alongside is ignored rather than trusted. Every id is checked
   against the card's own board; a foreign activity, task or release is rejected with
-  `{:error, changeset}`. Broadcasts `{:card_upserted, card}` via
-  `Relay.Cards.notify_upserted/1`, so the card arrives with `owners`/`sub_tasks` preloaded.
+  `{:error, changeset}` and nothing is written — including no renumber. Broadcasts
+  `{:card_upserted, card}` via `Relay.Cards.notify_upserted/1` for the moved card **only**:
+  every receiver's story-map refresh refetches the board's whole card list, so the renumbered
+  siblings arrive with it, and broadcasting them individually would be N redundant re-renders
+  per drop.
   """
   def assign_card(%Card{} = card, attrs) when is_map(attrs) do
     case resolve_placement(card, attrs) do
       {:ok, placement} ->
         card
-        |> Card.story_map_changeset(placement)
-        |> Repo.update()
+        |> write_placement(placement, Map.get(attrs, :position))
         |> notify_card()
 
       {:error, field, message} ->
@@ -243,9 +260,78 @@ defmodule Relay.StoryMap do
     end
   end
 
-  @doc "Takes `card` off the story map entirely — all three columns nil. Broadcasts like `assign_card/2`."
+  @doc """
+  Takes `card` off the story map entirely — all three columns **and** `story_map_position` nil.
+  So the invariant is plain: a card in the tray has no story-map position, and re-placing it
+  earns a fresh one. Broadcasts like `assign_card/2`.
+  """
   def unassign_card(%Card{} = card) do
     assign_card(card, %{})
+  end
+
+  # The placement write and the cell renumber are one transaction, so a failure leaves neither.
+  defp write_placement(%Card{} = card, placement, index) do
+    Repo.transaction(fn ->
+      case card |> Card.story_map_changeset(placement) |> Repo.update() do
+        {:ok, moved} -> renumber_cell(moved, index)
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    end)
+  end
+
+  # Unmapped: a card in the tray carries no position.
+  defp renumber_cell(%Card{story_activity_id: nil} = card, _index), do: set_story_map_position(card, nil)
+
+  defp renumber_cell(%Card{} = card, index) do
+    others = Repo.all(cell_query(card))
+    index = clamp_index(index, length(others))
+
+    others
+    |> List.insert_at(index, card)
+    |> Enum.with_index(1)
+    |> Enum.map(fn {sibling, position} -> set_story_map_position(sibling, position) end)
+    |> Enum.find(&(&1.id == card.id))
+  end
+
+  # The renumbered set is the **DB cell** — same board, same activity, same task, same release,
+  # nil-safe (`IS NOT DISTINCT FROM`, matching the `IS DISTINCT FROM` already in
+  # resync_mapped_cards/1). It is deliberately NOT the *display* cell: the last-lane fallback
+  # for a release-less card is a display rule owned by RelayWeb.StoryMapGrid, and this context
+  # may not reach into the web layer. The two differ only for a card with an activity and no
+  # release, which renders in the last lane beside cards explicitly in it; those strays sort
+  # last (nil position) and keep their board order — and every drop writes a release
+  # explicitly, so a stray stops being one the first time anyone touches it.
+  #
+  # Ordering before the renumber is the order the grid displays (Postgres ASC is nulls last),
+  # so a renumber never reshuffles what the user is looking at. Archived cards are excluded:
+  # `Cards.list_cards/1` never shows them, so letting one consume an index would shift the
+  # visible order for no reason. `type/2` because Ecto cannot infer a nil parameter's type
+  # inside a fragment.
+  defp cell_query(%Card{} = card) do
+    from c in Card,
+      where:
+        c.board_id == ^card.board_id and c.id != ^card.id and is_nil(c.archived_at) and
+          fragment("? IS NOT DISTINCT FROM ?", c.story_activity_id, type(^card.story_activity_id, :integer)) and
+          fragment("? IS NOT DISTINCT FROM ?", c.story_task_id, type(^card.story_task_id, :integer)) and
+          fragment("? IS NOT DISTINCT FROM ?", c.release_id, type(^card.release_id, :integer)),
+      order_by: [asc: c.story_map_position, asc: c.stage_id, asc: c.position, asc: c.id]
+  end
+
+  defp clamp_index(nil, count), do: count
+  defp clamp_index(index, count) when is_integer(index), do: index |> max(0) |> min(count)
+
+  # force_change so the UPDATE always writes, even when a caller-held struct's in-memory value
+  # coincidentally matches — the same guard Relay.Cards.reposition/2 uses.
+  defp set_story_map_position(%Card{} = card, position) do
+    changeset =
+      card
+      |> Changeset.change()
+      |> Changeset.force_change(:story_map_position, position)
+
+    case Repo.update(changeset) do
+      {:ok, updated} -> updated
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
   end
 
   # Derivation, not trust: the task supplies its own activity, so the pair written to the card
