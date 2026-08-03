@@ -157,7 +157,13 @@ sharing behavior.
   mapped cards' `story_activity_id` in the same transaction), and by the changeset as a
   backstop. Deleting structure **unmaps**
   cards, never deletes them (`cards → structure` is `nilify_all`, `activity → its tasks` is
-  `delete_all`). Structure writes broadcast `{:story_map_changed, board_id}`; assignment reuses
+  `delete_all`). **Deleting is refused outright (`{:error, :not_empty}`) while any non-archived
+  card still points at the structure (RE261)** — checked in the delete's own transaction, so
+  the cascade above is now only reachable for an already-empty structure. `move_task/3` is the
+  single task-repositioning entry point (activity change + renumber, one transaction, one
+  broadcast); `insert_before/3` is the pure "remove and re-insert before the target" ordering
+  rule every header drop shares.
+  Structure writes broadcast `{:story_map_changed, board_id}`; assignment reuses
   `{:card_upserted, card}` via `Cards.notify_upserted/1`. `Relay.Boards` deliberately does
   **not** depend on this context — `StoryMap → Cards → Boards` already exists, so the reverse
   edge would close a boundary cycle; the release seed therefore lives in `Boards`.

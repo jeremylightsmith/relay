@@ -244,6 +244,181 @@ defmodule Relay.StoryMapTest do
     end
   end
 
+  describe "insert_before/3 — the one ordering rule" do
+    test "inserts the dragged id immediately before the target" do
+      assert StoryMap.insert_before([1, 2, 3], 3, 1) == [3, 1, 2]
+      assert StoryMap.insert_before([1, 2, 3], 1, 3) == [2, 1, 3]
+      assert StoryMap.insert_before([1, 2, 3], 1, 2) == [1, 2, 3]
+    end
+
+    test "dropping something on itself is the identity" do
+      assert StoryMap.insert_before([1, 2, 3], 2, 2) == [1, 2, 3]
+    end
+
+    test "a target that is not in the list appends" do
+      assert StoryMap.insert_before([1, 2, 3], 1, 99) == [2, 3, 1]
+      assert StoryMap.insert_before([], 1, 99) == [1]
+    end
+
+    test "an id that is not in the list is inserted rather than lost" do
+      assert StoryMap.insert_before([1, 2], 9, 2) == [1, 9, 2]
+    end
+  end
+
+  describe "deleting a structure that still holds cards" do
+    setup %{board: board, stage: stage} do
+      activity = insert(:story_activity, board: board)
+      task = insert(:story_task, story_activity: activity)
+      release = insert(:release, board: board)
+      card = insert(:card, board: board, stage: stage)
+      {:ok, card} = StoryMap.assign_card(card, %{story_task_id: task.id, release_id: release.id})
+
+      %{activity: activity, task: task, release: release, card: card}
+    end
+
+    test "delete_activity/1 refuses while a card points at it, and succeeds once it does not",
+         ctx do
+      assert {:error, :not_empty} = StoryMap.delete_activity(ctx.activity)
+      assert Repo.get(StoryActivity, ctx.activity.id)
+
+      {:ok, _unmapped} = StoryMap.unassign_card(ctx.card)
+
+      assert {:ok, _deleted} = StoryMap.delete_activity(ctx.activity)
+      assert Repo.get(StoryActivity, ctx.activity.id) == nil
+    end
+
+    test "delete_task/1 refuses while a card points at it, and succeeds once it does not", ctx do
+      assert {:error, :not_empty} = StoryMap.delete_task(ctx.task)
+      assert Repo.get(StoryTask, ctx.task.id)
+
+      {:ok, _unmapped} = StoryMap.unassign_card(ctx.card)
+
+      assert {:ok, _deleted} = StoryMap.delete_task(ctx.task)
+      assert Repo.get(StoryTask, ctx.task.id) == nil
+    end
+
+    test "delete_release/1 refuses while a card points at it, and succeeds once it does not",
+         ctx do
+      assert {:error, :not_empty} = StoryMap.delete_release(ctx.release)
+      assert Repo.get(Release, ctx.release.id)
+
+      {:ok, _cleared} = StoryMap.assign_card(ctx.card, %{story_task_id: ctx.task.id})
+
+      assert {:ok, _deleted} = StoryMap.delete_release(ctx.release)
+      assert Repo.get(Release, ctx.release.id) == nil
+    end
+
+    # `Cards.list_cards/1` never shows archived cards, so the grid counts 0 and renders an
+    # ENABLED ✕. Without the `is_nil(archived_at)` filter the server would then refuse it — a
+    # dead button.
+    test "a structure holding only ARCHIVED cards deletes fine", %{board: board, stage: stage} do
+      activity = insert(:story_activity, board: board)
+      task = insert(:story_task, story_activity: activity)
+      release = insert(:release, board: board)
+      card = insert(:card, board: board, stage: stage)
+      {:ok, card} = StoryMap.assign_card(card, %{story_task_id: task.id, release_id: release.id})
+      {:ok, _archived} = Cards.archive_card(card)
+
+      assert {:ok, _} = StoryMap.delete_task(task)
+      assert {:ok, _} = StoryMap.delete_activity(activity)
+      assert {:ok, _} = StoryMap.delete_release(release)
+    end
+
+    test "a refused delete broadcasts nothing", %{board: board} = ctx do
+      Events.subscribe(board.id)
+
+      assert {:error, :not_empty} = StoryMap.delete_activity(ctx.activity)
+
+      refute_receive {:story_map_changed, _board_id}
+    end
+
+    test "a structure on another board's card does not block this board's delete",
+         %{board: board} do
+      # The count is board-scoped as well as id-scoped: two boards can hold the same id space
+      # only by coincidence, but the `where` proves the scoping is not accidental.
+      activity = insert(:story_activity, board: board)
+      other_board = insert(:board)
+      other_stage = insert(:stage, board: other_board)
+      other_activity = insert(:story_activity, board: other_board)
+      other_card = insert(:card, board: other_board, stage: other_stage)
+      {:ok, _} = StoryMap.assign_card(other_card, %{story_activity_id: other_activity.id})
+
+      assert {:ok, _deleted} = StoryMap.delete_activity(activity)
+    end
+  end
+
+  describe "move_task/3 — the single task-repositioning entry point" do
+    test "moves a task to another activity, renumbers, and drags its mapped cards along",
+         %{board: board, stage: stage} do
+      a1 = insert(:story_activity, board: board, position: 1)
+      a2 = insert(:story_activity, board: board, position: 2)
+      moving = insert(:story_task, story_activity: a1, position: 1)
+      first = insert(:story_task, story_activity: a2, position: 1)
+      second = insert(:story_task, story_activity: a2, position: 2)
+      card = insert(:card, board: board, stage: stage)
+      {:ok, card} = StoryMap.assign_card(card, %{story_task_id: moving.id})
+      assert card.story_activity_id == a1.id
+
+      Events.subscribe(board.id)
+
+      assert {:ok, moved} = StoryMap.move_task(moving, a2.id, [first.id, moving.id, second.id])
+
+      assert moved.story_activity_id == a2.id
+      assert moved.position == 2
+      assert Repo.get!(StoryTask, first.id).position == 1
+      assert Repo.get!(StoryTask, second.id).position == 3
+      assert Repo.get!(Card, card.id).story_activity_id == a2.id
+
+      assert_receive {:card_upserted, %Card{id: card_id, story_activity_id: activity_id}}
+      assert card_id == card.id
+      assert activity_id == a2.id
+      assert_receive {:story_map_changed, board_id}
+      assert board_id == board.id
+    end
+
+    test "within one activity it is a pure renumber and moves no card", %{board: board, stage: stage} do
+      activity = insert(:story_activity, board: board)
+      a = insert(:story_task, story_activity: activity, position: 1)
+      b = insert(:story_task, story_activity: activity, position: 2)
+      card = insert(:card, board: board, stage: stage)
+      {:ok, card} = StoryMap.assign_card(card, %{story_task_id: b.id})
+
+      Events.subscribe(board.id)
+
+      assert {:ok, moved} = StoryMap.move_task(b, activity.id, [b.id, a.id])
+
+      assert moved.story_activity_id == activity.id
+      assert moved.position == 1
+      assert Repo.get!(StoryTask, a.id).position == 2
+      assert Repo.get!(Card, card.id).story_activity_id == activity.id
+      refute_receive {:card_upserted, _card}
+    end
+
+    test "it rejects a move to another board's activity and writes nothing", %{board: board} do
+      activity = insert(:story_activity, board: board)
+      task = insert(:story_task, story_activity: activity, position: 1)
+      foreign = insert(:story_activity, board: insert(:board))
+
+      assert {:error, changeset} = StoryMap.move_task(task, foreign.id, [task.id])
+      assert "must belong to the same board" in errors_on(changeset).story_activity_id
+
+      reloaded = Repo.get!(StoryTask, task.id)
+      assert reloaded.story_activity_id == activity.id
+      assert reloaded.position == 1
+    end
+
+    test "ids from another board are ignored by the renumber", %{board: board} do
+      activity = insert(:story_activity, board: board)
+      task = insert(:story_task, story_activity: activity, position: 1)
+      foreign = insert(:story_task, story_activity: insert(:story_activity, board: insert(:board)), position: 9)
+
+      assert {:ok, _moved} = StoryMap.move_task(task, activity.id, [foreign.id, task.id])
+
+      assert Repo.get!(StoryTask, foreign.id).position == 9
+      assert Repo.get!(StoryTask, task.id).position == 2
+    end
+  end
+
   describe "assign_card/2" do
     setup %{board: board, stage: stage} do
       activity = insert(:story_activity, board: board)

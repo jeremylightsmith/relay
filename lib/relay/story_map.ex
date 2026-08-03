@@ -18,6 +18,9 @@ defmodule Relay.StoryMap do
   the direct-changeset path. `release_id` is genuinely independent: a card can be mapped to a
   cell with no release, and the artboard's "an activity with no release renders in the last
   lane" is a *display* rule owned by the story-map view (RE264), never a stored default.
+  `move_task/3` is the single task-repositioning entry point the web layer calls — activity
+  change plus renumber in one transaction — and it composes `update_task/2`'s derivation
+  rather than repeating it.
 
   **Two independent orderings (RE262).** `cards.position` orders a card within its stage
   column; `cards.story_map_position` orders it within its story-map **cell**. They never touch
@@ -31,6 +34,13 @@ defmodule Relay.StoryMap do
   assignment emits no new event: it reuses `{:card_upserted, card}` through
   `Relay.Cards.notify_upserted/1`, so the card arrives with `owners`/`sub_tasks` preloaded
   exactly as that contract requires.
+
+  **Deleting structure is refused while it still holds cards.** `delete_activity/1`,
+  `delete_task/1` and `delete_release/1` return `{:error, :not_empty}` when any **non-archived**
+  card on the board still points at them, checked inside the delete's own transaction. The
+  `is_nil(archived_at)` filter is not optional: `Relay.Cards.list_cards/1` never shows archived
+  cards, so a structure holding only archived ones renders an enabled ✕ that the server must
+  honour. There is no "last release" guard — that one is a display rule owned by the view.
 
   **Seeding.** The three seeded swimlanes are `Schemas.Release.seed_names/0` — the one
   definition. `Relay.Boards.create_board/2` inserts them inside its own transaction
@@ -90,6 +100,31 @@ defmodule Relay.StoryMap do
   """
   def next_position(list), do: Enum.reduce(list, 0, &max(&1.position, &2)) + 1
 
+  @doc """
+  The artboard's `reorder/3` (`docs/designs/Relay Story Map.dc.html`, line ~679), pure and
+  query-free like `next_position/1`: remove `id` from `ids` and re-insert it at `target_id`'s
+  index — i.e. immediately **before** the target — appending when the target is not in the
+  list. Dropping something on itself is the identity.
+
+  All three header drops (activity, task, release) order through this, so the insert rule has
+  one home and no call site re-types it.
+
+      insert_before([1, 2, 3], 3, 1) #=> [3, 1, 2]
+      insert_before([1, 2, 3], 1, 9) #=> [2, 3, 1]
+  """
+  def insert_before(ids, id, target_id) when is_list(ids) do
+    if id == target_id do
+      ids
+    else
+      rest = Enum.reject(ids, &(&1 == id))
+
+      case Enum.find_index(rest, &(&1 == target_id)) do
+        nil -> rest ++ [id]
+        index -> List.insert_at(rest, index, id)
+      end
+    end
+  end
+
   @doc "Creates an activity on `board`. `board_id` comes from the board, never from `attrs`."
   def create_activity(board, attrs) do
     id = board_id(board)
@@ -109,13 +144,12 @@ defmodule Relay.StoryMap do
   end
 
   @doc """
-  Deletes an activity. The database cascade deletes its tasks and **unmaps** every card that
-  pointed at either — `release_id` is untouched.
+  Deletes an activity — **refused with `{:error, :not_empty}` while any non-archived card on
+  this board still points at it**. On success the database cascade deletes its tasks and
+  **unmaps** every card that pointed at either; `release_id` is untouched.
   """
   def delete_activity(%StoryActivity{} = activity) do
-    activity
-    |> Repo.delete()
-    |> broadcast_changed(activity.board_id)
+    guarded_delete(activity, :story_activity_id, activity.id, activity.board_id)
   end
 
   @doc "Rewrites the given activities' `position` to `1..n`; ids not on this board are ignored."
@@ -186,13 +220,60 @@ defmodule Relay.StoryMap do
   end
 
   @doc """
-  Deletes one task. Cards pointing at it keep `story_activity_id` and fall back into that
-  activity's "No task yet" column (`story_task_id` nilified by the database).
+  Repositions a task, and may move it to another activity **on the same board** — the single
+  entry point the web layer calls, so no call site branches on "did the activity change".
+
+  `ordered_task_ids` is the TARGET activity's full desired task order, including the moved
+  task. In one transaction: the activity change (reusing `update_task/2`'s own
+  `resync_mapped_cards/1`, so the card→cell invariant keeps holding by derivation), then a
+  renumber of `ordered_task_ids` to `1..n`, board-scoped. Within one activity this degenerates
+  to a pure renumber and moves no card.
+
+  Broadcasts one `{:story_map_changed, board_id}` after commit, plus one
+  `{:card_upserted, card}` per card the activity change actually moved — exactly the contract
+  `update_task/2` already honours. A cross-board target is rejected with `{:error, changeset}`
+  by `validate_activity_on_board/2`, which this inherits.
+
+  `reorder_tasks/2` stays the primitive this renumbers through.
+  """
+  def move_task(%StoryTask{} = task, target_activity_id, ordered_task_ids) when is_list(ordered_task_ids) do
+    changeset =
+      task
+      |> StoryTask.changeset(%{story_activity_id: target_activity_id})
+      |> validate_activity_on_board(task.board_id)
+
+    result =
+      Repo.transaction(fn ->
+        case Repo.update(changeset) do
+          {:ok, updated} ->
+            cards = resync_mapped_cards(updated)
+            renumber(StoryTask, task.board_id, ordered_task_ids)
+            # The renumber is an update_all, so the in-memory struct's position is stale.
+            {Repo.reload!(updated), cards}
+
+          {:error, failed} ->
+            Repo.rollback(failed)
+        end
+      end)
+
+    case result do
+      {:ok, {updated, cards}} ->
+        Enum.each(cards, &Cards.notify_upserted/1)
+        broadcast_changed({:ok, updated}, task.board_id)
+
+      {:error, failed} ->
+        {:error, failed}
+    end
+  end
+
+  @doc """
+  Deletes one task — **refused with `{:error, :not_empty}` while any non-archived card on this
+  board still points at it**. On success, cards that pointed at it would keep
+  `story_activity_id` and fall into that activity's "No task yet" column; the guard means there
+  are none.
   """
   def delete_task(%StoryTask{} = task) do
-    task
-    |> Repo.delete()
-    |> broadcast_changed(task.board_id)
+    guarded_delete(task, :story_task_id, task.id, task.board_id)
   end
 
   @doc "Rewrites the given tasks' `position` to `1..n`; ids not on this board are ignored."
@@ -216,11 +297,48 @@ defmodule Relay.StoryMap do
     |> broadcast_changed(release.board_id)
   end
 
-  @doc "Deletes a release. Cards in that swimlane keep their cell; only `release_id` is nilified."
+  @doc """
+  Deletes a release (swimlane) — **refused with `{:error, :not_empty}` while any non-archived
+  card on this board still carries its `release_id`**. Cards keep their cell either way; only
+  `release_id` is nilified.
+
+  There is deliberately no "last release" guard here: that rule is a *display* one (the ✕ is
+  not rendered at all when the board has a single release, the artboard's
+  `canDelete: rels.length > 1`), and `RelayWeb.StoryMapGrid` already renders a board with zero
+  releases as one synthetic `(No release)` lane.
+  """
   def delete_release(%Release{} = release) do
-    release
-    |> Repo.delete()
-    |> broadcast_changed(release.board_id)
+    guarded_delete(release, :release_id, release.id, release.board_id)
+  end
+
+  # The count and the delete run in ONE transaction, so a card assigned concurrently cannot
+  # slip through the gap between them. `{:error, :not_empty}` is a deliberately new shape
+  # alongside the existing `{:ok, _} | {:error, changeset}`: the greyed ✕ is UI only, and a
+  # forged event must not delete a structure that still holds cards.
+  defp guarded_delete(record, field, id, board_id) do
+    fn ->
+      if holds_cards?(field, id, board_id), do: Repo.rollback(:not_empty), else: delete_or_rollback(record)
+    end
+    |> Repo.transaction()
+    |> broadcast_changed(board_id)
+  end
+
+  defp delete_or_rollback(record) do
+    case Repo.delete(record) do
+      {:ok, deleted} -> deleted
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
+  end
+
+  # "Non-empty" is ONE rule for all three structures: any non-archived card on this board
+  # pointing at it. `is_nil(archived_at)` is not optional — `Relay.Cards.list_cards/1` never
+  # shows archived cards, so the story map counts 0 and renders an ENABLED ✕; without the
+  # filter the server would then refuse that click, which is a dead button.
+  defp holds_cards?(field, id, board_id) do
+    Repo.exists?(
+      from c in Card,
+        where: c.board_id == ^board_id and is_nil(c.archived_at) and field(c, ^field) == ^id
+    )
   end
 
   @doc "Rewrites the given releases' `position` to `1..n`; ids not on this board are ignored."
@@ -393,24 +511,27 @@ defmodule Relay.StoryMap do
     end
   end
 
-  # One transaction, positions rewritten to 1..n in the order given. A `where` on board_id
-  # means an id from another board simply matches nothing — no error, no cross-board write.
+  # One transaction, positions rewritten to 1..n in the order given, then the broadcast.
   defp reorder(schema, board_id, ids) do
-    now = DateTime.truncate(DateTime.utc_now(), :second)
-
-    {:ok, _result} =
-      Repo.transaction(fn ->
-        ids
-        |> Enum.with_index(1)
-        |> Enum.each(fn {id, position} ->
-          schema
-          |> where([r], r.id == ^id and r.board_id == ^board_id)
-          |> Repo.update_all(set: [position: position, updated_at: now])
-        end)
-      end)
+    {:ok, :ok} = Repo.transaction(fn -> renumber(schema, board_id, ids) end)
 
     Events.broadcast(board_id, {:story_map_changed, board_id})
     :ok
+  end
+
+  # The renumber itself: no transaction, no broadcast, so `move_task/3` can compose it into its
+  # own. A `where` on board_id means an id from another board simply matches nothing — no
+  # error, no cross-board write.
+  defp renumber(schema, board_id, ids) do
+    now = DateTime.truncate(DateTime.utc_now(), :second)
+
+    ids
+    |> Enum.with_index(1)
+    |> Enum.each(fn {id, position} ->
+      schema
+      |> where([r], r.id == ^id and r.board_id == ^board_id)
+      |> Repo.update_all(set: [position: position, updated_at: now])
+    end)
   end
 
   defp broadcast_changed({:ok, _record} = result, board_id) do
@@ -418,7 +539,7 @@ defmodule Relay.StoryMap do
     result
   end
 
-  defp broadcast_changed({:error, _changeset} = result, _board_id), do: result
+  defp broadcast_changed({:error, _reason} = result, _board_id), do: result
 
   defp notify_card({:ok, %Card{} = card} = result) do
     :ok = Cards.notify_upserted(card)
