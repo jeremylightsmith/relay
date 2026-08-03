@@ -35,6 +35,16 @@ defmodule Relay.StoryMap do
   `Relay.Cards.notify_upserted/1`, so the card arrives with `owners`/`sub_tasks` preloaded
   exactly as that contract requires.
 
+  **Shared view settings (RE257).** The map's view state is board-wide, not per socket:
+  `view_defaults/0` is the one definition of the key set (today `"tray_open"`), `view/1` merges
+  it under the stored `boards.story_map_view` column dropping unknown keys, and `put_view/3`
+  persists one key and broadcasts `{:story_map_view_changed, board_id, view}` on
+  `"story_map_view:<board_id>"`. Deliberately **not** through `Relay.Events`: that bumps the
+  board version on every call, and a view toggle is not a domain mutation. Persisted rather
+  than in ETS so a late joiner and a post-deploy reload both see the view everyone else is on.
+  Deliberately NOT shared: `story_map_draft`, `story_map_draft_name` and `story_map_compose`
+  stay per-tab (RE263), so another tab's refresh can never eat what you are typing.
+
   **Deleting structure is refused while it still holds cards.** `delete_activity/1`,
   `delete_task/1` and `delete_release/1` return `{:error, :not_empty}` when any **non-archived**
   card on the board still points at them, checked inside the delete's own transaction. The
@@ -62,6 +72,13 @@ defmodule Relay.StoryMap do
   alias Schemas.Release
   alias Schemas.StoryActivity
   alias Schemas.StoryTask
+
+  @pubsub Relay.PubSub
+
+  # RE257 — the ONE definition of the shared story-map view key set and its defaults
+  # (AGENTS.md: a magic value is defined exactly once). RE259 (filter & focus) and RE260 (zoom)
+  # extend the shared view by adding a key HERE; nothing anywhere else re-types the key list.
+  @view_defaults %{"tray_open" => true}
 
   @doc "The board's activities in `position` order. Takes a board or a board id."
   def list_activities(board) do
@@ -532,6 +549,70 @@ defmodule Relay.StoryMap do
       |> where([r], r.id == ^id and r.board_id == ^board_id)
       |> Repo.update_all(set: [position: position, updated_at: now])
     end)
+  end
+
+  @doc """
+  The shared story-map view settings and their defaults — the single source of truth for the
+  key set. `view/1` merges over it and `put_view/3` validates against it, so a key can only
+  ever be added in one place.
+  """
+  def view_defaults, do: @view_defaults
+
+  @doc """
+  `board`'s shared story-map view: `view_defaults/0` with the stored map merged over it, and
+  any stored key that is no longer in the default set **dropped** — so a setting removed from
+  `view_defaults/0` can never resurrect from an old row.
+  """
+  def view(%Board{} = board) do
+    stored = board.story_map_view || %{}
+
+    Map.merge(@view_defaults, Map.take(stored, Map.keys(@view_defaults)))
+  end
+
+  @doc """
+  Writes one shared view setting and tells every viewer.
+
+  Board-wide and shared on purpose: every viewer of a board looks at the *same* map, which is
+  what makes RE257's raw-pixel cursors land on the right card for everyone.
+
+  An unknown `key` is refused with `{:error, :unknown_key}` and writes nothing, so a stale or
+  forged client cannot inject arbitrary keys into the board row. The board row is **re-read**
+  rather than trusted from the caller's struct: with more than one key in the set (RE259/RE260),
+  merging into a stale in-memory view would silently clobber another session's write.
+
+  Broadcasts `{:story_map_view_changed, board_id, view}` on `"story_map_view:<board_id>"` —
+  deliberately NOT through `Relay.Events`, which bumps the board version on every call. A view
+  toggle is not a domain mutation and must never make the CLI refetch the board.
+  """
+  def put_view(%Board{id: id}, key, value) when is_binary(key) do
+    if Map.has_key?(@view_defaults, key) do
+      board = Repo.get!(Board, id)
+      updated = Map.put(view(board), key, value)
+
+      case board |> Board.story_map_view_changeset(%{story_map_view: updated}) |> Repo.update() do
+        {:ok, _board} ->
+          broadcast_view(id, updated)
+          {:ok, updated}
+
+        {:error, changeset} ->
+          {:error, changeset}
+      end
+    else
+      {:error, :unknown_key}
+    end
+  end
+
+  @doc "Subscribes the calling process to `board_id`'s shared story-map view topic."
+  def subscribe_view(board_id), do: Phoenix.PubSub.subscribe(@pubsub, view_topic(board_id))
+
+  @doc "The shared story-map view topic for `board_id`."
+  def view_topic(board_id), do: "story_map_view:#{board_id}"
+
+  # Fire-and-forget, mirroring Relay.Events.broadcast/2's contract: a PubSub failure can never
+  # fail the interaction that triggered it.
+  defp broadcast_view(board_id, view) do
+    _ = Phoenix.PubSub.broadcast(@pubsub, view_topic(board_id), {:story_map_view_changed, board_id, view})
+    :ok
   end
 
   defp broadcast_changed({:ok, _record} = result, board_id) do

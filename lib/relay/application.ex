@@ -16,6 +16,9 @@ defmodule Relay.Application do
         Relay.Repo,
         {DNSCluster, query: Application.get_env(:relay, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Relay.PubSub},
+        # RE257 — story-map presence (roster + cursor topics). Requires Phoenix.PubSub above.
+        # Touches no database, so it is safe to start in every environment including test.
+        Relay.Presence,
         RelayWeb.ApiLog,
         Relay.BoardWatch,
         # RLY-133: server-side dispatch. Capacity store (fed by the executor heartbeat), the per-board

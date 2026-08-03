@@ -29,6 +29,7 @@ verifies it's current).
 flowchart LR
     Mailer
     Markdown
+    Presence
     Accounts --> Repo
     Activity --> Events
     Activity --> Repo

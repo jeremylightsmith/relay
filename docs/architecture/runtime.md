@@ -30,6 +30,7 @@ One flat `one_for_one` supervisor (`Relay.Supervisor`, started by `Relay.Applica
 | `Relay.Repo` | Ecto → Postgres |
 | `DNSCluster` | Fly multi-node discovery (no-op locally) |
 | `Phoenix.PubSub` (`Relay.PubSub`) | all topics below |
+| `Relay.Presence` | `Phoenix.Presence` tracker + fetcher `Task.Supervisor` for story-map presence (RE257); requires `Phoenix.PubSub` above, touches no database |
 | `RelayWeb.ApiLog` | in-memory recent API request log for the admin page |
 | `Relay.BoardWatch` | ETS owner for per-board version counters (RLY-12) |
 | `Relay.Runs.Capacity` | ETS owner for per-executor advertised free capacity (RLY-133), fed by the executor heartbeat |
@@ -86,6 +87,9 @@ tracked as a separate follow-up.
 | `board:<board_id>` | `Relay.Events` — contexts only, after successful mutations | `{:card_upserted, card}`, `{:card_moved, card, from_stage_id}`, `{:card_archived, card}`, `{:timeline_appended, card_id, entry}`, `{:card_log_appended, card_id, entries}`, `{:stages_changed, board_id}`, `{:story_map_changed, board_id}`, `{:board_updated, board}`, `{:vote_changed, card_id}` | every open `BoardLive` for that board (and, for `{:vote_changed, card_id}`, the public board — same fire-and-forget contract) |
 | `board:<board_id>:logs` | `Relay.AgentLog` | `{:agent_log, entry}` — live runner feed lines | the board's log sheet, only while open (no backfill by design) |
 | `board:<board_id>:runs` | `Relay.Runs` | `{:run_started, run}`, `{:node_started, run, execution}`, `{:node_finished, run, execution}`, `{:run_parked, run}`, `{:run_resumed, run}`, `{:run_finished, run}`, `{:run_changed, card_id}` | run UI (card 07/W8) and tests. Does NOT bump `BoardWatch`. The engine's fine-grained events above are internal; `{:run_changed, card_id}` (`Relay.Runs.broadcast_run_changed/2`, RLY-137) is the read side's coarse public contract — a subscriber refetches the card's runs/summary rather than patching state from a payload. |
+| `story_map_presence:<board_id>` | `Relay.Presence` (Phoenix.Presence's diff protocol) | `%Phoenix.Socket.Broadcast{event: "presence_diff"}` — joins/leaves of story-map viewers | every open `BoardLive` with `live_action == :story_map`. Does NOT bump `BoardWatch` |
+| `story_map_cursor:<board_id>` | `Relay.Presence` | `{:story_map_cursor, user_id, name, email, x, y}`, `{:story_map_cursor_gone, user_id}` | the same sockets; each relays to its own client with `push_event/3` (no template diff). Does NOT bump `BoardWatch` |
+| `story_map_view:<board_id>` | `Relay.StoryMap.put_view/3` | `{:story_map_view_changed, board_id, view}` — the board-wide shared map view settings changed | the same sockets, **including the writer** (there is no optimistic local assign). Does NOT bump `BoardWatch` |
 | `events:firehose` | `Relay.Events` — mirrors every board event as `{board_id, event}` | every `board:<board_id>` event, tagged with its board id | `Relay.Runs.Listener` (reconciles card events against runs — RLY-132; its first rule closes, rather than resumes, an active run whose card has reached a terminal-type stage — RLY-233) |
 | `runs:capacity` | `Relay.Runs.Capacity` | `{:executor_capacity_changed, executor_id}` — an executor's advertised free capacity changed | every per-board `Relay.Runs.Scheduler.Server` |
 | `api_log` | `RelayWeb.ApiLog` | `{:api_log, entry}` | `Admin.ApiLive` |
@@ -94,6 +98,11 @@ Two invariants make the seam trustworthy: **only contexts broadcast** domain eve
 LiveView and REST mutations share one path), and broadcasting is **fire-and-forget** (a
 PubSub failure can never fail the mutation). Every `Events.broadcast/2` also bumps the
 board's `BoardWatch` version, which the CLI polls to avoid refetching unchanged boards.
+
+RE257's three topics are the deliberate exception to "only contexts broadcast domain events":
+they carry **presence**, not mutations, and they bypass `Relay.Events` precisely so they never
+bump the board version — a cursor at 20 Hz through `Events.broadcast/2` would be a write storm
+against the CLI's version poll.
 
 ## Load-bearing sequences
 

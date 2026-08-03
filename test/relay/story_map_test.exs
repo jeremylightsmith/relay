@@ -1,9 +1,11 @@
 defmodule Relay.StoryMapTest do
   use Relay.DataCase, async: true
 
+  alias Relay.Boards
   alias Relay.Cards
   alias Relay.Events
   alias Relay.StoryMap
+  alias Schemas.Board
   alias Schemas.Card
   alias Schemas.Release
   alias Schemas.StoryActivity
@@ -755,5 +757,60 @@ defmodule Relay.StoryMapTest do
     attrs = Map.merge(%{story_task_id: task.id, release_id: release.id}, attrs)
     {:ok, placed} = StoryMap.assign_card(card, attrs)
     placed
+  end
+
+  describe "shared map view settings (RE257)" do
+    setup do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      %{user: user, board: board}
+    end
+
+    test "view_defaults/0 is the one definition of the shared key set" do
+      assert StoryMap.view_defaults() == %{"tray_open" => true}
+    end
+
+    test "view/1 merges the defaults under a board that has never been written", %{board: board} do
+      assert StoryMap.view(board) == %{"tray_open" => true}
+    end
+
+    test "view/1 drops a stored key that is no longer part of the set", %{board: board} do
+      {1, _} =
+        Repo.update_all(from(b in Board, where: b.id == ^board.id),
+          set: [story_map_view: %{"tray_open" => false, "removed_setting" => 42}]
+        )
+
+      assert StoryMap.view(Repo.get!(Board, board.id)) == %{"tray_open" => false}
+    end
+
+    test "put_view/3 persists, broadcasts and returns the whole view", %{board: board} do
+      :ok = StoryMap.subscribe_view(board.id)
+
+      assert {:ok, %{"tray_open" => false}} = StoryMap.put_view(board, "tray_open", false)
+
+      board_id = board.id
+      assert_receive {:story_map_view_changed, ^board_id, %{"tray_open" => false}}
+      assert Repo.get!(Board, board.id).story_map_view == %{"tray_open" => false}
+    end
+
+    test "put_view/3 reads the CURRENT row, so a concurrent key write is not clobbered",
+         %{board: board} do
+      # `board` is the caller's possibly-stale struct; another session has since written.
+      {1, _} =
+        Repo.update_all(from(b in Board, where: b.id == ^board.id),
+          set: [story_map_view: %{"tray_open" => false}]
+        )
+
+      assert {:ok, %{"tray_open" => true}} = StoryMap.put_view(board, "tray_open", true)
+    end
+
+    test "put_view/3 rejects an unknown key and writes nothing", %{board: board} do
+      :ok = StoryMap.subscribe_view(board.id)
+
+      assert StoryMap.put_view(board, "shoe_size", 11) == {:error, :unknown_key}
+
+      assert Repo.get!(Board, board.id).story_map_view == %{}
+      refute_receive {:story_map_view_changed, _board_id, _view}, 100
+    end
   end
 end

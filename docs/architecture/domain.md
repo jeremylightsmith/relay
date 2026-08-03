@@ -124,6 +124,17 @@ sharing behavior.
   **409 `would_strand_run`** (RLY-217); the board pre-checks and confirms instead of surfacing
   the raw error.
 - **Members** — board membership; who can see and act on a board.
+- **Presence** (`Relay.Presence`) — who is looking at a board's **story map** right now, and
+  where their pointer is (RE257); the app's first `Phoenix.Presence` context, supervised
+  directly after `Phoenix.PubSub`. Two board-scoped topics it owns outright:
+  `story_map_presence:<board_id>` (the roster, via Phoenix.Presence's diff protocol) and
+  `story_map_cursor:<board_id>` (the ephemeral cursor stream). **Neither goes through
+  `Relay.Events`** — that bumps the board version on every call, so a 20 Hz cursor would make
+  the CLI refetch the whole board on every mouse twitch; `Relay.PresenceTest` pins the version
+  as unchanged after a track, a cursor and a view write. Tracked by **user id**, so one person
+  with three tabs is one avatar; tracking happens only for `live_action == :story_map`
+  (the kanban board renders no presence UI), and untracking is the tracked pid's exit.
+  Humans only — no AI/agent avatar and no agent cursor.
 - **Accounts** — users and Google sign-in (`GoogleTokenValidator` verifies native mobile
   tokens); user API tokens for `/api/all`.
 - **ApiKeys** — per-board agent credentials for the `/api` scope.
@@ -225,6 +236,18 @@ sharing behavior.
   merged column keeps its `story_task_id` when that task still belongs to the target activity —
   a purely vertical drag changes release only and must not silently unset the task; the
   activity is then derived from the task by `StoryMap.resolve_placement/2`.
+  **Shared view (RE257):** the map's view settings are **board-wide**, stored in the
+  `boards.story_map_view` jsonb column and written only through `put_view/3`. `view_defaults/0`
+  is the one definition of the key set (today `%{"tray_open" => true}`), `view/1` merges it
+  under the stored map dropping unknown keys, and `put_view/3` refuses a key outside the set
+  with `{:error, :unknown_key}` and re-reads the row before merging so a concurrent write is
+  not clobbered. It broadcasts `{:story_map_view_changed, board_id, view}` on
+  `story_map_view:<board_id>` — again outside `Relay.Events`, same no-version-bump rule. There
+  is deliberately no optimistic local assign: the clicker re-renders from the same broadcast
+  everyone else does, so viewers cannot disagree. `story_map_draft` / `story_map_draft_name` /
+  `story_map_compose` stay **per-tab** (RE263) — sharing them would hand one person the ability
+  to clear another's in-progress input. RE259 and RE260 extend the shared view by adding a key
+  to `view_defaults/0`.
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
 
 ## Core schemas
