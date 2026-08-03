@@ -12,7 +12,9 @@ defmodule Relay.StoryMap do
   **The card→cell invariant** — if `story_task_id` is set, `story_activity_id` is set and
   equals that task's activity — is enforced by *derivation*, not by trusting the caller:
   `assign_card/2` looks the task up board-scoped and takes the activity from it, ignoring any
-  activity passed alongside. `Schemas.Card.story_map_changeset/2` rejects the half-state on
+  activity passed alongside; `update_task/2` closes the other half — moving a task to another
+  activity drags its mapped cards' `story_activity_id` along in the same transaction.
+  `Schemas.Card.story_map_changeset/2` rejects the half-state on
   the direct-changeset path. `release_id` is genuinely independent: a card can be mapped to a
   cell with no release, and the artboard's "an activity with no release renders in the last
   lane" is a *display* rule owned by the story-map view (RE264), never a stored default.
@@ -115,13 +117,53 @@ defmodule Relay.StoryMap do
   @doc """
   Renames/repositions a task, and may move it to another activity **on the same board**.
   A cross-board move is rejected with `{:error, changeset}`.
+
+  A move drags every card mapped to this task along with it: their `story_activity_id` is
+  rewritten in the same transaction, so the card→cell invariant holds by derivation on this
+  write path too. Each card that actually moved also gets its own `{:card_upserted, card}`
+  (broadcast after the transaction commits) — `{:story_map_changed, board_id}` only tells
+  receivers to refetch the *structure*.
   """
   def update_task(%StoryTask{} = task, attrs) do
-    task
-    |> StoryTask.changeset(attrs)
-    |> validate_activity_on_board(task.board_id)
-    |> Repo.update()
-    |> broadcast_changed(task.board_id)
+    changeset =
+      task
+      |> StoryTask.changeset(attrs)
+      |> validate_activity_on_board(task.board_id)
+
+    result =
+      Repo.transaction(fn ->
+        case Repo.update(changeset) do
+          {:ok, updated} -> {updated, resync_mapped_cards(updated)}
+          {:error, failed} -> Repo.rollback(failed)
+        end
+      end)
+
+    case result do
+      {:ok, {updated, cards}} ->
+        Enum.each(cards, &Cards.notify_upserted/1)
+        broadcast_changed({:ok, updated}, task.board_id)
+
+      {:error, failed} ->
+        {:error, failed}
+    end
+  end
+
+  # The card→cell invariant is derived, never trusted: a task that changes activity drags its
+  # mapped cards' `story_activity_id` with it. `IS DISTINCT FROM` so a card left in the
+  # half-state (task set, activity nil) is repaired rather than skipped by NULL comparison.
+  defp resync_mapped_cards(%StoryTask{} = task) do
+    {_count, cards} =
+      Repo.update_all(
+        from(c in Card,
+          where:
+            c.story_task_id == ^task.id and
+              fragment("? IS DISTINCT FROM ?", c.story_activity_id, ^task.story_activity_id),
+          select: c
+        ),
+        set: [story_activity_id: task.story_activity_id, updated_at: DateTime.truncate(DateTime.utc_now(), :second)]
+      )
+
+    cards
   end
 
   @doc """

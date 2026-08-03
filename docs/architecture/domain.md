@@ -153,7 +153,9 @@ sharing behavior.
   `Schemas.Card.story_map_changeset/2`, starting fully UNMAPPED, with release independent of
   activity/task. *A set `story_task_id` implies the matching `story_activity_id`*, enforced by
   derivation in `assign_card/2` (the task supplies its activity; a conflicting one passed
-  alongside is ignored) and by the changeset as a backstop. Deleting structure **unmaps**
+  alongside is ignored), by `update_task/2` (moving a task to another activity rewrites its
+  mapped cards' `story_activity_id` in the same transaction), and by the changeset as a
+  backstop. Deleting structure **unmaps**
   cards, never deletes them (`cards → structure` is `nilify_all`, `activity → its tasks` is
   `delete_all`). Structure writes broadcast `{:story_map_changed, board_id}`; assignment reuses
   `{:card_upserted, card}` via `Cards.notify_upserted/1`. `Relay.Boards` deliberately does

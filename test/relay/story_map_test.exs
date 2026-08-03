@@ -120,6 +120,36 @@ defmodule Relay.StoryMapTest do
       assert moved.story_activity_id == a2.id
     end
 
+    test "update_task/2 drags mapped cards' story_activity_id along with the task", %{board: board, stage: stage} do
+      a1 = insert(:story_activity, board: board)
+      a2 = insert(:story_activity, board: board)
+      task = insert(:story_task, story_activity: a1)
+      card = insert(:card, board: board, stage: stage)
+      {:ok, card} = StoryMap.assign_card(card, %{story_task_id: task.id})
+      assert card.story_activity_id == a1.id
+
+      Events.subscribe(board.id)
+      {:ok, _moved} = StoryMap.update_task(task, %{story_activity_id: a2.id})
+
+      assert Repo.get!(Card, card.id).story_activity_id == a2.id
+      assert_receive {:card_upserted, %Card{id: id, story_activity_id: activity_id}}
+      assert id == card.id
+      assert activity_id == a2.id
+    end
+
+    test "update_task/2 leaves cards mapped to other tasks alone", %{board: board, stage: stage} do
+      a1 = insert(:story_activity, board: board)
+      a2 = insert(:story_activity, board: board)
+      task = insert(:story_task, story_activity: a1)
+      other_task = insert(:story_task, story_activity: a1)
+      other_card = insert(:card, board: board, stage: stage)
+      {:ok, other_card} = StoryMap.assign_card(other_card, %{story_task_id: other_task.id})
+
+      {:ok, _moved} = StoryMap.update_task(task, %{story_activity_id: a2.id})
+
+      assert Repo.get!(Card, other_card.id).story_activity_id == a1.id
+    end
+
     test "update_task/2 rejects a move to another board's activity", %{board: board} do
       task = insert(:story_task, story_activity: insert(:story_activity, board: board))
       foreign = insert(:story_activity, board: insert(:board))
