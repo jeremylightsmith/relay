@@ -257,6 +257,41 @@ that stays server-side.
 - The full outcome-file contract (`RELAY_NODE_OUTCOME`) executors must honor is
   [Declaring an outcome](#declaring-an-outcome) below.
 
+## The foreach cursor (RE252)
+
+A `foreach` node iterates the card's `sub_tasks`, and every execution under it carries the
+`sub_task_id` of the iteration it belongs to (`node_executions.sub_task_id`). "Which task is
+next" is **derived, never persisted**: `Relay.Runs.next_sub_task_id/1` returns the first
+`sub_task` in position order whose `done` is false, so a crashed-and-resumed run recomputes the
+same answer with no cursor column.
+
+But `done` is not a private engine field. Three writers set it: the loop tail's check-off
+(`RunServer.check_off_sub_task/3`), the card drawer's checkbox, and `relay check <ref> <id>`
+(`PATCH /api/cards/:ref/sub-tasks/:id`) — which any agent in any node can call. So the derived
+cursor advances on **exactly one thing: a `when: :foreach_remaining` edge**, the flow author's
+explicit "next iteration". `RunServer.binding_for/5` keys off the guard the engine reports
+(`Engine.decide/4` returns `{:transition, target, guard}`), never off the target node:
+
+| Route into the next node | Binding |
+| --- | --- |
+| `when: :foreach_remaining` edge | the derived cursor — the loop tail already checked the finished task off inside the same transaction |
+| `when: :foreach_exhausted` edge | `nil` — the run has left the loop |
+| unguarded edge into the foreach head | **inherit**, falling back to the derived cursor when unbound (first entry from outside the loop, e.g. `branch → implement`) |
+| anything else, including a `{:retry, node}` | inherit |
+
+The third row is the one that matters. A review's failure loop-back
+(`spec_review`/`quality_review` `--failed--> implement`) is **not** an advance: it re-enters the
+**same** iteration with the reviewer's detail attached as `findings`, whatever any other writer
+did to `done` in the meantime. Keying off the target node instead — as the engine did before
+RE252 — made a failed review re-derive the cursor, so with the in-flight task already checked
+off the re-run landed on the NEXT task, that task's findings were delivered to nothing, and the
+run marched on to `final_review` and `smoke` with the branch looking clean.
+
+`done` stays writable while a run is live, deliberately: a human un-checking a box mid-run is a
+legitimate escape hatch. The residual risk is confined to the success path, where an external
+write can make `Relay.Runs.remaining_sub_tasks/1` under-count and exit the loop early. The
+failure path never consults `done` at all.
+
 ## Run recovery surface (RLY-189)
 
 A terminally `failed` run can be re-entered by a human — the branch, worktree, execution
