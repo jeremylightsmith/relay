@@ -64,13 +64,32 @@ defmodule RelayWeb.StoryMapComponentsTest do
     )
   end
 
-  defp grid_html do
+  # One activity, no tasks at all — the shape every board has before RE263 lets anyone create
+  # structure, and the case the artboard gives a strong (not dashed) header border.
+  defp bare_grid do
+    activity = %StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1}
+    releases = [%Release{id: 100, board_id: 1, name: "MVP", position: 1}]
+
+    StoryMapGrid.build([activity], [], releases, [card(1, story_activity_id: 1, release_id: 100)])
+  end
+
+  defp grid_html(grid \\ nil) do
     render_component(&StoryMapComponents.story_map/1,
-      grid: grid(),
+      grid: grid || grid(),
       board: board(),
       stages: stages(),
       stalled_ids: MapSet.new()
     )
+  end
+
+  # The `style` of one element, so a border assertion is anchored to the element it is about.
+  defp style_of(html, selector) do
+    html
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query(selector)
+    |> LazyHTML.attribute("style")
+    |> List.first()
+    |> Kernel.||("")
   end
 
   defp tray(open) do
@@ -148,6 +167,17 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert face.pct == 50
       assert face.badge == "CODE · 50%"
     end
+
+    test "a checklist with nothing ticked is 0% and the badge stays bare" do
+      unstarted = card(1, sub_tasks: [%SubTask{id: 1, title: "a", done: false, position: 0}])
+
+      face = StoryMapComponents.card_face(unstarted, board(), stages(), MapSet.new())
+
+      # `Cards.sub_task_pct/1` is right to answer 0 (the drawer bar needs it); the artboard
+      # treats 0 as absent — `stageText: c.pct ? … : c.stage`, line ~385.
+      assert face.pct == 0
+      assert face.badge == "CODE"
+    end
   end
 
   describe "story_map_card/1 — the artboard's full-zoom face" do
@@ -200,6 +230,21 @@ defmodule RelayWeb.StoryMapComponentsTest do
       refute html =~ "oklch(0.56 0.16 292)"
     end
 
+    test "a 0% card renders no bar — the artboard's `hasBar: full && !!c.pct`, line ~386" do
+      html =
+        render_component(&StoryMapComponents.story_map_card/1,
+          id: "story-map-card-RLY4",
+          ref: "RLY4",
+          title: "Checklist created, nothing ticked",
+          badge: "CODE",
+          hue: :violet,
+          pct: 0
+        )
+
+      refute html =~ "story-map-card-bar"
+      refute html =~ "width:0%"
+    end
+
     test "a needs-input card gets the amber ! disc" do
       html =
         render_component(&StoryMapComponents.story_map_card/1,
@@ -240,9 +285,29 @@ defmodule RelayWeb.StoryMapComponentsTest do
     test "the No task yet column is dashed and tinted, and the activity's last column is strong" do
       html = grid_html()
 
-      assert html =~ "border-right:1px dashed oklch(0.86 0.01 255)"
-      assert html =~ "background:oklch(0.978 0.004 255)"
-      assert html =~ "border-right:2px solid oklch(0.83 0.02 255)"
+      # Anchored to the elements themselves: the bare `=~` forms passed even with the
+      # `last_of_activity?` branches deleted, because the corner, lane rail and band all emit
+      # the strong border unconditionally.
+      no_task = style_of(html, "#story-map-no-task-1")
+      assert no_task =~ "border-right:1px dashed oklch(0.86 0.01 255)"
+      assert no_task =~ "background:oklch(0.978 0.004 255)"
+
+      assert style_of(html, "#story-map-task-10") =~ "border-right:2px solid oklch(0.83 0.02 255)"
+    end
+
+    test "an activity with no tasks: its one column is the activity boundary, so strong" do
+      # Artboard line ~456: `border-right:'+(tasks.length ? '1px dashed …' : GL_STRONG)`, with
+      # `lastOfAct:!tasks.length` on line ~453. RE263 (create structure) ships after this card,
+      # so a zero-task activity is the normal shape for a board just starting on the map.
+      html = grid_html(bare_grid())
+
+      assert style_of(html, "#story-map-no-task-1") =~
+               "border-right:2px solid oklch(0.83 0.02 255)"
+
+      # The body cell stays dashed — the artboard's cell branch (line ~524) has no such
+      # condition.
+      assert style_of(html, "#story-map-cell-nt-1-r-100") =~
+               "border-right:1px dashed oklch(0.86 0.01 255)"
     end
 
     test "each card renders in the cell its assignment implies" do

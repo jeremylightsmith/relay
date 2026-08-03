@@ -890,11 +890,8 @@ defmodule RelayWeb.CoreComponents do
       >
         Board
       </.link>
-      <%!-- Plain string, not `~p`: the `/board/:slug/story-map` route itself lands in RE264's
-            next task (router.ex); verified-routes compilation would fail on an unmatched path
-            before that lands. Task 3 is free to switch this to `~p` once the route exists. --%>
       <.link
-        navigate={"/board/#{@board_slug}/story-map"}
+        navigate={~p"/board/#{@board_slug}/story-map"}
         id="board-view-tab-story-map"
         aria-current={@active == :story_map && "page"}
         style={board_view_tab_style(@active == :story_map)}

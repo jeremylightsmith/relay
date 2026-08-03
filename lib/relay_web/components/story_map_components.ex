@@ -78,7 +78,10 @@ defmodule RelayWeb.StoryMapComponents do
         true -> String.upcase(stage.name)
       end
 
-    if pct, do: "#{label} · #{pct}%", else: label
+    # `Cards.sub_task_pct/1` answers 0 for a checklist with nothing ticked — correct for the
+    # drawer's bar, but the artboard treats 0 as absent (`stageText: c.pct ? … : c.stage`,
+    # line ~385), so the badge stays bare here.
+    if pct && pct > 0, do: "#{label} · #{pct}%", else: label
   end
 
   defp hue(stage, done?, needs?, stalled?) do
@@ -218,7 +221,7 @@ defmodule RelayWeb.StoryMapComponents do
       </span>
       <span style={badge_style(@hue)}>{@badge}</span>
       <div
-        :if={@pct}
+        :if={@pct && @pct > 0}
         class="story-map-card-bar"
         style={"position:absolute;left:0;bottom:0;height:3px;width:#{@pct}%;background:oklch(0.56 0.16 292);"}
       >
@@ -430,7 +433,10 @@ defmodule RelayWeb.StoryMapComponents do
   defp column_header_style(column, index) do
     {background, border_right, color} =
       if column.no_task? do
-        {@no_task_bg, @gl_dashed, "oklch(0.58 0.02 255)"}
+        # Artboard line ~456: `tasks.length ? '1px dashed …' : GL_STRONG` — when the activity has
+        # no tasks at all this single column *is* the activity boundary, so it carries the strong
+        # separator. (The body cell, artboard line ~524, is dashed unconditionally.)
+        {@no_task_bg, if(column.last_of_activity?, do: @gl_strong, else: @gl_dashed), "oklch(0.58 0.02 255)"}
       else
         {"oklch(1 0 0)", if(column.last_of_activity?, do: @gl_strong, else: @gl_light), "oklch(0.36 0.02 255)"}
       end
