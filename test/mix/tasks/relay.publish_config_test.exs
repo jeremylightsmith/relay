@@ -1,8 +1,5 @@
 defmodule Mix.Tasks.Relay.PublishConfigTest do
-  # async: false — the drift/--check describe block below writes fixtures under its own
-  # `tmp_dir`, and publishing (see setup below) copies real source files; keep the run serial
-  # so a slow copy on one test doesn't overlap another.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import ExUnit.CaptureIO
 
@@ -11,23 +8,53 @@ defmodule Mix.Tasks.Relay.PublishConfigTest do
 
   @moduletag :tmp_dir
 
-  # RE185 review: publishing writes a `.relay/published.json` marker at `src`. Publishing
-  # straight from `File.cwd!()` would make every test run write THIS repo's TRACKED marker —
-  # a hard-killed `mix test` would then leave the working tree claiming a version was
-  # published when it wasn't. Instead, copy just what `publish/2` reads (bin/relay, .claude/,
-  # relay.md) into a scratch `src` under `tmp_dir`, so the marker it writes lands there too.
-  setup %{tmp_dir: tmp_dir} do
-    src = Path.join(tmp_dir, "_src")
+  # RE185 review (round 2): publishing writes a `.relay/published.json` marker at `src`.
+  # Publishing straight from `File.cwd!()` would make every test run write THIS repo's TRACKED
+  # marker — a hard-killed `mix test` would then leave the working tree claiming a version was
+  # published when it wasn't. So `src` is a scratch copy, never `File.cwd!()`.
+  #
+  # That copy must stay narrow: `.claude/worktrees` (where the executor itself runs) lives
+  # under `.claude/` in this repo and can be gigabytes — copying `.claude` wholesale, once per
+  # test, turned a review fix into a disk-filling regression. Copy only what `publish/2` reads
+  # (`lib/mix/tasks/relay.publish_config.ex:127-146`) and build it once in `setup_all`, not per
+  # test — `.claude/agents`, `.claude/commands`, and `.claude/skills` alone are under 200K.
+  setup_all do
+    src = Path.join(System.tmp_dir!(), "relay_publish_config_test_src")
+    File.rm_rf!(src)
 
-    for rel <- ~w(bin .claude relay.md) do
+    for rel <- ~w(bin relay.md .claude/agents .claude/commands .claude/skills) do
       dest = Path.join(src, rel)
       dest |> Path.dirname() |> File.mkdir_p!()
       File.cp_r!(Path.join(File.cwd!(), rel), dest)
     end
 
+    on_exit(fn -> File.rm_rf!(src) end)
+
+    # Guard the invariant the scratch `src` above exists to protect: this repo's own TRACKED
+    # `.relay/published.json` must never be touched by running this suite. Snapshot it now and
+    # byte-diff it after every test in this module has run (not a value compare — bin/relay's
+    # EXECUTOR_VERSION and the tracked marker legitimately disagree mid-branch, see the
+    # `--check`/`--check --warn` split below, so a same-content rewrite must still trip this).
+    tracked_marker = PublishMarker.path(File.cwd!())
+    before_suite = File.read(tracked_marker)
+
+    on_exit(fn ->
+      after_suite = File.read(tracked_marker)
+
+      if after_suite != before_suite do
+        raise "this repo's tracked #{PublishMarker.rel_path()} changed while running " <>
+                "#{inspect(__MODULE__)} — some test published straight to File.cwd!() " <>
+                "instead of the isolated src"
+      end
+    end)
+
+    {:ok, src: src}
+  end
+
+  setup %{tmp_dir: tmp_dir, src: src} do
     capture_io(fn -> PublishConfig.publish(src, tmp_dir) end)
 
-    {:ok, manifest: Jason.decode!(File.read!(Path.join(tmp_dir, "manifest.json"))), src: src}
+    {:ok, manifest: Jason.decode!(File.read!(Path.join(tmp_dir, "manifest.json")))}
   end
 
   test "the manifest lists every tooling skill", %{manifest: manifest} do
@@ -61,17 +88,6 @@ defmodule Mix.Tasks.Relay.PublishConfigTest do
   test "publishing records what it published in the marker", %{src: src} do
     assert PublishMarker.version(PublishMarker.path(src)) ==
              PublishConfig.executor_version(src)
-  end
-
-  test "the fixture publishes from an isolated copy of the source tree, not this repo's cwd", %{
-    src: src,
-    tmp_dir: tmp_dir
-  } do
-    # RE185 review: this repo's TRACKED .relay/published.json must never be a test's side
-    # effect — a hard-killed `mix test` would leave the working tree claiming a version was
-    # published when it wasn't. `src` must be a copy under `tmp_dir`, never `File.cwd!()`.
-    assert String.starts_with?(src, tmp_dir)
-    refute src == File.cwd!()
   end
 
   test "the scaffolded executor.json advertises the auto-update knob", %{tmp_dir: tmp_dir} do

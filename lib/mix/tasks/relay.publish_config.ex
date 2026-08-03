@@ -16,11 +16,14 @@ defmodule Mix.Tasks.Relay.PublishConfig do
   (RE185) — the marker `Relay.Runs.latest_executor_version/0` reads at compile time, so an
   executor never auto-updates to code relay-config does not actually serve yet.
 
-      mix relay.publish_config --check          # non-zero exit if bin/relay is ahead of the marker
-      mix relay.publish_config --check --warn   # same check, but only warns — never fails
+      mix relay.publish_config --check                    # non-zero exit if bin/relay is ahead of the marker
+      mix relay.publish_config --check --warn              # same check, but only warns — never fails
+      mix relay.publish_config --check /path/to/source     # check that source root instead of cwd
 
   `--check` is a real gate (finish/merge time); `--check --warn` is the reminder wired into
-  `mix precommit` so iterating on `bin/relay` is never blocked mid-branch.
+  `mix precommit` so iterating on `bin/relay` is never blocked mid-branch. Note that the
+  positional argument means SOURCE root under `--check` but DESTINATION under plain publish —
+  the two modes never take the same kind of path.
   """
 
   use Mix.Task
