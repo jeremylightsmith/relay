@@ -1909,12 +1909,18 @@ defmodule Relay.Runs do
   defp awaiting_human_answer?(%Run{} = run), do: park_kind(run) == :question
 
   @doc """
-  Whether `run` stalled in a way retry can revive in place — the ONE eligibility rule shared by
-  per-run retry (`check_retryable/1`), the bulk sweep (`restart_stalled/2`), and the board's
-  stalled badge (`restartable_count/1`). True for a clean `:failed` run, and for an escalation
-  park (`park_kind/3 == :escalation` — a node failure routed to a human, RLY-194/A4). False for a
-  genuine `:needs_input` question, any `:executor_gone` park (RLY-199 auto-resumes those), and
-  `:running`/`:done`/`:cancelled`.
+  Whether `run` itself stalled in a way retry can revive in place — the ONE per-RUN eligibility
+  rule, used directly by per-run retry (`check_retryable/1`). True for a clean `:failed` run, and
+  for an escalation park (`park_kind/3 == :escalation` — a node failure routed to a human,
+  RLY-194/A4). False for a genuine `:needs_input` question, any `:executor_gone` park (RLY-199
+  auto-resumes those), and `:running`/`:done`/`:cancelled`.
+
+  The board-scoped consumers — the bulk sweep (`restart_stalled/2`), the board's stalled badge
+  (`restartable_count/1`), and the restart dialog (`stalled_cards/1`) — all read this same rule
+  through `restartable_runs/1`, which ADDITIONALLY excludes cards already in a terminal-type
+  stage (`Stage.terminal_types/0`, RE247): a run can be `restartable?/1` true while its card has
+  since moved to Done, and the board-scoped consumers correctly skip it where this function
+  cannot (it only sees the run).
   """
   def restartable?(%Run{status: status, parked_reason: parked_reason} = run),
     do: restartable_by_outcome?(status, parked_reason, latest_execution_outcome(run))

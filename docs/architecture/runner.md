@@ -306,7 +306,9 @@ retry by construction, and finished commits cannot be thrown away.
   body and funnel into `Relay.Runs.retry_run/2`.
 - `POST /api/board/restart-stalled` (`RelayWeb.Api.RunController.restart_stalled/2`) — bulk-revives
   every restartable run on the token's board (RLY-228), returning
-  `200 {"data": {"status": "ok", "restarted", "refused"}}`. Board-scoped by the bearer token.
+  `200 {"data": {"status": "ok", "restarted", "refused"}}`. Board-scoped by the bearer token. Cards
+  already in a terminal-type stage (`Relay.Schemas.Stage.terminal_types/0`) are excluded before
+  this runs — a finished card is not stalled (RE247) — and are not counted `refused`.
 
 Success is `200 {"data": {"status": "ok", "run_id", "node", "retries"}}`. A refusal is
 `422 {"error": {"code", "message"}}` where `code` is one of `not_failed`, `awaiting_answer`,
