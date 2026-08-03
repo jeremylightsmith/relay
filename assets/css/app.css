@@ -154,7 +154,15 @@
   border-right-color: oklch(0.6 0.14 250) !important;
   background: oklch(0.96 0.03 250) !important;
 }
-.story-map-card.dragging {
+/* RE261 — a header's drop state is the artboard's `hdrDrop` (line ~415): a 2px BLUE RING,
+   deliberately distinct from a body cell's blue tint above, so a header drop and a cell drop
+   never look alike. Same !important justification: the header's own styles are inline artboard
+   values on the element. */
+.story-map-header-drop.drag-over {
+  box-shadow: 0 0 0 2px oklch(0.55 0.14 250) !important;
+}
+.story-map-card.dragging,
+.story-map-header.dragging {
   opacity: 0.5 !important;
 }
 

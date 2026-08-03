@@ -6,10 +6,18 @@ defmodule RelayWeb.StoryMapComponents do
   Full zoom, **except** the affordances that are live: RE263's three create affordances — the
   trailing `＋` add-activity column, the `＋ Add task` on each activity header and on a bare
   placeholder, and the `＋ Release` row — which this module renders and `RelayWeb.BoardLive`
-  handles; RE262's drag and drop (below); and RE262's inline `＋` add-card in every cell
-  (below). The artboard's `⠿` grips, `▾` collapse, `✦` suggest, `◎` focus, `✎` rename, the `✕`
-  deletes and the ZOOM/FILTER chrome are still deliberately not rendered — RE260/RE261 own
-  them, and the filter bar's owner chips, Needs-input toggle and `+ filter` own no card today.
+  handles; RE262's drag and drop (below); RE262's inline `＋` add-card in every cell (below); and
+  RE261's structure editing — the `⠿` grip, the click-to-rename name and the `✕` delete on the
+  activity band, the task column header and the release label. The artboard's `▾` collapse,
+  `✦` suggest, `◎` focus and the ZOOM/FILTER chrome are still deliberately not rendered —
+  RE260 owns them, and the filter bar's owner chips, Needs-input toggle and `+ filter` own no
+  card today.
+
+  **Delete is blocked, not cascading (RE261).** A ✕ is `disabled` and greyed (the artboard's
+  `delOff`) while its structure still holds cards, and its `title` names the exact count the
+  header badge shows — both read from `RelayWeb.StoryMapGrid`'s `count`, so what the user is
+  told and what the server enforces come from one number. The board's last remaining release
+  renders no ✕ at all (the artboard's `canDelete: rels.length > 1`).
 
   **Two derivations the artboard needs and our data does not carry**, each written exactly once
   here (`card_face/4`) and used for both the badge and the card's tint:
@@ -163,6 +171,89 @@ defmodule RelayWeb.StoryMapComponents do
     """
   end
 
+  # One header's name: the open rename input, or the resting name span. All three header shapes
+  # go through here, so the rename event names and the `story-map-rename-<kind>-<id>` /
+  # `story-map-name-<kind>-<id>` id conventions exist exactly once.
+  #
+  # On a read-only board the span renders WITHOUT `phx-click` and without `cursor:text` — the
+  # name is still shown, it is just not an affordance (matching how `read_only` already
+  # suppresses `＋ Add task`).
+  attr :kind, :string, required: true, values: ~w(activity task release)
+  attr :id, :integer, required: true
+  attr :name, :string, required: true
+  attr :editing, :boolean, required: true
+  attr :edit_name, :string, required: true
+  attr :read_only, :boolean, required: true
+  attr :style, :string, required: true, doc: "the artboard's resting style for this name span"
+
+  defp header_name(assigns) do
+    ~H"""
+    <.inline_name_input
+      :if={@editing}
+      id={"story-map-rename-#{@kind}-#{@id}"}
+      value={@edit_name}
+      submit="story_map_rename_submit"
+      change="story_map_rename_change"
+      cancel="story_map_rename_cancel"
+    />
+    <span
+      :if={not @editing and not @read_only}
+      id={"story-map-name-#{@kind}-#{@id}"}
+      phx-click="story_map_rename_start"
+      phx-value-kind={@kind}
+      phx-value-id={@id}
+      style={@style <> "cursor:text;"}
+    >
+      {@name}
+    </span>
+    <span :if={not @editing and @read_only} id={"story-map-name-#{@kind}-#{@id}"} style={@style}>
+      {@name}
+    </span>
+    """
+  end
+
+  # The ✕. Greyed out and `disabled` while the structure still holds cards, with the artboard's
+  # blocking tooltip naming the exact count the header badge shows.
+  #
+  # It is deliberately a `disabled` button rather than an enabled one that no-ops: `disabled` is
+  # what makes the state real for a screen reader and for the acceptance test. The server refuses
+  # a non-empty delete anyway (`{:error, :not_empty}`) — the two together are defence in depth.
+  attr :kind, :string, required: true, values: ~w(activity task release)
+  attr :id, :integer, required: true
+  attr :count, :integer, required: true
+
+  defp delete_button(assigns) do
+    ~H"""
+    <button
+      type="button"
+      id={"story-map-delete-#{@kind}-#{@id}"}
+      disabled={@count > 0}
+      title={delete_title(@count, @kind)}
+      phx-click="story_map_delete"
+      phx-value-kind={@kind}
+      phx-value-id={@id}
+      style={delete_style(@count)}
+    >
+      ✕
+    </button>
+    """
+  end
+
+  # Artboard `blockMsg` (line ~403), verbatim — `card` singular at 1.
+  defp delete_title(0, kind), do: "Delete #{kind}"
+  defp delete_title(1, kind), do: "Move 1 card out of this #{kind} before deleting it"
+  defp delete_title(count, kind), do: "Move #{count} cards out of this #{kind} before deleting it"
+
+  # Artboard `delStyle` / `delOff`, lines ~397-398.
+  defp delete_style(0), do: "font-size:10px;color:oklch(0.62 0.03 25);"
+  defp delete_style(_count), do: "font-size:10px;color:oklch(0.82 0.01 255);cursor:not-allowed;"
+
+  # The ⠿ drag handle. The activity header's is one step larger and darker than the task
+  # header's (artboard lines ~176 and ~198); the release label's — this card's addition, which
+  # the artboard does not have — matches the task's.
+  defp grip_style(:activity), do: "font-size:12px;color:oklch(0.7 0.03 255);cursor:grab;"
+  defp grip_style(_task_or_release), do: "font-size:11px;color:oklch(0.72 0.03 255);cursor:grab;"
+
   @doc """
   The CSS grid: sticky corner, the two backing header bands, lane striping, the sticky release
   rail, the activity band, the task headers, and one body cell per column × lane.
@@ -173,6 +264,8 @@ defmodule RelayWeb.StoryMapComponents do
   attr :stalled_ids, :any, required: true, doc: "MapSet of card ids whose run is stalled"
   attr :draft, :any, default: nil, doc: "nil | :activity | :release | {:task, activity_id}"
   attr :draft_name, :string, default: "", doc: "the open draft's text, tracked server-side"
+  attr :edit, :any, default: nil, doc: "nil | {:activity, id} | {:task, id} | {:release, id}"
+  attr :edit_name, :string, default: "", doc: "the open rename's text, tracked server-side"
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
   attr :compose, :any, default: nil, doc: "the {column_key, lane_key} whose composer is open, or nil"
   attr :compose_form, :any, default: nil, doc: "the shared card composer form (BoardLive's :compose_form)"
@@ -199,14 +292,39 @@ defmodule RelayWeb.StoryMapComponents do
       <div
         :for={{lane, index} <- Enum.with_index(@grid.lanes)}
         id={lane_dom_id(lane)}
+        class={[lane.release && not @read_only && "story-map-header story-map-header-drop"]}
+        data-kind={lane.release && "release"}
+        data-id={lane.release && lane.release.id}
+        draggable={
+          to_string(!!lane.release and not @read_only and @edit != {:release, lane.release.id})
+        }
         style={lane_label_style(index)}
       >
         <div style="display:flex;align-items:center;gap:5px;">
           <span style={"width:8px;height:8px;border-radius:50%;background:#{lane_dot(index)};"}>
           </span>
-          <span style="font-size:12.5px;font-weight:600;color:oklch(0.3 0.02 255);">
-            {lane_name(lane)}
-          </span>
+          <span :if={lane.release && not @read_only} style={grip_style(:release)}>⠿</span>
+          <%!-- The synthetic `(No release)` lane is not a structure: no grip, no rename, no ✕. --%>
+          <span :if={is_nil(lane.release)} style={lane_name_style()}>{lane_name(lane)}</span>
+          <.header_name
+            :if={lane.release}
+            kind="release"
+            id={lane.release.id}
+            name={lane_name(lane)}
+            editing={@edit == {:release, lane.release.id}}
+            edit_name={@edit_name}
+            read_only={@read_only}
+            style={lane_name_style() <> "flex:1;"}
+          />
+          <%!-- Artboard `canDelete: rels.length > 1` (line ~506): the board's LAST swimlane
+                renders no ✕ at all. With zero releases the only lane is synthetic, so
+                `length(@grid.lanes) > 1` is exactly "more than one real release". --%>
+          <.delete_button
+            :if={lane.release && not @read_only && length(@grid.lanes) > 1}
+            kind="release"
+            id={lane.release.id}
+            count={lane.count}
+          />
         </div>
         <span style="font-family:var(--font-mono);font-size:9px;color:oklch(0.6 0.02 255);">
           {lane.count} cards
@@ -260,11 +378,24 @@ defmodule RelayWeb.StoryMapComponents do
       <div
         :for={band <- @grid.bands}
         id={"story-map-activity-#{band.activity.id}"}
+        class={[not @read_only && "story-map-header story-map-header-drop"]}
+        data-kind="activity"
+        data-id={band.activity.id}
+        draggable={to_string(not @read_only and @edit != {:activity, band.activity.id})}
         style={band_style(band)}
       >
-        <span style="font-size:13px;font-weight:600;color:oklch(0.34 0.02 255);">
-          {band.activity.name}
-        </span>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span :if={not @read_only} style={grip_style(:activity)}>⠿</span>
+          <.header_name
+            kind="activity"
+            id={band.activity.id}
+            name={band.activity.name}
+            editing={@edit == {:activity, band.activity.id}}
+            edit_name={@edit_name}
+            read_only={@read_only}
+            style={activity_name_style()}
+          />
+        </div>
         <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
           <span style="font-family:var(--font-mono);font-size:9px;font-weight:600;color:oklch(0.5 0.02 255);background:oklch(0.93 0.006 255);border-radius:20px;padding:2px 6px;">
             {band.count}
@@ -281,13 +412,21 @@ defmodule RelayWeb.StoryMapComponents do
           >
             ＋
           </button>
+          <.delete_button
+            :if={not @read_only}
+            kind="activity"
+            id={band.activity.id}
+            count={band.count}
+          />
         </div>
       </div>
-      <.column_header
+      <.story_map_column_header
         :for={{column, index} <- Enum.with_index(@grid.columns)}
         column={column}
         index={index}
         draft_name={@draft_name}
+        edit={@edit}
+        edit_name={@edit_name}
         read_only={@read_only}
       />
       <%= for {column, ci} <- Enum.with_index(@grid.columns), {lane, li} <- Enum.with_index(@grid.lanes) do %>
@@ -572,17 +711,24 @@ defmodule RelayWeb.StoryMapComponents do
 
   # ---------- private renders ----------
 
-  # RE263 — row 2 now has three shapes: the open draft's input; the `＋ Add task` invitation on
-  # an activity that has neither tasks nor task-less cards (artboard `bare = !ntCount`, line
-  # ~450), which is a real button because the WHOLE header is clickable; and a plain label for
-  # everything else. On a read-only board the bare column takes the plain-label branch, so it
-  # keeps its place in the grid without inviting a click that only flashes an error.
-  attr :column, :map, required: true
-  attr :index, :integer, required: true
+  @doc """
+  One column header, in all four shapes: RE263's open draft input, the bare `＋ Add task`
+  invitation, a **real task column** (RE261's grip + click-to-rename name + ✕), and the plain
+  `— No task yet` label.
+
+  Only a real task column is a structure, so only it gets a grip, a rename and a ✕ — the bare
+  placeholder keeps its shipped `＋ Add task` behaviour and the draft column is chrome. On a
+  read-only board the bare column falls through to the plain label, so it keeps its place in
+  the grid without inviting a click that only flashes an error.
+  """
+  attr :column, :map, required: true, doc: "one entry of the grid's `columns`"
+  attr :index, :integer, required: true, doc: "0-based, for grid-column"
   attr :draft_name, :string, required: true
+  attr :edit, :any, required: true, doc: "nil | {:activity, id} | {:task, id} | {:release, id}"
+  attr :edit_name, :string, required: true
   attr :read_only, :boolean, required: true
 
-  defp column_header(assigns) do
+  def story_map_column_header(assigns) do
     ~H"""
     <div
       :if={@column.draft?}
@@ -609,7 +755,33 @@ defmodule RelayWeb.StoryMapComponents do
       ＋ Add task
     </button>
     <div
-      :if={not @column.draft? and (not @column.bare? or @read_only)}
+      :if={not @column.draft? and not is_nil(@column.task)}
+      id={column_dom_id(@column)}
+      class={[not @read_only && "story-map-header story-map-header-drop"]}
+      data-kind="task"
+      data-id={@column.task && @column.task.id}
+      draggable={to_string(not @read_only and @edit != {:task, @column.task && @column.task.id})}
+      style={column_header_style(@column, @index)}
+    >
+      <span :if={not @read_only} style={grip_style(:task)}>⠿</span>
+      <.header_name
+        kind="task"
+        id={@column.task && @column.task.id}
+        name={column_name(@column)}
+        editing={@edit == {:task, @column.task && @column.task.id}}
+        edit_name={@edit_name}
+        read_only={@read_only}
+        style="flex:1;"
+      />
+      <.delete_button
+        :if={not @read_only}
+        kind="task"
+        id={@column.task && @column.task.id}
+        count={@column.count}
+      />
+    </div>
+    <div
+      :if={not @column.draft? and is_nil(@column.task) and (not @column.bare? or @read_only)}
       id={column_dom_id(@column)}
       style={column_header_style(@column, @index)}
     >
@@ -761,11 +933,17 @@ defmodule RelayWeb.StoryMapComponents do
     end
   end
 
+  # Artboard line ~141.
+  defp lane_name_style, do: "font-size:12.5px;font-weight:600;color:oklch(0.3 0.02 255);"
+
   defp lane_dom_id(%{release: nil}), do: "story-map-release-none"
   defp lane_dom_id(%{release: release}), do: "story-map-release-#{release.id}"
 
   defp lane_name(%{release: nil}), do: "(No release)"
   defp lane_name(%{release: release}), do: release.name
+
+  # Artboard `nameStyle`, line ~431.
+  defp activity_name_style, do: "font-size:13px;font-weight:600;color:oklch(0.34 0.02 255);"
 
   defp band_style(band) do
     "grid-column:#{band.start + 2} / span #{band.span};grid-row:1;align-self:stretch;" <>
