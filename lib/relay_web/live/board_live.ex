@@ -1438,8 +1438,9 @@ defmodule RelayWeb.BoardLive do
     {:noreply, commit_story_map_draft(socket, socket.assigns.story_map_draft, String.trim(name))}
   end
 
-  # Escape and blur both land here. A no-op when no draft is open, which is what makes the blur
-  # that follows a commit harmless.
+  # Escape and clicking away both land here — NOT blur, which LiveView fires itself around
+  # every submit and would use to cancel the draft it is about to commit (see
+  # `inline_name_input/1`). A no-op when no draft is open.
   def handle_event("story_map_draft_cancel", _params, socket) do
     {:noreply, close_story_map_draft(socket)}
   end

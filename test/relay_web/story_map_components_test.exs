@@ -512,7 +512,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ ~s(id="story-map-draft-input-form")
       assert html =~ ~s(phx-submit="story_map_draft_submit")
       assert html =~ ~s(phx-change="story_map_draft_change")
-      assert html =~ ~s(phx-blur="story_map_draft_cancel")
+      assert html =~ ~s(phx-click-away="story_map_draft_cancel")
       assert html =~ ~s(phx-keydown="story_map_draft_cancel")
       assert html =~ ~s(phx-key="Escape")
       assert html =~ ~s(phx-hook="InlineNameInput")
@@ -527,6 +527,23 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert style =~ "padding:2px 5px"
       assert style =~ "font-size:12px;font-weight:600"
       assert style =~ "flex:1;min-width:0"
+    end
+
+    # The bug this pins cost a whole smoke run: in a real browser LiveView blurs this input
+    # itself, BEFORE it pushes the submit. Bound to `cancel`, that blur closes the draft the
+    # submit is about to commit, so Enter creates NOTHING — and render_submit/2, which never
+    # blurs, never notices. Swap this back to phx-blur and every create affordance breaks
+    # again, silently; RelayWeb.Browser.StoryMapCreateTest is what actually catches it.
+    test "cancel is bound to click-away, never to blur — blur is LiveView's, not the user's" do
+      html =
+        render_component(&StoryMapComponents.inline_name_input/1,
+          id: "story-map-draft-input",
+          submit: "story_map_draft_submit",
+          change: "story_map_draft_change",
+          cancel: "story_map_draft_cancel"
+        )
+
+      refute html =~ "phx-blur"
     end
 
     test "hook: nil renders without the hook, for storybook" do

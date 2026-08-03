@@ -103,7 +103,18 @@ defmodule RelayWeb.StoryMapComponents do
   @doc """
   The shared inline editor: one autofocused text input in a form, carrying the artboard's
   `inputStyle` (line ~404). Enter fires `submit`, every keystroke fires `change`, and Escape and
-  blur both fire `cancel`.
+  clicking away both fire `cancel`.
+
+  Clicking away is `phx-click-away`, and it is **forbidden** for it to be `phx-blur`. Blur is
+  not a user gesture here: LiveView blurs this input itself, before it pushes the submit
+  (`view.js` `submitForm` → `blurActiveElement`) and again around the patch that follows. Bound
+  to `cancel`, those blurs land ahead of the submit, close the draft, and leave the submit with
+  no draft to commit — Enter created NOTHING in every affordance, while `render_submit/2`,
+  which never blurs, stayed green. `phx-click-away` fires only on a real click elsewhere, and
+  LiveView dispatches it *before* that click's own `phx-click` (`live_socket.js` `bindClick`),
+  so clicking a different ＋ still cancels this draft and then opens that one. The cost is that
+  tabbing away no longer cancels — Escape and clicking away do. See
+  `RelayWeb.Browser.StoryMapCreateTest`, which drives the real keypress.
 
   `change` is not optional bookkeeping — it is the same reason `BoardLive`'s composer has
   `validate_card` beside `create_card`: LiveView only patches an input whose *server-rendered*
@@ -119,7 +130,7 @@ defmodule RelayWeb.StoryMapComponents do
   attr :placeholder, :string, default: ""
   attr :submit, :string, required: true, doc: "the phx-submit event name"
   attr :change, :string, required: true, doc: "the phx-change event name"
-  attr :cancel, :string, required: true, doc: "the phx-blur AND Escape phx-keydown event name"
+  attr :cancel, :string, required: true, doc: "the click-away AND Escape phx-keydown event name"
   attr :hook, :string, default: "InlineNameInput", doc: "nil renders the input without the hook"
 
   def inline_name_input(assigns) do
@@ -139,7 +150,7 @@ defmodule RelayWeb.StoryMapComponents do
         placeholder={@placeholder}
         autocomplete="off"
         phx-hook={@hook}
-        phx-blur={@cancel}
+        phx-click-away={@cancel}
         phx-keydown={@cancel}
         phx-key="Escape"
         style={input_style()}

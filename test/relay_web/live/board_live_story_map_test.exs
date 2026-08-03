@@ -284,11 +284,22 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       assert length(StoryMap.list_activities(ctx.board)) == 2
     end
 
-    test "blur closes the draft and creates nothing", %{conn: conn} = ctx do
+    # Clicking away cancels — and it MUST be phx-click-away, not phx-blur: in a real browser
+    # LiveView blurs this input itself before pushing the submit, so phx-blur cancels the draft
+    # the submit is about to commit and Enter creates nothing. render_submit/2 never blurs, so
+    # the fast suite cannot see that; it pins the binding here and
+    # RelayWeb.Browser.StoryMapCreateTest drives the real keypress.
+    test "clicking away closes the draft and creates nothing, and blur is not bound at all",
+         %{conn: conn} = ctx do
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
 
       view |> element("#story-map-add-activity") |> render_click()
-      view |> element("#story-map-draft-input") |> render_blur()
+
+      input = view |> element("#story-map-draft-input") |> render()
+      assert input =~ ~s(phx-click-away="story_map_draft_cancel")
+      refute input =~ "phx-blur"
+
+      render_click(view, "story_map_draft_cancel", %{})
 
       refute has_element?(view, "#story-map-draft-input")
       assert length(StoryMap.list_activities(ctx.board)) == 2
