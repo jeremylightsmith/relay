@@ -1805,7 +1805,7 @@ defmodule Relay.Runs do
   @doc false
   # Revokes any lingering active job regardless of the run's current status
   # FIRST — the job that triggered this reclaim must never stay stuck
-  # :claimed/:running under a dead executor's name, even if the run itself
+  # :claimed under a dead executor's name, even if the run itself
   # already moved on (e.g. parked/finished via a concurrent path) by the time
   # this runs — then, only for a still-:running run, flips it to
   # :parked/:executor_gone (affinity is absolute; the run waits for its
