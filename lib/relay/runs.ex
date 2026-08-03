@@ -1909,12 +1909,18 @@ defmodule Relay.Runs do
   defp awaiting_human_answer?(%Run{} = run), do: park_kind(run) == :question
 
   @doc """
-  Whether `run` stalled in a way retry can revive in place — the ONE eligibility rule shared by
-  per-run retry (`check_retryable/1`), the bulk sweep (`restart_stalled/2`), and the board's
-  stalled badge (`restartable_count/1`). True for a clean `:failed` run, and for an escalation
-  park (`park_kind/3 == :escalation` — a node failure routed to a human, RLY-194/A4). False for a
-  genuine `:needs_input` question, any `:executor_gone` park (RLY-199 auto-resumes those), and
-  `:running`/`:done`/`:cancelled`.
+  Whether `run` itself stalled in a way retry can revive in place — the ONE per-RUN eligibility
+  rule, used directly by per-run retry (`check_retryable/1`). True for a clean `:failed` run, and
+  for an escalation park (`park_kind/3 == :escalation` — a node failure routed to a human,
+  RLY-194/A4). False for a genuine `:needs_input` question, any `:executor_gone` park (RLY-199
+  auto-resumes those), and `:running`/`:done`/`:cancelled`.
+
+  The board-scoped consumers — the bulk sweep (`restart_stalled/2`), the board's stalled badge
+  (`restartable_count/1`), and the restart dialog (`stalled_cards/1`) — all read this same rule
+  through `restartable_runs/1`, which ADDITIONALLY excludes cards already in a terminal-type
+  stage (`Stage.terminal_types/0`, RE247): a run can be `restartable?/1` true while its card has
+  since moved to Done, and the board-scoped consumers correctly skip it where this function
+  cannot (it only sees the run).
   """
   def restartable?(%Run{status: status, parked_reason: parked_reason} = run),
     do: restartable_by_outcome?(status, parked_reason, latest_execution_outcome(run))
@@ -2116,10 +2122,11 @@ defmodule Relay.Runs do
   end
 
   @doc """
-  Revive every restartable run on `board` — the mass-outage recovery (RLY-228). Each run is
-  revived through the per-run `retry_run/2` path, so its own guards (`check_no_active_run`,
-  executor liveness) still apply; a run that can't revive is counted `refused`, never fatal.
-  Returns `%{restarted: n, refused: m}` so the caller can flash "Restarted N cards."
+  Revive every restartable run on `board` whose card is not already in a terminal-type stage
+  — the mass-outage recovery (RLY-228). Each run is revived through the per-run `retry_run/2`
+  path, so its own guards (`check_no_active_run`, executor liveness) still apply; a run that
+  can't revive is counted `refused`, never fatal. Returns `%{restarted: n, refused: m}` so the
+  caller can flash "Restarted N cards."
   """
   def restart_stalled(%Board{} = board, actor) do
     board
@@ -2132,12 +2139,61 @@ defmodule Relay.Runs do
     end)
   end
 
-  @doc "How many runs on `board` are `restartable?/1` — the board-header badge count (RLY-228)."
+  @doc "How many runs on `board` are `restartable?/1`, excluding cards already in a terminal-type stage — the board-header badge count (RLY-228)."
   def restartable_count(%Board{} = board), do: board |> restartable_runs() |> length()
 
-  # The board's restartable runs: the LATEST run per card (exactly the run_summaries_for_board/1
-  # model, so the badge counts cards showing a stalled face and the sweep never revives a
-  # superseded run), filtered by the one eligibility rule. Latest node-execution outcome per run
+  @doc """
+  The board's stalled cards, as the restart dialog renders them (RE247): one entry per
+  restartable run, carrying the card (with its stage preloaded) and a human reason string.
+  Exactly the `restartable_runs/1` set the header badge counts and `restart_stalled/2`
+  sweeps, so the dialog can never name a different set than the badge claims. Sorted by
+  `ref_number` so the list order is stable across refreshes and restarts.
+  """
+  def stalled_cards(%Board{} = board) do
+    board
+    |> restartable_runs()
+    |> Enum.map(&%{card: &1.card, run: &1, reason: stall_reason(&1)})
+    |> Enum.sort_by(& &1.card.ref_number)
+  end
+
+  @doc """
+  The one-line reason `run` is stalled — the restart dialog's copy, owned by ONE function the
+  way `retry_refusal_message/1` owns retry's (RE247). `restartable?/1` admits exactly two
+  states, so there are exactly two sentences.
+
+  The two states are a clean `:failed` run and an ESCALATION park (`park_kind/1 == :escalation`
+  — a node failed and the flow's `--on failed --> needs_input` edge handed the card to a human,
+  RLY-194/A4). Nothing has died in either: the one state where an agent genuinely vanished is a
+  `:executor_gone` park, and `restartable?/1` excludes it. The escalation wording therefore
+  echoes the card drawer's copy for the same state (`panel_label(:escalation)` /
+  "<node> failed after N attempts — the flow handed this card to you", RE253) so the board
+  names one state one way — keep the two in step if either changes.
+
+  The node is `current_node` when the run still has one (an escalation park keeps it), else the
+  `node_key` of the run's most recent NodeExecution — `close_run!/3` nils `current_node` on
+  every terminal close, so a clean `:failed` run would otherwise name no node at all. This is
+  the same recovery `retry_run/2` uses to pick its re-entry node. A run with no execution at
+  all reads without the dangling node clause.
+
+  Raises `FunctionClauseError` for any run `restartable?/1` rejects — this describes stalled
+  cards only, and a caller reaching it with anything else has a bug worth surfacing loudly
+  rather than papering over with a generic sentence.
+  """
+  def stall_reason(%Run{} = run), do: stall_sentence(run, run.current_node || last_executed_node(run))
+
+  defp stall_sentence(%Run{status: :failed}, nil), do: "Failed"
+  defp stall_sentence(%Run{status: :failed}, node), do: "Failed at #{node}"
+  defp stall_sentence(%Run{status: :parked, parked_reason: :needs_input}, nil), do: "Node failed — your call"
+  defp stall_sentence(%Run{status: :parked, parked_reason: :needs_input}, node), do: "#{node} failed — your call"
+
+  # The board's restartable runs: the LATEST run per card (the same latest-run-per-card model as
+  # run_summaries_for_board/1, so the sweep never revives a superseded run), filtered by the one
+  # eligibility rule. It is NOT the same SET: run_summaries_for_board/1 has no terminal-stage
+  # filter, so a Done-stage card with a failed run still shows a stalled face while being
+  # invisible to this query. Cards in a terminal-type stage (`Stage.terminal_types/0`) are
+  # excluded HERE, in the single query the header badge, the restart dialog (`stalled_cards/1`),
+  # and `restart_stalled/2` all share — a finished card is not stalled, and filtering it out in
+  # any second place would let the three disagree (RE247). Latest node-execution outcome per run
   # is read in ONE grouped query, not per-run — the bulk analog of latest_execution_outcome/1.
   defp restartable_runs(%Board{id: board_id}) do
     latest_runs =
@@ -2145,9 +2201,12 @@ defmodule Relay.Runs do
         from r in Run,
           join: c in Card,
           on: c.id == r.card_id,
-          where: c.board_id == ^board_id,
+          join: s in Stage,
+          on: s.id == c.stage_id,
+          where: c.board_id == ^board_id and s.type not in ^Stage.terminal_types(),
           distinct: r.card_id,
-          order_by: [asc: r.card_id, desc: r.inserted_at, desc: r.id]
+          order_by: [asc: r.card_id, desc: r.inserted_at, desc: r.id],
+          preload: [card: :stage]
       )
 
     outcomes = latest_outcomes(Enum.map(latest_runs, & &1.id))
