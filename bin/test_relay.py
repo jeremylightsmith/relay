@@ -913,6 +913,16 @@ class ExecutorConfigTest(unittest.TestCase):
         self.assertIsNone(cfg.get("cache_dir"))
         self.assertIsNone(cfg.get("prepare"))
 
+    def test_auto_update_defaults_on_with_a_five_minute_floor(self):
+        relay.EXECUTOR_CONFIG_PATH = "/nope/does/not/exist.json"
+        cfg = relay.load_executor_config()
+        self.assertTrue(cfg["auto_update"])
+        self.assertEqual(cfg["auto_update_min_interval"], 300)
+
+    def test_auto_update_can_be_turned_off(self):
+        self._write({"auto_update": False})
+        self.assertFalse(relay.load_executor_config()["auto_update"])
+
 
 class ExecutorPoolTest(unittest.TestCase):
     """Per-card worktree model (RLY-231): the exclusive class no longer has fixed
@@ -1181,6 +1191,18 @@ class ExecutorConfigCommittedFileTest(unittest.TestCase):
         self.assertEqual(cfg["prepare"], ".relay/prepare-worktree.sh")
         self.assertEqual(cfg["max_retained_failed"], 3)
         self.assertIn("cache_dir", cfg)
+
+    def test_committed_executor_json_documents_the_auto_update_keys(self):
+        """RE185: the checked-in example advertises the opt-out, so a clone sees the knob
+        without reading bin/relay's source."""
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            ".relay", "executor.json",
+        )
+        with open(path) as f:
+            cfg = json.load(f)
+        self.assertEqual(cfg["auto_update"], True)
+        self.assertEqual(cfg["auto_update_min_interval"], 300)
 
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -2224,6 +2246,207 @@ class ExecutorHeartbeatTest(unittest.TestCase):
             relay.env = orig_env
             relay.urllib.request.urlopen = orig_urlopen
         self.assertEqual(err.getvalue(), "")
+
+    def test_a_beat_stores_the_latest_fetchable_version(self):
+        hb = relay.ExecutorHeartbeat({"name": "box", "host": "h"},
+                                     lambda: [], lambda jid: None, interval=15)
+        self.assertIsNone(hb.latest_version)
+        orig = relay.api
+        relay.api = lambda *a, **k: {"latest_executor_version": 99}
+        try:
+            hb._beat()
+        finally:
+            relay.api = orig
+        self.assertEqual(hb.latest_version, 99)
+
+    def test_an_older_board_that_omits_the_field_reads_as_never_update(self):
+        hb = relay.ExecutorHeartbeat({"name": "box", "host": "h"},
+                                     lambda: [], lambda jid: None, interval=15)
+        orig = relay.api
+        relay.api = lambda *a, **k: {"revoked": []}
+        try:
+            hb._beat()
+        finally:
+            relay.api = orig
+        self.assertIsNone(hb.latest_version)
+
+
+def isolate_relay_state(test):
+    """Point ~/.relay (the auto-update ledger) at a throwaway dir.
+
+    Any test that installs an executor otherwise writes the REAL ~/.relay/auto-update.json on a
+    dev box, teaching a live `relay execute` that a file it never wrote is one of its own.
+    """
+    statedir = tempfile.mkdtemp()
+    test.addCleanup(shutil.rmtree, statedir, ignore_errors=True)
+    prev = os.environ.get("RELAY_STATE_DIR")
+    os.environ["RELAY_STATE_DIR"] = statedir
+    test.addCleanup(lambda: os.environ.__setitem__("RELAY_STATE_DIR", prev)
+                    if prev is not None else os.environ.pop("RELAY_STATE_DIR", None))
+    return statedir
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t"] + list(args),
+                   cwd=cwd, check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+VALID_STUB = "#!/usr/bin/env python3\nEXECUTOR_VERSION = {}\nprint('hi')\n"
+
+
+class AutoUpdateDownloadTest(unittest.TestCase):
+    """RE185 unit D: the ONE download path, and everything it refuses.
+
+    Verification is HTTPS + a parse check by decision — no checksum, no signature — so these
+    rejections are the entire trust boundary between the network and an exec'd process."""
+
+    def setUp(self):
+        self.body = VALID_STUB.format(relay.EXECUTOR_VERSION + 1).encode()
+        self.addCleanup(setattr, relay, "_fetch", relay._fetch)
+        relay._fetch = lambda url, timeout=30: self.body
+        self.addCleanup(setattr, relay, "log", relay.log)
+        self.logs = []
+        relay.log = lambda msg, **k: self.logs.append(msg)
+
+    def test_a_valid_newer_source_comes_back_with_its_own_version(self):
+        source, version = relay.download_executor("http://config.test")
+        self.assertEqual(version, relay.EXECUTOR_VERSION + 1)
+        self.assertIn("EXECUTOR_VERSION", source)
+
+    def test_the_downloaded_files_own_version_wins_over_any_announcement(self):
+        """A board ahead of relay-config must be harmless, not a chase: the version is read
+        from the bytes we actually got."""
+        self.body = VALID_STUB.format(relay.EXECUTOR_VERSION + 5).encode()
+        _source, version = relay.download_executor("http://config.test")
+        self.assertEqual(version, relay.EXECUTOR_VERSION + 5)
+
+    def test_an_html_error_page_is_refused(self):
+        self.body = b"<!doctype html><title>404</title>"
+        self.assertIsNone(relay.download_executor("http://config.test"))
+        self.assertTrue(any("#!" in m for m in self.logs))
+
+    def test_an_empty_body_is_refused(self):
+        self.body = b""
+        self.assertIsNone(relay.download_executor("http://config.test"))
+
+    def test_a_source_without_a_version_line_is_refused(self):
+        self.body = b"#!/usr/bin/env python3\nprint('hi')\n"
+        self.assertIsNone(relay.download_executor("http://config.test"))
+
+    def test_a_non_compiling_source_is_refused_and_says_why(self):
+        self.body = (VALID_STUB.format(relay.EXECUTOR_VERSION + 1) + "def (:\n").encode()
+        self.assertIsNone(relay.download_executor("http://config.test"))
+        self.assertTrue(any("does not compile" in m for m in self.logs))
+
+    def test_an_equal_or_older_version_is_refused(self):
+        for v in (relay.EXECUTOR_VERSION, relay.EXECUTOR_VERSION - 1):
+            self.body = VALID_STUB.format(v).encode()
+            self.assertIsNone(relay.download_executor("http://config.test"))
+
+    def test_a_fetch_failure_is_reported_not_raised(self):
+        def boom(url, timeout=30):
+            raise urllib.error.URLError("refused")
+
+        relay._fetch = boom
+        self.assertIsNone(relay.download_executor("http://config.test"))
+
+    def test_it_asks_for_bin_relay_under_the_config_url(self):
+        seen = []
+        relay._fetch = lambda url, timeout=30: (seen.append(url) or self.body)
+        relay.download_executor("http://config.test/")
+        self.assertEqual(seen, ["http://config.test/bin/relay"])
+
+
+class AutoUpdateWriteSafetyTest(unittest.TestCase):
+    """RE185 unit E guard 6: auto-update overwrites a TRACKED file, so this is what keeps it
+    from clobbering a human's uncommitted edit — and from wedging itself, since after the
+    first update the file is permanently dirty against HEAD."""
+
+    def setUp(self):
+        isolate_relay_state(self)
+        self.repo = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.repo, ignore_errors=True)
+        os.makedirs(os.path.join(self.repo, "bin"))
+        self.path = os.path.join(self.repo, "bin", "relay")
+        self._write("#!/usr/bin/env python3\nEXECUTOR_VERSION = 1\n")
+
+    def _write(self, text):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def _init_repo(self, track=True):
+        _git(self.repo, "init")
+        if track:
+            _git(self.repo, "add", "bin/relay")
+            _git(self.repo, "commit", "-m", "init")
+
+    def test_a_plain_directory_is_safe(self):
+        self.assertTrue(relay._safe_to_overwrite(self.path))
+
+    def test_an_untracked_file_is_safe(self):
+        self._init_repo(track=False)
+        self.assertTrue(relay._safe_to_overwrite(self.path))
+
+    def test_a_tracked_clean_file_is_safe(self):
+        self._init_repo()
+        self.assertTrue(relay._safe_to_overwrite(self.path))
+
+    def test_a_tracked_dirty_file_is_refused(self):
+        self._init_repo()
+        self._write("#!/usr/bin/env python3\nEXECUTOR_VERSION = 1\n# my edit\n")
+        self.assertFalse(relay._safe_to_overwrite(self.path))
+
+    def test_a_tracked_file_dirty_from_our_own_update_is_safe(self):
+        """Without this the SECOND auto-update on a machine could never fire."""
+        self._init_repo()
+        self._write("#!/usr/bin/env python3\nEXECUTOR_VERSION = 2\n")
+        relay._record_auto_update(self.path, relay._sha256_file(self.path), 2)
+        self.assertTrue(relay._safe_to_overwrite(self.path))
+
+    def test_a_recorded_hash_that_no_longer_matches_is_refused(self):
+        self._init_repo()
+        self._write("#!/usr/bin/env python3\nEXECUTOR_VERSION = 2\n")
+        relay._record_auto_update(self.path, relay._sha256_file(self.path), 2)
+        self._write("#!/usr/bin/env python3\nEXECUTOR_VERSION = 2\n# then a human edited it\n")
+        self.assertFalse(relay._safe_to_overwrite(self.path))
+
+
+class AutoUpdateInstallTest(unittest.TestCase):
+    """RE185 unit E step 8: an atomic, executable, complete write — plus the ledger entry the
+    write-safety guard reads next time."""
+
+    def setUp(self):
+        isolate_relay_state(self)
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.path = os.path.join(self.tmp, "relay")
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write("old\n")
+        self.addCleanup(setattr, relay, "log", relay.log)
+        relay.log = lambda *a, **k: None
+
+    def test_it_writes_the_whole_source_and_marks_it_executable(self):
+        source = VALID_STUB.format(99)
+        self.assertTrue(relay.install_executor(source, 99, self.path))
+        with open(self.path, encoding="utf-8") as f:
+            self.assertEqual(f.read(), source)
+        self.assertTrue(os.access(self.path, os.X_OK))
+
+    def test_it_records_the_write_so_the_next_update_is_allowed(self):
+        source = VALID_STUB.format(99)
+        relay.install_executor(source, 99, self.path)
+        state = relay._read_auto_update_state()
+        self.assertEqual(state[self.path]["version"], 99)
+        self.assertEqual(state[self.path]["sha256"], relay._sha256_file(self.path))
+
+    def test_it_leaves_no_temp_file_behind(self):
+        relay.install_executor(VALID_STUB.format(99), 99, self.path)
+        self.assertEqual(os.listdir(self.tmp), ["relay"])
+
+    def test_an_unwritable_target_is_reported_not_raised(self):
+        self.assertFalse(relay.install_executor(VALID_STUB.format(99), 99,
+                                                os.path.join(self.tmp, "nope", "relay")))
 
 
 class ExecuteOnePrepareHookTest(unittest.TestCase):
@@ -3290,10 +3513,10 @@ class InitTest(unittest.TestCase):
         "AGENTS.md": b"# conventions\n@relay.md\n",
         "CLAUDE.md": b"@AGENTS.md\n@relay.md\n",
         ".claude/skills/brainstorm/SKILL.md": b"brainstorm skill\n",
-        "bin/relay": b"NEW CLI\n",
     }
 
     def setUp(self):
+        isolate_relay_state(self)
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, True)
 
@@ -3323,6 +3546,9 @@ class InitTest(unittest.TestCase):
             "items": items,
         }).encode()
         files = dict(self.DEFAULT_CONTENTS)
+        # RE185: `init`'s self-update now goes through download_executor, which verifies the
+        # bytes — so the stub CLI must be a real script declaring the manifest's version.
+        files["bin/relay"] = VALID_STUB.format(ev).encode()
         if contents:
             files.update(contents)
 
@@ -3429,7 +3655,7 @@ class InitTest(unittest.TestCase):
         self.stub(executor_version=relay.EXECUTOR_VERSION + 1)
         out = self.run_init(answers=["s"])
         with open(self.here) as f:
-            self.assertEqual(f.read(), "NEW CLI\n")
+            self.assertIn(f"EXECUTOR_VERSION = {relay.EXECUTOR_VERSION + 1}", f.read())
         self.assertIn(f"{relay.EXECUTOR_VERSION} → {relay.EXECUTOR_VERSION + 1}", out)
         self.assertTrue(os.access(self.here, os.X_OK))
 
