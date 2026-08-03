@@ -32,6 +32,8 @@ defmodule Storybook.StoryMapComponents.StoryMapCell do
           activity: %Schemas.StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1},
           task: %Schemas.StoryTask{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1},
           no_task?: false,
+          bare?: false,
+          draft?: false,
           last_of_activity?: true
         },
         lane: %{key: "r:100", release: %Schemas.Release{id: 100, board_id: 1, name: "MVP", position: 1}, count: 0},
