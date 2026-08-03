@@ -51,6 +51,25 @@ defmodule Relay.StoryMapTest do
     end
   end
 
+  describe "next_position/1 — the one definition of goes at the end" do
+    test "an empty list starts at 1" do
+      assert StoryMap.next_position([]) == 1
+    end
+
+    test "a list appends one past its highest position, sparse or out of order" do
+      assert StoryMap.next_position([%{position: 1}, %{position: 2}]) == 3
+      assert StoryMap.next_position([%{position: 7}, %{position: 2}]) == 8
+      assert StoryMap.next_position([%{position: 3}, %{position: 40}, %{position: 12}]) == 41
+    end
+
+    test "it composes with the board-scoped reads it is called with", %{board: board} do
+      insert(:story_activity, board: board, position: 4)
+      insert(:story_activity, board: insert(:board), position: 99)
+
+      assert StoryMap.next_position(StoryMap.list_activities(board)) == 5
+    end
+  end
+
   describe "structure writes" do
     test "create_activity/2 sets board_id from the board and never from input", %{board: board} do
       other = insert(:board)
@@ -64,6 +83,37 @@ defmodule Relay.StoryMapTest do
     test "create_activity/2 returns an error changeset for a blank name", %{board: board} do
       assert {:error, changeset} = StoryMap.create_activity(board, %{name: "", position: 1})
       assert "can't be blank" in errors_on(changeset).name
+    end
+
+    test "an over-long name is an error changeset, not a Postgres crash", %{board: board} do
+      # All three `name` columns are varchar(255); without a length validation `Repo.insert/1`
+      # raises Postgrex 22001 instead of returning `{:error, changeset}`, and RE263 is the
+      # first path that lets an end user supply these names.
+      long = String.duplicate("a", 81)
+
+      assert {:error, activity_cs} = StoryMap.create_activity(board, %{name: long, position: 1})
+      assert "should be at most 80 character(s)" in errors_on(activity_cs).name
+
+      activity = insert(:story_activity, board: board)
+      assert {:error, task_cs} = StoryMap.create_task(activity, %{name: long, position: 1})
+      assert "should be at most 80 character(s)" in errors_on(task_cs).name
+
+      assert {:error, release_cs} = StoryMap.create_release(board, %{name: long, position: 1})
+      assert "should be at most 80 character(s)" in errors_on(release_cs).name
+    end
+
+    test "a padded name is trimmed by the schema, not by the caller", %{board: board} do
+      # `Schemas.Board` pairs its name length cap with `update_change(:name, &String.trim/1)`;
+      # these three did not, so " Foo " stored its padding and every future write path
+      # (RE261's rename) would have to re-trim in the web layer to stay correct.
+      assert {:ok, activity} = StoryMap.create_activity(board, %{name: "  Onboard  ", position: 1})
+      assert activity.name == "Onboard"
+
+      assert {:ok, task} = StoryMap.create_task(activity, %{name: "  Sign in  ", position: 1})
+      assert task.name == "Sign in"
+
+      assert {:ok, release} = StoryMap.create_release(board, %{name: "  MVP 2  ", position: 9})
+      assert release.name == "MVP 2"
     end
 
     test "update_activity/2 renames", %{board: board} do

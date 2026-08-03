@@ -3,10 +3,12 @@ defmodule RelayWeb.StoryMapComponents do
   The story map's rendering (RE264): pure function components over
   `RelayWeb.StoryMapGrid`'s view model, matching `docs/designs/Relay Story Map.dc.html`.
 
-  Read-only and full zoom. The artboard's drag handles, inline `＋` add, `⠿` grips, `▾`
-  collapse, `✦` suggest, `◎` focus, `✎` rename and the ZOOM/FILTER chrome are deliberately not
-  rendered — RE260/RE261/RE262/RE263 own them, and the filter bar's owner chips, Needs-input
-  toggle and `+ filter` own no card today.
+  Read-only and full zoom, **except** RE263's three create affordances — the trailing `＋` add-
+  activity column, the `＋ Add task` on each activity header and on a bare placeholder, and the
+  `＋ Release` row — which this module renders and `RelayWeb.BoardLive` handles. The artboard's
+  drag handles, `⠿` grips, `▾` collapse, `✦` suggest, `◎` focus, `✎` rename, the `✕` deletes and
+  the ZOOM/FILTER chrome are still deliberately not rendered — RE260/RE261/RE262 own them, and
+  the filter bar's owner chips, Needs-input toggle and `+ filter` own no card today.
 
   **Two derivations the artboard needs and our data does not carry**, each written exactly once
   here (`card_face/4`) and used for both the badge and the card's tint:
@@ -99,6 +101,65 @@ defmodule RelayWeb.StoryMapComponents do
   defp avatar(_done?, _needs?), do: :owners
 
   @doc """
+  The shared inline editor: one autofocused text input in a form, carrying the artboard's
+  `inputStyle` (line ~404). Enter fires `submit`, every keystroke fires `change`, and Escape and
+  clicking away both fire `cancel`.
+
+  Clicking away is `phx-click-away`, and it is **forbidden** for it to be `phx-blur`. Blur is
+  not a user gesture here: LiveView blurs this input itself, before it pushes the submit
+  (`view.js` `submitForm` → `blurActiveElement`) and again around the patch that follows. Bound
+  to `cancel`, those blurs land ahead of the submit, close the draft, and leave the submit with
+  no draft to commit — Enter created NOTHING in every affordance, while `render_submit/2`,
+  which never blurs, stayed green. `phx-click-away` fires only on a real click elsewhere, and
+  LiveView dispatches it *before* that click's own `phx-click` (`live_socket.js` `bindClick`),
+  so clicking a different ＋ still cancels this draft and then opens that one. The cost is that
+  tabbing away no longer cancels — Escape and clicking away do. See
+  `RelayWeb.Browser.StoryMapCreateTest`, which drives the real keypress.
+
+  `change` is not optional bookkeeping — it is the same reason `BoardLive`'s composer has
+  `validate_card` beside `create_card`: LiveView only patches an input whose *server-rendered*
+  value changed, so without tracking the text the "commit clears and stays open" behaviour has
+  nothing to diff against. The clearing itself is the `InlineNameInput` hook's job, because
+  LiveView never patches a focused input's value at all.
+
+  RE261 reuses this verbatim for rename — that reuse is why this is a component and not inline
+  markup. `hook` exists so the storybook page can render it inert.
+  """
+  attr :id, :string, required: true
+  attr :value, :string, default: ""
+  attr :placeholder, :string, default: ""
+  attr :submit, :string, required: true, doc: "the phx-submit event name"
+  attr :change, :string, required: true, doc: "the phx-change event name"
+  attr :cancel, :string, required: true, doc: "the click-away AND Escape phx-keydown event name"
+  attr :hook, :string, default: "InlineNameInput", doc: "nil renders the input without the hook"
+
+  def inline_name_input(assigns) do
+    ~H"""
+    <.form
+      for={%{}}
+      id={"#{@id}-form"}
+      phx-change={@change}
+      phx-submit={@submit}
+      style="display:flex;flex:1;min-width:0;"
+    >
+      <input
+        type="text"
+        id={@id}
+        name="name"
+        value={@value}
+        placeholder={@placeholder}
+        autocomplete="off"
+        phx-hook={@hook}
+        phx-click-away={@cancel}
+        phx-keydown={@cancel}
+        phx-key="Escape"
+        style={input_style()}
+      />
+    </.form>
+    """
+  end
+
+  @doc """
   The CSS grid: sticky corner, the two backing header bands, lane striping, the sticky release
   rail, the activity band, the task headers, and one body cell per column × lane.
   """
@@ -106,10 +167,13 @@ defmodule RelayWeb.StoryMapComponents do
   attr :board, :any, required: true, doc: "the board, for Relay.Cards.ref/2"
   attr :stages, :list, required: true, doc: "board.stages, for the badge and Cards.done?/2"
   attr :stalled_ids, :any, required: true, doc: "MapSet of card ids whose run is stalled"
+  attr :draft, :any, default: nil, doc: "nil | :activity | :release | {:task, activity_id}"
+  attr :draft_name, :string, default: "", doc: "the open draft's text, tracked server-side"
+  attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
 
   def story_map(assigns) do
     ~H"""
-    <div id="story-map-grid" style={grid_style(@grid)}>
+    <div id="story-map-grid" style={grid_style(@grid, @draft)}>
       <div style={corner_style()}>
         <span style="font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:0.05em;color:oklch(0.55 0.02 255);">
           RELEASE ↓
@@ -142,6 +206,51 @@ defmodule RelayWeb.StoryMapComponents do
           {lane.count} cards
         </span>
       </div>
+      <%!-- RE263 — the add-release row: a 44px grid row directly below the last swimlane
+            label, in the sticky-left rail (artboard `addRelStyle`, line ~512 + lines ~152-155). --%>
+      <div style={add_release_style(@grid)}>
+        <button
+          :if={@draft != :release and not @read_only}
+          type="button"
+          id="story-map-add-release"
+          phx-click="story_map_add_release"
+          style={add_release_button_style()}
+        >
+          ＋ Release
+        </button>
+        <.inline_name_input
+          :if={@draft == :release}
+          id="story-map-draft-input"
+          placeholder="Release name… ↵"
+          value={@draft_name}
+          submit="story_map_draft_submit"
+          change="story_map_draft_change"
+          cancel="story_map_draft_cancel"
+        />
+      </div>
+      <%!-- RE263 — the add-activity column: 58px pinned past the last band, widening to a task
+            column's 156px while its draft is open (artboard `addActStyle`, line ~513). --%>
+      <div style={add_activity_style(@grid, @draft)}>
+        <button
+          :if={@draft != :activity and not @read_only}
+          type="button"
+          id="story-map-add-activity"
+          title="Add activity"
+          phx-click="story_map_add_activity"
+          style={add_activity_button_style()}
+        >
+          ＋
+        </button>
+        <.inline_name_input
+          :if={@draft == :activity}
+          id="story-map-draft-input"
+          placeholder="Activity name… ↵"
+          value={@draft_name}
+          submit="story_map_draft_submit"
+          change="story_map_draft_change"
+          cancel="story_map_draft_cancel"
+        />
+      </div>
       <div
         :for={band <- @grid.bands}
         id={"story-map-activity-#{band.activity.id}"}
@@ -154,15 +263,27 @@ defmodule RelayWeb.StoryMapComponents do
           <span style="font-family:var(--font-mono);font-size:9px;font-weight:600;color:oklch(0.5 0.02 255);background:oklch(0.93 0.006 255);border-radius:20px;padding:2px 6px;">
             {band.count}
           </span>
+          <span style="flex:1;"></span>
+          <button
+            :if={not @read_only}
+            type="button"
+            id={"story-map-add-task-#{band.activity.id}"}
+            title="Add task"
+            phx-click="story_map_add_task"
+            phx-value-activity-id={band.activity.id}
+            style={icon_style()}
+          >
+            ＋
+          </button>
         </div>
       </div>
-      <div
+      <.column_header
         :for={{column, index} <- Enum.with_index(@grid.columns)}
-        id={column_dom_id(column)}
-        style={column_header_style(column, index)}
-      >
-        {column_name(column)}
-      </div>
+        column={column}
+        index={index}
+        draft_name={@draft_name}
+        read_only={@read_only}
+      />
       <%= for {column, ci} <- Enum.with_index(@grid.columns), {lane, li} <- Enum.with_index(@grid.lanes) do %>
         <div
           id={StoryMapGrid.cell_dom_id(column.key, lane.key)}
@@ -290,10 +411,23 @@ defmodule RelayWeb.StoryMapComponents do
   end
 
   @doc """
-  The day-one panel: RE263 (create structure) lands after this card, so on the day this merges
-  every board has zero activities and this is the default experience, not an edge case. The
-  tray renders alongside it, so the page is never blank and no card is missing.
+  The day-one panel: what a board with zero activities shows, which every board is until
+  someone creates the first one. The tray renders alongside it, so the page is never blank and
+  no card is missing.
+
+  It is also the empty board's *entry point*: the grid's trailing `＋` column only exists once
+  the grid renders, so without the button here the first activity would be uncreatable. Opening
+  the draft sets the same `:activity` assign the grid uses, and committing flips the render
+  branch — the panel is replaced by the grid and the still-open draft reappears in the grid's
+  trailing cell, unchanged.
+
+  On a read-only (archived) board the button is not rendered, matching the stage column's
+  `read_only` compose affordance.
   """
+  attr :draft, :any, default: nil, doc: "nil | :activity | :release | {:task, activity_id}"
+  attr :draft_name, :string, default: "", doc: "the open draft's text, tracked server-side"
+  attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
+
   def story_map_empty(assigns) do
     ~H"""
     <div
@@ -307,14 +441,76 @@ defmodule RelayWeb.StoryMapComponents do
         Activities and their Tasks form the backbone across the top; Releases are the swimlanes
         down the left, and your cards fill the grid where the two cross.
       </p>
-      <p style="font-size:11.5px;color:oklch(0.6 0.02 255);">
-        Adding them is coming soon — until then every card sits in the UNMAPPED tray.
-      </p>
+      <button
+        :if={@draft != :activity and not @read_only}
+        type="button"
+        id="story-map-empty-add-activity"
+        class="btn btn-primary btn-sm"
+        phx-click="story_map_add_activity"
+      >
+        Add your first activity
+      </button>
+      <div :if={@draft == :activity} style="display:flex;width:240px;">
+        <.inline_name_input
+          id="story-map-draft-input"
+          placeholder="Activity name… ↵"
+          value={@draft_name}
+          submit="story_map_draft_submit"
+          change="story_map_draft_change"
+          cancel="story_map_draft_cancel"
+        />
+      </div>
     </div>
     """
   end
 
   # ---------- private renders ----------
+
+  # RE263 — row 2 now has three shapes: the open draft's input; the `＋ Add task` invitation on
+  # an activity that has neither tasks nor task-less cards (artboard `bare = !ntCount`, line
+  # ~450), which is a real button because the WHOLE header is clickable; and a plain label for
+  # everything else. On a read-only board the bare column takes the plain-label branch, so it
+  # keeps its place in the grid without inviting a click that only flashes an error.
+  attr :column, :map, required: true
+  attr :index, :integer, required: true
+  attr :draft_name, :string, required: true
+  attr :read_only, :boolean, required: true
+
+  defp column_header(assigns) do
+    ~H"""
+    <div
+      :if={@column.draft?}
+      id={column_dom_id(@column)}
+      style={column_header_style(@column, @index)}
+    >
+      <.inline_name_input
+        id="story-map-draft-input"
+        placeholder="Task name… ↵"
+        value={@draft_name}
+        submit="story_map_draft_submit"
+        change="story_map_draft_change"
+        cancel="story_map_draft_cancel"
+      />
+    </div>
+    <button
+      :if={not @column.draft? and @column.bare? and not @read_only}
+      type="button"
+      id={column_dom_id(@column)}
+      phx-click="story_map_add_task"
+      phx-value-activity-id={@column.activity.id}
+      style={column_header_style(@column, @index)}
+    >
+      ＋ Add task
+    </button>
+    <div
+      :if={not @column.draft? and (not @column.bare? or @read_only)}
+      id={column_dom_id(@column)}
+      style={column_header_style(@column, @index)}
+    >
+      {column_name(@column)}
+    </div>
+    """
+  end
 
   attr :face, :map, required: true
 
@@ -371,12 +567,59 @@ defmodule RelayWeb.StoryMapComponents do
 
   # ---------- private styles (artboard values, one definition each) ----------
 
-  defp grid_style(grid) do
+  defp grid_style(grid, draft) do
     columns = Enum.map_join(grid.columns, " ", fn _column -> "156px" end)
     rows = Enum.map_join(grid.lanes, " ", fn _lane -> "auto" end)
 
-    "display:grid;grid-template-columns:128px #{columns};" <>
-      "grid-template-rows:#{@h1}px #{@h2}px #{rows};align-items:start;min-width:max-content;"
+    # RE263 — the artboard's `colTemplate` ends `' 58px'` (line ~492) and `rowsTemplate` ends
+    # `' 44px'` (line ~493): the add-activity column and the add-release row. The trailing
+    # column takes a task column's 156px while the activity draft is open, so there is room to
+    # type; nothing else about the geometry moves.
+    add_activity = if draft == :activity, do: "156px", else: "58px"
+
+    "display:grid;grid-template-columns:128px #{columns} #{add_activity};" <>
+      "grid-template-rows:#{@h1}px #{@h2}px #{rows} 44px;align-items:start;min-width:max-content;"
+  end
+
+  # Artboard `inputStyle`, line ~404.
+  defp input_style do
+    "flex:1;min-width:0;border:1.5px solid oklch(0.6 0.14 250);border-radius:5px;" <>
+      "padding:2px 5px;font-size:12px;font-weight:600;outline:none;" <>
+      "color:oklch(0.3 0.02 255);background:white;"
+  end
+
+  # Artboard `iconStyle`, line ~396.
+  defp icon_style, do: "font-size:12px;color:oklch(0.55 0.02 255);"
+
+  # Artboard `addActStyle`, line ~513. The COLUMN's width is `grid_style/2`'s business; this is
+  # only the cell. The padding appears solely while the draft is open, so the resting state is
+  # the artboard's verbatim.
+  defp add_activity_style(grid, draft) do
+    padding = if draft == :activity, do: "padding:0 8px;", else: ""
+
+    "grid-column:#{length(grid.columns) + 2};grid-row:1 / span 2;position:sticky;top:0;" <>
+      "z-index:22;background:oklch(0.965 0.006 255);border-bottom:#{@gl_light};" <>
+      "display:flex;align-items:center;justify-content:center;#{padding}"
+  end
+
+  # Artboard line ~159.
+  defp add_activity_button_style do
+    "width:34px;height:34px;border-radius:9px;border:1px dashed oklch(0.82 0.01 255);" <>
+      "color:oklch(0.55 0.02 255);font-size:15px;line-height:1;background:white;"
+  end
+
+  # Artboard `addRelStyle`, line ~512: the 44px row under the last swimlane label.
+  defp add_release_style(grid) do
+    "grid-column:1;grid-row:#{length(grid.lanes) + 3};position:sticky;left:0;z-index:16;" <>
+      "background:oklch(0.96 0.006 255);border-right:#{@gl_strong};border-top:#{@gl_light};" <>
+      "display:flex;align-items:center;padding:8px 12px;"
+  end
+
+  # Artboard line ~154.
+  defp add_release_button_style do
+    "display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;" <>
+      "color:oklch(0.55 0.02 255);border:1px dashed oklch(0.85 0.008 255);" <>
+      "border-radius:8px;padding:4px 9px;width:100%;"
   end
 
   defp corner_style do
@@ -424,6 +667,10 @@ defmodule RelayWeb.StoryMapComponents do
       "display:flex;flex-direction:column;justify-content:center;"
   end
 
+  # The ONE owner of every column's DOM id — the plan's contract, which the tests and the card's
+  # acceptance criteria both address. All three column shapes are here, so the draft and the
+  # bare `＋ Add task` header cannot drift from the plain label they replace.
+  defp column_dom_id(%{draft?: true, activity: activity}), do: "story-map-draft-#{activity.id}"
   defp column_dom_id(%{no_task?: true, activity: activity}), do: "story-map-no-task-#{activity.id}"
   defp column_dom_id(%{task: task}), do: "story-map-task-#{task.id}"
 
@@ -441,21 +688,28 @@ defmodule RelayWeb.StoryMapComponents do
         {"oklch(1 0 0)", if(column.last_of_activity?, do: @gl_strong, else: @gl_light), "oklch(0.36 0.02 255)"}
       end
 
+    # RE263 — the bare `＋ Add task` header is the one clickable column header (artboard line
+    # ~457: `(bare ? 'cursor:pointer;' : '')`).
+    cursor = if column.bare?, do: "cursor:pointer;", else: ""
+
     "grid-column:#{index + 2};grid-row:2;position:sticky;top:#{@h1}px;z-index:20;" <>
       "background:#{background};border-right:#{border_right};border-bottom:#{@gl_strong};" <>
       "padding:7px 9px;font-size:11.5px;font-weight:600;color:#{color};" <>
-      "display:flex;align-items:center;gap:6px;"
+      "display:flex;align-items:center;gap:6px;#{cursor}"
   end
 
   defp cell_style(column, column_index, lane_index) do
+    # RE263 — the draft column's body cells are empty and dashed, exactly like `— No task yet`.
+    placeholder? = column.no_task? or column.draft?
+
     border_right =
       cond do
-        column.no_task? -> @gl_dashed
+        placeholder? -> @gl_dashed
         column.last_of_activity? -> @gl_strong
         true -> @gl_light
       end
 
-    background = if column.no_task?, do: "background:#{@no_task_bg};", else: ""
+    background = if placeholder?, do: "background:#{@no_task_bg};", else: ""
 
     "grid-column:#{column_index + 2};grid-row:#{lane_index + 3};display:flex;" <>
       "flex-direction:column;gap:7px;padding:8px;min-height:26px;" <>

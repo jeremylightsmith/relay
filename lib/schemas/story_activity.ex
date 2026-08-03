@@ -25,10 +25,26 @@ defmodule Schemas.StoryActivity do
     timestamps(type: :utc_datetime)
   end
 
-  @doc "Changeset for an activity's editable attributes. `board_id` must already be set on the struct."
+  @doc """
+  Changeset for an activity's editable attributes. `board_id` must already be set on the struct.
+
+  `name` is trimmed and capped at `max_name_length/0` — the column is `varchar(255)`, so an
+  unvalidated paste raises Postgrex 22001 instead of returning an error changeset, and the trim
+  keeps "a padded name stores its padding" a domain rule rather than one call site's habit
+  (`Schemas.Board` pairs the same two).
+  """
   def changeset(activity, attrs) do
     activity
     |> cast(attrs, [:name, :position])
+    |> update_change(:name, &String.trim/1)
     |> validate_required([:name, :position])
+    |> validate_length(:name, min: 1, max: max_name_length())
   end
+
+  @doc """
+  The cap on a user-typed story-map name — the ONE definition, shared by `Schemas.StoryTask`
+  and `Schemas.Release`. Matches `Schemas.Board`'s own name cap and stays well under the
+  `varchar(255)` column.
+  """
+  def max_name_length, do: 80
 end

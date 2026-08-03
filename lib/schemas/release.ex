@@ -25,11 +25,19 @@ defmodule Schemas.Release do
     timestamps(type: :utc_datetime)
   end
 
-  @doc "Changeset for a release's editable attributes. `board_id` must already be set on the struct."
+  @doc """
+  Changeset for a release's editable attributes. `board_id` must already be set on the struct.
+
+  `name` is trimmed and capped by `Schemas.StoryActivity.max_name_length/0` — the one
+  definition of the story-map name cap; the column is `varchar(255)`, so an unvalidated paste
+  raises Postgrex 22001 instead of returning an error changeset.
+  """
   def changeset(release, attrs) do
     release
     |> cast(attrs, [:name, :position])
+    |> update_change(:name, &String.trim/1)
     |> validate_required([:name, :position])
+    |> validate_length(:name, min: 1, max: Schemas.StoryActivity.max_name_length())
   end
 
   @doc """

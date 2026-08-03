@@ -1,11 +1,11 @@
 defmodule RelayWeb.StoryMapGrid do
   @moduledoc """
-  The story map's pure view model (RE264): `(activities, tasks, releases, cards)` in, a fully
-  placed grid out. No Ecto, no LiveView, no side effects — every placement rule the artboard
-  (`docs/designs/Relay Story Map.dc.html`, `eff/1`) encodes lives here, so the rules are
-  unit-testable without mounting a LiveView.
+  The story map's pure view model (RE264): `(activities, tasks, releases, cards, draft)` in, a
+  fully placed grid out. No Ecto, no LiveView, no side effects — every placement rule the
+  artboard (`docs/designs/Relay Story Map.dc.html`, `eff/1`) encodes lives here, so the rules
+  are unit-testable without mounting a LiveView.
 
-  **The invariant: no card can disappear.** Every card handed to `build/4` lands exactly once —
+  **The invariant: no card can disappear.** Every card handed to `build/5` lands exactly once —
   in one `cells` entry or in `unmapped` — and `total` is the input count. The rules are ordered
   and the last one is total:
 
@@ -49,19 +49,30 @@ defmodule RelayWeb.StoryMapGrid do
   board's non-archived cards in `Relay.Cards.list_cards/1` order, which every cell and the tray
   preserve.
 
+  `draft` (RE263) is the page's open inline draft — `nil`, `:activity`, `:release`, or
+  `{:task, activity_id}`. Only the last shape reaches the view model: it appends one draft
+  column to that activity, growing its `span` by 1 and moving `last_of_activity?` onto it, and
+  it **replaces** the placeholder column when the activity has neither tasks nor task-less
+  cards. Everything else about the grid — placement, lanes, the tray, `total` — is unchanged,
+  so the no-card-can-disappear invariant holds with a draft open.
+
   Fields of the returned struct:
 
     * `bands` — `[%{activity:, span:, count:, start:}]`, one per activity, left to right.
       `start` is the **0-based index into `columns`** of the band's first column; `span` how
       many columns it covers (always ≥ 1); `count` how many cards sit under it.
-    * `columns` — `[%{key:, activity:, task:, no_task?:, last_of_activity?:}]`, left to right.
+    * `columns` — `[%{key:, activity:, task:, no_task?:, bare?:, draft?:, last_of_activity?:}]`,
+      left to right. `bare?` marks a `— No task yet` column that holds no cards, which the
+      renderer turns into the clickable `＋ Add task` invitation (the artboard's `bare`);
+      `draft?` marks RE263's open new-task column, whose key is `"draft:<activity_id>"` and
+      which never appears in `cells`.
     * `lanes` — `[%{key:, release:, count:}]`, top to bottom. `release` is `nil` on the
       synthetic `(No release)` lane.
     * `cells` — `%{{column_key, lane_key} => [card]}`. A pair with no cards is simply absent.
     * `unmapped` — the tray's cards.
     * `total` — `length(cards)`.
   """
-  def build(activities, tasks, releases, cards) do
+  def build(activities, tasks, releases, cards, draft \\ nil) do
     tasks_by_id = Map.new(tasks, &{&1.id, &1})
     activity_ids = MapSet.new(activities, & &1.id)
     tasks_by_activity = Enum.group_by(tasks, & &1.story_activity_id)
@@ -71,7 +82,9 @@ defmodule RelayWeb.StoryMapGrid do
     no_task_ids =
       for {:grid, activity_id, nil, _card} <- placements, into: MapSet.new(), do: activity_id
 
-    {columns, bands} = backbone(activities, tasks_by_activity, no_task_ids)
+    {columns, bands} =
+      backbone(activities, tasks_by_activity, no_task_ids, draft_activity_id(draft))
+
     lanes = lane_list(releases)
     {cells, unmapped} = fill(placements, MapSet.new(lanes, & &1.key), last_key(lanes))
 
@@ -84,6 +97,13 @@ defmodule RelayWeb.StoryMapGrid do
       total: length(cards)
     }
   end
+
+  # RE263 — only a `{:task, activity_id}` draft reaches the view model: `:activity` and
+  # `:release` are chrome the renderer owns, and an id this board does not have (a stale draft
+  # after another tab deleted the activity) simply never matches, so the grid renders as if
+  # there were no draft at all.
+  defp draft_activity_id({:task, activity_id}), do: activity_id
+  defp draft_activity_id(_draft), do: nil
 
   @doc """
   The DOM id of one body cell. `:` is not legal in a CSS selector, so the keys' colons become
@@ -106,15 +126,22 @@ defmodule RelayWeb.StoryMapGrid do
     end
   end
 
-  defp backbone(activities, tasks_by_activity, no_task_ids) do
+  defp backbone(activities, tasks_by_activity, no_task_ids, draft_activity_id) do
     {grouped, _next} =
       Enum.map_reduce(activities, 0, fn activity, start ->
         tasks = Map.get(tasks_by_activity, activity.id, [])
-        no_task? = MapSet.member?(no_task_ids, activity.id) or tasks == []
+        draft? = activity.id == draft_activity_id
+        no_task_cards? = MapSet.member?(no_task_ids, activity.id)
+
+        # RE263 — the draft column stands in for the empty placeholder, so the user never sees
+        # `＋ Add task` and an open input side by side. An activity that still holds task-less
+        # CARDS keeps its `— No task yet` column: real cards live in it.
+        no_task? = no_task_cards? or (tasks == [] and not draft?)
 
         columns =
-          if(no_task?, do: [no_task_column(activity)], else: []) ++
-            Enum.map(tasks, &task_column(activity, &1))
+          if(no_task?, do: [no_task_column(activity, not no_task_cards?)], else: []) ++
+            Enum.map(tasks, &task_column(activity, &1)) ++
+            if(draft?, do: [draft_column(activity)], else: [])
 
         columns = mark_last(columns)
         band = %{activity: activity, span: length(columns), count: 0, start: start}
@@ -126,11 +153,46 @@ defmodule RelayWeb.StoryMapGrid do
   end
 
   defp task_column(activity, task) do
-    %{key: "t:#{task.id}", activity: activity, task: task, no_task?: false, last_of_activity?: false}
+    %{
+      key: "t:#{task.id}",
+      activity: activity,
+      task: task,
+      no_task?: false,
+      bare?: false,
+      draft?: false,
+      last_of_activity?: false
+    }
   end
 
-  defp no_task_column(activity) do
-    %{key: "nt:#{activity.id}", activity: activity, task: nil, no_task?: true, last_of_activity?: false}
+  # `bare?` is the artboard's `bare = !ntCount` (line ~450): a placeholder column that holds no
+  # cards invites the activity's first task (`＋ Add task`) instead of reading `— No task yet`.
+  # It is NOT derivable from `last_of_activity?` — an activity with no tasks but WITH task-less
+  # cards has a placeholder that is last AND occupied.
+  defp no_task_column(activity, bare?) do
+    %{
+      key: "nt:#{activity.id}",
+      activity: activity,
+      task: nil,
+      no_task?: true,
+      bare?: bare?,
+      draft?: false,
+      last_of_activity?: false
+    }
+  end
+
+  # RE263 — the open `{:task, _}` draft's column. It never receives cards (`fill/3` produces no
+  # `"draft:"` key), so its body cells render empty; `mark_last/1` gives it `last_of_activity?`
+  # because it is appended last.
+  defp draft_column(activity) do
+    %{
+      key: "draft:#{activity.id}",
+      activity: activity,
+      task: nil,
+      no_task?: false,
+      bare?: false,
+      draft?: true,
+      last_of_activity?: false
+    }
   end
 
   defp mark_last([]), do: []

@@ -218,6 +218,293 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
     end
   end
 
+  describe "RE263 — creating activities" do
+    test "clicking ＋ opens the draft; Enter creates at the end and reopens the input empty",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      refute has_element?(view, "#story-map-draft-input")
+      view |> element("#story-map-add-activity") |> render_click()
+      assert has_element?(view, "#story-map-draft-input")
+
+      submit_draft(view, "Ship work with AI")
+
+      assert_push_event(view, "story_map_draft_cleared", %{})
+
+      assert Enum.map(StoryMap.list_activities(ctx.board), &{&1.name, &1.position}) == [
+               {"Onboard & access", 1},
+               {"Plan the backlog", 2},
+               {"Ship work with AI", 3}
+             ]
+
+      shipped = List.last(StoryMap.list_activities(ctx.board))
+      assert has_element?(view, "#story-map-activity-#{shipped.id}", "Ship work with AI")
+      # Still open and empty, ready for the next sibling.
+      assert has_element?(view, "#story-map-draft-input")
+      refute render(view) =~ ~s(value="Ship work with AI")
+    end
+
+    test "a second Enter appends after the first, so a backbone can be typed", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-add-activity") |> render_click()
+      submit_draft(view, "Ship work with AI")
+      submit_draft(view, "Review & polish")
+
+      assert Enum.map(StoryMap.list_activities(ctx.board), & &1.name) == [
+               "Onboard & access",
+               "Plan the backlog",
+               "Ship work with AI",
+               "Review & polish"
+             ]
+    end
+
+    test "a blank or whitespace-only name creates nothing and leaves the input open",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-add-activity") |> render_click()
+      submit_draft(view, "   ")
+
+      assert length(StoryMap.list_activities(ctx.board)) == 2
+      assert has_element?(view, "#story-map-draft-input")
+      refute_push_event(view, "story_map_draft_cleared", %{})
+      # "nothing flashes" — `CoreComponents.flash/1` renders the error toast as `#flash-error`.
+      refute has_element?(view, "#flash-error")
+    end
+
+    test "Escape closes the draft and creates nothing", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-add-activity") |> render_click()
+      view |> element("#story-map-draft-input") |> render_keydown(%{"key" => "Escape"})
+
+      refute has_element?(view, "#story-map-draft-input")
+      assert has_element?(view, "#story-map-add-activity")
+      assert length(StoryMap.list_activities(ctx.board)) == 2
+    end
+
+    # Clicking away cancels — and it MUST be phx-click-away, not phx-blur: in a real browser
+    # LiveView blurs this input itself before pushing the submit, so phx-blur cancels the draft
+    # the submit is about to commit and Enter creates nothing. render_submit/2 never blurs, so
+    # the fast suite cannot see that; it pins the binding here and
+    # RelayWeb.Browser.StoryMapCreateTest drives the real keypress.
+    test "clicking away closes the draft and creates nothing, and blur is not bound at all",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-add-activity") |> render_click()
+
+      input = view |> element("#story-map-draft-input") |> render()
+      assert input =~ ~s(phx-click-away="story_map_draft_cancel")
+      refute input =~ "phx-blur"
+
+      render_click(view, "story_map_draft_cancel", %{})
+
+      refute has_element?(view, "#story-map-draft-input")
+      assert length(StoryMap.list_activities(ctx.board)) == 2
+    end
+  end
+
+  describe "RE263 — the empty panel creates the first activity" do
+    setup %{user: user} do
+      {:ok, board} = Boards.create_board(user, %{name: "Empty map"})
+      %{empty_board: board}
+    end
+
+    test "the panel offers Add your first activity, and committing replaces it with the grid",
+         %{conn: conn, empty_board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-empty #story-map-empty-add-activity")
+      view |> element("#story-map-empty-add-activity") |> render_click()
+      assert has_element?(view, "#story-map-empty #story-map-draft-input")
+
+      submit_draft(view, "Onboard & access")
+
+      [activity] = StoryMap.list_activities(board)
+      assert activity.name == "Onboard & access"
+      assert activity.position == 1
+      refute has_element?(view, "#story-map-empty")
+      assert has_element?(view, "#story-map-grid #story-map-activity-#{activity.id}")
+      # The draft is unchanged — only the render branch flipped, so it is now in the grid's
+      # trailing add-activity cell.
+      assert has_element?(view, "#story-map-grid #story-map-draft-input")
+    end
+  end
+
+  describe "RE263 — creating tasks" do
+    test "the header ＋ opens a draft column and Enter appends tasks under that activity",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-add-task-#{ctx.onboard.id}") |> render_click()
+      assert has_element?(view, "#story-map-draft-#{ctx.onboard.id} #story-map-draft-input")
+
+      submit_draft(view, "Watch it live")
+      submit_draft(view, "Run big changes")
+
+      tasks =
+        ctx.board
+        |> StoryMap.list_tasks()
+        |> Enum.filter(&(&1.story_activity_id == ctx.onboard.id))
+
+      assert Enum.map(tasks, &{&1.name, &1.position}) == [
+               {"Sign in", 1},
+               {"Watch it live", 2},
+               {"Run big changes", 3}
+             ]
+
+      for task <- tasks, do: assert(has_element?(view, "#story-map-task-#{task.id}", task.name))
+    end
+
+    test "an activity with no tasks shows a clickable ＋ Add task header that opens the draft",
+         %{conn: conn} = ctx do
+      {:ok, shipped} = StoryMap.create_activity(ctx.board, %{name: "Ship work with AI", position: 3})
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-no-task-#{shipped.id}", "＋ Add task")
+      view |> element("#story-map-no-task-#{shipped.id}") |> render_click()
+
+      # The draft column REPLACES the placeholder — never both at once.
+      assert has_element?(view, "#story-map-draft-#{shipped.id} #story-map-draft-input")
+      refute has_element?(view, "#story-map-no-task-#{shipped.id}")
+
+      submit_draft(view, "Watch it live")
+
+      shipped_tasks =
+        ctx.board |> StoryMap.list_tasks() |> Enum.filter(&(&1.story_activity_id == shipped.id))
+
+      assert [%{name: "Watch it live", position: 1}] = shipped_tasks
+    end
+
+    test "an activity id this board does not have is ignored", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      render_click(view, "story_map_add_task", %{"activity-id" => "999999"})
+
+      refute has_element?(view, "#story-map-draft-input")
+      assert length(StoryMap.list_tasks(ctx.board)) == 2
+    end
+  end
+
+  describe "RE263 — creating releases" do
+    test "＋ Release appends a fourth swimlane below Later", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-add-release") |> render_click()
+      submit_draft(view, "Someday")
+
+      releases = StoryMap.list_releases(ctx.board)
+      assert Enum.map(releases, & &1.name) == ["MVP", "Fast follow", "Later", "Someday"]
+      assert List.last(releases).position == 4
+      assert has_element?(view, "#story-map-release-#{List.last(releases).id}", "Someday")
+    end
+  end
+
+  describe "RE263 — an invalid name" do
+    test "an over-long name creates nothing, flashes the field, and leaves the draft intact",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-add-activity") |> render_click()
+      long = String.duplicate("a", 81)
+      html = submit_draft(view, long)
+
+      assert length(StoryMap.list_activities(ctx.board)) == 2
+      assert html =~ "name should be at most 80 character(s)"
+      assert has_element?(view, "#story-map-draft-input")
+      assert render(view) =~ ~s(value="#{long}")
+    end
+  end
+
+  describe "RE263 — realtime and the draft" do
+    test "a second tab sees a newly created activity without a reload", %{conn: conn} = ctx do
+      {:ok, first, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, second, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      first |> element("#story-map-add-activity") |> render_click()
+      submit_draft(first, "Report & share")
+
+      reported = List.last(StoryMap.list_activities(ctx.board))
+      assert has_element?(second, "#story-map-activity-#{reported.id}", "Report")
+    end
+
+    test "an open draft survives a story_map_changed broadcast from another tab",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-add-activity") |> render_click()
+      render_change(view, "story_map_draft_change", %{"name" => "Half typed"})
+
+      {:ok, _elsewhere} = StoryMap.create_activity(ctx.board, %{name: "From another tab", position: 9})
+
+      assert has_element?(view, "#story-map-draft-input")
+      assert render(view) =~ ~s(value="Half typed")
+    end
+  end
+
+  describe "RE263 — nothing from RE261 leaked in" do
+    test "no delete button, no drag grip, and a name is not an editable field", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      # Scoped to the map itself — the surrounding board chrome is not this card's business.
+      refute has_element?(view, "#story-map [draggable]")
+      # The map's ONLY text input is the create draft, and none is open here.
+      refute has_element?(view, "#story-map input[type=text]")
+      refute has_element?(view, "#story-map-grid", "✕")
+      refute has_element?(view, "#story-map-grid", "⠿")
+      refute render(view) =~ "story_map_rename"
+      refute render(view) =~ "story_map_delete"
+    end
+  end
+
+  describe "RE263 — an archived board cannot create structure" do
+    test "the create events are refused with the read-only flash", %{conn: conn} = ctx do
+      {:ok, _archived} = Boards.archive_board(ctx.board)
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert render_click(view, "story_map_add_activity", %{}) =~ "archived"
+      refute has_element?(view, "#story-map-draft-input")
+      assert length(StoryMap.list_activities(ctx.board)) == 2
+    end
+
+    test "no create affordance renders at all, matching the board's stage columns",
+         %{conn: conn} = ctx do
+      # A task-less activity so the `＋ Add task` header branch is on the page too.
+      {:ok, shipped} = StoryMap.create_activity(ctx.board, %{name: "Ship work with AI", position: 3})
+      {:ok, _archived} = Boards.archive_board(ctx.board)
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-grid")
+      refute has_element?(view, "#story-map-add-activity")
+      refute has_element?(view, "#story-map-add-release")
+      refute has_element?(view, "#story-map-add-task-#{ctx.onboard.id}")
+
+      # The bare header falls through to the plain `— No task yet` label rather than the
+      # clickable button, so the column keeps its place in the grid without inviting a click.
+      assert has_element?(view, "#story-map-no-task-#{shipped.id}", "— No task yet")
+      refute has_element?(view, "#story-map-no-task-#{shipped.id}[phx-click]")
+    end
+
+    test "the empty-board panel offers no button either", %{conn: conn, user: user} do
+      {:ok, board} = Boards.create_board(user, %{name: "Empty map"})
+      {:ok, _archived} = Boards.archive_board(board)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-empty")
+      refute has_element?(view, "#story-map-empty-add-activity")
+    end
+  end
+
+  # Type into the open draft and press Enter — the phx-change every keystroke fires, then the
+  # phx-submit. Both are needed: the change is what lets the server clear the box afterwards.
+  defp submit_draft(view, name) do
+    render_change(view, "story_map_draft_change", %{"name" => name})
+    view |> form("#story-map-draft-input-form", %{"name" => name}) |> render_submit()
+  end
+
   defp card_dom_id(board, card), do: "story-map-card-#{Cards.ref(board, card)}"
   defp tray_dom_id(board, card), do: "story-map-tray-card-#{Cards.ref(board, card)}"
 end

@@ -28,6 +28,7 @@ import BoardDnD from "./hooks/board_dnd"
 import BoardPager from "./hooks/board_pager"
 import ArrowKeyGuard from "./hooks/arrow_key_guard"
 import CommitField from "./hooks/commit_field"
+import InlineNameInput from "./hooks/inline_name_input"
 import SubmitOnCmdEnter from "./hooks/submit_on_cmd_enter"
 import SubmitOnEnter from "./hooks/submit_on_enter"
 import initImageLightbox from "./image_lightbox"
@@ -36,7 +37,7 @@ const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, BoardDnD, BoardPager, ArrowKeyGuard, CommitField, SubmitOnCmdEnter, SubmitOnEnter},
+  hooks: {...colocatedHooks, BoardDnD, BoardPager, ArrowKeyGuard, CommitField, InlineNameInput, SubmitOnCmdEnter, SubmitOnEnter},
 })
 
 // Show progress bar on live navigation and form submits
