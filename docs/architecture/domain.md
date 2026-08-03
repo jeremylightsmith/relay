@@ -142,6 +142,25 @@ sharing behavior.
   change never waits on Apple (RLY-81).
 - **Votes** — public upvotes (RLY-69): a unique `(card_id, user_id)` row; `toggle_vote/2`
   toggles and broadcasts `{:vote_changed, card_id}`. A card's supporters are the voting users.
+- **StoryMap** (`Relay.StoryMap`) — the board's second lens (RE265), orthogonal to stages:
+  `Schemas.StoryActivity` (big user goals, left to right), `Schemas.StoryTask` (the backbone,
+  ordered within an activity; `board_id` denormalized so every read is one board-scoped
+  `where`), and `Schemas.Release` (the swimlanes — a **new axis orthogonal to stage**; every
+  board is seeded with `Schemas.Release.seed_names/0` by `Boards.create_board/2`, every
+  pre-existing board by the `backfill_story_map_releases` migration, which carries the one
+  deliberately frozen copy of that list). Cards carry three nilable FKs —
+  `story_activity_id`, `story_task_id`, `release_id` — cast only through
+  `Schemas.Card.story_map_changeset/2`, starting fully UNMAPPED, with release independent of
+  activity/task. *A set `story_task_id` implies the matching `story_activity_id`*, enforced by
+  derivation in `assign_card/2` (the task supplies its activity; a conflicting one passed
+  alongside is ignored), by `update_task/2` (moving a task to another activity rewrites its
+  mapped cards' `story_activity_id` in the same transaction), and by the changeset as a
+  backstop. Deleting structure **unmaps**
+  cards, never deletes them (`cards → structure` is `nilify_all`, `activity → its tasks` is
+  `delete_all`). Structure writes broadcast `{:story_map_changed, board_id}`; assignment reuses
+  `{:card_upserted, card}` via `Cards.notify_upserted/1`. `Relay.Boards` deliberately does
+  **not** depend on this context — `StoryMap → Cards → Boards` already exists, so the reverse
+  edge would close a boundary cycle; the release seed therefore lives in `Boards`.
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
 
 ## Core schemas
@@ -168,6 +187,13 @@ erDiagram
     NodeExecution ||--o| NodeJob : "dispatch unit"
     Board ||--o{ Executor : "registered executors"
     Board ||--o{ Membership : has
+    Board ||--o{ StoryActivity : "story map activities"
+    Board ||--o{ StoryTask : "story map tasks"
+    StoryActivity ||--o{ StoryTask : "backbone (cascade delete)"
+    Board ||--o{ Release : "story map swimlanes"
+    StoryActivity |o--o{ Card : "story_activity_id (nilified on delete)"
+    StoryTask |o--o{ Card : "story_task_id (nilified on delete)"
+    Release |o--o{ Card : "release_id (nilified on delete)"
     User ||--o{ Membership : has
     Board ||--o{ ApiKey : "agent credentials"
     User ||--o{ UserApiToken : "mobile bearer"
@@ -179,6 +205,11 @@ erDiagram
 A `Stage` may point at a `parent` (sub-lanes like `Spec:Review`) and a `reject_to_stage`
 (where a rejection sends the card). `Scope` (not shown) is the per-request authorization
 context threaded through web and API entry points.
+
+A `Card` additionally carries an optional story-map placement — `story_activity_id`,
+`story_task_id` and `release_id`, all nilable, all nilified rather than cascaded when the
+structure they point at is deleted. Release is a **new axis orthogonal to stage**: a card has
+both.
 
 ---
 *Sources of truth: `lib/relay.ex` (`exports`), `lib/schemas/*.ex`, ADRs 0002–0004, 0006.*

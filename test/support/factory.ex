@@ -294,4 +294,45 @@ defmodule Relay.Factory do
     vote = %Schemas.Vote{card_id: card.id, user_id: user.id}
     vote |> merge_attributes(attrs) |> evaluate_lazy_attributes()
   end
+
+  # Full-control factory: `board` (when overridden) must be persisted.
+  def story_activity_factory(attrs) do
+    {board, attrs} = Map.pop_lazy(attrs, :board, fn -> insert(:board) end)
+
+    activity = %Schemas.StoryActivity{
+      board_id: board.id,
+      name: sequence(:story_activity_name, &"Activity #{&1}"),
+      position: sequence(:story_activity_position, &(&1 + 1))
+    }
+
+    activity |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
+
+  # Full-control factory: `story_activity` (when overridden) must be a *persisted* activity —
+  # the task's `board_id` is derived from it so task and activity always share a board.
+  def story_task_factory(attrs) do
+    {activity, attrs} = Map.pop_lazy(attrs, :story_activity, fn -> insert(:story_activity) end)
+
+    task = %Schemas.StoryTask{
+      board_id: activity.board_id,
+      story_activity_id: activity.id,
+      name: sequence(:story_task_name, &"Task #{&1}"),
+      position: sequence(:story_task_position, &(&1 + 1))
+    }
+
+    task |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
+
+  # Full-control factory: `board` (when overridden) must be persisted.
+  def release_factory(attrs) do
+    {board, attrs} = Map.pop_lazy(attrs, :board, fn -> insert(:board) end)
+
+    release = %Schemas.Release{
+      board_id: board.id,
+      name: sequence(:release_name, &"Release #{&1}"),
+      position: sequence(:release_position, &(&1 + 1))
+    }
+
+    release |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
 end

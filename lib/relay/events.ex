@@ -25,6 +25,10 @@ defmodule Relay.Events do
       the sink exists to absorb.
     * `{:stages_changed, board_id}` — any stage/config change; coarse on
       purpose, receivers refetch stages.
+    * `{:story_map_changed, board_id}` — any story-map activity/task/release create,
+      update, delete, or reorder (RE265); coarse on purpose, mirroring
+      `{:stages_changed, board_id}` — receivers refetch the structure. Card **assignment**
+      emits no new event: it reuses `{:card_upserted, card}`.
     * `{:board_updated, board}` — a board's editable attributes (currently
       just `name`) changed; carries the fresh board (stages not preloaded).
     * `{:vote_changed, card_id}` — a public upvote was added or removed (RLY-69);

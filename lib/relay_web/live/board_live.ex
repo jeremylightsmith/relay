@@ -1607,6 +1607,13 @@ defmodule RelayWeb.BoardLive do
     {:noreply, reload_board(socket)}
   end
 
+  # RE265 — the story map is a second lens onto the same board and rides the
+  # shared "board:<id>" topic, so this socket receives the event even though
+  # the kanban view renders none of that structure. No-op on purpose: without
+  # a clause the unmatched message is a FunctionClauseError that kills the
+  # LiveView (it exports handle_info/2, so LiveView dispatches everything here).
+  def handle_info({:story_map_changed, _board_id}, socket), do: {:noreply, socket}
+
   # RLY-69 — a vote toggled somewhere (this board, the public board, another
   # session). Refresh the affected card's count (and, if its drawer is open,
   # the supporters block), then re-stream the card so its face badge repaints

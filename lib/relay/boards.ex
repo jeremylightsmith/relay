@@ -15,6 +15,7 @@ defmodule Relay.Boards do
   alias Schemas.Board
   alias Schemas.Card
   alias Schemas.Membership
+  alias Schemas.Release
   alias Schemas.Stage
   alias Schemas.User
 
@@ -106,7 +107,8 @@ defmodule Relay.Boards do
   @doc """
   Returns the user's board with `stages` preloaded in `position` order,
   creating the board (unique slug derived from the user) and seeding the
-  default 8-stage pipeline, the `Spec:Review`/`Spec:Done`/`Plan:Done`
+  default 8-stage pipeline, the three story-map releases
+  (`Schemas.Release.seed_names/0`), the `Spec:Review`/`Spec:Done`/`Plan:Done`
   sub-lanes, and the three disabled default flows on first call. Idempotent
   per user. Prefers the user's first active (non-archived) board.
   """
@@ -160,7 +162,8 @@ defmodule Relay.Boards do
   @doc """
   Creates a board for `user`: validates `name`, derives a unique `slug` and a
   `key` from the name, sets `owner_id` programmatically, and seeds the
-  default 8-stage pipeline, the `Spec:Review`/`Spec:Done`/`Plan:Done`
+  default 8-stage pipeline, the three story-map releases
+  (`Schemas.Release.seed_names/0`), the `Spec:Review`/`Spec:Done`/`Plan:Done`
   sub-lanes, and the three disabled default flows — all in one transaction.
   External callers pass only a name (`%{name: ...}` / `%{"name" => ...}`).
   Returns the board with stages preloaded.
@@ -179,6 +182,7 @@ defmodule Relay.Boards do
       case Repo.insert(changeset) do
         {:ok, board} ->
           seed_stages!(board)
+          seed_releases!(board)
           seed_lanes_and_flows!(board)
           insert_owner_membership!(board, user)
           Repo.preload(board, stages: from(s in Stage, order_by: s.position))
@@ -596,6 +600,21 @@ defmodule Relay.Boards do
     |> Enum.each(fn {{name, category, type, ai_enabled}, position} ->
       %Stage{board_id: board.id}
       |> Stage.changeset(%{name: name, position: position, category: category, type: type, ai_enabled: ai_enabled})
+      |> Repo.insert!()
+    end)
+  end
+
+  # RE265: every board opens the story map with the three swimlanes. Names and order come from
+  # `Schemas.Release.seed_names/0` — the one definition. This lives here rather than in
+  # `Relay.StoryMap` because `Relay.StoryMap` depends on `Relay.Cards`, which depends on
+  # `Relay.Boards`; a `Boards -> StoryMap` edge would close a boundary cycle. Existing boards
+  # are reached by the `backfill_story_map_releases` migration instead.
+  defp seed_releases!(board) do
+    Release.seed_names()
+    |> Enum.with_index(1)
+    |> Enum.each(fn {name, position} ->
+      %Release{board_id: board.id}
+      |> Release.changeset(%{name: name, position: position})
       |> Repo.insert!()
     end)
   end

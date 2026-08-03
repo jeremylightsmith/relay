@@ -38,6 +38,7 @@ defmodule Relay do
       Runs.RunDetail,
       Runs.SchedulerSupervisor,
       Runs.Supervisor,
+      StoryMap,
       Votes
     ]
 end

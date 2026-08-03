@@ -23,6 +23,12 @@ defmodule Schemas.Card do
   `description`; nullable, cast like `description`. `posted_by_user_id`
   (RLY-225) records the public poster of an idea; nullable, never cast —
   set programmatically on the public-posting path only.
+
+  `story_activity_id` / `story_task_id` / `release_id` (RE265) place the card on the story
+  map — all three nilable, all three cast **only** through `story_map_changeset/2`, kept
+  separate from `changeset/2` and `status_changeset/2` the way the baton is, so a title edit
+  can never touch the map and a map edit can never touch the title. Cards start fully
+  UNMAPPED.
   """
 
   use Ecto.Schema
@@ -54,6 +60,9 @@ defmodule Schemas.Card do
     belongs_to :board, Schemas.Board
     belongs_to :stage, Schemas.Stage
     belongs_to :posted_by_user, Schemas.User
+    belongs_to :story_activity, Schemas.StoryActivity
+    belongs_to :story_task, Schemas.StoryTask
+    belongs_to :release, Schemas.Release
     has_many :owners, Schemas.CardOwner
     has_many :sub_tasks, Schemas.SubTask
     embeds_one :rejection, Schemas.CardRejection, on_replace: :delete
@@ -133,6 +142,33 @@ defmodule Schemas.Card do
 
       :error ->
         changeset
+    end
+  end
+
+  @doc """
+  Changeset for the card's story-map placement (RE265): `:story_activity_id`,
+  `:story_task_id`, `:release_id`. All three are nilable and cast **only** here — never by
+  `changeset/2` or `status_changeset/2`.
+
+  Enforces the one invariant: **if `story_task_id` is set, `story_activity_id` is set**. The
+  matching *value* is derived — `Relay.StoryMap.assign_card/2` reads the activity off the task
+  itself — so this guard exists to stop the direct-changeset path producing a half-state.
+  `release_id` is deliberately independent: a card can be mapped to a cell with no release.
+  """
+  def story_map_changeset(card, attrs) do
+    card
+    |> cast(attrs, [:story_activity_id, :story_task_id, :release_id])
+    |> validate_task_has_activity()
+    |> foreign_key_constraint(:story_activity_id)
+    |> foreign_key_constraint(:story_task_id)
+    |> foreign_key_constraint(:release_id)
+  end
+
+  defp validate_task_has_activity(changeset) do
+    if get_field(changeset, :story_task_id) && is_nil(get_field(changeset, :story_activity_id)) do
+      add_error(changeset, :story_activity_id, "is required when a story task is set")
+    else
+      changeset
     end
   end
 
