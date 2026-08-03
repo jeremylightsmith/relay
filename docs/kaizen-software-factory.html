@@ -151,79 +151,103 @@
   .mermaid { display: flex; justify-content: center; min-width: 520px; }
   .mermaid svg { max-width: 100%; height: auto; }
 
-  /* ---------- timeline ---------- */
-  .timeline { position: relative; margin-top: 8px; padding-left: 0; }
+  /* ---------- timeline (terse, expandable) ---------- */
+  .timeline { position: relative; margin-top: 8px; }
   .phase-label {
     font-family: var(--mono); font-size: .74rem; letter-spacing: .12em; text-transform: uppercase;
-    color: var(--ink-faint); margin: 40px 0 14px; padding-left: 34px;
+    color: var(--ink-faint); margin: 34px 0 12px; padding-left: 34px;
     display: flex; align-items: center; gap: 12px;
   }
   .phase-label::before { content: ""; height: 1px; flex: 1; background: var(--line); }
 
-  .event { position: relative; padding: 0 0 8px 34px; }
+  .event { position: relative; padding: 0 0 10px 34px; }
   /* spine */
   .event::before {
-    content: ""; position: absolute; left: 9px; top: 6px; bottom: -20px;
+    content: ""; position: absolute; left: 9px; top: 14px; bottom: -6px;
     width: 2px; background: var(--line);
   }
-  .event:last-child::before { bottom: 8px; }
+  .event:last-child::before { display: none; }
   /* node */
-  .event .node {
-    position: absolute; left: 3px; top: 5px; width: 14px; height: 14px; border-radius: 50%;
+  .event > .node {
+    position: absolute; left: 3px; top: 13px; width: 14px; height: 14px; border-radius: 50%;
     background: var(--problem); border: 3px solid var(--paper);
-    box-shadow: 0 0 0 1px var(--problem);
+    box-shadow: 0 0 0 1px var(--problem); z-index: 1;
   }
-  .event.solved .node { background: var(--solved); box-shadow: 0 0 0 1px var(--solved); }
-  .event.systemic .node { background: var(--ai); box-shadow: 0 0 0 1px var(--ai); width: 17px; height: 17px; left: 1px; }
+  .event.solved > .node { background: var(--solved); box-shadow: 0 0 0 1px var(--solved); }
+  .event.systemic > .node { background: var(--ai); box-shadow: 0 0 0 1px var(--ai); width: 18px; height: 18px; left: 1px; top: 12px; }
 
   .card {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
-    box-shadow: var(--shadow); overflow: hidden; margin-bottom: 8px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 13px;
+    box-shadow: var(--shadow); overflow: hidden;
   }
   .card.hero { border-color: color-mix(in oklab, var(--ai) 45%, var(--line)); }
-  .card-top {
-    display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px;
-    padding: 15px 20px 12px; border-bottom: 1px solid var(--line-soft);
-  }
-  .date { font-family: var(--mono); font-size: .76rem; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
-  .ref {
-    font-family: var(--mono); font-size: .72rem; font-weight: 600; letter-spacing: .02em;
-    padding: 2px 8px; border-radius: 999px; background: var(--panel-2);
-    border: 1px solid var(--line); color: var(--ink-soft);
-  }
-  .card-top h3 { flex-basis: 100%; margin-top: 2px; }
 
+  /* the always-visible terse row */
+  summary.head {
+    list-style: none; cursor: pointer; display: flex; align-items: center;
+    gap: 10px 14px; flex-wrap: wrap; padding: 13px 16px 13px 18px;
+  }
+  summary.head::-webkit-details-marker { display: none; }
+  .date { font-family: var(--mono); font-size: .74rem; color: var(--ink-faint); font-variant-numeric: tabular-nums; flex: none; }
+  .ref {
+    font-family: var(--mono); font-size: .7rem; font-weight: 600; letter-spacing: .02em;
+    padding: 2px 8px; border-radius: 999px; background: var(--panel-2);
+    border: 1px solid var(--line); color: var(--ink-soft); flex: none;
+  }
+  .tl { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; flex: 1 1 340px; min-width: 0; }
+  .tl .p, .tl .s { font-size: .96rem; font-weight: 620; letter-spacing: -0.01em; line-height: 1.25; }
+  .tl .p { color: var(--problem); }
+  .tl .s { color: var(--solved); }
+  .tl .ar { color: var(--ink-faint); font-weight: 500; flex: none; }
+  .event.systemic .tl .p { color: color-mix(in oklab, var(--problem) 80%, var(--ink)); }
+  .event.systemic .tl .s { color: var(--ai); }
+  .chev {
+    flex: none; margin-left: auto; color: var(--ink-faint); font-family: var(--mono);
+    font-size: .72rem; letter-spacing: .1em; text-transform: uppercase;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .chev svg { width: 13px; height: 13px; transition: transform .2s ease; }
+  details[open] .chev svg { transform: rotate(90deg); }
+  @media (prefers-reduced-motion: reduce) { .chev svg { transition: none; } }
+
+  /* the expanded detail */
+  .body { border-top: 1px solid var(--line-soft); }
   .flow { display: grid; grid-template-columns: 1fr 1fr; }
   @media (max-width: 640px) { .flow { grid-template-columns: 1fr; } }
-  .cell { padding: 14px 20px 16px; }
+  .cell { padding: 14px 18px 16px; }
   .cell.problem { background: var(--problem-bg); }
   .cell.solved  { background: var(--solved-bg); border-left: 1px solid var(--line-soft); }
   @media (max-width: 640px) { .cell.solved { border-left: none; border-top: 1px solid var(--line-soft); } }
   .cell .tag {
-    font-family: var(--mono); font-size: .68rem; letter-spacing: .12em; text-transform: uppercase;
+    font-family: var(--mono); font-size: .66rem; letter-spacing: .12em; text-transform: uppercase;
     font-weight: 600; margin: 0 0 6px; display: flex; align-items: center; gap: 7px;
   }
   .cell.problem .tag { color: var(--problem); }
   .cell.solved .tag  { color: var(--solved); }
-  .cell p { margin: 0; font-size: .92rem; color: var(--ink-soft); line-height: 1.5; }
+  .cell p { margin: 0; font-size: .9rem; color: var(--ink-soft); line-height: 1.5; }
   .cell p b { color: var(--ink); }
   .rootcause {
-    padding: 11px 20px; font-size: .86rem; color: var(--ink-soft);
+    padding: 11px 18px; font-size: .85rem; color: var(--ink-soft);
     background: var(--panel-2); border-top: 1px solid var(--line-soft);
     display: flex; gap: 9px; align-items: baseline;
   }
   .rootcause .k {
-    font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase;
+    font-family: var(--mono); font-size: .64rem; letter-spacing: .1em; text-transform: uppercase;
     color: var(--ink-faint); flex: none; padding-top: 1px;
   }
   .rootcause b { color: var(--ink); }
   .commit {
-    font-family: var(--mono); font-size: .72rem; color: var(--ink-faint);
-    padding: 9px 20px; border-top: 1px solid var(--line-soft);
+    font-family: var(--mono); font-size: .71rem; color: var(--ink-faint);
+    padding: 9px 18px; border-top: 1px solid var(--line-soft);
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   }
   .commit .sha { color: var(--solved); font-weight: 600; }
   .arrow { color: var(--ink-faint); }
+
+  .expand-hint {
+    font-family: var(--mono); font-size: .72rem; color: var(--ink-faint);
+    margin: 14px 0 2px; padding-left: 34px;
+  }
 
   /* ---------- feature panel ---------- */
   .feature {
@@ -310,9 +334,9 @@
 flowchart TD
   R["Run the line<br/>an AI executor works a card"]:::ai
   G{"Quality gate<br/>precommit · review · smoke"}:::neutral
-  Done(["Card done → merged"]):::fix
-  P["Defect caught<br/>the line stops — <b>jidoka</b>"]:::problem
-  A["Card parks<br/><b>andon</b>: pull a human"]:::human
+  Done(["Card done — merged"]):::fix
+  P["Defect caught — jidoka<br/>the line stops"]:::problem
+  A["Card parks — andon<br/>pull a human"]:::human
   C["Root cause<br/>+ countermeasure card"]:::human
   M["Merge the fix to main"]:::fix
   D["Self-update<br/>ships the fix to the line"]:::fix
@@ -343,204 +367,242 @@ flowchart TD
       </p>
     </div>
 
+    <p class="expand-hint">Each row is <span style="color:var(--problem)">problem</span> → <span style="color:var(--solved)">countermeasure</span>. Click any row to expand the root cause and the commit.</p>
+
     <div class="timeline">
 
       <div class="phase-label">Warm-up · hardening the line itself</div>
 
       <div class="event solved">
-        <div class="node"></div>
-        <div class="card">
-          <div class="card-top">
+        <span class="node"></span>
+        <details class="card">
+          <summary class="head">
             <span class="date">Jul 22–23</span><span class="ref">RE237</span>
-            <h3>A half-built dark mode was showing to users</h3>
+            <span class="tl"><span class="p">Half-built dark mode, live</span><span class="ar">→</span><span class="s">Force light, hide the toggle</span></span>
+            <span class="chev">detail<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+          </summary>
+          <div class="body">
+            <div class="flow">
+              <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>The theme toggle exposed an unfinished dark mode that rendered broken.</p></div>
+              <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>Force light mode and hide the control — <b>poka-yoke</b>: remove the way to reach the bad state — then card the real removal.</p></div>
+            </div>
+            <div class="rootcause"><span class="k">Root cause</span><p>An incomplete feature was reachable in production before it was ready.</p></div>
+            <div class="commit"><span class="sha">09ba22f</span> <span class="arrow">·</span> comment out darkmode</div>
           </div>
-          <div class="flow">
-            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>The theme toggle exposed an unfinished dark mode that rendered broken.</p></div>
-            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>Force light mode and hide the control — <b>poka-yoke</b>: remove the way to reach the bad state — then card the real removal.</p></div>
-          </div>
-          <div class="rootcause"><span class="k">Root cause</span><p>An incomplete feature was reachable in production before it was ready.</p></div>
-          <div class="commit"><span class="sha">09ba22f</span> <span class="arrow">·</span> comment out darkmode</div>
-        </div>
+        </details>
       </div>
 
       <div class="event solved">
-        <div class="node"></div>
-        <div class="card">
-          <div class="card-top">
+        <span class="node"></span>
+        <details class="card">
+          <summary class="head">
             <span class="date">Jul 23</span><span class="ref">precommit</span>
-            <h3><span class="mono">mix precommit</span> was flaky — the gate itself was unreliable</h3>
+            <span class="tl"><span class="p">Flaky gate, shared lock</span><span class="ar">→</span><span class="s">Hermetic per-run isolation</span></span>
+            <span class="chev">detail<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+          </summary>
+          <div class="body">
+            <div class="flow">
+              <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>Executor-lock tests fought live executors for one real lock directory, so the suite went red at random.</p></div>
+              <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>Hermetic test isolation — each run gets a private lock dir. A gate you can't trust can't stop the line.</p></div>
+            </div>
+            <div class="rootcause"><span class="k">Root cause</span><p>Tests shared mutable global state (the singleton lock) with running processes.</p></div>
+            <div class="commit"><span class="sha">3b8a2bf</span> <span class="arrow">·</span> fix isolation</div>
           </div>
-          <div class="flow">
-            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>Executor-lock tests fought live executors for one real lock directory, so the suite went red at random.</p></div>
-            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>Hermetic test isolation — each run gets a private lock dir. A gate you can't trust can't stop the line.</p></div>
-          </div>
-          <div class="rootcause"><span class="k">Root cause</span><p>Tests shared mutable global state (the singleton lock) with running processes.</p></div>
-          <div class="commit"><span class="sha">3b8a2bf</span> <span class="arrow">·</span> fix isolation</div>
-        </div>
+        </details>
       </div>
 
       <div class="event solved">
-        <div class="node"></div>
-        <div class="card">
-          <div class="card-top">
+        <span class="node"></span>
+        <details class="card">
+          <summary class="head">
             <span class="date">Jul 28–31</span><span class="ref">RE239 · 240 · 244</span>
-            <h3>Knowledge sprawl — no rule for where anything lived</h3>
+            <span class="tl"><span class="p">Docs sprawl, no home rule</span><span class="ar">→</span><span class="s">One home; doctor enforces it</span></span>
+            <span class="chev">detail<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+          </summary>
+          <div class="body">
+            <div class="flow">
+              <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>Docs duplicated and drifted; <span class="mono">relay.md</span> had bloated; nothing said where a given fact belonged.</p></div>
+              <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p><b>Standardize</b>: ADR 0008 defines nine homes — one fact, one home — and a <span class="mono">relay-doctor</span> check that fails the build on flow/factory drift.</p></div>
+            </div>
+            <div class="rootcause"><span class="k">Root cause</span><p>No single source of truth meant two copies of a fact could silently disagree.</p></div>
+            <div class="commit"><span class="sha">#192</span> <span class="arrow">→</span> <span class="sha">#195</span> <span class="arrow">→</span> <span class="sha">#197</span> <span class="arrow">·</span> taxonomy + doctor alignment checks</div>
           </div>
-          <div class="flow">
-            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>Docs duplicated and drifted; <span class="mono">relay.md</span> had bloated; nothing said where a given fact belonged.</p></div>
-            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p><b>Standardize</b>: ADR 0008 defines nine homes — one fact, one home — and a <span class="mono">relay-doctor</span> check that fails the build on flow/factory drift.</p></div>
-          </div>
-          <div class="rootcause"><span class="k">Root cause</span><p>No single source of truth meant two copies of a fact could silently disagree.</p></div>
-          <div class="commit"><span class="sha">#192</span> <span class="arrow">→</span> <span class="sha">#195</span> <span class="arrow">→</span> <span class="sha">#197</span> <span class="arrow">·</span> taxonomy + doctor alignment checks</div>
-        </div>
+        </details>
       </div>
 
       <div class="phase-label">Dogfooding · the factory finds its own bugs</div>
 
       <div class="event solved">
-        <div class="node"></div>
-        <div class="card">
-          <div class="card-top">
+        <span class="node"></span>
+        <details class="card">
+          <summary class="head">
             <span class="date">Aug 1</span><span class="ref">TH8 → #199</span>
-            <h3>A production card crash-looped the whole page</h3>
+            <span class="tl"><span class="p">Card drawer crash-loops prod</span><span class="ar">→</span><span class="s">Render coerces any shape</span></span>
+            <span class="chev">detail<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+          </summary>
+          <div class="body">
+            <div class="flow">
+              <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>Opening one card drawer threw <span class="mono">Protocol.UndefinedError</span> and reload-looped the browser — a live outage.</p></div>
+              <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>The render now coerces any shape of change and never crashes — proven with a failing test first (TDD), then deployed.</p></div>
+            </div>
+            <div class="rootcause"><span class="k">Root cause</span><p>The drawer assumed one shape for an AI's change record; real data came back as a map.</p></div>
+            <div class="commit"><span class="sha">5593883</span> <span class="arrow">·</span> handle crashloop for ai changes</div>
           </div>
-          <div class="flow">
-            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>Opening one card drawer threw <span class="mono">Protocol.UndefinedError</span> and reload-looped the browser — a live outage.</p></div>
-            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>The render now coerces any shape of change and never crashes — proven with a failing test first (TDD), then deployed.</p></div>
-          </div>
-          <div class="rootcause"><span class="k">Root cause</span><p>The drawer assumed one shape for an AI's change record; real data came back as a map.</p></div>
-          <div class="commit"><span class="sha">5593883</span> <span class="arrow">·</span> handle crashloop for ai changes</div>
-        </div>
+        </details>
       </div>
 
       <div class="event solved">
-        <div class="node"></div>
-        <div class="card">
-          <div class="card-top">
+        <span class="node"></span>
+        <details class="card">
+          <summary class="head">
             <span class="date">Aug 1–2</span><span class="ref">RE249–254</span>
-            <h3>One dogfooding pass surfaced six flow defects at once</h3>
+            <span class="tl"><span class="p">Dogfooding surfaces six flow bugs</span><span class="ar">→</span><span class="s">Filed, sequenced, pulled</span></span>
+            <span class="chev">detail<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+          </summary>
+          <div class="body">
+            <div class="flow">
+              <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>Running real work through the line exposed six ways the flow engine itself mishandled a card.</p></div>
+              <div class="cell solved"><p class="tag"><span>✓</span> The andon</p><p>Each was filed as a <span class="mono">relay-bug</span> card and sequenced at the top of the board — pull the cord, make the defects visible, work them in order.</p></div>
+            </div>
+            <div class="rootcause"><span class="k">Note</span><p>The next five entries are these cards, resolved one at a time on Aug 2.</p></div>
+            <div class="commit"><span class="arrow">↓</span> RE254 · RE253 · RE251 · RE249 · RE252 (and RE250, the deepest, still queued)</div>
           </div>
-          <div class="flow">
-            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>Running real work through the line exposed six ways the flow engine itself mishandled a card.</p></div>
-            <div class="cell solved"><p class="tag"><span>✓</span> The andon</p><p>Each was filed as a <span class="mono">relay-bug</span> card and sequenced at the top of the board — pull the cord, make the defects visible, work them in order.</p></div>
-          </div>
-          <div class="rootcause"><span class="k">Note</span><p>The next four entries are these cards, resolved one at a time on Aug 2.</p></div>
-          <div class="commit"><span class="arrow">↓</span> RE254 · RE253 · RE251 · RE249 · RE252 (and RE250, the deepest, still queued)</div>
-        </div>
+        </details>
       </div>
 
       <div class="event solved">
-        <div class="node"></div>
-        <div class="card">
-          <div class="card-top">
+        <span class="node"></span>
+        <details class="card">
+          <summary class="head">
             <span class="date">Aug 2</span><span class="ref">RE254</span>
-            <h3>The merge node raced CI — it couldn't merge on a protected branch</h3>
+            <span class="tl"><span class="p">Merge node races CI</span><span class="ar">→</span><span class="s">Merge --auto, squash fallback</span></span>
+            <span class="chev">detail<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+          </summary>
+          <div class="body">
+            <div class="flow">
+              <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>The flow tried to merge before required checks were green, so the merge just failed.</p></div>
+              <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>Merge with <span class="mono">--auto</span> (let the platform merge once checks pass) and fall back to a direct squash.</p></div>
+            </div>
+            <div class="rootcause"><span class="k">Root cause</span><p>The step modeled merging as instantaneous instead of gated on CI.</p></div>
+            <div class="commit"><span class="sha">d9042cc</span> <span class="arrow">·</span> merge node uses gh pr merge --auto</div>
           </div>
-          <div class="flow">
-            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>The flow tried to merge before required checks were green, so the merge just failed.</p></div>
-            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>Merge with <span class="mono">--auto</span> (let the platform merge once checks pass) and fall back to a direct squash.</p></div>
-          </div>
-          <div class="rootcause"><span class="k">Root cause</span><p>The step modeled merging as instantaneous instead of gated on CI.</p></div>
-          <div class="commit"><span class="sha">d9042cc</span> <span class="arrow">·</span> merge node uses gh pr merge --auto</div>
-        </div>
+        </details>
       </div>
 
       <div class="event solved">
-        <div class="node"></div>
-        <div class="card">
-          <div class="card-top">
+        <span class="node"></span>
+        <details class="card">
+          <summary class="head">
             <span class="date">Aug 2</span><span class="ref">RE253</span>
-            <h3>A card asked a human a question no one could answer</h3>
+            <span class="tl"><span class="p">Parked question, no reply</span><span class="ar">→</span><span class="s">park_kind makes it answerable</span></span>
+            <span class="chev">detail<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+          </summary>
+          <div class="body">
+            <div class="flow">
+              <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>An engine-raised <span class="mono">needs_input</span> park rendered with no way to reply — the andon pulled, but the cord had no handle.</p></div>
+              <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p><span class="mono">park_kind</span> classifies A1 questions vs A4 escalations; the drawer makes an engine-raised park answerable.</p></div>
+            </div>
+            <div class="rootcause"><span class="k">Root cause</span><p>The UI only knew how to answer human-authored questions, not engine-raised ones.</p></div>
+            <div class="commit"><span class="sha">e243772</span> <span class="arrow">·</span> engine-raised needs_input parks are answerable</div>
           </div>
-          <div class="flow">
-            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>An engine-raised <span class="mono">needs_input</span> park rendered with no way to reply — the andon pulled, but the cord had no handle.</p></div>
-            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p><span class="mono">park_kind</span> classifies A1 questions vs A4 escalations; the drawer makes an engine-raised park answerable.</p></div>
-          </div>
-          <div class="rootcause"><span class="k">Root cause</span><p>The UI only knew how to answer human-authored questions, not engine-raised ones.</p></div>
-          <div class="commit"><span class="sha">e243772</span> <span class="arrow">·</span> engine-raised needs_input parks are answerable</div>
-        </div>
+        </details>
       </div>
 
       <div class="event solved">
-        <div class="node"></div>
-        <div class="card">
-          <div class="card-top">
+        <span class="node"></span>
+        <details class="card">
+          <summary class="head">
             <span class="date">Aug 2</span><span class="ref">RE251</span>
-            <h3>Implementation intermittently did nothing on a retry</h3>
+            <span class="tl"><span class="p">Retry silently does nothing</span><span class="ar">→</span><span class="s">Loop-back carries the findings</span></span>
+            <span class="chev">detail<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+          </summary>
+          <div class="body">
+            <div class="flow">
+              <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>When review sent a task back, the retry sometimes produced no commits — the fix request never reached the worker.</p></div>
+              <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>Every loop-back prompt now carries the reviewer's actual findings, not just the guard's generic message (executor v27).</p></div>
+            </div>
+            <div class="rootcause"><span class="k">Root cause</span><p>The retry dropped the payload that told the worker <em>what to change</em>.</p></div>
+            <div class="commit"><span class="sha">4c0e31a</span> <span class="arrow">·</span> loop-back nodes receive the reviewer's findings</div>
           </div>
-          <div class="flow">
-            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>When review sent a task back, the retry sometimes produced no commits — the fix request never reached the worker.</p></div>
-            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>Every loop-back prompt now carries the reviewer's actual findings, not just the guard's generic message (executor v27).</p></div>
-          </div>
-          <div class="rootcause"><span class="k">Root cause</span><p>The retry dropped the payload that told the worker <em>what to change</em>.</p></div>
-          <div class="commit"><span class="sha">4c0e31a</span> <span class="arrow">·</span> loop-back nodes receive the reviewer's findings</div>
-        </div>
+        </details>
       </div>
 
       <div class="event solved">
-        <div class="node"></div>
-        <div class="card">
-          <div class="card-top">
+        <span class="node"></span>
+        <details class="card">
+          <summary class="head">
             <span class="date">Aug 2</span><span class="ref">RE249</span>
-            <h3>The health check was too shallow to catch any of this</h3>
+            <span class="tl"><span class="p">Health check too shallow</span><span class="ar">→</span><span class="s">relay audit: history + CI</span></span>
+            <span class="chev">detail<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+          </summary>
+          <div class="body">
+            <div class="flow">
+              <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p><span class="mono">relay-doctor</span> only checked name resolution — it couldn't see a broken run history.</p></div>
+              <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>A new <span class="mono">relay audit</span> — endpoint + CLI + doctor board-health — checks run history and CI parity. Sharpen the instrument that finds defects.</p></div>
+            </div>
+            <div class="rootcause"><span class="k">Root cause</span><p>Monitoring measured configuration, not the behavior that actually broke.</p></div>
+            <div class="commit"><span class="sha">9d85a40</span> <span class="arrow">·</span> relay audit with CI parity + board-health</div>
           </div>
-          <div class="flow">
-            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p><span class="mono">relay-doctor</span> only checked name resolution — it couldn't see a broken run history.</p></div>
-            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>A new <span class="mono">relay audit</span> — endpoint + CLI + doctor board-health — checks run history and CI parity. Sharpen the instrument that finds defects.</p></div>
-          </div>
-          <div class="rootcause"><span class="k">Root cause</span><p>Monitoring measured configuration, not the behavior that actually broke.</p></div>
-          <div class="commit"><span class="sha">9d85a40</span> <span class="arrow">·</span> relay audit with CI parity + board-health</div>
-        </div>
+        </details>
       </div>
 
       <div class="event solved">
-        <div class="node"></div>
-        <div class="card">
-          <div class="card-top">
+        <span class="node"></span>
+        <details class="card">
+          <summary class="head">
             <span class="date">Aug 2</span><span class="ref">RE252</span>
-            <h3>A failed review still advanced the batch</h3>
+            <span class="tl"><span class="p">Failed review advances the batch</span><span class="ar">→</span><span class="s">Failure holds the loop</span></span>
+            <span class="chev">detail<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+          </summary>
+          <div class="body">
+            <div class="flow">
+              <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>A failed <span class="mono">quality_review</span> advanced the <span class="mono">foreach</span> loop to the next task instead of stopping — a bad part rolled downstream.</p></div>
+              <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>A failing review holds the loop. This is jidoka in one line: don't pass defects to the next station.</p></div>
+            </div>
+            <div class="rootcause"><span class="k">Root cause</span><p>The loop advanced on completion, not on success.</p></div>
+            <div class="commit"><span class="sha">#201</span> <span class="arrow">·</span> failed quality_review no longer advances the foreach</div>
           </div>
-          <div class="flow">
-            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>A failed <span class="mono">quality_review</span> advanced the <span class="mono">foreach</span> loop to the next task instead of stopping — a bad part rolled downstream.</p></div>
-            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>A failing review holds the loop. This is jidoka in one line: don't pass defects to the next station.</p></div>
-          </div>
-          <div class="rootcause"><span class="k">Root cause</span><p>The loop advanced on completion, not on success.</p></div>
-          <div class="commit"><span class="sha">#201</span> <span class="arrow">·</span> failed quality_review no longer advances the foreach</div>
-        </div>
+        </details>
       </div>
 
       <div class="phase-label">The recurrence · the fix that fixes fixing</div>
 
       <div class="event systemic">
-        <div class="node"></div>
-        <div class="card hero">
-          <div class="card-top">
+        <span class="node"></span>
+        <details class="card hero" open>
+          <summary class="head">
             <span class="date">Aug 2–3</span><span class="ref" style="border-color:var(--ai);color:var(--ai)">RE185 · systemic</span>
-            <h3>The fixes were merged. The bugs kept happening anyway.</h3>
+            <span class="tl"><span class="p">Merged fixes never ran</span><span class="ar">→</span><span class="s">Executors self-update to the line</span></span>
+            <span class="chev">detail<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+          </summary>
+          <div class="body">
+            <div class="flow">
+              <div class="cell problem"><p class="tag"><span>◆</span> The real problem</p><p>Cards kept no-op'ing even after the fix was on <span class="mono">main</span>. The line was running executor <b>v24</b> — <b>four versions of fixes behind</b>. "Merged" had never meant "running."</p></div>
+              <div class="cell solved"><p class="tag"><span>✓</span> The systemic fix</p><p>Executors now <b>self-update</b>: verified download, atomic install, and a restart at a safe job boundary. The countermeasure reaches the <b>gemba</b> on its own.</p></div>
+            </div>
+            <div class="rootcause"><span class="k">Root cause</span><p>The deepest waste wasn't any single bug — it was <b>improvement latency</b>: the gap between a fix landing in the repo and running on the line.</p></div>
+            <div class="commit"><span class="sha">c919e00</span> <span class="arrow">·</span> executors self-update — download + verified install + restart</div>
           </div>
-          <div class="flow">
-            <div class="cell problem"><p class="tag"><span>◆</span> The real problem</p><p>Cards kept no-op'ing even after the fix was on <span class="mono">main</span>. The line was running executor <b>v24</b> — <b>four versions of fixes behind</b>. "Merged" had never meant "running."</p></div>
-            <div class="cell solved"><p class="tag"><span>✓</span> The systemic fix</p><p>Executors now <b>self-update</b>: verified download, atomic install, and a restart at a safe job boundary. The countermeasure reaches the <b>gemba</b> on its own.</p></div>
-          </div>
-          <div class="rootcause"><span class="k">Root cause</span><p>The deepest waste wasn't any single bug — it was <b>improvement latency</b>: the gap between a fix landing in the repo and running on the line.</p></div>
-          <div class="commit"><span class="sha">c919e00</span> <span class="arrow">·</span> executors self-update — download + verified install + restart</div>
-        </div>
+        </details>
       </div>
 
       <div class="event solved">
-        <div class="node"></div>
-        <div class="card">
-          <div class="card-top">
+        <span class="node"></span>
+        <details class="card">
+          <summary class="head">
             <span class="date">Aug 3</span><span class="ref">RE185 · follow-up</span>
-            <h3>The self-update's own guard miscounted — caught by the gate</h3>
+            <span class="tl"><span class="p">Self-updater miscounts its guard</span><span class="ar">→</span><span class="s">The gate caught it</span></span>
+            <span class="chev">detail<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+          </summary>
+          <div class="body">
+            <div class="flow">
+              <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>A benign "nothing newer" check burned the anti-thrash budget, and failed updates weren't counted correctly.</p></div>
+              <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>Fixed so a no-op update never counts against the cap. Notably, the <b>whole-branch review gate caught this</b> — jidoka on the machine that delivers jidoka.</p></div>
+            </div>
+            <div class="rootcause"><span class="k">Root cause</span><p>The safety valve counted the wrong events.</p></div>
+            <div class="commit"><span class="sha">e494502</span> <span class="arrow">·</span> <span class="sha">7cd44c4</span> <span class="arrow">·</span> a benign "nothing newer" never counts toward the cap</div>
           </div>
-          <div class="flow">
-            <div class="cell problem"><p class="tag"><span>◆</span> Problem</p><p>A benign "nothing newer" check burned the anti-thrash budget, and failed updates weren't counted correctly.</p></div>
-            <div class="cell solved"><p class="tag"><span>✓</span> Countermeasure</p><p>Fixed so a no-op update never counts against the cap. Notably, the <b>whole-branch review gate caught this</b> — jidoka on the machine that delivers jidoka.</p></div>
-          </div>
-          <div class="rootcause"><span class="k">Root cause</span><p>The safety valve counted the wrong events.</p></div>
-          <div class="commit"><span class="sha">e494502</span> <span class="arrow">·</span> <span class="sha">7cd44c4</span> <span class="arrow">·</span> a benign "nothing newer" never counts toward the cap</div>
-        </div>
+        </details>
       </div>
 
     </div>
