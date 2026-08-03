@@ -7,6 +7,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Repo
+  alias Relay.StoryMap
 
   describe "two sessions on the same board" do
     setup :register_and_log_in_user
@@ -235,6 +236,26 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
       refute has_element?(view_b, ".board-card")
       assert has_element?(view_b, "#stage-strip-#{backlog_b.id} .stage-count", "0")
+    end
+  end
+
+  describe "story-map events on the shared board topic" do
+    setup :register_and_log_in_user
+
+    # RE265: Relay.StoryMap broadcasts {:story_map_changed, board_id} on the
+    # "board:<id>" topic BoardLive subscribes to. BoardLive exports
+    # handle_info/2, so every message on that topic is dispatched to it — an
+    # unmatched one is a FunctionClauseError, not a logged no-op.
+    test "a story-map structure write leaves an open board session alive", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Still here"})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      {:ok, _activity} = StoryMap.create_activity(board, %{name: "Onboard", position: 1})
+
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Still here")
     end
   end
 
