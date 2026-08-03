@@ -133,10 +133,31 @@
       <!-- release labels (sticky left) -->
       <sc-for list="{{ relLabels }}" as="r" hint-placeholder-count="3">
         <div style="{{ r.style }}">
-          <div style="display:flex;align-items:center;gap:5px;"><span style="{{ r.dotStyle }}"></span><span style="font-size:12.5px;font-weight:600;color:oklch(0.3 0.02 255);">{{ r.name }}</span><span style="font-size:11px;color:oklch(0.7 0.02 255);">✎</span></div>
+          <div style="display:flex;align-items:center;gap:5px;">
+            <span style="{{ r.dotStyle }}"></span>
+            <sc-if value="{{ r.editing }}" hint-placeholder-val="{{ false }}">
+              <input value="{{ editValue }}" onChange="{{ onEditChange }}" onKeyDown="{{ onEditKey }}" onBlur="{{ commitEdit }}" autoFocus="{{ autofocus }}" style="{{ inputStyle }}"></input>
+            </sc-if>
+            <sc-if value="{{ r.notEditing }}" hint-placeholder-val="{{ true }}">
+              <span style="font-size:12.5px;font-weight:600;color:oklch(0.3 0.02 255);cursor:text;flex:1;" onClick="{{ r.onRename }}">{{ r.name }}</span>
+              <sc-if value="{{ r.canDelete }}" hint-placeholder-val="{{ true }}">
+                <button style="{{ r.delStyle }}" onClick="{{ r.onDelete }}" title="{{ r.delTitle }}">✕</button>
+              </sc-if>
+            </sc-if>
+          </div>
           <span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:oklch(0.6 0.02 255);">{{ r.sub }}</span>
         </div>
       </sc-for>
+
+      <!-- add release -->
+      <div style="{{ addRelStyle }}">
+        <button onClick="{{ addRelease }}" style="display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:oklch(0.55 0.02 255);border:1px dashed oklch(0.85 0.008 255);border-radius:8px;padding:4px 9px;width:100%;">＋ Release</button>
+      </div>
+
+      <!-- add activity -->
+      <div style="{{ addActStyle }}">
+        <button onClick="{{ addActivity }}" title="Add activity" style="width:34px;height:34px;border-radius:9px;border:1px dashed oklch(0.82 0.01 255);color:oklch(0.55 0.02 255);font-size:15px;line-height:1;background:white;">＋</button>
+      </div>
 
       <!-- backbone (sticky top) -->
       <sc-for list="{{ topCells }}" as="h" hint-placeholder-count="5">
@@ -149,16 +170,23 @@
         </sc-if>
         <sc-if value="{{ h.expanded }}" hint-placeholder-val="{{ true }}">
           <div style="{{ h.style }}" draggable="{{ dragTrue }}" onDragStart="{{ h.onDragStart }}" onDragOver="{{ h.onDragOver }}" onDrop="{{ h.onDrop }}">
-            <div style="display:flex;align-items:center;gap:6px;cursor:pointer;" onClick="{{ h.onCollapse }}">
-              <span style="font-size:11px;color:{{ h.arrow }};">▾</span>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="font-size:11px;color:{{ h.arrow }};cursor:pointer;" onClick="{{ h.onCollapse }}">▾</span>
               <span style="font-size:12px;color:oklch(0.7 0.03 255);cursor:grab;">⠿</span>
-              <span style="{{ h.nameStyle }}">{{ h.name }}</span>
+              <sc-if value="{{ h.editing }}" hint-placeholder-val="{{ false }}">
+                <input value="{{ editValue }}" onChange="{{ onEditChange }}" onKeyDown="{{ onEditKey }}" onBlur="{{ commitEdit }}" autoFocus="{{ autofocus }}" style="{{ inputStyle }}"></input>
+              </sc-if>
+              <sc-if value="{{ h.notEditing }}" hint-placeholder-val="{{ true }}">
+                <span style="{{ h.nameStyle }}" onClick="{{ h.onRename }}">{{ h.name }}</span>
+              </sc-if>
             </div>
             <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
               <span style="{{ h.badgeStyle }}">{{ h.count }}</span>
               <span style="flex:1;"></span>
+              <button style="{{ h.iconStyle }}" onClick="{{ h.onAddTask }}" title="Add task">＋</button>
               <button style="{{ h.iconStyle }}" onClick="{{ h.onSuggest }}">✦</button>
               <button style="{{ h.iconStyle }}" onClick="{{ h.onFocus }}">◎</button>
+              <button style="{{ h.delStyle }}" onClick="{{ h.onDelete }}" title="{{ h.delTitle }}">✕</button>
             </div>
           </div>
         </sc-if>
@@ -168,7 +196,15 @@
       <sc-for list="{{ taskCells }}" as="t" hint-placeholder-count="8">
         <div style="{{ t.style }}" draggable="{{ dragTrue }}" onDragStart="{{ t.onDragStart }}" onDragOver="{{ t.onDragOver }}" onDrop="{{ t.onDrop }}">
           <sc-if value="{{ t.grip }}" hint-placeholder-val="{{ true }}"><span style="font-size:11px;color:oklch(0.72 0.03 255);cursor:grab;">⠿</span></sc-if>
-          <span>{{ t.name }}</span>
+          <sc-if value="{{ t.editing }}" hint-placeholder-val="{{ false }}">
+            <input value="{{ editValue }}" onChange="{{ onEditChange }}" onKeyDown="{{ onEditKey }}" onBlur="{{ commitEdit }}" autoFocus="{{ autofocus }}" style="{{ inputStyle }}"></input>
+          </sc-if>
+          <sc-if value="{{ t.notEditing }}" hint-placeholder-val="{{ true }}">
+            <span style="flex:1;cursor:text;" onClick="{{ t.onRename }}">{{ t.name }}</span>
+            <sc-if value="{{ t.editable }}" hint-placeholder-val="{{ true }}">
+              <button style="{{ t.delStyle }}" onClick="{{ t.onDelete }}" title="{{ t.delTitle }}">✕</button>
+            </sc-if>
+          </sc-if>
         </div>
       </sc-for>
 
@@ -291,6 +327,10 @@ class Component extends DCLogic {
       suggestFor:null, suggestItems:[],
       actOrder: ACTIVITIES.map(a=>a.id),
       taskOrder: ACTIVITIES.reduce((o,a)=>{ o[a.id]=a.tasks.map(t=>t.id); return o; },{}),
+      acts: ACTIVITIES.reduce((o,a)=>{ o[a.id]={name:a.name,h:a.h}; return o; },{}),
+      taskNames: Object.keys(TASKMAP).reduce((o,k)=>{ o[k]=TASKMAP[k].name; return o; },{}),
+      rels: RELEASES.map(r=>({...r})),
+      editing:null, editValue:'', newId:1,
       moved:{}, dropCell:null, dropHeader:null,
     };
     this._drag = null;
@@ -310,9 +350,10 @@ class Component extends DCLogic {
     const task = ('task' in m) ? m.task : c.task;
     let act = task ? this.ownerAct(task) : (('act' in m) ? m.act : (c.act||null));
     let rel = ('rel' in m) ? m.rel : (c.rel||null);
-    if(act && !rel) rel='later';
+    if(act && (!rel || !this.state.rels.some(r=>r.id===rel))) rel=this.parkId();
     return { task, rel, act };
   }
+  parkId(){ const r=this.state.rels; return r.length ? r[r.length-1].id : null; }
   allCards(){ return CARDS.concat(this.state.added); }
   pass(c){ const o=this.state.owners; if(o.length && o.indexOf(c.owner)<0) return false; if(this.state.needs && !c.needs) return false; return true; }
 
@@ -350,13 +391,24 @@ class Component extends DCLogic {
   renderVals(){
     const p=this.props||{}, st=this.state, z=st.zoom;
     const all=this.allCards();
+    const rels=st.rels, acts=st.acts;
+    const isEdit=(kind,id)=> !!(st.editing && st.editing.kind===kind && st.editing.id===id);
+    const iconStyle='font-size:12px;color:oklch(0.55 0.02 255);';
+    const delStyle='font-size:10px;color:oklch(0.62 0.03 25);';
+    const delOff='font-size:10px;color:oklch(0.82 0.01 255);cursor:not-allowed;';
+    const nIn=(fn)=>all.filter(fn).length;
+    const actCount=(id)=>nIn(c=>this.eff(c).act===id);
+    const taskCount=(id)=>nIn(c=>this.eff(c).task===id);
+    const relCount=(id)=>nIn(c=>{ const e=this.eff(c); return e.act && e.rel===id; });
+    const blockMsg=(n,what)=>'Move '+n+' card'+(n===1?'':'s')+' out of this '+what+' before deleting it';
+    const inputStyle='flex:1;min-width:0;border:1.5px solid oklch(0.6 0.14 250);border-radius:5px;padding:2px 5px;font-size:12px;font-weight:600;outline:none;color:oklch(0.3 0.02 255);background:white;';
     const collapsedSet=new Set(st.collapsed);
     if(st.focus){ st.actOrder.forEach(id=>{ if(id!==st.focus) collapsedSet.add(id); }); }
 
     const cols=[], topCells=[], taskCells=[];
     let ci=2;
     st.actOrder.forEach(actId=>{
-      const a=ACT[actId], tasks=st.taskOrder[actId]||[];
+      const a=acts[actId]||{name:actId,h:255}, tasks=st.taskOrder[actId]||[];
       const cnt=all.filter(c=>{ const e=this.eff(c); return e.act===actId && this.pass(c); }).length;
       const collapsed=collapsedSet.has(actId);
       const badgeStyle='font-family:\'JetBrains Mono\',monospace;font-size:9px;font-weight:600;color:'+(collapsed?'white':'oklch(0.5 0.02 255)')+';background:'+(collapsed?'oklch(0.55 0.02 255)':'oklch(0.93 0.006 255)')+';border-radius:20px;padding:2px 6px;';
@@ -376,13 +428,18 @@ class Component extends DCLogic {
         cols.push({gc:ci, act:actId, task:this.firstTask(actId), merged:true, first:true, lastOfAct:true, h:a.h});
         topCells.push({ expanded:true, name:a.name, count:cnt, arrow:'oklch(0.5 0.02 255)',
           style:'grid-column:'+ci+';grid-row:1;align-self:stretch;position:sticky;top:0;z-index:22;background:oklch(0.972 0.006 255);border-right:'+GL_STRONG+';border-bottom:'+GL_LIGHT+';padding:8px 11px;display:flex;flex-direction:column;justify-content:center;cursor:grab;'+hdrDrop,
-          nameStyle:'font-size:13px;font-weight:600;color:oklch(0.34 0.02 255);', badgeStyle,
-          iconStyle:'font-size:12px;color:oklch(0.55 0.02 255);',
+          nameStyle:'font-size:13px;font-weight:600;color:oklch(0.34 0.02 255);cursor:text;', badgeStyle,
+          iconStyle, editing:isEdit('act',actId), notEditing:!isEdit('act',actId),
+          delStyle: actCount(actId) ? delOff : delStyle,
+          delTitle: actCount(actId) ? blockMsg(actCount(actId),'activity') : 'Delete activity',
+          onRename:(e)=>{ e.stopPropagation(); this.startEdit('act',actId,a.name); },
+          onAddTask:(e)=>{ e.stopPropagation(); this.addTask(actId); },
+          onDelete:(e)=>{ e.stopPropagation(); this.deleteAct(actId); },
           onCollapse:()=>this.toggleCollapse(actId), onSuggest:(e)=>this.toggleSuggest(e,actId), onFocus:(e)=>this.setFocusEv(e,actId),
           onDragStart:()=>{ this._drag={type:'act',id:actId}; },
           onDragOver:(e)=>this.overHeader(e,actId), onDrop:(e)=>this.onDropAct(e,actId),
         });
-        taskCells.push({ name:tasks.length+' tasks · merged', grip:false,
+        taskCells.push({ name:tasks.length+' tasks · merged', grip:false, editable:false, editing:false, notEditing:true, onRename:()=>{}, onDelete:()=>{},
           style:'grid-column:'+ci+';grid-row:2;position:sticky;top:'+H1+'px;z-index:20;background:oklch(0.985 0.004 255);border-right:'+GL_STRONG+';border-bottom:'+GL_STRONG+';padding:7px 9px;font-size:10.5px;color:oklch(0.6 0.02 255);display:flex;align-items:center;gap:6px;',
           onDragStart:()=>{}, onDragOver:(e)=>e.preventDefault(), onDrop:(e)=>e.preventDefault() });
         ci++;
@@ -390,11 +447,13 @@ class Component extends DCLogic {
         const start=ci;
         const ntCount=all.filter(c=>{ const e=this.eff(c); return e.act===actId && !e.task && this.pass(c); }).length;
         let span=tasks.length;
-        if(ntCount){
+        if(ntCount || !tasks.length){
           const ntDrop = st.dropHeader===('nt:'+actId) ? 'box-shadow:0 0 0 2px oklch(0.55 0.14 250);' : '';
-          cols.push({gc:ci, act:actId, task:null, noTask:true, first:true, lastOfAct:false, h:a.h});
-          taskCells.push({ name:'— No task yet', grip:false,
-            style:'grid-column:'+ci+';grid-row:2;position:sticky;top:'+H1+'px;z-index:20;background:oklch(0.978 0.004 255);border-right:1px dashed oklch(0.86 0.01 255);border-bottom:'+GL_STRONG+';padding:7px 9px;font-size:11.5px;font-weight:600;color:oklch(0.58 0.02 255);display:flex;align-items:center;gap:6px;'+ntDrop,
+          const bare=!ntCount;
+          cols.push({gc:ci, act:actId, task:null, noTask:true, first:true, lastOfAct:!tasks.length, h:a.h});
+          taskCells.push({ name: bare ? '＋ Add task' : '— No task yet', grip:false, editable:false, editing:false, notEditing:true,
+            onRename: bare ? (()=>this.addTask(actId)) : (()=>{}), onDelete:()=>{},
+            style:'grid-column:'+ci+';grid-row:2;position:sticky;top:'+H1+'px;z-index:20;background:oklch(0.978 0.004 255);border-right:'+(tasks.length?'1px dashed oklch(0.86 0.01 255)':GL_STRONG)+';border-bottom:'+GL_STRONG+';padding:7px 9px;font-size:11.5px;font-weight:600;color:oklch(0.58 0.02 255);display:flex;align-items:center;gap:6px;'+(bare?'cursor:pointer;':'')+ntDrop,
             onDragStart:()=>{}, onDragOver:(e)=>this.overHeader(e,'nt:'+actId), onDrop:(e)=>{ e.preventDefault(); this.setState({dropHeader:null}); } });
           ci++; span++;
         }
@@ -402,7 +461,12 @@ class Component extends DCLogic {
           const last=ti===tasks.length-1;
           const tDrop = st.dropHeader===tid ? 'box-shadow:0 0 0 2px oklch(0.55 0.14 250);' : '';
           cols.push({gc:ci, act:actId, task:tid, first:ti===0 && !ntCount, lastOfAct:last, h:a.h});
-          taskCells.push({ name:(TASKMAP[tid]||{}).name||tid, grip:true,
+          taskCells.push({ name:st.taskNames[tid]||tid, grip:true, editable:true,
+            editing:isEdit('task',tid), notEditing:!isEdit('task',tid),
+            delStyle: taskCount(tid) ? delOff : delStyle,
+            delTitle: taskCount(tid) ? blockMsg(taskCount(tid),'task') : 'Delete task',
+            onRename:()=>this.startEdit('task',tid,st.taskNames[tid]||tid),
+            onDelete:(e)=>{ e.stopPropagation(); this.deleteTask(actId,tid); },
             style:'grid-column:'+ci+';grid-row:2;position:sticky;top:'+H1+'px;z-index:20;background:white;border-right:'+(last?GL_STRONG:GL_LIGHT)+';border-bottom:'+GL_STRONG+';padding:7px 9px;font-size:11.5px;font-weight:600;color:oklch(0.36 0.02 255);display:flex;align-items:center;gap:6px;cursor:grab;'+tDrop,
             onDragStart:()=>{ this._drag={type:'task',task:tid}; },
             onDragOver:(e)=>this.overHeader(e,tid), onDrop:(e)=>this.onDropTask(e,actId,tid) });
@@ -410,33 +474,47 @@ class Component extends DCLogic {
         });
         topCells.push({ expanded:true, name:a.name, count:cnt, arrow:'oklch(0.5 0.02 255)',
           style:'grid-column:'+start+' / span '+Math.max(span,1)+';grid-row:1;align-self:stretch;position:sticky;top:0;z-index:22;background:oklch(0.972 0.006 255);border-right:'+GL_STRONG+';border-bottom:'+GL_LIGHT+';padding:8px 11px;display:flex;flex-direction:column;justify-content:center;cursor:grab;'+hdrDrop,
-          nameStyle:'font-size:13px;font-weight:600;color:oklch(0.34 0.02 255);', badgeStyle,
-          iconStyle:'font-size:12px;color:oklch(0.55 0.02 255);',
+          nameStyle:'font-size:13px;font-weight:600;color:oklch(0.34 0.02 255);cursor:text;', badgeStyle,
+          iconStyle, editing:isEdit('act',actId), notEditing:!isEdit('act',actId),
+          delStyle: actCount(actId) ? delOff : delStyle,
+          delTitle: actCount(actId) ? blockMsg(actCount(actId),'activity') : 'Delete activity',
+          onRename:(e)=>{ e.stopPropagation(); this.startEdit('act',actId,a.name); },
+          onAddTask:(e)=>{ e.stopPropagation(); this.addTask(actId); },
+          onDelete:(e)=>{ e.stopPropagation(); this.deleteAct(actId); },
           onCollapse:()=>this.toggleCollapse(actId), onSuggest:(e)=>this.toggleSuggest(e,actId), onFocus:(e)=>this.setFocusEv(e,actId),
           onDragStart:()=>{ this._drag={type:'act',id:actId}; },
           onDragOver:(e)=>this.overHeader(e,actId), onDrop:(e)=>this.onDropAct(e,actId),
         });
       }
     });
+    const addActCol=2+cols.length;
 
-    const colTemplate='128px '+cols.map(c=> c.stub?'50px':(c.merged?'176px':'156px')).join(' ');
-    const rowsTemplate=H1+'px '+H2+'px '+RELEASES.map(()=>'auto').join(' ');
+    const colTemplate='128px '+cols.map(c=> c.stub?'50px':(c.merged?'176px':'156px')).join(' ')+' 58px';
+    const rowsTemplate=H1+'px '+H2+'px '+rels.map(()=>'auto').join(' ')+' 44px';
     const gridStyle='display:grid;grid-template-columns:'+colTemplate+';grid-template-rows:'+rowsTemplate+';align-items:start;min-width:max-content;';
 
     const cornerStyle='grid-column:1;grid-row:1 / span 2;position:sticky;top:0;left:0;z-index:35;background:oklch(0.96 0.006 255);border-right:'+GL_STRONG+';border-bottom:'+GL_STRONG+';display:flex;align-items:flex-end;padding:8px 12px;';
     const bandTop1='grid-column:1 / -1;grid-row:1;position:sticky;top:0;z-index:8;background:oklch(0.96 0.006 255);';
     const bandTop2='grid-column:1 / -1;grid-row:2;position:sticky;top:'+H1+'px;z-index:8;background:oklch(0.965 0.005 255);';
-    const rowBands=RELEASES.map((r,ri)=>({ style:'grid-column:1 / -1;grid-row:'+(3+ri)+';z-index:0;background:'+(ri%2?'oklch(0.975 0.004 255)':'transparent')+';border-bottom:'+GL_LIGHT+';' }));
+    const rowBands=rels.map((r,ri)=>({ style:'grid-column:1 / -1;grid-row:'+(3+ri)+';z-index:0;background:'+(ri%2?'oklch(0.975 0.004 255)':'transparent')+';border-bottom:'+GL_LIGHT+';' }));
 
-    const relLabels=RELEASES.map((r,ri)=>({
+    const relLabels=rels.map((r,ri)=>({
       name:r.name, sub: r.sub || (all.filter(c=>this.eff(c).rel===r.id && this.pass(c)).length+' cards'),
       dotStyle:'width:8px;height:8px;border-radius:50%;background:'+(r.h?'oklch(0.6 0.13 '+r.h+')':'oklch(0.7 0.02 255)')+';',
       style:'grid-column:1;grid-row:'+(3+ri)+';position:sticky;left:0;z-index:16;background:oklch(0.96 0.006 255);border-right:'+GL_STRONG+';display:flex;flex-direction:column;gap:5px;padding:8px 12px;',
+      editing:isEdit('rel',r.id), notEditing:!isEdit('rel',r.id),
+      canDelete: rels.length>1,
+      delStyle: relCount(r.id) ? delOff : delStyle,
+      delTitle: relCount(r.id) ? blockMsg(relCount(r.id),'release') : 'Delete release',
+      onRename:()=>this.startEdit('rel',r.id,r.name),
+      onDelete:(e)=>{ e.stopPropagation(); this.deleteRel(r.id); },
     }));
+    const addRelStyle='grid-column:1;grid-row:'+(3+rels.length)+';position:sticky;left:0;z-index:16;background:oklch(0.96 0.006 255);border-right:'+GL_STRONG+';border-top:'+GL_LIGHT+';display:flex;align-items:center;padding:8px 12px;';
+    const addActStyle='grid-column:'+addActCol+';grid-row:1 / span 2;position:sticky;top:0;z-index:22;background:oklch(0.965 0.006 255);border-bottom:'+GL_LIGHT+';display:flex;align-items:center;justify-content:center;';
 
     const bodyCells=[];
     cols.forEach(col=>{
-      RELEASES.forEach((r,ri)=>{
+      rels.forEach((r,ri)=>{
         const cards=all.filter(c=>{ const e=this.eff(c); return e.act===col.act && (col.merged || (col.noTask ? !e.task : e.task===col.task)) && e.rel===r.id && this.pass(c); }).map(c=>this.cardVM(c, col.h));
         const cellKey=col.gc+'|'+r.id;
         const sugg=(st.suggestFor===col.act && r.id==='later' && col.first) ? st.suggestItems.map((s,i)=>({ text:s.text, onKeep:()=>this.keepSug(i), onDismiss:()=>this.dismissSug(i) })) : [];
@@ -458,7 +536,7 @@ class Component extends DCLogic {
     const visible=all.filter(c=>this.pass(c)).length;
     const seg=(v)=>({ bg:z===v?'white':'transparent', fg:z===v?'oklch(0.3 0.02 255)':'oklch(0.5 0.02 255)' });
     const sF=seg('full'), sC=seg('compact'), sM=seg('map');
-    const focusA=st.focus?ACT[st.focus]:null;
+    const focusA=st.focus?acts[st.focus]:null;
     const ownerChips=Object.keys(PEOPLE).map(init=>{ const on=st.owners.indexOf(init)>=0, hh=PEOPLE[init];
       return { init, onClick:()=>this.toggleOwner(init),
         style:'display:flex;align-items:center;border-radius:8px;padding:3px;background:'+(on?'oklch(0.95 0.03 '+hh+')':'white')+';border:1px solid '+(on?'oklch(0.75 0.08 '+hh+')':'oklch(0.9 0.006 255)')+';',
@@ -497,8 +575,84 @@ class Component extends DCLogic {
       countLabel: filterActive ? (visible+' of '+all.length) : (all.length+' cards'),
       focusOn:!!st.focus, focusName:focusA?focusA.name:'', exitFocus:()=>this.setState({focus:null}),
       gridStyle, cornerStyle, bandTop1, bandTop2, rowBands, relLabels, topCells, taskCells, bodyCells,
+      addRelStyle, addActStyle, iconStyle, inputStyle,
+      addActivity:()=>this.addActivity(), addRelease:()=>this.addRelease(),
+      editValue: st.editValue,
+      onEditChange:(e)=>this.setState({editValue:e.target.value}),
+      onEditKey:(e)=>{ if(e.key==='Enter') this.commitEdit(); else if(e.key==='Escape') this.setState({editing:null,editValue:''}); },
+      commitEdit:()=>this.commitEdit(),
       draft: st.draft, onDraftChange:(e)=>this.setState({draft:e.target.value}), closeAdd:()=>this.setState({addKey:null,addMeta:null,draft:''}),
     };
+  }
+
+  /* structure editing */
+  startEdit(kind,id,cur){ this.setState({editing:{kind,id}, editValue:cur||''}); }
+  commitEdit(){
+    const ed=this.state.editing; if(!ed) return;
+    const v=(this.state.editValue||'').trim();
+    this.setState(s=>{
+      if(!v) return {editing:null, editValue:''};
+      if(ed.kind==='act') return {acts:{...s.acts,[ed.id]:{...s.acts[ed.id],name:v}}, editing:null, editValue:''};
+      if(ed.kind==='task') return {taskNames:{...s.taskNames,[ed.id]:v}, editing:null, editValue:''};
+      if(ed.kind==='rel') return {rels:s.rels.map(r=> r.id===ed.id?{...r,name:v}:r), editing:null, editValue:''};
+      return {editing:null, editValue:''};
+    });
+  }
+  addActivity(){
+    const hues=[250,195,292,15,150,80,320];
+    this.setState(s=>{
+      const id='act'+s.newId;
+      return { newId:s.newId+1, actOrder:[...s.actOrder,id],
+        acts:{...s.acts,[id]:{name:'New activity',h:hues[s.actOrder.length%hues.length]}},
+        taskOrder:{...s.taskOrder,[id]:[]}, focus:null,
+        editing:{kind:'act',id}, editValue:'New activity' };
+    });
+  }
+  addTask(actId){
+    this.setState(s=>{
+      const id='task'+s.newId;
+      return { newId:s.newId+1,
+        taskNames:{...s.taskNames,[id]:'New task'},
+        taskOrder:{...s.taskOrder,[actId]:[...(s.taskOrder[actId]||[]),id]},
+        collapsed:s.collapsed.filter(x=>x!==actId), hideTasks:false,
+        editing:{kind:'task',id}, editValue:'New task' };
+    });
+  }
+  addRelease(){
+    this.setState(s=>{
+      const id='rel'+s.newId;
+      return { newId:s.newId+1, rels:[...s.rels,{id,name:'New release',h:80,sub:''}],
+        editing:{kind:'rel',id}, editValue:'New release' };
+    });
+  }
+  /* deletes are only allowed once the column/row is empty */
+  deleteAct(actId){
+    if(this.allCards().some(c=>this.eff(c).act===actId)) return;
+    this.setState(s=>{
+      const acts={...s.acts}; delete acts[actId];
+      const taskOrder={...s.taskOrder}; const gone=taskOrder[actId]||[]; delete taskOrder[actId];
+      const taskNames={...s.taskNames}; gone.forEach(t=>delete taskNames[t]);
+      return { acts, taskOrder, taskNames,
+        actOrder:s.actOrder.filter(x=>x!==actId),
+        collapsed:s.collapsed.filter(x=>x!==actId),
+        focus: s.focus===actId?null:s.focus,
+        suggestFor: s.suggestFor===actId?null:s.suggestFor,
+        editing:null, editValue:'' };
+    });
+  }
+  deleteTask(actId,tid){
+    if(this.allCards().some(c=>this.eff(c).task===tid)) return;
+    this.setState(s=>{
+      const taskNames={...s.taskNames}; delete taskNames[tid];
+      return { taskNames, editing:null, editValue:'',
+        taskOrder:{...s.taskOrder,[actId]:(s.taskOrder[actId]||[]).filter(t=>t!==tid)} };
+    });
+  }
+  deleteRel(relId){
+    const st=this.state;
+    if(st.rels.length<2) return;
+    if(this.allCards().some(c=>{ const e=this.eff(c); return e.act && e.rel===relId; })) return;
+    this.setState(s=>({ rels:s.rels.filter(r=>r.id!==relId), editing:null, editValue:'' }));
   }
 
   toggleOwner(init){ this.setState(s=>({ owners: s.owners.indexOf(init)>=0 ? s.owners.filter(o=>o!==init) : [...s.owners, init] })); }
