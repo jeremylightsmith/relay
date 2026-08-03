@@ -102,6 +102,33 @@ defmodule Relay.CardsSubTasksTest do
     end
   end
 
+  describe "sub_task_pct/1" do
+    test "is the whole-percent completion of a card's sub-tasks", %{card: card} do
+      {:ok, card} =
+        Cards.set_sub_tasks(card, [%{"title" => "a"}, %{"title" => "b"}, %{"title" => "c"}])
+
+      assert Cards.sub_task_pct(card) == 0
+
+      [first | _rest] = card.sub_tasks
+      {:ok, card} = Cards.set_sub_task_done(card, first.id, true)
+
+      assert Cards.sub_task_pct(card) == 33
+    end
+
+    test "is nil for a card with no sub-tasks", %{card: card} do
+      assert Cards.sub_task_pct(%{card | sub_tasks: []}) == nil
+    end
+
+    test "also takes a progress map, so the drawer's bar shares the one formula" do
+      assert Cards.sub_task_pct(%{done: 1, total: 4}) == 25
+      assert Cards.sub_task_pct(%{done: 0, total: 0}) == nil
+    end
+
+    test "is nil for anything without a loaded checklist" do
+      assert Cards.sub_task_pct(%Card{}) == nil
+    end
+  end
+
   describe "update_ai_result/2" do
     test "stores the blob and it round-trips", %{card: card} do
       blob = %{"summary" => "Did the thing", "changes" => ["a", "b"]}

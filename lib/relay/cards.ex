@@ -478,6 +478,21 @@ defmodule Relay.Cards do
   end
 
   @doc """
+  The card's checklist completion as a whole percentage, or `nil` when there is no checklist —
+  **the one definition of that formula** (RE264). `board_card/1`'s working bar, the drawer's
+  SUB-TASKS bar and the story map card's 3px bar all call it, so they can never disagree.
+
+  Takes either a map with a **loaded** `sub_tasks` list (a Card struct or a bare test/story
+  map) or a `sub_task_progress/1` result. Anything else is `nil`.
+  """
+  def sub_task_pct(%{sub_tasks: sub_tasks} = card) when is_list(sub_tasks),
+    do: card |> sub_task_progress() |> sub_task_pct()
+
+  def sub_task_pct(%{total: 0}), do: nil
+  def sub_task_pct(%{done: done, total: total}), do: round(done * 100 / total)
+  def sub_task_pct(_other), do: nil
+
+  @doc """
   The subset of `fields` that are blank on `card`, in the order given — the run-time half of a
   flow node's declared `writes` contract (RE244). The rule is deliberately "non-blank NOW", not
   "changed during the node": a delta check would fail an honest re-entry (a brainstorm returning
