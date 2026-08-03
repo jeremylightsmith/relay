@@ -54,6 +54,11 @@ defmodule Relay.Cards do
     :ai_result,
     :board_id,
     :stage_id,
+    # RE264 — the story map's placement, read straight off this list by
+    # RelayWeb.StoryMapGrid.build/4. Without them every card comes back unplaced.
+    :story_activity_id,
+    :story_task_id,
+    :release_id,
     :posted_by_user_id,
     :rejection,
     :inserted_at,
@@ -164,6 +169,8 @@ defmodule Relay.Cards do
   those heavy text bodies must fetch the full card via `get_card_by_ref/2`
   (the drawer already does). Every other column, the `owners: :user` and
   ordered `sub_tasks` preloads, and the `rejection` embed are populated.
+  That includes the three story-map columns (`story_activity_id`, `story_task_id`,
+  `release_id`), which `RelayWeb.StoryMapGrid` places the card by (RE264).
 
   `opts`:
     * `:exclude_stage_ids` — a list of stage ids to drop from the result
