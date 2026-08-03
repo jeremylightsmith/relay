@@ -98,6 +98,34 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
       assert html =~ "(read-only)"
     end
 
+    # RE262 — same reasoning as restart_one above: a fresh view per event, because folding
+    # these into the shared "every drawer mutation" list above would let an earlier
+    # iteration's "(read-only)" flash persist across render_hook calls and mask a missing
+    # assign_card/unassign_card guard entry (verified by temporarily dropping both from the
+    # guard clause: appended to the shared list the suite stayed green regardless; in a
+    # fresh view it fails as expected).
+    test "rejects assign_card as read-only", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      html =
+        render_hook(view, "assign_card", %{
+          "ref" => "RLY-1",
+          "column" => "t:1",
+          "lane" => "r:1",
+          "index" => 0
+        })
+
+      assert html =~ "(read-only)"
+    end
+
+    test "rejects unassign_card as read-only", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      html = render_hook(view, "unassign_card", %{"ref" => "RLY-1"})
+
+      assert html =~ "(read-only)"
+    end
+
     test "Restore re-activates the board and clears read-only",
          %{conn: conn, user: user, board: board} do
       stage = hd(board.stages)

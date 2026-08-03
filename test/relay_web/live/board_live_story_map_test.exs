@@ -288,6 +288,13 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
         "index" => 0
       })
 
+      # Sync with the view before asserting: render_hook returns as soon as handle_event
+      # completes, but the write broadcasts {:card_upserted, _} and the view re-renders off
+      # that echo. Without waiting for it, the test process (the sandbox connection owner)
+      # can exit while the view is still mid-query, logging a spurious Postgrex disconnect.
+      cell = "#story-map-cell-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}"
+      assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, second)}")
+
       assert Repo.get!(Schemas.Card, second.id).story_map_position == 1
       assert Repo.get!(Schemas.Card, ctx.sso.id).story_map_position == 2
       assert board_positions.() == before
