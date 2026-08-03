@@ -662,8 +662,13 @@ defmodule RelayWeb.BoardLive do
       class={["flex min-h-0", if(@embed, do: "h-dvh", else: "h-[calc(100dvh_-_53px)]")]}
       style="background:oklch(0.95 0.006 255);"
     >
+      <%!--
+      RE262 — the tray renders unconditionally, unlike the artboard's `trayShown:
+      unmappedAll.length>0`. It is the only drop target that unmaps a card, so hiding it when
+      the list empties makes unmapping unreachable exactly when every card is placed — the
+      steady state this feature drives a board toward.
+      --%>
       <StoryMapComponents.unmapped_tray
-        :if={@grid.unmapped != []}
         cards={@grid.unmapped}
         board={@board}
         stages={@board.stages}

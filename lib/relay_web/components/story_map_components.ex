@@ -458,6 +458,10 @@ defmodule RelayWeb.StoryMapComponents do
   The UNMAPPED tray, both states: open (214px — label, count pill, the one-line helper and the
   scrolling card list) and collapsed (a 42px vertical rail keeping the chevron, count and
   label).
+
+  It renders with an empty `cards` list too — count `0`, helper sentence, no cards. The tray is
+  the only drop target that unmaps a card, so it is a permanent rail rather than a function of
+  the list being non-empty (see the note at its call site in `BoardLive`).
   """
   attr :cards, :list, required: true
   attr :board, :any, required: true

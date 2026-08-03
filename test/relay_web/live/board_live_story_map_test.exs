@@ -190,8 +190,11 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       cell = "#story-map-cell-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}"
       assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, ctx.dashboards)}")
-      # Nothing is unmapped any more, so the tray disappears entirely (artboard: `trayShown`).
-      refute has_element?(view, "#story-map-tray")
+      # The card leaves the tray list, but the tray itself stays: it is the only drop target
+      # that unmaps a card, so it may never vanish (see "the tray is a permanent rail").
+      refute has_element?(view, "#story-map-tray ##{tray_dom_id(ctx.board, ctx.dashboards)}")
+      assert has_element?(view, "#story-map-tray")
+      assert has_element?(view, "#story-map-tray-count", "0")
     end
 
     test "an archived card leaves the map", %{conn: conn} = ctx do
@@ -244,8 +247,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       cell = "#story-map-cell-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}"
       assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, ctx.dashboards)}")
-      # Nothing is unmapped any more, so the tray disappears entirely (artboard `trayShown`).
-      refute has_element?(view, "#story-map-tray")
+      assert has_element?(view, "#story-map-tray-count", "0")
     end
 
     test "assign_card onto a No task yet column sets the activity and leaves the task nil",
@@ -316,6 +318,28 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       cleared = Cards.get_card_by_ref(ctx.board, Cards.ref(ctx.board, ctx.audit))
       assert cleared.story_map_position == nil
+    end
+
+    test "unmapping still works once every card is placed", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      # Place the last unmapped card: the tray list is now empty, which is the steady state
+      # this feature drives a board toward. The tray is the ONLY drop target that unmaps,
+      # so if it renders away here, unmapping is unreachable through the UI.
+      render_hook(view, "assign_card", %{
+        "ref" => Cards.ref(ctx.board, ctx.dashboards),
+        "column" => "t:#{ctx.sign_in.id}",
+        "lane" => "r:#{ctx.mvp.id}",
+        "index" => 0
+      })
+
+      assert has_element?(view, "#story-map-tray-count", "0")
+
+      render_hook(view, "unassign_card", %{"ref" => Cards.ref(ctx.board, ctx.audit)})
+
+      assert has_element?(view, "#story-map-tray ##{tray_dom_id(ctx.board, ctx.audit)}")
+      assert has_element?(view, "#story-map-tray-count", "1")
+      refute has_element?(view, "##{card_dom_id(ctx.board, ctx.audit)}")
     end
 
     test "an undecodable column key and an unknown ref are both silent no-ops",

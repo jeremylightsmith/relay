@@ -405,6 +405,23 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert LazyHTML.attribute(card, "class") == ["story-map-tray-card story-map-card"]
     end
 
+    test "with nothing unmapped it still renders the drop rail, count 0 and the helper" do
+      html =
+        render_component(&StoryMapComponents.unmapped_tray/1,
+          cards: [],
+          board: board(),
+          stages: stages(),
+          stalled_ids: MapSet.new(),
+          open: true
+        )
+
+      assert html =~ ~s(id="story-map-tray")
+      assert html =~ ~s(class="story-map-drop-tray")
+      assert html =~ ~s(id="story-map-tray-count")
+      assert html =~ ">0<"
+      assert html =~ "No activity yet. Drag onto the map to place — or drop a card here to unmap it."
+    end
+
     test "collapsed: a 42px vertical rail keeping the chevron, the count and the label" do
       html = tray(false)
 
