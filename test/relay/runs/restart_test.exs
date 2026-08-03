@@ -38,6 +38,16 @@ defmodule Relay.Runs.RestartTest do
     Runs.get_run!(run.id)
   end
 
+  # A run parked because the agent died mid-node — same shape as escalation_park/1
+  # (:parked/:needs_input with the latest NodeExecution.outcome == :failed), named for what
+  # RE247's stalled-cards tests are asserting about it: "Agent died at <node>".
+  defp died_agent_park(stage) do
+    {:ok, card} = Relay.Cards.create_card(stage, %{title: "Died"})
+    run = insert(:run, card: card, status: :parked, parked_reason: :needs_input, current_node: nil)
+    insert(:node_execution, run: run, node: "brainstorm", outcome: :failed)
+    Runs.get_run!(run.id)
+  end
+
   describe "restartable?/1 truth table" do
     test "a clean :failed run is restartable", %{stage: stage} do
       assert Runs.restartable?(clean_failed(stage))
@@ -186,6 +196,85 @@ defmodule Relay.Runs.RestartTest do
       reloaded = Relay.Cards.get_card(ctx.board, card.id)
       assert reloaded.status == :working
       assert reloaded.blocked_since == nil
+    end
+  end
+
+  describe "terminal-stage exclusion (RE247)" do
+    test "a failed run on a card in a Done-type stage is not counted, listed, or revived", ctx do
+      done = Enum.find(ctx.board.stages, &(&1.name == "Done"))
+      assert done.type == :done
+
+      {:ok, done_card} = Relay.Cards.create_card(done, %{title: "Shipped"})
+      done_run = insert(:run, card: done_card, status: :failed, current_node: nil, failure_detail: "boom")
+      insert(:node_execution, run: done_run, node: "brainstorm", outcome: :failed)
+
+      working = clean_failed(ctx.stage)
+
+      assert Runs.restartable_count(ctx.board) == 1
+      assert [%{card: listed}] = Runs.stalled_cards(ctx.board)
+      assert listed.id == working.card_id
+
+      summary = Runs.restart_stalled(ctx.board, :agent)
+
+      assert summary.restarted + summary.refused == 1
+      assert Runs.get_run!(done_run.id).status == :failed
+    end
+  end
+
+  describe "stalled_cards/1" do
+    test "it carries the card with its stage, a reason, and sorts by ref_number", ctx do
+      died = died_agent_park(ctx.stage)
+      failed = clean_failed(ctx.stage)
+
+      assert [first, second] = Runs.stalled_cards(ctx.board)
+
+      assert first.card.id == died.card_id
+      assert first.run.id == died.id
+      assert first.reason == "Agent died at brainstorm"
+      assert %Schemas.Stage{} = first.card.stage
+
+      assert second.card.id == failed.card_id
+      assert second.reason == "Failed at brainstorm"
+
+      assert first.card.ref_number < second.card.ref_number
+    end
+
+    test "it lists exactly the runs restartable_count/1 counts", ctx do
+      _died = died_agent_park(ctx.stage)
+      _failed = clean_failed(ctx.stage)
+      _question = genuine_question(ctx.stage)
+
+      assert length(Runs.stalled_cards(ctx.board)) == Runs.restartable_count(ctx.board)
+      assert Runs.restartable_count(ctx.board) == 2
+    end
+  end
+
+  describe "stall_reason/1" do
+    test "a failed run names the node it died on", %{stage: stage} do
+      assert Runs.stall_reason(clean_failed(stage)) == "Failed at brainstorm"
+    end
+
+    test "a died-agent park names the node it died on", %{stage: stage} do
+      assert Runs.stall_reason(died_agent_park(stage)) == "Agent died at brainstorm"
+    end
+
+    test "a live parked run reads its own current_node", %{stage: stage} do
+      {:ok, card} = Relay.Cards.create_card(stage, %{title: "Parked at code"})
+      run = insert(:run, card: card, status: :parked, parked_reason: :needs_input, current_node: "code")
+      insert(:node_execution, run: run, node: "code", outcome: :failed)
+
+      assert Runs.stall_reason(Runs.get_run!(run.id)) == "Agent died at code"
+    end
+
+    test "no node at all omits the dangling \" at \"", %{stage: stage} do
+      {:ok, failed_card} = Relay.Cards.create_card(stage, %{title: "No executions"})
+      failed = insert(:run, card: failed_card, status: :failed, current_node: nil)
+
+      {:ok, parked_card} = Relay.Cards.create_card(stage, %{title: "No executions either"})
+      parked = insert(:run, card: parked_card, status: :parked, parked_reason: :needs_input, current_node: nil)
+
+      assert Runs.stall_reason(Runs.get_run!(failed.id)) == "Failed"
+      assert Runs.stall_reason(Runs.get_run!(parked.id)) == "Agent died"
     end
   end
 

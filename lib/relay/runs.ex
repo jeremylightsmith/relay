@@ -2135,19 +2135,58 @@ defmodule Relay.Runs do
   @doc "How many runs on `board` are `restartable?/1` — the board-header badge count (RLY-228)."
   def restartable_count(%Board{} = board), do: board |> restartable_runs() |> length()
 
+  @doc """
+  The board's stalled cards, as the restart dialog renders them (RE247): one entry per
+  restartable run, carrying the card (with its stage preloaded) and a human reason string.
+  Exactly the `restartable_runs/1` set the header badge counts and `restart_stalled/2`
+  sweeps, so the dialog can never name a different set than the badge claims. Sorted by
+  `ref_number` so the list order is stable across refreshes and restarts.
+  """
+  def stalled_cards(%Board{} = board) do
+    board
+    |> restartable_runs()
+    |> Enum.map(&%{card: &1.card, run: &1, reason: stall_reason(&1)})
+    |> Enum.sort_by(& &1.card.ref_number)
+  end
+
+  @doc """
+  The one-line reason `run` is stalled — the restart dialog's copy, owned by ONE function the
+  way `retry_refusal_message/1` owns retry's (RE247). `restartable?/1` admits exactly two
+  states, so there are exactly two sentences.
+
+  The node is `current_node` when the run still has one (a died-agent park keeps it), else the
+  `node_key` of the run's most recent NodeExecution — `close_run!/3` nils `current_node` on
+  every terminal close, so a clean `:failed` run would otherwise name no node at all. This is
+  the same recovery `retry_run/2` uses to pick its re-entry node. A run with no execution at
+  all reads without the dangling " at " clause.
+  """
+  def stall_reason(%Run{} = run), do: stall_sentence(run, run.current_node || last_executed_node(run))
+
+  defp stall_sentence(%Run{status: :failed}, nil), do: "Failed"
+  defp stall_sentence(%Run{status: :failed}, node), do: "Failed at #{node}"
+  defp stall_sentence(_run, nil), do: "Agent died"
+  defp stall_sentence(_run, node), do: "Agent died at #{node}"
+
   # The board's restartable runs: the LATEST run per card (exactly the run_summaries_for_board/1
   # model, so the badge counts cards showing a stalled face and the sweep never revives a
-  # superseded run), filtered by the one eligibility rule. Latest node-execution outcome per run
-  # is read in ONE grouped query, not per-run — the bulk analog of latest_execution_outcome/1.
+  # superseded run), filtered by the one eligibility rule. Cards already in a terminal-type
+  # stage (`Stage.terminal_types/0`) are excluded HERE, in the single query the header badge,
+  # the restart dialog (`stalled_cards/1`), and `restart_stalled/2` all share — a finished card
+  # is not stalled, and filtering it out in any second place would let the three disagree
+  # (RE247). Latest node-execution outcome per run is read in ONE grouped query, not per-run —
+  # the bulk analog of latest_execution_outcome/1.
   defp restartable_runs(%Board{id: board_id}) do
     latest_runs =
       Repo.all(
         from r in Run,
           join: c in Card,
           on: c.id == r.card_id,
-          where: c.board_id == ^board_id,
+          join: s in Stage,
+          on: s.id == c.stage_id,
+          where: c.board_id == ^board_id and s.type not in ^Stage.terminal_types(),
           distinct: r.card_id,
-          order_by: [asc: r.card_id, desc: r.inserted_at, desc: r.id]
+          order_by: [asc: r.card_id, desc: r.inserted_at, desc: r.id],
+          preload: [card: :stage]
       )
 
     outcomes = latest_outcomes(Enum.map(latest_runs, & &1.id))
