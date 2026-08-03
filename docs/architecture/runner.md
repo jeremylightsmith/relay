@@ -422,7 +422,7 @@ silently billed to the paid API.
   `max_retained_failed` (how many failed-run worktrees to keep for post-mortem before the
   oldest is evicted, default 3), and two auto-update keys (RE185): `auto_update` (default
   `true`) and `auto_update_min_interval` (seconds between update attempts, default 300).
-  Missing file → sensible defaults, including all three new keys; capacity is the field a
+  Missing file → sensible defaults, including the auto-update keys; capacity is the field a
   developer routinely edits.
 
   > **Running more than one `exclusive` slot?** Concurrent runs each work in their own

@@ -2517,7 +2517,9 @@ class MaybeAutoUpdateTest(unittest.TestCase):
         relay.install_executor = lambda src, v, path=None: (self.installed.append(v) or True)
         relay._safe_to_overwrite = lambda path: True
         relay.restart_executor = lambda frm, attempts: self.restarts.append((frm, attempts))
-        self.cfg = {"auto_update": True, "auto_update_min_interval": 300}
+        # Built from AUTO_UPDATE_DEFAULTS, not retyped, so changing a default cannot silently
+        # disagree with what maybe_auto_update actually indexes (bin/relay's cfg["auto_update"]).
+        self.cfg = dict(relay.AUTO_UPDATE_DEFAULTS)
         self.state = relay.new_auto_update_state()
 
     def _hb(self, latest):
@@ -2943,6 +2945,111 @@ class ExecuteLoopTest(unittest.TestCase):
 
         self.assertEqual(calls, [])
 
+    def test_the_long_running_loop_offers_an_idle_boundary_to_auto_update(self):
+        """The positive complement to test_once_never_auto_updates: proves the call site at
+        the top of the claim loop (bin/relay, just before the `outdated` branch) actually
+        exists and is reached, so the feature cannot silently become dead code. Returning
+        True from the stub stands in for a real restart handing off to os.execv (which
+        never returns), so cmd_execute must return rather than loop."""
+        self.addCleanup(setattr, relay, "maybe_auto_update", relay.maybe_auto_update)
+        self.addCleanup(relay.signal.signal, relay.signal.SIGINT,
+                        relay.signal.getsignal(relay.signal.SIGINT))
+        calls = []
+
+        def fake(cfg, hb, state, config_url):
+            calls.append((cfg, hb, state, config_url))
+            return True
+
+        relay.maybe_auto_update = fake
+        relay.claim_node_job = lambda executor, capacity, timeout: None
+        relay.report_outcome = lambda *a: None
+        # Safety net, not the assertion: if the call site regresses to unreachable, `once=False`
+        # would otherwise spin forever claiming nothing rather than fail — bound that to a clean
+        # assertion failure (calls stays empty) instead of a hung test process.
+        watchdog = threading.Timer(2, lambda: os.kill(os.getpid(), relay.signal.SIGINT))
+        watchdog.daemon = True
+        self.addCleanup(watchdog.cancel)
+        watchdog.start()
+
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+
+        self.assertEqual(len(calls), 1)
+        cfg, hb, state, config_url = calls[0]
+        self.assertEqual(cfg, relay.load_executor_config())
+        self.assertIsNotNone(hb)
+        self.assertIsInstance(state, dict)
+        self.assertTrue(config_url)
+
+
+class AutoUpdateBoundaryTest(unittest.TestCase):
+    """RE185: the job-boundary guard itself (bin/relay, `idle = not in_flight` gating the
+    maybe_auto_update call). ExecuteLoopTest proves the call site exists and that `--once`
+    skips it; this proves the other half — that a job actually in flight blocks it, which is
+    the whole reason the check is `idle and ...` rather than unconditional."""
+
+    def setUp(self):
+        isolate_executor_locks(self)
+        self._saved = {k: getattr(relay, k) for k in
+                       ("load_executor_config", "claim_node_job", "run_node_job",
+                        "report_outcome", "reset_worktree", "refresh_worktree",
+                        "maybe_auto_update", "ExecutorHeartbeat", "FORWARDER", "env", "log",
+                        "DRY")}
+        self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+        self.addCleanup(relay.signal.signal, relay.signal.SIGINT,
+                        relay.signal.getsignal(relay.signal.SIGINT))
+        relay.DRY = False
+        relay.env = lambda name: "x"
+        relay.log = lambda *a, **k: None
+        relay.reset_worktree = lambda *a, **k: None
+        relay.refresh_worktree = lambda *a, **k: None
+        relay.report_outcome = lambda *a: "done"
+        relay.load_executor_config = lambda: {
+            "name": "box", "namespace": "exec",
+            "capacity": {"shared_clean": 1, "exclusive": 0},
+            "poll_timeout": 0.01, "heartbeat_interval": 60}
+        FakeHeartbeat.instances = []
+        relay.ExecutorHeartbeat = FakeHeartbeat
+        self.addCleanup(setattr, relay.ExecutorPool, "ensure", relay.ExecutorPool.ensure)
+        relay.ExecutorPool.ensure = lambda self: None
+        os.environ.setdefault("RELAY_URL", "http://example.test")
+        os.environ.setdefault("RELAY_API_KEY", "k")
+
+    def _interrupt_after(self, seconds):
+        t = threading.Timer(seconds, lambda: os.kill(os.getpid(), relay.signal.SIGINT))
+        t.daemon = True
+        self.addCleanup(t.cancel)
+        t.start()
+
+    def test_a_job_in_flight_blocks_the_boundary_check(self):
+        gate = threading.Event()      # test -> worker: release the blocking job
+        running = threading.Event()   # worker -> test: the job is genuinely in flight now
+        violations, idle_calls = [], []
+
+        def fake_maybe(cfg, hb, state, config_url):
+            (violations if running.is_set() else idle_calls).append(True)
+            return False
+
+        relay.maybe_auto_update = fake_maybe
+
+        def blocking_run(job, path, control, partition=None):
+            running.set()
+            gate.wait(2)               # still "in flight" for as long as this blocks
+            running.clear()
+            return ("succeeded", "", "sha", None)
+
+        relay.run_node_job = blocking_run
+        claims = [job(node_type="shell", run="true", id="nj-1", run_id="r1",
+                      vars={"ref": "RLY-1"})]
+        relay.claim_node_job = lambda e, c, t: claims.pop(0) if claims else None
+
+        threading.Timer(0.2, gate.set).start()   # let the job finish partway through
+        self._interrupt_after(0.4)               # then stop the otherwise-endless loop
+
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+
+        self.assertEqual(violations, [])   # never offered the boundary while the job ran
+        self.assertTrue(idle_calls)        # but was, both before the claim and after it finished
+
 
 class ExecuteParserTest(unittest.TestCase):
     def test_execute_subcommand_parses_flags(self):
@@ -3342,7 +3449,8 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         relay.load_executor_config = lambda: {
             "name": "box", "namespace": "exec",
             "capacity": {"shared_clean": 2, "exclusive": 0},
-            "poll_timeout": 0.01, "heartbeat_interval": 60}
+            "poll_timeout": 0.01, "heartbeat_interval": 60,
+            **relay.AUTO_UPDATE_DEFAULTS}
         FakeHeartbeat.instances = []
         relay.ExecutorHeartbeat = FakeHeartbeat
         self.addCleanup(setattr, relay.ExecutorPool, "ensure", relay.ExecutorPool.ensure)
