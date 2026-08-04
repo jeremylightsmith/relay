@@ -48,6 +48,20 @@ defmodule RelayWeb.StoryMapComponentsTest do
     )
   end
 
+  defp presence_person(id, name, email, avatar_url \\ nil) do
+    %{user_id: id, name: name, email: email, avatar_url: avatar_url}
+  end
+
+  defp presence_dana, do: presence_person(1, "Dana Kim", "dana@acme.co")
+  defp presence_mara, do: presence_person(2, "Mara Lopez", "mara@acme.co")
+
+  defp presence_html(people, current_user_id \\ 1) do
+    render_component(&StoryMapComponents.presence_stack/1,
+      people: people,
+      current_user_id: current_user_id
+    )
+  end
+
   defp grid(draft \\ nil) do
     activity = %StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1}
     task = %StoryTask{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}
@@ -1056,5 +1070,61 @@ defmodule RelayWeb.StoryMapComponentsTest do
     |> LazyHTML.query(selector)
     |> LazyHTML.attribute(attribute)
     |> List.first()
+  end
+
+  describe "presence_stack/1 (RE257)" do
+    test "renders nothing when you are alone on the map" do
+      refute presence_html([presence_dana()]) =~ "story-map-presence"
+    end
+
+    test "renders nothing for an empty roster" do
+      refute presence_html([]) =~ "story-map-presence"
+    end
+
+    test "two people render two 26px identity circles, artboard lines 49-56" do
+      html = presence_html([presence_dana(), presence_mara()])
+
+      assert html =~ ~s(id="story-map-presence")
+      # 26px circles (artboard line ~51)
+      assert html =~ "width:26px;height:26px"
+      # identity-hued fill, the same formula the cursor arrow uses
+      assert html =~ "background:#{CoreComponents.identity_color("dana@acme.co")}"
+      assert html =~ "background:#{CoreComponents.identity_color("mara@acme.co")}"
+      # white initials at weight 600
+      assert html =~ "color:oklch(1 0 0)"
+      assert html =~ "font-weight:600"
+      assert html =~ ">DK<"
+      assert html =~ ">ML<"
+      # 2px white border on every circle; -8px tuck on every circle AFTER the first
+      assert html =~ "border-2 border-white"
+      assert html =~ "-ml-2"
+    end
+
+    test "you come first and your title says so" do
+      html = presence_html([presence_mara(), presence_dana()], 1)
+
+      assert html =~ ~s(title="Dana Kim \(you\)")
+      assert html =~ ~s(title="Mara Lopez")
+      # Dana's circle is rendered before Mara's.
+      assert :binary.match(html, "Dana Kim (you)") < :binary.match(html, "Mara Lopez")
+    end
+
+    test "caps at five faces and shows a neutral +N chip beyond" do
+      people = for i <- 1..8, do: presence_person(i, "Person #{i}", "p#{i}@acme.co")
+
+      html = presence_html(people)
+
+      assert html =~ ~s(id="story-map-presence-overflow")
+      assert html =~ "+3"
+      # the board's existing overflow-chip colours, at the stack's 26px
+      assert html =~ "width:26px;height:26px;border-radius:50%;background:oklch(0.94 0.006 255)"
+      assert html =~ "border:2px solid oklch(1 0 0);margin-left:-8px;"
+    end
+
+    test "exactly five people show five faces and no chip" do
+      people = for i <- 1..5, do: presence_person(i, "Person #{i}", "p#{i}@acme.co")
+
+      refute presence_html(people) =~ "story-map-presence-overflow"
+    end
   end
 end

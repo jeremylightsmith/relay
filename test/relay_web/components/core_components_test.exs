@@ -1700,6 +1700,28 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "filter:grayscale(1)"
       assert html =~ "opacity:0.5"
     end
+
+    test "identity_color/1 is the one definition of a person's hue, and avatar/1 uses it" do
+      html = render_component(&CoreComponents.avatar/1, name: "Dana Kim", email: "dana@acme.co")
+
+      assert CoreComponents.identity_color("dana@acme.co") ==
+               "oklch(0.62 0.13 #{CoreComponents.identity_hue("dana@acme.co")})"
+
+      assert html =~ "background:#{CoreComponents.identity_color("dana@acme.co")}"
+    end
+
+    test "title overrides the name/email tooltip without touching the initials" do
+      html =
+        render_component(&CoreComponents.avatar/1,
+          name: "Dana",
+          email: "dana@acme.co",
+          title: "Dana (you)"
+        )
+
+      assert html =~ ~s(title="Dana \(you\)")
+      # The initials still come from the NAME, not the overridden title.
+      assert html =~ ">D<"
+    end
   end
 
   describe "avatar call sites (RLY-90)" do

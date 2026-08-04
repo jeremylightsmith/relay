@@ -9,6 +9,9 @@ defmodule Schemas.Board do
   from input.
   `public_enabled` + `public_intake_stage_id` (RLY-69) are the public-board
   settings, written only via `public_settings_changeset/2`.
+  `story_map_view` (RE257) is the board-wide shared story-map view state, written only via
+  `story_map_view_changeset/2` and keyed by `Relay.StoryMap.view_defaults/0` — the single
+  source of truth for which keys the view holds.
   """
 
   use Ecto.Schema
@@ -22,6 +25,7 @@ defmodule Schemas.Board do
     field :card_seq, :integer, default: 0
     field :archived_at, :utc_datetime
     field :public_enabled, :boolean, default: false
+    field :story_map_view, :map, default: %{}
 
     belongs_to :owner, Schemas.User
     belongs_to :public_intake_stage, Schemas.Stage
@@ -60,6 +64,17 @@ defmodule Schemas.Board do
   """
   def public_settings_changeset(board, attrs) do
     cast(board, attrs, [:public_enabled, :public_intake_stage_id])
+  end
+
+  @doc """
+  Changeset for the RE257 **shared** story-map view settings — the one jsonb column
+  `Relay.StoryMap.put_view/3` writes. Deliberately separate from `changeset/2` (which guards
+  name/slug/key), mirroring `public_settings_changeset/2`. The key set itself is validated by
+  `Relay.StoryMap.view_defaults/0`, not here: the column is a bag, and the context owns its
+  vocabulary.
+  """
+  def story_map_view_changeset(board, attrs) do
+    cast(board, attrs, [:story_map_view])
   end
 
   @doc "True when the board has been archived (read-only)."

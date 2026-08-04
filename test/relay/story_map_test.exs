@@ -1,9 +1,11 @@
 defmodule Relay.StoryMapTest do
   use Relay.DataCase, async: true
 
+  alias Relay.Boards
   alias Relay.Cards
   alias Relay.Events
   alias Relay.StoryMap
+  alias Schemas.Board
   alias Schemas.Card
   alias Schemas.Release
   alias Schemas.StoryActivity
@@ -755,5 +757,114 @@ defmodule Relay.StoryMapTest do
     attrs = Map.merge(%{story_task_id: task.id, release_id: release.id}, attrs)
     {:ok, placed} = StoryMap.assign_card(card, attrs)
     placed
+  end
+
+  describe "shared map view settings (RE257)" do
+    setup do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      %{user: user, board: board}
+    end
+
+    test "view_defaults/0 is the one definition of the shared key set" do
+      # RE257 — every setting that drives grid GEOMETRY lives here, because raw-pixel cursors
+      # are only sound while every viewer renders the same grid. jsonb, so zoom is a string.
+      assert StoryMap.view_defaults() == %{
+               "tray_open" => true,
+               "zoom" => "compact",
+               "hide_tasks" => false
+             }
+    end
+
+    test "view/1 merges the defaults under a board that has never been written", %{board: board} do
+      assert StoryMap.view(board) == StoryMap.view_defaults()
+    end
+
+    test "view/1 drops a stored key that is no longer part of the set", %{board: board} do
+      {1, _} =
+        Repo.update_all(from(b in Board, where: b.id == ^board.id),
+          set: [story_map_view: %{"tray_open" => false, "removed_setting" => 42}]
+        )
+
+      view = StoryMap.view(Repo.get!(Board, board.id))
+
+      assert view == %{StoryMap.view_defaults() | "tray_open" => false}
+      refute Map.has_key?(view, "removed_setting")
+    end
+
+    test "put_view/3 persists, broadcasts and returns the whole view", %{board: board} do
+      :ok = StoryMap.subscribe_view(board.id)
+
+      assert {:ok, %{"tray_open" => false}} = StoryMap.put_view(board, "tray_open", false)
+
+      board_id = board.id
+      assert_receive {:story_map_view_changed, ^board_id, %{"tray_open" => false}}
+
+      assert Repo.get!(Board, board.id).story_map_view ==
+               %{StoryMap.view_defaults() | "tray_open" => false}
+    end
+
+    test "put_view/3 reads the CURRENT row, so a concurrent key write is not clobbered",
+         %{board: board} do
+      # `board` is the caller's possibly-stale struct; another session has since written.
+      {1, _} =
+        Repo.update_all(from(b in Board, where: b.id == ^board.id),
+          set: [story_map_view: %{"tray_open" => false}]
+        )
+
+      assert {:ok, %{"tray_open" => true}} = StoryMap.put_view(board, "tray_open", true)
+    end
+
+    test "put_view/3 rejects an unknown key and writes nothing", %{board: board} do
+      :ok = StoryMap.subscribe_view(board.id)
+
+      assert StoryMap.put_view(board, "shoe_size", 11) == {:error, :unknown_key}
+
+      assert Repo.get!(Board, board.id).story_map_view == %{}
+      refute_receive {:story_map_view_changed, _board_id, _view}, 100
+    end
+
+    test "put_view/3 stores zoom as a string the component's parser accepts", %{board: board} do
+      assert {:ok, %{"zoom" => "full"}} = StoryMap.put_view(board, "zoom", "full")
+
+      stored = StoryMap.view(Repo.get!(Board, board.id))["zoom"]
+      assert RelayWeb.StoryMapComponents.parse_zoom(stored) == {:ok, :full}
+      # And the default is parseable too — the LiveView's fallback destructures on it.
+      assert {:ok, _level} = RelayWeb.StoryMapComponents.parse_zoom(StoryMap.view_defaults()["zoom"])
+    end
+
+    test "toggle_view/2 flips the COMMITTED row even when the caller's struct is stale",
+         %{board: board} do
+      :ok = StoryMap.subscribe_view(board.id)
+
+      # This is the two-fast-clicks case: `board` still says tray_open=true (the assign a
+      # LiveView would flip from, since its broadcast is still queued behind the second click)
+      # while the row already says false. A `put_view(board, "tray_open", not true)` here would
+      # write false a second time and the two clicks would net to ONE toggle.
+      {1, _} =
+        Repo.update_all(from(b in Board, where: b.id == ^board.id),
+          set: [story_map_view: %{"tray_open" => false}]
+        )
+
+      assert {:ok, %{"tray_open" => true}} = StoryMap.toggle_view(board, "tray_open")
+
+      board_id = board.id
+      assert_receive {:story_map_view_changed, ^board_id, %{"tray_open" => true}}
+      assert StoryMap.view(Repo.get!(Board, board.id))["tray_open"] == true
+    end
+
+    test "toggle_view/2 flips hide_tasks off its default and back", %{board: board} do
+      assert {:ok, %{"hide_tasks" => true}} = StoryMap.toggle_view(board, "hide_tasks")
+      assert {:ok, %{"hide_tasks" => false}} = StoryMap.toggle_view(board, "hide_tasks")
+    end
+
+    test "toggle_view/2 rejects an unknown key and writes nothing", %{board: board} do
+      :ok = StoryMap.subscribe_view(board.id)
+
+      assert StoryMap.toggle_view(board, "shoe_size") == {:error, :unknown_key}
+
+      assert Repo.get!(Board, board.id).story_map_view == %{}
+      refute_receive {:story_map_view_changed, _board_id, _view}, 100
+    end
   end
 end

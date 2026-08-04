@@ -28,6 +28,15 @@ vocabularies — isolation class (`Schemas.Flow.isolation_classes/0`), node type
 owned exactly the same way, by one accessor or `Ecto.Enum` on their schema, and are documented in
 [`runner.md`](runner.md). The rule does not vary: the schema owns the set, nothing re-types it.
 
+The board's **shared story-map view settings** are a closed key set of the same kind:
+`Relay.StoryMap.view_defaults/0` (today
+`%{"tray_open" => true, "zoom" => "compact", "hide_tasks" => false}`) owns both the keys and
+their defaults, `view/1` drops any stored key outside it, and `put_view/3` / `toggle_view/2`
+refuse to write one. They live in the `boards.story_map_view` jsonb column — a bag rather than a
+column per setting, so RE259 (filter & focus) extends the shared view by adding a key to
+`view_defaults/0` instead of shipping a migration. Values are jsonb, so `zoom` is stored as a
+string and read back through `RelayWeb.StoryMapComponents.parse_zoom/1`.
+
 ## Card status
 
 A card's status says whose turn it is and whether anything is holding it. Which statuses are

@@ -7,9 +7,12 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
   import Phoenix.LiveViewTest
 
+  alias Phoenix.Socket.Broadcast
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Events
+  alias Relay.Members
+  alias Relay.Presence
   alias Relay.Repo
   alias Relay.StoryMap
 
@@ -304,7 +307,9 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
     test "unassign_card returns a mapped card to the tray and expands a collapsed tray",
          %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
 
       view |> element("#story-map-tray-toggle") |> render_click()
       refute has_element?(view, "#story-map-tray ##{tray_dom_id(ctx.board, ctx.dashboards)}")
@@ -318,6 +323,12 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       cleared = Cards.get_card_by_ref(ctx.board, Cards.ref(ctx.board, ctx.audit))
       assert cleared.story_map_position == nil
+
+      # RE257 — the tray is a SHARED view setting, so the re-expand goes through put_view/3:
+      # it is persisted and every other viewer follows. An optimistic local assign here would
+      # leave B collapsed and the row saying false, which is the divergence this pins against.
+      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["tray_open"] == true
+      assert has_element?(view_b, "#story-map-tray-toggle[aria-expanded='true']")
     end
 
     test "unmapping still works once every card is placed", %{conn: conn} = ctx do
@@ -1289,7 +1300,11 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       assert has_element?(view, "#story-map-draft-#{ctx.onboard.id}")
     end
 
-    test "zoom and Hide tasks reset on reload", %{conn: conn} = ctx do
+    # RE257 inverted this: zoom and Hide tasks used to be per-socket assigns that reset on
+    # reload. They are shared view settings now — both drive grid geometry, and raw-pixel
+    # cursors only land on the right card while every viewer's geometry agrees — so a reload
+    # (and a post-deploy reconnect) must come back on the view the board is on.
+    test "zoom and Hide tasks SURVIVE a reload, because they are shared", %{conn: conn} = ctx do
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
 
       view |> element("#story-map-zoom-map") |> render_click()
@@ -1297,8 +1312,25 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       {:ok, reloaded, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
 
-      assert attr_of(reloaded, "#story-map-zoom-compact", "aria-pressed") == "true"
-      assert has_element?(reloaded, "#story-map-hide-tasks", "Hide tasks")
+      assert attr_of(reloaded, "#story-map-zoom-map", "aria-pressed") == "true"
+      assert has_element?(reloaded, "#story-map-hide-tasks", "Show tasks")
+    end
+
+    # RE257 — opening a task draft turns Hide tasks off through put_view/3, not a local assign,
+    # so it can never become a second writer that leaves other viewers merged.
+    test "opening a task draft shows tasks for EVERY viewer, not just the drafter",
+         %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view_a |> element("#story-map-hide-tasks") |> render_click()
+      refute has_element?(view_b, "#story-map-task-#{ctx.sign_in.id}")
+
+      view_a |> element("#story-map-add-task-#{ctx.onboard.id}") |> render_click()
+
+      assert has_element?(view_b, "#story-map-task-#{ctx.sign_in.id}")
+      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["hide_tasks"] == false
     end
   end
 
@@ -1430,4 +1462,268 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
   defp card_dom_id(board, card), do: "story-map-card-#{Cards.ref(board, card)}"
   defp tray_dom_id(board, card), do: "story-map-tray-card-#{Cards.ref(board, card)}"
+
+  # RE257 — a second signed-in member of the same board, and their own connection. `insert/2`
+  # and `build_conn/0` come from ConnCase's `import Relay.Factory` / `import Phoenix.ConnTest`.
+  defp second_member(board) do
+    other = insert(:user, name: "Mara Lopez", avatar_url: nil)
+    {:ok, _membership} = Members.invite(board, other.email)
+
+    {other, log_in_user(build_conn(), other)}
+  end
+
+  # The presence roster is re-derived from Relay.Presence, never patched from the diff payload,
+  # so a synthetic diff exercises exactly the shipped code path — deterministically. The REAL
+  # diff is asynchronous (Phoenix computes it in a Task), and that it genuinely arrives is
+  # pinned by Relay.PresenceTest rather than raced here.
+  defp presence_diff(board, leaves \\ %{}) do
+    %Broadcast{
+      topic: Presence.presence_topic(board.id),
+      event: "presence_diff",
+      payload: %{joins: %{}, leaves: leaves}
+    }
+  end
+
+  defp deliver_presence_diff(view, board) do
+    send(view.pid, presence_diff(board))
+    render(view)
+  end
+
+  describe "live presence — the avatar stack (RE257)" do
+    test "alone on the map, no stack renders", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-count")
+      refute has_element?(view, "#story-map-presence")
+    end
+
+    test "a second viewer puts two faces in the stack, yours first", %{conn: conn} = ctx do
+      {other, other_conn} = second_member(ctx.board)
+      {:ok, _view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      # Mounting AFTER the other viewer is tracked reads the roster straight out of the
+      # tracker — no async diff to wait on.
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view_a, "#story-map-presence")
+      html = render(view_a)
+      assert html =~ "(you)"
+      assert html =~ other.name
+      assert :binary.match(html, "(you)") < :binary.match(html, other.name)
+    end
+
+    test "a viewer who joins while you watch appears without a reload", %{conn: conn} = ctx do
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      refute has_element?(view_a, "#story-map-presence")
+
+      {other, other_conn} = second_member(ctx.board)
+      {:ok, _view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      html = deliver_presence_diff(view_a, ctx.board)
+
+      assert html =~ ~s(id="story-map-presence")
+      assert html =~ other.name
+    end
+
+    test "the kanban board renders no stack and tracks nobody", %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, _view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}")
+
+      refute has_element?(view_a, "#story-map-presence")
+      # Only the story-map viewer is counted.
+      assert [%{user_id: _}] = Presence.list_people(ctx.board.id)
+    end
+
+    test "navigating off the map stops counting you", %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      :ok = Presence.subscribe(ctx.board.id)
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+      assert_receive %Broadcast{event: "presence_diff", payload: %{joins: joins}}, 1000
+      assert map_size(joins) == 1
+
+      assert {:error, {:live_redirect, %{to: to}}} =
+               view_b |> element("#board-view-tab-board") |> render_click()
+
+      assert to == "/board/#{ctx.board.slug}"
+      assert_receive %Broadcast{event: "presence_diff", payload: %{leaves: leaves}}, 1000
+      assert map_size(leaves) == 1
+      assert Presence.list_people(ctx.board.id) == []
+
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      refute has_element?(view_a, "#story-map-presence")
+    end
+  end
+
+  describe "shared map view settings (RE257)" do
+    test "a tray toggle in one session moves the tray in another", %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view_b, "#story-map-tray-toggle[aria-expanded='true']")
+
+      render_click(view_a, "toggle_story_map_tray")
+
+      # Local PubSub dispatch happens synchronously in the writer's process, so B's mailbox
+      # already holds the broadcast by the time render_click/2 returns.
+      assert has_element?(view_b, "#story-map-tray-toggle[aria-expanded='false']")
+      # The clicker re-renders from the SAME broadcast — one path, no optimistic assign.
+      assert has_element?(view_a, "#story-map-tray-toggle[aria-expanded='false']")
+      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["tray_open"] == false
+    end
+
+    test "a late joiner opens on the view everyone else is already on", %{conn: conn} = ctx do
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      render_click(view_a, "toggle_story_map_tray")
+
+      {:ok, view_c, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view_c, "#story-map-tray-toggle[aria-expanded='false']")
+    end
+
+    # RE257 — zoom and Hide tasks are shared for a HARDER reason than the tray: both change the
+    # grid geometry that raw-pixel cursors are measured in, so a viewer left behind on the old
+    # value sees everyone else's cursor over the wrong card.
+    test "a zoom change in one session moves the other, and a late joiner opens on it",
+         %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert attr_of(view_b, "#story-map-zoom-compact", "aria-pressed") == "true"
+
+      view_a |> element("#story-map-zoom-full") |> render_click()
+
+      assert attr_of(view_b, "#story-map-zoom-full", "aria-pressed") == "true"
+      assert attr_of(view_a, "#story-map-zoom-full", "aria-pressed") == "true"
+      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["zoom"] == "full"
+
+      {:ok, view_c, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      assert attr_of(view_c, "#story-map-zoom-full", "aria-pressed") == "true"
+    end
+
+    test "a Hide tasks click in one session merges the other's columns too",
+         %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view_b, "#story-map-task-#{ctx.sign_in.id}")
+
+      view_a |> element("#story-map-hide-tasks") |> render_click()
+
+      refute has_element?(view_b, "#story-map-task-#{ctx.sign_in.id}")
+      assert has_element?(view_b, "#story-map-merged-#{ctx.onboard.id}")
+      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["hide_tasks"] == true
+
+      {:ok, view_c, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      refute has_element?(view_c, "#story-map-task-#{ctx.sign_in.id}")
+    end
+
+    # An unparseable zoom can only reach the row by hand, but it must not take the map down.
+    test "a stored zoom the parser rejects falls back to the default", %{conn: conn} = ctx do
+      {:ok, _view} = StoryMap.put_view(ctx.board, "zoom", "gigantic")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert attr_of(view, "#story-map-zoom-compact", "aria-pressed") == "true"
+    end
+  end
+
+  describe "live cursors (RE257)" do
+    test "the map renders the cursor overlay the hook owns", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-surface")
+
+      assert has_element?(
+               view,
+               ~s(#story-map-cursor-layer[phx-hook="StoryMapCursors"][phx-update="ignore"])
+             )
+    end
+
+    test "a cursor move relays to the other session, coloured, and never to itself",
+         %{conn: conn} = ctx do
+      {other, other_conn} = second_member(ctx.board)
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      render_hook(view_b, "cursor_moved", %{"x" => 120, "y" => 340})
+      _ = render(view_a)
+      _ = render(view_b)
+
+      other_id = other.id
+      color = RelayWeb.CoreComponents.identity_color(other.email)
+
+      assert_push_event(view_a, "story_map_cursor", %{
+        user_id: ^other_id,
+        name: _name,
+        color: ^color,
+        x: 120,
+        y: 340
+      })
+
+      refute_push_event(view_b, "story_map_cursor", %{})
+    end
+
+    test "the server-side floor drops a too-fast second move", %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      # Two synchronous round trips, microseconds apart against a 40ms floor.
+      render_hook(view_b, "cursor_moved", %{"x" => 1, "y" => 1})
+      render_hook(view_b, "cursor_moved", %{"x" => 2, "y" => 2})
+      _ = render(view_a)
+
+      assert_push_event(view_a, "story_map_cursor", %{x: 1, y: 1})
+      refute_push_event(view_a, "story_map_cursor", %{x: 2, y: 2})
+    end
+
+    test "cursor_left clears the cursor everywhere else", %{conn: conn} = ctx do
+      {other, other_conn} = second_member(ctx.board)
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      render_hook(view_b, "cursor_left", %{})
+      _ = render(view_a)
+
+      other_id = other.id
+      assert_push_event(view_a, "story_map_cursor_gone", %{user_id: ^other_id})
+    end
+
+    test "a presence leave clears a cursor only when that person is really gone",
+         %{conn: conn} = ctx do
+      {other, other_conn} = second_member(ctx.board)
+      {:ok, _view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      _ = render(view_a)
+
+      # One of their TABS closed while they are still on the map: the cursor must stay, because
+      # the other tab is still driving it.
+      send(view_a.pid, presence_diff(ctx.board, %{to_string(other.id) => %{metas: []}}))
+      _ = render(view_a)
+      refute_push_event(view_a, "story_map_cursor_gone", %{})
+
+      # Someone the fresh roster no longer knows: their cursor goes.
+      ghost_id = other.id + 10_000
+      send(view_a.pid, presence_diff(ctx.board, %{to_string(ghost_id) => %{metas: []}}))
+      _ = render(view_a)
+      assert_push_event(view_a, "story_map_cursor_gone", %{user_id: ^ghost_id})
+    end
+
+    test "the kanban board never relays a cursor", %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      # A forged cursor_moved from the board view must reach nobody.
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}")
+
+      render_hook(view_b, "cursor_moved", %{"x" => 5, "y" => 5})
+      _ = render(view_a)
+
+      refute_push_event(view_a, "story_map_cursor", %{})
+    end
+  end
 end

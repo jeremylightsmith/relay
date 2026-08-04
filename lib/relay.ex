@@ -32,6 +32,7 @@ defmodule Relay do
       Flows.Document,
       Markdown,
       Members,
+      Presence,
       Push,
       Runs,
       Runs.Capacity,
