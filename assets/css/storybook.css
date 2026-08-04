@@ -39,7 +39,10 @@
   color-scheme: "dark";
   --color-base-100: oklch(0.26 0.02 255);
   --color-base-200: oklch(0.22 0.018 255);
-  --color-base-300: oklch(0.30 0.02 255);
+  /* RE237: Line must stay distinct from field-hover (0.30) — a border drawn on a hover/inset
+     fill is invisible when the two match. 0.34 reproduces the light theme's steps: base-100 to
+     Line is 0.08 in both themes, field-hover to Line is ~0.045 in both. */
+  --color-base-300: oklch(0.34 0.02 255);
   --color-base-content: oklch(0.96 0.006 255);
   --color-field-bg: oklch(0.24 0.02 255);
   --color-field-border: oklch(0.34 0.02 255);
@@ -115,6 +118,14 @@
 @custom-variant phx-change-loading (.phx-change-loading&, .phx-change-loading &);
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/* RE237 caveat: /storybook renders under PhoenixStorybook's own root layout, not
+   root.html.heex, so <html> there carries NO data-theme. With `prefersdark: false` the light
+   theme is the only one the storybook ever shows, and every `[data-theme="dark"]` rule below
+   (and the `dark:` variant above) is unreachable on that route — they exist so this file stays
+   a faithful mirror of app.css, where they DO fire. Giving the storybook a real theme switch
+   is a follow-up: PhoenixStorybook 1.3's `color_mode` toggles a `.dark` class, not
+   `data-theme`, so it needs its own bridge. */
 
 /* RE237 — mirror of the modal-scrim rule in app.css (see that file for the rationale). */
 .modal-scrim {

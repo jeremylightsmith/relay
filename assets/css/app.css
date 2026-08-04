@@ -80,7 +80,10 @@
   color-scheme: "dark";
   --color-base-100: oklch(0.26 0.02 255);
   --color-base-200: oklch(0.22 0.018 255);
-  --color-base-300: oklch(0.30 0.02 255);
+  /* RE237: Line must stay distinct from field-hover (0.30) — a border drawn on a hover/inset
+     fill is invisible when the two match. 0.34 reproduces the light theme's steps: base-100 to
+     Line is 0.08 in both themes, field-hover to Line is ~0.045 in both. */
+  --color-base-300: oklch(0.34 0.02 255);
   --color-base-content: oklch(0.96 0.006 255);
   --color-field-bg: oklch(0.24 0.02 255);
   --color-field-border: oklch(0.34 0.02 255);

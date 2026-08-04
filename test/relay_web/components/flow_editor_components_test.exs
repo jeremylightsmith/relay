@@ -68,8 +68,10 @@ defmodule RelayWeb.FlowEditorComponentsTest do
           active: :editor
         })
 
+      # 14, not 10: the artboard draws this tab and FlowMetricsLive's segmented control with the
+      # byte-identical `oklch(0.5 0.03 255/0.14)`, so the two must carry the same alpha.
       assert html =~
-               "box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 10%, transparent)"
+               "box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 14%, transparent)"
 
       refute html =~ "box-shadow:0 1px 2px color-mix(in oklab, var(--color-base-content)"
     end

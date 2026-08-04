@@ -455,9 +455,7 @@ defmodule RelayWeb.FlowGraphComponents do
        "color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100))"}
 
   defp label_colors(_),
-    do:
-      {"color-mix(in oklab, var(--color-base-content) 65%, transparent)",
-       "color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100))"}
+    do: {"color-mix(in oklab, var(--color-base-content) 65%, transparent)", "var(--color-field-hover)"}
 
   defp selected_ring(sel, key) when sel == key, do: "outline:2px solid var(--color-secondary);"
   defp selected_ring(_, _), do: ""

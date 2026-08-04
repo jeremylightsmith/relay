@@ -341,10 +341,17 @@ defmodule RelayWeb.StoryMapComponents do
   defp owner_chip_style(chip) do
     {background, border} =
       if chip.selected? do
-        hue = chip_hue(chip)
         # Per-person/AI hue tint — no single brand role to map onto, same exception as
-        # CoreComponents.identity_color/1. theme-tokens:allow: per-entity hue, not a role
-        {"oklch(0.95 0.03 #{hue})", "oklch(0.75 0.08 #{hue})"}
+        # CoreComponents.identity_color/1. Only the HUE is exempt: freezing the LIGHTNESS too
+        # left a near-white pill sitting on the dark filter bar. So the hue is anchored at
+        # identity_color/1's fixed L 0.62 and mixed into the surface by Rule B, which reproduces
+        # the artboard's 0.95 fill / 0.75 border in light and a dark tint of the same hue in
+        # dark: N = round5((1 - L) / (1 - 0.62) * 100) → 15 and 65.
+        # theme-tokens:allow: per-entity hue, not a role
+        anchor = "oklch(0.62 0.13 #{chip_hue(chip)})"
+
+        {"color-mix(in oklab, #{anchor} 15%, var(--color-base-100))",
+         "color-mix(in oklab, #{anchor} 65%, var(--color-base-100))"}
       else
         {"var(--color-base-100)", "var(--color-field-border)"}
       end
@@ -1741,11 +1748,16 @@ defmodule RelayWeb.StoryMapComponents do
       "background:var(--color-field-hover);z-index:50;overflow:hidden;"
   end
 
-  # The inverted mono count pill: white on the neutral dark pill. Shared by the UNMAPPED
-  # tray's badge (artboard line ~87) and RE259's collapsed stub badge (line ~414), which are
-  # the same pill at the same two paddings — so the tokens exist once.
+  # The inverted mono count pill: the surface colour as ink on a mid-grey fill. Shared by the
+  # UNMAPPED tray's badge (artboard line ~87) and RE259's collapsed stub badge (line ~414),
+  # which are the same pill at the same two paddings — so the tokens exist once.
+  #
+  # This is a Rule-N mid grey (P = 60), NOT the `--color-neutral` dark-band shortcut: that
+  # shortcut is scoped to the 0.22 band, and taking it here dropped the pill 0.23 lightness in
+  # light mode — ~9x Constraint 6's 0.025 tolerance.
   defp inverted_count_style(padding) do
-    "font-family:var(--font-mono);font-size:9px;font-weight:600;color:var(--color-neutral-content);" <>
-      "background:var(--color-neutral);border-radius:20px;padding:#{padding};"
+    "font-family:var(--font-mono);font-size:9px;font-weight:600;color:var(--color-base-100);" <>
+      "background:color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100));" <>
+      "border-radius:20px;padding:#{padding};"
   end
 end

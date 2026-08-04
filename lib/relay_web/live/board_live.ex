@@ -315,7 +315,7 @@ defmodule RelayWeb.BoardLive do
           <div
             id="board-bands"
             class="drawer:min-w-0 drawer:w-auto drawer:overflow-x-auto drawer:overflow-y-hidden drawer:[-webkit-overflow-scrolling:touch] drawer:[overscroll-behavior-x:contain]"
-            style="display:flex;gap:22px;padding:16px 18px 18px 18px;align-items:stretch;background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));flex:1 1 auto;min-height:0;"
+            style="display:flex;gap:22px;padding:16px 18px 18px 18px;align-items:stretch;background:var(--color-base-200);flex:1 1 auto;min-height:0;"
           >
             <section
               :for={{category, stages} <- @stage_groups}
@@ -805,7 +805,7 @@ defmodule RelayWeb.BoardLive do
       <div
         id="story-map"
         phx-hook="StoryMapDnD"
-        class="flex min-h-0 flex-1 bg-base-content/5"
+        class="flex min-h-0 flex-1 bg-base-200"
       >
         <%!--
         RE262 — the tray renders unconditionally, unlike the artboard's `trayShown:

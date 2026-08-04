@@ -140,11 +140,15 @@ defmodule RelayWeb.RunComponents do
   # wrap/baton/dot/version colors per status — the artboard's `strips` table. RE237: each
   # tint/ink pair is re-expressed via the token mapping's Rule B (brand hues) — N for the
   # tints, P for the ink, against that status's role's light-theme L.
+  # `:running`'s baton_bg is 5, not 10, because secondary is the darkest role (L 0.56), so
+  # N = round5(0.03/0.44*100) = 5 where the same source tint maps to 10 under the lighter roles
+  # below. The two other sites rendering that violet tint (the run-ref chip at `run_ref/1`, the
+  # queued face) already use 5.
   defp strip_styles(:running),
     do: %{
       wrap_bg: "color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100))",
       wrap_border: "color-mix(in oklab, var(--color-secondary) 20%, var(--color-base-100))",
-      baton_bg: "color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100))",
+      baton_bg: "color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100))",
       baton_c: "color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content))",
       dot: "var(--color-secondary)",
       pulse?: true,
@@ -883,7 +887,7 @@ defmodule RelayWeb.RunComponents do
       class="run-face-badge run-face-failed"
       style="display:flex;align-items:center;gap:8px;background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border-radius:8px;padding:8px 10px;"
     >
-      <span style={"display:flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(#{RunStatus.descriptor(:failed).token});color:var(--color-error-content);font-size:10px;"}>
+      <span style={"display:flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(#{RunStatus.descriptor(:failed).token});color:var(#{RunStatus.descriptor(:failed).token}-content);font-size:10px;"}>
         {RunStatus.descriptor(:failed).icon}
       </span>
       <div>
@@ -948,7 +952,7 @@ defmodule RelayWeb.RunComponents do
     ~H"""
     <div
       class="run-face-badge run-face-cancelled"
-      style="display:flex;align-items:center;gap:8px;background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));border-radius:8px;padding:8px 10px;"
+      style="display:flex;align-items:center;gap:8px;background:var(--color-field-hover);border-radius:8px;padding:8px 10px;"
     >
       <span style="display:flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:color-mix(in oklab, var(--color-base-content) 40%, var(--color-base-100));color:var(--color-neutral-content);font-size:10px;">
         ⊘

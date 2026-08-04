@@ -69,7 +69,7 @@ defmodule RelayWeb.BoardRunnersLive do
       </:actions>
       <div
         id="runners-page"
-        style="background:var(--color-field-hover);min-height:calc(100vh - 74px);"
+        style="background:var(--color-base-200);min-height:calc(100vh - 74px);"
       >
         <div style="max-width:1120px;margin:0 auto;padding:30px 28px 72px 28px;">
           <%= if @runners == [] do %>

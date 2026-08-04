@@ -684,7 +684,7 @@ defmodule RelayWeb.FlowEditorComponents do
   defp flow_tab_style(true),
     do:
       "font-size:13px;font-weight:600;padding:5px 12px;border-radius:7px;" <>
-        "background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 95%, transparent);box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 10%, transparent);"
+        "background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 95%, transparent);box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 14%, transparent);"
 
   defp flow_tab_style(false),
     do:

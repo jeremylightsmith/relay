@@ -130,7 +130,7 @@ defmodule RelayWeb.BoardSettingsLive do
         >
           <div
             class="font-mono"
-            style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);padding:4px 10px 8px 10px;"
+            style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);padding:4px 10px 8px 10px;"
           >
             BOARD
           </div>
@@ -179,7 +179,7 @@ defmodule RelayWeb.BoardSettingsLive do
 
           <div
             class="font-mono"
-            style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);padding:18px 10px 8px 10px;"
+            style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);padding:18px 10px 8px 10px;"
           >
             ENGINE
           </div>
@@ -540,7 +540,7 @@ defmodule RelayWeb.BoardSettingsLive do
                           style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;letter-spacing:0.03em;color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));"
                         >
                           <span style="width:11px;height:11px;border-radius:50%;background:var(--color-secondary);display:flex;align-items:center;justify-content:center;">
-                            <span style="width:4px;height:4px;border-radius:50%;border:1px solid var(--color-base-100);">
+                            <span style="width:4px;height:4px;border-radius:50%;border:1px solid var(--color-secondary-content);">
                             </span>
                           </span>
                           Relay AI listens here
@@ -848,7 +848,7 @@ defmodule RelayWeb.BoardSettingsLive do
                 style="background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 20%, var(--color-base-100));border-radius:12px;padding:16px;display:flex;align-items:center;gap:13px;"
               >
                 <div style="width:38px;height:38px;border-radius:50%;background:var(--color-secondary);display:flex;align-items:center;justify-content:center;flex:0 0 auto;">
-                  <span style="width:14px;height:14px;border-radius:50%;border:2px solid var(--color-base-100);">
+                  <span style="width:14px;height:14px;border-radius:50%;border:2px solid var(--color-secondary-content);">
                   </span>
                 </div>
                 <div style="flex:1;min-width:0;">
@@ -880,7 +880,7 @@ defmodule RelayWeb.BoardSettingsLive do
 
               <div style="display:flex;align-items:center;gap:11px;background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 20%, var(--color-base-100));border-radius:10px;padding:12px 14px;margin-bottom:22px;">
                 <div style="width:26px;height:26px;border-radius:50%;background:var(--color-secondary);display:flex;align-items:center;justify-content:center;flex:0 0 auto;">
-                  <span style="width:10px;height:10px;border-radius:50%;border:1.5px solid var(--color-base-100);">
+                  <span style="width:10px;height:10px;border-radius:50%;border:1.5px solid var(--color-secondary-content);">
                   </span>
                 </div>
                 <span style="font-size:13px;color:color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));">
@@ -983,7 +983,7 @@ defmodule RelayWeb.BoardSettingsLive do
                   </div>
                   <div
                     class="font-mono"
-                    style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+                    style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);"
                   >
                     <span id="api-key-created">Created {format_time(@api_key.inserted_at)}</span>
                     · <span id="api-key-last-used">last used {last_used(@api_key)}</span>

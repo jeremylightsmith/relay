@@ -81,7 +81,10 @@ defmodule RelayWeb.BoardsLive do
                   class="flex size-[18px] flex-none items-center justify-center rounded-[6px] drawer:size-[22px] drawer:rounded-[7px]"
                   style={"background:#{accent(b.slug)};"}
                 >
-                  <span class="hidden size-[7px] rounded-full bg-base-100 drawer:block"></span>
+                  <%!-- neutral-content, not base-100: `accent/1` is a fixed lightness in both
+                        themes, so ink drawn on it must not invert either (same treatment as
+                        CoreComponents.identity_color/1's avatar text). --%>
+                  <span class="hidden size-[7px] rounded-full bg-neutral-content drawer:block"></span>
                 </span>
                 <span class="text-[14px] font-semibold tracking-[-0.015em] text-base-content drawer:text-[15.5px] drawer:tracking-tight">
                   {b.name}

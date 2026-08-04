@@ -564,7 +564,7 @@ defmodule RelayWeb.FlowEditorLive do
             All changes saved ·
             <span style="font-family:ui-monospace,monospace;">v{@flow.version}</span>
           </span>
-          <span style="margin-left:auto;font-family:ui-monospace,monospace;font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
+          <span style="margin-left:auto;font-family:ui-monospace,monospace;font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);">
             {stats(@working)}
           </span>
           <div

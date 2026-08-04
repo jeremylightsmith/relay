@@ -1202,13 +1202,19 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert (attr_of(html, "#{chip} span", "class") || "") =~ "opacity-[0.85]"
     end
 
-    test "a selected owner chip takes that person's identity hue" do
+    test "a selected owner chip takes that person's identity hue, mixed into the surface" do
       hue = CoreComponents.identity_hue("dana@acme.co")
       html = filter_bar(chips: [dana_chip(true)])
       chip = "##{StoryMapFilter.chip_dom_id("u:3")}"
 
-      assert style_of(html, chip) =~ "background:oklch(0.95 0.03 #{hue});"
-      assert style_of(html, chip) =~ "border:1px solid oklch(0.75 0.08 #{hue});"
+      # RE237: only the hue is frozen. The lightness comes from base-100, so the chip inverts
+      # with the theme instead of staying a near-white pill on the dark filter bar.
+      assert style_of(html, chip) =~
+               "background:color-mix(in oklab, oklch(0.62 0.13 #{hue}) 15%, var(--color-base-100));"
+
+      assert style_of(html, chip) =~
+               "border:1px solid color-mix(in oklab, oklch(0.62 0.13 #{hue}) 65%, var(--color-base-100));"
+
       assert attr_of(html, chip, "aria-pressed") == "true"
       refute (attr_of(html, "#{chip} span", "class") || "") =~ "opacity-[0.85]"
     end
@@ -1218,7 +1224,9 @@ defmodule RelayWeb.StoryMapComponentsTest do
       chip = "##{StoryMapFilter.chip_dom_id("agent")}"
 
       # 292 is this module's `hue_deg(:violet)` — the AI's one hue.
-      assert style_of(html, chip) =~ "background:oklch(0.95 0.03 292);"
+      assert style_of(html, chip) =~
+               "background:color-mix(in oklab, oklch(0.62 0.13 292) 15%, var(--color-base-100));"
+
       assert attr_of(html, chip, "phx-value-owner") == "agent"
     end
 
@@ -1357,11 +1365,13 @@ defmodule RelayWeb.StoryMapComponentsTest do
                "writing-mode:vertical-rl;transform:rotate(180deg);font-size:12px;" <>
                  "font-weight:600;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
 
-      # The artboard's `badgeStyle` collapsed branch (line ~414): white on the dark pill,
-      # the exact reverse of an expanded band's badge.
+      # The artboard's `badgeStyle` collapsed branch (line ~414): the surface colour on a
+      # mid-grey pill, the exact reverse of an expanded band's badge. RE237: a Rule-N P=60
+      # mid grey, not the `--color-neutral` dark-band shortcut, which is 0.23 too dark here.
       assert style_of(html, "#story-map-stub-7 [data-role='stub-count']") ==
-               "font-family:var(--font-mono);font-size:9px;font-weight:600;color:var(--color-neutral-content);" <>
-                 "background:var(--color-neutral);border-radius:20px;padding:2px 6px;"
+               "font-family:var(--font-mono);font-size:9px;font-weight:600;color:var(--color-base-100);" <>
+                 "background:color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100));" <>
+                 "border-radius:20px;padding:2px 6px;"
 
       assert text_of(html, "#story-map-stub-7 [data-role='stub-count']") == "3"
     end
