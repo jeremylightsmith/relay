@@ -38,6 +38,64 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         }
       },
       %Variation{
+        id: :stage_menu_open,
+        attributes: %{
+          id: "story-drawer-stage-menu",
+          ref: "RLY-281",
+          board_slug: "storybook-board",
+          card: story_card(),
+          stage_name: "Code",
+          stage_owner: :ai,
+          active_owner: :ai,
+          current_user_id: 1,
+          health: :live,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 61}, as: :card),
+          # RE281 — the header's Move-to popover, open, with the current stage marked.
+          stage_menu_open: true,
+          stage_filter: "",
+          stages: [
+            %{id: 1, name: "Backlog", current?: false},
+            %{id: 2, name: "Spec", current?: false},
+            %{id: 3, name: "Plan", current?: false},
+            %{id: 4, name: "Code", current?: true},
+            %{id: 5, name: "Code · Review", current?: false},
+            %{id: 7, name: "Done", current?: false}
+          ],
+          conversation: story_conversation(),
+          activity: story_activity(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
+        id: :overflow_open,
+        attributes: %{
+          id: "story-drawer-overflow",
+          ref: "RLY-281",
+          board_slug: "storybook-board",
+          card: story_card(),
+          stage_name: "Code",
+          stage_owner: :ai,
+          active_owner: :ai,
+          current_user_id: 1,
+          health: :live,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 61}, as: :card),
+          # RE281 — the ⋯ menu, open. Archive is the only item: no Duplicate, no Copy link.
+          overflow_open: true,
+          stages: [
+            %{id: 3, name: "Plan", current?: false},
+            %{id: 4, name: "Code", current?: true},
+            %{id: 7, name: "Done", current?: false}
+          ],
+          conversation: story_conversation(),
+          activity: story_activity(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
         id: :agent_stale,
         attributes: %{
           id: "story-drawer-stale",
