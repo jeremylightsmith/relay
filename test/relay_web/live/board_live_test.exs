@@ -1623,6 +1623,49 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
+  describe "drawer overflow menu" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      {:ok, card} = Cards.create_card(backlog, %{title: "Overflow me"})
+      %{board: board, backlog: backlog, card: card}
+    end
+
+    test "the ⋯ button toggles a menu carrying only Archive", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer-overflow-menu")
+
+      view |> element("#card-drawer-overflow") |> render_click()
+
+      assert has_element?(view, "#card-drawer-overflow-menu #archive-card-button", "Archive")
+      refute has_element?(view, "#card-drawer-overflow-menu", "Duplicate")
+      refute has_element?(view, "#card-drawer-overflow-menu", "Copy link")
+
+      view |> element("#card-drawer-overflow") |> render_click()
+
+      refute has_element?(view, "#card-drawer-overflow-menu")
+    end
+
+    test "opening a different card does not inherit an open menu",
+         %{conn: conn, board: board, backlog: backlog} do
+      {:ok, other} = Cards.create_card(backlog, %{title: "The next one"})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+      view |> element("#card-drawer-overflow") |> render_click()
+      assert has_element?(view, "#card-drawer-overflow-menu")
+
+      render_patch(view, ~p"/board/#{board.slug}?card=#{Cards.ref(board, other)}")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer-overflow-menu")
+    end
+  end
+
   describe "drawer baton rail" do
     setup :register_and_log_in_user
 
