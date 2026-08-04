@@ -147,9 +147,11 @@ defmodule RelayWeb.StoryMapComponents do
 
   @doc """
   The top-chrome view controls (RE260, artboard lines ~42-48): the ZOOM segmented control and
-  the Hide tasks toggle. Both are view-only — `RelayWeb.BoardLive` holds each in one socket
-  assign and neither reads or writes anything else, so they reset on reload exactly like the
-  tray's open state.
+  the Hide tasks toggle. Both are keys of the board-wide shared view
+  (`Relay.StoryMap.view/1` / `put_view/3` / `toggle_view/2`) — they change the grid's geometry,
+  which is the coordinate space RE257's raw-pixel cursors are measured in, so they are shared
+  and persisted rather than per-socket. A click writes through the view and the buttons
+  re-render from that write's own board-wide broadcast.
 
   The segments are rendered from `zoom_levels/0` and their event is parsed by `parse_zoom/1`,
   so a level can only ever be added in one place.

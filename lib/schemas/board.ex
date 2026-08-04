@@ -9,9 +9,9 @@ defmodule Schemas.Board do
   from input.
   `public_enabled` + `public_intake_stage_id` (RLY-69) are the public-board
   settings, written only via `public_settings_changeset/2`.
-  `story_map_view` (RE257) is the board-wide shared story-map view state (today just the
-  UNMAPPED tray's open/closed flag), written only via `story_map_view_changeset/2` and keyed by
-  `Relay.StoryMap.view_defaults/0`.
+  `story_map_view` (RE257) is the board-wide shared story-map view state, written only via
+  `story_map_view_changeset/2` and keyed by `Relay.StoryMap.view_defaults/0` — the single
+  source of truth for which keys the view holds.
   """
 
   use Ecto.Schema
