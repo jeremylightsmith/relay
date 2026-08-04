@@ -1457,4 +1457,25 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert style_of(html, "#story-map-collapse-2") == "font-size:12px;color:oklch(0.55 0.02 255);"
     end
   end
+
+  describe "RE237 theme tokens" do
+    test "grid lines and the empty-task cell come from base tokens, not literals" do
+      src = File.read!("lib/relay_web/components/story_map_components.ex")
+
+      # docs/designs/Relay Story Map.dc.html — the 1px grid Line and the 2px committed-row
+      # rule keep their weights and dash pattern; only the color moves to a token.
+      assert src =~ ~s[@gl_light "1px solid var(--color-base-300)"]
+      assert src =~ ~s[@gl_strong "2px solid color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100))"]
+      assert src =~ ~s[@gl_dashed "1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100))"]
+      assert src =~ ~s[@no_task_bg "var(--color-base-200)"]
+      refute src =~ "oklch("
+    end
+
+    test "the live-cursor avatar ring follows the surface instead of staying white" do
+      src = File.read!("lib/relay_web/components/story_map_components.ex")
+
+      assert src =~ "border-base-100"
+      refute src =~ "border-white"
+    end
+  end
 end
