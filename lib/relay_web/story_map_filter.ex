@@ -24,10 +24,17 @@ defmodule RelayWeb.StoryMapFilter do
   drawn by `RelayWeb.CoreComponents.avatar/1` so a person looks the same here as everywhere
   else on the board (and the AI is the standard violet mark).
 
-  **Owner and Needs-input compose with AND**, and an empty selection means "every owner"
-  (the artboard's `pass/1`). A card passes the owner test when **any** of its owners is
-  selected — Relay cards can have several owners, unlike the artboard's single `c.owner`.
-  "Needs input" is `Relay.Cards.needs_input?/1`, the one definition of that fact.
+  **Owner, Needs-input and hidden stages compose with AND**, and an empty selection means
+  "every owner" (the artboard's `pass/1`). A card passes the owner test when **any** of its
+  owners is selected — Relay cards can have several owners, unlike the artboard's single
+  `c.owner`. "Needs input" is `Relay.Cards.needs_input?/1`, the one definition of that fact.
+  RE276's third term is a plain `MapSet` of stage ids: this module never learns what makes a
+  stage hidden, which is what keeps it free of the board.
+
+  **"Is a filter on" is NOT answered here.** It is `Relay.StoryMap.filters_active?/1`, beside
+  the defaults it compares against — with `hide_complete` defaulting to true, the answer is
+  "do these keys differ from the board's defaults", which needs `view_defaults/0`. A local
+  `active?/2` would be a second answer to one question, so there isn't one.
 
   No `use Boundary` — a pure web-layer helper inside the `RelayWeb` boundary, like
   `RelayWeb.StoryMapGrid` and `RelayWeb.FlowLayout`.
@@ -87,23 +94,25 @@ defmodule RelayWeb.StoryMapFilter do
   end
 
   @doc """
-  The cards that pass both filters. An empty `selected_keys` means every owner; `true` for
-  `needs_input?` keeps only `Relay.Cards.needs_input?/1` cards. The two compose with AND.
+  The cards that pass every filter. An empty `selected_keys` means every owner; `true` for
+  `needs_input?` keeps only `Relay.Cards.needs_input?/1` cards; `hidden_stage_ids` is a
+  `MapSet` of stage ids to exclude, and an empty one excludes nothing. The three compose with
+  AND.
+
+  RE276 — this module deliberately does not know **why** a stage is hidden. `RelayWeb.BoardLive`
+  resolves "complete" to a set of ids (`Relay.Boards.top_level_done_stage_ids/1`) at the call
+  site and passes the set, so the meaning of the toggle has one home and this stays pure — no
+  Ecto, no board struct, no stage list.
   """
-  def visible(cards, selected_keys, needs_input?) do
+  def visible(cards, selected_keys, needs_input?, hidden_stage_ids) do
     selected = MapSet.new(selected_keys)
 
     Enum.filter(cards, fn card ->
-      owner_pass?(card, selected) and (not needs_input? or Cards.needs_input?(card))
+      owner_pass?(card, selected) and
+        (not needs_input? or Cards.needs_input?(card)) and
+        not MapSet.member?(hidden_stage_ids, card.stage_id)
     end)
   end
-
-  @doc """
-  Whether any filter is on — what drives the `Clear` link and the `N of M` count label.
-  Deliberately **not** affected by collapse or focus (the artboard's `filterActive`, line
-  ~535): `Clear` clears filters, and focus is exited at its own chip.
-  """
-  def active?(selected_keys, needs_input?), do: selected_keys != [] or needs_input?
 
   # An empty selection short-circuits BEFORE touching `card.owners`, so the unfiltered
   # render never depends on the association being loaded.

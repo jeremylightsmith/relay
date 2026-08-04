@@ -1938,4 +1938,99 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       assert has_element?(view, "#story-map-needs-input-filter[aria-pressed='true']")
     end
   end
+
+  describe "RE276 — hide complete" do
+    # The seeded board's terminal `Done` is its only top-level `:complete` stage; `sso` is a
+    # MAPPED card (Sign in / MVP) and `dashboards` is still in the tray.
+    setup ctx do
+      done = Enum.find(ctx.board.stages, &(&1.category == :complete and is_nil(&1.parent_id)))
+      {:ok, shipped} = Cards.move_card(ctx.sso, done, 0)
+
+      %{done: done, shipped: shipped}
+    end
+
+    test "a card in a top-level complete stage is hidden from the map on first paint",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      refute has_element?(view, "##{card_dom_id(ctx.board, ctx.shipped)}")
+      # Its neighbours are untouched — this hides a finished COLUMN, not the whole map.
+      assert has_element?(view, "##{card_dom_id(ctx.board, ctx.bulk)}")
+      assert has_element?(view, "##{card_dom_id(ctx.board, ctx.audit)}")
+    end
+
+    test "the UNMAPPED tray narrows too — it renders the same filtered list",
+         %{conn: conn} = ctx do
+      {:ok, shipped_unmapped} = Cards.move_card(ctx.dashboards, ctx.done, 0)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      refute has_element?(view, "##{tray_dom_id(ctx.board, shipped_unmapped)}")
+    end
+
+    test "a card in a mid-board Done SUB-LANE is NOT hidden", %{conn: conn} = ctx do
+      # The filter is `parent_id == nil` AND `category == :complete`. A complete-category
+      # SUB-LANE is the case that separates it from `Cards.done?/2` — mid-board done is not
+      # "this column is finished".
+      code = Enum.find(ctx.board.stages, &(&1.name == "Code"))
+
+      sub =
+        insert(:stage,
+          board: ctx.board,
+          name: "Code:Done",
+          position: 99,
+          category: :complete,
+          type: :done,
+          parent: code
+        )
+
+      {:ok, mid} = Cards.move_card(ctx.bulk, sub, 0)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "##{card_dom_id(ctx.board, mid)}")
+    end
+
+    test "the toggle is SHARED — flipping it in one session reveals the card in the other",
+         %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      refute has_element?(view_b, "##{card_dom_id(ctx.board, ctx.shipped)}")
+
+      render_click(view_a, "toggle_story_map_hide_complete", %{})
+
+      # Both follow the write's own board-wide broadcast; there is no optimistic assign.
+      assert has_element?(view_a, "##{card_dom_id(ctx.board, ctx.shipped)}")
+      assert has_element?(view_b, "##{card_dom_id(ctx.board, ctx.shipped)}")
+
+      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["hide_complete"] == false
+    end
+
+    test "Clear appears once hide-complete is OFF and resets to the board's DEFAULTS",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      # At the defaults nothing differs, so there is nothing to clear — even though a filter
+      # is demonstrably narrowing the map.
+      refute has_element?(view, "#story-map-clear-filters")
+
+      render_click(view, "toggle_story_map_hide_complete", %{})
+      assert has_element?(view, "#story-map-clear-filters")
+
+      view |> element("#story-map-needs-input-filter") |> render_click()
+      view |> element("#story-map-clear-filters") |> render_click()
+
+      refute has_element?(view, "#story-map-clear-filters")
+      # Clear means "put the filters back how this board starts", so the complete card is
+      # hidden again rather than left revealed.
+      refute has_element?(view, "##{card_dom_id(ctx.board, ctx.shipped)}")
+
+      view_state = StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))
+      assert view_state["hide_complete"] == true
+      assert view_state["needs_input_filter"] == false
+      assert view_state["owner_filter"] == []
+    end
+  end
 end
