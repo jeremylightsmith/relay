@@ -1980,11 +1980,29 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(view, "#timeline-comment-#{comment.id} .timeline-author", user.name)
 
+      assert has_element?(view, "#timeline-comment-#{comment.id} .timeline-time", "just now")
+
       assert has_element?(
                view,
-               "#timeline-comment-#{comment.id} .timeline-time",
-               Calendar.strftime(comment.inserted_at, "%b %d, %H:%M")
+               ~s(#timeline-comment-#{comment.id} .timeline-time[title="#{Calendar.strftime(comment.inserted_at, "%b %d, %H:%M")}"])
              )
+    end
+
+    test "the Notes header count tracks the list as notes are added",
+         %{conn: conn, user: user, card: card} do
+      insert(:comment, card: card, user: user, body: "Kickoff")
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-note-count", "1 note")
+
+      view
+      |> form("#card-drawer-comment-form", comment: %{body: "Second note"})
+      |> render_submit()
+
+      assert has_element?(view, "#card-drawer-note-count", "2 notes")
     end
 
     test "a blank comment is rejected and persists nothing", %{conn: conn, user: user} do

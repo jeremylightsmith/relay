@@ -753,6 +753,155 @@ defmodule RelayWeb.CoreComponentsTest do
       )
     end
 
+    defp drawer_note(overrides \\ %{}) do
+      struct(
+        %Schemas.Comment{
+          id: 1,
+          actor_type: :user,
+          user: %Schemas.User{id: 1, name: "Ada Lovelace", email: "ada@example.com"},
+          kind: :comment,
+          body: "Took the fixture generation offline.",
+          inserted_at: DateTime.add(DateTime.utc_now(), -7200, :second)
+        },
+        overrides
+      )
+    end
+
+    defp notes_attrs(notes, extra \\ %{}) do
+      streamed = Enum.map(notes, &{"timeline-comment-#{&1.id}", &1})
+
+      drawer_attrs(
+        %{},
+        Map.merge(%{conversation: streamed, note_count: length(streamed)}, extra)
+      )
+    end
+
+    test "the Notes header carries the accent bar, eyebrow, count and READ BY EVERY AGENT chip" do
+      html = render_component(&CoreComponents.card_drawer/1, notes_attrs([drawer_note()]))
+
+      assert html =~ ~s(id="card-drawer-notes")
+      # accent bar: 3px x 13px, primary (artboard: oklch(0.55 0.1 255), shipped as the token)
+      assert html =~ "h-[13px] w-[3px] shrink-0 rounded-sm bg-primary"
+      assert html =~ "Notes"
+      refute html =~ "Conversation"
+      # count label: mono 10px at 45% (artboard line 208)
+      assert html =~ ~s(id="card-drawer-note-count")
+      assert html =~ "font-mono text-[10px] text-base-content/45"
+      assert html =~ "1 note"
+      # chip: mono 9.5px/600, 0.04em, 4px radius, 2px/7px padding, success tint (artboard line 210)
+      assert html =~
+               "rounded bg-success/10 px-[7px] py-[2px] font-mono text-[9.5px] font-semibold tracking-[0.04em] text-success"
+
+      assert html =~ "READ BY EVERY AGENT"
+    end
+
+    test "the count label pluralises" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          notes_attrs([drawer_note(), drawer_note(%{id: 2})])
+        )
+
+      assert html =~ "2 notes"
+    end
+
+    test "the list and the composer sit inside one bordered box" do
+      html = render_component(&CoreComponents.card_drawer/1, notes_attrs([drawer_note()]))
+
+      # artboard line 211: 1px border, 8px radius, 13px/14px padding, 13px column gap
+      assert html =~
+               "flex flex-col gap-[13px] rounded-lg border border-base-300 bg-base-100 px-[14px] py-[13px]"
+    end
+
+    test "a note is a 22px role-tinted avatar, a 12px name, a relative time and bubble-free prose" do
+      html = render_component(&CoreComponents.card_drawer/1, notes_attrs([drawer_note()]))
+
+      # 22px avatar (was 28), human => primary tint
+      assert html =~ "width:22px;height:22px"
+      assert html =~ "background:var(--color-primary)"
+      # row geometry from artboard line 213
+      assert html =~ "timeline-entry flex items-start gap-[10px]"
+      # 12px semibold name (was 13px)
+      assert html =~ ~s(<span class="timeline-author text-[12px] font-semibold">)
+      # relative time, mono 10px at 45%, with the absolute time one hover away
+      assert html =~ "2h ago"
+      assert html =~ ~s(class="timeline-time font-mono text-[10px] text-base-content/45")
+      assert html =~ ~s(title=")
+      # prose body: no bubble, no padding — .md already supplies 13px/20.15px/85%
+      assert html =~ ~s(class="timeline-comment-body md")
+      refute html =~ "bg-base-200/60"
+    end
+
+    test "an agent note is violet-tinted" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          notes_attrs([drawer_note(%{actor_type: :agent, user: nil})])
+        )
+
+      assert html =~ "background:var(--color-secondary)"
+      assert html =~ "Relay AI"
+    end
+
+    test "a question note keeps its amber chip and amber body box" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          notes_attrs([drawer_note(%{kind: :question, body: "Which colour?"})])
+        )
+
+      assert html =~ "QUESTION"
+      assert html =~ "oklch(0.52 0.11 65)"
+      assert html =~ "border:1px solid oklch(0.88 0.06 75);"
+      assert html =~ "timeline-comment-body md rounded-lg px-3 py-2"
+    end
+
+    test "with no notes the list reads No notes yet" do
+      html = render_component(&CoreComponents.card_drawer/1, notes_attrs([]))
+
+      assert html =~ "No notes yet"
+      refute html =~ "No comments yet"
+      assert html =~ "0 notes"
+    end
+
+    test "the composer is the artboard's bordered row with an inline Add note button" do
+      html = render_component(&CoreComponents.card_drawer/1, notes_attrs([]))
+
+      # artboard line 228: 7px radius, 7px/8px/7px/11px padding, 8px gap
+      assert html =~
+               "flex items-start gap-2 rounded-[7px] border border-base-300 bg-base-100 py-[7px] pl-[11px] pr-2"
+
+      assert html =~ ~s(id="card-drawer-comment-input")
+      assert html =~ ~s(phx-hook="SubmitOnCmdEnter")
+      assert html =~ ~s(rows="2")
+      assert html =~ "What you did, what you found, what’s left…"
+      assert html =~ "text-[12.5px]"
+      # artboard line 229: 27px tall, 6px radius, 11.5px/600 label
+      assert html =~ "h-[27px] shrink-0 rounded-md border border-base-300 px-3 text-[11.5px] font-semibold"
+      assert html =~ "Add note"
+      refute html =~ "Write a comment…"
+    end
+
+    test "the caption under the box states what a note is" do
+      html = render_component(&CoreComponents.card_drawer/1, notes_attrs([]))
+
+      assert html =~ "font-mono text-[10.5px] leading-[1.5] text-base-content/50"
+      assert html =~ "Notes are card content, not chat — they go into every agent’s context."
+      # D5: the artboard's second sentence is Talk demo copy, out of scope here
+      refute html =~ "open Talk"
+    end
+
+    test "an archived card renders no composer" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          notes_attrs([drawer_note()], %{archived: true})
+        )
+
+      refute html =~ "Add note"
+      refute html =~ ~s(id="card-drawer-comment-form")
+    end
+
     test "working shows the pulsing strip with sub-task-derived progress" do
       attrs =
         drawer_attrs(

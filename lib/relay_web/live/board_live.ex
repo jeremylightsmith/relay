@@ -489,6 +489,7 @@ defmodule RelayWeb.BoardLive do
         members={@members}
         reassign_open={@reassign_open}
         conversation={@streams.conversation}
+        note_count={@note_count}
         activity={@streams.activity}
         comment_form={@comment_form}
         question={@question}
@@ -959,6 +960,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:run_flush_events, 0)
       |> assign(:run_flush_pending?, false)
       |> assign_run_diagnostics(board, run_summaries)
+      |> assign(:note_count, 0)
       |> stream_configure(:conversation, dom_id: &conversation_dom_id/1)
       |> stream_configure(:activity, dom_id: &activity_dom_id/1)
 
@@ -1009,7 +1011,7 @@ defmodule RelayWeb.BoardLive do
          |> assign(:drawer_tab, default_tab)
          |> assign(:drawer_supporters, supporters)
          |> assign(:drawer_vote_count, vote_count)
-         |> stream(:conversation, conversation, reset: true)
+         |> stream_notes(conversation)
          |> stream(:activity, activity, reset: true)}
 
       _stale ->
@@ -1977,11 +1979,12 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("post_comment", %{"comment" => comment_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
     case Activity.add_comment(card, %{actor: current_actor(socket), body: comment_params["body"]}) do
-      {:ok, comment} ->
-        {:noreply,
-         socket
-         |> stream_insert(:conversation, comment)
-         |> assign(:comment_form, empty_comment_form())}
+      # `add_comment` broadcasts `:timeline_appended`, and this LiveView is subscribed to its
+      # own board topic, so `handle_info/2` below inserts the note for every viewer, this one
+      # included — inserting it again here would double-count `@note_count` (the stream insert
+      # alone is harmless since stream_insert is idempotent per id, but the counter is not).
+      {:ok, _comment} ->
+        {:noreply, assign(socket, :comment_form, empty_comment_form())}
 
       {:error, changeset} ->
         {:noreply, assign(socket, :comment_form, to_form(changeset))}
@@ -2469,7 +2472,7 @@ defmodule RelayWeb.BoardLive do
   def handle_info({:EXIT, _pid, _reason}, socket), do: {:noreply, socket}
 
   defp insert_timeline_entry(socket, %Schemas.Comment{} = comment) do
-    stream_insert(socket, :conversation, comment)
+    insert_note(socket, comment)
   end
 
   defp insert_timeline_entry(socket, %Schemas.Activity{} = activity) do
@@ -2951,7 +2954,7 @@ defmodule RelayWeb.BoardLive do
     |> assign_review(card)
     # the card may have parked/resumed a run since the last refresh
     |> assign(:card_runs, Runs.list_runs_for_card(card))
-    |> stream(:conversation, Activity.list_conversation(card), reset: true)
+    |> stream_notes(Activity.list_conversation(card))
     |> stream(:activity, activity, reset: true)
     |> stream_insert(stream_name(card.stage_id), card)
   end
@@ -3258,7 +3261,7 @@ defmodule RelayWeb.BoardLive do
         |> assign(:body_loading?, false)
         |> assign(:selected_stage, find_stage_by_id(socket, moved.stage_id))
         |> assign_review(moved)
-        |> stream(:conversation, Activity.list_conversation(moved), reset: true)
+        |> stream_notes(Activity.list_conversation(moved))
         |> stream(:activity, Activity.list_activity(moved, limit: @activity_render_limit), reset: true)
 
       _ ->
@@ -3705,7 +3708,7 @@ defmodule RelayWeb.BoardLive do
           |> assign(:reject_error, nil)
           |> assign(:card_runs, [])
           |> assign(:drawer_tab, :detail)
-          |> stream(:conversation, [], reset: true)
+          |> stream_notes([])
           |> stream(:activity, [], reset: true)
 
         maybe_start_body_load(socket, card, ref, connected?(socket))
@@ -3745,7 +3748,7 @@ defmodule RelayWeb.BoardLive do
           reject_error: nil,
           body_loading?: false
         )
-        |> stream(:conversation, [], reset: true)
+        |> stream_notes([])
         |> stream(:activity, [], reset: true)
     end
   end
@@ -3841,6 +3844,21 @@ defmodule RelayWeb.BoardLive do
 
   defp conversation_dom_id(%Schemas.Comment{id: id}), do: "timeline-comment-#{id}"
   defp activity_dom_id(%Schemas.Activity{id: id}), do: "timeline-activity-#{id}"
+
+  # RE277 — the Notes header shows a count, and LiveView streams cannot be counted.
+  # These two helpers are the ONLY places :conversation is streamed, so @note_count
+  # cannot drift from the list the drawer renders.
+  defp stream_notes(socket, comments) do
+    socket
+    |> stream(:conversation, comments, reset: true)
+    |> assign(:note_count, length(comments))
+  end
+
+  defp insert_note(socket, comment) do
+    socket
+    |> stream_insert(:conversation, comment)
+    |> update(:note_count, &(&1 + 1))
+  end
 
   defp category_label(:unstarted), do: "Unstarted"
   defp category_label(:planning), do: "Planning"
