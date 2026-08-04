@@ -613,4 +613,119 @@ defmodule RelayWeb.StoryMapGridTest do
       assert Enum.all?(grid.columns, &(not &1.merged?))
     end
   end
+
+  describe "collapse and focus (RE259)" do
+    defp collapsed_grid(collapsed_ids, focus_id \\ nil) do
+      activities = [activity(1, 1), activity(2, 2)]
+
+      StoryMapGrid.build(
+        activities,
+        [task(10, 1, 1), task(20, 2, 1)],
+        [release(100, 1)],
+        [
+          card(5, story_activity_id: 1, story_task_id: 10, release_id: 100),
+          card(6, story_activity_id: 1, release_id: 100),
+          card(7, story_activity_id: 2, story_task_id: 20, release_id: 100),
+          card(8)
+        ],
+        nil,
+        false,
+        StoryMapGrid.collapsed_set(activities, collapsed_ids, focus_id)
+      )
+    end
+
+    test "a collapsed activity yields ONE counted stub column and renders no cells" do
+      grid = collapsed_grid([1])
+
+      assert [stub, task_column] = grid.columns
+      assert stub.key == "c:1"
+      assert stub.collapsed?
+      assert stub.count == 2
+      assert stub.activity.id == 1
+      assert stub.last_of_activity?
+
+      assert task_column.key == "t:20"
+      refute task_column.collapsed?
+
+      # None of activity 1's cards render anywhere on the grid.
+      assert Map.keys(grid.cells) == [{"t:20", "r:100"}]
+      # And the collapsed activity has no BAND: the stub spans grid-row 1 / -1 in its place.
+      assert Enum.map(grid.bands, & &1.activity.id) == [2]
+      assert [%{start: 1, span: 1, count: 1}] = grid.bands
+    end
+
+    test "the three-way partition sums to total — no card can disappear" do
+      for collapsed <- [[], [1], [2], [1, 2]] do
+        grid = collapsed_grid(collapsed)
+
+        in_cells = grid.cells |> Map.values() |> Enum.map(&length/1) |> Enum.sum()
+        in_stubs = grid.columns |> Enum.filter(& &1.collapsed?) |> Enum.map(& &1.count) |> Enum.sum()
+
+        assert in_cells + length(grid.unmapped) + in_stubs == grid.total
+        assert grid.total == 4
+      end
+    end
+
+    test "collapse wins over Hide tasks" do
+      activities = [activity(1, 1)]
+
+      grid =
+        StoryMapGrid.build(
+          activities,
+          [task(10, 1, 1)],
+          [release(100, 1)],
+          [card(5, story_activity_id: 1, story_task_id: 10, release_id: 100)],
+          nil,
+          true,
+          StoryMapGrid.collapsed_set(activities, [1], nil)
+        )
+
+      # The artboard's `if(collapsed) … else if(hideTasks)` order, line ~416.
+      assert [%{key: "c:1", collapsed?: true, count: 1}] = grid.columns
+    end
+
+    test "collapsed_set/3 derives focus-collapse and drops ids the board does not have" do
+      activities = [activity(1, 1), activity(2, 2), activity(3, 3)]
+
+      assert StoryMapGrid.collapsed_set(activities, [2, 999], nil) == MapSet.new([2])
+
+      # A focus IS a collapse of everything else (the artboard's line ~406).
+      assert StoryMapGrid.collapsed_set(activities, [], 2) == MapSet.new([1, 3])
+
+      # And the focused activity is NEVER in the set, even when `collapsed` names it —
+      # otherwise ▾ on the focused band would collapse the only expanded activity and the
+      # map would go blank.
+      assert StoryMapGrid.collapsed_set(activities, [1, 2, 3], 2) == MapSet.new([1, 3])
+    end
+
+    test "an unknown focus id is NO focus, so the map never goes blank" do
+      activities = [activity(1, 1), activity(2, 2)]
+
+      # The focused activity was deleted in another tab. An unresolved focus that still
+      # collapsed everything else would leave every band a stub.
+      assert StoryMapGrid.collapsed_set(activities, [], 999) == MapSet.new()
+      assert StoryMapGrid.resolve_focus(activities, 999) == nil
+      assert StoryMapGrid.resolve_focus(activities, nil) == nil
+      assert %{id: 2} = StoryMapGrid.resolve_focus(activities, 2)
+    end
+
+    test "a stub column is never a drop target, even for a forged drop" do
+      assert StoryMapGrid.decode_placement("c:1", "r:1") == :error
+    end
+
+    test "the grid is unchanged when nothing is collapsed" do
+      assert collapsed_grid([]) ==
+               StoryMapGrid.build(
+                 [activity(1, 1), activity(2, 2)],
+                 [task(10, 1, 1), task(20, 2, 1)],
+                 [release(100, 1)],
+                 [
+                   card(5, story_activity_id: 1, story_task_id: 10, release_id: 100),
+                   card(6, story_activity_id: 1, release_id: 100),
+                   card(7, story_activity_id: 2, story_task_id: 20, release_id: 100),
+                   card(8)
+                 ]
+               )
+    end
+  end
 end

@@ -29,13 +29,29 @@ owned exactly the same way, by one accessor or `Ecto.Enum` on their schema, and 
 [`runner.md`](runner.md). The rule does not vary: the schema owns the set, nothing re-types it.
 
 The board's **shared story-map view settings** are a closed key set of the same kind:
-`Relay.StoryMap.view_defaults/0` (today
-`%{"tray_open" => true, "zoom" => "compact", "hide_tasks" => false}`) owns both the keys and
-their defaults, `view/1` drops any stored key outside it, and `put_view/3` / `toggle_view/2`
-refuse to write one. They live in the `boards.story_map_view` jsonb column — a bag rather than a
-column per setting, so RE259 (filter & focus) extends the shared view by adding a key to
-`view_defaults/0` instead of shipping a migration. Values are jsonb, so `zoom` is stored as a
-string and read back through `RelayWeb.StoryMapComponents.parse_zoom/1`.
+`Relay.StoryMap.view_defaults/0` owns both the keys and their defaults —
+
+| key | default | shape | written by |
+|---|---|---|---|
+| `tray_open` | `true` | boolean | `toggle_view/2` |
+| `zoom` | `"compact"` | string | `put_view/3` |
+| `hide_tasks` | `false` | boolean | `toggle_view/2` |
+| `owner_filter` | `[]` | list of `RelayWeb.StoryMapFilter` owner keys | `toggle_view_member/4` |
+| `needs_input_filter` | `false` | boolean | `toggle_view/2` |
+| `collapsed` | `[]` | list of `story_activity` ids | `toggle_view_member/4` |
+| `focus` | `nil` | one `story_activity` id or nil | `merge_view/2` |
+
+— `view/1` drops any stored key outside the set, and every writer refuses one. The **shape
+of a key's default is load-bearing**: `toggle_view/2` refuses a key whose default is not a
+boolean (`{:error, :not_a_toggle}`) and `toggle_view_member/4` one whose default is not a
+list (`{:error, :not_a_list}`), so a wrong call site cannot replace the `collapsed` list
+with `true` and break every viewer's map. All three writers compose the single
+`merge_view/2`, which validates every key, re-reads the committed row, writes once and
+broadcasts once — so a multi-key change ("expand this activity **and** turn Hide tasks
+off") is atomic. They live in the `boards.story_map_view` jsonb column — a bag rather than
+a column per setting, which is why RE259 (filter & focus) added four keys with no
+migration. Values are jsonb, so `zoom` is stored as a string and read back through
+`RelayWeb.StoryMapComponents.parse_zoom/1`.
 
 ## Card status
 

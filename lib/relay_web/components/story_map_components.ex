@@ -8,10 +8,11 @@ defmodule RelayWeb.StoryMapComponents do
   placeholder, and the `＋ Release` row — which this module renders and `RelayWeb.BoardLive`
   handles; RE262's drag and drop (below); RE262's inline `＋` add-card in every cell (below); and
   RE261's structure editing — the `⠿` grip, the click-to-rename name and the `✕` delete on the
-  activity band, the task column header and the release label. The artboard's `▾` collapse,
-  `✦` suggest, `◎` focus and the ZOOM/FILTER chrome are still deliberately not rendered —
-  RE260 owns them, and the filter bar's owner chips, Needs-input toggle and `+ filter` own no
-  card today.
+  activity band, the task column header and the release label. RE259 adds the FILTER bar
+  (owner chips, the Needs-input toggle, the `Clear` link and the count label), the band's `▾`
+  collapse and `◎` focus buttons, and the collapsed stub column. The artboard's `✦` suggest
+  button and its dashed `+ filter` button are still deliberately not rendered — the first is
+  RE258, and the second has no behaviour to offer.
 
   **Delete is blocked, not cascading (RE261).** A ✕ is `disabled` and greyed (the artboard's
   `delOff`) while its structure still holds cards, and its `title` names the exact count the
@@ -46,6 +47,7 @@ defmodule RelayWeb.StoryMapComponents do
 
   alias Relay.Cards
   alias RelayWeb.CoreComponents
+  alias RelayWeb.StoryMapFilter
   alias RelayWeb.StoryMapGrid
 
   # Artboard tokens (lines ~277-279): the grid lines and the two sticky header heights.
@@ -98,7 +100,7 @@ defmodule RelayWeb.StoryMapComponents do
     stage = Enum.find(stages, &(&1.id == card.stage_id))
     ref = Cards.ref(board, card)
     done? = Cards.done?(card, stages)
-    needs? = card.status == :needs_input
+    needs? = Cards.needs_input?(card)
     stalled? = MapSet.member?(stalled_ids, card.id)
     pct = Cards.sub_task_pct(card)
 
@@ -148,7 +150,8 @@ defmodule RelayWeb.StoryMapComponents do
   @doc """
   The top-chrome view controls (RE260, artboard lines ~42-48): the ZOOM segmented control and
   the Hide tasks toggle. Both are keys of the board-wide shared view
-  (`Relay.StoryMap.view/1` / `put_view/3` / `toggle_view/2`) — they change the grid's geometry,
+  (`Relay.StoryMap.view/1` plus `merge_view/2`, the one writer `put_view/3` and `toggle_view/2`
+  compose) — they change the grid's geometry,
   which is the coordinate space RE257's raw-pixel cursors are measured in, so they are shared
   and persisted rather than per-socket. A click writes through the view and the buttons
   re-render from that write's own board-wide broadcast.
@@ -199,6 +202,221 @@ defmodule RelayWeb.StoryMapComponents do
   end
 
   @doc """
+  The filter bar (RE259) — `docs/designs/Relay Story Map.dc.html` lines 60-76: a 48px-min row
+  below the top chrome and above the map, carrying the mono `FILTER` label, the owner chip
+  row, the `Needs input` toggle, the `◎ Focusing: <name> ✕` chip while focusing, the `Clear`
+  link while a filter is active, and the mono count label.
+
+  Every control is a key of the board-wide shared view, so a click writes through
+  `Relay.StoryMap` and the bar re-renders from that write's own broadcast — the clicker
+  included, exactly like ZOOM and Hide tasks above.
+
+  Chips are drawn by `RelayWeb.CoreComponents.avatar/1`, the app's one definition of a
+  person's circle, so a person looks the same here as in the member stack, the card owner
+  cluster and RE257's presence stack — and the Relay AI chip is the standard violet mark
+  rather than a hand-drawn initial. The selected chip's tint is that person's own
+  `CoreComponents.identity_hue/1` in the artboard's `oklch(0.95 0.03 <hue>)` formula, so the
+  artboard's per-person colour survives our real, unbounded roster.
+
+  Two deliberate omissions from the artboard: the dashed `+ filter` button (line 69), which
+  has no behaviour behind it and would be a lie until a second filter type exists, and the
+  count label's ownership — it MOVED here from the app bar's `<:actions>` slot, keeping the
+  DOM id `story-map-count` so existing selectors still resolve.
+
+  `filter_active` is owner-or-Needs-input only (the artboard's `filterActive`, line ~535):
+  collapse and focus narrow the view but are not "filters", and focus is exited at its own
+  chip.
+  """
+  attr :chips, :list, required: true, doc: "RelayWeb.StoryMapFilter.chips/2's shape"
+  attr :needs_input, :boolean, required: true
+  attr :focus_name, :string, default: nil, doc: "the focused activity's name, or nil"
+  attr :filter_active, :boolean, required: true
+  attr :visible, :integer, required: true, doc: "cards passing the filter"
+  attr :total, :integer, required: true, doc: "cards on the board"
+
+  def story_map_filter_bar(assigns) do
+    ~H"""
+    <div id="story-map-filter-bar" style={filter_bar_style()}>
+      <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.5 0.02 255);">
+        FILTER
+      </span>
+      <span style="font-size:11px;color:oklch(0.55 0.02 255);margin-right:2px;">Owner</span>
+      <button
+        :for={chip <- @chips}
+        type="button"
+        id={StoryMapFilter.chip_dom_id(chip.key)}
+        phx-click="toggle_story_map_owner_filter"
+        phx-value-owner={chip.key}
+        aria-pressed={to_string(chip.selected?)}
+        aria-label={"Filter by #{chip.name}"}
+        style={owner_chip_style(chip)}
+      >
+        <CoreComponents.avatar
+          actor={chip.actor}
+          src={chip.avatar_url}
+          name={chip.name}
+          email={chip.email}
+          title={chip.name}
+          size={20}
+          tint={:identity}
+          class={if(chip.selected?, do: nil, else: "opacity-[0.85]")}
+        />
+      </button>
+      <span style="width:1px;height:20px;background:oklch(0.9 0.006 255);margin:0 4px;"></span>
+      <button
+        type="button"
+        id="story-map-needs-input-filter"
+        phx-click="toggle_story_map_needs_filter"
+        aria-pressed={to_string(@needs_input)}
+        style={needs_input_style(@needs_input)}
+      >
+        <span style="width:6px;height:6px;border-radius:50%;background:oklch(0.7 0.13 65);"></span>
+        Needs input
+      </button>
+      <button
+        :if={@focus_name}
+        type="button"
+        id="story-map-exit-focus"
+        phx-click="clear_story_map_focus"
+        style={focus_chip_style()}
+      >
+        ◎ Focusing: {@focus_name} ✕
+      </button>
+      <span style="flex:1;"></span>
+      <button
+        :if={@filter_active}
+        type="button"
+        id="story-map-clear-filters"
+        phx-click="clear_story_map_filters"
+        style="font-size:11px;font-weight:600;color:oklch(0.55 0.14 250);"
+      >
+        Clear
+      </button>
+      <span
+        id="story-map-count"
+        style="font-family:var(--font-mono);font-size:11px;color:oklch(0.5 0.02 255);"
+      >
+        {count_label(@filter_active, @visible, @total)}
+      </span>
+    </div>
+    """
+  end
+
+  # Artboard line 61.
+  defp filter_bar_style do
+    "min-height:48px;flex:0 0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;" <>
+      "padding:9px 18px;border-bottom:#{@gl_light};background:oklch(0.972 0.005 255);z-index:55;"
+  end
+
+  # Artboard `ownerChips` (line ~542). The artboard's per-person `PEOPLE[init]` hue becomes
+  # the app's own `identity_hue/1` — the ONE definition of who is what colour — and the AI
+  # takes this module's violet, the same 292 `hue_deg(:violet)` already uses.
+  defp owner_chip_style(chip) do
+    {background, border} =
+      if chip.selected? do
+        hue = chip_hue(chip)
+        {"oklch(0.95 0.03 #{hue})", "oklch(0.75 0.08 #{hue})"}
+      else
+        {"oklch(1 0 0)", "oklch(0.9 0.006 255)"}
+      end
+
+    "display:flex;align-items:center;border-radius:8px;padding:3px;" <>
+      "background:#{background};border:1px solid #{border};"
+  end
+
+  defp chip_hue(%{actor: :ai}), do: hue_deg(:violet)
+  defp chip_hue(%{email: email}), do: CoreComponents.identity_hue(email)
+
+  # Artboard `needsStyle` (line ~572).
+  defp needs_input_style(on?) do
+    {background, color, border} =
+      if on?,
+        do: {"oklch(0.96 0.05 65)", "oklch(0.5 0.13 65)", "oklch(0.82 0.09 65)"},
+        else: {"oklch(1 0 0)", "oklch(0.5 0.02 255)", "oklch(0.9 0.006 255)"}
+
+    "display:flex;align-items:center;gap:6px;border-radius:8px;padding:5px 10px;" <>
+      "font-size:11.5px;font-weight:600;background:#{background};color:#{color};" <>
+      "border:1px solid #{border};"
+  end
+
+  # Artboard line 71.
+  defp focus_chip_style do
+    "display:flex;align-items:center;gap:6px;border-radius:8px;padding:5px 10px;" <>
+      "font-size:11.5px;font-weight:600;background:oklch(0.97 0.02 292);" <>
+      "color:oklch(0.46 0.14 292);border:1px solid oklch(0.88 0.05 292);"
+  end
+
+  # Artboard `countLabel` (line ~575).
+  defp count_label(true, visible, total), do: "#{visible} of #{total}"
+  defp count_label(_filter_active, _visible, total), do: "#{total} cards"
+
+  @doc """
+  A collapsed activity's stub column (RE259) — `docs/designs/Relay Story Map.dc.html` lines
+  164-169 and the `topCells` stub branch (lines ~416-426): a 50px full-height column carrying
+  the `▸` glyph, the activity name written vertically, and an **inverted** count badge (white
+  on the neutral pill — the exact reverse of an expanded band's badge).
+
+  It replaces the activity's band, its column headers and all of its body cells at once,
+  spanning `grid-row:1 / -1`, which is why `RelayWeb.StoryMapGrid` emits **no band** for a
+  collapsed activity.
+
+  The click is the artboard's `onClick: st.focus ? setFocus : toggleCollapse` (line ~422):
+  normally it expands this activity, and while focusing it moves the focus here instead —
+  because expanding one activity in focus mode is exactly "focus that one".
+
+  It is deliberately **not** a *card* drop target: it carries no `.story-map-drop` class, and
+  `StoryMapGrid.decode_placement/2` has no `"c:"` clause, so a forged drop is refused server
+  side too.
+
+  It **is** still a RE261 header-reorder source and target (the artboard's stub carries
+  `draggable` / `onDragStart` / `onDropAct`, template line ~165): it mirrors the band header's
+  `.story-map-header` / `.story-map-header-drop` / `data-kind` / `data-id` wiring, which is what
+  `StoryMapDnD` selects reorder by. Collapsing is a view state, and a shared board-wide one, so
+  losing drag here would remove the affordance for every viewer. The two drag worlds stay apart
+  in `dropZone/1`, so carrying the header classes never makes the stub take a card.
+  """
+  attr :activity, :any, required: true, doc: "the collapsed %Schemas.StoryActivity{}"
+  attr :index, :integer, required: true, doc: "0-based index into the grid's columns"
+  attr :count, :integer, required: true, doc: "how many of its cards are hidden"
+  attr :focusing, :boolean, default: false
+  attr :read_only, :boolean, default: false, doc: "an archived board reorders nothing"
+
+  def story_map_collapsed_stub(assigns) do
+    ~H"""
+    <button
+      type="button"
+      id={"story-map-stub-#{@activity.id}"}
+      class={[not @read_only && "story-map-header story-map-header-drop"]}
+      data-kind="activity"
+      data-id={@activity.id}
+      draggable={to_string(not @read_only)}
+      phx-click={if(@focusing, do: "set_story_map_focus", else: "toggle_story_map_collapse")}
+      phx-value-activity-id={@activity.id}
+      aria-label={if(@focusing, do: "Focus #{@activity.name}", else: "Expand #{@activity.name}")}
+      style={stub_style(@index)}
+    >
+      <span style="font-size:12px;color:oklch(0.5 0.02 255);">▸</span>
+      <span data-role="stub-name" style={stub_name_style()}>{@activity.name}</span>
+      <span data-role="stub-count" style={inverted_count_style("2px 6px")}>{@count}</span>
+    </button>
+    """
+  end
+
+  # Artboard line ~419.
+  defp stub_style(index) do
+    "grid-column:#{index + 2};grid-row:1 / -1;align-self:stretch;position:sticky;top:0;" <>
+      "z-index:22;background:oklch(0.972 0.006 255);border-right:#{@gl_strong};" <>
+      "border-bottom:#{@gl_light};display:flex;flex-direction:column;align-items:center;" <>
+      "justify-content:space-between;padding:10px 0;cursor:pointer;"
+  end
+
+  # Artboard line ~420.
+  defp stub_name_style do
+    "writing-mode:vertical-rl;transform:rotate(180deg);font-size:12px;font-weight:600;" <>
+      "color:oklch(0.4 0.02 255);"
+  end
+
+  @doc """
   The collaborator avatar stack (RE257) — `docs/designs/Relay Story Map.dc.html` lines 49-56,
   the artboard's `showPresence` mode: 26px identity-hued circles with a 2px white border, each
   after the first tucked -8px under its neighbour, capped at five faces with a neutral `+N` chip
@@ -219,7 +437,8 @@ defmodule RelayWeb.StoryMapComponents do
 
   Placement is also a deliberate deviation (per the spec): the artboard puts this stack in the
   map's own toolbar beside ZOOM, and `BoardLive` renders it in the app layout's `<:actions>`
-  slot after the `#story-map-count` chip until RE260's toolbar can host it.
+  slot beside the map's toolbar (RE259 moved `#story-map-count` down into the filter bar, its
+  artboard home).
   """
   attr :people, :list, required: true, doc: "Relay.Presence.list_people/1's shape"
   attr :current_user_id, :integer, required: true
@@ -436,6 +655,10 @@ defmodule RelayWeb.StoryMapComponents do
   attr :compose_form, :any, default: nil, doc: "the shared card composer form (BoardLive's :compose_form)"
   attr :zoom, :atom, values: @zoom_levels, default: :full
 
+  attr :focus, :any,
+    default: nil,
+    doc: "the focused %Schemas.StoryActivity{} (RelayWeb.StoryMapGrid.resolve_focus/2), or nil"
+
   def story_map(assigns) do
     ~H"""
     <div id="story-map-grid" style={grid_style(@grid, @draft)}>
@@ -541,6 +764,17 @@ defmodule RelayWeb.StoryMapComponents do
           cancel="story_map_draft_cancel"
         />
       </div>
+      <%!-- RE259 — a collapsed activity's stub stands in for its band, its column headers
+            and its body cells, spanning grid-row 1 / -1. The grid emits no band for it, so
+            nothing renders underneath. --%>
+      <.story_map_collapsed_stub
+        :for={{column, index} <- indexed_columns(@grid.columns, & &1.collapsed?)}
+        activity={column.activity}
+        index={index}
+        count={column.count}
+        focusing={@focus != nil}
+        read_only={@read_only}
+      />
       <div
         :for={band <- @grid.bands}
         id={"story-map-activity-#{band.activity.id}"}
@@ -578,6 +812,30 @@ defmodule RelayWeb.StoryMapComponents do
           >
             ＋
           </button>
+          <%!-- RE259 — ▾ collapses this band to a stub, ◎ focuses it (a collapse of everything
+                else). Both render on a read-only board, like ZOOM and the tray: view state is not
+                board data. The artboard puts ▾ in the name row (line ~174) and ◎ here (line ~188);
+                both sit here so neither depends on the ⠿ grip, which read_only suppresses. --%>
+          <button
+            type="button"
+            id={"story-map-collapse-#{band.activity.id}"}
+            title="Collapse activity"
+            phx-click="toggle_story_map_collapse"
+            phx-value-activity-id={band.activity.id}
+            style={icon_style()}
+          >
+            ▾
+          </button>
+          <button
+            type="button"
+            id={"story-map-focus-#{band.activity.id}"}
+            title="Focus this activity"
+            phx-click="set_story_map_focus"
+            phx-value-activity-id={band.activity.id}
+            style={icon_style()}
+          >
+            ◎
+          </button>
           <.delete_button
             :if={not @read_only}
             kind="activity"
@@ -587,7 +845,7 @@ defmodule RelayWeb.StoryMapComponents do
         </div>
       </div>
       <.story_map_column_header
-        :for={{column, index} <- Enum.with_index(@grid.columns)}
+        :for={{column, index} <- indexed_columns(@grid.columns, &(not &1.collapsed?))}
         column={column}
         index={index}
         draft_name={@draft_name}
@@ -595,7 +853,9 @@ defmodule RelayWeb.StoryMapComponents do
         edit_name={@edit_name}
         read_only={@read_only}
       />
-      <%= for {column, ci} <- Enum.with_index(@grid.columns), {lane, li} <- Enum.with_index(@grid.lanes) do %>
+      <%= for {column, ci} <- Enum.with_index(@grid.columns),
+              not column.collapsed?,
+              {lane, li} <- Enum.with_index(@grid.lanes) do %>
         <.story_map_cell
           column={column}
           lane={lane}
@@ -814,7 +1074,9 @@ defmodule RelayWeb.StoryMapComponents do
           <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.5 0.02 255);">
             UNMAPPED
           </span>
-          <span id="story-map-tray-count" style={tray_count_style("2px 7px")}>{length(@cards)}</span>
+          <span id="story-map-tray-count" style={inverted_count_style("2px 7px")}>
+            {length(@cards)}
+          </span>
           <span style="flex:1;"></span>
           <span style="font-size:11px;color:oklch(0.5 0.02 255);">‹</span>
         </button>
@@ -838,7 +1100,9 @@ defmodule RelayWeb.StoryMapComponents do
         style="height:100%;width:100%;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;"
       >
         <span style="font-size:11px;color:oklch(0.5 0.02 255);">›</span>
-        <span id="story-map-tray-count" style={tray_count_style("2px 6px")}>{length(@cards)}</span>
+        <span id="story-map-tray-count" style={inverted_count_style("2px 6px")}>
+          {length(@cards)}
+        </span>
         <span style="writing-mode:vertical-rl;font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.5 0.02 255);">
           UNMAPPED
         </span>
@@ -1078,9 +1342,23 @@ defmodule RelayWeb.StoryMapComponents do
   defp hide_tasks_label(true), do: "Show tasks"
   defp hide_tasks_label(_hiding), do: "Hide tasks"
 
+  # RE259 — HEEx's `:for` attribute accepts only a single generator (`pattern <- enumerable`),
+  # not a comma-separated filter clause, so the stub loop and the header loop each narrow
+  # `@grid.columns` through this helper rather than inline. `Enum.with_index/1` runs BEFORE the
+  # filter, so `index` still names each column's true position in the full list — the same
+  # position `grid_style/2` lays out in `grid-template-columns` — whether or not it survives
+  # the filter.
+  defp indexed_columns(columns, keep?) do
+    columns |> Enum.with_index() |> Enum.filter(fn {column, _index} -> keep?.(column) end)
+  end
+
   defp grid_style(grid, draft) do
     columns =
-      Enum.map_join(grid.columns, " ", fn column -> if column.merged?, do: "176px", else: "156px" end)
+      Enum.map_join(grid.columns, " ", fn
+        %{collapsed?: true} -> "50px"
+        %{merged?: true} -> "176px"
+        _column -> "156px"
+      end)
 
     rows = Enum.map_join(grid.lanes, " ", fn _lane -> "auto" end)
 
@@ -1362,7 +1640,10 @@ defmodule RelayWeb.StoryMapComponents do
       "background:oklch(0.972 0.005 255);z-index:50;overflow:hidden;"
   end
 
-  defp tray_count_style(padding) do
+  # The inverted mono count pill: white on the neutral dark pill. Shared by the UNMAPPED
+  # tray's badge (artboard line ~87) and RE259's collapsed stub badge (line ~414), which are
+  # the same pill at the same two paddings — so the tokens exist once.
+  defp inverted_count_style(padding) do
     "font-family:var(--font-mono);font-size:9px;font-weight:600;color:oklch(1 0 0);" <>
       "background:oklch(0.55 0.02 255);border-radius:20px;padding:#{padding};"
   end

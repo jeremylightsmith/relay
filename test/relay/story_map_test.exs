@@ -769,10 +769,15 @@ defmodule Relay.StoryMapTest do
     test "view_defaults/0 is the one definition of the shared key set" do
       # RE257 — every setting that drives grid GEOMETRY lives here, because raw-pixel cursors
       # are only sound while every viewer renders the same grid. jsonb, so zoom is a string.
+      # RE259 adds the four filter/focus keys: two lists and one nullable id.
       assert StoryMap.view_defaults() == %{
                "tray_open" => true,
                "zoom" => "compact",
-               "hide_tasks" => false
+               "hide_tasks" => false,
+               "owner_filter" => [],
+               "needs_input_filter" => false,
+               "collapsed" => [],
+               "focus" => nil
              }
     end
 
@@ -865,6 +870,130 @@ defmodule Relay.StoryMapTest do
 
       assert Repo.get!(Board, board.id).story_map_view == %{}
       refute_receive {:story_map_view_changed, _board_id, _view}, 100
+    end
+
+    test "merge_view/2 writes several keys in ONE broadcast", %{board: board} do
+      :ok = StoryMap.subscribe_view(board.id)
+
+      assert {:ok, view} =
+               StoryMap.merge_view(board, %{"hide_tasks" => true, "focus" => 7})
+
+      assert view["hide_tasks"] == true
+      assert view["focus"] == 7
+
+      board_id = board.id
+      assert_receive {:story_map_view_changed, ^board_id, %{"focus" => 7}}
+      # ONE broadcast, not one per key: "expand this activity AND turn Hide tasks off" is
+      # atomic, which is the whole reason this writer exists.
+      refute_receive {:story_map_view_changed, ^board_id, _view}, 100
+    end
+
+    test "merge_view/2 refuses a batch containing an unknown key and writes NOTHING",
+         %{board: board} do
+      :ok = StoryMap.subscribe_view(board.id)
+
+      assert StoryMap.merge_view(board, %{"hide_tasks" => true, "shoe_size" => 11}) ==
+               {:error, :unknown_key}
+
+      assert Repo.get!(Board, board.id).story_map_view == %{}
+      refute_receive {:story_map_view_changed, _board_id, _view}, 100
+    end
+
+    test "merge_view/2 re-reads the committed row, so a concurrent key write survives",
+         %{board: board} do
+      {1, _} =
+        Repo.update_all(from(b in Board, where: b.id == ^board.id),
+          set: [story_map_view: %{"tray_open" => false}]
+        )
+
+      assert {:ok, view} = StoryMap.merge_view(board, %{"needs_input_filter" => true})
+      assert view["tray_open"] == false
+    end
+
+    test "put_view/3 still writes exactly one key through merge_view/2", %{board: board} do
+      assert {:ok, %{"zoom" => "full", "tray_open" => true}} =
+               StoryMap.put_view(board, "zoom", "full")
+    end
+
+    test "toggle_view/2 refuses a key whose default is not a boolean", %{board: board} do
+      :ok = StoryMap.subscribe_view(board.id)
+
+      # Without this guard `flip/1`'s "anything not true is off" fallback would replace the
+      # "collapsed" LIST with `true` and every viewer's map would break.
+      assert StoryMap.toggle_view(board, "collapsed") == {:error, :not_a_toggle}
+      assert StoryMap.toggle_view(board, "focus") == {:error, :not_a_toggle}
+
+      assert Repo.get!(Board, board.id).story_map_view == %{}
+      refute_receive {:story_map_view_changed, _board_id, _view}, 100
+    end
+
+    test "toggle_view/2 flips needs_input_filter off its default and back", %{board: board} do
+      assert {:ok, %{"needs_input_filter" => true}} =
+               StoryMap.toggle_view(board, "needs_input_filter")
+
+      assert {:ok, %{"needs_input_filter" => false}} =
+               StoryMap.toggle_view(board, "needs_input_filter")
+    end
+
+    test "toggle_view_member/3 adds a member, then removes it", %{board: board} do
+      assert {:ok, %{"owner_filter" => ["u:3"]}} =
+               StoryMap.toggle_view_member(board, "owner_filter", "u:3")
+
+      assert {:ok, %{"owner_filter" => ["u:3", "agent"]}} =
+               StoryMap.toggle_view_member(board, "owner_filter", "agent")
+
+      assert {:ok, %{"owner_filter" => ["agent"]}} =
+               StoryMap.toggle_view_member(board, "owner_filter", "u:3")
+    end
+
+    test "toggle_view_member/3 flips the COMMITTED row, not the caller's stale struct",
+         %{board: board} do
+      # Two fast clicks computed from a render-lagged assign would both flip from the same
+      # stale value — the reason toggle_view/2 exists, generalised to a list key.
+      {1, _} =
+        Repo.update_all(from(b in Board, where: b.id == ^board.id),
+          set: [story_map_view: %{"collapsed" => [4]}]
+        )
+
+      assert {:ok, %{"collapsed" => []}} = StoryMap.toggle_view_member(board, "collapsed", 4)
+    end
+
+    test "toggle_view_member/4 merges `extra` into the SAME write", %{board: board} do
+      :ok = StoryMap.subscribe_view(board.id)
+      {:ok, _view} = StoryMap.merge_view(board, %{"focus" => 9})
+
+      assert {:ok, %{"collapsed" => [4], "focus" => nil}} =
+               StoryMap.toggle_view_member(board, "collapsed", 4, %{"focus" => nil})
+
+      board_id = board.id
+      assert_receive {:story_map_view_changed, ^board_id, %{"focus" => 9}}
+      assert_receive {:story_map_view_changed, ^board_id, %{"collapsed" => [4], "focus" => nil}}
+      refute_receive {:story_map_view_changed, ^board_id, _view}, 100
+    end
+
+    test "toggle_view_member/3 refuses a key whose default is not a list", %{board: board} do
+      assert StoryMap.toggle_view_member(board, "hide_tasks", true) == {:error, :not_a_list}
+      assert StoryMap.toggle_view_member(board, "shoe_size", 1) == {:error, :unknown_key}
+      assert Repo.get!(Board, board.id).story_map_view == %{}
+    end
+
+    test "toggle_view_member/4 refuses an unknown key inside `extra`", %{board: board} do
+      assert StoryMap.toggle_view_member(board, "collapsed", 4, %{"shoe_size" => 1}) ==
+               {:error, :unknown_key}
+
+      assert Repo.get!(Board, board.id).story_map_view == %{}
+    end
+
+    test "view/1 still drops a stored key outside the grown set", %{board: board} do
+      {1, _} =
+        Repo.update_all(from(b in Board, where: b.id == ^board.id),
+          set: [story_map_view: %{"collapsed" => [1, 2], "removed_setting" => 42}]
+        )
+
+      view = StoryMap.view(Repo.get!(Board, board.id))
+
+      assert view == %{StoryMap.view_defaults() | "collapsed" => [1, 2]}
+      refute Map.has_key?(view, "removed_setting")
     end
   end
 end

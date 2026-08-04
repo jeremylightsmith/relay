@@ -55,7 +55,7 @@ defmodule Relay.Cards do
     :board_id,
     :stage_id,
     # RE264 — the story map's placement, read straight off this list by
-    # RelayWeb.StoryMapGrid.build/6. Without them every card comes back unplaced.
+    # RelayWeb.StoryMapGrid.build/7. Without them every card comes back unplaced.
     :story_activity_id,
     :story_task_id,
     :release_id,
@@ -796,6 +796,17 @@ defmodule Relay.Cards do
   end
 
   def ready_awaiting_human?(_card, _stages), do: false
+
+  @doc """
+  Whether the card is parked on a human's answer — strictly `status == :needs_input`.
+
+  The ONE definition of that fact (AGENTS.md: a magic value is defined exactly once):
+  `RelayWeb.StoryMapFilter`'s Needs-input toggle and
+  `RelayWeb.StoryMapComponents.card_face/4`'s `NEEDS YOU` badge both call it, so the filter
+  and the badge cannot disagree about which cards it means. Deliberately narrower than
+  `needs_you?/2`, which also counts `:in_review`, `:failed` and ready-awaiting-human. Pure.
+  """
+  def needs_input?(%{status: status}), do: status == :needs_input
 
   @doc """
   The two-bucket "needs-you" fact: `:needs_input`/`:in_review`/`:failed` always count, plus

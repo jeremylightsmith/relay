@@ -10,6 +10,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
   alias RelayWeb.CoreComponents
   alias RelayWeb.StoryMapComponents
+  alias RelayWeb.StoryMapFilter
   alias RelayWeb.StoryMapGrid
   alias Schemas.Board
   alias Schemas.Card
@@ -395,7 +396,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ "width:214px"
       assert html =~ "UNMAPPED"
       assert html =~ ~s(id="story-map-tray-count")
-      assert html =~ ">2<"
+      assert html =~ ~r/>\s*2\s*</
       # RE262 restores the artboard's full sentence (line ~91): dragging is real now.
       assert html =~ "No activity yet. Drag onto the map to place — or drop a card here to unmap it."
       assert html =~ ~s(id="story-map-tray-card-RLY7")
@@ -432,7 +433,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ ~s(id="story-map-tray")
       assert html =~ ~s(class="story-map-drop-tray")
       assert html =~ ~s(id="story-map-tray-count")
-      assert html =~ ">0<"
+      assert html =~ ~r/>\s*0\s*</
       assert html =~ "No activity yet. Drag onto the map to place — or drop a card here to unmap it."
     end
 
@@ -1125,6 +1126,282 @@ defmodule RelayWeb.StoryMapComponentsTest do
       people = for i <- 1..5, do: presence_person(i, "Person #{i}", "p#{i}@acme.co")
 
       refute presence_html(people) =~ "story-map-presence-overflow"
+    end
+  end
+
+  describe "RE259 — story_map_filter_bar/1" do
+    defp dana_chip(selected?) do
+      %{
+        key: "u:3",
+        actor: :human,
+        name: "Dana Kim",
+        email: "dana@acme.co",
+        avatar_url: nil,
+        selected?: selected?
+      }
+    end
+
+    defp ai_chip(selected?) do
+      %{key: "agent", actor: :ai, name: "Relay AI", email: nil, avatar_url: nil, selected?: selected?}
+    end
+
+    defp filter_bar(overrides) do
+      attrs =
+        Keyword.merge(
+          [
+            chips: [dana_chip(false), ai_chip(false)],
+            needs_input: false,
+            focus_name: nil,
+            filter_active: false,
+            visible: 5,
+            total: 5
+          ],
+          overrides
+        )
+
+      render_component(&StoryMapComponents.story_map_filter_bar/1, attrs)
+    end
+
+    test "the bar is the artboard's 48px row" do
+      assert style_of(filter_bar([]), "#story-map-filter-bar") ==
+               "min-height:48px;flex:0 0 auto;display:flex;align-items:center;gap:8px;" <>
+                 "flex-wrap:wrap;padding:9px 18px;border-bottom:1px solid oklch(0.92 0.006 255);" <>
+                 "background:oklch(0.972 0.005 255);z-index:55;"
+    end
+
+    test "an unselected owner chip is white-on-neutral with the artboard's dimmed avatar" do
+      html = filter_bar([])
+      chip = "##{StoryMapFilter.chip_dom_id("u:3")}"
+
+      assert style_of(html, chip) ==
+               "display:flex;align-items:center;border-radius:8px;padding:3px;" <>
+                 "background:oklch(1 0 0);border:1px solid oklch(0.9 0.006 255);"
+
+      assert attr_of(html, chip, "aria-pressed") == "false"
+      # `avatar/1` omits the attribute entirely when it has no class, so `|| ""` keeps a
+      # missing class from raising instead of failing.
+      assert (attr_of(html, "#{chip} span", "class") || "") =~ "opacity-[0.85]"
+    end
+
+    test "a selected owner chip takes that person's identity hue" do
+      hue = CoreComponents.identity_hue("dana@acme.co")
+      html = filter_bar(chips: [dana_chip(true)])
+      chip = "##{StoryMapFilter.chip_dom_id("u:3")}"
+
+      assert style_of(html, chip) =~ "background:oklch(0.95 0.03 #{hue});"
+      assert style_of(html, chip) =~ "border:1px solid oklch(0.75 0.08 #{hue});"
+      assert attr_of(html, chip, "aria-pressed") == "true"
+      refute (attr_of(html, "#{chip} span", "class") || "") =~ "opacity-[0.85]"
+    end
+
+    test "the AI chip is the app's violet mark at the artboard's violet tint" do
+      html = filter_bar(chips: [ai_chip(true)])
+      chip = "##{StoryMapFilter.chip_dom_id("agent")}"
+
+      # 292 is this module's `hue_deg(:violet)` — the AI's one hue.
+      assert style_of(html, chip) =~ "background:oklch(0.95 0.03 292);"
+      assert attr_of(html, chip, "phx-value-owner") == "agent"
+    end
+
+    test "the Needs input button carries the artboard's amber dot and both states" do
+      off = filter_bar([])
+      on = filter_bar(needs_input: true)
+
+      assert style_of(off, "#story-map-needs-input-filter") =~
+               "background:oklch(1 0 0);color:oklch(0.5 0.02 255);border:1px solid oklch(0.9 0.006 255);"
+
+      assert style_of(on, "#story-map-needs-input-filter") =~
+               "background:oklch(0.96 0.05 65);color:oklch(0.5 0.13 65);border:1px solid oklch(0.82 0.09 65);"
+
+      assert attr_of(off, "#story-map-needs-input-filter", "aria-pressed") == "false"
+      assert attr_of(on, "#story-map-needs-input-filter", "aria-pressed") == "true"
+
+      assert style_of(on, "#story-map-needs-input-filter span") ==
+               "width:6px;height:6px;border-radius:50%;background:oklch(0.7 0.13 65);"
+    end
+
+    test "the Focusing chip renders only while focusing, in the artboard's violet" do
+      refute filter_bar([]) =~ "story-map-exit-focus"
+
+      html = filter_bar(focus_name: "Checkout")
+
+      assert html =~ "◎ Focusing: Checkout ✕"
+
+      assert style_of(html, "#story-map-exit-focus") =~
+               "background:oklch(0.97 0.02 292);color:oklch(0.46 0.14 292);" <>
+                 "border:1px solid oklch(0.88 0.05 292);"
+    end
+
+    test "Clear appears only while a filter is active, and the count follows it" do
+      resting = filter_bar([])
+      filtering = filter_bar(filter_active: true, visible: 2, total: 5)
+
+      refute resting =~ "story-map-clear-filters"
+      assert resting =~ "5 cards"
+
+      assert filtering =~ "story-map-clear-filters"
+      assert filtering =~ "2 of 5"
+
+      assert style_of(filtering, "#story-map-clear-filters") ==
+               "font-size:11px;font-weight:600;color:oklch(0.55 0.14 250);"
+
+      assert style_of(filtering, "#story-map-count") ==
+               "font-family:var(--font-mono);font-size:11px;color:oklch(0.5 0.02 255);"
+    end
+
+    test "the artboard's + filter button is deliberately absent" do
+      refute filter_bar([]) =~ "+ filter"
+    end
+  end
+
+  describe "RE259 — story_map_collapsed_stub/1" do
+    defp text_of(html, selector) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(selector)
+      |> LazyHTML.text()
+      |> String.trim()
+    end
+
+    defp stub(overrides) do
+      attrs =
+        Keyword.merge(
+          [
+            activity: %StoryActivity{id: 7, board_id: 1, name: "Checkout", position: 1},
+            index: 0,
+            count: 3,
+            focusing: false
+          ],
+          overrides
+        )
+
+      render_component(&StoryMapComponents.story_map_collapsed_stub/1, attrs)
+    end
+
+    test "the stub spans every row, sticky, at the artboard's values" do
+      assert style_of(stub([]), "#story-map-stub-7") ==
+               "grid-column:2;grid-row:1 / -1;align-self:stretch;position:sticky;top:0;z-index:22;" <>
+                 "background:oklch(0.972 0.006 255);border-right:2px solid oklch(0.83 0.02 255);" <>
+                 "border-bottom:1px solid oklch(0.92 0.006 255);display:flex;flex-direction:column;" <>
+                 "align-items:center;justify-content:space-between;padding:10px 0;cursor:pointer;"
+    end
+
+    test "the name is vertical and the count badge is INVERTED" do
+      html = stub([])
+
+      assert html =~ "▸"
+      assert html =~ "Checkout"
+
+      assert style_of(html, "#story-map-stub-7 [data-role='stub-name']") ==
+               "writing-mode:vertical-rl;transform:rotate(180deg);font-size:12px;" <>
+                 "font-weight:600;color:oklch(0.4 0.02 255);"
+
+      # The artboard's `badgeStyle` collapsed branch (line ~414): white on the dark pill,
+      # the exact reverse of an expanded band's badge.
+      assert style_of(html, "#story-map-stub-7 [data-role='stub-count']") ==
+               "font-family:var(--font-mono);font-size:9px;font-weight:600;color:oklch(1 0 0);" <>
+                 "background:oklch(0.55 0.02 255);border-radius:20px;padding:2px 6px;"
+
+      assert text_of(html, "#story-map-stub-7 [data-role='stub-count']") == "3"
+    end
+
+    test "clicking expands normally and MOVES FOCUS while focusing" do
+      # The artboard's `onClick: st.focus ? setFocus : toggleCollapse` (line ~422).
+      assert attr_of(stub([]), "#story-map-stub-7", "phx-click") == "toggle_story_map_collapse"
+
+      assert attr_of(stub(focusing: true), "#story-map-stub-7", "phx-click") ==
+               "set_story_map_focus"
+
+      assert attr_of(stub([]), "#story-map-stub-7", "phx-value-activity-id") == "7"
+    end
+
+    test "the aria-label names what the click ACTUALLY does in each mode" do
+      # Focus mode is precisely when every non-focused band is a stub, so a label that
+      # always said "Expand" would mis-describe the common case to a screen reader.
+      assert attr_of(stub([]), "#story-map-stub-7", "aria-label") == "Expand Checkout"
+
+      assert attr_of(stub(focusing: true), "#story-map-stub-7", "aria-label") == "Focus Checkout"
+    end
+
+    test "the stub stays a RE261 reorder source and target while collapsed" do
+      html = stub([])
+
+      # `StoryMapDnD` selects both by exactly these (story_map_dnd.js lines ~22-23), so a
+      # collapsed activity that dropped them could neither be dragged nor dropped onto.
+      assert attr_of(html, "#story-map-stub-7", "draggable") == "true"
+      assert attr_of(html, "#story-map-stub-7", "data-kind") == "activity"
+      assert attr_of(html, "#story-map-stub-7", "data-id") == "7"
+      assert attr_of(html, "#story-map-stub-7", "class") == "story-map-header story-map-header-drop"
+
+      # And NOT a card drop target — `decode_placement/2` has no `"c:"` clause.
+      refute attr_of(html, "#story-map-stub-7", "class") =~ "story-map-drop"
+    end
+
+    test "an archived board's stub is neither a reorder source nor a target" do
+      html = stub(read_only: true)
+
+      assert attr_of(html, "#story-map-stub-7", "draggable") == "false"
+      assert attr_of(html, "#story-map-stub-7", "class") in [nil, ""]
+    end
+  end
+
+  describe "RE259 — the grid under collapse" do
+    defp collapsed_map_html do
+      activities = [
+        %StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1},
+        %StoryActivity{id: 2, board_id: 1, name: "Plan the backlog", position: 2}
+      ]
+
+      tasks = [%StoryTask{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}]
+      releases = [%Release{id: 100, board_id: 1, name: "MVP", position: 1}]
+      cards = [card(1, story_activity_id: 1, story_task_id: 10, release_id: 100)]
+
+      grid =
+        StoryMapGrid.build(
+          activities,
+          tasks,
+          releases,
+          cards,
+          nil,
+          false,
+          StoryMapGrid.collapsed_set(activities, [1], nil)
+        )
+
+      render_component(&StoryMapComponents.story_map/1,
+        grid: grid,
+        board: board(),
+        stages: stages(),
+        stalled_ids: MapSet.new(),
+        focus: nil
+      )
+    end
+
+    test "a collapsed activity renders its stub instead of a band, a header and cells" do
+      html = collapsed_map_html()
+
+      assert html =~ "story-map-stub-1"
+      refute html =~ "story-map-activity-1"
+      refute html =~ "story-map-task-10"
+      refute html =~ StoryMapGrid.cell_dom_id("c:1", "r:100")
+      refute html =~ StoryMapGrid.cell_dom_id("t:10", "r:100")
+
+      # The expanded neighbour is untouched.
+      assert html =~ "story-map-activity-2"
+    end
+
+    test "the stub column is the artboard's 50px track" do
+      assert style_of(collapsed_map_html(), "#story-map-grid") =~
+               "grid-template-columns:128px 50px 156px 58px;"
+    end
+
+    test "the band header carries the two new icon buttons on every board" do
+      html = collapsed_map_html()
+
+      assert attr_of(html, "#story-map-collapse-2", "phx-click") == "toggle_story_map_collapse"
+      assert attr_of(html, "#story-map-collapse-2", "phx-value-activity-id") == "2"
+      assert attr_of(html, "#story-map-focus-2", "phx-click") == "set_story_map_focus"
+      assert style_of(html, "#story-map-focus-2") == "font-size:12px;color:oklch(0.55 0.02 255);"
+      assert style_of(html, "#story-map-collapse-2") == "font-size:12px;color:oklch(0.55 0.02 255);"
     end
   end
 end

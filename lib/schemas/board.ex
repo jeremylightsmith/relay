@@ -68,7 +68,8 @@ defmodule Schemas.Board do
 
   @doc """
   Changeset for the RE257 **shared** story-map view settings — the one jsonb column
-  `Relay.StoryMap.put_view/3` writes. Deliberately separate from `changeset/2` (which guards
+  `Relay.StoryMap.merge_view/2` writes (the writer `put_view/3`, `toggle_view/2` and
+  `toggle_view_member/4` all compose). Deliberately separate from `changeset/2` (which guards
   name/slug/key), mirroring `public_settings_changeset/2`. The key set itself is validated by
   `Relay.StoryMap.view_defaults/0`, not here: the column is a bag, and the context owns its
   vocabulary.
