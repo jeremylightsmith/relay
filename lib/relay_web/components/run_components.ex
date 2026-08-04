@@ -22,6 +22,7 @@ defmodule RelayWeb.RunComponents do
   use Phoenix.Component
 
   alias RelayWeb.RunStatus
+  alias RelayWeb.TimeAgo
 
   # ---------- formatters (public: board_card and tests use them) ----------
 
@@ -125,28 +126,16 @@ defmodule RelayWeb.RunComponents do
 
   defp elapsed_label(%{status: :running, started_at: at}, now), do: "elapsed #{clock(now, at)}"
   defp elapsed_label(%{status: :parked, started_at: at}, now), do: "parked #{clock(now, at)}"
-  defp elapsed_label(%{status: :done, finished_at: at}, now), do: "finished #{ago(now, at)}"
-  defp elapsed_label(%{status: :failed, finished_at: at}, now), do: "stopped #{ago(now, at)}"
-  defp elapsed_label(%{status: :cancelled, finished_at: at}, now), do: "cancelled #{ago(now, at)}"
+  defp elapsed_label(%{status: :done, finished_at: at}, now), do: "finished #{TimeAgo.ago(now, at)}"
+  defp elapsed_label(%{status: :failed, finished_at: at}, now), do: "stopped #{TimeAgo.ago(now, at)}"
+
+  defp elapsed_label(%{status: :cancelled, finished_at: at}, now), do: "cancelled #{TimeAgo.ago(now, at)}"
 
   defp clock(_now, nil), do: ""
   defp clock(now, at), do: run_duration(max(DateTime.diff(now, at, :second), 0))
 
   defp times_label(1), do: "1 time"
   defp times_label(n), do: "#{n} times"
-
-  defp ago(_now, nil), do: ""
-
-  defp ago(now, at) do
-    seconds = max(DateTime.diff(now, at, :second), 0)
-
-    cond do
-      seconds < 60 -> "just now"
-      seconds < 3600 -> "#{div(seconds, 60)}m ago"
-      seconds < 86_400 -> "#{div(seconds, 3600)}h ago"
-      true -> "#{div(seconds, 86_400)}d ago"
-    end
-  end
 
   # wrap/baton/dot/version colors per status — the artboard's `strips` table.
   defp strip_styles(:running),
@@ -489,7 +478,10 @@ defmodule RelayWeb.RunComponents do
         {@rejection.note}
       </blockquote>
       <div style="font-size:12px;color:oklch(0.50 0.02 255);">
-        rejected from {@rejection.from_stage_name} {ago(DateTime.utc_now(), @rejection.rejected_at)}
+        rejected from {@rejection.from_stage_name} {TimeAgo.ago(
+          DateTime.utc_now(),
+          @rejection.rejected_at
+        )}
       </div>
       <div style="font-size:12px;color:oklch(0.50 0.04 250);margin-top:4px;">
         the run reads this note before implement
@@ -603,7 +595,7 @@ defmodule RelayWeb.RunComponents do
           ?
         </span>
         <span style="font-family:var(--font-mono);font-size:12px;color:oklch(0.50 0.02 255);">
-          Parked {ago(DateTime.utc_now(), @detail.started_at)}
+          Parked {TimeAgo.ago(DateTime.utc_now(), @detail.started_at)}
         </span>
       </div>
     </div>
@@ -696,7 +688,7 @@ defmodule RelayWeb.RunComponents do
             {history_title(entry)}
           </span>
           <span style="margin-left:auto;font-size:11px;color:oklch(0.55 0.02 255);">
-            {ago(DateTime.utc_now(), entry.detail.finished_at)}
+            {TimeAgo.ago(DateTime.utc_now(), entry.detail.finished_at)}
           </span>
           <span style="color:oklch(0.60 0.02 255);">⌄</span>
         </summary>
@@ -816,7 +808,7 @@ defmodule RelayWeb.RunComponents do
           class="run-face-age"
           style="color:oklch(0.55 0.02 255);"
         >
-          {ago(DateTime.utc_now(), @progress_at)}
+          {TimeAgo.ago(DateTime.utc_now(), @progress_at)}
         </span>
       </div>
       <div

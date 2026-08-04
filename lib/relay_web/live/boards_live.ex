@@ -12,6 +12,7 @@ defmodule RelayWeb.BoardsLive do
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Members
+  alias RelayWeb.TimeAgo
 
   @impl true
   def render(assigns) do
@@ -143,7 +144,7 @@ defmodule RelayWeb.BoardsLive do
               >
                 <.member_stack id={"board-members-#{b.slug}"} members={b.members} />
                 <span class="font-mono text-[10.5px]" style="color:oklch(0.62 0.02 255);">
-                  Updated {updated_label(b.updated_at)}
+                  Updated {TimeAgo.ago(b.updated_at)}
                 </span>
               </div>
             </div>
@@ -230,15 +231,4 @@ defmodule RelayWeb.BoardsLive do
 
   # Cosmetic per-board accent from a stable hash of the slug.
   defp accent(slug), do: "oklch(0.62 0.15 #{rem(:erlang.phash2(slug), 360)})"
-
-  defp updated_label(%DateTime{} = at) do
-    seconds = DateTime.diff(DateTime.utc_now(), at, :second)
-
-    cond do
-      seconds < 60 -> "just now"
-      seconds < 3600 -> "#{div(seconds, 60)}m ago"
-      seconds < 86_400 -> "#{div(seconds, 3600)}h ago"
-      true -> "#{div(seconds, 86_400)}d ago"
-    end
-  end
 end
