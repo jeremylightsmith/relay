@@ -26,11 +26,53 @@
   --breakpoint-drawer: 45rem; /* 720px — the mobile↔desktop divide for the card drawer */
 }
 
+/* --- Token mapping (RE237) ------------------------------------------------------------
+   No color literals live outside these two @plugin theme blocks. Every color in
+   lib/relay_web and in the rules below is a semantic token, so it flips with data-theme.
+   To convert an oklch literal from a light-only artboard:
+
+   NEUTRALS (chroma <= 0.02, hue ~250-255) — one percentage serves text and surfaces:
+       P = round_to_5( (1 - L) / 0.74 * 100 )
+     text/icon      -> text-base-content/P   (drop /P at 100)
+                       or color-mix(in oklab, var(--color-base-content) P%, transparent)
+     surface/border -> color-mix(in oklab, var(--color-base-content) P%, var(--color-base-100))
+   Prefer an exact token when one matches:
+     oklch(1 0 0) as background ....... var(--color-base-100)
+     oklch(1 0 0) as ink on a brand ... var(--color-<role>-content)
+     oklch(0.985 0.004 250) canvas .... var(--color-base-200)
+     oklch(0.99 0.002 255) field ...... var(--color-field-bg)
+     oklch(0.968 0.004 255) hover ..... var(--color-field-hover)
+     oklch(0.90 0.006 255) ............ var(--color-field-border)
+     oklch(0.92 0.006 255) line ....... var(--color-base-300)
+     oklch(0.80 0.01 255) ............. var(--color-field-border-hover)
+     oklch(0.22 0.02 255) dark band ... var(--color-neutral) / var(--color-neutral-content)
+
+   BRAND HUES — pick the role by hue (AGENTS.md: Human=blue, AI=violet, Done=green,
+   Blocked=amber, over-WIP=rose): 245-255 primary(L .60) | 285-300 secondary(L .56) |
+   190-200 accent(L .62) | 145-160 success(L .60) | 55-80 warning(L .70) | 5-30 error(L .62)
+     mid-tone fill, L .55-.68 ......... var(--color-<role>)
+     pale tint bg, L >= .90 ........... color-mix(in oklab, var(--color-<role>) N%, var(--color-base-100))
+     tinted border, L .80-.92 ......... same, as border-<role>/N
+        with N = round_to_5( (1 - L) / (1 - L_role) * 100 )
+     brand ink on a tint, L .40-.55 ... color-mix(in oklab, var(--color-<role>) P%, var(--color-base-content))
+        with P = round_to_5( (L - 0.26) / (L_role - 0.26) * 100 )
+
+   Always `in oklab`, never `in oklch`: oklch interpolates hue along the shorter arc, so
+   mixing amber (H 65) with the blue-grey base-content (H 255) swings 190 degrees through
+   green. Tailwind v4's own alpha modifiers emit color-mix(in oklab, ...) too.
+
+   Enforced by test/relay_web/theme_tokens_test.exs.
+   --------------------------------------------------------------------------------------- */
+
 /* --- Relay dark theme (actors kept consistent: Human = blue, AI = violet) --- */
 @plugin "../vendor/daisyui-theme" {
   name: "dark";
   default: false;
-  prefersdark: true;
+  /* RE237: theme resolution is explicit — root.html.heex always writes data-theme. Leaving
+     prefersdark on would let daisyUI apply dark tokens under OS-dark in contexts that have no
+     data-theme (the storybook iframe), where the `dark:` custom variant would NOT match — the
+     exact half-and-half state this card exists to remove. */
+  prefersdark: false;
   color-scheme: "dark";
   --color-base-100: oklch(0.26 0.02 255);
   --color-base-200: oklch(0.22 0.018 255);
@@ -160,19 +202,19 @@
    done card's own `opacity:0.8` are INLINE artboard values on the element, and an inline
    declaration beats a stylesheet rule; the drop and drag states have to win over all three. */
 .story-map-drop.drag-over {
-  background: oklch(0.95 0.04 250 / 0.55) !important;
-  box-shadow: inset 0 0 0 2px oklch(0.6 0.14 250) !important;
+  background: color-mix(in oklab, var(--color-primary) 15%, transparent) !important;
+  box-shadow: inset 0 0 0 2px var(--color-primary) !important;
 }
 .story-map-drop-tray.drag-over {
-  border-right-color: oklch(0.6 0.14 250) !important;
-  background: oklch(0.96 0.03 250) !important;
+  border-right-color: var(--color-primary) !important;
+  background: color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100)) !important;
 }
 /* RE261 — a header's drop state is the artboard's `hdrDrop` (line ~415): a 2px BLUE RING,
    deliberately distinct from a body cell's blue tint above, so a header drop and a cell drop
    never look alike. Same !important justification: the header's own styles are inline artboard
    values on the element. */
 .story-map-header-drop.drag-over {
-  box-shadow: 0 0 0 2px oklch(0.55 0.14 250) !important;
+  box-shadow: 0 0 0 2px var(--color-primary) !important;
 }
 .story-map-card.dragging,
 .story-map-header.dragging {
@@ -558,7 +600,7 @@
   border: 1px dashed var(--color-field-border);
   border-radius: 8px;
   padding: 9px 11px;
-  color: oklch(0.60 0.02 255);
+  color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
   font-style: italic;
 }
 .commit-field-input {
@@ -597,7 +639,7 @@ textarea.commit-field-input { min-height: 64px; }
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-primary) 14%, transparent);
 }
-.commit-field-prefix { padding: 9px 0 9px 11px; color: oklch(0.62 0.02 255); font-size: 14px; }
+.commit-field-prefix { padding: 9px 0 9px 11px; color: color-mix(in oklab, var(--color-base-content) 50%, transparent); font-size: 14px; }
 .commit-field-bare {
   flex: 1;
   border: none;
@@ -647,7 +689,7 @@ textarea.commit-field-input { min-height: 64px; }
   background: var(--color-base-100);
   border: 1px solid var(--color-field-border);
   border-radius: 8px;
-  box-shadow: 0 6px 18px oklch(0.5 0.03 255 / 0.18);
+  box-shadow: 0 6px 18px color-mix(in oklab, var(--color-base-content) 18%, transparent);
 }
 /* Unlayered .commit-pill beats Tailwind's layered .hidden utility on
    specificity alone, so the "hidden until dirty" pill never actually hides.
@@ -664,15 +706,15 @@ textarea.commit-field-input { min-height: 64px; }
   cursor: pointer;
 }
 .commit-pill-save { background: var(--color-primary); color: var(--color-primary-content); border: none; }
-.commit-pill-cancel { background: var(--color-base-100); color: oklch(0.55 0.02 255); border: 1px solid var(--color-field-border); }
-.commit-pill-hint { font-family: var(--font-mono); font-size: 10px; color: oklch(0.60 0.02 255); }
+.commit-pill-cancel { background: var(--color-base-100); color: color-mix(in oklab, var(--color-base-content) 60%, transparent); border: 1px solid var(--color-field-border); }
+.commit-pill-hint { font-family: var(--font-mono); font-size: 10px; color: color-mix(in oklab, var(--color-base-content) 50%, transparent); }
 
 /* RLY-225: the public board's newly-posted-idea entrance (docs/designs/Relay
    Public Board.dc.html lines 23-24, 335) — a quick rise-in plus a brief
    background flash so a freshly posted card draws the eye at the top of its
    column. */
 @keyframes pbrise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes pbflash { 0% { background: oklch(0.96 0.04 250); } 100% { background: var(--color-base-100); } }
+@keyframes pbflash { 0% { background: color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100)); } 100% { background: var(--color-base-100); } }
 .pb-new { animation: pbflash 1.4s ease, pbrise 0.25s ease; }
 
 /* RLY-48: the drawer's "Relay AI is working" strip pulse. */
@@ -680,16 +722,16 @@ textarea.commit-field-input { min-height: 64px; }
 
 /* RLY-137: the run timeline's active-node ring (artboard's `crring`). */
 @keyframes relayring {
-  0% { box-shadow: 0 0 0 0 oklch(0.56 0.16 292 / 0.4); }
-  70% { box-shadow: 0 0 0 7px oklch(0.56 0.16 292 / 0); }
-  100% { box-shadow: 0 0 0 0 oklch(0.56 0.16 292 / 0); }
+  0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-secondary) 40%, transparent); }
+  70% { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 /* RLY-112: the Activity timeline's connecting rule (Relay Card Activity.dc.html §04). */
 #card-drawer-activity { position: relative; }
 #card-drawer-activity::before {
   content: ""; position: absolute; left: 4px; top: 6px; bottom: 6px;
-  width: 1.5px; background: oklch(0.91 0.01 255);
+  width: 1.5px; background: var(--color-base-300);
 }
 
 /* --- RLY-94 · BOARD-01 phone-width stage pager ---
@@ -702,7 +744,7 @@ textarea.commit-field-input { min-height: 64px; }
 .board-pager-nav {
   position: relative;
   background: var(--color-base-100);
-  border-bottom: 1px solid oklch(0.93 0.006 255);
+  border-bottom: 1px solid var(--color-base-300);
 }
 .board-pager-header {
   display: flex; align-items: center; gap: 8px;
@@ -710,15 +752,15 @@ textarea.commit-field-input { min-height: 64px; }
 }
 .board-pager-title {
   font-size: 14px; font-weight: 600; letter-spacing: -0.015em;
-  color: oklch(0.26 0.02 255);
+  color: var(--color-base-content);
 }
 /* RLY-95 · BOARD-01: the ‹ back-to-boards button — 24px square, radius 8. */
 .board-pager-back {
   flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
   width: 24px; height: 24px; border-radius: 8px;
-  background: oklch(0.96 0.006 255);
-  color: oklch(0.4 0.02 255);
+  background: var(--color-field-hover);
+  color: color-mix(in oklab, var(--color-base-content) 80%, transparent);
   font-size: 15px; line-height: 1;
   text-decoration: none;
 }
@@ -729,8 +771,8 @@ textarea.commit-field-input { min-height: 64px; }
   width: 26px; height: 26px; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
   border: none; border-radius: 8px; cursor: pointer;
-  background: oklch(0.60 0.14 250); /* --color-primary · BOARD-01 line ~401 */
-  color: oklch(1 0 0);
+  background: var(--color-primary); /* BOARD-01 line ~401 */
+  color: var(--color-primary-content);
   font-size: 19px; line-height: 1;
 }
 .board-pager-chips {
@@ -743,7 +785,7 @@ textarea.commit-field-input { min-height: 64px; }
   flex: 0 0 auto;
   display: flex; align-items: center; gap: 5px;
   font-size: 11px; font-weight: 600;
-  color: oklch(0.55 0.02 255);
+  color: color-mix(in oklab, var(--color-base-content) 60%, transparent);
   padding: 7px 10px; white-space: nowrap;
   background: transparent;
   border: 1px solid transparent; border-radius: 8px;
@@ -751,20 +793,20 @@ textarea.commit-field-input { min-height: 64px; }
 }
 .board-pager-chip-count {
   font-size: 9px; font-family: var(--font-mono);
-  color: oklch(0.62 0.02 255);
+  color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
 }
 .board-pager-chip-dot { display: none; }
 .board-pager-chip[data-active] {
-  color: oklch(0.26 0.02 255);
-  background: oklch(0.96 0.008 255);
-  border-color: oklch(0.9 0.006 255);
+  color: var(--color-base-content);
+  background: var(--color-field-hover);
+  border-color: var(--color-field-border);
 }
 .board-pager-chip[data-active][data-ai="true"] .board-pager-chip-dot {
   display: block; width: 6px; height: 6px; border-radius: 2px;
-  background: oklch(0.56 0.16 292);
+  background: var(--color-secondary);
 }
 .board-pager-chip[data-active][data-ai="true"] .board-pager-chip-count {
-  color: oklch(0.5 0.1 292);
+  color: color-mix(in oklab, var(--color-secondary) 80%, var(--color-base-content));
 }
 .board-pager-fade {
   position: absolute; right: 0; top: 0; bottom: 9px; width: 28px;
