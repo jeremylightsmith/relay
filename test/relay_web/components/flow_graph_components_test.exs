@@ -50,13 +50,13 @@ defmodule RelayWeb.FlowGraphComponentsTest do
       assert html =~ ~s(data-node="n")
       assert html =~ ~s(data-type="agent")
       # violet accent + AGENT tag
-      assert html =~ "border-left:4px solid oklch(0.56 0.16 292)"
+      assert html =~ "border-left:4px solid var(--color-secondary)"
       assert html =~ "AGENT"
     end
 
     test "shell node: slate accent stripe + SHELL tag" do
       html = one_node(:shell)
-      assert html =~ "border-left:4px solid oklch(0.55 0.02 255)"
+      assert html =~ "border-left:4px solid color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100))"
       assert html =~ "SHELL"
     end
 
@@ -72,7 +72,7 @@ defmodule RelayWeb.FlowGraphComponentsTest do
 
     test "parallel node: tinted teal fill" do
       html = one_node(:parallel)
-      assert html =~ "oklch(0.985 0.02 195)"
+      assert html =~ "color-mix(in oklab, var(--color-accent) 5%, var(--color-base-100))"
       assert html =~ "PARALLEL"
     end
   end
@@ -99,7 +99,7 @@ defmodule RelayWeb.FlowGraphComponentsTest do
     test "end pill reads lands → <stage> in green" do
       html = one_node(:agent)
       assert html =~ "lands → Review"
-      assert html =~ "oklch(0.42 0.10 155)"
+      assert html =~ "color-mix(in oklab, var(--color-success) 45%, var(--color-base-content))"
     end
 
     test "foreach guard edges render human wording appended to the outcome" do

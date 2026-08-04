@@ -21,57 +21,57 @@ defmodule RelayWeb.FlowGraphComponents do
   # rounded-corner radius for orthogonal edge turns.
   @corner 8
 
-  # oklch tokens straight from the artboard, keyed by node type.
+  # daisyUI tokens mapped from the artboard's oklch literals (RE237), keyed by node type.
   @type_meta %{
     agent: %{
-      accent: "oklch(0.56 0.16 292)",
-      border: "oklch(0.88 0.05 292)",
-      fill: "oklch(1 0 0)",
+      accent: "var(--color-secondary)",
+      border: "color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100))",
+      fill: "var(--color-base-100)",
       tag: "AGENT",
-      tag_c: "oklch(0.46 0.14 292)",
-      tag_bg: "oklch(0.95 0.04 292)"
+      tag_c: "color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content))",
+      tag_bg: "color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100))"
     },
     shell: %{
-      accent: "oklch(0.55 0.02 255)",
-      border: "oklch(0.90 0.006 255)",
-      fill: "oklch(1 0 0)",
+      accent: "color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100))",
+      border: "var(--color-field-border)",
+      fill: "var(--color-base-100)",
       tag: "SHELL",
-      tag_c: "oklch(0.48 0.02 255)",
-      tag_bg: "oklch(0.95 0.004 255)"
+      tag_c: "color-mix(in oklab, var(--color-base-content) 70%, transparent)",
+      tag_bg: "color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100))"
     },
     gate: %{
-      accent: "oklch(0.70 0.13 65)",
-      border: "oklch(0.85 0.07 75)",
-      fill: "oklch(0.985 0.02 75)",
+      accent: "var(--color-warning)",
+      border: "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100))",
+      fill: "color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100))",
       tag: "GATE",
-      tag_c: "oklch(0.48 0.11 65)",
+      tag_c: "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content))",
       tag_bg: nil
     },
     parallel: %{
-      accent: "oklch(0.62 0.13 195)",
-      border: "oklch(0.87 0.05 195)",
-      fill: "oklch(0.985 0.02 195)",
+      accent: "var(--color-accent)",
+      border: "color-mix(in oklab, var(--color-accent) 35%, var(--color-base-100))",
+      fill: "color-mix(in oklab, var(--color-accent) 5%, var(--color-base-100))",
       tag: "PARALLEL",
-      tag_c: "oklch(0.42 0.10 195)",
-      tag_bg: "oklch(0.95 0.03 195)"
+      tag_c: "color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content))",
+      tag_bg: "color-mix(in oklab, var(--color-accent) 15%, var(--color-base-100))"
     },
     human: %{
-      accent: "oklch(0.60 0.14 250)",
-      border: "oklch(0.86 0.06 250)",
-      fill: "oklch(0.985 0.02 250)",
+      accent: "var(--color-primary)",
+      border: "color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100))",
+      fill: "color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100))",
       tag: "HUMAN",
-      tag_c: "oklch(0.44 0.13 250)",
-      tag_bg: "oklch(0.95 0.03 250)"
+      tag_c: "color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content))",
+      tag_bg: "color-mix(in oklab, var(--color-primary) 15%, var(--color-base-100))"
     }
   }
 
   # edge stroke color by canonical outcome (start edge = nil → neutral "ok" grey).
   @edge_color %{
-    nil => "oklch(0.66 0.02 255)",
-    succeeded: "oklch(0.54 0.12 155)",
-    failed: "oklch(0.64 0.16 22)",
-    partial: "oklch(0.58 0.13 292)",
-    needs_input: "oklch(0.70 0.13 65)"
+    nil => "color-mix(in oklab, var(--color-base-content) 45%, transparent)",
+    succeeded: "var(--color-success)",
+    failed: "var(--color-error)",
+    partial: "var(--color-secondary)",
+    needs_input: "var(--color-warning)"
   }
 
   attr :nodes, :list, required: true
@@ -106,7 +106,7 @@ defmodule RelayWeb.FlowGraphComponents do
     <div
       id="flow-graph"
       class="relative"
-      style={"width:#{@width}px;height:#{@height}px;background-image:radial-gradient(oklch(0.90 0.006 255) 1px, transparent 1px);background-size:22px 22px;"}
+      style={"width:#{@width}px;height:#{@height}px;background-image:radial-gradient(var(--color-field-border) 1px, transparent 1px);background-size:22px 22px;"}
     >
       <svg
         width={@width}
@@ -167,16 +167,16 @@ defmodule RelayWeb.FlowGraphComponents do
         <span :if={node.type not in [:gate, :human]} style={tag_style(meta)}>
           {meta.tag}
         </span>
-        <span style="font-size:12.5px;font-weight:600;color:oklch(0.28 0.02 255);text-align:center;line-height:1.15;padding:0 6px;">
+        <span style="font-size:12.5px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);text-align:center;line-height:1.15;padding:0 6px;">
           {humanize(node.key)}
         </span>
-        <span style="font-size:9.5px;font-family:ui-monospace,monospace;color:oklch(0.58 0.02 255);white-space:nowrap;">
+        <span style="font-size:9.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);white-space:nowrap;">
           {sub_label(node)}
         </span>
       </div>
 
       <div :if={@lands_on} style={lands_style(@layout)}>
-        <span style="width:7px;height:7px;border-radius:50%;background:oklch(0.60 0.13 155);"></span>
+        <span style="width:7px;height:7px;border-radius:50%;background:var(--color-success);"></span>
         lands → {@lands_on}
       </div>
 
@@ -235,9 +235,9 @@ defmodule RelayWeb.FlowGraphComponents do
     base <> shape <> ring <> state
   end
 
-  defp state_accent(:running), do: "outline:2px solid oklch(0.56 0.16 292);"
-  defp state_accent(:succeeded), do: "outline:2px solid oklch(0.54 0.12 155);"
-  defp state_accent(:failed), do: "outline:2px solid oklch(0.64 0.16 22);"
+  defp state_accent(:running), do: "outline:2px solid var(--color-secondary);"
+  defp state_accent(:succeeded), do: "outline:2px solid var(--color-success);"
+  defp state_accent(:failed), do: "outline:2px solid var(--color-error);"
   defp state_accent(_), do: ""
 
   defp tag_style(meta) do
@@ -408,9 +408,9 @@ defmodule RelayWeb.FlowGraphComponents do
 
     "position:absolute;left:#{x}px;top:#{y + 8}px;transform:translateX(-50%);z-index:4;" <>
       "display:flex;align-items:center;gap:6px;white-space:nowrap;" <>
-      "background:oklch(0.97 0.02 155);border:1px solid oklch(0.88 0.05 155);border-radius:20px;" <>
+      "background:color-mix(in oklab, var(--color-success) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-success) 30%, var(--color-base-100));border-radius:20px;" <>
       "padding:7px 13px;font-size:11.5px;font-weight:600;font-family:ui-monospace,monospace;" <>
-      "color:oklch(0.42 0.10 155);"
+      "color:color-mix(in oklab, var(--color-success) 45%, var(--color-base-content));"
   end
 
   # Clickable "done" sentinel — only rendered mid connect-edge (picking a target), so it never
@@ -420,8 +420,8 @@ defmodule RelayWeb.FlowGraphComponents do
 
     "position:absolute;left:#{x}px;top:#{y}px;transform:translate(-50%,-50%);z-index:5;" <>
       "font-size:10px;font-weight:700;font-family:ui-monospace,monospace;border-radius:20px;" <>
-      "padding:6px 12px;cursor:pointer;border:1.5px dashed oklch(0.60 0.13 155);" <>
-      "background:oklch(0.97 0.02 155);color:oklch(0.42 0.10 155);"
+      "padding:6px 12px;cursor:pointer;border:1.5px dashed var(--color-success);" <>
+      "background:color-mix(in oklab, var(--color-success) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-success) 45%, var(--color-base-content));"
   end
 
   defp edge_label_style(edge, geo) do
@@ -431,15 +431,34 @@ defmodule RelayWeb.FlowGraphComponents do
     "position:absolute;left:#{x}px;top:#{y}px;transform:translate(-50%,-50%);z-index:3;" <>
       "font-size:9.5px;font-weight:600;font-family:ui-monospace,monospace;border-radius:5px;" <>
       "padding:2px 6px;white-space:nowrap;border:0;cursor:pointer;" <>
-      "box-shadow:0 0 0 3px oklch(0.975 0.004 250);color:#{color};background:#{bg};"
+      "box-shadow:0 0 0 3px var(--color-base-200);color:#{color};background:#{bg};"
   end
 
-  defp label_colors(:succeeded), do: {"oklch(0.42 0.11 155)", "oklch(0.97 0.03 155)"}
-  defp label_colors(:failed), do: {"oklch(0.52 0.15 22)", "oklch(0.98 0.03 22)"}
-  defp label_colors(:partial), do: {"oklch(0.48 0.13 292)", "oklch(0.98 0.03 292)"}
-  defp label_colors(:needs_input), do: {"oklch(0.52 0.11 65)", "oklch(0.98 0.04 75)"}
-  defp label_colors(_), do: {"oklch(0.52 0.02 255)", "oklch(0.97 0.004 255)"}
+  defp label_colors(:succeeded),
+    do:
+      {"color-mix(in oklab, var(--color-success) 45%, var(--color-base-content))",
+       "color-mix(in oklab, var(--color-success) 10%, var(--color-base-100))"}
 
-  defp selected_ring(sel, key) when sel == key, do: "outline:2px solid oklch(0.56 0.16 292);"
+  defp label_colors(:failed),
+    do:
+      {"color-mix(in oklab, var(--color-error) 70%, var(--color-base-content))",
+       "color-mix(in oklab, var(--color-error) 5%, var(--color-base-100))"}
+
+  defp label_colors(:partial),
+    do:
+      {"color-mix(in oklab, var(--color-secondary) 75%, var(--color-base-content))",
+       "color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100))"}
+
+  defp label_colors(:needs_input),
+    do:
+      {"color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))",
+       "color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100))"}
+
+  defp label_colors(_),
+    do:
+      {"color-mix(in oklab, var(--color-base-content) 65%, transparent)",
+       "color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100))"}
+
+  defp selected_ring(sel, key) when sel == key, do: "outline:2px solid var(--color-secondary);"
   defp selected_ring(_, _), do: ""
 end

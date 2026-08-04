@@ -387,23 +387,29 @@ defmodule RelayWeb.FlowEditorLive do
       subtracting it here the editor overshoots the viewport by 53px. --%>
       <div class="flex flex-col" style="height:calc(100vh - 53px);">
         <%!-- Top bar --%>
-        <div style="height:52px;display:flex;align-items:center;gap:12px;padding:0 18px;border-bottom:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);">
+        <div style="height:52px;display:flex;align-items:center;gap:12px;padding:0 18px;border-bottom:1px solid var(--color-base-300);background:var(--color-base-100);">
           <nav style="font-size:13px;display:flex;align-items:center;gap:7px;">
             <.link
               navigate={~p"/board/#{@board.slug}"}
-              style="color:oklch(0.52 0.02 255);font-weight:600;"
+              style="color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-weight:600;"
             >
               {@board.name}
             </.link>
-            <span style="color:oklch(0.78 0.02 255);">/</span>
+            <span style="color:color-mix(in oklab, var(--color-base-content) 30%, transparent);">
+              /
+            </span>
             <.link
               navigate={~p"/board/#{@board.slug}/settings?section=flows"}
-              style="color:oklch(0.52 0.02 255);font-weight:600;"
+              style="color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-weight:600;"
             >
               Flows
             </.link>
-            <span style="color:oklch(0.78 0.02 255);">/</span>
-            <span style="color:oklch(0.28 0.02 255);font-weight:600;">{humanize(@flow.key)}</span>
+            <span style="color:color-mix(in oklab, var(--color-base-content) 30%, transparent);">
+              /
+            </span>
+            <span style="color:color-mix(in oklab, var(--color-base-content) 95%, transparent);font-weight:600;">
+              {humanize(@flow.key)}
+            </span>
           </nav>
           <FlowEditorComponents.flow_tabs
             board_slug={@board.slug}
@@ -418,13 +424,13 @@ defmodule RelayWeb.FlowEditorLive do
         <%!-- Toolbar --%>
         <div
           id="flow-editor-toolbar"
-          style="min-height:50px;display:flex;align-items:center;gap:10px;padding:7px 16px;border-bottom:1px solid oklch(0.93 0.006 255);background:oklch(0.992 0.002 255);flex-wrap:wrap;"
+          style="min-height:50px;display:flex;align-items:center;gap:10px;padding:7px 16px;border-bottom:1px solid var(--color-base-300);background:var(--color-base-200);flex-wrap:wrap;"
         >
-          <span style="font-size:10.5px;font-weight:600;letter-spacing:0.06em;font-family:ui-monospace,monospace;color:oklch(0.58 0.02 255);">
+          <span style="font-size:10.5px;font-weight:600;letter-spacing:0.06em;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
             ADD NODE
           </span>
           <FlowEditorComponents.palette read_only?={@read_only?} />
-          <div style="width:1px;height:22px;background:oklch(0.90 0.006 255);margin:0 4px;"></div>
+          <div style="width:1px;height:22px;background:var(--color-field-border);margin:0 4px;"></div>
           <FlowEditorComponents.toolbar_actions
             connecting?={!!@connecting}
             has_selection?={!!@selected}
@@ -433,8 +439,8 @@ defmodule RelayWeb.FlowEditorLive do
         </div>
 
         <%!-- Trigger bar --%>
-        <div style="display:flex;align-items:center;gap:14px;padding:11px 18px;border-bottom:1px solid oklch(0.93 0.006 255);background:oklch(1 0 0);">
-          <span style="font-size:10.5px;font-weight:600;letter-spacing:0.06em;font-family:ui-monospace,monospace;color:oklch(0.58 0.02 255);">
+        <div style="display:flex;align-items:center;gap:14px;padding:11px 18px;border-bottom:1px solid var(--color-base-300);background:var(--color-base-100);">
+          <span style="font-size:10.5px;font-weight:600;letter-spacing:0.06em;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
             TRIGGER
           </span>
           <.trigger_select
@@ -445,7 +451,9 @@ defmodule RelayWeb.FlowEditorLive do
             stages={@stages}
             disabled={@read_only?}
           />
-          <span style="color:oklch(0.72 0.02 255);">→</span>
+          <span style="color:color-mix(in oklab, var(--color-base-content) 40%, transparent);">
+            →
+          </span>
           <.trigger_select
             id="trigger-works-in"
             field="works_in"
@@ -454,7 +462,9 @@ defmodule RelayWeb.FlowEditorLive do
             stages={@stages}
             disabled={@read_only?}
           />
-          <span style="color:oklch(0.72 0.02 255);">→</span>
+          <span style="color:color-mix(in oklab, var(--color-base-content) 40%, transparent);">
+            →
+          </span>
           <.trigger_select
             id="trigger-lands-on"
             field="lands_on"
@@ -473,7 +483,7 @@ defmodule RelayWeb.FlowEditorLive do
           phx-window-keydown={if @connecting, do: "cancel_connect"}
           phx-key="escape"
         >
-          <div style="flex:1;overflow:auto;background:oklch(0.975 0.004 250);padding:16px;">
+          <div style="flex:1;overflow:auto;background:var(--color-base-200);padding:16px;">
             <FlowGraphComponents.flow_graph
               nodes={@working.nodes}
               edges={@working.edges}
@@ -486,7 +496,7 @@ defmodule RelayWeb.FlowEditorLive do
           </div>
           <aside
             id="flow-inspector"
-            style="width:328px;flex:0 0 auto;border-left:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);overflow-y:auto;"
+            style="width:328px;flex:0 0 auto;border-left:1px solid var(--color-base-300);background:var(--color-base-100);overflow-y:auto;"
           >
             <FlowEditorComponents.node_inspector
               :if={match?({:node, _}, @selected) and selected_node(@working, @selected)}
@@ -508,17 +518,17 @@ defmodule RelayWeb.FlowEditorLive do
         <div
           :if={@dirty?}
           id="flow-editor-unsaved-bar"
-          style="padding:12px 18px;background:oklch(1 0 0);border-top:1px solid oklch(0.90 0.006 255);display:flex;align-items:center;gap:14px;"
+          style="padding:12px 18px;background:var(--color-base-100);border-top:1px solid var(--color-field-border);display:flex;align-items:center;gap:14px;"
         >
-          <span style="display:flex;align-items:center;gap:7px;color:oklch(0.48 0.11 65);font-size:12.5px;font-weight:600;">
-            <span style="width:8px;height:8px;border-radius:50%;background:oklch(0.70 0.13 65);">
+          <span style="display:flex;align-items:center;gap:7px;color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));font-size:12.5px;font-weight:600;">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--color-warning);">
             </span>
             Unsaved changes
           </span>
           <div
             :if={@errors != []}
             id="flow-editor-errors"
-            style="background:oklch(0.98 0.02 15);border:1px solid oklch(0.89 0.06 15);border-radius:8px;padding:7px 12px;max-width:640px;color:oklch(0.48 0.12 15);font-size:12px;"
+            style="background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 30%, var(--color-base-100));border-radius:8px;padding:7px 12px;max-width:640px;color:color-mix(in oklab, var(--color-error) 60%, var(--color-base-content));font-size:12px;"
           >
             <span :for={msg <- @errors}>{msg}</span>
           </div>
@@ -536,7 +546,7 @@ defmodule RelayWeb.FlowEditorLive do
               id="flow-editor-discard"
               type="button"
               phx-click="discard"
-              style="background:transparent;border:1px solid oklch(0.90 0.006 255);color:oklch(0.48 0.02 255);border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;"
+              style="background:transparent;border:1px solid var(--color-field-border);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;"
             >
               Discard
             </button>
@@ -546,21 +556,21 @@ defmodule RelayWeb.FlowEditorLive do
         <div
           :if={!@dirty?}
           id="flow-editor-saved-bar"
-          style="padding:11px 18px;border-top:1px solid oklch(0.93 0.006 255);display:flex;align-items:center;gap:12px;"
+          style="padding:11px 18px;border-top:1px solid var(--color-base-300);display:flex;align-items:center;gap:12px;"
         >
-          <span style="width:8px;height:8px;border-radius:50%;background:oklch(0.60 0.13 155);">
+          <span style="width:8px;height:8px;border-radius:50%;background:var(--color-success);">
           </span>
-          <span style="font-size:12.5px;color:oklch(0.55 0.02 255);">
+          <span style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
             All changes saved ·
             <span style="font-family:ui-monospace,monospace;">v{@flow.version}</span>
           </span>
-          <span style="margin-left:auto;font-family:ui-monospace,monospace;font-size:11.5px;color:oklch(0.60 0.02 255);">
+          <span style="margin-left:auto;font-family:ui-monospace,monospace;font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
             {stats(@working)}
           </span>
           <div
             :if={diff_present?(@diff)}
             id="flow-diff-affordance"
-            style="display:flex;align-items:center;gap:10px;font-size:11.5px;color:oklch(0.46 0.14 292);"
+            style="display:flex;align-items:center;gap:10px;font-size:11.5px;color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));"
           >
             <span>
               {diff_node_count(@diff)} nodes · {diff_edge_count(@diff)} edges differ from the shipped default
@@ -569,7 +579,7 @@ defmodule RelayWeb.FlowEditorLive do
               id="flow-diff-view"
               type="button"
               phx-click="open_diff"
-              style="background:transparent;border:none;color:oklch(0.46 0.14 292);font-size:11.5px;font-weight:600;text-decoration:underline;"
+              style="background:transparent;border:none;color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));font-size:11.5px;font-weight:600;text-decoration:underline;"
             >
               View diff
             </button>
@@ -578,7 +588,7 @@ defmodule RelayWeb.FlowEditorLive do
               type="button"
               phx-click="open_reset"
               disabled={@read_only?}
-              style="background:transparent;border:none;color:oklch(0.46 0.14 292);font-size:11.5px;font-weight:600;text-decoration:underline;"
+              style="background:transparent;border:none;color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));font-size:11.5px;font-weight:600;text-decoration:underline;"
             >
               Reset to default
             </button>
@@ -594,33 +604,33 @@ defmodule RelayWeb.FlowEditorLive do
         phx-key="escape"
       >
         <.modal_scrim phx-click="close_modal" />
-        <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:51;width:min(480px,92vw);background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);border-radius:16px;">
+        <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:51;width:min(480px,92vw);background:var(--color-base-100);border:1px solid var(--color-field-border);border-radius:16px;">
           <div style="padding:22px 24px;display:flex;flex-direction:column;gap:12px;">
             <div style="display:flex;align-items:center;gap:11px;">
-              <span style="width:32px;height:32px;border-radius:9px;background:oklch(0.56 0.16 292);color:white;display:flex;align-items:center;justify-content:center;font-weight:700;">
+              <span style="width:32px;height:32px;border-radius:9px;background:var(--color-secondary);color:var(--color-secondary-content);display:flex;align-items:center;justify-content:center;font-weight:700;">
                 ↑
               </span>
-              <span style="font-size:17px;font-weight:600;color:oklch(0.24 0.02 255);">
+              <span style="font-size:17px;font-weight:600;color:var(--color-base-content);">
                 Save as v{@flow.version + 1}?
               </span>
             </div>
-            <p style="font-size:13.5px;line-height:1.6;color:oklch(0.46 0.02 255);">
+            <p style="font-size:13.5px;line-height:1.6;color:color-mix(in oklab, var(--color-base-content) 75%, transparent);">
               Saving bumps this flow from <span style="font-family:ui-monospace,monospace;">v{@flow.version} → v{@flow.version + 1}</span>. Every new run started from now on uses v{@flow.version +
                 1}.
             </p>
             <div
               :if={Flows.mid_run_count(@flow) > 0}
               id="flow-save-modal-midrun"
-              style="background:oklch(0.98 0.02 292);border:1px solid oklch(0.91 0.04 292);border-radius:10px;padding:12px 14px;color:oklch(0.44 0.14 292);font-size:12.5px;"
+              style="background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 20%, var(--color-base-100));border-radius:10px;padding:12px 14px;color:color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));font-size:12.5px;"
             >
               {Flows.mid_run_count(@flow)} cards are mid-run on v{@flow.version}. They finish on v{@flow.version} — this edit won't touch them.
             </div>
           </div>
-          <div style="background:oklch(0.985 0.004 250);border-top:1px solid oklch(0.94 0.005 255);padding:14px 24px;display:flex;justify-content:flex-end;gap:9px;">
+          <div style="background:var(--color-base-200);border-top:1px solid var(--color-base-300);padding:14px 24px;display:flex;justify-content:flex-end;gap:9px;">
             <button
               type="button"
               phx-click="close_modal"
-              style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.01 255);color:oklch(0.42 0.02 255);border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;"
+              style="background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 80%, transparent);border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;"
             >
               Cancel
             </button>
@@ -628,7 +638,7 @@ defmodule RelayWeb.FlowEditorLive do
               id="flow-save-confirm"
               type="button"
               phx-click="confirm_save"
-              style="background:oklch(0.56 0.16 292);color:white;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;"
+              style="background:var(--color-secondary);color:var(--color-secondary-content);border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;"
             >
               Save as v{@flow.version + 1}
             </button>
@@ -658,13 +668,13 @@ defmodule RelayWeb.FlowEditorLive do
     ~H"""
     <form id={@id} phx-change="validate_trigger" style="display:flex;flex-direction:column;gap:3px;">
       <input type="hidden" name="field" value={@field} />
-      <label style="font-size:9.5px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
+      <label style="font-size:9.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);">
         {@label}
       </label>
       <select
         name="stage_id"
         disabled={@disabled}
-        style="border:1px solid oklch(0.90 0.006 255);background:oklch(0.99 0.002 255);border-radius:8px;padding:6px 10px;font-size:12.5px;font-family:ui-monospace,monospace;color:oklch(0.40 0.02 255);"
+        style="border:1px solid var(--color-field-border);background:var(--color-field-bg);border-radius:8px;padding:6px 10px;font-size:12.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
       >
         <option value="">—</option>
         <option :for={s <- @stages} value={s.id} selected={s.id == @value}>{s.name}</option>
@@ -675,19 +685,19 @@ defmodule RelayWeb.FlowEditorLive do
 
   defp version_chip_style(true),
     do:
-      "font-size:11px;font-weight:600;font-family:ui-monospace,monospace;padding:4px 10px;border-radius:6px;background:oklch(0.97 0.04 75);color:oklch(0.48 0.11 65);"
+      "font-size:11px;font-weight:600;font-family:ui-monospace,monospace;padding:4px 10px;border-radius:6px;background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));"
 
   defp version_chip_style(false),
     do:
-      "font-size:11px;font-weight:600;font-family:ui-monospace,monospace;padding:4px 10px;border-radius:6px;background:oklch(0.96 0.004 255);color:oklch(0.46 0.02 255);"
+      "font-size:11px;font-weight:600;font-family:ui-monospace,monospace;padding:4px 10px;border-radius:6px;background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 75%, transparent);"
 
   defp save_button_style(true),
     do:
-      "background:oklch(0.56 0.16 292);color:white;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;"
+      "background:var(--color-secondary);color:var(--color-secondary-content);border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;"
 
   defp save_button_style(false),
     do:
-      "background:oklch(0.82 0.05 250);color:white;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:not-allowed;opacity:0.7;"
+      "background:color-mix(in oklab, var(--color-primary) 45%, var(--color-base-100));color:var(--color-primary-content);border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:not-allowed;opacity:0.7;"
 
   defp stage_name(stages, id), do: Enum.find_value(stages, &(&1.id == id && &1.name))
 

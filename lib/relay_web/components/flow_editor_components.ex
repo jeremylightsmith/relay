@@ -8,19 +8,29 @@ defmodule RelayWeb.FlowEditorComponents do
   use RelayWeb, :html
 
   @type_tag %{
-    agent: {"AGENT", "oklch(0.46 0.14 292)", "oklch(0.95 0.04 292)"},
-    shell: {"SHELL", "oklch(0.48 0.02 255)", "oklch(0.95 0.004 255)"},
-    gate: {"GATE", "oklch(0.48 0.11 65)", "oklch(0.96 0.02 75)"},
-    parallel: {"PARALLEL", "oklch(0.42 0.10 195)", "oklch(0.95 0.03 195)"},
-    human: {"HUMAN", "oklch(0.44 0.13 250)", "oklch(0.95 0.03 250)"}
+    agent:
+      {"AGENT", "color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content))",
+       "color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100))"},
+    shell:
+      {"SHELL", "color-mix(in oklab, var(--color-base-content) 70%, transparent)",
+       "color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100))"},
+    gate:
+      {"GATE", "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content))",
+       "color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100))"},
+    parallel:
+      {"PARALLEL", "color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content))",
+       "color-mix(in oklab, var(--color-accent) 15%, var(--color-base-100))"},
+    human:
+      {"HUMAN", "color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content))",
+       "color-mix(in oklab, var(--color-primary) 15%, var(--color-base-100))"}
   }
 
   @palette_types [
-    {:agent, "Agent", "oklch(0.56 0.16 292)"},
-    {:shell, "Shell", "oklch(0.55 0.02 255)"},
-    {:gate, "Gate", "oklch(0.70 0.13 65)"},
-    {:parallel, "Parallel", "oklch(0.62 0.13 195)"},
-    {:human, "Human", "oklch(0.60 0.14 250)"}
+    {:agent, "Agent", "var(--color-secondary)"},
+    {:shell, "Shell", "color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100))"},
+    {:gate, "Gate", "var(--color-warning)"},
+    {:parallel, "Parallel", "var(--color-accent)"},
+    {:human, "Human", "var(--color-primary)"}
   ]
 
   @models ["inherit", "haiku", "sonnet", "opus"]
@@ -43,7 +53,7 @@ defmodule RelayWeb.FlowEditorComponents do
         phx-click="add_node"
         phx-value-type={type}
         disabled={@read_only?}
-        style="display:flex;align-items:center;gap:6px;background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);color:oklch(0.38 0.02 255);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;"
+        style="display:flex;align-items:center;gap:6px;background:var(--color-base-100);border:1px solid var(--color-field-border);color:color-mix(in oklab, var(--color-base-content) 85%, transparent);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;"
       >
         <span style={"width:9px;height:9px;border-radius:#{if type == :gate, do: "0;transform:rotate(45deg)", else: "3px"};background:#{accent};display:inline-block;"}>
         </span>
@@ -77,7 +87,7 @@ defmodule RelayWeb.FlowEditorComponents do
       type="button"
       phx-click="delete_selected"
       disabled={@read_only? or !@has_selection?}
-      style="display:flex;align-items:center;gap:7px;background:oklch(0.98 0.015 15);border:1px solid oklch(0.88 0.05 15);color:oklch(0.52 0.16 15);border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:600;"
+      style="display:flex;align-items:center;gap:7px;background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 30%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:600;"
     >
       Delete
     </button>
@@ -86,11 +96,11 @@ defmodule RelayWeb.FlowEditorComponents do
 
   defp connect_button_style(true),
     do:
-      "display:flex;align-items:center;gap:7px;background:oklch(0.97 0.04 292);border:1px solid oklch(0.80 0.10 292);color:oklch(0.46 0.14 292);border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:600;"
+      "display:flex;align-items:center;gap:7px;background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 45%, var(--color-base-100));color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:600;"
 
   defp connect_button_style(false),
     do:
-      "display:flex;align-items:center;gap:7px;background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);color:oklch(0.42 0.02 255);border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:600;"
+      "display:flex;align-items:center;gap:7px;background:var(--color-base-100);border:1px solid var(--color-field-border);color:color-mix(in oklab, var(--color-base-content) 80%, transparent);border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:600;"
 
   # ---- Node inspector ----
 
@@ -104,7 +114,7 @@ defmodule RelayWeb.FlowEditorComponents do
 
     ~H"""
     <div>
-      <div style="padding:16px 18px;border-bottom:1px solid oklch(0.94 0.005 255);display:flex;flex-direction:column;gap:10px;">
+      <div style="padding:16px 18px;border-bottom:1px solid var(--color-base-300);display:flex;flex-direction:column;gap:10px;">
         <div style="display:flex;align-items:center;gap:8px;">
           <span style={type_badge_style(@node.type)}>{type_tag(@node.type)}</span>
           <span style="flex:1;"></span>
@@ -131,14 +141,14 @@ defmodule RelayWeb.FlowEditorComponents do
               value={@node.key}
               disabled={@read_only?}
               phx-debounce="blur"
-              style="width:100%;padding:7px 9px;border:1px solid oklch(0.90 0.006 255);border-radius:7px;font-size:15px;font-weight:600;color:oklch(0.26 0.02 255);background:oklch(0.99 0.002 255);"
+              style="width:100%;padding:7px 9px;border:1px solid var(--color-field-border);border-radius:7px;font-size:15px;font-weight:600;color:var(--color-base-content);background:var(--color-field-bg);"
             />
           </form>
         </div>
         <div
           :if={@referenced_count > 0}
           id="inspector-delete-guard"
-          style="display:flex;align-items:center;gap:7px;background:oklch(0.98 0.015 15);border:1px solid oklch(0.90 0.04 15);border-radius:7px;padding:7px 9px;font-size:11px;color:oklch(0.50 0.10 15);"
+          style="display:flex;align-items:center;gap:7px;background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));border-radius:7px;padding:7px 9px;font-size:11px;color:color-mix(in oklab, var(--color-error) 65%, var(--color-base-content));"
         >
           <span style="font-weight:700;">⚠</span>
           Referenced by {@referenced_count} edge{if @referenced_count != 1, do: "s"} — clear them before deleting
@@ -156,7 +166,7 @@ defmodule RelayWeb.FlowEditorComponents do
             <textarea
               name="value"
               disabled={@read_only?}
-              style="width:100%;border:1px solid oklch(0.90 0.006 255);background:oklch(1 0 0);border-radius:8px;padding:10px 11px;font-size:12px;line-height:1.55;color:oklch(0.36 0.02 255);font-family:ui-monospace,monospace;white-space:pre-wrap;min-height:96px;"
+              style="width:100%;border:1px solid var(--color-field-border);background:var(--color-base-100);border-radius:8px;padding:10px 11px;font-size:12px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 85%, transparent);font-family:ui-monospace,monospace;white-space:pre-wrap;min-height:96px;"
             >{@node.run}</textarea>
           </form>
         </div>
@@ -190,7 +200,7 @@ defmodule RelayWeb.FlowEditorComponents do
           <.meta_label>
             EFFORT
           </.meta_label>
-          <div style="display:inline-flex;background:oklch(0.96 0.004 255);border:1px solid oklch(0.90 0.006 255);border-radius:9px;padding:3px;gap:2px;align-self:flex-start;">
+          <div style="display:inline-flex;background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));border:1px solid var(--color-field-border);border-radius:9px;padding:3px;gap:2px;align-self:flex-start;">
             <button
               :for={effort <- @efforts}
               id={"inspector-effort-#{effort}"}
@@ -212,7 +222,7 @@ defmodule RelayWeb.FlowEditorComponents do
             <.meta_label>
               MAX RETRIES
             </.meta_label>
-            <div style="display:inline-flex;align-items:center;border:1px solid oklch(0.90 0.006 255);border-radius:8px;overflow:hidden;align-self:flex-start;">
+            <div style="display:inline-flex;align-items:center;border:1px solid var(--color-field-border);border-radius:8px;overflow:hidden;align-self:flex-start;">
               <button
                 id="inspector-max-retries-dec"
                 type="button"
@@ -221,7 +231,7 @@ defmodule RelayWeb.FlowEditorComponents do
                 phx-value-field="max_retries"
                 phx-value-v={stepper_value(@node.max_retries, -1)}
                 disabled={@read_only?}
-                style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:oklch(0.55 0.02 255);font-size:16px;border:0;background:oklch(1 0 0);"
+                style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);font-size:16px;border:0;background:var(--color-base-100);"
               >
                 −
               </button>
@@ -236,7 +246,7 @@ defmodule RelayWeb.FlowEditorComponents do
                 phx-value-field="max_retries"
                 phx-value-v={stepper_value(@node.max_retries, 1)}
                 disabled={@read_only?}
-                style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:oklch(0.55 0.02 255);font-size:16px;border:0;background:oklch(1 0 0);"
+                style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);font-size:16px;border:0;background:var(--color-base-100);"
               >
                 +
               </button>
@@ -254,7 +264,7 @@ defmodule RelayWeb.FlowEditorComponents do
                 type="text"
                 value={@node.timeout_minutes}
                 disabled={@read_only?}
-                style="width:100%;border:1px solid oklch(0.90 0.006 255);border-radius:8px;padding:8px 11px;font-size:13px;font-family:ui-monospace,monospace;color:oklch(0.32 0.02 255);background:oklch(0.99 0.002 255);"
+                style="width:100%;border:1px solid var(--color-field-border);border-radius:8px;padding:8px 11px;font-size:13px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);background:var(--color-field-bg);"
               />
             </form>
           </div>
@@ -273,22 +283,25 @@ defmodule RelayWeb.FlowEditorComponents do
           control that could ship an aspirational declaration. --%>
           <div
             id="inspector-card-contract-value"
-            style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:oklch(0.40 0.02 255);"
+            style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
           >
             <span :if={@node.reads != []}>reads</span>
             <span
               :if={@node.reads != []}
-              style="font-family:ui-monospace,monospace;color:oklch(0.30 0.02 255);"
+              style="font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
             >
               {Enum.join(@node.reads, ", ")}
             </span>
-            <span :if={@node.reads != [] and @node.writes != []} style="color:oklch(0.70 0.02 255);">
+            <span
+              :if={@node.reads != [] and @node.writes != []}
+              style="color:color-mix(in oklab, var(--color-base-content) 40%, transparent);"
+            >
               ·
             </span>
             <span :if={@node.writes != []}>writes</span>
             <span
               :if={@node.writes != []}
-              style="font-family:ui-monospace,monospace;color:oklch(0.30 0.02 255);"
+              style="font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
             >
               {Enum.join(@node.writes, ", ")}
             </span>
@@ -301,18 +314,20 @@ defmodule RelayWeb.FlowEditorComponents do
           </.meta_label>
           <div
             :for={edge <- @edges}
-            style="display:flex;align-items:center;gap:8px;border:1px solid oklch(0.93 0.006 255);border-radius:8px;padding:8px 10px;background:oklch(0.994 0.002 255);"
+            style="display:flex;align-items:center;gap:8px;border:1px solid var(--color-base-300);border-radius:8px;padding:8px 10px;background:var(--color-base-200);"
           >
-            <span style="font-size:10px;font-weight:600;font-family:ui-monospace,monospace;padding:2px 7px;border-radius:5px;background:oklch(0.96 0.004 255);color:oklch(0.48 0.02 255);">
+            <span style="font-size:10px;font-weight:600;font-family:ui-monospace,monospace;padding:2px 7px;border-radius:5px;background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
               {edge.on}
             </span>
-            <span style="color:oklch(0.70 0.02 255);font-size:11px;">→</span>
-            <span style="font-size:12px;font-weight:500;color:oklch(0.34 0.02 255);flex:1;">
+            <span style="color:color-mix(in oklab, var(--color-base-content) 40%, transparent);font-size:11px;">
+              →
+            </span>
+            <span style="font-size:12px;font-weight:500;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);flex:1;">
               {edge.to}
             </span>
             <span
               :if={edge.max_loops}
-              style="font-size:9.5px;font-weight:600;font-family:ui-monospace,monospace;color:oklch(0.52 0.11 65);background:oklch(0.98 0.04 75);border-radius:4px;padding:2px 5px;"
+              style="font-size:9.5px;font-weight:600;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));border-radius:4px;padding:2px 5px;"
             >
               max {edge.max_loops}
             </span>
@@ -344,7 +359,7 @@ defmodule RelayWeb.FlowEditorComponents do
           type="button"
           phx-click="delete_selected"
           disabled={@read_only?}
-          style="background:oklch(0.98 0.015 15);border:1px solid oklch(0.90 0.05 15);color:oklch(0.54 0.14 15);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;"
+          style="background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 80%, var(--color-base-content));border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;"
         >
           Delete edge
         </button>
@@ -353,14 +368,14 @@ defmodule RelayWeb.FlowEditorComponents do
       <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;">
         <span
           id="inspector-edge-from"
-          style="font-family:ui-monospace,monospace;color:oklch(0.34 0.02 255);"
+          style="font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);"
         >
           {@edge.from}
         </span>
-        <span style="color:oklch(0.70 0.02 255);">→</span>
+        <span style="color:color-mix(in oklab, var(--color-base-content) 40%, transparent);">→</span>
         <span
           id="inspector-edge-to"
-          style="font-family:ui-monospace,monospace;color:oklch(0.34 0.02 255);"
+          style="font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);"
         >
           {@edge.to}
         </span>
@@ -376,7 +391,7 @@ defmodule RelayWeb.FlowEditorComponents do
           <select
             name="value"
             disabled={@read_only?}
-            style="border:1px solid oklch(0.90 0.006 255);background:oklch(0.99 0.002 255);border-radius:8px;padding:6px 10px;font-size:12.5px;font-family:ui-monospace,monospace;color:oklch(0.40 0.02 255);"
+            style="border:1px solid var(--color-field-border);background:var(--color-field-bg);border-radius:8px;padding:6px 10px;font-size:12.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
           >
             <option
               :for={outcome <- @outcomes}
@@ -400,7 +415,7 @@ defmodule RelayWeb.FlowEditorComponents do
             id="inspector-edge-when"
             name="value"
             disabled={@read_only?}
-            style="border:1px solid oklch(0.90 0.006 255);background:oklch(0.99 0.002 255);border-radius:8px;padding:6px 10px;font-size:12.5px;font-family:ui-monospace,monospace;color:oklch(0.40 0.02 255);"
+            style="border:1px solid var(--color-field-border);background:var(--color-field-bg);border-radius:8px;padding:6px 10px;font-size:12.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
           >
             <option value="" selected={is_nil(@edge.when)}>(none)</option>
             <option
@@ -418,7 +433,7 @@ defmodule RelayWeb.FlowEditorComponents do
         <.meta_label>
           MAX LOOPS
         </.meta_label>
-        <div style="display:inline-flex;align-items:center;border:1px solid oklch(0.90 0.006 255);border-radius:8px;overflow:hidden;align-self:flex-start;">
+        <div style="display:inline-flex;align-items:center;border:1px solid var(--color-field-border);border-radius:8px;overflow:hidden;align-self:flex-start;">
           <button
             id="inspector-max-loops-dec"
             type="button"
@@ -427,7 +442,7 @@ defmodule RelayWeb.FlowEditorComponents do
             phx-value-field="max_loops"
             phx-value-v={stepper_value(@edge.max_loops, -1)}
             disabled={@read_only?}
-            style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:oklch(0.55 0.02 255);font-size:16px;border:0;background:oklch(1 0 0);"
+            style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);font-size:16px;border:0;background:var(--color-base-100);"
           >
             −
           </button>
@@ -442,7 +457,7 @@ defmodule RelayWeb.FlowEditorComponents do
             phx-value-field="max_loops"
             phx-value-v={stepper_value(@edge.max_loops, 1)}
             disabled={@read_only?}
-            style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:oklch(0.55 0.02 255);font-size:16px;border:0;background:oklch(1 0 0);"
+            style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);font-size:16px;border:0;background:var(--color-base-100);"
           >
             +
           </button>
@@ -464,46 +479,75 @@ defmodule RelayWeb.FlowEditorComponents do
       phx-key="escape"
     >
       <.modal_scrim phx-click="close_modal" />
-      <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:51;width:min(560px,92vw);max-height:80vh;overflow-y:auto;background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);border-radius:16px;">
+      <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:51;width:min(560px,92vw);max-height:80vh;overflow-y:auto;background:var(--color-base-100);border:1px solid var(--color-field-border);border-radius:16px;">
         <div style="padding:20px 22px;display:flex;flex-direction:column;gap:14px;">
-          <span style="font-size:16px;font-weight:600;color:oklch(0.24 0.02 255);">
+          <span style="font-size:16px;font-weight:600;color:var(--color-base-content);">
             Diff vs shipped default
           </span>
 
           <div style="display:flex;flex-direction:column;gap:8px;font-family:ui-monospace,monospace;font-size:12px;">
             <div :if={@diff.nodes.added != []}>
-              <div style="font-weight:600;color:oklch(0.48 0.02 255);">Nodes added</div>
-              <div :for={key <- @diff.nodes.added} style="color:oklch(0.44 0.13 155);">+ {key}</div>
+              <div style="font-weight:600;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
+                Nodes added
+              </div>
+              <div
+                :for={key <- @diff.nodes.added}
+                style="color:color-mix(in oklab, var(--color-success) 55%, var(--color-base-content));"
+              >
+                + {key}
+              </div>
             </div>
             <div :if={@diff.nodes.removed != []}>
-              <div style="font-weight:600;color:oklch(0.48 0.02 255);">Nodes removed</div>
-              <div :for={key <- @diff.nodes.removed} style="color:oklch(0.52 0.15 22);">- {key}</div>
+              <div style="font-weight:600;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
+                Nodes removed
+              </div>
+              <div
+                :for={key <- @diff.nodes.removed}
+                style="color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));"
+              >
+                - {key}
+              </div>
             </div>
             <div :if={@diff.nodes.changed != []}>
-              <div style="font-weight:600;color:oklch(0.48 0.02 255);">Nodes changed</div>
-              <div :for={c <- @diff.nodes.changed} style="color:oklch(0.46 0.14 292);">
+              <div style="font-weight:600;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
+                Nodes changed
+              </div>
+              <div
+                :for={c <- @diff.nodes.changed}
+                style="color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));"
+              >
                 ~ {c.key} ({Enum.join(c.fields, ", ")})
               </div>
             </div>
             <div :if={@diff.edges.added != []}>
-              <div style="font-weight:600;color:oklch(0.48 0.02 255);">Edges added</div>
-              <div :for={{from, to, on} <- @diff.edges.added} style="color:oklch(0.44 0.13 155);">
+              <div style="font-weight:600;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
+                Edges added
+              </div>
+              <div
+                :for={{from, to, on} <- @diff.edges.added}
+                style="color:color-mix(in oklab, var(--color-success) 55%, var(--color-base-content));"
+              >
                 + {from} → {to} on {on}
               </div>
             </div>
             <div :if={@diff.edges.removed != []}>
-              <div style="font-weight:600;color:oklch(0.48 0.02 255);">Edges removed</div>
-              <div :for={{from, to, on} <- @diff.edges.removed} style="color:oklch(0.52 0.15 22);">
+              <div style="font-weight:600;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
+                Edges removed
+              </div>
+              <div
+                :for={{from, to, on} <- @diff.edges.removed}
+                style="color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));"
+              >
                 - {from} → {to} on {on}
               </div>
             </div>
           </div>
         </div>
-        <div style="background:oklch(0.985 0.004 250);border-top:1px solid oklch(0.94 0.005 255);padding:14px 22px;display:flex;justify-content:flex-end;">
+        <div style="background:var(--color-base-200);border-top:1px solid var(--color-base-300);padding:14px 22px;display:flex;justify-content:flex-end;">
           <button
             type="button"
             phx-click="close_modal"
-            style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.01 255);color:oklch(0.42 0.02 255);border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;"
+            style="background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 80%, transparent);border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;"
           >
             Close
           </button>
@@ -525,21 +569,21 @@ defmodule RelayWeb.FlowEditorComponents do
       phx-key="escape"
     >
       <.modal_scrim phx-click="close_modal" />
-      <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:51;width:min(480px,92vw);background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);border-radius:16px;">
+      <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:51;width:min(480px,92vw);background:var(--color-base-100);border:1px solid var(--color-field-border);border-radius:16px;">
         <div style="padding:22px 24px;display:flex;flex-direction:column;gap:12px;">
-          <span style="font-size:17px;font-weight:600;color:oklch(0.24 0.02 255);">
+          <span style="font-size:17px;font-weight:600;color:var(--color-base-content);">
             Reset the {@flow_name} flow to the shipped default?
           </span>
-          <p style="font-size:13.5px;line-height:1.6;color:oklch(0.46 0.02 255);">
+          <p style="font-size:13.5px;line-height:1.6;color:color-mix(in oklab, var(--color-base-content) 75%, transparent);">
             Replace this flow's definition with the shipped default? Your customizations are
             overwritten. The flow's triggers and on/off state are untouched.
           </p>
         </div>
-        <div style="background:oklch(0.985 0.004 250);border-top:1px solid oklch(0.94 0.005 255);padding:14px 24px;display:flex;justify-content:flex-end;gap:9px;">
+        <div style="background:var(--color-base-200);border-top:1px solid var(--color-base-300);padding:14px 24px;display:flex;justify-content:flex-end;gap:9px;">
           <button
             type="button"
             phx-click="close_modal"
-            style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.01 255);color:oklch(0.42 0.02 255);border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;"
+            style="background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 80%, transparent);border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;"
           >
             Cancel
           </button>
@@ -547,7 +591,7 @@ defmodule RelayWeb.FlowEditorComponents do
             id="flow-reset-confirm"
             type="button"
             phx-click="confirm_reset"
-            style="background:oklch(0.62 0.14 65);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;"
+            style="background:var(--color-warning);color:var(--color-warning-content);border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;"
           >
             Reset to default
           </button>
@@ -569,11 +613,11 @@ defmodule RelayWeb.FlowEditorComponents do
 
   defp delete_button_style(true),
     do:
-      "background:oklch(0.98 0.015 15);border:1px solid oklch(0.90 0.05 15);color:oklch(0.54 0.14 15);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;opacity:0.55;cursor:not-allowed;"
+      "background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 80%, var(--color-base-content));border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;opacity:0.55;cursor:not-allowed;"
 
   defp delete_button_style(false),
     do:
-      "background:oklch(0.98 0.015 15);border:1px solid oklch(0.90 0.05 15);color:oklch(0.54 0.14 15);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;"
+      "background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 80%, var(--color-base-content));border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;"
 
   defp main_label(:shell), do: "COMMAND"
   defp main_label(:gate), do: "CONDITION"
@@ -588,19 +632,19 @@ defmodule RelayWeb.FlowEditorComponents do
 
   defp chip_style(true),
     do:
-      "font-size:12px;font-weight:600;padding:6px 12px;border-radius:7px;border:1px solid oklch(0.56 0.16 292);background:oklch(0.97 0.04 292);color:oklch(0.44 0.14 292);font-family:ui-monospace,monospace;"
+      "font-size:12px;font-weight:600;padding:6px 12px;border-radius:7px;border:1px solid var(--color-secondary);background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));font-family:ui-monospace,monospace;"
 
   defp chip_style(false),
     do:
-      "font-size:12px;font-weight:600;padding:6px 12px;border-radius:7px;border:1px solid oklch(0.90 0.006 255);background:oklch(1 0 0);color:oklch(0.46 0.02 255);font-family:ui-monospace,monospace;"
+      "font-size:12px;font-weight:600;padding:6px 12px;border-radius:7px;border:1px solid var(--color-field-border);background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 75%, transparent);font-family:ui-monospace,monospace;"
 
   defp segment_style(true),
     do:
-      "font-size:12px;font-weight:600;padding:6px 14px;border-radius:6px;color:oklch(0.30 0.02 255);background:oklch(1 0 0);box-shadow:0 1px 2px oklch(0.5 0.03 255/0.12);border:0;"
+      "font-size:12px;font-weight:600;padding:6px 14px;border-radius:6px;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);background:var(--color-base-100);box-shadow:0 1px 2px color-mix(in oklab, var(--color-base-content) 12%, transparent);border:0;"
 
   defp segment_style(false),
     do:
-      "font-size:12px;font-weight:500;padding:6px 14px;border-radius:6px;color:oklch(0.52 0.02 255);background:transparent;border:0;"
+      "font-size:12px;font-weight:500;padding:6px 14px;border-radius:6px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);background:transparent;border:0;"
 
   # Valid values are nil ("no limit") or a positive integer (schemas require
   # `greater_than: 0`). Stepping below 1 clears the field to nil rather than landing on the
@@ -640,8 +684,9 @@ defmodule RelayWeb.FlowEditorComponents do
   defp flow_tab_style(true),
     do:
       "font-size:13px;font-weight:600;padding:5px 12px;border-radius:7px;" <>
-        "background:oklch(1 0 0);color:oklch(0.28 0.02 255);box-shadow:0 1px 2px oklch(0.5 0.03 255/0.14);"
+        "background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 95%, transparent);box-shadow:0 1px 2px color-mix(in oklab, var(--color-base-content) 14%, transparent);"
 
   defp flow_tab_style(false),
-    do: "font-size:13px;font-weight:600;padding:5px 12px;border-radius:7px;color:oklch(0.52 0.02 255);"
+    do:
+      "font-size:13px;font-weight:600;padding:5px 12px;border-radius:7px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
 end
