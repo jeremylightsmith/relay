@@ -7,6 +7,13 @@ defmodule RelayWeb.ThemeTokensTest do
 
   `@pending` lists files not yet swept by RE237. It shrinks to `[]` over the card's sweep
   tasks and is deleted in the final task — a file must never be added back to it.
+
+  Known scanner blind spots (`@color_pattern` is intentionally narrow, not exhaustive): it does
+  not catch CSS named colors in inline styles (`style="color: white"`), `hsl(...)`/`hsla(...)`,
+  or `color(display-p3 ...)`. It also has a false-positive risk on an all-hex-digit fragment
+  link (`href="#abc"`, `href="#deadbeef"`) — none have appeared yet, but a future one would need
+  an `@allowlist` entry. Tighten or note further gaps in Task 9, which is where the guardrail
+  gets proven against a real violation.
   """
   use ExUnit.Case, async: true
 

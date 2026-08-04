@@ -57,9 +57,13 @@
      brand ink on a tint, L .40-.55 ... color-mix(in oklab, var(--color-<role>) P%, var(--color-base-content))
         with P = round_to_5( (L - 0.26) / (L_role - 0.26) * 100 )
 
-   Always `in oklab`, never `in oklch`: oklch interpolates hue along the shorter arc, so
-   mixing amber (H 65) with the blue-grey base-content (H 255) swings 190 degrees through
-   green. Tailwind v4's own alpha modifiers emit color-mix(in oklab, ...) too.
+   Prefer `in oklab` over `in oklch` for any NEW mix: oklch interpolates hue along the shorter
+   arc, so mixing amber (H 65) with the blue-grey base-content (H 255) swings 190 degrees through
+   green. Tailwind v4's own alpha modifiers emit color-mix(in oklab, ...) too. The `in oklch`
+   mixes still elsewhere in this file predate this table and are grandfathered, not house style:
+   most mix with `transparent`/`currentColor` (no second hue to swing through, so hue
+   interpolation is moot) and the one exception (the secondary -> base-content brand-ink arc)
+   only swings ~37 degrees, well short of the amber/base-content case above.
 
    Enforced by test/relay_web/theme_tokens_test.exs.
    --------------------------------------------------------------------------------------- */
@@ -677,6 +681,11 @@ textarea.commit-field-input { min-height: 64px; }
   -webkit-mask-image: linear-gradient(180deg, #000 62%, transparent);
   mask-image: linear-gradient(180deg, #000 62%, transparent);
 }
+/* RE237 — .commit-pill's shadow blurs behind a floating pill. Light: 13% base-content matches
+   the swept literal (oklch(0.5 0.03 255 / 0.18)) alpha-faithfully — Rule N maps L 0.5 to P 70,
+   so 70% of the original 18% alpha is ~13%. Dark: mixing with base-content instead would read as
+   a light halo behind the pill (base-content is near-white in dark mode), the same failure the
+   .modal-scrim dark override above already exists to prevent, so this mixes with base-200. */
 .commit-pill {
   position: absolute;
   top: calc(100% + 6px);
@@ -689,7 +698,10 @@ textarea.commit-field-input { min-height: 64px; }
   background: var(--color-base-100);
   border: 1px solid var(--color-field-border);
   border-radius: 8px;
-  box-shadow: 0 6px 18px color-mix(in oklab, var(--color-base-content) 18%, transparent);
+  box-shadow: 0 6px 18px color-mix(in oklab, var(--color-base-content) 13%, transparent);
+}
+[data-theme="dark"] .commit-pill {
+  box-shadow: 0 6px 18px color-mix(in oklab, var(--color-base-200) 55%, transparent);
 }
 /* Unlayered .commit-pill beats Tailwind's layered .hidden utility on
    specificity alone, so the "hidden until dirty" pill never actually hides.
