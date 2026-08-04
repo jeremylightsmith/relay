@@ -528,7 +528,11 @@ defmodule RelayWeb.CoreComponents do
     """
   end
 
+  # Every value in `Schemas.Card.statuses/0` needs a clause here — the scheduler
+  # writes `:queued` (Runs.Scheduler.Server), and a missing clause is not a
+  # fallback, it is a FunctionClauseError that takes the whole drawer down.
   defp status_badge_class(:ready), do: "badge-ghost"
+  defp status_badge_class(:queued), do: "badge-ghost"
   defp status_badge_class(:working), do: "badge-secondary"
   defp status_badge_class(:needs_input), do: "badge-warning"
   defp status_badge_class(:in_review), do: "badge-primary"
@@ -536,6 +540,7 @@ defmodule RelayWeb.CoreComponents do
 
   defp status_badge_label(:working, progress) when is_integer(progress), do: "working·#{progress}%"
   defp status_badge_label(:ready, _progress), do: "ready"
+  defp status_badge_label(:queued, _progress), do: "queued"
   defp status_badge_label(:working, _progress), do: "working"
   defp status_badge_label(:needs_input, _progress), do: "NEEDS INPUT"
   defp status_badge_label(:in_review, _progress), do: "in review"

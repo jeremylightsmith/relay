@@ -45,3 +45,18 @@ is enough to read layout and color. They reference no external images.
 Authorize with `/design-login`, then have Claude Code read the project by its ID above and
 overwrite these files (see the design-sync capability). Keep the original filenames so the
 mockups' cross-links keep working.
+
+## The other direction — `docs/designs-as-is/`
+
+Everything in *this* directory is **drawn first and built to**: the design leads, and
+[`/slicing-mockups`](../../.claude/skills/slicing-mockups/SKILL.md) files the gaps where the
+app drifted from it.
+
+[`docs/designs-as-is/`](../designs-as-is/README.md) is the mirror image — `.dc.html` files
+**generated from the running app** by `bin/design-capture.mjs`, so the design project can
+iterate from what actually shipped rather than from memory. They are snapshots with no
+authority: when one disagrees with the app, the *file* is stale.
+
+Keep the two apart. A capture written into this directory would quietly promote itself to
+visual source of truth. The loop is documented in
+[`/design-capture`](../../.claude/skills/design-capture/SKILL.md).

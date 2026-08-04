@@ -16,6 +16,12 @@ encodes the core idea — **Human = blue** (`--color-primary`), **AI = violet**
 (`--color-secondary`), Done = green, Blocked = amber — set these as the daisyUI theme in
 `assets/css/app.css`. The Design System mockup maps each element to a daisyUI primitive.
 
+[`docs/designs-as-is/`](docs/designs-as-is/README.md) is the **opposite direction and carries
+no authority**: `.dc.html` snapshots generated *from* the running app by
+`bin/design-capture.mjs` (see `/design-capture`), so the design project can iterate from what
+shipped. Never treat one as a spec, never hand-edit one, and never write a capture into
+`docs/designs/` — when a capture and the app disagree, the capture is stale.
+
 **Client strategy (important for where code goes):** the LiveView web app is the single
 source of truth for UI and real-time logic. Mobile ships as a **thin native wrapper** around
 that same LiveView UI — so **build features in LiveView, not in a parallel client**. We do

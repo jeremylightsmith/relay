@@ -468,12 +468,24 @@ defmodule RelayWeb.CoreComponentsTest do
             {:ready, "badge-ghost", "ready"},
             {:working, "badge-secondary", "working"},
             {:needs_input, "badge-warning", "NEEDS INPUT"},
+            {:queued, "badge-ghost", "queued"},
             {:in_review, "badge-primary", "in review"}
           ] do
         html = render_component(&CoreComponents.status_badge/1, status: status)
 
         assert html =~ class
         assert html =~ label
+        assert html =~ ~s(data-status="#{status}")
+      end
+    end
+
+    # The badge re-states a closed set the schema owns. When it drifted, opening
+    # any scheduler-queued card raised FunctionClauseError and took the whole
+    # card drawer down — so drive the vocabulary from its source, not a copy.
+    test "renders every status the card schema allows" do
+      for status <- Schemas.Card.statuses() do
+        html = render_component(&CoreComponents.status_badge/1, status: status)
+
         assert html =~ ~s(data-status="#{status}")
       end
     end
