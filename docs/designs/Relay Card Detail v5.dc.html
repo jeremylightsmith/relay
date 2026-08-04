@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.26 0.02 255);background:oklch(0.945 0.008 255);-webkit-font-smoothing:antialiased;}
+  button{font-family:inherit;cursor:pointer;}
+  input{font-family:inherit;}
+  a{color:oklch(0.50 0.13 250);}
+  a:hover{color:oklch(0.42 0.14 250);}
+  @keyframes v5pulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
+  @keyframes v5in{0%{opacity:0;}100%{opacity:1;}}
+</style>
+</helmet>
+
+<div style="display:flex;align-items:flex-start;gap:26px;padding:34px;">
+
+  <div style="display:flex;flex-direction:column;gap:13px;flex:0 0 auto;">
+
+    <div style="display:flex;align-items:center;gap:11px;flex-wrap:wrap;width:1040px;">
+      <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;font-weight:600;letter-spacing:0.09em;color:oklch(0.26 0.02 255/0.55);">CARD DRAWER V5 · V2 CHROME + TERMINAL SESSION</span>
+      <span style="flex:1;"></span>
+      <sc-for list="{{ scenarios }}" as="s" hint-placeholder-count="2">
+        <button onClick="{{ s.onClick }}" style="{{ s.style }}">{{ s.label }}</button>
+      </sc-for>
+    </div>
+
+    <div style="width:1040px;background:oklch(1 0 0);border:1px solid oklch(0.9 0.006 255);border-radius:12px;overflow:hidden;box-shadow:0 1px 2px oklch(0.26 0.02 255/0.06),0 12px 32px oklch(0.26 0.02 255/0.08);">
+
+      <!-- ===== header (v2) ===== -->
+      <div style="display:flex;align-items:flex-start;gap:12px;padding:18px 20px 14px 20px;">
+        <div style="display:flex;flex-direction:column;gap:7px;flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <div style="position:relative;flex:0 0 auto;">
+              <button onClick="{{ onToggleStage }}" style="display:flex;align-items:center;gap:5px;height:20px;padding:0 7px 0 9px;border-radius:4px;border:none;background:oklch(0.56 0.16 292);color:oklch(0.98 0.01 292);font-size:12px;font-weight:500;">{{ card.stage }}<span style="{{ icons.chevW }}"></span></button>
+              <sc-if value="{{ stageOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="position:absolute;top:26px;left:0;z-index:24;width:214px;background:oklch(1 0 0);border:1px solid oklch(0.9 0.006 255);border-radius:9px;box-shadow:0 8px 28px oklch(0.26 0.02 255/0.16);padding:6px;display:flex;flex-direction:column;gap:5px;">
+                  <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.6px;text-transform:uppercase;color:oklch(0.26 0.02 255/0.5);padding:3px 4px 0 4px;">Move to</span>
+                  <input value="{{ stageFilter }}" onChange="{{ onStageFilter }}" placeholder="Filter stages…" style="width:100%;border:1px solid oklch(0.91 0.006 255);border-radius:6px;padding:6px 9px;font-size:12px;outline:none;background:oklch(0.995 0.002 255);color:oklch(0.26 0.02 255);" />
+                  <div style="max-height:230px;overflow-y:auto;display:flex;flex-direction:column;gap:1px;">
+                    <sc-for list="{{ stageMatches }}" as="s" hint-placeholder-count="6">
+                      <button onClick="{{ s.onClick }}" style="{{ s.style }}" style-hover="background:oklch(0.96 0.006 255);">
+                        <span style="{{ s.dot }}"></span>{{ s.t }}
+                        <sc-if value="{{ s.current }}" hint-placeholder-val="{{ false }}">
+                          <span style="{{ s.mark }}">current</span>
+                        </sc-if>
+                      </button>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-if>
+            </div>
+            <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:oklch(0.26 0.02 255/0.6);flex:0 0 auto;">{{ card.ref }}</span>
+            <span style="width:1px;height:13px;background:oklch(0.9 0.006 255);flex:0 0 auto;"></span>
+            <span style="{{ presence.style }}"><span style="{{ presence.dot }}"></span>{{ presence.label }}</span>
+          </div>
+          <div style="font-size:18px;font-weight:600;line-height:23.4px;">{{ card.title }}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:7px;flex:0 0 auto;">
+          <button onClick="{{ onOpenTalk }}" style="{{ talkBtn.style }}" style-hover="border-color:oklch(0.72 0.06 250);">
+            <span style="{{ talkBtn.icon }}"></span>{{ talkBtn.label }}<span style="{{ talkBtn.kbd }}">t</span>
+          </button>
+          <div style="position:relative;flex:0 0 auto;">
+            <button onClick="{{ onToggleMenu }}" style="width:28px;height:28px;border-radius:7px;border:1px solid oklch(0.93 0.006 255);background:oklch(1 0 0);display:flex;align-items:center;justify-content:center;padding:0;"><span style="{{ icons.dots }}"></span></button>
+            <sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}">
+              <div style="position:absolute;top:33px;right:0;z-index:22;width:190px;background:oklch(1 0 0);border:1px solid oklch(0.9 0.006 255);border-radius:9px;box-shadow:0 8px 28px oklch(0.26 0.02 255/0.16);padding:6px;display:flex;flex-direction:column;gap:1px;">
+                <sc-for list="{{ menuItems }}" as="m" hint-placeholder-count="3">
+                  <button onClick="{{ m.onClick }}" style="{{ m.style }}" style-hover="background:oklch(0.96 0.006 255);">{{ m.t }}</button>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+          <button style="width:28px;height:28px;border-radius:7px;border:none;background:transparent;display:flex;align-items:center;justify-content:center;padding:0;"><span style="{{ icons.x }}"></span></button>
+        </div>
+      </div>
+
+      <!-- ===== persistent needs-you strip (v2) ===== -->
+      <sc-if value="{{ strip.show }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;align-items:center;gap:14px;padding:12px 20px;background:oklch(0.977 0.022 75);border-top:1px solid oklch(0.9 0.05 75);border-bottom:1px solid oklch(0.9 0.05 75);">
+          <span style="width:3px;align-self:stretch;border-radius:2px;background:oklch(0.7 0.13 65);flex:0 0 auto;"></span>
+          <div style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;">
+            <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:0.6px;color:oklch(0.5 0.11 65);">SPEC ASKED AND EXITED</span>
+            <span style="font-size:13.5px;font-weight:600;line-height:1.4;color:oklch(0.34 0.05 65);">Which scope should board search cover?</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;flex:0 0 auto;">
+            <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:21px;font-weight:600;line-height:1;letter-spacing:-0.02em;color:oklch(0.5 0.13 55);">47m</span>
+            <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.5px;color:oklch(0.5 0.11 65/0.8);margin-top:2px;">waiting on you</span>
+          </div>
+          <button onClick="{{ onGoDetail }}" style="flex:0 0 auto;height:30px;padding:0 13px;border-radius:7px;border:none;background:oklch(0.7 0.13 65);color:oklch(1 0 0);font-size:12px;font-weight:600;white-space:nowrap;">Answer</button>
+        </div>
+      </sc-if>
+
+      <!-- ===== tabs (v2) ===== -->
+      <nav style="display:flex;gap:22px;padding:0 20px;border-bottom:1px solid oklch(0.94 0.005 255);">
+        <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="4">
+          <button onClick="{{ t.onClick }}" style="{{ t.style }}">
+            {{ t.label }}
+            <sc-if value="{{ t.dot }}" hint-placeholder-val="{{ false }}">
+              <span style="width:6px;height:6px;border-radius:50%;background:oklch(0.7 0.13 65);flex:0 0 auto;"></span>
+            </sc-if>
+            <sc-if value="{{ t.count }}" hint-placeholder-val="{{ false }}">
+              <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;color:oklch(0.26 0.02 255/0.55);background:oklch(0.26 0.02 255/0.06);border-radius:20px;padding:1px 6px;">{{ t.count }}</span>
+            </sc-if>
+          </button>
+        </sc-for>
+      </nav>
+
+      <!-- ===== DETAIL (v2) ===== -->
+      <sc-if value="{{ onDetail }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;height:548px;">
+          <div style="flex:1;min-width:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:21px;">
+
+            <sc-if value="{{ ask.show }}" hint-placeholder-val="{{ true }}">
+              <div style="flex:0 0 auto;border:1px solid oklch(0.87 0.07 75);background:oklch(0.977 0.022 75);border-radius:9px;padding:16px 18px;display:flex;flex-direction:column;gap:14px;max-width:660px;">
+                <div style="display:flex;align-items:center;gap:9px;">
+                  <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:0.6px;color:oklch(0.5 0.11 65);">NEEDS YOUR ANSWER</span>
+                  <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;color:oklch(0.5 0.11 65/0.75);">one shot · the agent that asked has exited</span>
+                </div>
+                <span style="font-size:13.5px;line-height:20.5px;font-weight:500;color:oklch(0.32 0.04 65);">Should search cover card bodies and comments, or just titles? Full-text needs an index and a migration; titles-only ships today.</span>
+                <div style="display:flex;flex-direction:column;gap:7px;">
+                  <sc-for list="{{ ask.opts }}" as="o" hint-placeholder-count="2">
+                    <button onClick="{{ o.onClick }}" style="{{ o.style }}" style-hover="border-color:oklch(0.76 0.11 68);">{{ o.label }}</button>
+                  </sc-for>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;border:1px solid oklch(0.87 0.05 75);border-radius:7px;padding:7px 8px 7px 11px;background:oklch(1 0 0);">
+                  <input value="{{ ask.draft }}" onChange="{{ ask.onDraft }}" onKeyDown="{{ ask.onKey }}" placeholder="Or answer in your own words…" style="flex:1;min-width:0;border:none;outline:none;background:transparent;font-size:12.5px;color:oklch(0.26 0.02 255);" />
+                  <button onClick="{{ ask.onSubmit }}" style="flex:0 0 auto;height:27px;padding:0 12px;border-radius:6px;border:none;background:oklch(0.7 0.13 65);color:oklch(1 0 0);font-size:11.5px;font-weight:600;">Answer</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.5;color:oklch(0.5 0.11 65/0.85);flex:1;min-width:0;">Answering resumes the work with a fresh agent.</span>
+                  <button onClick="{{ ask.onDiscuss }}" style="{{ ask.discussStyle }}"><span style="{{ icons.termAmber }}"></span>Not sure — talk it through</button>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ answered }}" hint-placeholder-val="{{ false }}">
+              <div style="flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:11px 13px;border-radius:8px;background:oklch(0.985 0.02 155);border:1px solid oklch(0.89 0.05 155);max-width:660px;animation:v5in 0.3s ease-out;">
+                <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:oklch(0.45 0.12 155);flex:0 0 auto;">✓</span>
+                <span style="font-size:12.5px;line-height:1.5;color:oklch(0.34 0.08 155);flex:1;min-width:0;">Answered — spec resumed with a fresh agent.</span>
+              </div>
+            </sc-if>
+
+            <sc-for list="{{ sections }}" as="s" hint-placeholder-count="4">
+              <div style="flex:0 0 auto;display:flex;flex-direction:column;gap:9px;max-width:660px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="{{ s.accent }}"></span>
+                  <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:0.6px;text-transform:uppercase;color:oklch(0.26 0.02 255/0.6);">{{ s.label }}</span>
+                  <span style="flex:1;"></span>
+                  <sc-if value="{{ s.hasToggle }}" hint-placeholder-val="{{ true }}">
+                    <button onClick="{{ s.onToggle }}" style="display:flex;align-items:center;gap:4px;font-size:12px;font-weight:600;color:oklch(0.5 0.13 250);background:transparent;border:none;padding:2px 0;">{{ s.toggleLabel }}<span style="{{ s.chev }}"></span></button>
+                  </sc-if>
+                </div>
+                <div ref="{{ s.boxRef }}" style="{{ s.box }}">
+                  <sc-for list="{{ s.lines }}" as="l" hint-placeholder-count="2">
+                    <span style="{{ l.style }}">{{ l.t }}</span>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+
+            <div style="flex:0 0 auto;display:flex;flex-direction:column;gap:9px;max-width:660px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:0.6px;text-transform:uppercase;color:oklch(0.26 0.02 255/0.6);">Sub-tasks</span>
+                <sc-if value="{{ hasSubs }}" hint-placeholder-val="{{ true }}">
+                  <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;color:oklch(0.26 0.02 255/0.6);">{{ subCount }}</span>
+                  <div style="flex-grow:1;flex-basis:0;height:4px;max-width:120px;border-radius:999px;background:oklch(0.92 0.006 255);overflow:hidden;">
+                    <div style="{{ subFill }}"></div>
+                  </div>
+                </sc-if>
+                <span style="flex:1;"></span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.4px;color:oklch(0.26 0.02 255/0.5);">DERIVED FROM PLAN</span>
+              </div>
+              <sc-if value="{{ hasSubs }}" hint-placeholder-val="{{ true }}">
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                  <sc-for list="{{ subs }}" as="s" hint-placeholder-count="4">
+                    <button onClick="{{ s.onClick }}" style="{{ s.rowStyle }}">
+                      <span style="{{ s.boxStyle }}"><span style="{{ s.tickStyle }}"></span></span>
+                      <span style="{{ s.textStyle }}">{{ s.t }}</span>
+                      <sc-if value="{{ s.current }}" hint-placeholder-val="{{ false }}">
+                        <span style="{{ s.currentChip }}">AGENT IS HERE</span>
+                      </sc-if>
+                    </button>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <sc-if value="{{ noSubs }}" hint-placeholder-val="{{ false }}">
+                <div style="border:1px dashed oklch(0.9 0.006 255);border-radius:8px;padding:12px 13px;">
+                  <span style="font-size:12.5px;line-height:19.5px;color:oklch(0.26 0.02 255/0.6);">{{ subEmptyText }}</span>
+                </div>
+              </sc-if>
+            </div>
+
+            <div style="flex:0 0 auto;display:flex;flex-direction:column;gap:10px;max-width:660px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="width:3px;height:13px;border-radius:2px;background:oklch(0.55 0.1 255);flex:0 0 auto;"></span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:0.6px;text-transform:uppercase;color:oklch(0.26 0.02 255/0.6);">Notes</span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;color:oklch(0.26 0.02 255/0.45);">{{ noteCountLabel }}</span>
+                <span style="flex:1;"></span>
+                <span style="display:inline-flex;align-items:center;gap:5px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.4px;color:oklch(0.42 0.11 155);background:oklch(0.95 0.03 155);border-radius:4px;padding:2px 7px;">READ BY EVERY AGENT</span>
+              </div>
+              <div style="border:1px solid oklch(0.9 0.006 255);border-radius:8px;background:oklch(0.99 0.002 255);padding:13px 14px;display:flex;flex-direction:column;gap:13px;">
+                <sc-for list="{{ notes }}" as="n" hint-placeholder-count="2">
+                  <div style="{{ n.wrap }}">
+                    <span style="{{ n.avStyle }}">{{ n.who }}</span>
+                    <div style="display:flex;flex-direction:column;gap:3px;min-width:0;">
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:12px;font-weight:600;">{{ n.name }}</span>
+                        <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;color:oklch(0.26 0.02 255/0.45);">{{ n.ago }}</span>
+                      </div>
+                      <span style="font-size:13px;line-height:20.15px;color:oklch(0.26 0.02 255/0.85);">{{ n.text }}</span>
+                    </div>
+                  </div>
+                </sc-for>
+                <div style="display:flex;align-items:center;gap:8px;border:1px solid oklch(0.91 0.006 255);border-radius:7px;padding:7px 8px 7px 11px;background:oklch(1 0 0);">
+                  <input value="{{ noteDraft }}" onChange="{{ onNoteDraft }}" onKeyDown="{{ onNoteKey }}" placeholder="What you did, what you found, what’s left…" style="flex:1;min-width:0;border:none;outline:none;background:transparent;font-size:12.5px;color:oklch(0.26 0.02 255);" />
+                  <button onClick="{{ onAddNote }}" style="flex:0 0 auto;height:27px;padding:0 12px;border-radius:6px;border:1px solid oklch(0.9 0.006 255);background:oklch(0.985 0.004 255);color:oklch(0.26 0.02 255/0.8);font-size:11.5px;font-weight:600;">Add note</button>
+                </div>
+              </div>
+              <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.5;color:oklch(0.26 0.02 255/0.5);">Notes are card content, not chat — they go into every agent’s context. Add one, then open Talk and expand the seed line to see it counted.</span>
+            </div>
+          </div>
+
+          <div style="width:224px;flex:0 0 auto;border-left:1px solid oklch(0.94 0.005 255);padding:20px 18px;display:flex;flex-direction:column;gap:18px;background:oklch(0.996 0.002 255);">
+            <sc-for list="{{ rail }}" as="r" hint-placeholder-count="5">
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:0.6px;text-transform:uppercase;color:oklch(0.26 0.02 255/0.6);">{{ r.label }}</span>
+                <span style="{{ r.valueStyle }}">{{ r.value }}</span>
+                <sc-if value="{{ r.action }}" hint-placeholder-val="{{ false }}">
+                  <button style="font-size:11.5px;font-weight:600;color:oklch(0.5 0.13 250);background:transparent;border:none;padding:0;text-align:left;">{{ r.action }}</button>
+                </sc-if>
+              </div>
+            </sc-for>
+            <div style="display:flex;flex-direction:column;gap:9px;">
+              <sc-if value="{{ emptyOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:14px;">
+                  <sc-for list="{{ emptyFields }}" as="f" hint-placeholder-count="2">
+                    <div style="display:flex;flex-direction:column;gap:5px;">
+                      <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:0.6px;text-transform:uppercase;color:oklch(0.26 0.02 255/0.6);">{{ f.label }}</span>
+                      <span style="font-size:12.5px;color:oklch(0.26 0.02 255/0.45);">{{ f.hint }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <button onClick="{{ onToggleEmpty }}" style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:600;color:oklch(0.26 0.02 255/0.55);background:transparent;border:1px dashed oklch(0.88 0.008 255);border-radius:7px;padding:7px 9px;text-align:left;">{{ emptyLabel }}</button>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== TALK: terminal session ===== -->
+      <sc-if value="{{ onTalk }}" hint-placeholder-val="{{ false }}">
+        <div style="height:548px;background:oklch(0.185 0.015 262);display:flex;flex-direction:column;">
+          <div style="flex:0 0 auto;display:flex;align-items:center;gap:9px;padding:10px 16px;border-bottom:1px solid oklch(0.26 0.018 262);">
+            <span style="display:flex;gap:5px;flex:0 0 auto;">
+              <span style="width:9px;height:9px;border-radius:50%;background:oklch(0.62 0.15 25);"></span>
+              <span style="width:9px;height:9px;border-radius:50%;background:oklch(0.75 0.13 85);"></span>
+              <span style="width:9px;height:9px;border-radius:50%;background:oklch(0.7 0.14 145);"></span>
+            </span>
+            <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:oklch(0.66 0.02 262);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">relay talk {{ card.ref }} — {{ card.title }}</span>
+            <span style="{{ termChip }}">{{ termChipLabel }}</span>
+            <button onClick="{{ onGoDetail }}" style="flex:0 0 auto;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;background:transparent;border:none;padding:0;color:oklch(0.6 0.02 262);">esc</button>
+          </div>
+
+          <div style="flex:1;min-height:0;overflow-y:auto;padding:15px 16px;display:flex;flex-direction:column;gap:2px;">
+            <div style="display:flex;flex-direction:column;gap:1px;padding-bottom:8px;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;line-height:19px;color:oklch(0.52 0.02 262);">relay talk {{ card.ref }}</span>
+              <button onClick="{{ onToggleSeed }}" style="text-align:left;background:transparent;border:none;padding:0;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;line-height:19px;color:oklch(0.62 0.09 150);">{{ seedChev }} seeded with {{ card.ref }} · {{ card.seed }}</button>
+              <sc-if value="{{ seedOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:2px;padding:6px 0 4px 14px;border-left:1px solid oklch(0.3 0.02 262);margin-left:2px;">
+                  <sc-for list="{{ seedLines }}" as="s" hint-placeholder-count="5">
+                    <span style="{{ s.style }}">{{ s.t }}</span>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+
+            <sc-for list="{{ lines }}" as="l" hint-placeholder-count="2">
+              <sc-if value="{{ l.isUser }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;gap:8px;padding-top:9px;">
+                  <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;line-height:19px;color:oklch(0.72 0.14 150);flex:0 0 auto;">❯</span>
+                  <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;line-height:19px;color:oklch(0.92 0.01 262);flex:1;min-width:0;">{{ l.text }}</span>
+                </div>
+              </sc-if>
+              <sc-if value="{{ l.isTool }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;gap:8px;">
+                  <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;line-height:19px;color:oklch(0.5 0.02 262);flex:0 0 auto;">·</span>
+                  <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;line-height:19px;color:oklch(0.56 0.03 262);flex:1;min-width:0;">{{ l.text }}</span>
+                </div>
+              </sc-if>
+              <sc-if value="{{ l.isOut }}" hint-placeholder-val="{{ true }}">
+                <span style="{{ l.style }}">{{ l.text }}</span>
+              </sc-if>
+              <sc-if value="{{ l.isAct }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;align-items:flex-start;gap:9px;margin:6px 0;padding:9px 11px;border-radius:6px;background:oklch(0.23 0.03 150);border-left:2px solid oklch(0.62 0.13 150);">
+                  <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;line-height:18px;color:oklch(0.76 0.13 150);flex:0 0 auto;">✓</span>
+                  <div style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;">
+                    <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;line-height:18px;color:oklch(0.84 0.09 150);">{{ l.text }}</span>
+                    <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;line-height:17px;color:oklch(0.6 0.05 150);">{{ l.sub }}</span>
+                  </div>
+                </div>
+              </sc-if>
+            </sc-for>
+
+            <sc-if value="{{ busy }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;gap:8px;padding-top:4px;">
+                <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;line-height:19px;color:oklch(0.62 0.14 300);">✳</span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;line-height:19px;color:oklch(0.58 0.03 262);animation:v5pulse 1.2s ease-in-out infinite;">thinking…</span>
+              </div>
+            </sc-if>
+
+            <div style="display:flex;gap:8px;padding-top:9px;align-items:baseline;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;line-height:19px;color:oklch(0.72 0.14 150);flex:0 0 auto;">❯</span>
+              <input value="{{ draft }}" onChange="{{ onDraft }}" onKeyDown="{{ onKey }}" placeholder="{{ placeholder }}" style="flex:1;min-width:0;border:none;outline:none;background:transparent;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;line-height:19px;color:oklch(0.94 0.01 262);caret-color:oklch(0.72 0.14 150);" />
+            </div>
+          </div>
+
+          <div style="flex:0 0 auto;border-top:1px solid oklch(0.26 0.018 262);padding:9px 16px 11px 16px;display:flex;flex-direction:column;gap:7px;">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <sc-for list="{{ slash }}" as="s" hint-placeholder-count="4">
+                <button onClick="{{ s.onClick }}" style="{{ s.style }}">{{ s.label }}</button>
+              </sc-for>
+            </div>
+            <div style="display:flex;align-items:center;gap:9px;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:oklch(0.74 0.02 262);flex:1;min-width:0;">scrollback kept · esc back to the card</span>
+              <button onClick="{{ onCopyResume }}" style="{{ resumeStyle }}">{{ resumeLabel }}</button>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ onStub }}" hint-placeholder-val="{{ false }}">
+        <div style="height:548px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;background:oklch(0.994 0.002 255);">
+          <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:600;letter-spacing:0.6px;color:oklch(0.26 0.02 255/0.5);">{{ stubLabel }}</span>
+          <span style="font-size:12.5px;color:oklch(0.26 0.02 255/0.55);max-width:400px;text-align:center;line-height:1.55;">{{ stubBody }}</span>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <!-- ===== changelog for the implementing agent ===== -->
+  <div style="width:396px;flex:0 0 auto;display:flex;flex-direction:column;gap:12px;">
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <h1 style="margin:0;font-size:18px;font-weight:600;letter-spacing:-0.02em;">Everything that changed</h1>
+      <p style="margin:0;font-size:12.5px;line-height:1.6;color:oklch(0.26 0.02 255/0.68);text-wrap:pretty;">Twenty-three changes against the captured drawer at <code style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;background:oklch(0.26 0.02 255/0.07);border-radius:4px;padding:1px 4px;">@b312da1</code>. Each is small enough to land or reject on its own. Rows with a button are live — click to see the state.</p>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;">
+        <sc-for list="{{ legend }}" as="l" hint-placeholder-count="3">
+          <span style="{{ l.style }}">{{ l.label }}</span>
+        </sc-for>
+      </div>
+    </div>
+
+    <sc-for list="{{ changes }}" as="c" hint-placeholder-count="14">
+      <div style="{{ c.wrap }}">
+        <div style="display:flex;align-items:center;gap:9px;">
+          <span style="{{ c.num }}">{{ c.n }}</span>
+          <span style="font-size:13px;font-weight:600;line-height:1.35;flex:1;min-width:0;">{{ c.title }}</span>
+          <span style="{{ c.tagStyle }}">{{ c.tag }}</span>
+        </div>
+        <span style="font-size:12.5px;line-height:1.6;color:oklch(0.26 0.02 255/0.75);padding-left:27px;text-wrap:pretty;">{{ c.body }}</span>
+        <sc-if value="{{ c.where }}" hint-placeholder-val="{{ false }}">
+          <span style="{{ c.whereStyle }}">{{ c.where }}</span>
+        </sc-if>
+        <sc-if value="{{ c.btn }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ c.onClick }}" style="{{ c.btnStyle }}">{{ c.btn }}</button>
+        </sc-if>
+      </div>
+    </sc-for>
+
+    <div style="border:1px solid oklch(0.92 0.006 255);background:oklch(0.996 0.002 255);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:9px;">
+      <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.26 0.02 255/0.55);">NOT IN THIS PASS</span>
+      <sc-for list="{{ notNow }}" as="n" hint-placeholder-count="4">
+        <div style="display:flex;align-items:flex-start;gap:9px;">
+          <span style="width:5px;height:5px;border-radius:50%;background:oklch(0.26 0.02 255/0.3);flex:0 0 auto;margin-top:7px;"></span>
+          <span style="font-size:12.5px;line-height:1.55;color:oklch(0.26 0.02 255/0.62);text-wrap:pretty;">{{ n.t }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="border:1px solid oklch(0.9 0.04 65);background:oklch(0.982 0.02 75);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:9px;">
+      <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.5 0.11 65);">BLOCKS EVERYTHING ELSE</span>
+      <sc-for list="{{ prereqs }}" as="p" hint-placeholder-count="2">
+        <div style="display:flex;align-items:flex-start;gap:9px;">
+          <span style="width:5px;height:5px;border-radius:50%;background:oklch(0.7 0.13 65);flex:0 0 auto;margin-top:7px;"></span>
+          <span style="font-size:12.5px;line-height:1.55;color:oklch(0.34 0.05 65);text-wrap:pretty;">{{ p.t }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1470,&quot;height&quot;:1060}}">
+const MONO = "'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace";
+const INK = 'oklch(0.26 0.02 255)';
+const BODY = 'oklch(0.26 0.02 255/0.85)';
+const AMBER = 'oklch(0.7 0.13 65)';
+const VIOLET = 'oklch(0.56 0.16 292)';
+const BLUE = 'oklch(0.6 0.14 250)';
+const TAGC = {
+  talk: { solid: 'oklch(0.56 0.16 292)', text: 'oklch(0.46 0.14 292)' },
+  task: { solid: 'oklch(0.7 0.13 65)', text: 'oklch(0.5 0.11 65)' },
+  notes: { solid: 'oklch(0.55 0.1 255)', text: 'oklch(0.42 0.1 255)' },
+  subtasks: { solid: 'oklch(0.6 0.13 155)', text: 'oklch(0.42 0.11 155)' },
+  chrome: { solid: 'oklch(0.26 0.02 255/0.4)', text: 'oklch(0.26 0.02 255/0.45)' },
+  polish: { solid: 'oklch(0.62 0.13 195)', text: 'oklch(0.44 0.11 195)' }
+};
+
+const SVG = {
+  x: 'M6 18 18 6M6 6l12 12',
+  dots: 'M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z',
+  chevD: 'm19.5 8.25-7.5 7.5-7.5-7.5',
+  chevU: 'm4.5 15.75 7.5-7.5 7.5 7.5',
+  check: 'm4.5 12.75 6 6 9-13.5',
+  term: 'm6.75 7.5 3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 21 18V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v12a2.25 2.25 0 0 0 2.25 2.25Z'
+};
+function mask(k, size, color) {
+  const u = 'url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 fill=%22none%22 viewBox=%220 0 24 24%22 stroke-width=%221.6%22 stroke=%22black%22%3E%3Cpath stroke-linecap=%22round%22 stroke-linejoin=%22round%22 d=%22' + SVG[k] + '%22/%3E%3C/svg%3E")';
+  return { display: 'block', flex: '0 0 auto', width: size + 'px', height: size + 'px', backgroundColor: color, maskImage: u, WebkitMaskImage: u, maskRepeat: 'no-repeat', WebkitMaskRepeat: 'no-repeat', maskSize: 'contain', WebkitMaskSize: 'contain' };
+}
+
+const CARDS = {
+  blocked: {
+    ref: 'DE3', stage: 'Spec', title: 'Board search',
+    seed: '3 fields · no plan yet · 2 runs · paused 47m',
+    seedLines: [
+      ['description', 'Search box in the board header, filters cards live as you type.'],
+      ['acceptance', '3 criteria · titles only'],
+      ['plan', 'not written — spec paused'],
+      ['runs', 'spec ×2 · paused on an open question'],
+      ['flow', 'v4 · spec → implement → review']
+    ],
+    desc: 'Owners can’t find anything on a board past about eighty cards. Add a search box to the board header that filters cards live as you type, with keyboard access from anywhere on the board.',
+    ac: ['Typing in the board header filters cards within 100ms on a 5,000-card board.', 'Matches highlight on the card title.', '/ focuses the box from anywhere on the board, and Esc clears it.'],
+    spec: 'Filtering runs client-side against the already-loaded board assigns. “Search cards” is deliberately vague — see the open question above.',
+    plan: 'Not written yet — spec is paused.'
+  },
+  healthy: {
+    ref: 'DE4', stage: 'Implement', title: 'Stream the CSV row by row',
+    seed: '4 fields · plan 4 steps · 31 runs · 2 rejections',
+    seedLines: [
+      ['description', 'Export buffers the whole result set and falls over above ~20k rows.'],
+      ['acceptance', '3 criteria · 80MB resident ceiling · byte-identical output'],
+      ['plan', '4 steps · on step 2 (stream the query)'],
+      ['runs', 'spec ✓ · plan ✓ · implement ×6 · review ×2 rejected'],
+      ['notes', '1 from Dana Koss, 2h ago'],
+      ['flow', 'v4 · implement → review']
+    ],
+    desc: 'The CSV export buffers the whole result set in memory and falls over above ~20k rows. Stream it row by row instead.',
+    ac: ['A 40,000-row export completes without exceeding 80MB resident.', 'The downloaded file is byte-identical to the buffered implementation.', 'Cancelling mid-download does not leave an open transaction.'],
+    spec: 'Wrap the query in a stream and pipe through a chunked CSV encoder. Backpressure comes from the socket. No change to the endpoint’s contract.',
+    plan: '1 · CSV writer accepts a stream ✓   2 · Stream the query ◂ current   3 · 40k-row fixture test   4 · Snapshot diff in review'
+  }
+};
+
+const REPLIES = {
+  blocked: {
+    why: [
+      { k: 'tool', text: 'read card · acceptance · runs spec#1 spec#2' },
+      { k: 'out', text: 'spec paused 47m ago and exited. It asked whether search covers card bodies or just titles — the description says “search cards”, the criteria only mention titles.' },
+      { k: 'out', text: 'Titles-only is about two hours. Full-text needs an index and a 40k-card backfill — call it a week.' },
+      { k: 'out', dim: true, text: 'tell me which and I’ll unblock it' }
+    ],
+    fix: [
+      { k: 'act', text: 'answered spec · titles only', sub: 'acceptance criteria +1 line · spec resumed with a fresh agent' },
+      { k: 'out', text: 'Unblocked. Spec should land in about 10 minutes.' }
+    ],
+    split: [
+      { k: 'act', text: 'created DE11 · Full-text search index + migration', sub: 'Spec · sequenced after this card' },
+      { k: 'out', text: 'Split out. This card stays titles-only — answer spec above and it resumes.' }
+    ],
+    fallback: [
+      { k: 'tool', text: 'read card · 2 runs' },
+      { k: 'out', text: 'I have the card and both runs. I can answer spec for you, change any field, split the card, or override the plan. Say what you want.' }
+    ]
+  },
+  healthy: {
+    why: [
+      { k: 'tool', text: 'read card · acceptance · plan' },
+      { k: 'tool', text: 'read runs implement#4 implement#6 review#1 review#2' },
+      { k: 'out', text: 'review rejected twice for the same reason. Both cite the snapshot diff, and attempts 4 and 6 differ only in where chunk boundaries fall.' },
+      { k: 'out', text: 'The assertion compares byte offsets, not rows. Streaming moves the boundaries, so it fails on byte-identical data. The export is correct — the test is wrong.' },
+      { k: 'out', dim: true, text: 'want me to fix the test, or narrow the criterion?' }
+    ],
+    fix: [
+      { k: 'tool', text: 'patch test/export_snapshot_test.exs' },
+      { k: 'act', text: 'test rewritten to compare parsed rows', sub: '1 assertion changed · review re-queued' },
+      { k: 'out', text: 'Re-running review. If it passes, this card is done.' }
+    ],
+    split: [
+      { k: 'act', text: 'plan step 4 replaced', sub: 'was “snapshot diff”, now “row-wise snapshot diff”' },
+      { k: 'out', text: 'Done. implement picks that up on its next attempt.' }
+    ],
+    fallback: [
+      { k: 'tool', text: 'read card · plan · 31 runs' },
+      { k: 'out', text: 'I have the card and every run. I can change any field, override the plan, split or close the card, or re-run a node. Say what you want.' }
+    ]
+  }
+};
+
+function pick(sc, t) {
+  const s = t.toLowerCase().trim();
+  const r = REPLIES[sc];
+  if (s === '/card') return [{ k: 'out', dim: true, text: 'card context is in the seed line above — expand it' }];
+  if (s === '/run') return [{ k: 'out', dim: true, text: 'opening Run · subagent output' }];
+  if (/split|new card|override|step 4/.test(s)) return r.split;
+  if (/fix|do it|yes|titles/.test(s)) return r.fix;
+  if (/why|reject|stuck|explain|happen/.test(s)) return r.why;
+  return r.fallback;
+}
+
+class Component extends DCLogic {
+  state = {
+    scenario: 'blocked', tab: 'Detail', answered: false, askDraft: '',
+    lines: [], draft: '', busy: false, seedOpen: false, resumed: false,
+    stageOpen: false, stageFilter: '', menuOpen: false, emptyOpen: false,
+    expanded: { ac: false, spec: false, plan: false },
+    overflow: { ac: true, spec: true, plan: true },
+    subtasks: {
+      blocked: [],
+      healthy: [
+        { t: 'Relay.Exports.stream_board_csv/2 + tests', done: true },
+        { t: 'Chunked ExportController + scope check', done: true },
+        { t: 'Board menu entry behind the read check', done: false },
+        { t: 'Docs: architecture page for the export endpoint', done: false }
+      ]
+    },
+    noteDraft: '',
+    notes: {
+      blocked: [
+        { who: 'DK', name: 'Dana Koss', ago: '1d ago', text: 'We shipped a titles-only filter in the admin tool last quarter — same shape. Worth copying rather than reinventing.' }
+      ],
+      healthy: [
+        { who: 'DK', name: 'Dana Koss', ago: '2h ago', text: 'Took the fixture generation offline — the 40k CSV lives in test/fixtures now. Didn’t touch the encoder.' },
+        { who: 'JL', name: 'Jeremy Lightsmith', ago: '1h ago', text: 'If the snapshot diff is still slow after this, cap it at 500 rows in review rather than tuning it further.' }
+      ]
+    }
+  };
+
+  toggleSub(i) {
+    const sc = this.state.scenario;
+    this.setState(s => ({
+      subtasks: { ...s.subtasks, [sc]: s.subtasks[sc].map((x, n) => n === i ? { ...x, done: !x.done } : x) }
+    }));
+  }
+
+  addNote() {
+    const t = (this.state.noteDraft || '').trim();
+    if (!t) return;
+    const sc = this.state.scenario;
+    this.setState(s => ({
+      noteDraft: '',
+      notes: { ...s.notes, [sc]: [...s.notes[sc], { who: 'JL', name: 'Jeremy Lightsmith', ago: 'just now', text: t, fresh: true }] }
+    }));
+  }
+
+  boxes = {};
+
+  measure() {
+    const next = {};
+    let changed = false;
+    Object.keys(this.boxes).forEach(k => {
+      const el = this.boxes[k];
+      if (!el) return;
+      // only trustworthy while collapsed; keep last known value when expanded
+      if (this.state.expanded[k]) { next[k] = this.state.overflow[k]; return; }
+      const over = el.scrollHeight > 63;
+      next[k] = over;
+      if (this.state.overflow[k] !== over) changed = true;
+    });
+    if (changed) this.setState({ overflow: { ...this.state.overflow, ...next } });
+  }
+
+  componentDidMount() { this.measure(); }
+  componentDidUpdate() { this.measure(); }
+
+  setScenario(s) {
+    this.setState({ scenario: s, tab: 'Detail', answered: false, askDraft: '', lines: [], draft: '', busy: false, seedOpen: false, resumed: false, stageOpen: false, menuOpen: false, expanded: { ac: false, spec: false, plan: false }, overflow: { ac: true, spec: true, plan: true } });
+  }
+
+  openTalk(seed) {
+    this.setState({ tab: 'Talk', stageOpen: false, menuOpen: false });
+    if (seed) setTimeout(() => this.send(seed), 220);
+  }
+
+  answer(text) {
+    const t = (text || this.state.askDraft || '').trim();
+    if (!t) return;
+    this.setState({ answered: true, askDraft: '' });
+  }
+
+  send(text) {
+    const t = (text || this.state.draft || '').trim();
+    if (!t || this.state.busy) return;
+    if (t.toLowerCase() === '/clear') { this.setState({ lines: [], draft: '' }); return; }
+    const turns = pick(this.state.scenario, t);
+    this.setState(s => ({ draft: '', busy: true, lines: [...s.lines, { k: 'user', text: t }] }));
+    turns.forEach((m, i) => setTimeout(() => {
+      this.setState(s => ({ lines: [...s.lines, { ...m, key: 'l' + s.lines.length }], busy: i < turns.length - 1 }));
+    }, 400 + i * 640));
+  }
+
+  renderVals() {
+    const sc = this.state.scenario;
+    const card = CARDS[sc];
+    const blocked = sc === 'blocked';
+    const awaiting = blocked && !this.state.answered;
+    const tab = this.state.tab;
+    const busy = this.state.busy;
+
+    const chip = (on) => ({ height: '26px', padding: '0 11px', borderRadius: '7px', fontSize: '11.5px', fontWeight: 600, whiteSpace: 'nowrap', border: '1px solid ' + (on ? INK : 'oklch(0.9 0.006 255)'), background: on ? INK : 'oklch(1 0 0)', color: on ? 'oklch(1 0 0)' : 'oklch(0.26 0.02 255/0.7)' });
+
+    const secs = [
+      { key: 'desc', label: 'Description', color: null, toggle: false, lines: [card.desc] },
+      { key: 'ac', label: 'Acceptance criteria', color: 'oklch(0.62 0.13 195)', toggle: true, lines: card.ac },
+      { key: 'spec', label: 'Spec', color: BLUE, toggle: true, lines: [card.spec] },
+      { key: 'plan', label: 'Plan', color: VIOLET, toggle: true, lines: [card.plan] }
+    ];
+
+    const lines = this.state.lines.map(m => ({
+      isUser: m.k === 'user', isTool: m.k === 'tool', isOut: m.k === 'out', isAct: m.k === 'act',
+      text: m.text, sub: m.sub || '',
+      style: { fontFamily: MONO, fontSize: '11.5px', lineHeight: '19px', display: 'block', paddingBottom: '2px', color: m.dim ? 'oklch(0.58 0.03 262)' : 'oklch(0.86 0.015 262)' }
+    }));
+
+    const subs = this.state.subtasks[sc];
+    const subDone = subs.filter(x => x.done).length;
+    const curIdx = subs.findIndex(x => !x.done);
+
+    const notes = this.state.notes[sc];
+    const noteCount = notes.length;
+    const noteNames = (() => {
+      const names = [];
+      notes.forEach(n => { const f = n.name.split(' ')[0]; if (names.indexOf(f) < 0) names.push(f); });
+      return names.length ? names.join(', ') : 'nobody yet';
+    })();
+
+    const allStages = ['Inbox', 'Ideas', 'Shaping', 'Spec', 'Ready', 'Implement', 'Review', 'Verify', 'Release', 'Done', 'Icebox'];
+    const q = this.state.stageFilter.trim().toLowerCase();
+
+    return {
+      card,
+      icons: {
+        x: mask('x', 19, 'oklch(0.26 0.02 255/0.75)'),
+        dots: mask('dots', 17, 'oklch(0.26 0.02 255/0.7)'),
+        chevW: mask('chevD', 11, 'oklch(0.98 0.01 292)'),
+        termAmber: mask('term', 13, 'oklch(0.5 0.13 250)')
+      },
+
+      scenarios: [
+        { label: 'Blocked · DE3', onClick: () => this.setScenario('blocked'), style: chip(blocked) },
+        { label: 'Running fine · DE4', onClick: () => this.setScenario('healthy'), style: chip(!blocked) }
+      ],
+
+      presence: {
+        label: busy ? 'thinking…' : awaiting ? 'paused — waiting on you' : blocked ? 'working · spec' : 'working · implement 2 of 4',
+        style: { display: 'inline-flex', alignItems: 'center', gap: '6px', height: '19px', padding: '0 8px', borderRadius: '5px', fontFamily: MONO, fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em', background: awaiting && !busy ? 'oklch(0.96 0.03 75)' : 'oklch(0.97 0.03 292)', color: awaiting && !busy ? 'oklch(0.5 0.11 65)' : 'oklch(0.46 0.14 292)' },
+        dot: { width: '6px', height: '6px', borderRadius: '50%', flex: '0 0 auto', background: awaiting && !busy ? AMBER : VIOLET, animation: 'v5pulse 1.5s ease-in-out infinite' }
+      },
+
+      talkBtn: {
+        label: 'Talk',
+        style: { display: 'flex', alignItems: 'center', gap: '7px', height: '28px', padding: '0 11px', borderRadius: '7px', fontSize: '12px', fontWeight: 600, border: '1px solid ' + (tab === 'Talk' ? 'oklch(0.55 0.02 255)' : 'oklch(0.9 0.006 255)'), background: tab === 'Talk' ? 'oklch(0.96 0.006 255)' : 'oklch(1 0 0)', color: 'oklch(0.26 0.02 255/0.85)' },
+        icon: mask('term', 14, 'oklch(0.26 0.02 255/0.65)'),
+        kbd: { fontFamily: MONO, fontSize: '9.5px', fontWeight: 600, color: 'oklch(0.26 0.02 255/0.45)', border: '1px solid oklch(0.9 0.008 255)', borderRadius: '3px', padding: '0 3px', lineHeight: '13px' }
+      },
+
+      strip: { show: awaiting },
+      onGoDetail: () => this.setState({ tab: 'Detail' }),
+      onOpenTalk: () => this.openTalk(),
+
+      stageOpen: this.state.stageOpen,
+      onToggleStage: () => this.setState(s => ({ stageOpen: !s.stageOpen, menuOpen: false, stageFilter: '' })),
+      stageFilter: this.state.stageFilter,
+      onStageFilter: (e) => this.setState({ stageFilter: e.target.value }),
+      stageMatches: allStages.filter(s => !q || s.toLowerCase().includes(q)).map(s => ({
+        t: s, current: s === card.stage,
+        onClick: () => this.setState({ stageOpen: false, stageFilter: '' }),
+        style: { display: 'flex', alignItems: 'center', gap: '8px', width: '100%', textAlign: 'left', padding: '6px 9px', borderRadius: '6px', border: 'none', background: 'transparent', fontSize: '12.5px', fontWeight: s === card.stage ? 600 : 500, color: s === card.stage ? INK : 'oklch(0.26 0.02 255/0.82)' },
+        dot: { width: '6px', height: '6px', borderRadius: '2px', flex: '0 0 auto', background: s === card.stage ? VIOLET : 'oklch(0.88 0.008 255)' },
+        mark: { fontFamily: MONO, fontSize: '10px', color: VIOLET, marginLeft: 'auto', flex: '0 0 auto' }
+      })),
+
+      menuOpen: this.state.menuOpen,
+      onToggleMenu: () => this.setState(s => ({ menuOpen: !s.menuOpen, stageOpen: false })),
+      menuItems: [{ t: 'Duplicate' }, { t: 'Copy link' }, { t: 'Archive', danger: true, sep: true }].map(it => ({
+        t: it.t, onClick: () => this.setState({ menuOpen: false }),
+        style: { display: 'flex', alignItems: 'center', width: '100%', textAlign: 'left', padding: it.sep ? '11px 9px 6px 9px' : '6px 9px', borderRadius: '6px', border: 'none', background: 'transparent', fontSize: '12.5px', fontWeight: 500, color: it.danger ? 'oklch(0.55 0.16 25)' : 'oklch(0.26 0.02 255/0.82)', marginTop: it.sep ? '5px' : '0', borderTop: it.sep ? '1px solid oklch(0.94 0.005 255)' : 'none' }
+      })),
+
+      tabs: [
+        { label: 'Detail', dot: awaiting },
+        { label: 'Run', count: blocked ? '2' : '31' },
+        { label: 'Talk' },
+        { label: 'Activity', count: blocked ? '12' : '7' }
+      ].map(t => ({
+        label: t.label, dot: !!t.dot, count: t.count || false,
+        onClick: () => this.setState({ tab: t.label }),
+        style: { display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: 'none', padding: '0 0 10px 0', marginBottom: '-1px', fontSize: '13px', fontWeight: tab === t.label ? 600 : 500, color: tab === t.label ? INK : 'oklch(0.26 0.02 255/0.6)', borderBottom: '2px solid ' + (tab === t.label ? VIOLET : 'transparent') }
+      })),
+
+      onDetail: tab === 'Detail',
+      onTalk: tab === 'Talk',
+      onStub: tab === 'Run' || tab === 'Activity',
+      stubLabel: tab.toUpperCase(),
+      stubBody: tab === 'Run' ? 'Subagent output lives here — unchanged in this pass.' : 'The event log — unchanged in this pass.',
+
+      answered: this.state.answered,
+      ask: {
+        show: awaiting,
+        draft: this.state.askDraft,
+        onDraft: (e) => this.setState({ askDraft: e.target.value }),
+        onKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); this.answer(); } },
+        onSubmit: () => this.answer(),
+        onDiscuss: () => this.openTalk('why is this stuck?'),
+        discussStyle: { display: 'flex', alignItems: 'center', gap: '6px', flex: '0 0 auto', height: '27px', padding: '0 10px', borderRadius: '6px', border: '1px solid oklch(0.88 0.04 250)', background: 'oklch(1 0 0)', color: BLUE, fontSize: '11.5px', fontWeight: 600, whiteSpace: 'nowrap' },
+        opts: ['Titles only for now', 'Full-text: bodies + comments'].map(o => ({
+          label: o, onClick: () => this.answer(o),
+          style: { textAlign: 'left', padding: '9px 12px', borderRadius: '7px', border: '1px solid oklch(0.87 0.07 75)', background: 'oklch(1 0 0)', color: 'oklch(0.33 0.03 65)', fontSize: '12.5px' }
+        }))
+      },
+
+      sections: secs.map(s => {
+        const open = !!this.state.expanded[s.key];
+        const over = s.toggle && this.state.overflow[s.key] !== false;
+        const fade = s.toggle && over && !open;
+        return {
+          label: s.label,
+          hasToggle: s.toggle && (over || open),
+          accent: s.color ? { width: '3px', height: '13px', borderRadius: '2px', background: s.color, flex: '0 0 auto' } : { display: 'none' },
+          toggleLabel: open ? 'Less' : 'More',
+          chev: mask(open ? 'chevU' : 'chevD', 12, BLUE),
+          onToggle: () => this.setState(st => ({ expanded: { ...st.expanded, [s.key]: !st.expanded[s.key] } })),
+          boxRef: s.toggle ? (el) => { this.boxes[s.key] = el; } : null,
+          box: s.toggle
+            ? { display: 'flex', flexDirection: 'column', gap: '6px', border: '1px solid oklch(0.9 0.006 255)', borderRadius: '8px', background: 'oklch(0.99 0.002 255)', padding: '13px 14px', maxHeight: open ? 'none' : '62px', overflow: 'hidden', maskImage: fade ? 'linear-gradient(black 60%,transparent)' : 'none', WebkitMaskImage: fade ? 'linear-gradient(black 60%,transparent)' : 'none' }
+            : { display: 'flex', flexDirection: 'column', gap: '5px' },
+          lines: s.lines.map(t => ({ t, style: { fontSize: '13px', lineHeight: '20.15px', color: BODY, display: 'block' } }))
+        };
+      }),
+
+      rail: [
+        { label: 'Status', value: awaiting ? 'blocked' : 'in progress', mono: true },
+        { label: 'Owners', value: 'Jeremy Lightsmith', action: 'Reassign' },
+        { label: 'Tags', value: blocked ? '#search' : '#export #perf', mono: true },
+        { label: 'Updated', value: 'Aug 04 · 09:12', mono: true },
+        { label: 'Flow', value: blocked ? 'spec → implement → review' : 'implement → review', mono: true }
+      ].map(r => ({ ...r, action: r.action || false, valueStyle: r.mono ? { fontFamily: MONO, fontSize: '12px', color: BODY } : { fontSize: '12.5px', color: BODY } })),
+
+      emptyOpen: this.state.emptyOpen,
+      onToggleEmpty: () => this.setState(s => ({ emptyOpen: !s.emptyOpen })),
+      emptyLabel: this.state.emptyOpen ? 'Hide unused fields' : '2 unused fields',
+      emptyFields: [{ label: 'Public support', hint: 'no supporters yet' }, { label: 'Public description', hint: 'not written' }],
+
+      seedOpen: this.state.seedOpen,
+      seedChev: this.state.seedOpen ? '▾' : '▸',
+      onToggleSeed: () => this.setState(s => ({ seedOpen: !s.seedOpen })),
+      seedLines: card.seedLines
+        .filter(([k]) => k !== 'notes')
+        .concat([['notes', noteCount + (noteCount === 1 ? ' note' : ' notes') + ' from ' + noteNames]])
+        .map(([k, v]) => ({
+          t: k.padEnd(12, ' ') + v,
+          style: { fontFamily: MONO, fontSize: '11px', lineHeight: '18px', color: k === 'notes' ? 'oklch(0.78 0.1 150)' : 'oklch(0.6 0.025 262)', whiteSpace: 'pre-wrap' }
+        })),
+
+      subs: subs.map((x, i) => {
+        const current = i === curIdx && !awaiting;
+        return {
+          t: x.t, done: x.done, current,
+          onClick: () => this.toggleSub(i),
+          rowStyle: {
+            display: 'flex', alignItems: 'center', gap: '8px', width: '100%', textAlign: 'left',
+            padding: '6px 8px', borderRadius: '8px', background: current ? 'oklch(0.98 0.018 292)' : 'oklch(0.985 0.004 250)',
+            border: '1px solid ' + (current ? 'oklch(0.86 0.06 292)' : 'oklch(0.92 0.006 255)')
+          },
+          boxStyle: {
+            display: 'flex', flexShrink: 0, justifyContent: 'center', alignItems: 'center', width: '16px', height: '16px',
+            borderRadius: '4px', color: 'oklch(1 0 0)',
+            background: x.done ? 'oklch(0.6 0.13 155)' : 'transparent',
+            border: '1px solid ' + (x.done ? 'oklch(0.6 0.13 155)' : 'oklch(0.92 0.006 255)')
+          },
+          tickStyle: x.done ? mask('check', 12, 'oklch(1 0 0)') : { display: 'none' },
+          textStyle: {
+            display: 'block', fontSize: '14px', lineHeight: '19.25px', flex: 1, minWidth: 0,
+            color: x.done ? 'oklch(0.26 0.02 255/0.5)' : 'oklch(0.26 0.02 255)',
+            textDecorationLine: x.done ? 'line-through' : 'none',
+            textDecorationColor: 'oklch(0.26 0.02 255/0.5)'
+          },
+          currentChip: { fontFamily: MONO, fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.4px', flex: '0 0 auto', color: 'oklch(0.46 0.14 292)', background: 'oklch(0.96 0.03 292)', borderRadius: '4px', padding: '2px 6px' }
+        };
+      }),
+      hasSubs: subs.length > 0,
+      noSubs: subs.length === 0,
+      subCount: subDone + '/' + subs.length,
+      subFill: { width: subs.length ? Math.round((subDone / subs.length) * 100) + '%' : '0%', height: '100%', borderRadius: '999px', background: 'oklch(0.6 0.13 155)' },
+      subEmptyText: 'Sub-tasks are pulled out of the plan when it lands, then worked one at a time. Spec is still paused, so there is no plan to derive them from yet.',
+
+      notes: notes.map(n => ({
+        who: n.who, name: n.name, ago: n.ago, text: n.text,
+        wrap: { display: 'flex', alignItems: 'flex-start', gap: '10px', padding: n.fresh ? '9px 11px' : '0', borderRadius: '8px', background: n.fresh ? 'oklch(0.985 0.02 155)' : 'transparent', border: n.fresh ? '1px solid oklch(0.9 0.04 155)' : 'none', animation: n.fresh ? 'v5in 0.3s ease-out' : 'none' },
+        avStyle: { width: '22px', height: '22px', borderRadius: '50%', background: 'oklch(0.55 0.1 255)', color: 'oklch(1 0 0)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto', fontFamily: MONO, fontSize: '9px', fontWeight: 600, marginTop: '1px' }
+      })),
+      noteCountLabel: noteCount + (noteCount === 1 ? ' note' : ' notes'),
+      noteDraft: this.state.noteDraft,
+      onNoteDraft: (e) => this.setState({ noteDraft: e.target.value }),
+      onNoteKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); this.addNote(); } },
+      onAddNote: () => this.addNote(),
+
+      termChipLabel: busy ? 'working' : awaiting ? 'card paused' : 'card running',
+      termChip: { display: 'inline-flex', alignItems: 'center', height: '18px', padding: '0 7px', borderRadius: '4px', flex: '0 0 auto', fontFamily: MONO, fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.04em', background: busy ? 'oklch(0.28 0.05 300)' : awaiting ? 'oklch(0.3 0.06 70)' : 'oklch(0.26 0.02 262)', color: busy ? 'oklch(0.82 0.09 300)' : awaiting ? 'oklch(0.84 0.1 75)' : 'oklch(0.68 0.02 262)' },
+
+      lines, busy,
+      draft: this.state.draft,
+      onDraft: (e) => this.setState({ draft: e.target.value }),
+      onKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); this.send(); } },
+      placeholder: awaiting ? 'why is this stuck?' : 'what happened?',
+      slash: [
+        { label: awaiting ? 'why is this stuck?' : 'why did review reject?', v: awaiting ? 'why is this stuck?' : 'why did review reject?' },
+        { label: 'fix it', v: 'fix it' },
+        { label: '/card', v: '/card' },
+        { label: '/run', v: '/run' },
+        { label: '/clear', v: '/clear' }
+      ].map(s => ({
+        label: s.label, onClick: () => this.send(s.v),
+        style: { fontFamily: MONO, fontSize: '10.5px', fontWeight: 500, padding: '4px 8px', borderRadius: '5px', border: '1px solid oklch(0.3 0.02 262)', background: 'oklch(0.22 0.018 262)', color: 'oklch(0.72 0.02 262)' }
+      })),
+      resumeLabel: this.state.resumed ? 'copied' : 'copy resume cmd',
+      onCopyResume: () => this.setState({ resumed: true }),
+      resumeStyle: { flex: '0 0 auto', fontFamily: MONO, fontSize: '10px', fontWeight: 600, padding: '4px 8px', borderRadius: '5px', border: '1px solid oklch(0.32 0.03 220)', background: 'oklch(0.23 0.03 220)', color: 'oklch(0.76 0.1 220)' },
+
+      legend: [
+        { label: 'talk · new surface', c: VIOLET },
+        { label: 'task · the ask', c: AMBER },
+        { label: 'notes · card content', c: 'oklch(0.42 0.1 255)' },
+        { label: 'chrome · v2 fixes', c: 'oklch(0.26 0.02 255/0.45)' },
+        { label: 'sub-tasks', c: 'oklch(0.42 0.11 155)' },
+        { label: 'polish · roll these back', c: 'oklch(0.44 0.11 195)' }
+      ].map(l => ({
+        label: l.label,
+        style: { display: 'inline-flex', alignItems: 'center', height: '20px', padding: '0 8px', borderRadius: '5px', fontFamily: MONO, fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.4px', textTransform: 'uppercase', color: l.c, background: 'oklch(1 0 0)', border: '1px solid oklch(0.92 0.006 255)' }
+      })),
+
+      changes: [
+        { n: '1', tag: 'talk', title: 'Replace the Conversation list with a terminal session pane',
+          body: 'The card’s chat UI goes away entirely. Talk is a monospace pane: ❯ prompt, dim tool lines, streamed output, slash commands, scrollback. Nothing renders as a message bubble, because a chat frame implies a partner that may not exist.',
+          where: 'new tab body · replaces #card-drawer-conversation', btn: 'Open Talk', act: 'talk' },
+        { n: '2', tag: 'talk', title: 'Seed line showing injected context',
+          body: 'First line of every session: “seeded with DE3 · 3 fields · no plan yet · 2 runs · paused 47m”, expandable to the per-field receipt. A terminal user needs to know what context the session got; no chat UI ever tells them.',
+          where: 'top of session pane · collapsed by default', btn: 'Expand the seed', act: 'seed' },
+        { n: '3', tag: 'talk', title: 'Inline action receipts, no accept/decline gate',
+          body: 'The session can change anything on the card. It acts, then prints a green receipt naming exactly what changed. No confirmation dialog in front of every step — that is what a CLI does, and gating it made the pane feel heavy. No undo either: reverting a card change after a fresh agent has already read it is not something we can honestly promise yet, so the receipt reports rather than offers.',
+          where: 'session output · act lines', btn: 'Run “fix it”', act: 'fix' },
+        { n: '4', tag: 'talk', title: 'Session scrollback is kept, not expired',
+          body: 'Earlier drafts expired transcripts after 30 days and kept a generated summary. Reversed: developers read scrollback, and the one time they need it is the time it is gone.',
+          where: 'persistence · session store' },
+        { n: '5', tag: 'talk', title: 'relay talk <ref> --resume continues the same session',
+          body: 'The pane’s footer hands over the resume command. This is the load-bearing one: if the terminal can pick up a session started on the board, the pane is a window onto the channel they already trust rather than a second channel they abandon.',
+          where: 'session footer + CLI', btn: 'Show resume cmd', act: 'resume' },
+        { n: '6', tag: 'talk', title: 'Talk button in the header on every card, shortcut t',
+          body: 'One entry point, always in the same place, in every state — blocked, running, idle. It never competes with the answer affordance because answering is a different control in a different place.',
+          where: 'drawer header · right cluster', btn: 'Focus it', act: 'talk' },
+        { n: '7', tag: 'task', title: 'The ask is a task, not a message',
+          body: 'A claude -p that asks a question exits. So the ask renders as a card-level task: the question, its generated options, a free-text answer field, and the plain statement “one shot · the agent that asked has exited”. It is never a chat turn.',
+          where: 'Detail · replaces needs-input-panel', btn: 'Show the task', act: 'ask' },
+        { n: '8', tag: 'task', title: 'One escape hatch from task to session',
+          body: '“Not sure — talk it through” opens Talk pre-seeded with “why is this stuck?”, so you land on the explanation instead of an empty prompt. One direction only: the session can answer the task, the task never becomes a chat.',
+          where: 'task panel footer', btn: 'Try the handoff', act: 'discuss' },
+        { n: '9', tag: 'notes', title: 'Human notes are a card field, not a conversation',
+          body: 'Your test for a note is “will the AI read this later”, and that makes it card content — so it sits on Detail with the description, criteria, spec and plan. Author, time, prose, badged READ BY EVERY AGENT. No threading, no replies, no chat frame: if you want a back-and-forth with a person, that is Slack, and if you want one with the agent, that is Talk.',
+          where: 'Detail · after Plan', btn: 'Add a note', act: 'note' },
+        { n: '10', tag: 'notes', title: 'Notes appear in the session seed receipt',
+          body: 'The proof the agent reads them. The seed line counts them by author — “notes  2 notes from Dana, Jeremy” — highlighted green in the receipt. That is what earns trust in writing them, which is the thing the old Conversation list never had.',
+          where: 'Talk · seed line', btn: 'Add one, then see the seed', act: 'noteSeed' },
+        { n: '11', tag: 'chrome', title: 'Presence in the header',
+          body: 'Relay AI states what it is doing: working · implement 2 of 4, thinking…, or paused — waiting on you. Without this the session is a letterbox and the card gives no signal.',
+          where: 'header · next to ref' },
+        { n: '12', tag: 'chrome', title: 'Blocked state hoisted out of the tabs',
+          body: 'One strip under the header, visible on every tab, replacing the two panels that used to disagree on Detail and Run. Wait time is 21px, not 10px.',
+          where: 'below header · above tabs' },
+        { n: '13', tag: 'chrome', title: 'Tabs carry state',
+          body: 'Detail takes the amber dot when a task is open; Run and Activity carry counts. A card can no longer be stuck and look fine on the default tab.',
+          where: 'tab bar' },
+        { n: '14', tag: 'chrome', title: 'Stage chip is the Move-to control',
+          body: 'Move to lives on the chip that shows the stage, as a filterable list — a board can have ten-plus stages. The overflow keeps only what acts on the whole card: Duplicate, Copy link, Archive.',
+          where: 'header · stage chip + overflow', btn: 'Open the stage list', act: 'stage' },
+        { n: '15', tag: 'chrome', title: 'Rail is metadata, plus Reassign',
+          body: 'Reassign stays under Owners because it acts on that field. Public support and Public description collapse behind one “2 unused fields” row instead of taking slots to say “nothing yet”. One label style throughout.',
+          where: 'rail · 224px', btn: 'Show unused fields', act: 'empty' },
+        { n: '16', tag: 'chrome', title: 'One expand affordance, driven by measured overflow',
+          body: 'The header toggle and the inner “Show more” merge into a single More / Less that owns the fade. It is rendered only when the box actually overflows its 62px — measured, not guessed from character count — so no dead buttons and no silent truncation.',
+          where: 'Detail · every long section' },
+        { n: '17', tag: 'subtasks', title: 'Sub-tasks keep their shape, and say who is on them',
+          body: 'Unchanged from the capture: the Sub-tasks label, the n/m count, the 120px progress bar, 16px checkboxes, and line-through on completed rows. Two additions. The row the agent is currently working carries an AGENT IS HERE chip and a violet border, so the list reads as a live position rather than a static checklist — that is the part that was invisible before. And when there is no plan yet the section states plainly that sub-tasks get pulled out of the plan once it lands, instead of rendering an empty box.',
+          where: 'Detail · after Plan, before Notes', btn: 'Show them on DE4', act: 'subs' },
+        { n: '18', tag: 'polish', title: 'Vertical rhythm: one spacing scale in the card body',
+          body: 'The capture mixes 8px, 12px and 16px gaps between sections with per-element margin-bottom. Here the body column is a flex column with a single 21px gap and 9px inside each section between its label and its box — no margins on children at all. That is why it reads as a document rather than a stack of boxes, and it survives adding a section (sub-tasks, notes) without retuning anything.',
+          where: 'card body column · gap only, no child margins' },
+        { n: '19', tag: 'polish', title: 'Every scroll child is flex:0 0 auto',
+          body: 'Sections in a fixed-height scroll column default to flex-shrink:1, so a tall panel silently compresses instead of the column scrolling — and any child with overflow:hidden for its border-radius then eats its own content. Pinning children fixed this twice during the day. Worth doing globally in the drawer.',
+          where: 'card body + session transcript' },
+        { n: '20', tag: 'polish', title: 'Collapse fades measure, they do not guess',
+          body: 'The old collapse used a 62px max-height with a hardcoded fade. If content is 66px you get a half-cut line with no fade cue; if it is 46px you get a More button that does nothing. Both are gone: measure scrollHeight, render the toggle and the mask only when it actually overflows.',
+          where: 'every collapsible section' },
+        { n: '21', tag: 'polish', title: 'Micro-label system unified',
+          body: 'All field labels are one recipe: JetBrains Mono 10px / 600 / 0.6px tracking / uppercase / ink at 0.6 alpha. The capture had PUBLIC SUPPORT and PUBLIC DESCRIPTION hardcoded in caps at a different colour with no text-transform — two systems for one thing. Same for the 3px×13px accent bar, which now only appears on sections that have a semantic colour.',
+          where: 'all section + rail labels' },
+        { n: '22', tag: 'polish', title: 'Numbers get their own type treatment',
+          body: 'Anything you compare or scan is mono and tabular: the 21px wait time, sub-task counts, refs, timestamps, run counts. Prose stays in the sans stack. The capture rendered the wait time at the same 10px weight as its own label, which is why nobody could see it.',
+          where: 'strip, sub-tasks, rail, seed line' },
+        { n: '23', tag: 'polish', title: 'Buttons that only look like buttons when they do something',
+          body: 'No disabled-looking-but-live and no live-looking-but-dead controls. Dropdowns close each other, the overflow menu closes on select, chips carry white-space:nowrap so they never wrap inside a fixed-height pill, and every interactive row has a real hover state.',
+          where: 'header cluster, menus, chips' }
+      ].map(c => ({
+        n: c.n, tag: c.tag, title: c.title, body: c.body, where: c.where || false, btn: c.btn || false,
+        onClick: () => {
+          const a = c.act;
+          if (a === 'talk') this.openTalk();
+          else if (a === 'seed') this.setState({ tab: 'Talk', seedOpen: true });
+          else if (a === 'fix') { this.setState({ tab: 'Talk' }); setTimeout(() => this.send('fix it'), 200); }
+          else if (a === 'resume') this.setState({ tab: 'Talk', resumed: true });
+          else if (a === 'ask') this.setState({ scenario: 'blocked', answered: false, tab: 'Detail', lines: [] });
+          else if (a === 'discuss') { this.setState({ scenario: 'blocked', answered: false, tab: 'Detail', lines: [] }); setTimeout(() => this.openTalk('why is this stuck?'), 140); }
+          else if (a === 'stage') this.setState({ tab: 'Detail', stageOpen: true, menuOpen: false });
+          else if (a === 'empty') this.setState({ tab: 'Detail', emptyOpen: true });
+          else if (a === 'note') this.setState({ tab: 'Detail' });
+          else if (a === 'noteSeed') this.setState({ tab: 'Talk', seedOpen: true });
+          else if (a === 'subs') this.setState({ scenario: 'healthy', tab: 'Detail', answered: false, lines: [] });
+        },
+        wrap: { display: 'flex', flexDirection: 'column', gap: '6px', border: '1px solid oklch(0.92 0.006 255)', borderRadius: '10px', padding: '13px 15px', background: 'oklch(1 0 0)' },
+        num: { fontFamily: MONO, fontSize: '10px', fontWeight: 600, color: 'oklch(1 0 0)', borderRadius: '4px', padding: '2px 6px', flex: '0 0 auto', background: TAGC[c.tag].solid },
+        tagStyle: { fontFamily: MONO, fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.5px', textTransform: 'uppercase', flex: '0 0 auto', color: TAGC[c.tag].text },
+        whereStyle: { fontFamily: MONO, fontSize: '10.5px', lineHeight: '1.5', color: 'oklch(0.26 0.02 255/0.5)', paddingLeft: '27px' },
+        btnStyle: { alignSelf: 'flex-start', marginLeft: '27px', height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid oklch(0.89 0.03 250)', background: 'oklch(0.985 0.012 250)', color: BLUE, fontSize: '11.5px', fontWeight: 600 }
+      })),
+
+      notNow: [
+        { t: 'Run and Activity panels — stubbed here. Only their tab badges are new.' },
+        { t: 'The board-level stuck queue. Separate surface, and the right next thing to design: fire-and-forget means the queue is what you come back for.' },
+        { t: 'Notifications. Nothing here tells a user a card is waiting while they are in their terminal or asleep — email/Slack/CLI push is a separate feature and arguably outranks this whole drawer.' },
+        { t: 'Threaded human-to-human discussion. Notes are one-way card content by design; if two people need to argue, that belongs in Slack with a link to the card.' },
+        { t: '@mentions and note notifications. Writing a note pages nobody right now.' }
+      ],
+
+      prereqs: [
+        { t: 'Streaming presence. The header chip and streamed session output are what make this feel live. You said long-polling can do seconds — that is the one engineering dependency the whole design rests on.' },
+        { t: 'Reverting a session’s changes. Cut for now — undo across an agent boundary cannot un-write work a fresh agent already did. Until that is answered, Activity is the audit trail and edits are rolled back by hand.' }
+      ]
+    };
+  }
+}
+
+</script>
+</body>
+</html>
