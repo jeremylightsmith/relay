@@ -1610,6 +1610,10 @@ defmodule RelayWeb.CoreComponents do
     default: false,
     doc: "whether the OWNERS reassign picker popover is open"
 
+  attr :overflow_open, :boolean,
+    default: false,
+    doc: "RE281: whether the drawer header's ⋯ overflow menu (card-level actions) is open"
+
   attr :stages, :list,
     default: [],
     doc: "move targets: the board's other stages (each exposing id and name); [] hides the menu"
@@ -1847,6 +1851,43 @@ defmodule RelayWeb.CoreComponents do
               >
                 <.icon name="hero-chevron-right" class="size-5" />
               </button>
+            </div>
+            <%!--
+              RE281 — card-level actions. Renders in `embed` too: @embed suppresses dismissal
+              affordances (scrim, ✕), and Archive is not one — parity with today, where the
+              rail's Archive already renders in embed. The h-11 wrapper centres the artboard's
+              28×28 square against the 44px prev/next chevrons beside it.
+            --%>
+            <div :if={!@archived} class="relative flex h-11 flex-none items-center">
+              <button
+                type="button"
+                id="card-drawer-overflow"
+                phx-click="toggle_overflow_menu"
+                aria-haspopup="menu"
+                aria-expanded={to_string(@overflow_open)}
+                aria-label="Card actions"
+                class="flex size-7 items-center justify-center rounded-[7px] border border-base-300 bg-base-100 p-0"
+              >
+                <.icon name="hero-ellipsis-horizontal" class="size-[17px]" />
+              </button>
+              <div
+                :if={@overflow_open}
+                id="card-drawer-overflow-menu"
+                role="menu"
+                class="absolute right-0 top-[33px] z-[22] flex w-[190px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5 shadow-[0_8px_28px_oklch(0.26_0.02_255/0.16)]"
+              >
+                <button
+                  type="button"
+                  id="archive-card-button"
+                  role="menuitem"
+                  phx-click="archive_card"
+                  phx-value-ref={@ref}
+                  data-confirm="Archive this card? You can restore it from Archived."
+                  class="flex w-full items-center rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-error hover:bg-base-300/50"
+                >
+                  Archive
+                </button>
+              </div>
             </div>
             <.link
               :if={!@embed}
@@ -2641,7 +2682,7 @@ defmodule RelayWeb.CoreComponents do
               id={"#{@id}-rail"}
               class="flex w-full shrink-0 flex-col gap-5 border-t border-base-300 bg-base-200/30 p-5 text-sm drawer:w-[220px] drawer:overflow-y-auto drawer:border-l drawer:border-t-0"
             >
-              <%!-- STAGE: chip + Move to… + Archive --%>
+              <%!-- STAGE: chip + Move to… --%>
               <div class="rail-section flex flex-col gap-2">
                 <.section_label>Stage</.section_label>
                 <div class="rail-stage flex flex-wrap items-center gap-2">
@@ -2677,17 +2718,6 @@ defmodule RelayWeb.CoreComponents do
                       </li>
                     </ul>
                   </div>
-                  <button
-                    :if={!@archived}
-                    type="button"
-                    id="archive-card-button"
-                    phx-click="archive_card"
-                    phx-value-ref={@ref}
-                    data-confirm="Archive this card? You can restore it from Archived."
-                    class="btn btn-ghost btn-xs text-base-content/60"
-                  >
-                    <.icon name="hero-archive-box" class="size-3.5" /> Archive
-                  </button>
                 </div>
               </div>
 

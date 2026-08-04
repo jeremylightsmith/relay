@@ -504,6 +504,7 @@ defmodule RelayWeb.BoardLive do
         current_user_id={@current_scope.user.id}
         members={@members}
         reassign_open={@reassign_open}
+        overflow_open={@overflow_open}
         conversation={@streams.conversation}
         note_count={MapSet.size(@note_ids)}
         activity={@streams.activity}
@@ -983,6 +984,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:compose_form, empty_compose_form())
       |> assign(:members, Members.list_members(board))
       |> assign(:reassign_open, false)
+      |> assign(:overflow_open, false)
       |> assign(:body_loading?, false)
       |> assign(:flows, flows)
       |> assign(:run_summaries, run_summaries)
@@ -1181,6 +1183,8 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("archive_card", %{"ref" => ref}, socket) do
+    socket = close_header_popovers(socket)
+
     with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
          {:ok, archived} <- Cards.archive_card(card, current_actor(socket)) do
       {:noreply,
@@ -1988,6 +1992,11 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("toggle_reassign", _params, socket) do
     {:noreply, update(socket, :reassign_open, &(not &1))}
+  end
+
+  # RE281 — the drawer header's ⋯ menu. Card-level actions live here; today just Archive.
+  def handle_event("toggle_overflow_menu", _params, socket) do
+    {:noreply, update(socket, :overflow_open, &(not &1))}
   end
 
   # RLY-32: any board member (or the agent) can be assigned — the old
@@ -2895,6 +2904,13 @@ defmodule RelayWeb.BoardLive do
     Enum.find(socket.assigns.board.stages, &(&1.id == stage_id))
   end
 
+  # RE281 — ONE place that shuts the drawer header's popovers, so every path that must
+  # dismiss them (a selection, Esc, opening a different card) says it once instead of
+  # each re-listing which popovers exist. Task 2 widens this to the stage popover.
+  defp close_header_popovers(socket) do
+    assign(socket, :overflow_open, false)
+  end
+
   # Drawer move targets: every stage on this board except the card's
   # current one, in position order. Sub-lanes are ordinary move_card
   # targets (per plan Architecture: "no move changes"), but must show a
@@ -3763,6 +3779,7 @@ defmodule RelayWeb.BoardLive do
           |> assign(:reject_open, false)
           |> assign(:reject_form, empty_reject_form())
           |> assign(:reject_error, nil)
+          |> close_header_popovers()
           |> assign(:card_runs, [])
           |> assign(:drawer_tab, :detail)
           |> stream_notes([])

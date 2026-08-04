@@ -1081,6 +1081,40 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(id="card-drawer-acceptance-criteria-view")
       assert html =~ "<strong>yes</strong>"
     end
+
+    test "the header ⋯ overflow menu matches the v5 artboard and carries only a danger Archive" do
+      attrs = drawer_attrs(%{}, %{overflow_open: true})
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      # Relay Card Detail v5.dc.html line ~73 — 28×28 bordered square, 17px dots.
+      assert html =~ ~s(id="card-drawer-overflow")
+      assert html =~ "flex size-7 items-center justify-center rounded-[7px] border border-base-300 bg-base-100 p-0"
+      assert html =~ "hero-ellipsis-horizontal size-[17px]"
+
+      # line ~75 — top:33px;right:0;z-index:22;width:190px;radius 9px;padding 6px;gap 1px.
+      assert html =~ ~s(id="card-drawer-overflow-menu")
+
+      assert html =~
+               "absolute right-0 top-[33px] z-[22] flex w-[190px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5 shadow-[0_8px_28px_oklch(0.26_0.02_255/0.16)]"
+
+      # line ~700 menuItems — 6px 9px, radius 6px, 12.5px/500, danger red, real hover.
+      assert html =~ ~s(id="archive-card-button")
+      assert html =~ "rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-error hover:bg-base-300/50"
+
+      # Decided in review: no Duplicate, no Copy link.
+      refute html =~ "Duplicate"
+      refute html =~ "Copy link"
+    end
+
+    test "an archived card renders no ⋯ overflow button at all" do
+      attrs = drawer_attrs(%{}, %{archived: true, overflow_open: true})
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      refute html =~ ~s(id="card-drawer-overflow")
+      refute html =~ ~s(id="archive-card-button")
+    end
   end
 
   describe "inline_field/1" do

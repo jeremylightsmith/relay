@@ -1310,6 +1310,7 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
+      view |> element("#card-drawer-overflow") |> render_click()
       html = view |> element("#archive-card-button") |> render_click()
 
       assert_patch(view, ~p"/board/#{board.slug}")
@@ -1333,6 +1334,7 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#card-archived-banner")
       assert has_element?(view, "#restore-card-button")
       refute has_element?(view, "#archive-card-button")
+      refute has_element?(view, "#card-drawer-overflow")
       refute has_element?(view, "#card-drawer-status-form")
 
       assert has_element?(
@@ -1375,7 +1377,7 @@ defmodule RelayWeb.BoardLiveTest do
       end
 
       assert has_element?(view, "#card-drawer-move")
-      assert has_element?(view, "#archive-card-button")
+      assert has_element?(view, "#card-drawer-overflow")
 
       # working — still no primary button
       {:ok, work} = Cards.create_card(code, %{title: "Working one"})
