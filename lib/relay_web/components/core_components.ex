@@ -1533,7 +1533,10 @@ defmodule RelayWeb.CoreComponents do
 
   def modal_scrim(assigns) do
     ~H"""
-    <div class={["modal-scrim", @class]} {@rest}></div>
+    <%!-- Enum.reject is load-bearing: a class list drops a nil VALUE but still emits the
+    separator, so `["modal-scrim", nil]` renders `class="modal-scrim "` (trailing space) and
+    fails the exact-class pin in core_components_test.exs. --%>
+    <div class={Enum.reject(["modal-scrim", @class], &is_nil/1)} {@rest}></div>
     """
   end
 
