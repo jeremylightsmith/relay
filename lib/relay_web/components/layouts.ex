@@ -11,6 +11,23 @@ defmodule RelayWeb.Layouts do
   # and other static content.
   embed_templates "layouts/*"
 
+  # The light/dark logo pair (RE237): only `width` differs between the app top bar (23px)
+  # and the docs nav (22px). `dark:` is reliable because the root-layout resolver always
+  # sets an explicit `data-theme` before first paint.
+  attr :width, :string, required: true
+
+  defp logo(assigns) do
+    ~H"""
+    <img src={~p"/images/logo_light_128.png"} width={@width} alt="Relay" class="dark:hidden" />
+    <img
+      src={~p"/images/logo_dark_128.png"}
+      width={@width}
+      alt="Relay"
+      class="hidden dark:block"
+    />
+    """
+  end
+
   @doc """
   Renders your app layout.
 
@@ -62,18 +79,7 @@ defmodule RelayWeb.Layouts do
         title="All boards"
         class="flex items-center gap-2"
       >
-        <img
-          src={~p"/images/logo_light_128.png"}
-          width="23"
-          alt="Relay"
-          class="dark:hidden"
-        />
-        <img
-          src={~p"/images/logo_dark_128.png"}
-          width="23"
-          alt="Relay"
-          class="hidden dark:block"
-        />
+        <.logo width="23" />
         <span class="hidden md:inline text-[15px] font-semibold tracking-[-0.02em]">Relay</span>
       </.link>
       <div
@@ -163,7 +169,7 @@ defmodule RelayWeb.Layouts do
 
   def public_board(assigns) do
     ~H"""
-    <div class="min-h-screen" style="background:var(--color-field-hover);">
+    <div class="min-h-screen bg-base-200">
       <header
         id="public-board-header"
         class="flex items-center gap-3 border-b border-base-300 bg-base-100 px-4 sm:px-6"
@@ -227,18 +233,7 @@ defmodule RelayWeb.Layouts do
       </script>
       <header class="docs-nav">
         <a href={~p"/"} class="docs-nav-brand">
-          <img
-            src={~p"/images/logo_light_128.png"}
-            width="22"
-            alt="Relay"
-            class="dark:hidden"
-          />
-          <img
-            src={~p"/images/logo_dark_128.png"}
-            width="22"
-            alt="Relay"
-            class="hidden dark:block"
-          />
+          <.logo width="22" />
           <span>Relay</span>
         </a>
         <span class="docs-nav-eyebrow">/ Docs</span>

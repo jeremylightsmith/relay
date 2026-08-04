@@ -18,6 +18,11 @@ defmodule RelayWeb.PageControllerTest do
       # nav "Open the board" CTA and the secondary "See how it works" ghost button
       assert html =~ "Open the board"
       assert html =~ "See how it works"
+
+      # RE237: the 3-way theme toggle lives in the landing nav too, not just the account
+      # dropdown — this is the exact line the QUICKFIX deleted once already.
+      assert html =~ ~s(role="radiogroup")
+      assert html =~ ~s(data-phx-theme="dark")
     end
 
     test "titles the landing tab with the · Relay suffix and drops the Phoenix suffix", %{conn: conn} do

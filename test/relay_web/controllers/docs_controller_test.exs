@@ -8,6 +8,15 @@ defmodule RelayWeb.DocsControllerTest do
     refute html =~ "docs-pager-prev"
   end
 
+  test "the docs nav ships both logo variants and swaps on the dark theme", %{conn: conn} do
+    html = conn |> get(~p"/docs") |> html_response(200)
+
+    assert html =~ ~s(src="/images/logo_light_128.png")
+    assert html =~ ~s(src="/images/logo_dark_128.png")
+    assert html =~ "dark:hidden"
+    assert html =~ "hidden dark:block"
+  end
+
   test "the getting-started path names every step of the journey", %{conn: conn} do
     html = conn |> get(~p"/docs") |> html_response(200)
 
