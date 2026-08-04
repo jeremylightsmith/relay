@@ -26,8 +26,7 @@ defmodule RelayWeb.BoardsLive do
           type="button"
           id="top-bar-new-board"
           phx-click="new_board"
-          class="btn btn-sm border-none font-semibold text-white"
-          style="background:oklch(0.60 0.14 250);"
+          class="btn btn-sm border-none font-semibold text-primary-content bg-primary"
         >
           <span class="text-[15px] leading-none">+</span> New board
         </button>
@@ -38,25 +37,21 @@ defmodule RelayWeb.BoardsLive do
               mockup's search icon is deliberately skipped (Later polish). --%>
         <div
           id="boards-title-mobile"
-          class="border-b bg-base-100 px-[18px] pb-3 pt-[6px] drawer:hidden"
-          style="border-color:oklch(0.93 0.006 255);"
+          class="border-b border-base-300 bg-base-100 px-[18px] pb-3 pt-[6px] drawer:hidden"
         >
           <span
             class="text-[22px] font-semibold"
-            style="letter-spacing:-0.03em;color:oklch(0.22 0.02 255);"
+            style="letter-spacing:-0.03em;color:var(--color-base-content);"
           >
             Boards
           </span>
         </div>
 
         <div id="boards-desktop-header" class="hidden items-start justify-between gap-5 drawer:flex">
-          <h1 class="m-0 text-[27px] font-semibold tracking-tight" style="color:oklch(0.24 0.02 255);">
+          <h1 class="m-0 text-[27px] font-semibold tracking-tight text-base-content">
             Your boards
           </h1>
-          <div
-            class="flex items-center gap-4 pt-2 font-mono text-[11px]"
-            style="color:oklch(0.55 0.02 255);"
-          >
+          <div class="flex items-center gap-4 pt-2 font-mono text-[11px] text-base-content/60">
             <span class="flex items-center gap-1.5">
               <span style="width:8px;height:8px;border-radius:2px;background:var(--color-secondary);"></span>AI
             </span>
@@ -65,10 +60,7 @@ defmodule RelayWeb.BoardsLive do
             </span>
           </div>
         </div>
-        <p
-          class="mb-7 mt-1 hidden max-w-[560px] text-sm leading-relaxed drawer:block"
-          style="color:oklch(0.50 0.02 255);"
-        >
+        <p class="mb-7 mt-1 hidden max-w-[560px] text-sm leading-relaxed drawer:block text-base-content/70">
           Each board is a shared workspace where you and Relay AI pass work between each other.
         </p>
 
@@ -80,7 +72,7 @@ defmodule RelayWeb.BoardsLive do
             :for={b <- @boards}
             id={"board-card-#{b.slug}"}
             navigate={~p"/board/#{b.slug}"}
-            class="flex flex-col overflow-hidden rounded-[12px] border border-[oklch(0.92_0.006_255)] bg-base-100 no-underline transition hover:-translate-y-0.5 drawer:rounded-[14px] drawer:border-[oklch(0.90_0.006_255)]"
+            class="flex flex-col overflow-hidden rounded-[12px] border border-base-300 bg-base-100 no-underline transition hover:-translate-y-0.5 drawer:rounded-[14px] drawer:border-[var(--color-field-border)]"
           >
             <div class="hidden drawer:block" style={"height:3px;background:#{accent(b.slug)};"}></div>
             <div class="flex flex-col gap-2 p-3 drawer:gap-2.5 drawer:p-4">
@@ -89,12 +81,9 @@ defmodule RelayWeb.BoardsLive do
                   class="flex size-[18px] flex-none items-center justify-center rounded-[6px] drawer:size-[22px] drawer:rounded-[7px]"
                   style={"background:#{accent(b.slug)};"}
                 >
-                  <span class="hidden size-[7px] rounded-full bg-white drawer:block"></span>
+                  <span class="hidden size-[7px] rounded-full bg-base-100 drawer:block"></span>
                 </span>
-                <span
-                  class="text-[14px] font-semibold tracking-[-0.015em] drawer:text-[15.5px] drawer:tracking-tight"
-                  style="color:oklch(0.26 0.02 255);"
-                >
+                <span class="text-[14px] font-semibold tracking-[-0.015em] drawer:text-[15.5px] drawer:tracking-tight text-base-content">
                   {b.name}
                 </span>
                 <span class="flex-1"></span>
@@ -102,7 +91,7 @@ defmodule RelayWeb.BoardsLive do
                   :if={b.slug == @from}
                   id={"board-card-#{b.slug}-current"}
                   class="rounded-[5px] px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-wide"
-                  style="background:oklch(0.95 0.03 250);color:oklch(0.46 0.12 250);"
+                  style="background:color-mix(in oklab, var(--color-primary) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-primary) 60%, var(--color-base-content));"
                 >
                   CURRENT
                 </span>
@@ -113,22 +102,18 @@ defmodule RelayWeb.BoardsLive do
                   :if={badge_count(b, @embed) > 0}
                   id={"board-needs-you-mobile-#{b.slug}"}
                   class="rounded-[5px] border px-1.5 py-0.5 font-mono text-[8.5px] font-semibold drawer:hidden"
-                  style="color:oklch(0.52 0.11 65);background:oklch(0.97 0.03 75);border-color:oklch(0.87 0.07 75);"
+                  style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border-color:color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));"
                 >
                   {badge_count(b, @embed)} NEEDS YOU
                 </span>
               </div>
               <span
                 id={"board-meta-mobile-#{b.slug}"}
-                class="font-mono text-[10.5px] drawer:hidden"
-                style="color:oklch(0.58 0.02 255);"
+                class="font-mono text-[10.5px] drawer:hidden text-base-content/55"
               >
                 {mobile_meta_label(b)}
               </span>
-              <span
-                class="hidden items-center gap-2 font-mono text-[11.5px] drawer:flex"
-                style="color:oklch(0.58 0.02 255);"
-              >
+              <span class="hidden items-center gap-2 font-mono text-[11.5px] drawer:flex text-base-content/55">
                 {board_meta_summary(b)}
                 <span
                   :if={badge_count(b, @embed) > 0}
@@ -143,7 +128,7 @@ defmodule RelayWeb.BoardsLive do
                 class="mt-[3px] hidden items-center justify-between drawer:flex"
               >
                 <.member_stack id={"board-members-#{b.slug}"} members={b.members} />
-                <span class="font-mono text-[10.5px]" style="color:oklch(0.62 0.02 255);">
+                <span class="font-mono text-[10.5px] text-base-content/50">
                   Updated {TimeAgo.ago(b.updated_at)}
                 </span>
               </div>
@@ -154,8 +139,7 @@ defmodule RelayWeb.BoardsLive do
             id="new-board-button"
             type="button"
             phx-click="new_board"
-            class="hidden min-h-[220px] flex-col items-center justify-center gap-2.5 rounded-[14px] border border-dashed bg-transparent drawer:flex"
-            style="border-color:oklch(0.86 0.01 255);color:oklch(0.55 0.02 255);"
+            class="hidden min-h-[220px] flex-col items-center justify-center gap-2.5 rounded-[14px] border border-dashed border-base-content/20 bg-transparent text-base-content/60 drawer:flex"
           >
             <span class="flex size-[34px] items-center justify-center rounded-[9px] border-[1.5px] text-xl leading-none">
               +
@@ -229,6 +213,9 @@ defmodule RelayWeb.BoardsLive do
 
   defp board_meta_summary(b), do: "#{b.slug} · #{b.card_count} cards"
 
-  # Cosmetic per-board accent from a stable hash of the slug.
+  # Cosmetic per-board accent from a stable hash of the slug. RE237: stays an OKLCH color, not
+  # a token, for the same reason as `CoreComponents.identity_color/1` — the hue is per-board and
+  # arbitrary, so there is no brand role to map it onto.
+  # theme-tokens:allow: no role for a hue
   defp accent(slug), do: "oklch(0.62 0.15 #{rem(:erlang.phash2(slug), 360)})"
 end

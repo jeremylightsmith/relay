@@ -48,12 +48,7 @@ defmodule RelayWeb.ThemeTokensTest do
     {"assets/css/storybook.css", "#000", "mask-image channel, not a color"}
   ]
 
-  @pending [
-    "lib/relay_web/live/board_live.ex",
-    "lib/relay_web/live/board_settings_live.ex",
-    "lib/relay_web/live/boards_live.ex",
-    "lib/relay_web/live/public_board_live.ex"
-  ]
+  @pending []
 
   test "no hardcoded color literals outside the theme blocks" do
     offenders = Enum.flat_map(scanned_files(), &offenders_in/1)

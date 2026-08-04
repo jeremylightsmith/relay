@@ -192,8 +192,8 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       assert has_element?(view, "#general-pane")
       refute has_element?(view, "#stages-pane")
       # the General rail link carries nav_style/1's active blue-tint
-      assert has_element?(view, "#settings-nav-general[style*='oklch(0.42 0.13 250)']")
-      refute has_element?(view, "#settings-nav-stages[style*='oklch(0.42 0.13 250)']")
+      assert has_element?(view, "#settings-nav-general[style*='var(--color-primary) 45%, var(--color-base-content)']")
+      refute has_element?(view, "#settings-nav-stages[style*='var(--color-primary) 45%, var(--color-base-content)']")
     end
   end
 
@@ -215,12 +215,12 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       board = Boards.get_or_create_default_board(user)
 
       {:ok, general, _html} = live(conn, ~p"/board/#{board.slug}/settings")
-      assert has_element?(general, "#settings-tab-general[style*='oklch(0.42 0.13 250)']")
-      refute has_element?(general, "#settings-tab-stages[style*='oklch(0.42 0.13 250)']")
+      assert has_element?(general, "#settings-tab-general[style*='var(--color-primary) 45%, var(--color-base-content)']")
+      refute has_element?(general, "#settings-tab-stages[style*='var(--color-primary) 45%, var(--color-base-content)']")
 
       {:ok, stages, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
-      assert has_element?(stages, "#settings-tab-stages[style*='oklch(0.42 0.13 250)']")
-      refute has_element?(stages, "#settings-tab-general[style*='oklch(0.42 0.13 250)']")
+      assert has_element?(stages, "#settings-tab-stages[style*='var(--color-primary) 45%, var(--color-base-content)']")
+      refute has_element?(stages, "#settings-tab-general[style*='var(--color-primary) 45%, var(--color-base-content)']")
     end
 
     test "rail and strip carry the responsive show/hide classes", %{conn: conn, user: user} do

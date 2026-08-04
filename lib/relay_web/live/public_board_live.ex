@@ -146,8 +146,7 @@ defmodule RelayWeb.PublicBoardLive do
                   </span>
                   <span
                     :if={MapSet.member?(@voted_ids, card.id)}
-                    class="text-[10px] font-semibold"
-                    style="color:oklch(0.60 0.14 250);"
+                    class="text-[10px] font-semibold text-primary"
                   >
                     YOU VOTED
                   </span>
@@ -263,8 +262,7 @@ defmodule RelayWeb.PublicBoardLive do
                   <span
                     :if={supporter.id == @current_scope.user.id}
                     data-supporter-you
-                    class="text-[10px] font-semibold"
-                    style="color:oklch(0.60 0.14 250);"
+                    class="text-[10px] font-semibold text-primary"
                   >
                     YOU
                   </span>
