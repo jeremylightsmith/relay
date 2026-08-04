@@ -18,6 +18,19 @@ defmodule RelayWeb.FlowEditorLiveTest do
     assert has_element?(view, "#flow-graph")
   end
 
+  test "the clean (not-dirty) version chip uses the field-hover shortcut token", %{
+    conn: conn,
+    board: board
+  } do
+    # RE237 review fix: the literal swept here was oklch(0.96 0.004 255), inside the plan's
+    # exact-token shortcut range (oklch(0.955-0.975 0.004-0.008 255) -> --color-field-hover) —
+    # it should use the shortcut, not a computed color-mix.
+    {:ok, _view, html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    assert html =~
+             ~s{<span id="flow-editor-version-chip" style="font-size:11px;font-weight:600;font-family:ui-monospace,monospace;padding:4px 10px;border-radius:6px;background:var(--color-field-hover);color:color-mix(in oklab, var(--color-base-content) 75%, transparent);"}
+  end
+
   test "the Code flow diagram distinguishes the two quality_review succeeded edges by their guard",
        %{conn: conn, board: board} do
     {:ok, view, html} = live(conn, ~p"/board/#{board.slug}/flows/code")

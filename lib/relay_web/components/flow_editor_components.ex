@@ -200,7 +200,7 @@ defmodule RelayWeb.FlowEditorComponents do
           <.meta_label>
             EFFORT
           </.meta_label>
-          <div style="display:inline-flex;background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));border:1px solid var(--color-field-border);border-radius:9px;padding:3px;gap:2px;align-self:flex-start;">
+          <div style="display:inline-flex;background:var(--color-field-hover);border:1px solid var(--color-field-border);border-radius:9px;padding:3px;gap:2px;align-self:flex-start;">
             <button
               :for={effort <- @efforts}
               id={"inspector-effort-#{effort}"}
@@ -316,7 +316,7 @@ defmodule RelayWeb.FlowEditorComponents do
             :for={edge <- @edges}
             style="display:flex;align-items:center;gap:8px;border:1px solid var(--color-base-300);border-radius:8px;padding:8px 10px;background:var(--color-base-200);"
           >
-            <span style="font-size:10px;font-weight:600;font-family:ui-monospace,monospace;padding:2px 7px;border-radius:5px;background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
+            <span style="font-size:10px;font-weight:600;font-family:ui-monospace,monospace;padding:2px 7px;border-radius:5px;background:var(--color-field-hover);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
               {edge.on}
             </span>
             <span style="color:color-mix(in oklab, var(--color-base-content) 40%, transparent);font-size:11px;">
@@ -640,7 +640,7 @@ defmodule RelayWeb.FlowEditorComponents do
 
   defp segment_style(true),
     do:
-      "font-size:12px;font-weight:600;padding:6px 14px;border-radius:6px;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);background:var(--color-base-100);box-shadow:0 1px 2px color-mix(in oklab, var(--color-base-content) 12%, transparent);border:0;"
+      "font-size:12px;font-weight:600;padding:6px 14px;border-radius:6px;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);background:var(--color-base-100);box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 10%, transparent);border:0;"
 
   defp segment_style(false),
     do:
@@ -684,7 +684,7 @@ defmodule RelayWeb.FlowEditorComponents do
   defp flow_tab_style(true),
     do:
       "font-size:13px;font-weight:600;padding:5px 12px;border-radius:7px;" <>
-        "background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 95%, transparent);box-shadow:0 1px 2px color-mix(in oklab, var(--color-base-content) 14%, transparent);"
+        "background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 95%, transparent);box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 10%, transparent);"
 
   defp flow_tab_style(false),
     do:

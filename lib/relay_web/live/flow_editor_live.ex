@@ -689,7 +689,7 @@ defmodule RelayWeb.FlowEditorLive do
 
   defp version_chip_style(false),
     do:
-      "font-size:11px;font-weight:600;font-family:ui-monospace,monospace;padding:4px 10px;border-radius:6px;background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 75%, transparent);"
+      "font-size:11px;font-weight:600;font-family:ui-monospace,monospace;padding:4px 10px;border-radius:6px;background:var(--color-field-hover);color:color-mix(in oklab, var(--color-base-content) 75%, transparent);"
 
   defp save_button_style(true),
     do:
