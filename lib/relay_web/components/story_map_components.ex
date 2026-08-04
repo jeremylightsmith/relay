@@ -218,8 +218,10 @@ defmodule RelayWeb.StoryMapComponents do
   person's circle, so a person looks the same here as in the member stack, the card owner
   cluster and RE257's presence stack — and the Relay AI chip is the standard violet mark
   rather than a hand-drawn initial. The selected chip's tint is that person's own
-  `CoreComponents.identity_hue/1` in the artboard's `oklch(0.95 0.03 <hue>)` formula, so the
-  artboard's per-person colour survives our real, unbounded roster.
+  `CoreComponents.identity_hue/1` at the artboard's fixed pale-tint lightness/chroma
+  (`owner_chip_style/1` — RE237: stays OKLCH, not a token, same exception as
+  `CoreComponents.identity_color/1`), so the artboard's per-person colour survives our real,
+  unbounded roster.
 
   Two deliberate omissions from the artboard: the dashed `+ filter` button (line 69), which
   opens a filter-type PICKER this bar does not have — RE276's `Hide complete` is a second
@@ -249,10 +251,12 @@ defmodule RelayWeb.StoryMapComponents do
   def story_map_filter_bar(assigns) do
     ~H"""
     <div id="story-map-filter-bar" style={filter_bar_style()}>
-      <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.5 0.02 255);">
+      <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
         FILTER
       </span>
-      <span style="font-size:11px;color:oklch(0.55 0.02 255);margin-right:2px;">Owner</span>
+      <span style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);margin-right:2px;">
+        Owner
+      </span>
       <button
         :for={chip <- @chips}
         type="button"
@@ -274,7 +278,7 @@ defmodule RelayWeb.StoryMapComponents do
           class={if(chip.selected?, do: nil, else: "opacity-[0.85]")}
         />
       </button>
-      <span style="width:1px;height:20px;background:oklch(0.9 0.006 255);margin:0 4px;"></span>
+      <span style="width:1px;height:20px;background:var(--color-field-border);margin:0 4px;"></span>
       <button
         type="button"
         id="story-map-needs-input-filter"
@@ -282,7 +286,7 @@ defmodule RelayWeb.StoryMapComponents do
         aria-pressed={to_string(@needs_input)}
         style={filter_toggle_style(@needs_input)}
       >
-        <span style="width:6px;height:6px;border-radius:50%;background:oklch(0.7 0.13 65);"></span>
+        <span style="width:6px;height:6px;border-radius:50%;background:var(--color-warning);"></span>
         Needs input
       </button>
       <button
@@ -309,13 +313,13 @@ defmodule RelayWeb.StoryMapComponents do
         type="button"
         id="story-map-clear-filters"
         phx-click="clear_story_map_filters"
-        style="font-size:11px;font-weight:600;color:oklch(0.55 0.14 250);"
+        style="font-size:11px;font-weight:600;color:color-mix(in oklab, var(--color-primary) 85%, var(--color-base-content));"
       >
         Clear
       </button>
       <span
         id="story-map-count"
-        style="font-family:var(--font-mono);font-size:11px;color:oklch(0.5 0.02 255);"
+        style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
       >
         {count_label(@visible, @total)}
       </span>
@@ -326,26 +330,33 @@ defmodule RelayWeb.StoryMapComponents do
   # Artboard line 61.
   defp filter_bar_style do
     "min-height:48px;flex:0 0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;" <>
-      "padding:9px 18px;border-bottom:#{@gl_light};background:oklch(0.972 0.005 255);z-index:55;"
+      "padding:9px 18px;border-bottom:#{@gl_light};background:var(--color-field-hover);z-index:55;"
   end
 
   # Artboard `ownerChips` (line ~542). The artboard's per-person `PEOPLE[init]` hue becomes
   # the app's own `identity_hue/1` — the ONE definition of who is what colour — and the AI
-  # takes this module's violet, the same 292 `hue_deg(:violet)` already uses.
+  # takes this module's violet, the same 292 degrees `--color-secondary` is defined at
+  # (assets/css/app.css) — `chip_hue/1` is the one place that pins the number, since this
+  # pale identity tint is deliberately not a role token (see `theme-tokens:allow` below).
   defp owner_chip_style(chip) do
     {background, border} =
       if chip.selected? do
         hue = chip_hue(chip)
+        # Per-person/AI hue tint — no single brand role to map onto, same exception as
+        # CoreComponents.identity_color/1. theme-tokens:allow: per-entity hue, not a role
         {"oklch(0.95 0.03 #{hue})", "oklch(0.75 0.08 #{hue})"}
       else
-        {"oklch(1 0 0)", "oklch(0.9 0.006 255)"}
+        {"var(--color-base-100)", "var(--color-field-border)"}
       end
 
     "display:flex;align-items:center;border-radius:8px;padding:3px;" <>
       "background:#{background};border:1px solid #{border};"
   end
 
-  defp chip_hue(%{actor: :ai}), do: hue_deg(:violet)
+  # 292 — `--color-secondary`'s hue (assets/css/app.css) — not `hue_role/1`'s vocabulary
+  # below, which maps a status hue to a role *token*; this pins the raw degree the identity
+  # tint above needs instead.
+  defp chip_hue(%{actor: :ai}), do: 292
   defp chip_hue(%{email: email}), do: CoreComponents.identity_hue(email)
 
   # Artboard `needsStyle` (line ~572) — the filter bar's toggle chrome, shared by `Needs input`
@@ -354,8 +365,13 @@ defmodule RelayWeb.StoryMapComponents do
   defp filter_toggle_style(on?) do
     {background, color, border} =
       if on?,
-        do: {"oklch(0.96 0.05 65)", "oklch(0.5 0.13 65)", "oklch(0.82 0.09 65)"},
-        else: {"oklch(1 0 0)", "oklch(0.5 0.02 255)", "oklch(0.9 0.006 255)"}
+        do:
+          {"color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100))",
+           "color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content))",
+           "color-mix(in oklab, var(--color-warning) 60%, var(--color-base-100))"},
+        else:
+          {"var(--color-base-100)", "color-mix(in oklab, var(--color-base-content) 70%, transparent)",
+           "var(--color-field-border)"}
 
     "display:flex;align-items:center;gap:6px;border-radius:8px;padding:5px 10px;" <>
       "font-size:11.5px;font-weight:600;background:#{background};color:#{color};" <>
@@ -365,8 +381,10 @@ defmodule RelayWeb.StoryMapComponents do
   # Artboard line 71.
   defp focus_chip_style do
     "display:flex;align-items:center;gap:6px;border-radius:8px;padding:5px 10px;" <>
-      "font-size:11.5px;font-weight:600;background:oklch(0.97 0.02 292);" <>
-      "color:oklch(0.46 0.14 292);border:1px solid oklch(0.88 0.05 292);"
+      "font-size:11.5px;font-weight:600;" <>
+      "background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));" <>
+      "color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));" <>
+      "border:1px solid color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));"
   end
 
   # Artboard `countLabel` (line ~575), corrected by RE276. The artboard keyed this off
@@ -422,7 +440,9 @@ defmodule RelayWeb.StoryMapComponents do
       aria-label={if(@focusing, do: "Focus #{@activity.name}", else: "Expand #{@activity.name}")}
       style={stub_style(@index)}
     >
-      <span style="font-size:12px;color:oklch(0.5 0.02 255);">▸</span>
+      <span style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
+        ▸
+      </span>
       <span data-role="stub-name" style={stub_name_style()}>{@activity.name}</span>
       <span data-role="stub-count" style={inverted_count_style("2px 6px")}>{@count}</span>
     </button>
@@ -432,7 +452,7 @@ defmodule RelayWeb.StoryMapComponents do
   # Artboard line ~419.
   defp stub_style(index) do
     "grid-column:#{index + 2};grid-row:1 / -1;align-self:stretch;position:sticky;top:0;" <>
-      "z-index:22;background:oklch(0.972 0.006 255);border-right:#{@gl_strong};" <>
+      "z-index:22;background:var(--color-field-hover);border-right:#{@gl_strong};" <>
       "border-bottom:#{@gl_light};display:flex;flex-direction:column;align-items:center;" <>
       "justify-content:space-between;padding:10px 0;cursor:pointer;"
   end
@@ -440,7 +460,7 @@ defmodule RelayWeb.StoryMapComponents do
   # Artboard line ~420.
   defp stub_name_style do
     "writing-mode:vertical-rl;transform:rotate(180deg);font-size:12px;font-weight:600;" <>
-      "color:oklch(0.4 0.02 255);"
+      "color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
   end
 
   @doc """

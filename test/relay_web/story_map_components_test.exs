@@ -1184,8 +1184,8 @@ defmodule RelayWeb.StoryMapComponentsTest do
     test "the bar is the artboard's 48px row" do
       assert style_of(filter_bar([]), "#story-map-filter-bar") ==
                "min-height:48px;flex:0 0 auto;display:flex;align-items:center;gap:8px;" <>
-                 "flex-wrap:wrap;padding:9px 18px;border-bottom:1px solid oklch(0.92 0.006 255);" <>
-                 "background:oklch(0.972 0.005 255);z-index:55;"
+                 "flex-wrap:wrap;padding:9px 18px;border-bottom:1px solid var(--color-base-300);" <>
+                 "background:var(--color-field-hover);z-index:55;"
     end
 
     test "an unselected owner chip is white-on-neutral with the artboard's dimmed avatar" do
@@ -1194,7 +1194,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
       assert style_of(html, chip) ==
                "display:flex;align-items:center;border-radius:8px;padding:3px;" <>
-                 "background:oklch(1 0 0);border:1px solid oklch(0.9 0.006 255);"
+                 "background:var(--color-base-100);border:1px solid var(--color-field-border);"
 
       assert attr_of(html, chip, "aria-pressed") == "false"
       # `avatar/1` omits the attribute entirely when it has no class, so `|| ""` keeps a
@@ -1227,16 +1227,20 @@ defmodule RelayWeb.StoryMapComponentsTest do
       on = filter_bar(needs_input: true)
 
       assert style_of(off, "#story-map-needs-input-filter") =~
-               "background:oklch(1 0 0);color:oklch(0.5 0.02 255);border:1px solid oklch(0.9 0.006 255);"
+               "background:var(--color-base-100);" <>
+                 "color:color-mix(in oklab, var(--color-base-content) 70%, transparent);" <>
+                 "border:1px solid var(--color-field-border);"
 
       assert style_of(on, "#story-map-needs-input-filter") =~
-               "background:oklch(0.96 0.05 65);color:oklch(0.5 0.13 65);border:1px solid oklch(0.82 0.09 65);"
+               "background:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100));" <>
+                 "color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));" <>
+                 "border:1px solid color-mix(in oklab, var(--color-warning) 60%, var(--color-base-100));"
 
       assert attr_of(off, "#story-map-needs-input-filter", "aria-pressed") == "false"
       assert attr_of(on, "#story-map-needs-input-filter", "aria-pressed") == "true"
 
       assert style_of(on, "#story-map-needs-input-filter span") ==
-               "width:6px;height:6px;border-radius:50%;background:oklch(0.7 0.13 65);"
+               "width:6px;height:6px;border-radius:50%;background:var(--color-warning);"
     end
 
     test "the Focusing chip renders only while focusing, in the artboard's violet" do
@@ -1247,8 +1251,9 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ "◎ Focusing: Checkout ✕"
 
       assert style_of(html, "#story-map-exit-focus") =~
-               "background:oklch(0.97 0.02 292);color:oklch(0.46 0.14 292);" <>
-                 "border:1px solid oklch(0.88 0.05 292);"
+               "background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));" <>
+                 "color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));" <>
+                 "border:1px solid color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));"
     end
 
     test "Clear follows filter_active, and the count follows the NUMBERS not the filter" do
@@ -1269,10 +1274,12 @@ defmodule RelayWeb.StoryMapComponentsTest do
       refute default_hiding =~ "story-map-clear-filters"
 
       assert style_of(filtering, "#story-map-clear-filters") ==
-               "font-size:11px;font-weight:600;color:oklch(0.55 0.14 250);"
+               "font-size:11px;font-weight:600;" <>
+                 "color:color-mix(in oklab, var(--color-primary) 85%, var(--color-base-content));"
 
       assert style_of(filtering, "#story-map-count") ==
-               "font-family:var(--font-mono);font-size:11px;color:oklch(0.5 0.02 255);"
+               "font-family:var(--font-mono);font-size:11px;" <>
+                 "color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
     end
 
     test "the Hide complete toggle is the Needs input button's chrome, pressed by default" do
@@ -1334,8 +1341,9 @@ defmodule RelayWeb.StoryMapComponentsTest do
     test "the stub spans every row, sticky, at the artboard's values" do
       assert style_of(stub([]), "#story-map-stub-7") ==
                "grid-column:2;grid-row:1 / -1;align-self:stretch;position:sticky;top:0;z-index:22;" <>
-                 "background:oklch(0.972 0.006 255);border-right:2px solid oklch(0.83 0.02 255);" <>
-                 "border-bottom:1px solid oklch(0.92 0.006 255);display:flex;flex-direction:column;" <>
+                 "background:var(--color-field-hover);" <>
+                 "border-right:2px solid color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100));" <>
+                 "border-bottom:1px solid var(--color-base-300);display:flex;flex-direction:column;" <>
                  "align-items:center;justify-content:space-between;padding:10px 0;cursor:pointer;"
     end
 
@@ -1347,13 +1355,13 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
       assert style_of(html, "#story-map-stub-7 [data-role='stub-name']") ==
                "writing-mode:vertical-rl;transform:rotate(180deg);font-size:12px;" <>
-                 "font-weight:600;color:oklch(0.4 0.02 255);"
+                 "font-weight:600;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
 
       # The artboard's `badgeStyle` collapsed branch (line ~414): white on the dark pill,
       # the exact reverse of an expanded band's badge.
       assert style_of(html, "#story-map-stub-7 [data-role='stub-count']") ==
-               "font-family:var(--font-mono);font-size:9px;font-weight:600;color:oklch(1 0 0);" <>
-                 "background:oklch(0.55 0.02 255);border-radius:20px;padding:2px 6px;"
+               "font-family:var(--font-mono);font-size:9px;font-weight:600;color:var(--color-neutral-content);" <>
+                 "background:var(--color-neutral);border-radius:20px;padding:2px 6px;"
 
       assert text_of(html, "#story-map-stub-7 [data-role='stub-count']") == "3"
     end
@@ -1453,8 +1461,12 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert attr_of(html, "#story-map-collapse-2", "phx-click") == "toggle_story_map_collapse"
       assert attr_of(html, "#story-map-collapse-2", "phx-value-activity-id") == "2"
       assert attr_of(html, "#story-map-focus-2", "phx-click") == "set_story_map_focus"
-      assert style_of(html, "#story-map-focus-2") == "font-size:12px;color:oklch(0.55 0.02 255);"
-      assert style_of(html, "#story-map-collapse-2") == "font-size:12px;color:oklch(0.55 0.02 255);"
+
+      assert style_of(html, "#story-map-focus-2") ==
+               "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+
+      assert style_of(html, "#story-map-collapse-2") ==
+               "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
     end
   end
 
@@ -1468,7 +1480,23 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert src =~ ~s[@gl_strong "2px solid color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100))"]
       assert src =~ ~s[@gl_dashed "1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100))"]
       assert src =~ ~s[@no_task_bg "var(--color-base-200)"]
-      refute src =~ "oklch("
+
+      # RE259's owner chip reintroduced ONE oklch: `owner_chip_style/1`'s per-person/AI hue
+      # tint, the same kind of exception as `CoreComponents.identity_color/1` — marked with
+      # a `theme-tokens:allow` comment (on the line itself or the line directly above, same
+      # as theme_tokens_test.exs honours) and covered by the whole-tree guardrail. Any OTHER
+      # oklch( here would be a regression.
+      lines = String.split(src, "\n")
+
+      unmarked =
+        lines
+        |> Enum.with_index()
+        |> Enum.filter(fn {line, _i} -> line =~ "oklch(" end)
+        |> Enum.reject(fn {line, i} ->
+          line =~ "theme-tokens:allow" or (i > 0 and Enum.at(lines, i - 1) =~ "theme-tokens:allow")
+        end)
+
+      assert unmarked == [], "unmarked oklch literal(s): #{inspect(unmarked)}"
     end
 
     test "the live-cursor avatar ring follows the surface instead of staying white" do
