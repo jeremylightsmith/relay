@@ -150,7 +150,8 @@ defmodule RelayWeb.StoryMapComponents do
   @doc """
   The top-chrome view controls (RE260, artboard lines ~42-48): the ZOOM segmented control and
   the Hide tasks toggle. Both are keys of the board-wide shared view
-  (`Relay.StoryMap.view/1` / `put_view/3` / `toggle_view/2`) — they change the grid's geometry,
+  (`Relay.StoryMap.view/1` plus `merge_view/2`, the one writer `put_view/3` and `toggle_view/2`
+  compose) — they change the grid's geometry,
   which is the coordinate space RE257's raw-pixel cursors are measured in, so they are shared
   and persisted rather than per-socket. A click writes through the view and the buttons
   re-render from that write's own board-wide broadcast.
@@ -363,20 +364,32 @@ defmodule RelayWeb.StoryMapComponents do
   normally it expands this activity, and while focusing it moves the focus here instead —
   because expanding one activity in focus mode is exactly "focus that one".
 
-  It is deliberately **not** a drop target: it carries no `.story-map-drop` class, and
+  It is deliberately **not** a *card* drop target: it carries no `.story-map-drop` class, and
   `StoryMapGrid.decode_placement/2` has no `"c:"` clause, so a forged drop is refused server
   side too.
+
+  It **is** still a RE261 header-reorder source and target (the artboard's stub carries
+  `draggable` / `onDragStart` / `onDropAct`, template line ~165): it mirrors the band header's
+  `.story-map-header` / `.story-map-header-drop` / `data-kind` / `data-id` wiring, which is what
+  `StoryMapDnD` selects reorder by. Collapsing is a view state, and a shared board-wide one, so
+  losing drag here would remove the affordance for every viewer. The two drag worlds stay apart
+  in `dropZone/1`, so carrying the header classes never makes the stub take a card.
   """
   attr :activity, :any, required: true, doc: "the collapsed %Schemas.StoryActivity{}"
   attr :index, :integer, required: true, doc: "0-based index into the grid's columns"
   attr :count, :integer, required: true, doc: "how many of its cards are hidden"
   attr :focusing, :boolean, default: false
+  attr :read_only, :boolean, default: false, doc: "an archived board reorders nothing"
 
   def story_map_collapsed_stub(assigns) do
     ~H"""
     <button
       type="button"
       id={"story-map-stub-#{@activity.id}"}
+      class={[not @read_only && "story-map-header story-map-header-drop"]}
+      data-kind="activity"
+      data-id={@activity.id}
+      draggable={to_string(not @read_only)}
       phx-click={if(@focusing, do: "set_story_map_focus", else: "toggle_story_map_collapse")}
       phx-value-activity-id={@activity.id}
       aria-label={"Expand #{@activity.name}"}
@@ -760,6 +773,7 @@ defmodule RelayWeb.StoryMapComponents do
         index={index}
         count={column.count}
         focusing={@focus != nil}
+        read_only={@read_only}
       />
       <div
         :for={band <- @grid.bands}

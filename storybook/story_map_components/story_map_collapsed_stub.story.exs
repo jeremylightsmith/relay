@@ -23,6 +23,17 @@ defmodule Storybook.StoryMapComponents.StoryMapCollapsedStub do
         id: :empty,
         description: "An activity holding no cards still shows its badge.",
         attributes: %{activity: checkout(), index: 0, count: 0, focusing: false}
+      },
+      %Variation{
+        id: :read_only,
+        description: "On an archived board the stub is not a RE261 reorder source or target.",
+        attributes: %{
+          activity: checkout(),
+          index: 0,
+          count: 3,
+          focusing: false,
+          read_only: true
+        }
       }
     ]
   end

@@ -1314,6 +1314,27 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
       assert attr_of(stub([]), "#story-map-stub-7", "phx-value-activity-id") == "7"
     end
+
+    test "the stub stays a RE261 reorder source and target while collapsed" do
+      html = stub([])
+
+      # `StoryMapDnD` selects both by exactly these (story_map_dnd.js lines ~22-23), so a
+      # collapsed activity that dropped them could neither be dragged nor dropped onto.
+      assert attr_of(html, "#story-map-stub-7", "draggable") == "true"
+      assert attr_of(html, "#story-map-stub-7", "data-kind") == "activity"
+      assert attr_of(html, "#story-map-stub-7", "data-id") == "7"
+      assert attr_of(html, "#story-map-stub-7", "class") == "story-map-header story-map-header-drop"
+
+      # And NOT a card drop target — `decode_placement/2` has no `"c:"` clause.
+      refute attr_of(html, "#story-map-stub-7", "class") =~ "story-map-drop"
+    end
+
+    test "an archived board's stub is neither a reorder source nor a target" do
+      html = stub(read_only: true)
+
+      assert attr_of(html, "#story-map-stub-7", "draggable") == "false"
+      assert attr_of(html, "#story-map-stub-7", "class") in [nil, ""]
+    end
   end
 
   describe "RE259 — the grid under collapse" do

@@ -38,10 +38,10 @@ defmodule RelayWeb.BoardLive do
   board-wide shared view alongside `:story_map_tray_open` (RE257) — **not** per-socket assigns:
   they change the grid's geometry, which is the coordinate space RE257's raw-pixel cursors are
   measured in, so viewers who disagree see each other's cursor over the wrong card.
-  `:story_map_hide_tasks` is the sixth argument to `StoryMapGrid.build/6`; `:story_map_zoom`
+  `:story_map_hide_tasks` is the sixth argument to `StoryMapGrid.build/7`; `:story_map_zoom`
   reaches only the renderer. Opening a `{:task, _}` draft turns Hide tasks off (through
-  `put_view/3` like every other writer), because a new task column has nowhere to render while
-  the activity is merged.
+  `merge_view/2`, which now also drops the activity from `collapsed` and clears a focus that is
+  elsewhere), because a new task column has nowhere to render while the activity is merged.
 
   RE262 makes it writable: `"assign_card"` / `"unassign_card"` come from the `StoryMapDnD`
   hook rooted on `#story-map`, and both re-render through the `{:card_upserted, _}` echo rather
@@ -59,7 +59,8 @@ defmodule RelayWeb.BoardLive do
   anywhere but the map, re-derived on every `"presence_diff"`), rendered by
   `StoryMapComponents.presence_stack/1` in the `<:actions>` slot. `:story_map_tray_open`,
   `:story_map_zoom` and `:story_map_hide_tasks` are no longer private socket assigns: they are
-  the board-wide shared view (`Relay.StoryMap.view/1` / `put_view/3` / `toggle_view/2`), so a
+  the board-wide shared view (`Relay.StoryMap.view/1` plus `merge_view/2`, the one writer that
+  `put_view/3`, `toggle_view/2` and `toggle_view_member/4` all compose), so a
   toggle writes and re-renders from the write's own broadcast — the clicker included, one path,
   no optimistic local assign, and `assign_story_map_view/2` is the one place they are assigned.
   Every flip goes through `toggle_view/2` so it is computed on the committed row rather than the

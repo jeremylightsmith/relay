@@ -1,7 +1,7 @@
 defmodule RelayWeb.StoryMapGrid do
   @moduledoc """
   The story map's pure view model (RE264): `(activities, tasks, releases, cards, draft,
-  hide_tasks?)` in, a fully placed grid out. No Ecto, no LiveView, no side effects — every placement rule the
+  hide_tasks?, collapsed)` in, a fully placed grid out. No Ecto, no LiveView, no side effects — every placement rule the
   artboard (`docs/designs/Relay Story Map.dc.html`, `eff/1`) encodes lives here, so the rules
   are unit-testable without mounting a LiveView.
 
