@@ -26,7 +26,7 @@ defmodule RelayWeb.BoardsLive do
           type="button"
           id="top-bar-new-board"
           phx-click="new_board"
-          class="btn btn-sm border-none font-semibold text-primary-content bg-primary"
+          class="btn btn-sm btn-primary font-semibold"
         >
           <span class="text-[15px] leading-none">+</span> New board
         </button>
@@ -60,7 +60,7 @@ defmodule RelayWeb.BoardsLive do
             </span>
           </div>
         </div>
-        <p class="mb-7 mt-1 hidden max-w-[560px] text-sm leading-relaxed drawer:block text-base-content/70">
+        <p class="mb-7 mt-1 hidden max-w-[560px] text-sm leading-relaxed text-base-content/70 drawer:block">
           Each board is a shared workspace where you and Relay AI pass work between each other.
         </p>
 
@@ -83,7 +83,7 @@ defmodule RelayWeb.BoardsLive do
                 >
                   <span class="hidden size-[7px] rounded-full bg-base-100 drawer:block"></span>
                 </span>
-                <span class="text-[14px] font-semibold tracking-[-0.015em] drawer:text-[15.5px] drawer:tracking-tight text-base-content">
+                <span class="text-[14px] font-semibold tracking-[-0.015em] text-base-content drawer:text-[15.5px] drawer:tracking-tight">
                   {b.name}
                 </span>
                 <span class="flex-1"></span>
@@ -109,11 +109,11 @@ defmodule RelayWeb.BoardsLive do
               </div>
               <span
                 id={"board-meta-mobile-#{b.slug}"}
-                class="font-mono text-[10.5px] drawer:hidden text-base-content/55"
+                class="font-mono text-[10.5px] text-base-content/55 drawer:hidden"
               >
                 {mobile_meta_label(b)}
               </span>
-              <span class="hidden items-center gap-2 font-mono text-[11.5px] drawer:flex text-base-content/55">
+              <span class="hidden items-center gap-2 font-mono text-[11.5px] text-base-content/55 drawer:flex">
                 {board_meta_summary(b)}
                 <span
                   :if={badge_count(b, @embed) > 0}

@@ -160,6 +160,27 @@ defmodule RelayWeb.BoardSettingsLiveTest do
     end
   end
 
+  describe "stages pane" do
+    setup %{conn: conn} do
+      user = Relay.Factory.insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      %{conn: Plug.Test.init_test_session(conn, user_id: user.id), board: board}
+    end
+
+    test "the delete-stage × uses a dark error ink, not the flat mid-tone token",
+         %{conn: conn, board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      # L 0.55 brand ink on a tinted chip maps to the ink formula (error 80%, base-content),
+      # not the flat mid-tone fill/border token — the flat token washes out contrast in light mode.
+      assert has_element?(
+               view,
+               "#stage-#{code.id}-delete[style*='color:color-mix(in oklab, var(--color-error) 80%, var(--color-base-content))']"
+             )
+    end
+  end
+
   describe "top bar" do
     setup :register_and_log_in_user
 
@@ -170,6 +191,9 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       refute has_element?(view, "#back-to-board")
       assert has_element?(view, ~s(#settings-done[href="/board/#{board.slug}"]))
       assert has_element?(view, "#top-bar-crumb-boards")
+      # daisyUI's own primitive, not a hand-rolled bg-primary utility stack
+      assert has_element?(view, "#settings-done.btn-primary")
+      refute has_element?(view, "#settings-done.bg-primary")
     end
 
     test "the avatar dropdown has Sign out but no Archived cards", %{conn: conn, user: user} do
@@ -194,6 +218,19 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       # the General rail link carries nav_style/1's active blue-tint
       assert has_element?(view, "#settings-nav-general[style*='var(--color-primary) 45%, var(--color-base-content)']")
       refute has_element?(view, "#settings-nav-stages[style*='var(--color-primary) 45%, var(--color-base-content)']")
+    end
+
+    test "the board-key rename warning uses a dark warning ink, not the flat mid-tone token",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+      # L 0.55 brand ink on a tinted chip maps to the ink formula (warning 65%, base-content),
+      # not the flat mid-tone fill/border token — the flat token washes out contrast in light mode.
+      assert has_element?(
+               view,
+               "#board-key-warning[style*='color-mix(in oklab, var(--color-warning) 65%, var(--color-base-content))']"
+             )
     end
   end
 

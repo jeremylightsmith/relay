@@ -52,7 +52,7 @@ defmodule RelayWeb.BoardSettingsLive do
         <.link
           navigate={~p"/board/#{@board.slug}"}
           id="settings-done"
-          class="btn btn-sm border-none font-semibold text-primary-content bg-primary"
+          class="btn btn-sm btn-primary font-semibold"
         >
           Done
         </.link>
@@ -235,7 +235,7 @@ defmodule RelayWeb.BoardSettingsLive do
                     </label>
                     <div
                       id="public-url-row"
-                      style="max-width:460px;display:flex;align-items:center;border:1px solid var(--color-field-border);border-radius:9px;padding:10px 12px;background:var(--color-base-200);font-size:13.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
+                      style="max-width:460px;display:flex;align-items:center;border:1px solid var(--color-field-border);border-radius:9px;padding:10px 12px;background:var(--color-field-bg);font-size:13.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
                     >
                       {"#{RelayWeb.Endpoint.url()}/board/#{@board.slug}/public"}
                     </div>
@@ -332,7 +332,7 @@ defmodule RelayWeb.BoardSettingsLive do
                   </span>
                   <p
                     id="board-key-warning"
-                    style="font-size:12px;line-height:1.5;color:var(--color-warning);margin:0;"
+                    style="font-size:12px;line-height:1.5;color:color-mix(in oklab, var(--color-warning) 65%, var(--color-base-content));margin:0;"
                   >
                     Changing this renames every card on this board (e.g. {@board.key}230).
                   </p>
@@ -458,7 +458,7 @@ defmodule RelayWeb.BoardSettingsLive do
                           phx-value-stage-id={stage.id}
                           data-confirm="Delete this stage?"
                           title="Delete stage"
-                          style="width:26px;height:26px;border-radius:6px;border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));color:var(--color-error);font-size:14px;padding:0;margin-left:4px;"
+                          style="width:26px;height:26px;border-radius:6px;border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 80%, var(--color-base-content));font-size:14px;padding:0;margin-left:4px;"
                         >
                           ×
                         </button>
@@ -764,7 +764,7 @@ defmodule RelayWeb.BoardSettingsLive do
                   value={Phoenix.HTML.Form.normalize_value("email", f[:email].value)}
                   placeholder="name@company.com"
                   autocomplete="off"
-                  style="flex:1;min-width:180px;border:1px solid var(--color-field-border);border-radius:8px;padding:9px 11px;font-size:13.5px;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);background:var(--color-base-200);outline:none;"
+                  style="flex:1;min-width:180px;border:1px solid var(--color-field-border);border-radius:8px;padding:9px 11px;font-size:13.5px;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);background:var(--color-field-bg);outline:none;"
                 />
                 <button
                   type="submit"
@@ -1669,8 +1669,8 @@ defmodule RelayWeb.BoardSettingsLive do
   end
 
   # RLY-72: horizontal tab in the mobile settings strip. Reuses nav_style/1's
-  # active/inactive blue-tint values (active = oklch(0.42 0.13 250) text on
-  # oklch(0.95 0.03 250)), laid out as a non-wrapping pill for a horizontal row.
+  # active/inactive blue-tint values (active = primary 15% tint background with
+  # primary 45% ink text), laid out as a non-wrapping pill for a horizontal row.
   # No artboard — deliberate responsive design matching the settings chrome.
   defp tab_style(true) do
     "flex:0 0 auto;text-decoration:none;padding:10px 14px;border-radius:8px;" <>

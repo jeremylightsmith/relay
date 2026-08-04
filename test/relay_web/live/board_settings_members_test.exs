@@ -20,6 +20,16 @@ defmodule RelayWeb.BoardSettingsMembersTest do
     assert has_element?(view, "#invite-member-form")
   end
 
+  test "the invite email input uses the field-surface token, not the base-200 canvas token", %{
+    conn: conn,
+    user: user
+  } do
+    board = board_for(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=members")
+
+    assert has_element?(view, "#invite-email[style*='background:var(--color-field-bg)']")
+  end
+
   test "the current user's own row shows a YOU badge and no remove button", %{conn: conn, user: user} do
     board = board_for(user)
     [me] = Members.list_members(board)
