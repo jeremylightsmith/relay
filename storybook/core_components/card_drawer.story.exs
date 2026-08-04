@@ -26,7 +26,11 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 61}, as: :card),
-          stages: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 7, name: "Done"}],
+          stages: [
+            %{id: 3, name: "Plan", current?: false},
+            %{id: 4, name: "Code", current?: true},
+            %{id: 7, name: "Done", current?: false}
+          ],
           conversation: story_conversation(),
           note_count: length(story_conversation()),
           activity: story_activity(),
@@ -48,7 +52,11 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Deploy the search reindex job"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => nil}, as: :card),
-          stages: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 7, name: "Done"}],
+          stages: [
+            %{id: 3, name: "Plan", current?: false},
+            %{id: 4, name: "Code", current?: true},
+            %{id: 7, name: "Done", current?: false}
+          ],
           conversation: [],
           note_count: 0,
           activity: story_activity(),
@@ -70,7 +78,11 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Generate the API client"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => nil}, as: :card),
-          stages: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 7, name: "Done"}],
+          stages: [
+            %{id: 3, name: "Plan", current?: false},
+            %{id: 4, name: "Code", current?: true},
+            %{id: 7, name: "Done", current?: false}
+          ],
           conversation: [],
           note_count: 0,
           activity: story_activity(),
