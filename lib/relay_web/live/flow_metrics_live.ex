@@ -131,16 +131,14 @@ defmodule RelayWeb.FlowMetricsLive do
       "background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));"
 
   defp type_tag_style(:shell),
-    do:
-      "background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
+    do: "background:var(--color-field-hover);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
 
   defp type_tag_style(:gate),
     do:
       "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));"
 
   defp type_tag_style(_),
-    do:
-      "background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
+    do: "background:var(--color-field-hover);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
 
   @impl true
   def render(assigns) do
@@ -205,13 +203,13 @@ defmodule RelayWeb.FlowMetricsLive do
         <div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0;">
           <span
             id="flow-metrics-version-chip"
-            style="font-family:var(--font-mono);font-size:14px;font-weight:600;padding:6px 12px;border-radius:8px;background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 90%, transparent);"
+            style="font-family:var(--font-mono);font-size:14px;font-weight:600;padding:6px 12px;border-radius:8px;background:var(--color-field-hover);color:color-mix(in oklab, var(--color-base-content) 90%, transparent);"
           >
             v{@flow.version}
           </span>
           <div
             id="flow-metrics-window"
-            style="display:inline-flex;background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));border:1px solid var(--color-field-border);border-radius:9px;padding:3px;gap:2px;"
+            style="display:inline-flex;background:var(--color-field-hover);border:1px solid var(--color-field-border);border-radius:9px;padding:3px;gap:2px;"
           >
             <button
               :for={{key, label} <- window_options()}

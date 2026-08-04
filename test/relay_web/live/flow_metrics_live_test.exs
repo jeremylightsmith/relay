@@ -79,6 +79,22 @@ defmodule RelayWeb.FlowMetricsLiveTest do
     assert has_element?(view, "#cost-blank-note")
   end
 
+  test "version chip, window selector and a shell node's type tag use the field-hover token", %{
+    conn: conn,
+    board: board
+  } do
+    seed_runs(board, "branch", 10)
+    {:ok, _view, html} = live(conn, ~p"/board/#{board.slug}/flows/code/metrics")
+
+    assert html =~
+             ~r/id="flow-metrics-version-chip"\s*style="[^"]*background:var\(--color-field-hover\)/
+
+    assert html =~
+             ~r/id="flow-metrics-window"\s*style="[^"]*background:var\(--color-field-hover\)/
+
+    assert html =~ ~r/id="node-type-branch"[^>]*background:var\(--color-field-hover\)/
+  end
+
   test "window selector re-queries via URL patch", %{conn: conn, board: board} do
     seed_runs(board, "implement", 10)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code/metrics")
