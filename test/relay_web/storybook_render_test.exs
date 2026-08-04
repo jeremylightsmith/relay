@@ -14,4 +14,13 @@ defmodule RelayWeb.StorybookRenderTest do
       assert html_response(conn, 200)
     end
   end
+
+  test "GET /storybook/core_components/card_drawer shows the Notes count and the :question state (RE277)",
+       %{conn: conn} do
+    conn = get(conn, "/storybook/core_components/card_drawer")
+    html = html_response(conn, 200)
+
+    assert html =~ "3 notes"
+    assert html =~ "QUESTION"
+  end
 end
