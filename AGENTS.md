@@ -90,6 +90,16 @@ use them.
   (`test/fixtures/executor_contract.json`, RLY-176) so drift breaks CI instead of shipping.
   Nearly every recent engine bug reduced to "two copies of one fact disagreed" — reviews should
   treat a duplicated closed set the way they treat a failing test.
+- **No color literals in the web layer or in the app stylesheets.** `oklch(...)`, hex, `rgb()`
+  and the raw Tailwind palette classes (`text-white`, `bg-slate-200`, …) do not flip with
+  `data-theme`, so a screen built by transcribing a light-only artboard breaks dark mode. The
+  only place a raw color may appear is inside the two `@plugin "../vendor/daisyui-theme"` blocks
+  in `assets/css/app.css` and `assets/css/storybook.css`, which is where the tokens are defined.
+  Everywhere else use the daisyUI semantic tokens — `bg-base-100`, `text-base-content/60`,
+  `border-base-300`, `var(--color-primary)`, `color-mix(in oklab, var(--color-warning) 15%,
+  var(--color-base-100))` — and prefer a shared control over a repeated inline style. The
+  literal → token mapping is documented at the top of the theming section of `app.css` and
+  enforced by `test/relay_web/theme_tokens_test.exs` (RE237).
 
 ### Phoenix v1.8 guidelines
 

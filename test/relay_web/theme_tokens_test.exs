@@ -5,8 +5,10 @@ defmodule RelayWeb.ThemeTokensTest do
   with `data-theme`; the mapping from a literal to its token is documented at the top of the
   theming section of `assets/css/app.css`.
 
-  `@pending` lists files not yet swept by RE237. It shrinks to `[]` over the card's sweep
-  tasks and is deleted in the final task — a file must never be added back to it.
+  There is deliberately **no** opt-out list — RE237's sweep is finished and the whole of
+  `lib/relay_web` plus both stylesheets is scanned. A new exception belongs in `@allowlist`
+  (or a `# theme-tokens:allow:` marker) with a comment saying why, never in a re-added pending
+  list.
 
   Known scanner blind spots (`@color_pattern` is intentionally narrow, not exhaustive): it does
   not catch CSS named colors in inline styles (`style="color: white"`), `hsl(...)`/`hsla(...)`,
@@ -48,8 +50,6 @@ defmodule RelayWeb.ThemeTokensTest do
     {"assets/css/storybook.css", "#000", "mask-image channel, not a color"}
   ]
 
-  @pending []
-
   test "no hardcoded color literals outside the theme blocks" do
     offenders = Enum.flat_map(scanned_files(), &offenders_in/1)
 
@@ -62,12 +62,6 @@ defmodule RelayWeb.ThemeTokensTest do
     """
   end
 
-  test "@pending only ever lists files that exist" do
-    for rel <- @pending do
-      assert File.exists?(Path.join(@root, rel)), "@pending names a missing file: #{rel}"
-    end
-  end
-
   # --- scanner ---------------------------------------------------------------
 
   defp scanned_files do
@@ -75,7 +69,6 @@ defmodule RelayWeb.ThemeTokensTest do
       @root
       |> Path.join("lib/relay_web/**/*.{ex,heex}")
       |> Path.wildcard()
-      |> Enum.reject(&(relative(&1) in @pending))
 
     web ++ Enum.map(@css_files, &Path.join(@root, &1))
   end
@@ -153,4 +146,50 @@ defmodule RelayWeb.ThemeTokensTest do
   # its own line above.
   defp marked_allowed?(nil), do: false
   defp marked_allowed?(line), do: String.contains?(line, "theme-tokens:allow")
+
+  describe "the guardrail itself" do
+    @tag :tmp_dir
+    test "a fresh hardcoded literal is reported with file, line and the literal", %{tmp_dir: tmp} do
+      path = Path.join(tmp, "offender.heex")
+
+      File.write!(path, """
+      <div class="ok">fine</div>
+      <div style="color:oklch(0.55 0.02 255);">not fine</div>
+      <div class="bg-white">also not fine</div>
+      """)
+
+      assert Enum.map(offenders_in(path), fn {_rel, line_no, match, _line} -> {line_no, match} end) ==
+               [{2, "oklch("}, {3, "bg-white"}]
+    end
+
+    @tag :tmp_dir
+    test "a literal quoted in a comment is documentation, not an offence", %{tmp_dir: tmp} do
+      css = Path.join(tmp, "notes.css")
+      File.write!(css, ".a { color: var(--color-primary); } /* was oklch(0.60 0.14 250) */\n")
+      assert offenders_in(css) == []
+
+      ex = Path.join(tmp, "notes.ex")
+      File.write!(ex, "  # the artboard used oklch(0.55 0.02 255) here\n  x = 1\n")
+      assert offenders_in(ex) == []
+    end
+
+    test "daisyUI semantic classes are not mistaken for the Tailwind palette" do
+      for ok <- ~w(bg-base-100 text-base-content/50 border-base-300 bg-primary text-secondary
+                   text-neutral-content bg-success border-warning text-error) do
+        refute Regex.match?(@color_pattern, ok), "#{ok} is a token, not a palette class"
+      end
+    end
+
+    test "a fragment link is not mistaken for a hex color" do
+      for ok <- ~w(#top #how #flow #stages) do
+        refute Regex.match?(@color_pattern, ok)
+      end
+    end
+
+    test "literals inside a daisyUI theme block are allowed" do
+      # app.css and storybook.css are already scanned by the main test; their theme blocks are
+      # full of literals, so a green suite proves drop_theme_blocks/1 works. This pins WHY.
+      assert File.read!(Path.join(@root, "assets/css/app.css")) =~ "--color-base-100: oklch(1 0 0);"
+    end
+  end
 end
