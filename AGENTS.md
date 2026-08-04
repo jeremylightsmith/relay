@@ -96,7 +96,7 @@ use them.
   only place a raw color may appear *unannounced* is inside the two
   `@plugin "../vendor/daisyui-theme"` blocks in `assets/css/app.css` and
   `assets/css/storybook.css`, which is where the tokens are defined.
-  Everywhere else use the daisyUI semantic tokens — `bg-base-100`, `text-base-content/60`,
+  Everywhere else use the daisyUI semantic tokens — `bg-base-100`, `text-base-content/65`,
   `border-base-300`, `var(--color-primary)`, `color-mix(in oklab, var(--color-warning) 15%,
   var(--color-base-100))` — and prefer a shared control over a repeated inline style. The
   literal → token mapping is documented at the top of the theming section of `app.css` and

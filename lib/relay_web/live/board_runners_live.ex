@@ -61,8 +61,7 @@ defmodule RelayWeb.BoardRunnersLive do
         <.link
           navigate={~p"/board/#{@board.slug}"}
           id="runners-back"
-          class="btn btn-sm border-none font-semibold text-primary-content"
-          style="background:var(--color-primary);"
+          class="btn btn-sm btn-primary font-semibold"
         >
           Back to board
         </.link>

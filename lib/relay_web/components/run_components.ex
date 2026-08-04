@@ -185,16 +185,20 @@ defmodule RelayWeb.RunComponents do
 
   # The dot has long used the accent (teal) token while the surrounding tint/ink were
   # blue-ish (hue 250, primary's range) literals — a pre-existing choice, unrelated to
-  # RE237; the tint/ink below preserve that same blue appearance via var(--color-primary).
+  # RE237. The faint tint backgrounds (5-10% over base-100) keep that blue wash via
+  # var(--color-primary), but `baton_c` / `title_c` were `oklch(0.44 0.06 250)` — C 0.06 is a
+  # Rule-N near-neutral (see `delete_style/1` in story_map_components.ex), and Rule B ran
+  # `primary` to 55% to reach L 0.44, landing at C ~0.09 and reading as active Human-blue on a
+  # cancelled run. The ink goes neutral; the wash stays.
   defp strip_styles(:cancelled),
     do: %{
       wrap_bg: "color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100))",
       wrap_border: "color-mix(in oklab, var(--color-primary) 20%, var(--color-base-100))",
       baton_bg: "color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100))",
-      baton_c: "color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content))",
+      baton_c: "color-mix(in oklab, var(--color-base-content) 70%, transparent)",
       dot: "var(--color-accent)",
       pulse?: false,
-      title_c: "color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content))",
+      title_c: "color-mix(in oklab, var(--color-base-content) 70%, transparent)",
       ver_bg: "color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100))",
       ver_c: "color-mix(in oklab, var(--color-primary) 60%, var(--color-base-content))"
     }

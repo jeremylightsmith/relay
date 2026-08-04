@@ -2188,7 +2188,7 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(phx-click="close")
     end
 
-    test "meta_label is the mono 10px data label at the base-content/50 ink tier" do
+    test "meta_label is the mono 10px data label at the base-content/55 ink tier" do
       html =
         render_component(&CoreComponents.meta_label/1, %{
           inner_block: [%{__slot__: :inner_block, inner_block: fn _, _ -> "RLY-1" end}]
@@ -2196,7 +2196,8 @@ defmodule RelayWeb.CoreComponentsTest do
 
       assert html =~ "font-mono"
       assert html =~ "text-[10px]"
-      # oklch(0.62 0.02 255) → P = round5((1 - 0.62) / 0.74 * 100) = 50
+      # oklch(0.62 0.02 255) → P = round5((1 - 0.62) / 0.74 * 100) = 50, +5 on the alpha ink
+      # branch (see app.css) → 55
       assert html =~ "text-base-content/55"
       assert html =~ "RLY-1"
       refute html =~ "ui-monospace"

@@ -348,7 +348,11 @@ defmodule RelayWeb.BoardSettingsLive do
                   Danger zone
                 </div>
                 <div style="display:flex;align-items:center;gap:16px;">
-                  <span style="font-size:13px;color:color-mix(in oklab, var(--color-error) 65%, var(--color-base-content));flex:1;">
+                  <%!-- `oklch(0.50 0.04 15)` is a muted warm grey, not a red: C 0.04 is a Rule-N
+                    near-neutral (see `delete_style/1` in story_map_components.ex). Rule B needed
+                    `error` at 65% to reach L 0.50, landing at C 0.10 — a clear red this body copy
+                    never was; the "Danger zone" heading above carries the warning. --%>
+                  <span style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);flex:1;">
                     Archiving hides this board for everyone. You can restore it later.
                   </span>
                   <button
@@ -886,7 +890,11 @@ defmodule RelayWeb.BoardSettingsLive do
                   <span style="width:10px;height:10px;border-radius:50%;border:1.5px solid var(--color-secondary-content);">
                   </span>
                 </div>
-                <span style="font-size:13px;color:color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));">
+                <%!-- `oklch(0.44 0.06 292)` is a violet-tinted grey, not violet ink: a Rule-N
+                  near-neutral (see `delete_style/1` in story_map_components.ex). Rule B needed
+                  `secondary` at 60% to reach L 0.44, landing at C 0.10 — the violet AI dot beside
+                  it carries the signal, not this caption. --%>
+                <span style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
                   These keys authenticate <b>Relay AI</b> on this board.
                 </span>
               </div>

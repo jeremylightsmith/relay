@@ -693,9 +693,10 @@ defmodule RelayWeb.StoryMapComponents do
   defp delete_style(_count),
     do: "font-size:10px;color:color-mix(in oklab, var(--color-base-content) 25%, transparent);cursor:not-allowed;"
 
-  # The ⠿ drag handle. The activity header's is one step larger and darker than the task
-  # header's (artboard lines ~176 and ~198); the release label's — this card's addition, which
-  # the artboard does not have — matches the task's.
+  # The ⠿ drag handle. The activity header's is one step larger than the task header's (artboard
+  # lines ~176 and ~198; the artboard also had it a touch darker, but Rule N collapses that 0.02 L
+  # step so both now emit base-content 40%); the release label's — this card's addition, which the
+  # artboard does not have — matches the task's.
   defp grip_style(:activity),
     do: "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 40%, transparent);cursor:grab;"
 

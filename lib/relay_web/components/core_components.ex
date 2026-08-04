@@ -1533,14 +1533,14 @@ defmodule RelayWeb.CoreComponents do
 
   def modal_scrim(assigns) do
     ~H"""
-    <div class={Enum.reject(["modal-scrim", @class], &is_nil/1)} {@rest}></div>
+    <div class={["modal-scrim", @class]} {@rest}></div>
     """
   end
 
   @doc """
   The design system's small mono data/label style (RE237).
 
-  10px `--font-mono` at the `base-content/50` ink tier — the token form of the hardcoded
+  10px `--font-mono` at the `base-content/55` ink tier — the token form of the hardcoded
   10px mono-with-grey-ink style string that repeated 12× in the flow editor. Pass `tone` to
   recolor it (e.g. `"text-secondary"`).
 
@@ -3252,7 +3252,7 @@ defmodule RelayWeb.CoreComponents do
         <pre
           :if={@failure_detail}
           id={"#{@id_prefix}-failure-detail"}
-          style="background:var(--color-neutral);color:var(--color-neutral-content);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0;overflow-x:auto;"
+          style="background:var(--color-neutral);color:var(--color-neutral-content);border:1px solid var(--color-base-300);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0;overflow-x:auto;"
         ><%= @failure_detail %></pre>
       </div>
       <%!-- RLY-71 stepper: one structured question at a time. An A4 park never reaches this

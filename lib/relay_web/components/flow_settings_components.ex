@@ -121,7 +121,10 @@ defmodule RelayWeb.FlowSettingsComponents do
       <div style="font-size:13.5px;font-weight:600;color:color-mix(in oklab, var(--color-primary) 25%, var(--color-base-content));margin-bottom:3px;">
         New flow
       </div>
-      <p style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content));margin:0 0 12px 0;">
+      <%!-- `oklch(0.44 0.04 250)` is a slate-grey, not Human-blue: C 0.04 is a Rule-N near-neutral
+        (see `delete_style/1` in story_map_components.ex). Rule B needed `primary` at 55% to reach
+        L 0.44, landing at C 0.09 — a blue statement this helper copy never made. --%>
+      <p style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0 0 12px 0;">
         Pick a key and the three stages this flow triggers on. It is created switched off with
         an empty graph — add its steps in the editor, then turn it on here.
       </p>
@@ -212,7 +215,10 @@ defmodule RelayWeb.FlowSettingsComponents do
         <div style="font-size:14px;font-weight:600;color:color-mix(in oklab, var(--color-primary) 25%, var(--color-base-content));margin-bottom:3px;">
           Flows are off until you turn them on
         </div>
-        <p style="font-size:13px;line-height:1.55;color:color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content));margin:0;max-width:620px;">
+        <%!-- `oklch(0.44 0.04 250)` is a slate-grey, not Human-blue: C 0.04 is a Rule-N near-neutral
+          (see `delete_style/1` in story_map_components.ex). Rule B needed `primary` at 55% to reach
+          L 0.44, landing at C 0.09 — a blue statement this helper copy never made. --%>
+        <p style="font-size:13px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0;max-width:620px;">
           This board ships with the {flow_names(@shipped_rows)} defaults, but nothing runs
           automatically yet — every card waits for a human. Turn a flow on to start handing
           its stage to the AI. Cut over one flow at a time; you can always turn it back off.
@@ -382,7 +388,7 @@ defmodule RelayWeb.FlowSettingsComponents do
                         id={"flow-#{row.flow.id}-delete"}
                         phx-click="flow_delete"
                         phx-value-flow-id={row.flow.id}
-                        style="color:var(--color-error);"
+                        style="color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));"
                       >
                         🗑 Delete flow
                       </button>

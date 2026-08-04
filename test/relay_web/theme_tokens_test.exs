@@ -70,6 +70,8 @@ defmodule RelayWeb.ThemeTokensTest do
   ]
 
   test "no hardcoded color literals outside the theme blocks" do
+    # Guard against a path move silently emptying the scan and making this test pass vacuously.
+    refute Enum.empty?(scanned_files()), "scanned_files/0 found nothing to scan — did a path move?"
     offenders = Enum.flat_map(scanned_files(), &offenders_in/1)
 
     assert offenders == [], """
@@ -127,6 +129,26 @@ defmodule RelayWeb.ThemeTokensTest do
   defp strip_comments(source, _ex_or_heex), do: Regex.replace(~r{<%!--.*?--%>}s, source, &blank/1)
 
   defp blank(match), do: String.replace(match, ~r/[^\n]/, " ")
+
+  # The sorted, de-duplicated set of `--*` custom-property NAMES declared in each
+  # `@plugin "../vendor/daisyui-theme"` block of a stylesheet (one list per block). Comments are
+  # stripped first so a `}` inside a comment cannot truncate a block, and `var(--x)` references
+  # are ignored — only declarations (a name immediately followed by `:`) count.
+  defp theme_block_token_names(source) do
+    stripped = strip_comments(source, ".css")
+
+    ~r|@plugin\s+"\.\./vendor/daisyui-theme"\s*\{(.*?)\}|s
+    |> Regex.scan(stripped, capture: :all_but_first)
+    |> Enum.map(fn [block] -> block_token_names(block) end)
+  end
+
+  defp block_token_names(block) do
+    ~r/--([\w-]+)\s*:/
+    |> Regex.scan(block, capture: :all_but_first)
+    |> Enum.map(&hd/1)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
 
   # Whole-line `#` comments in Elixir/HEEx. Not applied to CSS, where a line may legitimately
   # start with an id selector. Heredocs are NOT parsed: see Global Constraint 9 — never quote a
@@ -267,6 +289,34 @@ defmodule RelayWeb.ThemeTokensTest do
       # app.css and storybook.css are already scanned by the main test; their theme blocks are
       # full of literals, so a green suite proves drop_theme_blocks/1 works. This pins WHY.
       assert File.read!(Path.join(@root, "assets/css/app.css")) =~ "--color-base-100: oklch(1 0 0);"
+    end
+  end
+
+  # Dark mode only works if the dark theme block defines every token the light block does: a token
+  # present in light but missing from dark silently falls back to the light value, and the ~2,000
+  # `var(--color-*)` references this branch introduced all depend on that parity. The two
+  # stylesheets must mirror each other too (`docs_styling_test.exs` establishes the same rule for
+  # selectors). So all four `@plugin "../vendor/daisyui-theme"` blocks — light + dark in app.css,
+  # light + dark in storybook.css — must declare the identical set of token names.
+  test "all four daisyUI theme blocks declare the identical token-name set" do
+    blocks =
+      for file <- @css_files,
+          names <- theme_block_token_names(File.read!(Path.join(@root, file))) do
+        {file, names}
+      end
+
+    assert length(blocks) == 4,
+           ~s(expected 4 `@plugin "../vendor/daisyui-theme"` blocks ) <>
+             "(light + dark in each stylesheet), found #{length(blocks)}"
+
+    [{ref_file, reference} | _] = blocks
+    refute Enum.empty?(reference), "no `--*` tokens found in the theme blocks — did the regex drift?"
+
+    for {file, names} <- blocks do
+      assert names == reference,
+             "#{file}: theme token set differs from #{ref_file}.\n" <>
+               "  missing here: #{inspect(reference -- names)}\n" <>
+               "  extra here:   #{inspect(names -- reference)}"
     end
   end
 end
