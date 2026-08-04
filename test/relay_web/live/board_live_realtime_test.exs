@@ -311,6 +311,30 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       send(view.pid, {:timeline_appended, card.id, comment})
 
       assert element_count(view, "#timeline-comment-#{comment.id}") == 1
+      # RE277 — the Notes header counts note ids, not applications, so a re-applied
+      # event cannot leave the header claiming more notes than the list renders.
+      assert has_element?(view, "#card-drawer-note-count", "1 note")
+    end
+
+    test "a drawer refresh racing the note that caused it still counts one note",
+         %{conn: conn, backlog: backlog, user: user} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Asky"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
+      render_async(view)
+
+      # `Cards.request_input/3` broadcasts :card_upserted from set_status/3 *before* it
+      # writes the question comment, so a busy LiveView can recount from the DB (already
+      # including the comment) and only then receive :timeline_appended for it.
+      {:ok, updated} = Cards.request_input(card, "Which one?")
+      [question] = Activity.list_conversation(updated)
+
+      send(view.pid, {:card_upserted, updated})
+      send(view.pid, {:timeline_appended, card.id, question})
+
+      assert element_count(view, "#timeline-comment-#{question.id}") == 1
+      assert has_element?(view, "#card-drawer-note-count", "1 note")
     end
   end
 

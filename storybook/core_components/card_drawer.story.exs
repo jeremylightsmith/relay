@@ -28,6 +28,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 61}, as: :card),
           stages: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 7, name: "Done"}],
           conversation: story_conversation(),
+          note_count: length(story_conversation()),
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
@@ -49,6 +50,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => nil}, as: :card),
           stages: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 7, name: "Done"}],
           conversation: [],
+          note_count: 0,
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
@@ -70,6 +72,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => nil}, as: :card),
           stages: [%{id: 3, name: "Plan"}, %{id: 4, name: "Code"}, %{id: 7, name: "Done"}],
           conversation: [],
+          note_count: 0,
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
@@ -91,6 +94,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           editing_description: true,
           description_form: Phoenix.Component.to_form(%{"description" => ""}, as: :card),
           conversation: [],
+          note_count: 0,
           activity: [],
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
@@ -122,6 +126,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
               "4. Should a scheduled export email a link, or attach the file directly?",
           answer_form: Phoenix.Component.to_form(%{"body" => ""}, as: :answer),
           conversation: story_conversation(),
+          note_count: length(story_conversation()),
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
@@ -169,6 +174,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           answer_step: 0,
           answer_values: %{},
           conversation: story_conversation(),
+          note_count: length(story_conversation()),
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
@@ -194,6 +200,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           },
           reject_form: Phoenix.Component.to_form(%{"note" => ""}, as: :reject),
           conversation: story_conversation(),
+          note_count: length(story_conversation()),
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
@@ -220,6 +227,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           reject_open: true,
           reject_form: Phoenix.Component.to_form(%{"note" => ""}, as: :reject),
           conversation: story_conversation(),
+          note_count: length(story_conversation()),
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
@@ -248,6 +256,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           },
           reject_form: Phoenix.Component.to_form(%{"note" => ""}, as: :reject),
           conversation: story_conversation(),
+          note_count: length(story_conversation()),
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
@@ -279,6 +288,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           expanded_spec: false,
           expanded_plan: false,
           conversation: story_conversation(),
+          note_count: length(story_conversation()),
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
@@ -311,6 +321,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           title_form: Phoenix.Component.to_form(%{"title" => "Wire the runner"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "ready", "progress" => nil}, as: :card),
           conversation: story_conversation(),
+          note_count: length(story_conversation()),
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
@@ -349,6 +360,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           title_form: Phoenix.Component.to_form(%{"title" => "AI result & sub-tasks"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
           conversation: story_conversation(),
+          note_count: length(story_conversation()),
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
@@ -377,6 +389,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           title_form: Phoenix.Component.to_form(%{"title" => "Sub-tasks drawer"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => nil}, as: :card),
           conversation: story_conversation(),
+          note_count: length(story_conversation()),
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
@@ -407,6 +420,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           title_form: Phoenix.Component.to_form(%{"title" => "Wire the runner"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 61}, as: :card),
           conversation: [],
+          note_count: 0,
           activity: [],
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
@@ -427,6 +441,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           title_form: Phoenix.Component.to_form(%{"title" => "Ship the landing page"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "ready", "progress" => nil}, as: :card),
           conversation: [],
+          note_count: 0,
           activity: [],
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
@@ -458,6 +473,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           question: nil,
           answer_form: Phoenix.Component.to_form(%{"body" => ""}, as: :answer),
           conversation: [],
+          note_count: 0,
           activity: [],
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
@@ -484,6 +500,15 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
          user: nil,
          body: "Implemented the drawer — ready for review.",
          inserted_at: ~U[2026-07-06 15:30:00Z]
+       }},
+      {"timeline-comment-3",
+       %Schemas.Comment{
+         id: 3,
+         actor_type: :agent,
+         user: nil,
+         kind: :question,
+         body: "Should the export include archived cards?",
+         inserted_at: ~U[2026-07-06 16:05:00Z]
        }}
     ]
   end

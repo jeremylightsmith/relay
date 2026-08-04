@@ -34,6 +34,7 @@ defmodule RelayWeb.CoreComponents do
   alias Phoenix.LiveView.JS
   alias Relay.Cards
   alias RelayWeb.RunComponents
+  alias RelayWeb.TimeAgo
   alias Schemas.Activity
 
   @doc """
@@ -1532,7 +1533,7 @@ defmodule RelayWeb.CoreComponents do
   `"add_owner"` / `"remove_owner"` (phx-value
   `actor_type` + `user_id`) from the owners rail's controls,
   `"validate_comment"` / `"post_comment"` (form params `comment[body]`)
-  from the timeline composer, and `"answer_input"` (form params
+  from the Notes composer, and `"answer_input"` (form params
   `answer[body]`) from the needs-input panel's composer, and the MMF 15
   review-panel events: `"review_approve"`, `"review_open_reject"`,
   `"review_cancel_reject"`, and `"review_reject"` (form params `reject[note]` +
@@ -1616,6 +1617,11 @@ defmodule RelayWeb.CoreComponents do
   attr :conversation, :any,
     required: true,
     doc: "the :conversation LiveView stream — the card's comments, oldest first"
+
+  attr :note_count, :integer,
+    default: 0,
+    doc:
+      "RE277 how many notes the :conversation stream holds — streams cannot be counted, so BoardLive keeps this in step via stream_notes/2 and insert_note/2"
 
   attr :activity, :any,
     required: true,
@@ -2323,92 +2329,134 @@ defmodule RelayWeb.CoreComponents do
                     </li>
                   </ul>
                 </section>
-                <section class="space-y-3 border-t border-base-300 pt-4">
-                  <.section_label>Conversation</.section_label>
-                  <div
-                    :if={@body_loading}
-                    id={"#{@id}-conversation-loading"}
-                    class="flex justify-center py-4"
-                  >
-                    <span class="loading loading-spinner loading-sm text-base-content/40"></span>
+                <section id={"#{@id}-notes"} class="space-y-3 border-t border-base-300 pt-4">
+                  <div class="flex items-center gap-2">
+                    <span class="h-[13px] w-[3px] shrink-0 rounded-sm bg-primary"></span>
+                    <.section_label>Notes</.section_label>
+                    <span
+                      id={"#{@id}-note-count"}
+                      class="font-mono text-[10px] text-base-content/45"
+                    >
+                      {note_count_label(@note_count)}
+                    </span>
+                    <span class="flex-1"></span>
+                    <%!-- True today: every flow node runs `relay card REF`, which prints the
+                          card's comment-kind timeline entries (see bin/relay's card printer).
+                          If that ever stops being true this chip is a lie — fix one or the other. --%>
+                    <span class="rounded bg-success/10 px-[7px] py-[2px] font-mono text-[9.5px] font-semibold tracking-[0.04em] text-success">
+                      READ BY EVERY AGENT
+                    </span>
                   </div>
-                  <ol
-                    :if={!@body_loading}
-                    id={"#{@id}-conversation"}
-                    phx-update="stream"
-                    class="space-y-4"
-                  >
-                    <li
-                      id={"#{@id}-conversation-empty"}
-                      class="hidden text-sm text-base-content/50 only:block"
+                  <div class="flex flex-col gap-[13px] rounded-lg border border-base-300 bg-base-100 px-[14px] py-[13px]">
+                    <div
+                      :if={@body_loading}
+                      id={"#{@id}-conversation-loading"}
+                      class="flex justify-center py-4"
                     >
-                      No comments yet
-                    </li>
-                    <li
-                      :for={{dom_id, comment} <- @conversation}
-                      id={dom_id}
-                      class="timeline-entry flex items-start gap-3"
-                      data-actor-type={comment.actor_type}
+                      <span class="loading loading-spinner loading-sm text-base-content/40"></span>
+                    </div>
+                    <ol
+                      :if={!@body_loading}
+                      id={"#{@id}-conversation"}
+                      phx-update="stream"
+                      class="flex flex-col gap-[13px]"
                     >
-                      <.avatar
-                        class="timeline-avatar shrink-0"
-                        size={28}
-                        tint={:role}
-                        actor={if(comment.actor_type == :agent, do: :ai, else: :human)}
-                        src={comment.user && comment.user.avatar_url}
-                        name={comment.user && comment.user.name}
-                        email={comment.user && comment.user.email}
-                      />
-                      <div class="min-w-0 flex-1 space-y-1">
-                        <div class="flex items-baseline gap-2">
-                          <span class="timeline-author text-[13px] font-semibold">
-                            {timeline_author(comment)}
-                          </span>
-                          <time class="timeline-time font-mono text-[11px] text-base-content/50">
-                            {Calendar.strftime(comment.inserted_at, "%b %d, %H:%M")}
-                          </time>
-                          <span
-                            :if={comment.kind in [:question, :changes_requested]}
-                            class="font-mono"
-                            style={"font-size:9.5px;font-weight:600;letter-spacing:0.04em;color:#{comment_tag_color(comment.kind)};background:oklch(0.96 0.03 75);padding:1px 6px;border-radius:4px;"}
+                      <li
+                        id={"#{@id}-conversation-empty"}
+                        class="hidden text-sm text-base-content/50 only:block"
+                      >
+                        No notes yet
+                      </li>
+                      <li
+                        :for={{dom_id, comment} <- @conversation}
+                        id={dom_id}
+                        class="timeline-entry flex items-start gap-[10px]"
+                        data-actor-type={comment.actor_type}
+                      >
+                        <.avatar
+                          class="timeline-avatar mt-px shrink-0"
+                          size={22}
+                          tint={:role}
+                          actor={if(comment.actor_type == :agent, do: :ai, else: :human)}
+                          src={comment.user && comment.user.avatar_url}
+                          name={comment.user && comment.user.name}
+                          email={comment.user && comment.user.email}
+                        />
+                        <div class="min-w-0 flex-1 space-y-[3px]">
+                          <div class="flex items-center gap-2">
+                            <span class="timeline-author text-[12px] font-semibold">
+                              {timeline_author(comment)}
+                            </span>
+                            <time
+                              class="timeline-time font-mono text-[10px] text-base-content/45"
+                              datetime={DateTime.to_iso8601(comment.inserted_at)}
+                              title={Calendar.strftime(comment.inserted_at, "%b %d, %H:%M")}
+                            >
+                              {TimeAgo.ago(comment.inserted_at)}
+                            </time>
+                            <span
+                              :if={comment.kind in [:question, :changes_requested]}
+                              class="font-mono"
+                              style={"font-size:9.5px;font-weight:600;letter-spacing:0.04em;color:#{comment_tag_color(comment.kind)};background:oklch(0.96 0.03 75);padding:1px 6px;border-radius:4px;"}
+                            >
+                              {comment_tag_label(comment.kind)}
+                            </span>
+                          </div>
+                          <%!-- No bubble: `.md` already renders the artboard's 13px / 20.15px /
+                                base-content 85% prose (assets/css/app.css). Only the amber
+                                question / changes-requested treatment keeps a box. --%>
+                          <div
+                            class={
+                              # RE277 — a literal string head followed by a dynamic falsy tail in a
+                              # HEEx `class={[...]}` leaves a stray trailing space (the compiler
+                              # splits head/tail and always joins with a literal space); pipe
+                              # through Enum.reject so this is one dynamic expression instead.
+                              [
+                                "timeline-comment-body md",
+                                comment.kind in [:question, :changes_requested] &&
+                                  "rounded-lg px-3 py-2"
+                              ]
+                              |> Enum.reject(&(&1 == false))
+                            }
+                            style={
+                              comment.kind in [:question, :changes_requested] &&
+                                "background:oklch(0.96 0.03 75);border:1px solid oklch(0.88 0.06 75);"
+                            }
                           >
-                            {comment_tag_label(comment.kind)}
-                          </span>
+                            {Relay.Markdown.to_html(comment.body)}
+                          </div>
                         </div>
-                        <div
-                          class={[
-                            "timeline-comment-body md rounded-lg px-3 py-2 text-sm leading-relaxed",
-                            comment.kind not in [:question, :changes_requested] && "bg-base-200/60"
-                          ]}
-                          style={
-                            comment.kind in [:question, :changes_requested] &&
-                              "background:oklch(0.96 0.03 75);border:1px solid oklch(0.88 0.06 75);"
-                          }
+                      </li>
+                    </ol>
+                    <.form
+                      :if={!@archived}
+                      for={@comment_form}
+                      id={"#{@id}-comment-form"}
+                      phx-change="validate_comment"
+                      phx-submit="post_comment"
+                    >
+                      <div class="flex items-start gap-2 rounded-[7px] border border-base-300 bg-base-100 py-[7px] pl-[11px] pr-2">
+                        <textarea
+                          id={"#{@id}-comment-input"}
+                          name={@comment_form[:body].name}
+                          rows="2"
+                          phx-hook="SubmitOnCmdEnter"
+                          placeholder="What you did, what you found, what’s left…"
+                          class="min-w-0 flex-1 resize-none border-none bg-transparent p-0 text-[12.5px] leading-[18px] text-base-content focus:outline-none"
+                        >{Phoenix.HTML.Form.normalize_value("textarea", @comment_form[:body].value)}</textarea>
+                        <button
+                          type="submit"
+                          class="h-[27px] shrink-0 rounded-md border border-base-300 px-3 text-[11.5px] font-semibold text-base-content/80"
                         >
-                          {Relay.Markdown.to_html(comment.body)}
-                        </div>
+                          Add note
+                        </button>
                       </div>
-                    </li>
-                  </ol>
-                  <.form
-                    :if={!@archived}
-                    for={@comment_form}
-                    id={"#{@id}-comment-form"}
-                    phx-change="validate_comment"
-                    phx-submit="post_comment"
-                  >
-                    <.boxed_field
-                      id={"#{@id}-comment-input"}
-                      commit={:form}
-                      multiline
-                      rows="2"
-                      form={@comment_form}
-                      field={:body}
-                      placeholder="Write a comment…"
-                      phx-hook="SubmitOnCmdEnter"
-                    />
-                    <.button variant="primary" class="btn btn-primary btn-sm">Comment</.button>
-                  </.form>
+                      <.error :for={msg <- comment_errors(@comment_form[:body])}>{msg}</.error>
+                    </.form>
+                  </div>
+                  <p class="font-mono text-[10.5px] leading-[1.5] text-base-content/50">
+                    Notes are card content, not chat — they go into every agent’s context.
+                  </p>
                 </section>
               </div>
 
@@ -3246,6 +3294,18 @@ defmodule RelayWeb.CoreComponents do
 
   defp comment_tag_color(:question), do: "oklch(0.52 0.11 65)"
   defp comment_tag_color(:changes_requested), do: "oklch(0.55 0.13 65)"
+
+  defp note_count_label(1), do: "1 note"
+  defp note_count_label(count), do: "#{count} notes"
+
+  # The Notes composer is hand-rolled markup — `<.input>` cannot produce the artboard's
+  # bordered row with an inline button — so it renders its own errors the same way
+  # `input/1` does, off the same `used_input?/1` predicate.
+  defp comment_errors(%FormField{} = field) do
+    if Phoenix.Component.used_input?(field),
+      do: Enum.map(field.errors, &translate_error/1),
+      else: []
+  end
 
   defp activity_phrase(%Activity{type: :created}), do: "created this card"
 
