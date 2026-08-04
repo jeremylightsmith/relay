@@ -18,7 +18,7 @@
         <a href="#stages" class="hover:text-primary">Stages</a>
       </div>
       <span class="flex-1"></span>
-      <%!-- QUICKFIX: theme toggle hidden while dark mode is broken (forced light in root.html.heex). --%>
+      <Layouts.theme_toggle />
       <a
         href={~p"/auth/google"}
         class="hidden text-[13.5px] text-base-content/70 hover:text-primary sm:inline"
@@ -364,12 +364,12 @@
   <section class="mx-auto max-w-[1120px] px-4 pb-20 pt-8 sm:px-8">
     <div
       class="relative overflow-hidden rounded-[20px] px-6 py-14 text-center sm:px-10"
-      style="background:oklch(0.22 0.02 255);"
+      style="background:var(--color-neutral);"
     >
-      <h2 class="mx-auto mb-3.5 max-w-[560px] text-[34px] font-semibold leading-tight tracking-[-0.025em] text-white">
+      <h2 class="mx-auto mb-3.5 max-w-[560px] text-[34px] font-semibold leading-tight tracking-[-0.025em] text-neutral-content">
         Give the AI a lane. Keep your hand on the board.
       </h2>
-      <p class="mx-auto mb-7 max-w-[480px] text-base leading-relaxed text-white/70">
+      <p class="mx-auto mb-7 max-w-[480px] text-base leading-relaxed text-neutral-content/70">
         Start with the default workflow, then bend it to fit. It takes about a minute.
       </p>
       <a href={~p"/auth/google"} class="btn btn-primary">Open the board →</a>

@@ -46,8 +46,9 @@ defmodule RelayWeb.PageControllerTest do
       # responsive + fidelity signals
       assert html =~ "md:grid-cols-3"
       assert html =~ "overflow-x-auto"
-      # the CTA band is a deliberately fixed-dark panel in both themes
-      assert html =~ "background:oklch(0.22 0.02 255)"
+      # the CTA band is a deliberately fixed-dark panel in both themes (RE237: --color-neutral
+      # is oklch(0.32 0.02 255) in both theme blocks)
+      assert html =~ "background:var(--color-neutral)"
     end
   end
 

@@ -177,8 +177,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
       assert has_element?(view, "#account-menu #sign-out")
-      # QUICKFIX: theme toggle hidden while dark mode is broken (forced light).
-      refute has_element?(view, "#account-menu [data-phx-theme='dark']")
+      assert has_element?(view, "#account-menu [data-phx-theme='dark']")
       refute has_element?(view, "#archived-cards-menu-item")
     end
   end

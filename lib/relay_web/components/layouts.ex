@@ -62,24 +62,34 @@ defmodule RelayWeb.Layouts do
         title="All boards"
         class="flex items-center gap-2"
       >
-        <img src={~p"/images/logo_light_128.png"} width="23" alt="Relay" />
+        <img
+          src={~p"/images/logo_light_128.png"}
+          width="23"
+          alt="Relay"
+          class="dark:hidden"
+        />
+        <img
+          src={~p"/images/logo_dark_128.png"}
+          width="23"
+          alt="Relay"
+          class="hidden dark:block"
+        />
         <span class="hidden md:inline text-[15px] font-semibold tracking-[-0.02em]">Relay</span>
       </.link>
       <div
         :if={@crumb or @title != []}
-        style="width:1px;height:18px;background:oklch(0.90 0.006 255);flex:0 0 auto;"
+        style="width:1px;height:18px;background:var(--color-field-border);flex:0 0 auto;"
       >
       </div>
       <div :if={@crumb} id="top-bar-crumb" class="flex flex-none items-center gap-[7px]">
         <.link
           navigate={~p"/boards"}
           id="top-bar-crumb-boards"
-          class="flex items-center gap-1.5 rounded-[7px] px-[7px] py-1 text-[13px] font-semibold"
-          style="color:oklch(0.50 0.02 255);"
+          class="flex items-center gap-1.5 rounded-[7px] px-[7px] py-1 text-[13px] font-semibold text-base-content/70"
         >
           <.icon name="hero-squares-2x2" class="size-3.5" /> Boards
         </.link>
-        <span class="text-[13px]" style="color:oklch(0.78 0.02 255);">/</span>
+        <span class="text-[13px] text-base-content/30">/</span>
       </div>
       <div id="top-bar-title" class="flex min-w-0 items-center text-[13px] font-medium">
         {render_slot(@title)}
@@ -108,7 +118,12 @@ defmodule RelayWeb.Layouts do
           class="menu dropdown-content z-50 mt-2 w-60 rounded-box bg-base-100 p-2 shadow"
         >
           {render_slot(@menu_items)}
-          <%!-- QUICKFIX: theme toggle hidden while dark mode is broken (forced light in root.html.heex). --%>
+          <li class="menu-title px-2 text-[10px] uppercase tracking-wider">Theme</li>
+          <li>
+            <div class="pointer-events-auto px-1 py-1 hover:bg-transparent">
+              <.theme_toggle />
+            </div>
+          </li>
           <li>
             <.link href={~p"/logout"} method="delete" id="sign-out">
               <.icon name="hero-arrow-right-on-rectangle" class="size-4" /> Sign out
@@ -148,7 +163,7 @@ defmodule RelayWeb.Layouts do
 
   def public_board(assigns) do
     ~H"""
-    <div class="min-h-screen" style="background:oklch(0.955 0.008 255);">
+    <div class="min-h-screen" style="background:var(--color-field-hover);">
       <header
         id="public-board-header"
         class="flex items-center gap-3 border-b border-base-300 bg-base-100 px-4 sm:px-6"
@@ -212,7 +227,18 @@ defmodule RelayWeb.Layouts do
       </script>
       <header class="docs-nav">
         <a href={~p"/"} class="docs-nav-brand">
-          <img src={~p"/images/logo_light_128.png"} width="22" alt="Relay" />
+          <img
+            src={~p"/images/logo_light_128.png"}
+            width="22"
+            alt="Relay"
+            class="dark:hidden"
+          />
+          <img
+            src={~p"/images/logo_dark_128.png"}
+            width="22"
+            alt="Relay"
+            class="hidden dark:block"
+          />
           <span>Relay</span>
         </a>
         <span class="docs-nav-eyebrow">/ Docs</span>
@@ -354,17 +380,30 @@ defmodule RelayWeb.Layouts do
   end
 
   @doc """
-  Provides dark vs light theme toggle based on themes defined in app.css.
+  The 3-way system / light / dark theme control (RE237).
 
-  See <head> in root.html.heex which applies the theme before page load.
+  The sliding indicator keys off `data-theme-pref` — the user's raw choice — not off
+  `data-theme`, which carries the *resolved* theme. Keying it off the resolved theme would
+  park the indicator on "light" or "dark" whenever the preference is "system".
+
+  `aria-checked` renders as `"false"` on all three and is synced from `data-theme-pref` by the
+  resolver script in `root.html.heex`; the preference lives in localStorage, so the server
+  cannot know it.
   """
   def theme_toggle(assigns) do
     ~H"""
-    <div class="card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full">
-      <div class="absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 brightness-200 left-0 [[data-theme=light]_&]:left-1/3 [[data-theme=dark]_&]:left-2/3 transition-[left]" />
+    <div
+      class="card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full"
+      role="radiogroup"
+      aria-label="Theme"
+    >
+      <div class="absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 left-0 [[data-theme-pref=light]_&]:left-1/3 [[data-theme-pref=dark]_&]:left-2/3 transition-[left]" />
 
       <button
-        class="flex p-2 cursor-pointer w-1/3"
+        class="relative flex p-2 cursor-pointer w-1/3"
+        role="radio"
+        aria-checked="false"
+        aria-label="Use the system theme"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="system"
       >
@@ -372,7 +411,10 @@ defmodule RelayWeb.Layouts do
       </button>
 
       <button
-        class="flex p-2 cursor-pointer w-1/3"
+        class="relative flex p-2 cursor-pointer w-1/3"
+        role="radio"
+        aria-checked="false"
+        aria-label="Use the light theme"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="light"
       >
@@ -380,7 +422,10 @@ defmodule RelayWeb.Layouts do
       </button>
 
       <button
-        class="flex p-2 cursor-pointer w-1/3"
+        class="relative flex p-2 cursor-pointer w-1/3"
+        role="radio"
+        aria-checked="false"
+        aria-label="Use the dark theme"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="dark"
       >
