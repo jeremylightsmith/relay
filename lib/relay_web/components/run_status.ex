@@ -31,12 +31,12 @@ defmodule RelayWeb.RunStatus do
       class="run-status-row"
       style="display:flex;align-items:center;gap:12px;font-family:var(--font-mono);font-size:12px;padding:6px 0;"
     >
-      <span style={"display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(#{@d.token});color:oklch(1 0 0);"}>
+      <span style={"display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(#{@d.token});color:var(#{@d.token}-content);"}>
         {@d.icon}
       </span>
       <span style="width:90px;font-weight:600;">{@status}</span>
       <span style="width:120px;">{@d.label}</span>
-      <span style="color:oklch(0.55 0.02 255);">{@d.token}</span>
+      <span class="text-base-content/60">{@d.token}</span>
     </div>
     """
   end

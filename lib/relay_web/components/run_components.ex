@@ -84,7 +84,7 @@ defmodule RelayWeb.RunComponents do
       <div style="display:flex;align-items:center;gap:10px;flex:0 0 auto;">
         <span
           class="run-strip-elapsed"
-          style="font-family:var(--font-mono);font-size:11px;color:oklch(0.55 0.02 255);"
+          style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
         >
           {@elapsed}
         </span>
@@ -137,70 +137,75 @@ defmodule RelayWeb.RunComponents do
   defp times_label(1), do: "1 time"
   defp times_label(n), do: "#{n} times"
 
-  # wrap/baton/dot/version colors per status — the artboard's `strips` table.
+  # wrap/baton/dot/version colors per status — the artboard's `strips` table. RE237: each
+  # tint/ink pair is re-expressed via the token mapping's Rule B (brand hues) — N for the
+  # tints, P for the ink, against that status's role's light-theme L.
   defp strip_styles(:running),
     do: %{
-      wrap_bg: "oklch(0.985 0.018 292)",
-      wrap_border: "oklch(0.92 0.03 292)",
-      baton_bg: "oklch(0.97 0.03 292)",
-      baton_c: "oklch(0.46 0.14 292)",
+      wrap_bg: "color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100))",
+      wrap_border: "color-mix(in oklab, var(--color-secondary) 20%, var(--color-base-100))",
+      baton_bg: "color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100))",
+      baton_c: "color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content))",
       dot: "var(--color-secondary)",
       pulse?: true,
-      title_c: "oklch(0.44 0.12 292)",
-      ver_bg: "oklch(0.96 0.03 292)",
-      ver_c: "oklch(0.46 0.13 292)"
+      title_c: "color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content))",
+      ver_bg: "color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100))",
+      ver_c: "color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content))"
     }
 
   defp strip_styles(:parked),
     do: %{
-      wrap_bg: "oklch(0.985 0.022 75)",
-      wrap_border: "oklch(0.90 0.05 75)",
-      baton_bg: "oklch(0.98 0.04 75)",
-      baton_c: "oklch(0.48 0.11 65)",
+      wrap_bg: "color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100))",
+      wrap_border: "color-mix(in oklab, var(--color-warning) 35%, var(--color-base-100))",
+      baton_bg: "color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100))",
+      baton_c: "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content))",
       dot: "var(--color-warning)",
       pulse?: false,
-      title_c: "oklch(0.48 0.11 65)",
-      ver_bg: "oklch(0.97 0.02 75)",
-      ver_c: "oklch(0.50 0.09 65)"
+      title_c: "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content))",
+      ver_bg: "color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100))",
+      ver_c: "color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content))"
     }
 
   defp strip_styles(:failed),
     do: %{
-      wrap_bg: "oklch(0.985 0.02 22)",
-      wrap_border: "oklch(0.91 0.04 22)",
-      baton_bg: "oklch(0.97 0.03 22)",
-      baton_c: "oklch(0.52 0.16 22)",
+      wrap_bg: "color-mix(in oklab, var(--color-error) 5%, var(--color-base-100))",
+      wrap_border: "color-mix(in oklab, var(--color-error) 25%, var(--color-base-100))",
+      baton_bg: "color-mix(in oklab, var(--color-error) 10%, var(--color-base-100))",
+      baton_c: "color-mix(in oklab, var(--color-error) 70%, var(--color-base-content))",
       dot: "var(--color-error)",
       pulse?: false,
-      title_c: "oklch(0.50 0.14 22)",
-      ver_bg: "oklch(0.97 0.02 22)",
-      ver_c: "oklch(0.52 0.13 22)"
+      title_c: "color-mix(in oklab, var(--color-error) 65%, var(--color-base-content))",
+      ver_bg: "color-mix(in oklab, var(--color-error) 10%, var(--color-base-100))",
+      ver_c: "color-mix(in oklab, var(--color-error) 70%, var(--color-base-content))"
     }
 
+  # The dot has long used the accent (teal) token while the surrounding tint/ink were
+  # blue-ish (hue 250, primary's range) literals — a pre-existing choice, unrelated to
+  # RE237; the tint/ink below preserve that same blue appearance via var(--color-primary).
   defp strip_styles(:cancelled),
     do: %{
-      wrap_bg: "oklch(0.985 0.01 250)",
-      wrap_border: "oklch(0.92 0.02 250)",
-      baton_bg: "oklch(0.97 0.02 250)",
-      baton_c: "oklch(0.44 0.13 250)",
+      wrap_bg: "color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100))",
+      wrap_border: "color-mix(in oklab, var(--color-primary) 20%, var(--color-base-100))",
+      baton_bg: "color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100))",
+      baton_c: "color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content))",
       dot: "var(--color-accent)",
       pulse?: false,
-      title_c: "oklch(0.44 0.06 250)",
-      ver_bg: "oklch(0.97 0.02 250)",
-      ver_c: "oklch(0.46 0.10 250)"
+      title_c: "color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content))",
+      ver_bg: "color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100))",
+      ver_c: "color-mix(in oklab, var(--color-primary) 60%, var(--color-base-content))"
     }
 
   defp strip_styles(:done),
     do: %{
-      wrap_bg: "oklch(0.985 0.015 155)",
-      wrap_border: "oklch(0.92 0.03 155)",
-      baton_bg: "oklch(0.97 0.03 155)",
-      baton_c: "oklch(0.42 0.11 155)",
+      wrap_bg: "color-mix(in oklab, var(--color-success) 5%, var(--color-base-100))",
+      wrap_border: "color-mix(in oklab, var(--color-success) 20%, var(--color-base-100))",
+      baton_bg: "color-mix(in oklab, var(--color-success) 10%, var(--color-base-100))",
+      baton_c: "color-mix(in oklab, var(--color-success) 45%, var(--color-base-content))",
       dot: "var(--color-success)",
       pulse?: false,
-      title_c: "oklch(0.42 0.10 155)",
-      ver_bg: "oklch(0.97 0.02 155)",
-      ver_c: "oklch(0.42 0.11 155)"
+      title_c: "color-mix(in oklab, var(--color-success) 45%, var(--color-base-content))",
+      ver_bg: "color-mix(in oklab, var(--color-success) 10%, var(--color-base-100))",
+      ver_c: "color-mix(in oklab, var(--color-success) 45%, var(--color-base-content))"
     }
 
   # ---------- run_mini_graph ----------
@@ -224,7 +229,7 @@ defmodule RelayWeb.RunComponents do
 
     ~H"""
     <div class="run-mini-graph">
-      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.50 0.02 255);margin-bottom:6px;">
+      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin-bottom:6px;">
         {@header}
       </div>
       <div style="display:flex;gap:3px;">
@@ -252,10 +257,11 @@ defmodule RelayWeb.RunComponents do
 
   defp segment_style(:active) do
     "flex:1;height:9px;border-radius:3px;background:var(--color-secondary);" <>
-      "animation:relaypulse 1.6s ease-in-out infinite;box-shadow:0 0 0 2px oklch(0.56 0.16 292/0.25);"
+      "animation:relaypulse 1.6s ease-in-out infinite;box-shadow:0 0 0 2px color-mix(in oklab, var(--color-secondary) 25%, transparent);"
   end
 
-  defp segment_style(:pending), do: "flex:1;height:9px;border-radius:3px;background:oklch(0.80 0.01 255);opacity:0.5;"
+  defp segment_style(:pending),
+    do: "flex:1;height:9px;border-radius:3px;background:var(--color-field-border-hover);opacity:0.5;"
 
   # ---------- run_node_timeline ----------
 
@@ -272,16 +278,16 @@ defmodule RelayWeb.RunComponents do
           <% :loop -> %>
             <div
               class="run-loop-chip"
-              style="font-family:var(--font-mono);font-size:11px;color:oklch(0.50 0.09 65);background:oklch(0.98 0.03 75);border-radius:6px;padding:6px 10px;"
+              style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));border-radius:6px;padding:6px 10px;"
             >
               ↺ {loop_text(row)}
             </div>
           <% :pending -> %>
             <div
               class="run-timeline-row run-timeline-row-pending"
-              style="display:flex;align-items:center;gap:10px;padding:8px 10px;color:oklch(0.60 0.02 255);"
+              style="display:flex;align-items:center;gap:10px;padding:8px 10px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);"
             >
-              <span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid oklch(0.80 0.01 255);flex:0 0 auto;" />
+              <span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid var(--color-field-border-hover);flex:0 0 auto;" />
               <span style="font-family:var(--font-mono);font-size:12px;">
                 {Enum.join(row.nodes, " → ")}
               </span>
@@ -307,7 +313,7 @@ defmodule RelayWeb.RunComponents do
     <div class="run-timeline-row" style="display:flex;flex-direction:column;gap:4px;">
       <div style="display:flex;align-items:center;gap:10px;">
         <.timeline_icon state={@row.state} />
-        <span style="font-family:var(--font-mono);font-size:13.5px;font-weight:600;color:oklch(0.28 0.02 255);">
+        <span style="font-family:var(--font-mono);font-size:13.5px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);">
           {@row.node_key}
         </span>
         <span :if={@row.type} class={type_tag_class(@row.type)} style={type_tag_style(@row.type)}>
@@ -316,44 +322,44 @@ defmodule RelayWeb.RunComponents do
         <span
           :if={@row.attempt > 1}
           class="run-attempt-chip"
-          style="font-family:var(--font-mono);font-size:9.5px;color:oklch(0.55 0.02 255);background:oklch(0.95 0.006 255);border-radius:4px;padding:2px 6px;"
+          style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));border-radius:4px;padding:2px 6px;"
         >
           attempt {@row.attempt}
         </span>
         <span
           :if={@row.resumed?}
           class="run-resumed-chip"
-          style="font-family:var(--font-mono);font-size:9.5px;color:oklch(0.46 0.12 292);background:oklch(0.97 0.03 292);border-radius:4px;padding:2px 6px;"
+          style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border-radius:4px;padding:2px 6px;"
         >
           session resumed
         </span>
         <span
           :if={@row.partial?}
-          style="font-family:var(--font-mono);font-size:9.5px;color:oklch(0.42 0.10 155);"
+          style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-success) 45%, var(--color-base-content));"
         >
           partial
         </span>
-        <span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:oklch(0.50 0.02 255);">
+        <span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
           {run_duration(@row.duration_s)}
         </span>
-        <span style="font-family:var(--font-mono);font-size:11px;color:oklch(0.50 0.08 155);">
+        <span style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-success) 70%, var(--color-base-content));">
           {run_cost(@row.cost)}
         </span>
       </div>
       <div
         :if={@row.state == :active && @task_progress}
-        style="height:5px;border-radius:3px;background:oklch(0.92 0.01 292);overflow:hidden;"
+        style="height:5px;border-radius:3px;background:color-mix(in oklab, var(--color-secondary) 20%, var(--color-base-100));overflow:hidden;"
       >
         <div style={"height:100%;background:var(--color-secondary);width:#{task_progress_pct(@task_progress)}%;"} />
       </div>
       <div
         :if={@row.state == :failed}
-        style="background:oklch(0.98 0.025 22);border-radius:8px;padding:8px 10px;"
+        style="background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border-radius:8px;padding:8px 10px;"
       >
-        <div style="font-family:var(--font-mono);font-size:9px;font-weight:700;letter-spacing:0.05em;color:oklch(0.52 0.16 22);margin-bottom:4px;">
+        <div style="font-family:var(--font-mono);font-size:9px;font-weight:700;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));margin-bottom:4px;">
           OUTCOME: FAILED
         </div>
-        <pre style="background:oklch(0.20 0.02 255);color:oklch(0.94 0.006 255);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0;"><%= @row.detail %></pre>
+        <pre style="background:var(--color-neutral);color:color-mix(in oklab, var(--color-neutral-content) 95%, transparent);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0;"><%= @row.detail %></pre>
       </div>
     </div>
     """
@@ -365,7 +371,7 @@ defmodule RelayWeb.RunComponents do
     ~H"""
     <span
       class="run-timeline-icon"
-      style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--color-success);color:oklch(1 0 0);font-size:11px;flex:0 0 auto;"
+      style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--color-success);color:var(--color-success-content);font-size:11px;flex:0 0 auto;"
     >
       ✓
     </span>
@@ -376,7 +382,7 @@ defmodule RelayWeb.RunComponents do
     ~H"""
     <span
       class="run-timeline-icon"
-      style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--color-error);color:oklch(1 0 0);font-size:11px;flex:0 0 auto;"
+      style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--color-error);color:var(--color-error-content);font-size:11px;flex:0 0 auto;"
     >
       ✕
     </span>
@@ -387,7 +393,7 @@ defmodule RelayWeb.RunComponents do
     ~H"""
     <span
       class="run-timeline-icon"
-      style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:oklch(0.90 0.006 255);color:oklch(0.55 0.02 255);font-size:11px;flex:0 0 auto;"
+      style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--color-field-border);color:color-mix(in oklab, var(--color-base-content) 60%, transparent);font-size:11px;flex:0 0 auto;"
     >
       ⊘
     </span>
@@ -398,7 +404,7 @@ defmodule RelayWeb.RunComponents do
     ~H"""
     <span
       class="run-timeline-icon"
-      style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5px;background:oklch(0.62 0.16 22);color:oklch(1 0 0);font-size:11px;flex:0 0 auto;"
+      style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5px;background:var(--color-error);color:var(--color-error-content);font-size:11px;flex:0 0 auto;"
     >
       ⊗
     </span>
@@ -418,7 +424,7 @@ defmodule RelayWeb.RunComponents do
     ~H"""
     <span
       class="run-timeline-icon"
-      style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--color-warning);color:oklch(1 0 0);font-size:11px;flex:0 0 auto;animation:relaypulse 1.6s ease-in-out infinite;"
+      style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--color-warning);color:var(--color-warning-content);font-size:11px;flex:0 0 auto;animation:relaypulse 1.6s ease-in-out infinite;"
     >
       ?
     </span>
@@ -432,17 +438,17 @@ defmodule RelayWeb.RunComponents do
   defp type_tag_style(:agent),
     do:
       "font-family:var(--font-mono);font-size:8px;font-weight:700;text-transform:uppercase;" <>
-        "background:oklch(0.96 0.03 292);color:oklch(0.46 0.13 292);border-radius:3px;padding:2px 5px;"
+        "background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));border-radius:3px;padding:2px 5px;"
 
   defp type_tag_style(:gate),
     do:
       "font-family:var(--font-mono);font-size:8px;font-weight:700;text-transform:uppercase;" <>
-        "background:oklch(0.97 0.03 75);color:oklch(0.50 0.09 65);border-radius:3px;padding:2px 5px;"
+        "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));border-radius:3px;padding:2px 5px;"
 
   defp type_tag_style(_type),
     do:
       "font-family:var(--font-mono);font-size:8px;font-weight:700;text-transform:uppercase;" <>
-        "background:oklch(0.95 0.006 255);color:oklch(0.50 0.02 255);border-radius:3px;padding:2px 5px;"
+        "background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 70%, transparent);border-radius:3px;padding:2px 5px;"
 
   defp task_progress_pct(%{done: done, total: total}) when total > 0, do: min(100, round(done / total * 100))
   defp task_progress_pct(_task_progress), do: 0
@@ -469,21 +475,21 @@ defmodule RelayWeb.RunComponents do
     ~H"""
     <div
       class="run-banner run-banner-reentry"
-      style="border-left:3px solid oklch(0.60 0.14 250);background:oklch(0.975 0.02 250);border-radius:8px;padding:14px 16px;"
+      style="border-left:3px solid var(--color-primary);background:color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100));border-radius:8px;padding:14px 16px;"
     >
-      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.44 0.10 250);margin-bottom:8px;">
+      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content));margin-bottom:8px;">
         RE-ENTRY · CHANGES REQUESTED BY {String.upcase(@rejection.rejected_by)}
       </div>
-      <blockquote style="margin:0 0 8px 0;padding:8px 10px;background:oklch(1 0 0 / 0.6);border-radius:6px;font-size:13px;color:oklch(0.32 0.02 255);">
+      <blockquote style="margin:0 0 8px 0;padding:8px 10px;background:color-mix(in oklab, var(--color-base-100) 60%, transparent);border-radius:6px;font-size:13px;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);">
         {@rejection.note}
       </blockquote>
-      <div style="font-size:12px;color:oklch(0.50 0.02 255);">
+      <div style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
         rejected from {@rejection.from_stage_name} {TimeAgo.ago(
           DateTime.utc_now(),
           @rejection.rejected_at
         )}
       </div>
-      <div style="font-size:12px;color:oklch(0.50 0.04 250);margin-top:4px;">
+      <div style="font-size:12px;color:color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content));margin-top:4px;">
         the run reads this note before implement
       </div>
     </div>
@@ -493,19 +499,20 @@ defmodule RelayWeb.RunComponents do
   def run_state_banner(%{variant: :revoked} = assigns) do
     ~H"""
     <div class="run-banner run-banner-revoked" style="display:flex;flex-direction:column;gap:10px;">
-      <div style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;color:oklch(0.55 0.02 255);">
+      <div style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
         <span style="width:8px;height:8px;border-radius:50%;background:var(--color-secondary);" />
-        FLOW <span style="color:oklch(0.65 0.02 255);">→</span>
-        <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:oklch(0.60 0.14 250);color:oklch(1 0 0);font-size:9px;">
+        FLOW
+        <span style="color:color-mix(in oklab, var(--color-base-content) 45%, transparent);">→</span>
+        <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--color-primary);color:var(--color-primary-content);font-size:9px;">
           {initials(@claimer)}
         </span>
         {@claimer}
       </div>
-      <div style="background:oklch(0.97 0.01 255);border-radius:8px;padding:12px 14px;">
-        <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.40 0.02 255);margin-bottom:6px;">
+      <div style="background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));border-radius:8px;padding:12px 14px;">
+        <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);margin-bottom:6px;">
           CLAIMED BY A HUMAN
         </div>
-        <p style="font-size:13px;color:oklch(0.42 0.02 255);margin:0;">
+        <p style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);margin:0;">
           A human claimed this card while Relay AI was working, so the run at
           <strong>{@detail.current_node}</strong>
           was cancelled. Nothing is lost — the branch {@card.branch} keeps the work so far.
@@ -526,15 +533,15 @@ defmodule RelayWeb.RunComponents do
     ~H"""
     <div
       class="run-banner run-banner-circuit"
-      style="border-left:3px solid oklch(0.62 0.16 22);background:oklch(0.975 0.025 22);border-radius:8px;padding:14px 16px;"
+      style="border-left:3px solid var(--color-error);background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border-radius:8px;padding:14px 16px;"
     >
-      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.52 0.16 22);margin-bottom:6px;">
+      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));margin-bottom:6px;">
         ⊗ CIRCUIT BREAKER TRIPPED
       </div>
-      <p style="font-size:13px;color:oklch(0.34 0.02 255);margin:0 0 8px 0;">
+      <p style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);margin:0 0 8px 0;">
         <strong>{@tripped}</strong> returned failed {times_label(@repeats)}
       </p>
-      <pre style="background:oklch(0.20 0.02 255);color:oklch(0.94 0.006 255);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0 0 10px 0;"><%= @detail_text %></pre>
+      <pre style="background:var(--color-neutral);color:color-mix(in oklab, var(--color-neutral-content) 95%, transparent);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0 0 10px 0;"><%= @detail_text %></pre>
       <.failure_stats totals={@totals} />
       <.retry_button />
     </div>
@@ -554,15 +561,17 @@ defmodule RelayWeb.RunComponents do
     ~H"""
     <div
       class="run-banner run-banner-failed"
-      style="border-left:3px solid oklch(0.62 0.16 22);background:oklch(0.975 0.025 22);border-radius:8px;padding:14px 16px;"
+      style="border-left:3px solid var(--color-error);background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border-radius:8px;padding:14px 16px;"
     >
-      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.52 0.16 22);margin-bottom:6px;">
+      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));margin-bottom:6px;">
         ⊗ RUN FAILED
       </div>
-      <p style="font-size:13px;color:oklch(0.34 0.02 255);margin:0 0 8px 0;">{@reason}</p>
+      <p style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);margin:0 0 8px 0;">
+        {@reason}
+      </p>
       <pre
         :if={@detail_text}
-        style="background:oklch(0.20 0.02 255);color:oklch(0.94 0.006 255);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0 0 10px 0;"
+        style="background:var(--color-neutral);color:color-mix(in oklab, var(--color-neutral-content) 95%, transparent);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0 0 10px 0;"
       ><%= @detail_text %></pre>
       <.failure_stats :if={@totals} totals={@totals} />
       <.retry_button />
@@ -575,26 +584,29 @@ defmodule RelayWeb.RunComponents do
 
     ~H"""
     <div class="run-banner run-banner-parked" style="display:flex;flex-direction:column;gap:10px;">
-      <div style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;color:oklch(0.55 0.02 255);">
+      <div style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
         <span style="width:8px;height:8px;border-radius:50%;background:var(--color-warning);" />
-        baton → <span style="font-weight:700;color:oklch(0.44 0.02 255);">YOU</span>
+        baton →
+        <span style="font-weight:700;color:color-mix(in oklab, var(--color-base-content) 75%, transparent);">
+          YOU
+        </span>
       </div>
-      <div style="background:oklch(0.975 0.025 75);border-radius:8px;padding:14px 16px;">
+      <div style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border-radius:8px;padding:14px 16px;">
         <div :if={@park_kind == :question}>
-          <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.48 0.11 65);margin-bottom:2px;">
+          <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));margin-bottom:2px;">
             RELAY AI NEEDS YOUR INPUT
           </div>
-          <div style="font-size:12px;color:oklch(0.55 0.06 65);margin-bottom:10px;">
+          <div style="font-size:12px;color:color-mix(in oklab, var(--color-warning) 65%, var(--color-base-content));margin-bottom:10px;">
             · paused at {@detail.current_node} · attempt {@attempt}
           </div>
         </div>
         {render_slot(@inner_block)}
       </div>
       <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;">
-        <span style="display:flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--color-warning);color:oklch(1 0 0);font-size:9px;animation:relaypulse 1.6s ease-in-out infinite;">
+        <span style="display:flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--color-warning);color:var(--color-warning-content);font-size:9px;animation:relaypulse 1.6s ease-in-out infinite;">
           ?
         </span>
-        <span style="font-family:var(--font-mono);font-size:12px;color:oklch(0.50 0.02 255);">
+        <span style="font-family:var(--font-mono);font-size:12px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
           Parked {TimeAgo.ago(DateTime.utc_now(), @detail.started_at)}
         </span>
       </div>
@@ -629,7 +641,11 @@ defmodule RelayWeb.RunComponents do
   defp failure_stats(assigns) do
     ~H"""
     <div style="display:flex;gap:18px;">
-      <.stat label="ATTEMPTS" value={"#{@totals.attempts} · stopped"} value_c="oklch(0.52 0.16 22)" />
+      <.stat
+        label="ATTEMPTS"
+        value={"#{@totals.attempts} · stopped"}
+        value_c="color-mix(in oklab, var(--color-error) 70%, var(--color-base-content))"
+      />
       <.stat label="DURATION" value={run_duration(@totals.duration_s)} />
       <.stat label="SPENT" value={run_cost(@totals.cost)} />
     </div>
@@ -638,12 +654,12 @@ defmodule RelayWeb.RunComponents do
 
   attr :label, :string, required: true
   attr :value, :string, required: true
-  attr :value_c, :string, default: "oklch(0.30 0.02 255)"
+  attr :value_c, :string, default: "color-mix(in oklab, var(--color-base-content) 95%, transparent)"
 
   defp stat(assigns) do
     ~H"""
     <div>
-      <div style="font-family:var(--font-mono);font-size:9px;font-weight:600;letter-spacing:0.05em;color:oklch(0.58 0.02 255);">
+      <div style="font-family:var(--font-mono);font-size:9px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
         {@label}
       </div>
       <div style={"font-family:var(--font-mono);font-size:13px;color:#{@value_c};"}>{@value}</div>
@@ -669,13 +685,13 @@ defmodule RelayWeb.RunComponents do
   def run_history(assigns) do
     ~H"""
     <div class="run-history">
-      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.50 0.02 255);margin-bottom:8px;">
+      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin-bottom:8px;">
         PRIOR RUNS · {length(@runs)}
       </div>
       <details
         :for={entry <- @runs}
         class="run-history-entry"
-        style="border:1px solid oklch(0.92 0.006 255);border-radius:8px;margin-bottom:8px;"
+        style="border:1px solid var(--color-base-300);border-radius:8px;margin-bottom:8px;"
       >
         <summary style="display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;list-style:none;">
           <span
@@ -684,13 +700,15 @@ defmodule RelayWeb.RunComponents do
           >
             {RunStatus.descriptor(entry.detail.status).label}
           </span>
-          <span style="font-size:13px;font-weight:600;color:oklch(0.28 0.02 255);">
+          <span style="font-size:13px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);">
             {history_title(entry)}
           </span>
-          <span style="margin-left:auto;font-size:11px;color:oklch(0.55 0.02 255);">
+          <span style="margin-left:auto;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
             {TimeAgo.ago(DateTime.utc_now(), entry.detail.finished_at)}
           </span>
-          <span style="color:oklch(0.60 0.02 255);">⌄</span>
+          <span style="color:color-mix(in oklab, var(--color-base-content) 50%, transparent);">
+            ⌄
+          </span>
         </summary>
         <div style="padding:0 12px 12px 12px;">
           <div style="display:flex;gap:18px;margin-bottom:10px;">
@@ -719,15 +737,15 @@ defmodule RelayWeb.RunComponents do
   defp history_chip_style(:done),
     do:
       "font-family:var(--font-mono);font-size:9px;font-weight:700;text-transform:uppercase;" <>
-        "background:oklch(0.97 0.03 155);color:oklch(0.42 0.10 155);border-radius:4px;padding:2px 6px;"
+        "background:color-mix(in oklab, var(--color-success) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-success) 45%, var(--color-base-content));border-radius:4px;padding:2px 6px;"
 
   defp history_chip_style(_status),
     do:
       "font-family:var(--font-mono);font-size:9px;font-weight:700;text-transform:uppercase;" <>
-        "background:oklch(0.97 0.03 22);color:oklch(0.52 0.13 22);border-radius:4px;padding:2px 6px;"
+        "background:color-mix(in oklab, var(--color-error) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));border-radius:4px;padding:2px 6px;"
 
-  defp history_duration_color(:failed), do: "oklch(0.52 0.14 22)"
-  defp history_duration_color(_status), do: "oklch(0.30 0.02 255)"
+  defp history_duration_color(:failed), do: "color-mix(in oklab, var(--color-error) 70%, var(--color-base-content))"
+  defp history_duration_color(_status), do: "color-mix(in oklab, var(--color-base-content) 95%, transparent)"
 
   # ---------- run_face (board card) ----------
 
@@ -784,7 +802,8 @@ defmodule RelayWeb.RunComponents do
       style={
         "display:flex;flex-direction:column;gap:6px;" <>
           if(@stalled?,
-            do: "background:oklch(0.97 0.03 75);border:1px solid oklch(0.88 0.06 75);border-radius:8px;padding:8px 10px;",
+            do:
+              "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100));border-radius:8px;padding:8px 10px;",
             else: ""
           )
       }
@@ -795,7 +814,7 @@ defmodule RelayWeb.RunComponents do
           style={"flex:1;height:5px;border-radius:2px;#{face_segment_style(i, @summary)}"}
         />
       </div>
-      <div style={"display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:#{if(@stalled?, do: "oklch(0.48 0.11 65)", else: "oklch(0.44 0.12 292)")};"}>
+      <div style={"display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:#{if(@stalled?, do: "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content))", else: "color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content))")};"}>
         <span style={"width:6px;height:6px;border-radius:50%;background:#{if(@stalled?, do: "var(--color-warning)", else: "var(--color-secondary)")};#{unless @stalled?, do: "animation:relaypulse 1.6s ease-in-out infinite;"}"} />
         <span
           :if={not @stalled?}
@@ -806,7 +825,7 @@ defmodule RelayWeb.RunComponents do
           :if={@progress_at}
           id={"card-#{@ref}-run-age"}
           class="run-face-age"
-          style="color:oklch(0.55 0.02 255);"
+          style="color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
         >
           {TimeAgo.ago(DateTime.utc_now(), @progress_at)}
         </span>
@@ -814,7 +833,7 @@ defmodule RelayWeb.RunComponents do
       <div
         :if={@stalled?}
         class="run-face-stalled-note"
-        style="font-family:var(--font-mono);font-size:10.5px;color:oklch(0.50 0.10 65);"
+        style="font-family:var(--font-mono);font-size:10.5px;color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));"
       >
         Quiet for a while — may be stuck
       </div>
@@ -828,7 +847,8 @@ defmodule RelayWeb.RunComponents do
   defp face_segment_style(i, %{node_index: idx}) when is_integer(idx) and i == idx,
     do: "background:var(--color-secondary);animation:relaypulse 1.6s ease-in-out infinite;"
 
-  defp face_segment_style(_i, _summary), do: "background:oklch(0.90 0.02 292);"
+  defp face_segment_style(_i, _summary),
+    do: "background:color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));"
 
   attr :summary, :map, required: true
 
@@ -836,16 +856,16 @@ defmodule RelayWeb.RunComponents do
     ~H"""
     <div
       class="run-face-badge run-face-parked"
-      style="display:flex;align-items:center;gap:8px;background:oklch(0.975 0.025 75);border-radius:8px;padding:8px 10px;"
+      style="display:flex;align-items:center;gap:8px;background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border-radius:8px;padding:8px 10px;"
     >
-      <span style="display:flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--color-warning);color:oklch(1 0 0);font-size:9px;animation:relaypulse 1.6s ease-in-out infinite;">
+      <span style="display:flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--color-warning);color:var(--color-warning-content);font-size:9px;animation:relaypulse 1.6s ease-in-out infinite;">
         ?
       </span>
       <div>
-        <div style="font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:0.05em;color:oklch(0.48 0.11 65);">
+        <div style="font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));">
           {String.upcase(RunStatus.descriptor(:parked).label)} · NEEDS YOU
         </div>
-        <div style="font-family:var(--font-mono);font-size:11px;color:oklch(0.50 0.06 65);">
+        <div style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));">
           {@summary.current_node}
         </div>
       </div>
@@ -861,19 +881,19 @@ defmodule RelayWeb.RunComponents do
     ~H"""
     <div
       class="run-face-badge run-face-failed"
-      style="display:flex;align-items:center;gap:8px;background:oklch(0.975 0.03 22);border-radius:8px;padding:8px 10px;"
+      style="display:flex;align-items:center;gap:8px;background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border-radius:8px;padding:8px 10px;"
     >
-      <span style={"display:flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(#{RunStatus.descriptor(:failed).token});color:oklch(1 0 0);font-size:10px;"}>
+      <span style={"display:flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(#{RunStatus.descriptor(:failed).token});color:var(--color-error-content);font-size:10px;"}>
         {RunStatus.descriptor(:failed).icon}
       </span>
       <div>
-        <div style="font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:0.05em;color:oklch(0.52 0.16 22);">
+        <div style="font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));">
           {String.upcase(RunStatus.descriptor(:failed).label)}
           <%= if @circuit? do %>
             · CIRCUIT BREAKER
           <% end %>
         </div>
-        <div style="font-family:var(--font-mono);font-size:11px;color:oklch(0.50 0.09 22);">
+        <div style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-error) 65%, var(--color-base-content));">
           stuck at {@summary.last_node}
           <%= if @summary[:flow_version] do %>
             · v{@summary.flow_version}
@@ -890,12 +910,12 @@ defmodule RelayWeb.RunComponents do
     ~H"""
     <div
       class="run-face-badge run-face-queued"
-      style="display:flex;flex-direction:column;gap:2px;background:oklch(0.97 0.03 292);border-radius:8px;padding:8px 10px;"
+      style="display:flex;flex-direction:column;gap:2px;background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border-radius:8px;padding:8px 10px;"
     >
-      <div style="font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:0.05em;color:oklch(0.46 0.13 292);">
+      <div style="font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));">
         QUEUED · {String.upcase(@flow.key)} FLOW
       </div>
-      <div style="font-family:var(--font-mono);font-size:11px;color:oklch(0.55 0.06 292);">
+      <div style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-secondary) 95%, var(--color-base-content));">
         picks up next
       </div>
     </div>
@@ -910,12 +930,12 @@ defmodule RelayWeb.RunComponents do
       class="run-face-row run-face-done"
       style="display:flex;align-items:center;justify-content:space-between;gap:8px;"
     >
-      <span style="font-family:var(--font-mono);font-size:11px;color:oklch(0.42 0.10 155);">
+      <span style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-success) 45%, var(--color-base-content));">
         {RunStatus.descriptor(:done).icon} {RunStatus.descriptor(:done).label} · {run_duration(
           @summary[:duration_s]
         )}
       </span>
-      <span style="font-family:var(--font-mono);font-size:11px;color:oklch(0.50 0.08 155);">
+      <span style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-success) 70%, var(--color-base-content));">
         {run_cost(@summary[:cost])}
       </span>
     </div>
@@ -928,16 +948,16 @@ defmodule RelayWeb.RunComponents do
     ~H"""
     <div
       class="run-face-badge run-face-cancelled"
-      style="display:flex;align-items:center;gap:8px;background:oklch(0.97 0.006 255);border-radius:8px;padding:8px 10px;"
+      style="display:flex;align-items:center;gap:8px;background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));border-radius:8px;padding:8px 10px;"
     >
-      <span style="display:flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:oklch(0.72 0.02 255);color:oklch(1 0 0);font-size:10px;">
+      <span style="display:flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:color-mix(in oklab, var(--color-base-content) 40%, var(--color-base-100));color:var(--color-neutral-content);font-size:10px;">
         ⊘
       </span>
       <div>
-        <div style="font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:0.05em;color:oklch(0.44 0.02 255);">
+        <div style="font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 75%, transparent);">
           {String.upcase(RunStatus.descriptor(:cancelled).label)}
         </div>
-        <div style="font-family:var(--font-mono);font-size:11px;color:oklch(0.50 0.02 255);">
+        <div style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
           stopped at {@summary.last_node} · resumable
         </div>
       </div>
@@ -955,12 +975,12 @@ defmodule RelayWeb.RunComponents do
     ~H"""
     <div
       class="run-face-badge run-face-review"
-      style="display:flex;align-items:center;gap:6px;background:oklch(0.97 0.02 250);border:1px solid oklch(0.89 0.04 250);border-radius:6px;padding:6px 8px;"
+      style="display:flex;align-items:center;gap:6px;background:color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-primary) 30%, var(--color-base-100));border-radius:6px;padding:6px 8px;"
     >
-      <span style="width:15px;height:15px;border-radius:50%;background:oklch(0.60 0.14 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex:0 0 auto;">
+      <span style="width:15px;height:15px;border-radius:50%;background:var(--color-primary);color:var(--color-primary-content);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex:0 0 auto;">
         ✓
       </span>
-      <span style="font-size:10.5px;font-weight:600;letter-spacing:0.03em;color:oklch(0.44 0.13 250);font-family:var(--font-mono);">
+      <span style="font-size:10.5px;font-weight:600;letter-spacing:0.03em;color:color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content));font-family:var(--font-mono);">
         READY FOR YOUR REVIEW
       </span>
     </div>
