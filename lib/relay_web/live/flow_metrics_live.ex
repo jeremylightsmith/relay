@@ -124,11 +124,23 @@ defmodule RelayWeb.FlowMetricsLive do
   defp cost_cell(nil), do: "—"
   defp cost_cell(%Decimal{} = d), do: "$" <> Decimal.to_string(d, :normal)
 
-  # Artboard type-tag palette (docs/designs/Relay Flow Metrics.dc.html lines 281-285).
-  defp type_tag_style(:agent), do: "background:oklch(0.96 0.03 292);color:oklch(0.46 0.13 292);"
-  defp type_tag_style(:shell), do: "background:oklch(0.96 0.004 255);color:oklch(0.50 0.02 255);"
-  defp type_tag_style(:gate), do: "background:oklch(0.97 0.03 75);color:oklch(0.48 0.11 65);"
-  defp type_tag_style(_), do: "background:oklch(0.96 0.004 255);color:oklch(0.50 0.02 255);"
+  # Artboard type-tag palette (docs/designs/Relay Flow Metrics.dc.html lines 281-285), re-expressed
+  # as daisyUI tokens (RE237) so they flip with data-theme.
+  defp type_tag_style(:agent),
+    do:
+      "background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));"
+
+  defp type_tag_style(:shell),
+    do:
+      "background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
+
+  defp type_tag_style(:gate),
+    do:
+      "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));"
+
+  defp type_tag_style(_),
+    do:
+      "background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
 
   @impl true
   def render(assigns) do
@@ -139,19 +151,25 @@ defmodule RelayWeb.FlowMetricsLive do
           <nav style="font-size:13px;display:flex;align-items:center;gap:7px;">
             <.link
               navigate={~p"/board/#{@board.slug}"}
-              style="color:oklch(0.52 0.02 255);font-weight:600;"
+              style="color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-weight:600;"
             >
               {@board.name}
             </.link>
-            <span style="color:oklch(0.78 0.02 255);">/</span>
+            <span style="color:color-mix(in oklab, var(--color-base-content) 30%, transparent);">
+              /
+            </span>
             <.link
               navigate={~p"/board/#{@board.slug}/settings?section=flows"}
-              style="color:oklch(0.52 0.02 255);font-weight:600;"
+              style="color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-weight:600;"
             >
               Flows
             </.link>
-            <span style="color:oklch(0.78 0.02 255);">/</span>
-            <span style="color:oklch(0.28 0.02 255);font-weight:600;">{humanize(@flow.key)}</span>
+            <span style="color:color-mix(in oklab, var(--color-base-content) 30%, transparent);">
+              /
+            </span>
+            <span style="color:color-mix(in oklab, var(--color-base-content) 95%, transparent);font-weight:600;">
+              {humanize(@flow.key)}
+            </span>
           </nav>
           <FlowEditorComponents.flow_tabs
             board_slug={@board.slug}
@@ -164,7 +182,7 @@ defmodule RelayWeb.FlowMetricsLive do
         <div
           :if={@deep_ref}
           id="deep-link-banner"
-          style="background:oklch(0.975 0.02 250);border:1px solid oklch(0.88 0.05 250);border-left:3px solid oklch(0.60 0.14 250);border-radius:11px;padding:13px 16px;margin-bottom:16px;font-size:13px;"
+          style="background:color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-primary) 30%, var(--color-base-100));border-left:3px solid var(--color-primary);border-radius:11px;padding:13px 16px;margin-bottom:16px;font-size:13px;"
         >
           Opened from <span style="font-family:var(--font-mono);font-weight:600;">{@deep_ref}</span>
           <%= if @deep_node do %>
@@ -177,7 +195,7 @@ defmodule RelayWeb.FlowMetricsLive do
           <.page_heading id="flow-metrics-title">
             Flow metrics
           </.page_heading>
-          <p style="font-size:13.5px;line-height:1.55;color:oklch(0.50 0.02 255);max-width:560px;">
+          <p style="font-size:13.5px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);max-width:560px;">
             Per-node rollup for the <strong>{humanize(@flow.key)}</strong>
             flow. Every node execution records duration, attempts, verdict and cost — this is where
             you read it in aggregate and decide what to tune.
@@ -187,13 +205,13 @@ defmodule RelayWeb.FlowMetricsLive do
         <div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0;">
           <span
             id="flow-metrics-version-chip"
-            style="font-family:var(--font-mono);font-size:14px;font-weight:600;padding:6px 12px;border-radius:8px;background:oklch(0.96 0.004 255);color:oklch(0.34 0.02 255);"
+            style="font-family:var(--font-mono);font-size:14px;font-weight:600;padding:6px 12px;border-radius:8px;background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 90%, transparent);"
           >
             v{@flow.version}
           </span>
           <div
             id="flow-metrics-window"
-            style="display:inline-flex;background:oklch(0.96 0.004 255);border:1px solid oklch(0.90 0.006 255);border-radius:9px;padding:3px;gap:2px;"
+            style="display:inline-flex;background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));border:1px solid var(--color-field-border);border-radius:9px;padding:3px;gap:2px;"
           >
             <button
               :for={{key, label} <- window_options()}
@@ -209,7 +227,7 @@ defmodule RelayWeb.FlowMetricsLive do
         </div>
 
         <%!-- Stat band --%>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);border:1px solid oklch(0.92 0.006 255);border-radius:12px;background:oklch(1 0 0);margin-bottom:18px;">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--color-base-300);border-radius:12px;background:var(--color-base-100);margin-bottom:18px;">
           <.stat_cell id="stat-total-runs" label="TOTAL RUNS" value={"#{@summary.total_runs}"} />
           <.stat_cell
             id="stat-completed"
@@ -234,7 +252,7 @@ defmodule RelayWeb.FlowMetricsLive do
         <p
           :if={@cost_blank?}
           id="cost-blank-note"
-          style="font-size:12px;color:oklch(0.52 0.02 255);margin-bottom:12px;"
+          style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin-bottom:12px;"
         >
           Cost lights up once executors report spend. Duration, attempts and verdicts are recording live right now.
         </p>
@@ -242,9 +260,9 @@ defmodule RelayWeb.FlowMetricsLive do
         <%= if @enough? do %>
           <div
             id="flow-metrics-table"
-            style="border:1px solid oklch(0.92 0.006 255);border-radius:12px;overflow:hidden;"
+            style="border:1px solid var(--color-base-300);border-radius:12px;overflow:hidden;"
           >
-            <div style="display:grid;grid-template-columns:minmax(220px,1.3fr) 62px 130px 130px 92px 170px 84px;column-gap:14px;padding:10px 16px;background:oklch(0.975 0.004 255);font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.55 0.02 255);">
+            <div style="display:grid;grid-template-columns:minmax(220px,1.3fr) 62px 130px 130px 92px 170px 84px;column-gap:14px;padding:10px 16px;background:var(--color-field-hover);font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
               <span>NODE</span>
               <span style="text-align:right;">RUNS</span>
               <span style="text-align:right;">DURATION</span>
@@ -260,13 +278,13 @@ defmodule RelayWeb.FlowMetricsLive do
             >
               <div>
                 <div style="display:flex;align-items:center;gap:8px;">
-                  <span style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:oklch(0.28 0.02 255);">
+                  <span style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);">
                     {row.name}
                   </span>
                   <span
                     :if={@deep_node == row.node_key}
                     id={"node-here-#{row.node_key}"}
-                    style="font-family:var(--font-mono);font-size:9px;font-weight:600;color:oklch(0.44 0.13 250);background:oklch(0.95 0.03 250);border-radius:5px;padding:2px 6px;"
+                    style="font-family:var(--font-mono);font-size:9px;font-weight:600;color:color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content));background:color-mix(in oklab, var(--color-primary) 15%, var(--color-base-100));border-radius:5px;padding:2px 6px;"
                   >
                     {@deep_ref} is here
                   </span>
@@ -281,7 +299,7 @@ defmodule RelayWeb.FlowMetricsLive do
                   <span
                     :if={row.model}
                     id={"node-model-#{row.node_key}"}
-                    style="font-family:var(--font-mono);font-size:10.5px;font-weight:500;color:oklch(0.44 0.10 292);background:oklch(0.975 0.02 292);padding:2px 7px;border-radius:4px;"
+                    style="font-family:var(--font-mono);font-size:10.5px;font-weight:500;color:color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));padding:2px 7px;border-radius:4px;"
                   >
                     {row.model}
                   </span>
@@ -308,12 +326,12 @@ defmodule RelayWeb.FlowMetricsLive do
         <% else %>
           <div
             id="flow-metrics-empty"
-            style="text-align:center;padding:54px 24px 58px 24px;border:1px solid oklch(0.92 0.006 255);border-radius:12px;"
+            style="text-align:center;padding:54px 24px 58px 24px;border:1px solid var(--color-base-300);border-radius:12px;"
           >
-            <div style="font-size:16px;font-weight:600;color:oklch(0.34 0.02 255);">
+            <div style="font-size:16px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);">
               Not enough runs in this window yet
             </div>
-            <p style="font-size:13px;color:oklch(0.50 0.02 255);max-width:460px;margin:8px auto 16px;">
+            <p style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);max-width:460px;margin:8px auto 16px;">
               Only <strong>{@summary.completed} runs</strong>
               completed in this window. Per-node percentiles need roughly
               <strong>{Runs.min_runs_for_percentiles()}+</strong>
@@ -324,7 +342,7 @@ defmodule RelayWeb.FlowMetricsLive do
               type="button"
               phx-click="set-window"
               phx-value-window="all"
-              style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;"
+              style="background:var(--color-primary);color:var(--color-primary-content);border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;"
             >
               Widen to all-time
             </button>
@@ -333,9 +351,11 @@ defmodule RelayWeb.FlowMetricsLive do
 
         <p
           id="flow-metrics-footnote"
-          style="font-size:11.5px;color:oklch(0.56 0.02 255);margin-top:14px;"
+          style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);margin-top:14px;"
         >
-          <span style="font-family:var(--font-mono);color:oklch(0.62 0.02 255);">RUNS</span>
+          <span style="font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 50%, transparent);">
+            RUNS
+          </span>
           count node executions, not cards — a node visited twice by one card counts twice.
           Per-card totals live in the card's Run panel.
         </p>
@@ -355,22 +375,22 @@ defmodule RelayWeb.FlowMetricsLive do
   defp window_button_style(true),
     do:
       "font-size:12px;padding:5px 11px;border:none;border-radius:7px;font-weight:600;cursor:pointer;" <>
-        "background:oklch(1 0 0);color:oklch(0.28 0.02 255);box-shadow:0 1px 2px oklch(0.5 0.03 255/0.14);"
+        "background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 95%, transparent);box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 14%, transparent);"
 
   defp window_button_style(false),
     do:
-      "font-size:12px;padding:5px 11px;border:none;border-radius:7px;font-weight:600;cursor:pointer;background:transparent;color:oklch(0.52 0.02 255);"
+      "font-size:12px;padding:5px 11px;border:none;border-radius:7px;font-weight:600;cursor:pointer;background:transparent;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
 
   defp row_style(true),
     do:
       "display:grid;grid-template-columns:minmax(220px,1.3fr) 62px 130px 130px 92px 170px 84px;" <>
-        "column-gap:14px;align-items:center;padding:12px 16px;border-top:1px solid oklch(0.95 0.005 255);" <>
-        "background:oklch(0.975 0.02 250);box-shadow:inset 3px 0 0 oklch(0.60 0.14 250);"
+        "column-gap:14px;align-items:center;padding:12px 16px;border-top:1px solid color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));" <>
+        "background:color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100));box-shadow:inset 3px 0 0 var(--color-primary);"
 
   defp row_style(false),
     do:
       "display:grid;grid-template-columns:minmax(220px,1.3fr) 62px 130px 130px 92px 170px 84px;" <>
-        "column-gap:14px;align-items:center;padding:12px 16px;border-top:1px solid oklch(0.95 0.005 255);"
+        "column-gap:14px;align-items:center;padding:12px 16px;border-top:1px solid color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));"
 
   attr :id, :string, required: true
   attr :label, :string, required: true
@@ -380,13 +400,13 @@ defmodule RelayWeb.FlowMetricsLive do
 
   defp stat_cell(assigns) do
     ~H"""
-    <div style={"padding:14px 16px;#{unless @last, do: "border-right:1px solid oklch(0.94 0.005 255);"}"}>
-      <div style="font-family:var(--font-mono);font-size:9.5px;color:oklch(0.60 0.02 255);">
+    <div style={"padding:14px 16px;#{unless @last, do: "border-right:1px solid var(--color-base-300);"}"}>
+      <div style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);">
         {@label}
       </div>
       <div
         id={@id}
-        style={"font-size:21px;font-weight:600;font-family:var(--font-mono);color:#{if @muted, do: "oklch(0.74 0.01 255)", else: "oklch(0.30 0.02 255)"};"}
+        style={"font-size:21px;font-weight:600;font-family:var(--font-mono);color:#{if @muted, do: "color-mix(in oklab, var(--color-base-content) 35%, transparent)", else: "color-mix(in oklab, var(--color-base-content) 95%, transparent)"};"}
       >
         {@value}
       </div>

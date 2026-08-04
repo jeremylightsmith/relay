@@ -391,8 +391,8 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
         |> element("#new-flow-button")
         |> render()
 
-      assert button =~ "background:oklch(0.60 0.14 250)"
-      assert button =~ "color:oklch(1 0 0)"
+      assert button =~ "background:var(--color-primary)"
+      assert button =~ "color:var(--color-primary-content)"
       assert button =~ "border-radius:8px"
       assert button =~ "padding:9px 15px"
       assert button =~ "font-size:13px"

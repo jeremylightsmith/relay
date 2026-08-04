@@ -49,12 +49,9 @@ defmodule RelayWeb.ThemeTokensTest do
   ]
 
   @pending [
-    "lib/relay_web/components/flow_metrics_components.ex",
-    "lib/relay_web/components/flow_settings_components.ex",
     "lib/relay_web/live/board_live.ex",
     "lib/relay_web/live/board_settings_live.ex",
     "lib/relay_web/live/boards_live.ex",
-    "lib/relay_web/live/flow_metrics_live.ex",
     "lib/relay_web/live/public_board_live.ex"
   ]
 
