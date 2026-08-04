@@ -225,8 +225,9 @@ sharing behavior.
   last-lane fallback with it, which is a display move only — no stored `release_id` changes.
   Every new event joins the `read_only?` guard list and none of the affordances render on an
   archived board.
-  **Zoom (RE260):** two view-only chrome controls, socket assigns on `BoardLive` that no
-  broadcast touches, so another tab cannot reset your view. `:story_map_zoom` is the closed set
+  **Zoom (RE260):** two view-only chrome controls, both keys of the **shared view** below — they
+  change grid geometry, and RE257's raw-pixel cursors are measured in it, so viewers who
+  disagree see each other's cursor over the wrong card. `:story_map_zoom` is the closed set
   `RelayWeb.StoryMapComponents.zoom_levels/0` (`:map` | `:compact` | `:full`, defaulting to
   `:compact`) parsed off the wire by `parse_zoom/1`; it reaches only the renderer, which sizes
   the card face — Map is a title-only chip, Full adds the meta row and progress bar.
@@ -237,17 +238,22 @@ sharing behavior.
   a purely vertical drag changes release only and must not silently unset the task; the
   activity is then derived from the task by `StoryMap.resolve_placement/2`.
   **Shared view (RE257):** the map's view settings are **board-wide**, stored in the
-  `boards.story_map_view` jsonb column and written only through `put_view/3`. `view_defaults/0`
-  is the one definition of the key set (today `%{"tray_open" => true}`), `view/1` merges it
-  under the stored map dropping unknown keys, and `put_view/3` refuses a key outside the set
-  with `{:error, :unknown_key}` and re-reads the row before merging so a concurrent write is
-  not clobbered. It broadcasts `{:story_map_view_changed, board_id, view}` on
+  `boards.story_map_view` jsonb column and written only through `put_view/3` or `toggle_view/2`.
+  `view_defaults/0` is the one definition of the key set (today
+  `%{"tray_open" => true, "zoom" => "compact", "hide_tasks" => false}` — jsonb, so zoom is a
+  string parsed back by `parse_zoom/1`, never `String.to_atom/1`), `view/1` merges it
+  under the stored map dropping unknown keys, and both writers refuse a key outside the set
+  with `{:error, :unknown_key}` and re-read the row before merging so a concurrent write is
+  not clobbered. `toggle_view/2` exists so a boolean flip is computed on the **committed row**:
+  a LiveView's assign only catches up when it handles the broadcast, which lands behind any
+  click already queued, so two fast clicks on `put_view(…, not assign)` would make one toggle.
+  It broadcasts `{:story_map_view_changed, board_id, view}` on
   `story_map_view:<board_id>` — again outside `Relay.Events`, same no-version-bump rule. There
   is deliberately no optimistic local assign: the clicker re-renders from the same broadcast
   everyone else does, so viewers cannot disagree. `story_map_draft` / `story_map_draft_name` /
   `story_map_compose` stay **per-tab** (RE263) — sharing them would hand one person the ability
-  to clear another's in-progress input. RE259 and RE260 extend the shared view by adding a key
-  to `view_defaults/0`.
+  to clear another's in-progress input. RE259 (filter & focus) extends the shared view by adding
+  a key to `view_defaults/0`.
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
 
 ## Core schemas

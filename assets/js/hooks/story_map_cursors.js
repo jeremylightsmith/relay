@@ -10,22 +10,19 @@
 // x = clientX - #story-map-grid's rect left. The grid's geometry is a pure function of the
 // structure data, the cards and the (shared) view settings, so window size and scroll change
 // only what you can SEE, never where anything IS. The layer sits at the content origin, so one
-// viewer's raw pixel lands on the same card for every other viewer ON THE SAME ZOOM — which
-// holds only to the extent the view settings that drive geometry are shared board-wide
-// (Relay.StoryMap.view/1). The UNMAPPED tray is a flex sibling outside the scroll container, so
-// its width never shifts map coordinates either.
+// viewer's raw pixel lands on the same card for every other viewer. That holds because EVERY
+// view setting that drives geometry is shared board-wide in `view_defaults/0`
+// (Relay.StoryMap.view/1): "tray_open", "zoom" — column widths and card heights via
+// cell_style/4 and card_shell/3 — and "hide_tasks", which adds or removes whole task columns
+// (StoryMapGrid.build/6). A geometry setting that went per-socket would put a viewer's cursor
+// over the WRONG cell, not merely a few pixels off, so a new one belongs in that key set.
+// The UNMAPPED tray is a flex sibling outside the scroll container, so its width never shifts
+// map coordinates either.
 //
 // KNOWN RESIDUAL DRIFT, ACCEPTED: a viewer with an inline draft or composer open has slightly
 // different geometry (the add-activity column widens 58px -> 156px; an open composer adds height
 // to one row), so their cursor is a little off for others while they type. Transient,
 // self-inflicted, and cheaper to live with than cell anchoring.
-//
-// NOT YET SHARED, and a LARGER drift: `view_defaults/0` shares exactly one key today,
-// "tray_open". `:story_map_zoom` and `:story_map_hide_tasks` are still per-socket assigns until
-// RE260/RE259 move them into that key set. Zoom drives column widths and card heights
-// (cell_style/4, card_shell/3) and Hide tasks adds or removes whole task columns
-// (StoryMapGrid.build/6), so two viewers at different zoom — or disagreeing on Hide tasks — see
-// each other's cursor over the WRONG cell, not merely a few pixels off.
 //
 // Deliberately NOT copied from the artboard: its decorative CSS keyframe animations, which
 // exist only to make the static mockup look alive. The only animation here is an 80ms linear

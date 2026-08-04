@@ -327,7 +327,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       # RE257 — the tray is a SHARED view setting, so the re-expand goes through put_view/3:
       # it is persisted and every other viewer follows. An optimistic local assign here would
       # leave B collapsed and the row saying false, which is the divergence this pins against.
-      assert Repo.get!(Schemas.Board, ctx.board.id).story_map_view == %{"tray_open" => true}
+      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["tray_open"] == true
       assert has_element?(view_b, "#story-map-tray-toggle[aria-expanded='true']")
     end
 
@@ -1300,7 +1300,11 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       assert has_element?(view, "#story-map-draft-#{ctx.onboard.id}")
     end
 
-    test "zoom and Hide tasks reset on reload", %{conn: conn} = ctx do
+    # RE257 inverted this: zoom and Hide tasks used to be per-socket assigns that reset on
+    # reload. They are shared view settings now — both drive grid geometry, and raw-pixel
+    # cursors only land on the right card while every viewer's geometry agrees — so a reload
+    # (and a post-deploy reconnect) must come back on the view the board is on.
+    test "zoom and Hide tasks SURVIVE a reload, because they are shared", %{conn: conn} = ctx do
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
 
       view |> element("#story-map-zoom-map") |> render_click()
@@ -1308,8 +1312,25 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       {:ok, reloaded, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
 
-      assert attr_of(reloaded, "#story-map-zoom-compact", "aria-pressed") == "true"
-      assert has_element?(reloaded, "#story-map-hide-tasks", "Hide tasks")
+      assert attr_of(reloaded, "#story-map-zoom-map", "aria-pressed") == "true"
+      assert has_element?(reloaded, "#story-map-hide-tasks", "Show tasks")
+    end
+
+    # RE257 — opening a task draft turns Hide tasks off through put_view/3, not a local assign,
+    # so it can never become a second writer that leaves other viewers merged.
+    test "opening a task draft shows tasks for EVERY viewer, not just the drafter",
+         %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view_a |> element("#story-map-hide-tasks") |> render_click()
+      refute has_element?(view_b, "#story-map-task-#{ctx.sign_in.id}")
+
+      view_a |> element("#story-map-add-task-#{ctx.onboard.id}") |> render_click()
+
+      assert has_element?(view_b, "#story-map-task-#{ctx.sign_in.id}")
+      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["hide_tasks"] == false
     end
   end
 
@@ -1550,7 +1571,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       assert has_element?(view_b, "#story-map-tray-toggle[aria-expanded='false']")
       # The clicker re-renders from the SAME broadcast — one path, no optimistic assign.
       assert has_element?(view_a, "#story-map-tray-toggle[aria-expanded='false']")
-      assert Repo.get!(Schemas.Board, ctx.board.id).story_map_view == %{"tray_open" => false}
+      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["tray_open"] == false
     end
 
     test "a late joiner opens on the view everyone else is already on", %{conn: conn} = ctx do
@@ -1560,6 +1581,54 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       {:ok, view_c, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
 
       assert has_element?(view_c, "#story-map-tray-toggle[aria-expanded='false']")
+    end
+
+    # RE257 — zoom and Hide tasks are shared for a HARDER reason than the tray: both change the
+    # grid geometry that raw-pixel cursors are measured in, so a viewer left behind on the old
+    # value sees everyone else's cursor over the wrong card.
+    test "a zoom change in one session moves the other, and a late joiner opens on it",
+         %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert attr_of(view_b, "#story-map-zoom-compact", "aria-pressed") == "true"
+
+      view_a |> element("#story-map-zoom-full") |> render_click()
+
+      assert attr_of(view_b, "#story-map-zoom-full", "aria-pressed") == "true"
+      assert attr_of(view_a, "#story-map-zoom-full", "aria-pressed") == "true"
+      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["zoom"] == "full"
+
+      {:ok, view_c, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      assert attr_of(view_c, "#story-map-zoom-full", "aria-pressed") == "true"
+    end
+
+    test "a Hide tasks click in one session merges the other's columns too",
+         %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view_b, "#story-map-task-#{ctx.sign_in.id}")
+
+      view_a |> element("#story-map-hide-tasks") |> render_click()
+
+      refute has_element?(view_b, "#story-map-task-#{ctx.sign_in.id}")
+      assert has_element?(view_b, "#story-map-merged-#{ctx.onboard.id}")
+      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["hide_tasks"] == true
+
+      {:ok, view_c, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      refute has_element?(view_c, "#story-map-task-#{ctx.sign_in.id}")
+    end
+
+    # An unparseable zoom can only reach the row by hand, but it must not take the map down.
+    test "a stored zoom the parser rejects falls back to the default", %{conn: conn} = ctx do
+      {:ok, _view} = StoryMap.put_view(ctx.board, "zoom", "gigantic")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert attr_of(view, "#story-map-zoom-compact", "aria-pressed") == "true"
     end
   end
 

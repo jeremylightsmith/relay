@@ -34,13 +34,14 @@ defmodule RelayWeb.BoardLive do
   `{:story_map_changed, board_id}` broadcast do the refetch — the creating tab included.
 
   RE260 adds the map's two view-only chrome controls: `:story_map_zoom` (`:map` | `:compact` |
-  `:full`, defaulting to `:compact`) and `:story_map_hide_tasks`. Both are socket assigns only —
-  unlike `:story_map_tray_open`, which RE257 moved onto the board-wide shared view, these two
-  are per socket and reset on reload, and `refresh_story_map/1` never touches them, so another
-  tab's broadcast cannot reset your view. `:story_map_hide_tasks` is
-  the sixth argument to `StoryMapGrid.build/6`; `:story_map_zoom` reaches only the renderer.
-  Opening a `{:task, _}` draft turns Hide tasks off, because a new task column has nowhere to
-  render while the activity is merged.
+  `:full`, defaulting to `:compact`) and `:story_map_hide_tasks`. Both are keys of the
+  board-wide shared view alongside `:story_map_tray_open` (RE257) — **not** per-socket assigns:
+  they change the grid's geometry, which is the coordinate space RE257's raw-pixel cursors are
+  measured in, so viewers who disagree see each other's cursor over the wrong card.
+  `:story_map_hide_tasks` is the sixth argument to `StoryMapGrid.build/6`; `:story_map_zoom`
+  reaches only the renderer. Opening a `{:task, _}` draft turns Hide tasks off (through
+  `put_view/3` like every other writer), because a new task column has nowhere to render while
+  the activity is merged.
 
   RE262 makes it writable: `"assign_card"` / `"unassign_card"` come from the `StoryMapDnD`
   hook rooted on `#story-map`, and both re-render through the `{:card_upserted, _}` echo rather
@@ -56,11 +57,14 @@ defmodule RelayWeb.BoardLive do
 
   RE257 makes the map multi-user. `:presence_people` is `Relay.Presence`'s roster (empty
   anywhere but the map, re-derived on every `"presence_diff"`), rendered by
-  `StoryMapComponents.presence_stack/1` in the `<:actions>` slot. `:story_map_tray_open` is no
-  longer a private socket assign: it is one key of the board-wide shared view
-  (`Relay.StoryMap.view/1` / `put_view/3`), so the toggle writes and re-renders from the write's
-  own broadcast — the clicker included, one path, no optimistic local assign. Tracking happens
-  only for `live_action == :story_map`; untracking is the LiveView's exit.
+  `StoryMapComponents.presence_stack/1` in the `<:actions>` slot. `:story_map_tray_open`,
+  `:story_map_zoom` and `:story_map_hide_tasks` are no longer private socket assigns: they are
+  the board-wide shared view (`Relay.StoryMap.view/1` / `put_view/3` / `toggle_view/2`), so a
+  toggle writes and re-renders from the write's own broadcast — the clicker included, one path,
+  no optimistic local assign, and `assign_story_map_view/2` is the one place they are assigned.
+  Every flip goes through `toggle_view/2` so it is computed on the committed row rather than the
+  render-lagged assign. Tracking happens only for `live_action == :story_map`; untracking is the
+  LiveView's exit.
 
   Cursors never touch assigns: `"cursor_moved"` is floored per socket (`@cursor_floor_ms`) and
   relayed on `Relay.Presence`'s cursor topic, and every receiver forwards it to its own client
@@ -832,12 +836,12 @@ defmodule RelayWeb.BoardLive do
       |> assign(:story_tasks, StoryMap.list_tasks(board))
       |> assign(:releases, StoryMap.list_releases(board))
       |> assign(:story_map_cards, cards)
-      # RE257 — the tray's open state is a SHARED, board-wide view setting now, not a per-socket
-      # assign: every viewer of a board must be looking at the same map, which is what makes a
-      # raw-pixel cursor land on the right card. Seeded from the persisted view so a late joiner
-      # opens on what everyone else is already on, and re-assigned only from the write's own
+      # RE257 — the map's view settings are SHARED, board-wide, not per-socket assigns: every
+      # viewer of a board must be looking at the same map, which is what makes a raw-pixel
+      # cursor land on the right card. Seeded from the persisted view so a late joiner opens on
+      # what everyone else is already on, and re-assigned only from the write's own
       # {:story_map_view_changed, _, _} broadcast.
-      |> assign(:story_map_tray_open, StoryMap.view(board)["tray_open"])
+      |> assign_story_map_view(StoryMap.view(board))
       # RE257 — the story-map roster, [] anywhere but the map. Re-derived from Relay.Presence on
       # every diff, never patched from the diff payload: one person with three tabs is three
       # joins and one avatar, and only list_people/1 knows that.
@@ -861,13 +865,6 @@ defmodule RelayWeb.BoardLive do
       # itself is the board's existing :compose_form: one composer is open at a time anywhere
       # on this socket, so one form assign is the whole state.
       |> assign(:story_map_compose, nil)
-      # RE260 — the two view-only chrome assigns. Compact is the DEFAULT face (a deliberate
-      # change from RE264's Full). Both are socket-only — no URL param, no localStorage — and
-      # deliberately untouched by refresh_story_map/1, so another tab's broadcast never resets
-      # your view. NOT like :story_map_tray_open, which RE257 moved onto the board-wide shared
-      # view (StoryMap.view/1); RE259/RE260 are where these two would join it.
-      |> assign(:story_map_zoom, :compact)
-      |> assign(:story_map_hide_tasks, false)
       |> assign_stalled()
       |> assign(:stalled_open, false)
       |> assign(:stalled_error, nil)
@@ -1235,7 +1232,7 @@ defmodule RelayWeb.BoardLive do
       # "toggle_story_map_tray". An optimistic local assign here would be a SECOND writer of
       # one piece of state: the dropper's tray would open while every other viewer's (and the
       # persisted row) stayed collapsed, and nothing would ever reconcile them.
-      _ = StoryMap.put_view(socket.assigns.board, "tray_open", true)
+      log_view_write(StoryMap.put_view(socket.assigns.board, "tray_open", true), "tray_open")
       {:noreply, socket}
     else
       _other -> {:noreply, socket}
@@ -1618,28 +1615,37 @@ defmodule RelayWeb.BoardLive do
   end
 
   # RE257 — the tray's open state is SHARED board-wide, so the click writes through
-  # Relay.StoryMap.put_view/3 and assigns nothing here: the write's own broadcast lands in this
-  # socket's mailbox too (local PubSub dispatch is synchronous in the writer's process) and
+  # Relay.StoryMap.toggle_view/2 and assigns nothing here: the write's own broadcast lands in
+  # this socket's mailbox too (local PubSub dispatch is synchronous in the writer's process) and
   # re-assigns in handle_info/2. One path, so the clicker and every other viewer can never
-  # disagree. Still deliberately OUTSIDE the read_only? guard list — it changes no card data.
+  # disagree. toggle_view/2 rather than put_view/3 with `not assigns...`: the assign lags a
+  # render behind, so two fast clicks would both flip from the same stale value (see its doc).
+  # Still deliberately OUTSIDE the read_only? guard list — view state is not board data, so it
+  # stays live on an archived board, whose map is still readable.
   def handle_event("toggle_story_map_tray", _params, socket) do
-    _ = StoryMap.put_view(socket.assigns.board, "tray_open", not socket.assigns.story_map_tray_open)
+    log_view_write(StoryMap.toggle_view(socket.assigns.board, "tray_open"), "tray_open")
     {:noreply, socket}
   end
 
-  # RE260 — the two view-only chrome controls. `parse_zoom/1` is the ONLY parser for the closed
-  # set and never calls String.to_atom/1, so a forged value is a silent no-op rather than a new
-  # atom. Neither event is in the read_only? guard above: an archived board is still readable,
-  # and zoom changes nothing on it.
+  # RE260 — the two view-only chrome controls, shared board-wide for the same reason the tray is
+  # (both change grid GEOMETRY, which raw-pixel cursors are measured in). `parse_zoom/1` is the
+  # ONLY parser for the closed set and never calls String.to_atom/1, so a forged value is a
+  # silent no-op rather than a new atom — and it still guards the wire value BEFORE the write.
+  # Neither event is in the read_only? guard above, for the reason above the tray toggle.
   def handle_event("set_story_map_zoom", %{"zoom" => zoom}, socket) do
     case StoryMapComponents.parse_zoom(zoom) do
-      {:ok, level} -> {:noreply, assign(socket, :story_map_zoom, level)}
-      :error -> {:noreply, socket}
+      {:ok, level} ->
+        log_view_write(StoryMap.put_view(socket.assigns.board, "zoom", Atom.to_string(level)), "zoom")
+        {:noreply, socket}
+
+      :error ->
+        {:noreply, socket}
     end
   end
 
   def handle_event("toggle_story_map_hide_tasks", _params, socket) do
-    {:noreply, assign(socket, :story_map_hide_tasks, not socket.assigns.story_map_hide_tasks)}
+    log_view_write(StoryMap.toggle_view(socket.assigns.board, "hide_tasks"), "hide_tasks")
+    {:noreply, socket}
   end
 
   # RE257 — one cursor frame from this socket's pointer. Gated on the story map (interview
@@ -2138,7 +2144,7 @@ defmodule RelayWeb.BoardLive do
   # RE257 — a shared view setting changed, here or in someone else's tab. The whole view arrives
   # in the payload, so there is nothing to refetch.
   def handle_info({:story_map_view_changed, _board_id, view}, socket) do
-    {:noreply, assign(socket, :story_map_tray_open, view["tray_open"])}
+    {:noreply, assign_story_map_view(socket, view)}
   end
 
   # RE257 — someone else's pointer. push_event/3 rather than an assign: it sends no template
@@ -3214,8 +3220,47 @@ defmodule RelayWeb.BoardLive do
   # RE260 — a task draft is a NEW TASK COLUMN, and there is nowhere to render one while the
   # activity is merged. The user asked to add a task, so showing tasks is the coherent response;
   # the other two draft shapes (activity, release) are unaffected.
-  defp show_tasks_for_draft(socket, {:task, _activity_id}), do: assign(socket, :story_map_hide_tasks, false)
+  #
+  # RE257 — through put_view/3, NOT a local assign: hide_tasks is shared board-wide now, and an
+  # optimistic assign here would make this a SECOND writer of one piece of state. This socket
+  # re-renders from the write's own broadcast like every other viewer.
+  defp show_tasks_for_draft(socket, {:task, _activity_id}) do
+    log_view_write(StoryMap.put_view(socket.assigns.board, "hide_tasks", false), "hide_tasks")
+    socket
+  end
+
   defp show_tasks_for_draft(socket, _draft), do: socket
+
+  # RE257 — the shared view, assigned in exactly one place so mount and the broadcast cannot
+  # drift. `zoom` round-trips through jsonb as a string and comes back through `parse_zoom/1`,
+  # never `String.to_atom/1`; a row holding an unparseable value falls back to the shared
+  # default rather than crashing the viewer.
+  defp assign_story_map_view(socket, view) do
+    socket
+    |> assign(:story_map_tray_open, view["tray_open"])
+    |> assign(:story_map_zoom, zoom_from_view(view))
+    |> assign(:story_map_hide_tasks, view["hide_tasks"] == true)
+  end
+
+  defp zoom_from_view(view) do
+    case StoryMapComponents.parse_zoom(view["zoom"]) do
+      {:ok, level} -> level
+      :error -> default_zoom()
+    end
+  end
+
+  defp default_zoom do
+    {:ok, level} = StoryMapComponents.parse_zoom(StoryMap.view_defaults()["zoom"])
+    level
+  end
+
+  # A view write that fails leaves state consistent (nothing was assigned optimistically), but a
+  # click that vanishes with no trace is a black hole — say so in the log.
+  defp log_view_write({:ok, _view}, _key), do: :ok
+
+  defp log_view_write({:error, reason}, key) do
+    Logger.warning("story-map view write failed for #{key}: #{inspect(reason)}")
+  end
 
   defp close_story_map_draft(socket) do
     socket
@@ -3545,8 +3590,10 @@ defmodule RelayWeb.BoardLive do
 
   defp navigate_neighbor(socket, nil), do: socket
 
+  # card_path/2, not a hardcoded kanban URL: patching a :story_map socket onto the nil-action
+  # route does not remount, so it would stay tracked in Relay.Presence as a ghost avatar.
   defp navigate_neighbor(socket, ref) do
-    push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}?card=#{ref}")
+    push_patch(socket, to: card_path(socket.assigns, ref))
   end
 
   # Kick off the async heavy-body fetch when the socket is connected. On a
