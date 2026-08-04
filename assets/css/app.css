@@ -117,6 +117,19 @@
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
+/* RE237 — the one modal scrim. Light: a dark translucent veil, matching the previous
+   oklch(0.30 0.02 255/0.28) literal to within 0.02 L. Dark: a *darker* veil, because a
+   base-content-derived veil over a dark canvas would read as a light frost. */
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: color-mix(in oklab, var(--color-base-content) 28%, transparent);
+}
+[data-theme="dark"] .modal-scrim {
+  background: color-mix(in oklab, var(--color-base-200) 72%, transparent);
+}
+
 /* --- Drag-and-drop affordances (classes toggled by the BoardDnD hook) --- */
 /* RLY-116: .sr-only (the card-ref span) is position:absolute; without a
    positioned ancestor it resolves against the viewport, escapes the lane

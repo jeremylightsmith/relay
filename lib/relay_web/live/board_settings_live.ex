@@ -197,9 +197,9 @@ defmodule RelayWeb.BoardSettingsLive do
         <div style="flex:1;overflow-y:auto;background:oklch(0.985 0.004 250);">
           <div style="max-width:760px;margin:0 auto;padding:34px 40px 84px 40px;">
             <section :if={@section == :public} id="public-pane">
-              <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 4px 0;color:oklch(0.24 0.02 255);">
+              <.page_heading class="mb-1">
                 Public board
-              </h1>
+              </.page_heading>
               <p style="font-size:14px;line-height:1.55;color:oklch(0.52 0.02 255);margin:0 0 28px 0;max-width:560px;">
                 Open a read-only version of this board to the public. Anyone can browse it and upvote ideas — the ones with the most support rise to the top.
               </p>
@@ -275,9 +275,9 @@ defmodule RelayWeb.BoardSettingsLive do
             </section>
 
             <section :if={@section == :general} id="general-pane">
-              <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px 0;color:oklch(0.26 0.02 255);">
+              <.page_heading class="mb-1.5">
                 General
-              </h1>
+              </.page_heading>
               <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 18px 0;max-width:560px;">
                 The board's display name, its URL slug (relay.app/&lt;slug&gt;), and its card key.
               </p>
@@ -366,9 +366,9 @@ defmodule RelayWeb.BoardSettingsLive do
             </section>
 
             <section :if={@section == :stages} id="stages-pane">
-              <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px 0;color:oklch(0.26 0.02 255);">
+              <.page_heading class="mb-1.5">
                 Stages
-              </h1>
+              </.page_heading>
               <%!-- Mockup line ~217. --%>
               <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 12px 0;max-width:560px;">
                 Stages live inside four categories — <b style="color:oklch(0.34 0.02 255);">Unstarted</b>, <b style="color:oklch(0.34 0.02 255);">Planning</b>, <b style="color:oklch(0.34 0.02 255);">In progress</b>, and
@@ -713,9 +713,9 @@ defmodule RelayWeb.BoardSettingsLive do
             />
 
             <section :if={@section == :members} id="members-pane">
-              <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 4px 0;color:oklch(0.24 0.02 255);">
+              <.page_heading class="mb-1">
                 Members
-              </h1>
+              </.page_heading>
               <p style="font-size:14px;color:oklch(0.52 0.02 255);margin:0 0 26px 0;">
                 People with access to this board — and the AI agent that works alongside them.
               </p>
@@ -838,9 +838,9 @@ defmodule RelayWeb.BoardSettingsLive do
             </section>
 
             <section :if={@section == :keys} id="api-key-pane">
-              <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 4px 0;color:oklch(0.24 0.02 255);">
+              <.page_heading class="mb-1">
                 API keys
-              </h1>
+              </.page_heading>
               <p style="font-size:14px;line-height:1.55;color:oklch(0.52 0.02 255);margin:0 0 24px 0;max-width:520px;">
                 Give a key to your agent so it can read the board, move cards, post progress, and
                 ask questions on the AI-owned stages. Treat it like a password.

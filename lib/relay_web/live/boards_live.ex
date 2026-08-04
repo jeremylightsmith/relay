@@ -129,7 +129,7 @@ defmodule RelayWeb.BoardsLive do
                 class="hidden items-center gap-2 font-mono text-[11.5px] drawer:flex"
                 style="color:oklch(0.58 0.02 255);"
               >
-                {meta_label(b)}
+                {board_meta_summary(b)}
                 <span
                   :if={badge_count(b, @embed) > 0}
                   id={"board-needs-you-#{b.slug}"}
@@ -227,7 +227,7 @@ defmodule RelayWeb.BoardsLive do
     "#{b.stage_count} stages · #{b.card_count} cards · #{activity}"
   end
 
-  defp meta_label(b), do: "#{b.slug} · #{b.card_count} cards"
+  defp board_meta_summary(b), do: "#{b.slug} · #{b.card_count} cards"
 
   # Cosmetic per-board accent from a stable hash of the slug.
   defp accent(slug), do: "oklch(0.62 0.15 #{rem(:erlang.phash2(slug), 360)})"

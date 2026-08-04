@@ -593,11 +593,7 @@ defmodule RelayWeb.FlowEditorLive do
         phx-window-keydown="close_modal"
         phx-key="escape"
       >
-        <div
-          phx-click="close_modal"
-          style="position:fixed;inset:0;background:oklch(0.30 0.02 255/0.28);z-index:50;"
-        >
-        </div>
+        <.modal_scrim phx-click="close_modal" />
         <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:51;width:min(480px,92vw);background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);border-radius:16px;">
           <div style="padding:22px 24px;display:flex;flex-direction:column;gap:12px;">
             <div style="display:flex;align-items:center;gap:11px;">

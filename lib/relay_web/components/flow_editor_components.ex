@@ -119,9 +119,9 @@ defmodule RelayWeb.FlowEditorComponents do
           </button>
         </div>
         <div style="display:flex;flex-direction:column;gap:3px;">
-          <span style="font-size:10px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
+          <.meta_label>
             NODE NAME
-          </span>
+          </.meta_label>
           <form id="inspector-node-rename-form" phx-change="rename_node">
             <input type="hidden" name="key" value={@node.key} />
             <input
@@ -147,9 +147,9 @@ defmodule RelayWeb.FlowEditorComponents do
 
       <div style="padding:16px 18px;display:flex;flex-direction:column;gap:18px;">
         <div style="display:flex;flex-direction:column;gap:7px;">
-          <span style="font-size:10px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
+          <.meta_label>
             {main_label(@node.type)}
-          </span>
+          </.meta_label>
           <form id="inspector-node-form" phx-change="edit_node_field">
             <input type="hidden" name="key" value={@node.key} />
             <input type="hidden" name="field" value="run" />
@@ -162,9 +162,9 @@ defmodule RelayWeb.FlowEditorComponents do
         </div>
 
         <div :if={@node.type == :agent} style="display:flex;flex-direction:column;gap:8px;">
-          <span style="font-size:10px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
+          <.meta_label>
             MODEL
-          </span>
+          </.meta_label>
           <%!-- phx-value-v, not phx-value-value: "value" collides with the button's intrinsic
           DOM .value property (empty for a value-less <button>), which wins over the
           phx-value-* attribute when a real browser serializes the click — silently sending ""
@@ -187,9 +187,9 @@ defmodule RelayWeb.FlowEditorComponents do
         </div>
 
         <div :if={@node.type == :agent} style="display:flex;flex-direction:column;gap:8px;">
-          <span style="font-size:10px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
+          <.meta_label>
             EFFORT
-          </span>
+          </.meta_label>
           <div style="display:inline-flex;background:oklch(0.96 0.004 255);border:1px solid oklch(0.90 0.006 255);border-radius:9px;padding:3px;gap:2px;align-self:flex-start;">
             <button
               :for={effort <- @efforts}
@@ -209,9 +209,9 @@ defmodule RelayWeb.FlowEditorComponents do
 
         <div style="display:flex;gap:16px;">
           <div style="display:flex;flex-direction:column;gap:8px;">
-            <span style="font-size:10px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
+            <.meta_label>
               MAX RETRIES
-            </span>
+            </.meta_label>
             <div style="display:inline-flex;align-items:center;border:1px solid oklch(0.90 0.006 255);border-radius:8px;overflow:hidden;align-self:flex-start;">
               <button
                 id="inspector-max-retries-dec"
@@ -243,9 +243,9 @@ defmodule RelayWeb.FlowEditorComponents do
             </div>
           </div>
           <div style="display:flex;flex-direction:column;gap:8px;flex:1;">
-            <span style="font-size:10px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
+            <.meta_label>
               TIMEOUT (MIN)
-            </span>
+            </.meta_label>
             <form id="inspector-node-timeout-form" phx-change="edit_node_field">
               <input type="hidden" name="key" value={@node.key} />
               <input type="hidden" name="field" value="timeout_minutes" />
@@ -265,9 +265,9 @@ defmodule RelayWeb.FlowEditorComponents do
           id="inspector-card-contract"
           style="display:flex;flex-direction:column;gap:7px;"
         >
-          <span style="font-size:10px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
+          <.meta_label>
             CARD CONTRACT
-          </span>
+          </.meta_label>
           <%!-- Display only (RE244): a declared `writes` is ENFORCED at run time, so authoring
           it belongs to `flow-push` + /relay-doctor's establish dialogue, never an inline
           control that could ship an aspirational declaration. --%>
@@ -296,9 +296,9 @@ defmodule RelayWeb.FlowEditorComponents do
         </div>
 
         <div style="display:flex;flex-direction:column;gap:9px;">
-          <span style="font-size:10px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
+          <.meta_label>
             OUTGOING EDGES · routed on outcome
-          </span>
+          </.meta_label>
           <div
             :for={edge <- @edges}
             style="display:flex;align-items:center;gap:8px;border:1px solid oklch(0.93 0.006 255);border-radius:8px;padding:8px 10px;background:oklch(0.994 0.002 255);"
@@ -335,9 +335,9 @@ defmodule RelayWeb.FlowEditorComponents do
     ~H"""
     <div style="padding:16px 18px;display:flex;flex-direction:column;gap:16px;">
       <div style="display:flex;align-items:center;gap:8px;">
-        <span style="font-size:10px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
+        <.meta_label>
           EDGE
-        </span>
+        </.meta_label>
         <span style="flex:1;"></span>
         <button
           id="inspector-delete-edge"
@@ -367,9 +367,9 @@ defmodule RelayWeb.FlowEditorComponents do
       </div>
 
       <div style="display:flex;flex-direction:column;gap:7px;">
-        <span style="font-size:10px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
+        <.meta_label>
           OUTCOME
-        </span>
+        </.meta_label>
         <form id="inspector-edge-outcome-form" phx-change="edit_edge">
           <input type="hidden" name="index" value={@index} />
           <input type="hidden" name="field" value="on" />
@@ -390,9 +390,9 @@ defmodule RelayWeb.FlowEditorComponents do
       </div>
 
       <div style="display:flex;flex-direction:column;gap:7px;">
-        <span style="font-size:10px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
+        <.meta_label>
           WHEN
-        </span>
+        </.meta_label>
         <form id="inspector-edge-when-form" phx-change="edit_edge">
           <input type="hidden" name="index" value={@index} />
           <input type="hidden" name="field" value="when" />
@@ -415,9 +415,9 @@ defmodule RelayWeb.FlowEditorComponents do
       </div>
 
       <div style="display:flex;flex-direction:column;gap:8px;">
-        <span style="font-size:10px;font-family:ui-monospace,monospace;color:oklch(0.62 0.02 255);">
+        <.meta_label>
           MAX LOOPS
-        </span>
+        </.meta_label>
         <div style="display:inline-flex;align-items:center;border:1px solid oklch(0.90 0.006 255);border-radius:8px;overflow:hidden;align-self:flex-start;">
           <button
             id="inspector-max-loops-dec"
@@ -463,11 +463,7 @@ defmodule RelayWeb.FlowEditorComponents do
       phx-window-keydown="close_modal"
       phx-key="escape"
     >
-      <div
-        phx-click="close_modal"
-        style="position:fixed;inset:0;background:oklch(0.30 0.02 255/0.28);z-index:50;"
-      >
-      </div>
+      <.modal_scrim phx-click="close_modal" />
       <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:51;width:min(560px,92vw);max-height:80vh;overflow-y:auto;background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);border-radius:16px;">
         <div style="padding:20px 22px;display:flex;flex-direction:column;gap:14px;">
           <span style="font-size:16px;font-weight:600;color:oklch(0.24 0.02 255);">
@@ -528,11 +524,7 @@ defmodule RelayWeb.FlowEditorComponents do
       phx-window-keydown="close_modal"
       phx-key="escape"
     >
-      <div
-        phx-click="close_modal"
-        style="position:fixed;inset:0;background:oklch(0.30 0.02 255/0.28);z-index:50;"
-      >
-      </div>
+      <.modal_scrim phx-click="close_modal" />
       <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:51;width:min(480px,92vw);background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);border-radius:16px;">
         <div style="padding:22px 24px;display:flex;flex-direction:column;gap:12px;">
           <span style="font-size:17px;font-weight:600;color:oklch(0.24 0.02 255);">

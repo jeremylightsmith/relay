@@ -1472,6 +1472,75 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
+  The one modal scrim (RE237).
+
+  Was a fixed, inset-0, z-50 div with a hardcoded translucent mid-grey background, repeated
+  verbatim at three call sites. The color lives in `.modal-scrim` in `app.css` (mirrored into
+  `storybook.css`) because dark needs a separately tuned veil, which a single `color-mix`
+  cannot express.
+
+  ## Examples
+
+      <.modal_scrim phx-click="close-drawer" />
+  """
+  attr :class, :string, default: nil
+  attr :rest, :global
+
+  def modal_scrim(assigns) do
+    ~H"""
+    <div class={Enum.reject(["modal-scrim", @class], &is_nil/1)} {@rest}></div>
+    """
+  end
+
+  @doc """
+  The design system's small mono data/label style (RE237).
+
+  10px `--font-mono` at the `base-content/50` ink tier — the token form of the hardcoded
+  10px mono-with-grey-ink style string that repeated 12× in the flow editor. Pass `tone` to
+  recolor it (e.g. `"text-secondary"`).
+
+  ## Examples
+
+      <.meta_label>agent</.meta_label>
+      <.meta_label tone="text-secondary">AI</.meta_label>
+  """
+  attr :class, :string, default: nil
+  attr :tone, :string, default: nil
+  attr :rest, :global
+  slot :inner_block, required: true
+
+  def meta_label(assigns) do
+    ~H"""
+    <span class={["font-mono text-[10px]", @tone || "text-base-content/50", @class]} {@rest}>
+      {render_slot(@inner_block)}
+    </span>
+    """
+  end
+
+  @doc """
+  The settings/flow page `<h1>` (RE237).
+
+  22px / 600 / -0.02em at full ink — the shared form of a style string that repeated 7× across
+  settings, flow settings and flow metrics. The per-page bottom margin varies, so pass it in
+  via `class` (`mb-1` or `mb-1.5`).
+
+  ## Examples
+
+      <.page_heading class="mb-1.5">Stages</.page_heading>
+  """
+  attr :class, :string, default: nil
+  attr :rest, :global
+  slot :inner_block, required: true
+
+  def page_heading(assigns) do
+    ~H"""
+    <h1 class={["text-[22px] font-semibold tracking-[-0.02em] text-base-content", @class]} {@rest}>
+      {render_slot(@inner_block)}
+    </h1>
+    """
+  end
+
+  @doc """
   The full-size image viewer (RLY-157).
 
   A single native `<dialog>` rendered **once** in the root layout, shared by every image

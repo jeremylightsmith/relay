@@ -112,6 +112,17 @@
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
+/* RE237 — mirror of the modal-scrim rule in app.css (see that file for the rationale). */
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: color-mix(in oklab, var(--color-base-content) 28%, transparent);
+}
+[data-theme="dark"] .modal-scrim {
+  background: color-mix(in oklab, var(--color-base-200) 72%, transparent);
+}
+
 /* RLY-59: PhoenixStorybook ships its own unlayered chrome CSS that defaults the
    sandbox to `serif` (the "weird font") and the chrome to a generic system sans.
    Force both onto Relay's Helvetica Neue so the storybook matches the app.

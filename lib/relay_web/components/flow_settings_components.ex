@@ -51,9 +51,9 @@ defmodule RelayWeb.FlowSettingsComponents do
             the button is a mockup-only affordance and is deliberately not shipped. --%>
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:20px;">
         <div>
-          <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px 0;color:oklch(0.26 0.02 255);">
+          <.page_heading class="mb-1.5">
             Flows
-          </h1>
+          </.page_heading>
           <%!-- Artboard blurb minus the versioning sentence (deferred to RLY-152). --%>
           <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0;max-width:600px;">
             A flow is the automation attached to a stage transition — it pulls work from one

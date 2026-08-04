@@ -2146,4 +2146,62 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "fixed the login bug"
     end
   end
+
+  describe "RE237 shared theme controls" do
+    test "modal_scrim renders the shared class and no inline color" do
+      html = render_component(&CoreComponents.modal_scrim/1, %{})
+
+      assert html =~ ~s(class="modal-scrim")
+      refute html =~ "oklch("
+    end
+
+    test "modal_scrim merges an extra class and passes globals through" do
+      html = render_component(&CoreComponents.modal_scrim/1, %{class: "z-40", "phx-click": "close"})
+
+      assert html =~ "modal-scrim"
+      assert html =~ "z-40"
+      assert html =~ ~s(phx-click="close")
+    end
+
+    test "meta_label is the mono 10px data label at the base-content/50 ink tier" do
+      html =
+        render_component(&CoreComponents.meta_label/1, %{
+          inner_block: [%{__slot__: :inner_block, inner_block: fn _, _ -> "RLY-1" end}]
+        })
+
+      assert html =~ "font-mono"
+      assert html =~ "text-[10px]"
+      # oklch(0.62 0.02 255) → P = round5((1 - 0.62) / 0.74 * 100) = 50
+      assert html =~ "text-base-content/50"
+      assert html =~ "RLY-1"
+      refute html =~ "ui-monospace"
+    end
+
+    test "meta_label's tone overrides the default ink tier" do
+      html =
+        render_component(&CoreComponents.meta_label/1, %{
+          tone: "text-secondary",
+          inner_block: [%{__slot__: :inner_block, inner_block: fn _, _ -> "AI" end}]
+        })
+
+      assert html =~ "text-secondary"
+      refute html =~ "text-base-content/50"
+    end
+
+    test "page_heading keeps the artboard's 22px/600/-0.02em type at full ink" do
+      html =
+        render_component(&CoreComponents.page_heading/1, %{
+          class: "mb-1.5",
+          inner_block: [%{__slot__: :inner_block, inner_block: fn _, _ -> "Stages" end}]
+        })
+
+      assert html =~ "<h1"
+      assert html =~ "text-[22px]"
+      assert html =~ "font-semibold"
+      assert html =~ "tracking-[-0.02em]"
+      assert html =~ "text-base-content"
+      assert html =~ "mb-1.5"
+      refute html =~ "oklch("
+    end
+  end
 end

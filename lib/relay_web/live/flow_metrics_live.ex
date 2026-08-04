@@ -174,12 +174,9 @@ defmodule RelayWeb.FlowMetricsLive do
         </div>
 
         <div style="margin-bottom:8px;">
-          <h1
-            id="flow-metrics-title"
-            style="font-size:22px;font-weight:600;letter-spacing:-0.02em;color:oklch(0.24 0.02 255);"
-          >
+          <.page_heading id="flow-metrics-title">
             Flow metrics
-          </h1>
+          </.page_heading>
           <p style="font-size:13.5px;line-height:1.55;color:oklch(0.50 0.02 255);max-width:560px;">
             Per-node rollup for the <strong>{humanize(@flow.key)}</strong>
             flow. Every node execution records duration, attempts, verdict and cost — this is where
