@@ -130,7 +130,7 @@ defmodule RelayWeb.BoardSettingsLive do
         >
           <div
             class="font-mono"
-            style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);padding:4px 10px 8px 10px;"
+            style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);padding:4px 10px 8px 10px;"
           >
             BOARD
           </div>
@@ -179,7 +179,7 @@ defmodule RelayWeb.BoardSettingsLive do
 
           <div
             class="font-mono"
-            style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);padding:18px 10px 8px 10px;"
+            style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);padding:18px 10px 8px 10px;"
           >
             ENGINE
           </div>
@@ -209,7 +209,7 @@ defmodule RelayWeb.BoardSettingsLive do
                     <div style="font-size:14px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);">
                       Enable public board
                     </div>
-                    <div style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);margin-top:2px;">
+                    <div style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin-top:2px;">
                       When on, the public URL below is live.
                     </div>
                   </div>
@@ -245,7 +245,7 @@ defmodule RelayWeb.BoardSettingsLive do
                     <label style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);">
                       New public ideas arrive in
                     </label>
-                    <p style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);margin:0 0 2px 0;max-width:520px;">
+                    <p style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin:0 0 2px 0;max-width:520px;">
                       When someone posts on the public board, Relay creates a card in this stage.
                     </p>
                     <div
@@ -657,7 +657,7 @@ defmodule RelayWeb.BoardSettingsLive do
                           </li>
                         </ul>
                       </details>
-                      <span style="flex:1;min-width:180px;font-size:11px;line-height:1.4;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
+                      <span style="flex:1;min-width:180px;font-size:11px;line-height:1.4;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
                         Rejected cards return here to be re-planned — the reviewer doesn't choose a destination.
                       </span>
                     </div>
@@ -699,7 +699,7 @@ defmodule RelayWeb.BoardSettingsLive do
                           phx-value-lane="done"
                         />
                       </div>
-                      <span style="flex:1;min-width:180px;font-size:11px;line-height:1.4;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
+                      <span style="flex:1;min-width:180px;font-size:11px;line-height:1.4;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
                         Both are optional lanes at the end of a stage —
                         <b style="color:color-mix(in oklab, var(--color-base-content) 80%, transparent);">
                           Review
@@ -713,7 +713,7 @@ defmodule RelayWeb.BoardSettingsLive do
                     </div>
                     <span
                       :if={lane_on?(@lane_map, stage.id, :review)}
-                      style="font-size:11px;line-height:1.4;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+                      style="font-size:11px;line-height:1.4;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
                     >
                       A review sub-lane always rejects back into its own stage — nothing to configure.
                     </span>
@@ -816,7 +816,7 @@ defmodule RelayWeb.BoardSettingsLive do
                     </div>
                     <span
                       class="font-mono"
-                      style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+                      style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
                     >
                       {m.email}
                     </span>
@@ -829,7 +829,7 @@ defmodule RelayWeb.BoardSettingsLive do
                     phx-value-id={m.id}
                     data-confirm="Remove this member from the board?"
                     title="Remove"
-                    style="width:28px;height:28px;border-radius:7px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 60%, transparent);font-size:15px;line-height:1;padding:0;flex:0 0 auto;"
+                    style="width:28px;height:28px;border-radius:7px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-size:15px;line-height:1;padding:0;flex:0 0 auto;"
                   >
                     ×
                   </button>
@@ -855,7 +855,10 @@ defmodule RelayWeb.BoardSettingsLive do
                   <div style="font-size:14px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);">
                     Relay AI
                   </div>
-                  <div style="font-size:12.5px;color:color-mix(in oklab, var(--color-secondary) 80%, var(--color-base-content));">
+                  <%!-- `oklch(0.50 0.03 292)` is a grey-violet, not a violet: C 0.03 is a Rule-N near-neutral
+                    (see `delete_style/1` in story_map_components.ex), and Rule B's ink formula would
+                    have to run `secondary` to 80% to reach L 0.50, landing at C 0.13. --%>
+                  <div style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
                     Runs the AI-owned stages · authenticated with an API key
                   </div>
                 </div>
@@ -983,7 +986,7 @@ defmodule RelayWeb.BoardSettingsLive do
                   </div>
                   <div
                     class="font-mono"
-                    style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);"
+                    style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
                   >
                     <span id="api-key-created">Created {format_time(@api_key.inserted_at)}</span>
                     · <span id="api-key-last-used">last used {last_used(@api_key)}</span>

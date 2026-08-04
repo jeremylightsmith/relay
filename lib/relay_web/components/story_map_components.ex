@@ -170,7 +170,7 @@ defmodule RelayWeb.StoryMapComponents do
 
     ~H"""
     <div id="story-map-toolbar" style="display:flex;align-items:center;gap:10px;">
-      <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
+      <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
         ZOOM
       </span>
       <div
@@ -254,7 +254,7 @@ defmodule RelayWeb.StoryMapComponents do
       <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
         FILTER
       </span>
-      <span style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);margin-right:2px;">
+      <span style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin-right:2px;">
         Owner
       </span>
       <button
@@ -337,18 +337,18 @@ defmodule RelayWeb.StoryMapComponents do
   # the app's own `identity_hue/1` — the ONE definition of who is what colour — and the AI
   # takes this module's violet, the same 292 degrees `--color-secondary` is defined at
   # (assets/css/app.css) — `chip_hue/1` is the one place that pins the number, since this
-  # pale identity tint is deliberately not a role token (see `theme-tokens:allow` below).
+  # pale identity tint is deliberately not a role token.
   defp owner_chip_style(chip) do
     {background, border} =
       if chip.selected? do
-        # Per-person/AI hue tint — no single brand role to map onto, same exception as
-        # CoreComponents.identity_color/1. Only the HUE is exempt: freezing the LIGHTNESS too
-        # left a near-white pill sitting on the dark filter bar. So the hue is anchored at
-        # identity_color/1's fixed L 0.62 and mixed into the surface by Rule B, which reproduces
-        # the artboard's 0.95 fill / 0.75 border in light and a dark tint of the same hue in
-        # dark: N = round5((1 - L) / (1 - 0.62) * 100) → 15 and 65.
-        # theme-tokens:allow: per-entity hue, not a role
-        anchor = "oklch(0.62 0.13 #{chip_hue(chip)})"
+        # Per-person/AI hue tint — no single brand role to map onto, the same exception
+        # `CoreComponents.identity_color_for_hue/1` is granted, which is why the fill comes from
+        # there rather than being re-typed here: L 0.62 is load-bearing (see its @doc) and must
+        # hold in exactly one place. Only the HUE is exempt: freezing the LIGHTNESS too left a
+        # near-white pill sitting on the dark filter bar. So the anchor is mixed into the surface
+        # by Rule B, which reproduces the artboard's 0.95 fill / 0.75 border in light and a dark
+        # tint of the same hue in dark: N = round5((1 - L) / (1 - 0.62) * 100) → 15 and 65.
+        anchor = CoreComponents.identity_color_for_hue(chip_hue(chip))
 
         {"color-mix(in oklab, #{anchor} 15%, var(--color-base-100))",
          "color-mix(in oklab, #{anchor} 65%, var(--color-base-100))"}
@@ -682,8 +682,13 @@ defmodule RelayWeb.StoryMapComponents do
   defp delete_title(1, kind), do: "Move 1 card out of this #{kind} before deleting it"
   defp delete_title(count, kind), do: "Move #{count} cards out of this #{kind} before deleting it"
 
-  # Artboard `delStyle` / `delOff`, lines ~397-398.
-  defp delete_style(0), do: "font-size:10px;color:var(--color-error);"
+  # Artboard `delStyle` / `delOff`, lines ~397-398. The enabled label is `oklch(0.62 0.03 25)` —
+  # a warm grey, not a red: the artboard deliberately mutes this destructive affordance. C 0.03
+  # sits in the gap between Rule N (chroma ≤ 0.02) and Rule B (worked at C ≥ 0.10), and Rule B's
+  # ink formula cannot express it — solving `error` against `base-content` for L 0.62 needs ~100%
+  # error, landing at C 0.16 and turning a muted link into bright coral. Rule N is the closer
+  # translation (ΔC −0.03, L exact), so a near-neutral is treated as the neutral it nearly is.
+  defp delete_style(0), do: "font-size:10px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
 
   defp delete_style(_count),
     do: "font-size:10px;color:color-mix(in oklab, var(--color-base-content) 25%, transparent);cursor:not-allowed;"
@@ -722,7 +727,7 @@ defmodule RelayWeb.StoryMapComponents do
     ~H"""
     <div id="story-map-grid" style={grid_style(@grid, @draft)}>
       <div style={corner_style()}>
-        <span style="font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
+        <span style="font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
           RELEASE ↓
         </span>
       </div>
@@ -774,7 +779,7 @@ defmodule RelayWeb.StoryMapComponents do
             count={lane.count}
           />
         </div>
-        <span style="font-family:var(--font-mono);font-size:9px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);">
+        <span style="font-family:var(--font-mono);font-size:9px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
           {lane.count} cards
         </span>
       </div>
@@ -1011,7 +1016,7 @@ defmodule RelayWeb.StoryMapComponents do
           id={@compose_id <> "-cancel"}
           phx-click="cancel_compose_cell"
           aria-label="Close the composer"
-          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);"
+          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
         >
           ✕
         </button>
@@ -1086,7 +1091,7 @@ defmodule RelayWeb.StoryMapComponents do
       phx-value-ref={@ref}
     >
       <div :if={@zoom == :full} style="display:flex;align-items:center;justify-content:space-between;">
-        <span style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
+        <span style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
           {@ref}
         </span>
         <.face_avatar avatar={@avatar} owners={@owners} active_owner={@active_owner} />
@@ -1141,7 +1146,7 @@ defmodule RelayWeb.StoryMapComponents do
             ‹
           </span>
         </button>
-        <div style="font-size:11px;line-height:1.35;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);padding:0 14px 10px;">
+        <div style="font-size:11px;line-height:1.35;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);padding:0 14px 10px;">
           No activity yet. Drag onto the map to place — or drop a card here to unmap it.
         </div>
         <div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:0 12px 14px;">
@@ -1338,7 +1343,7 @@ defmodule RelayWeb.StoryMapComponents do
       style={"flex:0 0 auto;background:var(--color-base-100);border:1px solid var(--color-field-border);border-left:3px solid #{card_accent(@face.hue, @face.done)};border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:7px;cursor:pointer;box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 7%, transparent);"}
     >
       <div style="display:flex;align-items:center;justify-content:space-between;">
-        <span style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
+        <span style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
           {@face.ref}
         </span>
         <.face_avatar
@@ -1459,7 +1464,7 @@ defmodule RelayWeb.StoryMapComponents do
   end
 
   # Artboard `iconStyle`, line ~396.
-  defp icon_style, do: "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+  defp icon_style, do: "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
 
   # Artboard `addActStyle`, line ~513. The COLUMN's width is `grid_style/2`'s business; this is
   # only the cell. The padding appears solely while the draft is open, so the resting state is
@@ -1475,7 +1480,7 @@ defmodule RelayWeb.StoryMapComponents do
   # Artboard line ~159.
   defp add_activity_button_style do
     "width:34px;height:34px;border-radius:9px;border:1px dashed color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100));" <>
-      "color:color-mix(in oklab, var(--color-base-content) 60%, transparent);font-size:15px;line-height:1;background:var(--color-base-100);"
+      "color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-size:15px;line-height:1;background:var(--color-base-100);"
   end
 
   # Artboard `addRelStyle`, line ~512: the 44px row under the last swimlane label.
@@ -1488,7 +1493,7 @@ defmodule RelayWeb.StoryMapComponents do
   # Artboard line ~154.
   defp add_release_button_style do
     "display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;" <>
-      "color:color-mix(in oklab, var(--color-base-content) 60%, transparent);border:1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100));" <>
+      "color:color-mix(in oklab, var(--color-base-content) 65%, transparent);border:1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100));" <>
       "border-radius:8px;padding:4px 9px;width:100%;"
   end
 
@@ -1560,7 +1565,7 @@ defmodule RelayWeb.StoryMapComponents do
   defp column_header_style(%{merged?: true}, index) do
     "grid-column:#{index + 2};grid-row:2;position:sticky;top:#{@h1}px;z-index:20;" <>
       "background:var(--color-base-200);border-right:#{@gl_strong};border-bottom:#{@gl_strong};" <>
-      "padding:7px 9px;font-size:10.5px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);" <>
+      "padding:7px 9px;font-size:10.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);" <>
       "display:flex;align-items:center;gap:6px;"
   end
 
@@ -1700,7 +1705,7 @@ defmodule RelayWeb.StoryMapComponents do
   defp line_accent(:violet, _done?), do: role_mix(:violet, 70, "var(--color-base-100)")
   defp line_accent(:blue, _done?), do: role_mix(:blue, 75, "var(--color-base-100)")
 
-  defp line_color(_hue, true), do: "color-mix(in oklab, var(--color-base-content) 60%, transparent)"
+  defp line_color(_hue, true), do: "color-mix(in oklab, var(--color-base-content) 65%, transparent)"
   defp line_color(:neutral, _done?), do: "color-mix(in oklab, var(--color-base-content) 75%, transparent)"
   defp line_color(:green, _done?), do: role_mix(:green, 40, "var(--color-base-content)")
   defp line_color(:amber, _done?), do: role_mix(:amber, 30, "var(--color-base-content)")

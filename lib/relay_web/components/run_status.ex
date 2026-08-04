@@ -36,7 +36,7 @@ defmodule RelayWeb.RunStatus do
       </span>
       <span style="width:90px;font-weight:600;">{@status}</span>
       <span style="width:120px;">{@d.label}</span>
-      <span class="text-base-content/60">{@d.token}</span>
+      <span class="text-base-content/65">{@d.token}</span>
     </div>
     """
   end

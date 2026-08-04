@@ -10,7 +10,7 @@ defmodule Storybook.Components.CoreComponents.Controls do
     ~H"""
     <div class="flex flex-col gap-8 p-4">
       <section>
-        <div class="mb-3 font-mono text-[11px] uppercase tracking-[0.06em] text-base-content/60">
+        <div class="mb-3 font-mono text-[11px] uppercase tracking-[0.06em] text-base-content/65">
           Buttons
         </div>
         <div class="flex flex-wrap items-center gap-2.5">
@@ -27,7 +27,7 @@ defmodule Storybook.Components.CoreComponents.Controls do
 
       <section class="flex flex-wrap gap-10">
         <div>
-          <div class="mb-3 font-mono text-[11px] uppercase tracking-[0.06em] text-base-content/60">
+          <div class="mb-3 font-mono text-[11px] uppercase tracking-[0.06em] text-base-content/65">
             Segmented
           </div>
           <div class="join">
@@ -37,7 +37,7 @@ defmodule Storybook.Components.CoreComponents.Controls do
         </div>
 
         <div>
-          <div class="mb-3 font-mono text-[11px] uppercase tracking-[0.06em] text-base-content/60">
+          <div class="mb-3 font-mono text-[11px] uppercase tracking-[0.06em] text-base-content/65">
             Toggle
           </div>
           <div class="flex items-center gap-4">
@@ -47,7 +47,7 @@ defmodule Storybook.Components.CoreComponents.Controls do
         </div>
 
         <div>
-          <div class="mb-3 font-mono text-[11px] uppercase tracking-[0.06em] text-base-content/60">
+          <div class="mb-3 font-mono text-[11px] uppercase tracking-[0.06em] text-base-content/65">
             WIP stepper
           </div>
           <div class="join border border-base-300">

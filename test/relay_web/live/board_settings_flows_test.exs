@@ -92,6 +92,32 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       refute has_element?(view, "#flow-#{spec.id}-customized")
     end
 
+    # RE237: the knob is ink on the track's fill, so it must come from a `-content` token (pinned
+    # light in both themes), never from `base-100` — that is a surface token, and in dark it
+    # resolves to 0.26, punching a near-black disc into the 0.65 blue ON track.
+    test "the toggle knob is drawn in a -content ink, not in the base-100 surface",
+         %{conn: conn, board: board} do
+      spec = flow(board, "spec")
+      off = render(open_flows(conn, board))
+
+      assert off =~ "background:var(--color-neutral-content)"
+
+      {:ok, _} = Flows.enable_flow(spec)
+      on = render(open_flows(conn, board))
+
+      assert on =~ "background:var(--color-primary-content)"
+
+      for html <- [off, on] do
+        knobs = Regex.scan(~r/width:18px;height:18px;border-radius:50%;background:([^;]+);/, html)
+        assert knobs != []
+
+        for [_, fill] <- knobs do
+          refute fill == "var(--color-base-100)",
+                 "the toggle knob must not be a surface token — it inverts in dark"
+        end
+      end
+    end
+
     test "seeded defaults carry no customized affix; a hand-customized flow does",
          %{conn: conn, board: board} do
       plan = flow(board, "plan")

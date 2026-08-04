@@ -564,7 +564,7 @@ defmodule RelayWeb.CoreComponents do
     ~H"""
     <span
       class={@class}
-      style="display:inline-flex;align-items:center;gap:3px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+      style="display:inline-flex;align-items:center;gap:3px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
       title="Public supporters"
       data-support-count={@count}
       {@rest}
@@ -631,13 +631,13 @@ defmodule RelayWeb.CoreComponents do
             <.avatar name={sp[:name]} email={sp[:email]} src={sp[:src]} size={24} tint={:identity} />
           </span>
         </div>
-        <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
+        <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
           {@total} {if(@total == 1, do: "supporter", else: "supporters")}
         </span>
       </div>
       <span
         :if={@more > 0}
-        style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);"
+        style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
       >
         + {@more} more
       </span>
@@ -786,23 +786,30 @@ defmodule RelayWeb.CoreComponents do
   def identity_hue(email), do: rem(:erlang.phash2(email || ""), 360)
 
   @doc """
-  `identity_hue/1` as a fill — a fixed-lightness, moderately-saturated color at that hue, the
-  same formula the member stack, board settings and the card owner cluster already draw, and
-  the ONE definition of a person's colour.
+  An arbitrary `hue` as an identity fill — the ONE definition of the lightness/chroma pair that
+  turns a per-entity hue into a colour. `identity_color/1` (people), the story map's owner chips
+  and the `/boards` per-board accent all draw this same fill, so the formula lives here once.
 
-  RE237: this stays an OKLCH color, not a token — theme-tokens:allow, see
-  `test/relay_web/theme_tokens_test.exs` `@allowlist`. The hue is per-person and arbitrary
-  (seeded from an email hash), so it cannot be one of the six named brand roles the token
-  vocabulary covers — there is nothing to map it onto. Its lightness and saturation stay fixed
-  across themes on purpose: unlike a token, this fill never inverts, so ink drawn on it
-  (`avatar_circle_style/4`) can stay a single constant color too. The lightness specifically must
-  stay in OKLCH's *perceptual* L channel, not HSL's: HSL's L is not perceptually uniform, so a
-  flat HSL color at L=58% swings from oklab L 0.53 to 0.83 across the hue circle and starts
-  failing contrast against the fixed `--color-neutral-content` ink at some hues. OKLCH holds L at
-  a constant 0.62 for every hue, which is what makes a single fixed ink color legible everywhere.
+  RE237: this stays an OKLCH color, not a token — see the `theme-tokens:allow` marker below and
+  `test/relay_web/theme_tokens_test.exs`, which pins the full inventory of such markers. The hue
+  is per-entity and arbitrary (seeded from a hash), so it cannot be one of the six named brand
+  roles the token vocabulary covers — there is nothing to map it onto. Its lightness and
+  saturation stay fixed across themes on purpose: unlike a token, this fill never inverts, so ink
+  drawn on it (`avatar_circle_style/4`) can stay a single constant color too. The lightness
+  specifically must stay in OKLCH's *perceptual* L channel, not HSL's: HSL's L is not
+  perceptually uniform, so a flat HSL color at L=58% swings from oklab L 0.53 to 0.83 across the
+  hue circle and starts failing contrast against the fixed `--color-neutral-content` ink at some
+  hues. OKLCH holds L at a constant 0.62 for every hue, which is what makes a single fixed ink
+  color legible everywhere — and that argument only holds while 0.62 has exactly one home.
   """
   # theme-tokens:allow: no role for a hue
-  def identity_color(email), do: "oklch(0.62 0.13 #{identity_hue(email)})"
+  def identity_color_for_hue(hue), do: "oklch(0.62 0.13 #{hue})"
+
+  @doc """
+  `identity_hue/1` as a fill — a person's colour, the same one the member stack, board settings
+  and the card owner cluster already draw.
+  """
+  def identity_color(email), do: email |> identity_hue() |> identity_color_for_hue()
 
   @doc """
   Renders the owner avatar cluster for a card — the mockup's "who holds the
@@ -1138,7 +1145,7 @@ defmodule RelayWeb.CoreComponents do
     >
       <span
         class="card-title"
-        style={"font-size:12.5px;font-weight:500;line-height:1.35;letter-spacing:-0.01em;color:#{if(@done, do: "color-mix(in oklab, var(--color-base-content) 50%, transparent)", else: "var(--color-base-content)")};"}
+        style={"font-size:12.5px;font-weight:500;line-height:1.35;letter-spacing:-0.01em;color:#{if(@done, do: "color-mix(in oklab, var(--color-base-content) 55%, transparent)", else: "var(--color-base-content)")};"}
       >
         {@title}
       </span>
@@ -1239,7 +1246,7 @@ defmodule RelayWeb.CoreComponents do
         <span
           :if={@tag && @status != :working}
           class="card-tag"
-          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);font-family:var(--font-mono);"
+          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);font-family:var(--font-mono);"
         >
           #{@tag}
         </span>
@@ -1365,10 +1372,10 @@ defmodule RelayWeb.CoreComponents do
   defp strip_text_color(:stopped), do: "color-mix(in oklab, var(--color-error) 65%, var(--color-base-content))"
   defp strip_text_color(_health), do: "color-mix(in oklab, var(--color-base-content) 75%, transparent)"
 
-  defp strip_time_color(:live), do: "color-mix(in oklab, var(--color-base-content) 50%, transparent)"
+  defp strip_time_color(:live), do: "color-mix(in oklab, var(--color-base-content) 55%, transparent)"
   defp strip_time_color(:stale), do: "color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
   defp strip_time_color(:stopped), do: "color-mix(in oklab, var(--color-error) 65%, var(--color-base-content))"
-  defp strip_time_color(_health), do: "color-mix(in oklab, var(--color-base-content) 50%, transparent)"
+  defp strip_time_color(_health), do: "color-mix(in oklab, var(--color-base-content) 55%, transparent)"
 
   # RLY-148 §04 header chip — amber when stale; Retry joins it on stopped (Task 2).
   defp health_chip_color(:live), do: "var(--color-secondary)"
@@ -1501,7 +1508,7 @@ defmodule RelayWeb.CoreComponents do
     ~H"""
     <span class={[
       "font-mono text-[10px] font-semibold uppercase tracking-[0.06em]",
-      @accent || "text-base-content/60",
+      @accent || "text-base-content/65",
       @class
     ]}>
       {render_slot(@inner_block)}
@@ -1549,7 +1556,7 @@ defmodule RelayWeb.CoreComponents do
 
   def meta_label(assigns) do
     ~H"""
-    <span class={["font-mono text-[10px]", @tone || "text-base-content/50", @class]} {@rest}>
+    <span class={["font-mono text-[10px]", @tone || "text-base-content/55", @class]} {@rest}>
       {render_slot(@inner_block)}
     </span>
     """
@@ -2000,7 +2007,7 @@ defmodule RelayWeb.CoreComponents do
                     </div>
                   </div>
                 </div>
-                <span class="drawer-card-ref font-mono text-xs text-base-content/60">{@ref}</span>
+                <span class="drawer-card-ref font-mono text-xs text-base-content/65">{@ref}</span>
                 <span
                   :if={@done}
                   id="drawer-done-pill"
@@ -2318,7 +2325,7 @@ defmodule RelayWeb.CoreComponents do
                           type="button"
                           phx-click="review_cancel_reject"
                           class="btn btn-ghost btn-sm text-xs"
-                          style="color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+                          style="color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
                         >
                           Cancel
                         </button>
@@ -2529,7 +2536,7 @@ defmodule RelayWeb.CoreComponents do
                         />
                         <figcaption
                           :if={screen["caption"]}
-                          class="text-[11px] leading-tight text-base-content/60"
+                          class="text-[11px] leading-tight text-base-content/65"
                         >
                           {screen["caption"]}
                         </figcaption>
@@ -2550,7 +2557,7 @@ defmodule RelayWeb.CoreComponents do
                 <section :if={@card.sub_tasks != []} id="sub-tasks" class="space-y-2">
                   <div class="flex items-center gap-2">
                     <.section_label>Sub-tasks</.section_label>
-                    <span id="sub-tasks-count" class="font-mono text-[10px] text-base-content/60">
+                    <span id="sub-tasks-count" class="font-mono text-[10px] text-base-content/65">
                       {@sub_task_progress.done}/{@sub_task_progress.total}
                     </span>
                     <div class="h-1 max-w-[120px] flex-1 overflow-hidden rounded-full bg-base-300">
@@ -2580,7 +2587,7 @@ defmodule RelayWeb.CoreComponents do
                         </span>
                         <span class={[
                           "text-sm leading-snug",
-                          st.done && "text-base-content/50 line-through"
+                          st.done && "text-base-content/55 line-through"
                         ]}>
                           {st.title}
                         </span>
@@ -2622,7 +2629,7 @@ defmodule RelayWeb.CoreComponents do
                     >
                       <li
                         id={"#{@id}-conversation-empty"}
-                        class="hidden text-sm text-base-content/50 only:block"
+                        class="hidden text-sm text-base-content/55 only:block"
                       >
                         No notes yet
                       </li>
@@ -2853,7 +2860,7 @@ defmodule RelayWeb.CoreComponents do
                   >
                     <li
                       id={"#{@id}-activity-empty"}
-                      class="hidden text-sm text-base-content/50 only:block"
+                      class="hidden text-sm text-base-content/55 only:block"
                     >
                       No activity yet
                     </li>
@@ -2943,7 +2950,7 @@ defmodule RelayWeb.CoreComponents do
                       <.icon name="hero-x-mark" class="size-3" />
                     </button>
                   </div>
-                  <span :if={@card.owners == []} class="text-base-content/50">None</span>
+                  <span :if={@card.owners == []} class="text-base-content/55">None</span>
                   <button
                     :if={!@archived}
                     type="button"
@@ -3061,7 +3068,7 @@ defmodule RelayWeb.CoreComponents do
                   <span :if={@archived && @card.tag} class="badge badge-ghost badge-sm">
                     #{@card.tag}
                   </span>
-                  <span :if={@archived && !@card.tag} class="text-base-content/50">None</span>
+                  <span :if={@archived && !@card.tag} class="text-base-content/55">None</span>
                 </div>
               </div>
 
@@ -3076,7 +3083,7 @@ defmodule RelayWeb.CoreComponents do
 
               <%!-- PUBLIC SUPPORT (RLY-69) --%>
               <div style="display:flex;flex-direction:column;gap:8px;">
-                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);font-family:'JetBrains Mono',ui-monospace,monospace;">
+                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);font-family:'JetBrains Mono',ui-monospace,monospace;">
                   PUBLIC SUPPORT
                 </span>
                 <.supporters_row
@@ -3086,7 +3093,7 @@ defmodule RelayWeb.CoreComponents do
                 />
                 <span
                   :if={@vote_count == 0}
-                  style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);"
+                  style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
                 >
                   No public supporters yet.
                 </span>
@@ -3094,7 +3101,7 @@ defmodule RelayWeb.CoreComponents do
 
               <%!-- PUBLIC DESCRIPTION (RLY-69) --%>
               <div style="display:flex;flex-direction:column;gap:8px;">
-                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);font-family:'JetBrains Mono',ui-monospace,monospace;">
+                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);font-family:'JetBrains Mono',ui-monospace,monospace;">
                   PUBLIC DESCRIPTION
                 </span>
                 <p
@@ -3488,7 +3495,7 @@ defmodule RelayWeb.CoreComponents do
   end
 
   defp drawer_tab_style(false) do
-    "font-size:13px;padding:0 0 10px 0;font-weight:500;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);" <>
+    "font-size:13px;padding:0 0 10px 0;font-weight:500;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);" <>
       "background:transparent;border:none;cursor:pointer;"
   end
 
@@ -3897,7 +3904,7 @@ defmodule RelayWeb.CoreComponents do
                       <button
                         type="button"
                         class="btn btn-ghost btn-xs min-h-[44px]"
-                        style="color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+                        style="color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
                         phx-click="cancel_compose"
                       >
                         Cancel
@@ -4164,7 +4171,7 @@ defmodule RelayWeb.CoreComponents do
         {@edit_attrs}
       >
         <span :if={!field_blank?(@value)} class="whitespace-pre-wrap">{@value}</span>
-        <span :if={field_blank?(@value)} class="font-normal italic text-base-content/50">
+        <span :if={field_blank?(@value)} class="font-normal italic text-base-content/55">
           {@placeholder}
         </span>
       </div>

@@ -4,8 +4,12 @@ defmodule RelayWeb.DocsStylingTest do
   @app_css Path.join([File.cwd!(), "assets", "css", "app.css"])
   @storybook_css Path.join([File.cwd!(), "assets", "css", "storybook.css"])
 
-  # Every docs style selector must exist in BOTH stylesheets (the mirror rule).
+  # Every shared style selector must exist in BOTH stylesheets (the mirror rule). Docs chrome is
+  # the bulk of it; RE237 added `.modal-scrim`, whose dark override is the whole point of the
+  # rule existing — a scrim that only lands in app.css drifts silently.
   @mirrored_selectors [
+    ".modal-scrim",
+    ~s([data-theme="dark"] .modal-scrim),
     ".docs-nav",
     ".docs-nav-brand",
     ".docs-nav-eyebrow",
@@ -24,7 +28,7 @@ defmodule RelayWeb.DocsStylingTest do
     ".docs .markdown-alert-warning"
   ]
 
-  test "every docs style is mirrored from app.css into storybook.css" do
+  test "every shared style is mirrored from app.css into storybook.css" do
     app = File.read!(@app_css)
     storybook = File.read!(@storybook_css)
 

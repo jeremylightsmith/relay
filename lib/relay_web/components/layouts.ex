@@ -177,7 +177,7 @@ defmodule RelayWeb.Layouts do
       >
         <span class="truncate text-[15px] font-semibold">{@board_name}</span>
         <span class="badge badge-ghost badge-sm uppercase tracking-wider">Public roadmap</span>
-        <span class="hidden truncate font-mono text-xs text-base-content/50 sm:inline">
+        <span class="hidden truncate font-mono text-xs text-base-content/55 sm:inline">
           {@public_path}
         </span>
         <span class="flex-1"></span>

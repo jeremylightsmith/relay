@@ -227,7 +227,7 @@ defmodule RelayWeb.FlowSettingsComponents do
     <div
       id="flows-legend"
       class="font-mono"
-      style="display:flex;gap:18px;flex-wrap:wrap;margin:22px 0 12px 0;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+      style="display:flex;gap:18px;flex-wrap:wrap;margin:22px 0 12px 0;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
     >
       <span style="display:flex;align-items:center;gap:6px;">
         <span style="width:8px;height:8px;border-radius:2px;background:var(--color-accent);"></span>
@@ -256,7 +256,7 @@ defmodule RelayWeb.FlowSettingsComponents do
         <div style="min-width:660px;">
           <div
             class="font-mono"
-            style="display:flex;align-items:center;gap:14px;padding:11px 18px;background:var(--color-field-hover);border-bottom:1px solid var(--color-base-300);font-size:10.5px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+            style="display:flex;align-items:center;gap:14px;padding:11px 18px;background:var(--color-field-hover);border-bottom:1px solid var(--color-base-300);font-size:10.5px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
           >
             <span style="flex:0 0 150px;">FLOW</span>
             <span style="flex:1;min-width:0;white-space:nowrap;">
@@ -278,7 +278,7 @@ defmodule RelayWeb.FlowSettingsComponents do
                 </span>
                 <span
                   class="font-mono"
-                  style="display:flex;align-items:center;gap:8px;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);"
+                  style="display:flex;align-items:center;gap:8px;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
                 >
                   <span id={"flow-#{row.flow.id}-nodes-count"}>
                     v{row.flow.version} · {nodes_label(row.flow)}
@@ -698,10 +698,17 @@ defmodule RelayWeb.FlowSettingsComponents do
       if(missing?, do: "opacity:0.45;cursor:not-allowed;", else: "cursor:pointer;")
   end
 
+  # The knob is INK on the track's fill, not a surface, so it splits on `enabled?` the way
+  # `toggle_style/2` does. `base-100` here read as "white disc" from the light artboard, but it
+  # is a surface token: in dark it resolves to 0.26 and punched a near-black disc into the 0.65
+  # blue ON track — darker even than the 0.365 OFF track. The `-content` tokens are the ones
+  # pinned light in both themes (0.98), which is what a knob needs.
   defp knob_style(enabled?) do
+    knob = if enabled?, do: "var(--color-primary-content)", else: "var(--color-neutral-content)"
+
     "position:absolute;top:2px;" <>
       if(enabled?, do: "right:2px;", else: "left:2px;") <>
-      "width:18px;height:18px;border-radius:50%;background:var(--color-base-100);transition:all 0.18s;box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 30%, transparent);"
+      "width:18px;height:18px;border-radius:50%;background:#{knob};transition:all 0.18s;box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 30%, transparent);"
   end
 
   attr :flow, Flow, required: true

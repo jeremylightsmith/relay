@@ -44,8 +44,8 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "box-shadow:0 0 0 2px var(--color-base-100)"
       # avatar fill is the one identity-color formula (RE237: oklch() held at fixed perceptual
       # lightness so every hue stays legible under the fixed neutral-content ink — see
-      # CoreComponents.identity_color/1)
-      assert html =~ "background:oklch("
+      # CoreComponents.identity_color_for_hue/1). `Relay Board.dc.html` line ~1590.
+      assert html =~ "background:oklch(0.62 0.13 "
       refute html =~ ~s(data-role="member-overflow")
     end
 
@@ -1043,7 +1043,7 @@ defmodule RelayWeb.CoreComponentsTest do
 
       # Done check box is filled green; done label is muted + struck through.
       assert html =~ "border-success bg-success text-success-content"
-      assert html =~ "text-base-content/50 line-through"
+      assert html =~ "text-base-content/55 line-through"
       assert html =~ "hero-check"
     end
 
@@ -1419,7 +1419,7 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "Owners"
       assert html =~ "font-mono"
       assert html =~ "uppercase"
-      assert html =~ "text-base-content/60"
+      assert html =~ "text-base-content/65"
     end
 
     test "an accent class replaces the default muted token" do
@@ -1432,7 +1432,7 @@ defmodule RelayWeb.CoreComponentsTest do
 
       assert html =~ "AI Result"
       assert html =~ "text-secondary"
-      refute html =~ "text-base-content/60"
+      refute html =~ "text-base-content/65"
     end
   end
 
@@ -2013,6 +2013,28 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "background:#{CoreComponents.identity_color("dana@acme.co")}"
     end
 
+    # RE237: the L/C pair is load-bearing (a fixed `--color-neutral-content` ink has to stay
+    # legible on every hue), so it gets exactly ONE home — `identity_color_for_hue/1`. Before
+    # this, `identity_color/1`, the story-map owner chip and the /boards accent each re-typed
+    # it, and the accent had drifted to a third pair (0.62 0.15).
+    test "identity_color_for_hue/1 is the single home of the identity L/C pair" do
+      assert CoreComponents.identity_color_for_hue(123) == "oklch(0.62 0.13 123)"
+
+      for module <- [
+            "lib/relay_web/components/core_components.ex",
+            "lib/relay_web/components/story_map_components.ex",
+            "lib/relay_web/live/boards_live.ex"
+          ] do
+        occurrences =
+          module |> File.read!() |> then(&Regex.scan(~r/"oklch\(0\.62 0\.1\d /, &1)) |> length()
+
+        expected = if module =~ "core_components", do: 1, else: 0
+
+        assert occurrences == expected,
+               "#{module} re-types the identity fill — call identity_color_for_hue/1 instead"
+      end
+    end
+
     test "title overrides the name/email tooltip without touching the initials" do
       html =
         render_component(&CoreComponents.avatar/1,
@@ -2175,7 +2197,7 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "font-mono"
       assert html =~ "text-[10px]"
       # oklch(0.62 0.02 255) → P = round5((1 - 0.62) / 0.74 * 100) = 50
-      assert html =~ "text-base-content/50"
+      assert html =~ "text-base-content/55"
       assert html =~ "RLY-1"
       refute html =~ "ui-monospace"
     end
@@ -2188,7 +2210,7 @@ defmodule RelayWeb.CoreComponentsTest do
         })
 
       assert html =~ "text-secondary"
-      refute html =~ "text-base-content/50"
+      refute html =~ "text-base-content/55"
     end
 
     test "page_heading keeps the artboard's 22px/600/-0.02em type at full ink" do

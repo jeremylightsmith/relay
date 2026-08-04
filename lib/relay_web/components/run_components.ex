@@ -84,7 +84,7 @@ defmodule RelayWeb.RunComponents do
       <div style="display:flex;align-items:center;gap:10px;flex:0 0 auto;">
         <span
           class="run-strip-elapsed"
-          style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+          style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
         >
           {@elapsed}
         </span>
@@ -289,7 +289,7 @@ defmodule RelayWeb.RunComponents do
           <% :pending -> %>
             <div
               class="run-timeline-row run-timeline-row-pending"
-              style="display:flex;align-items:center;gap:10px;padding:8px 10px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);"
+              style="display:flex;align-items:center;gap:10px;padding:8px 10px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
             >
               <span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid var(--color-field-border-hover);flex:0 0 auto;" />
               <span style="font-family:var(--font-mono);font-size:12px;">
@@ -326,7 +326,7 @@ defmodule RelayWeb.RunComponents do
         <span
           :if={@row.attempt > 1}
           class="run-attempt-chip"
-          style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));border-radius:4px;padding:2px 6px;"
+          style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));border-radius:4px;padding:2px 6px;"
         >
           attempt {@row.attempt}
         </span>
@@ -397,7 +397,7 @@ defmodule RelayWeb.RunComponents do
     ~H"""
     <span
       class="run-timeline-icon"
-      style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--color-field-border);color:color-mix(in oklab, var(--color-base-content) 60%, transparent);font-size:11px;flex:0 0 auto;"
+      style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--color-field-border);color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-size:11px;flex:0 0 auto;"
     >
       ⊘
     </span>
@@ -493,7 +493,10 @@ defmodule RelayWeb.RunComponents do
           @rejection.rejected_at
         )}
       </div>
-      <div style="font-size:12px;color:color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content));margin-top:4px;">
+      <%!-- `oklch(0.50 0.04 250)` is slate, not Human-blue: a Rule-N near-neutral (see
+      `delete_style/1` in story_map_components.ex). Rule B needed `primary` at 70% to reach L 0.50,
+      which lands at C 0.10 and reads as a blue statement this hint line never made. --%>
+      <div style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin-top:4px;">
         the run reads this note before implement
       </div>
     </div>
@@ -503,7 +506,7 @@ defmodule RelayWeb.RunComponents do
   def run_state_banner(%{variant: :revoked} = assigns) do
     ~H"""
     <div class="run-banner run-banner-revoked" style="display:flex;flex-direction:column;gap:10px;">
-      <div style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
+      <div style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
         <span style="width:8px;height:8px;border-radius:50%;background:var(--color-secondary);" />
         FLOW
         <span style="color:color-mix(in oklab, var(--color-base-content) 45%, transparent);">→</span>
@@ -588,7 +591,7 @@ defmodule RelayWeb.RunComponents do
 
     ~H"""
     <div class="run-banner run-banner-parked" style="display:flex;flex-direction:column;gap:10px;">
-      <div style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
+      <div style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
         <span style="width:8px;height:8px;border-radius:50%;background:var(--color-warning);" />
         baton →
         <span style="font-weight:700;color:color-mix(in oklab, var(--color-base-content) 75%, transparent);">
@@ -707,10 +710,10 @@ defmodule RelayWeb.RunComponents do
           <span style="font-size:13px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);">
             {history_title(entry)}
           </span>
-          <span style="margin-left:auto;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
+          <span style="margin-left:auto;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
             {TimeAgo.ago(DateTime.utc_now(), entry.detail.finished_at)}
           </span>
-          <span style="color:color-mix(in oklab, var(--color-base-content) 50%, transparent);">
+          <span style="color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
             ⌄
           </span>
         </summary>
@@ -829,7 +832,7 @@ defmodule RelayWeb.RunComponents do
           :if={@progress_at}
           id={"card-#{@ref}-run-age"}
           class="run-face-age"
-          style="color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+          style="color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
         >
           {TimeAgo.ago(DateTime.utc_now(), @progress_at)}
         </span>
@@ -919,7 +922,10 @@ defmodule RelayWeb.RunComponents do
       <div style="font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));">
         QUEUED · {String.upcase(@flow.key)} FLOW
       </div>
-      <div style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-secondary) 95%, var(--color-base-content));">
+      <%!-- `oklch(0.55 0.06 292)` is a violet-tinted grey, not violet ink: a Rule-N near-neutral
+      (see `delete_style/1` in story_map_components.ex). Rule B needed `secondary` at 95% to reach
+      L 0.55, which lands at C 0.15 — the QUEUED label above carries the AI signal, not this. --%>
+      <div style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
         picks up next
       </div>
     </div>

@@ -217,7 +217,7 @@ defmodule RelayWeb.BoardLive do
           <button type="button" id="archived-cards-menu-item" phx-click="open_archived">
             <.icon name="hero-archive-box" class="size-4" />
             <span class="flex-1">Archived cards</span>
-            <span class="font-mono text-xs text-base-content/60">{@archived_count}</span>
+            <span class="font-mono text-xs text-base-content/65">{@archived_count}</span>
           </button>
         </li>
       </:menu_items>
@@ -404,7 +404,7 @@ defmodule RelayWeb.BoardLive do
           aria-label="Agent log"
         >
           <div class="flex items-center justify-between border-b border-base-200 px-4 py-1.5">
-            <div class="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-base-content/60">
+            <div class="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-base-content/65">
               <.icon name="hero-command-line" class="size-4" /> Agent log
             </div>
             <button
@@ -424,7 +424,7 @@ defmodule RelayWeb.BoardLive do
           >
             <div
               id="agent-log-empty"
-              class="hidden py-6 text-center text-base-content/50 only:block"
+              class="hidden py-6 text-center text-base-content/55 only:block"
             >
               Waiting for agent activity…
             </div>
@@ -436,7 +436,7 @@ defmodule RelayWeb.BoardLive do
               <span class="shrink-0 text-base-content/40">
                 {Calendar.strftime(entry.ts, "%H:%M:%S")}
               </span>
-              <span :if={entry.ref} class="shrink-0 text-base-content/60">[{entry.ref}]</span>
+              <span :if={entry.ref} class="shrink-0 text-base-content/65">[{entry.ref}]</span>
               <span class="whitespace-pre-wrap break-all">{entry.text}</span>
             </div>
           </div>
@@ -573,12 +573,12 @@ defmodule RelayWeb.BoardLive do
                 class="min-w-0 flex-1 text-left"
               >
                 <div class="flex items-baseline gap-2">
-                  <span class="font-mono text-xs text-base-content/60">
+                  <span class="font-mono text-xs text-base-content/65">
                     {Cards.ref(@board, card)}
                   </span>
                   <span class="truncate font-medium">{card.title}</span>
                 </div>
-                <div class="text-xs text-base-content/50">
+                <div class="text-xs text-base-content/55">
                   {drawer_stage_name(card.stage, @board.stages)} · archived {Calendar.strftime(
                     card.archived_at,
                     "%b %d, %Y"
@@ -595,7 +595,7 @@ defmodule RelayWeb.BoardLive do
                 Restore
               </button>
             </li>
-            <li :if={@archived_cards == []} class="py-3 text-sm text-base-content/50">
+            <li :if={@archived_cards == []} class="py-3 text-sm text-base-content/55">
               No archived cards.
             </li>
           </ul>
@@ -639,12 +639,12 @@ defmodule RelayWeb.BoardLive do
                 class="min-w-0 flex-1 text-left"
               >
                 <div class="flex items-baseline gap-2">
-                  <span class="font-mono text-xs text-base-content/60">
+                  <span class="font-mono text-xs text-base-content/65">
                     {Cards.ref(@board, card)}
                   </span>
                   <span class="truncate font-medium">{card.title}</span>
                 </div>
-                <div class="text-xs text-base-content/50">
+                <div class="text-xs text-base-content/55">
                   {drawer_stage_name(card.stage, @board.stages)} · {reason}
                 </div>
               </button>
@@ -658,7 +658,7 @@ defmodule RelayWeb.BoardLive do
                 Restart
               </button>
             </li>
-            <li :if={@stalled_cards == []} class="py-3 text-sm text-base-content/50">
+            <li :if={@stalled_cards == []} class="py-3 text-sm text-base-content/55">
               No stalled cards.
             </li>
           </ul>
@@ -4024,6 +4024,6 @@ defmodule RelayWeb.BoardLive do
     do: "width:9px;height:9px;border-radius:50%;background:var(--color-success);display:block;flex:0 0 auto;"
 
   defp agent_log_class(:error), do: "text-error"
-  defp agent_log_class(:lifecycle), do: "text-base-content/60"
+  defp agent_log_class(:lifecycle), do: "text-base-content/65"
   defp agent_log_class(_), do: "text-base-content"
 end

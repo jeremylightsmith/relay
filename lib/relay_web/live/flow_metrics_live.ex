@@ -260,7 +260,7 @@ defmodule RelayWeb.FlowMetricsLive do
             id="flow-metrics-table"
             style="border:1px solid var(--color-base-300);border-radius:12px;overflow:hidden;"
           >
-            <div style="display:grid;grid-template-columns:minmax(220px,1.3fr) 62px 130px 130px 92px 170px 84px;column-gap:14px;padding:10px 16px;background:var(--color-field-hover);font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
+            <div style="display:grid;grid-template-columns:minmax(220px,1.3fr) 62px 130px 130px 92px 170px 84px;column-gap:14px;padding:10px 16px;background:var(--color-field-hover);font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
               <span>NODE</span>
               <span style="text-align:right;">RUNS</span>
               <span style="text-align:right;">DURATION</span>
@@ -349,9 +349,9 @@ defmodule RelayWeb.FlowMetricsLive do
 
         <p
           id="flow-metrics-footnote"
-          style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);margin-top:14px;"
+          style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin-top:14px;"
         >
-          <span style="font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 50%, transparent);">
+          <span style="font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
             RUNS
           </span>
           count node executions, not cards — a node visited twice by one card counts twice.
@@ -399,7 +399,7 @@ defmodule RelayWeb.FlowMetricsLive do
   defp stat_cell(assigns) do
     ~H"""
     <div style={"padding:14px 16px;#{unless @last, do: "border-right:1px solid var(--color-base-300);"}"}>
-      <div style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);">
+      <div style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
         {@label}
       </div>
       <div

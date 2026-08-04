@@ -134,7 +134,7 @@ defmodule RelayWeb.BoardRunnersLive do
                 </span>
                 <span
                   class="font-mono"
-                  style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+                  style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
                 >
                   Waiting for a heartbeat…
                 </span>
@@ -249,7 +249,7 @@ defmodule RelayWeb.BoardRunnersLive do
                     <div style="display:flex;flex-direction:column;gap:8px;">
                       <span
                         class="font-mono"
-                        style="font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);"
+                        style="font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
                       >
                         CAPACITY
                       </span>
@@ -276,7 +276,7 @@ defmodule RelayWeb.BoardRunnersLive do
                     <div style="display:flex;flex-direction:column;gap:8px;">
                       <span
                         class="font-mono"
-                        style="font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);"
+                        style="font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
                       >
                         {working_label(runner)}
                       </span>

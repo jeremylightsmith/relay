@@ -533,7 +533,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
       html = grid_html()
 
       assert style_of(html, "#story-map-add-task-1") ==
-               "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+               "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
 
       assert html =~ ~s(title="Add task")
       assert html =~ ~s(phx-click="story_map_add_task")
@@ -921,7 +921,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
       html = card_html(:map, hue: :green, done: true, badge: "DONE", avatar: :check)
 
       style = style_of(html, "#story-map-card-RLY1")
-      assert style =~ "color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+      assert style =~ "color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
       assert style =~ "border-left:2px solid color-mix(in oklab, var(--color-success) 65%, var(--color-base-100));"
 
       assert style =~
@@ -1004,7 +1004,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
                "grid-column:2;grid-row:2;position:sticky;top:56px;z-index:20;" <>
                  "background:var(--color-base-200);border-right:2px solid color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100));" <>
                  "border-bottom:2px solid color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100));padding:7px 9px;font-size:10.5px;" <>
-                 "color:color-mix(in oklab, var(--color-base-content) 50%, transparent);display:flex;align-items:center;gap:6px;"
+                 "color:color-mix(in oklab, var(--color-base-content) 55%, transparent);display:flex;align-items:center;gap:6px;"
     end
 
     test "it is not a rename affordance, not a drag grip and not an add-task button" do
@@ -1473,10 +1473,10 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert attr_of(html, "#story-map-focus-2", "phx-click") == "set_story_map_focus"
 
       assert style_of(html, "#story-map-focus-2") ==
-               "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+               "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
 
       assert style_of(html, "#story-map-collapse-2") ==
-               "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+               "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
     end
   end
 
@@ -1491,22 +1491,15 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert src =~ ~s[@gl_dashed "1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100))"]
       assert src =~ ~s[@no_task_bg "var(--color-base-200)"]
 
-      # RE259's owner chip reintroduced ONE oklch: `owner_chip_style/1`'s per-person/AI hue
-      # tint, the same kind of exception as `CoreComponents.identity_color/1` — marked with
-      # a `theme-tokens:allow` comment (on the line itself or the line directly above, same
-      # as theme_tokens_test.exs honours) and covered by the whole-tree guardrail. Any OTHER
-      # oklch( here would be a regression.
-      lines = String.split(src, "\n")
+      # RE259's owner chip reintroduced one oklch — `owner_chip_style/1`'s per-person/AI hue
+      # tint — which now comes from `CoreComponents.identity_color_for_hue/1`, the single home
+      # of that formula. So this module carries no exception of its own: not one literal, and
+      # no `theme-tokens:allow` marker (the whole-tree guardrail pins the marker inventory).
+      code =
+        src |> String.split("\n") |> Enum.reject(&String.starts_with?(String.trim(&1), "#"))
 
-      unmarked =
-        lines
-        |> Enum.with_index()
-        |> Enum.filter(fn {line, _i} -> line =~ "oklch(" end)
-        |> Enum.reject(fn {line, i} ->
-          line =~ "theme-tokens:allow" or (i > 0 and Enum.at(lines, i - 1) =~ "theme-tokens:allow")
-        end)
-
-      assert unmarked == [], "unmarked oklch literal(s): #{inspect(unmarked)}"
+      refute Enum.any?(code, &(&1 =~ "oklch(")), "an oklch literal came back into this module"
+      refute src =~ "theme-tokens:allow"
     end
 
     test "the live-cursor avatar ring follows the surface instead of staying white" do

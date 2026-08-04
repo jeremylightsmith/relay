@@ -231,7 +231,7 @@ defmodule RelayWeb.FlowEditorComponents do
                 phx-value-field="max_retries"
                 phx-value-v={stepper_value(@node.max_retries, -1)}
                 disabled={@read_only?}
-                style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);font-size:16px;border:0;background:var(--color-base-100);"
+                style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-size:16px;border:0;background:var(--color-base-100);"
               >
                 −
               </button>
@@ -246,7 +246,7 @@ defmodule RelayWeb.FlowEditorComponents do
                 phx-value-field="max_retries"
                 phx-value-v={stepper_value(@node.max_retries, 1)}
                 disabled={@read_only?}
-                style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);font-size:16px;border:0;background:var(--color-base-100);"
+                style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-size:16px;border:0;background:var(--color-base-100);"
               >
                 +
               </button>
@@ -442,7 +442,7 @@ defmodule RelayWeb.FlowEditorComponents do
             phx-value-field="max_loops"
             phx-value-v={stepper_value(@edge.max_loops, -1)}
             disabled={@read_only?}
-            style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);font-size:16px;border:0;background:var(--color-base-100);"
+            style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-size:16px;border:0;background:var(--color-base-100);"
           >
             −
           </button>
@@ -457,7 +457,7 @@ defmodule RelayWeb.FlowEditorComponents do
             phx-value-field="max_loops"
             phx-value-v={stepper_value(@edge.max_loops, 1)}
             disabled={@read_only?}
-            style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);font-size:16px;border:0;background:var(--color-base-100);"
+            style="width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-size:16px;border:0;background:var(--color-base-100);"
           >
             +
           </button>

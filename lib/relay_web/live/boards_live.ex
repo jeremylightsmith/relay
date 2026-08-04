@@ -12,6 +12,7 @@ defmodule RelayWeb.BoardsLive do
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Members
+  alias RelayWeb.CoreComponents
   alias RelayWeb.TimeAgo
 
   @impl true
@@ -51,7 +52,7 @@ defmodule RelayWeb.BoardsLive do
           <h1 class="m-0 text-[27px] font-semibold tracking-tight text-base-content">
             Your boards
           </h1>
-          <div class="flex items-center gap-4 pt-2 font-mono text-[11px] text-base-content/60">
+          <div class="flex items-center gap-4 pt-2 font-mono text-[11px] text-base-content/65">
             <span class="flex items-center gap-1.5">
               <span style="width:8px;height:8px;border-radius:2px;background:var(--color-secondary);"></span>AI
             </span>
@@ -131,7 +132,7 @@ defmodule RelayWeb.BoardsLive do
                 class="mt-[3px] hidden items-center justify-between drawer:flex"
               >
                 <.member_stack id={"board-members-#{b.slug}"} members={b.members} />
-                <span class="font-mono text-[10.5px] text-base-content/50">
+                <span class="font-mono text-[10.5px] text-base-content/55">
                   Updated {TimeAgo.ago(b.updated_at)}
                 </span>
               </div>
@@ -142,7 +143,7 @@ defmodule RelayWeb.BoardsLive do
             id="new-board-button"
             type="button"
             phx-click="new_board"
-            class="hidden min-h-[220px] flex-col items-center justify-center gap-2.5 rounded-[14px] border border-dashed border-base-content/20 bg-transparent text-base-content/60 drawer:flex"
+            class="hidden min-h-[220px] flex-col items-center justify-center gap-2.5 rounded-[14px] border border-dashed border-base-content/20 bg-transparent text-base-content/65 drawer:flex"
           >
             <span class="flex size-[34px] items-center justify-center rounded-[9px] border-[1.5px] text-xl leading-none">
               +
@@ -216,9 +217,9 @@ defmodule RelayWeb.BoardsLive do
 
   defp board_meta_summary(b), do: "#{b.slug} · #{b.card_count} cards"
 
-  # Cosmetic per-board accent from a stable hash of the slug. RE237: stays an OKLCH color, not
-  # a token, for the same reason as `CoreComponents.identity_color/1` — the hue is per-board and
-  # arbitrary, so there is no brand role to map it onto.
-  # theme-tokens:allow: no role for a hue
-  defp accent(slug), do: "oklch(0.62 0.15 #{rem(:erlang.phash2(slug), 360)})"
+  # Cosmetic per-board accent from a stable hash of the slug. RE237: an identity fill like any
+  # other — the hue is per-board and arbitrary, so there is no brand role to map it onto, and
+  # both halves of that (the hash → hue, and the hue → colour) belong to `CoreComponents`. It
+  # used to re-type `rem(:erlang.phash2(x), 360)` and a third L/C pair of its own.
+  defp accent(slug), do: slug |> CoreComponents.identity_hue() |> CoreComponents.identity_color_for_hue()
 end

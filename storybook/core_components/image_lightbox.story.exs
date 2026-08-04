@@ -14,7 +14,7 @@ defmodule Storybook.Components.CoreComponents.ImageLightbox do
     ~H"""
     <div class="flex flex-col gap-8 p-4">
       <section>
-        <div class="mb-3 font-mono text-[11px] uppercase tracking-[0.06em] text-base-content/60">
+        <div class="mb-3 font-mono text-[11px] uppercase tracking-[0.06em] text-base-content/65">
           Constrained markdown image
         </div>
         <div class="md max-w-md rounded border border-base-300 p-3">
@@ -25,7 +25,7 @@ defmodule Storybook.Components.CoreComponents.ImageLightbox do
       </section>
 
       <section>
-        <div class="mb-3 font-mono text-[11px] uppercase tracking-[0.06em] text-base-content/60">
+        <div class="mb-3 font-mono text-[11px] uppercase tracking-[0.06em] text-base-content/65">
           Viewer (forced open)
         </div>
         <div class="relative h-80 overflow-hidden rounded border border-base-300">

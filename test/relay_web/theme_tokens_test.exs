@@ -24,6 +24,18 @@ defmodule RelayWeb.ThemeTokensTest do
   arguments), or a trailing `# theme-tokens:allow: <reason>` comment on the one offending source
   line, which exempts only that line. Prefer the marker when the same pattern (e.g. `oklch(`)
   appears more than once in a file and only one site is a real exception.
+
+  **Both hatches are inventoried here, and that is the point.** `@allowlist` is a list in this
+  file, so adding to it is already a reviewable test edit; `@marked_exceptions` gives the marker
+  the same property. Without it, an author could exempt a fresh literal by typing a comment into
+  the very file being guarded, with no diff under `test/` for a reviewer to catch — a materially
+  weaker guardrail than the one this card set out to ship.
+
+  **The marker only works in `.ex`.** It has to survive to the scanner as text on the offending
+  line, which rules out `.heex` (`<%!-- … --%>` is blanked by `strip_comments/2` before the scan,
+  and HEEx has no `#` comment) and `.css` (`/* … */`, blanked for the same reason). Use an
+  `@allowlist` entry there — that is why the four Google-brand hexes in `home.html.heex` and the
+  two `#000` mask channels in the stylesheets are listed rather than marked.
   """
   use ExUnit.Case, async: true
 
@@ -48,6 +60,13 @@ defmodule RelayWeb.ThemeTokensTest do
     # A mask channel, not a color: only the alpha of this gradient is read.
     {"assets/css/app.css", "#000", "mask-image channel, not a color"},
     {"assets/css/storybook.css", "#000", "mask-image channel, not a color"}
+  ]
+
+  # The OTHER hatch: every `# theme-tokens:allow: <reason>` marker in the scanned tree, pinned
+  # as {repo-relative path, reason}. A new marker fails this test until it is added here, which
+  # is what keeps the hatch reviewable (see moduledoc).
+  @marked_exceptions [
+    {"lib/relay_web/components/core_components.ex", "no role for a hue"}
   ]
 
   test "no hardcoded color literals outside the theme blocks" do
@@ -135,7 +154,7 @@ defmodule RelayWeb.ThemeTokensTest do
 
   defp allowed?(rel, match, line, prev_line) do
     Enum.any?(@allowlist, fn {path, literal, _why} -> path == rel and literal == match end) or
-      marked_allowed?(line) or marked_allowed?(prev_line)
+      marked_allowed?(line) or hoisted_marker?(prev_line)
   end
 
   # A `# theme-tokens:allow: <reason>` marker exempts only the ONE line it annotates — the
@@ -144,8 +163,48 @@ defmodule RelayWeb.ThemeTokensTest do
   # honoured as a trailing comment on the offending line OR as a whole-line comment immediately
   # above it, since `mix format` hoists a trailing comment on a one-line `def ... do: ...` onto
   # its own line above.
+  #
+  # Anchored on the `#` and the trailing `:` so it is a real Elixir comment carrying a reason,
+  # not any stray occurrence of the phrase — prose inside a `@doc` heredoc that merely mentions
+  # the marker must not silence the line it sits on.
+  @marker ~r/#\s*theme-tokens:allow:\s*(?<reason>\S.*?)\s*$/
+
   defp marked_allowed?(nil), do: false
-  defp marked_allowed?(line), do: String.contains?(line, "theme-tokens:allow")
+  defp marked_allowed?(line), do: Regex.match?(@marker, line)
+
+  # The line-above form only counts as a WHOLE-line comment — that is the shape `mix format`
+  # produces when it hoists. Accepting a trailing marker as cover for the next line too would
+  # let one annotation silence two literals.
+  defp hoisted_marker?(nil), do: false
+
+  defp hoisted_marker?(line), do: String.starts_with?(String.trim(line), "#") and marked_allowed?(line)
+
+  test "every theme-tokens:allow marker in the tree is inventoried here" do
+    found =
+      Enum.flat_map(scanned_files(), fn path ->
+        path
+        |> File.read!()
+        |> String.split("\n")
+        |> Enum.flat_map(fn line ->
+          case Regex.named_captures(@marker, line) do
+            %{"reason" => reason} -> [{relative(path), reason}]
+            nil -> []
+          end
+        end)
+      end)
+
+    assert Enum.sort(found) == Enum.sort(@marked_exceptions), """
+    The `# theme-tokens:allow:` inventory is out of date.
+
+    A marker exempts a color literal from the guardrail from inside the file being guarded, so
+    it only stays reviewable while every one of them is listed in `@marked_exceptions`. If you
+    added an exception, add it here too — and justify it in review. If you removed a literal,
+    drop its entry.
+
+      in the tree: #{inspect(found)}
+      inventoried: #{inspect(@marked_exceptions)}
+    """
+  end
 
   describe "the guardrail itself" do
     @tag :tmp_dir
@@ -171,6 +230,24 @@ defmodule RelayWeb.ThemeTokensTest do
       ex = Path.join(tmp, "notes.ex")
       File.write!(ex, "  # the artboard used oklch(0.55 0.02 255) here\n  x = 1\n")
       assert offenders_in(ex) == []
+    end
+
+    @tag :tmp_dir
+    test "the marker must be a `#` comment carrying a reason", %{tmp_dir: tmp} do
+      path = Path.join(tmp, "marked.ex")
+
+      File.write!(path, """
+        # theme-tokens:allow: seeded per-entity hue
+        def a, do: "oklch(0.62 0.13 10)"
+        def b, do: "oklch(0.62 0.13 20)" # theme-tokens:allow: ditto
+        def c, do: "oklch(0.62 0.13 30)"
+        @doc "prose that merely says theme-tokens:allow proves nothing"
+        def d, do: "oklch(0.62 0.13 40)" # theme-tokens:allow
+      """)
+
+      # a and b are exempt; c is unmarked; d's marker carries no reason, and the bare mention in
+      # the @doc above it is prose, not an opt-out.
+      assert Enum.map(offenders_in(path), fn {_rel, line_no, _match, _line} -> line_no end) == [4, 6]
     end
 
     test "daisyUI semantic classes are not mistaken for the Tailwind palette" do

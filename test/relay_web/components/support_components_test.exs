@@ -20,7 +20,7 @@ defmodule RelayWeb.SupportComponentsTest do
 
     test "count variant: muted internal card-face label" do
       html = render_component(&support_badge/1, %{count: 7, variant: :count})
-      assert html =~ "color-mix(in oklab, var(--color-base-content) 60%, transparent)"
+      assert html =~ "color-mix(in oklab, var(--color-base-content) 65%, transparent)"
       assert html =~ ~s(title="Public supporters")
       assert html =~ "↑"
       assert html =~ "7"

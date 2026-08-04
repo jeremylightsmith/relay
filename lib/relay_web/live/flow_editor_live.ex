@@ -560,11 +560,11 @@ defmodule RelayWeb.FlowEditorLive do
         >
           <span style="width:8px;height:8px;border-radius:50%;background:var(--color-success);">
           </span>
-          <span style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
+          <span style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
             All changes saved ·
             <span style="font-family:ui-monospace,monospace;">v{@flow.version}</span>
           </span>
-          <span style="margin-left:auto;font-family:ui-monospace,monospace;font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);">
+          <span style="margin-left:auto;font-family:ui-monospace,monospace;font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
             {stats(@working)}
           </span>
           <div
@@ -668,7 +668,7 @@ defmodule RelayWeb.FlowEditorLive do
     ~H"""
     <form id={@id} phx-change="validate_trigger" style="display:flex;flex-direction:column;gap:3px;">
       <input type="hidden" name="field" value={@field} />
-      <label style="font-size:9.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);">
+      <label style="font-size:9.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
         {@label}
       </label>
       <select
