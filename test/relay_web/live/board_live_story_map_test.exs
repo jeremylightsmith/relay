@@ -2032,5 +2032,31 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       assert view_state["needs_input_filter"] == false
       assert view_state["owner_filter"] == []
     end
+
+    test "the toggle renders pressed on first paint and flips the map when clicked",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      # Pressed without anyone having clicked it.
+      assert has_element?(view, "#story-map-hide-complete-filter[aria-pressed='true']")
+
+      view |> element("#story-map-hide-complete-filter") |> render_click()
+
+      assert has_element?(view, "#story-map-hide-complete-filter[aria-pressed='false']")
+      assert has_element?(view, "##{card_dom_id(ctx.board, ctx.shipped)}")
+    end
+
+    test "the count label tells the truth on first paint, with no filter touched",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      # 5 cards on the board, one of them in Done — `<total> cards` here would be a lie, and
+      # `filter_active` is false, so the label cannot be keyed off it.
+      assert has_element?(view, "#story-map-count", "4 of 5")
+
+      view |> element("#story-map-hide-complete-filter") |> render_click()
+
+      assert has_element?(view, "#story-map-count", "5 cards")
+    end
   end
 end

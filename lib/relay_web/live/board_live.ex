@@ -792,6 +792,7 @@ defmodule RelayWeb.BoardLive do
       <StoryMapComponents.story_map_filter_bar
         chips={@chips}
         needs_input={@needs_input_filter}
+        hide_complete={@hide_complete}
         focus_name={@focus_activity && @focus_activity.name}
         filter_active={@filter_active}
         visible={@grid.total}

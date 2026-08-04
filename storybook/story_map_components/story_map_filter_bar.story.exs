@@ -35,13 +35,15 @@ defmodule Storybook.StoryMapComponents.StoryMapFilterBar do
     [
       %Variation{
         id: :resting,
-        description: "No filter: no Clear link, and the count reads the plain total.",
+        description:
+          "The board's defaults: Hide complete pressed, no Clear link, and the count reads N of M while it hides cards.",
         attributes: %{
           chips: [dana(false), mara(false), ai(false)],
           needs_input: false,
+          hide_complete: true,
           focus_name: nil,
           filter_active: false,
-          visible: 24,
+          visible: 20,
           total: 24
         }
       },
@@ -51,6 +53,7 @@ defmodule Storybook.StoryMapComponents.StoryMapFilterBar do
         attributes: %{
           chips: [dana(true), mara(false), ai(false)],
           needs_input: false,
+          hide_complete: true,
           focus_name: nil,
           filter_active: true,
           visible: 7,
@@ -63,6 +66,7 @@ defmodule Storybook.StoryMapComponents.StoryMapFilterBar do
         attributes: %{
           chips: [dana(false), mara(false), ai(false)],
           needs_input: true,
+          hide_complete: true,
           focus_name: nil,
           filter_active: true,
           visible: 3,
@@ -75,9 +79,25 @@ defmodule Storybook.StoryMapComponents.StoryMapFilterBar do
         attributes: %{
           chips: [dana(false), mara(false), ai(true)],
           needs_input: false,
+          hide_complete: true,
           focus_name: "Checkout",
           filter_active: true,
           visible: 9,
+          total: 24
+        }
+      },
+      %Variation{
+        id: :complete_shown,
+        description:
+          "Hide complete switched OFF (it is pressed by default): finished cards are back, " <>
+            "so this differs from the board's defaults and Clear appears.",
+        attributes: %{
+          chips: [dana(false), mara(false), ai(false)],
+          needs_input: false,
+          hide_complete: false,
+          focus_name: nil,
+          filter_active: true,
+          visible: 24,
           total: 24
         }
       }
