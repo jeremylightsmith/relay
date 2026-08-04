@@ -348,7 +348,7 @@ defmodule RelayWeb.BoardSettingsLive do
                   Danger zone
                 </div>
                 <div style="display:flex;align-items:center;gap:16px;">
-                  <%!-- `oklch(0.50 0.04 15)` is a muted warm grey, not a red: C 0.04 is a Rule-N
+                  <%!-- `oklch 0.50 0.04 15` is a muted warm grey, not a red: C 0.04 is a Rule-N
                     near-neutral (see `delete_style/1` in story_map_components.ex). Rule B needed
                     `error` at 65% to reach L 0.50, landing at C 0.10 — a clear red this body copy
                     never was; the "Danger zone" heading above carries the warning. --%>
@@ -859,7 +859,7 @@ defmodule RelayWeb.BoardSettingsLive do
                   <div style="font-size:14px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);">
                     Relay AI
                   </div>
-                  <%!-- `oklch(0.50 0.03 292)` is a grey-violet, not a violet: C 0.03 is a Rule-N near-neutral
+                  <%!-- `oklch 0.50 0.03 292` is a grey-violet, not a violet: C 0.03 is a Rule-N near-neutral
                     (see `delete_style/1` in story_map_components.ex), and Rule B's ink formula would
                     have to run `secondary` to 80% to reach L 0.50, landing at C 0.13. --%>
                   <div style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
@@ -890,7 +890,7 @@ defmodule RelayWeb.BoardSettingsLive do
                   <span style="width:10px;height:10px;border-radius:50%;border:1.5px solid var(--color-secondary-content);">
                   </span>
                 </div>
-                <%!-- `oklch(0.44 0.06 292)` is a violet-tinted grey, not violet ink: a Rule-N
+                <%!-- `oklch 0.44 0.06 292` is a violet-tinted grey, not violet ink: a Rule-N
                   near-neutral (see `delete_style/1` in story_map_components.ex). Rule B needed
                   `secondary` at 60% to reach L 0.44, landing at C 0.10 — the violet AI dot beside
                   it carries the signal, not this caption. --%>

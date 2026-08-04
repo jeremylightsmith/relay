@@ -682,7 +682,7 @@ defmodule RelayWeb.StoryMapComponents do
   defp delete_title(1, kind), do: "Move 1 card out of this #{kind} before deleting it"
   defp delete_title(count, kind), do: "Move #{count} cards out of this #{kind} before deleting it"
 
-  # Artboard `delStyle` / `delOff`, lines ~397-398. The enabled label is `oklch(0.62 0.03 25)` —
+  # Artboard `delStyle` / `delOff`, lines ~397-398. The enabled label is `oklch 0.62 0.03 25` —
   # a warm grey, not a red: the artboard deliberately mutes this destructive affordance. C 0.03
   # sits in the gap between Rule N (chroma ≤ 0.02) and Rule B (worked at C ≥ 0.10), and Rule B's
   # ink formula cannot express it — solving `error` against `base-content` for L 0.62 needs ~100%

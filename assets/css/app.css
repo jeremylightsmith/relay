@@ -84,10 +84,11 @@
 @plugin "../vendor/daisyui-theme" {
   name: "dark";
   default: false;
-  /* RE237: theme resolution is explicit — root.html.heex always writes data-theme. Leaving
-     prefersdark on would let daisyUI apply dark tokens under OS-dark in contexts that have no
-     data-theme (the storybook iframe), where the `dark:` custom variant would NOT match — the
-     exact half-and-half state this card exists to remove. */
+  /* RE237: theme resolution is explicit — data-theme is always written before first paint, by
+     root.html.heex in the app and by assets/js/storybook.js under /storybook. Leaving
+     prefersdark on would add a SECOND, competing source of dark tokens keyed on the OS instead,
+     which the `dark:` custom variant (keyed on data-theme) would NOT match — the exact
+     half-and-half state this card exists to remove. */
   prefersdark: false;
   color-scheme: "dark";
   --color-base-100: oklch(0.26 0.02 255);

@@ -186,7 +186,7 @@ defmodule RelayWeb.RunComponents do
   # The dot has long used the accent (teal) token while the surrounding tint/ink were
   # blue-ish (hue 250, primary's range) literals — a pre-existing choice, unrelated to
   # RE237. The faint tint backgrounds (5-10% over base-100) keep that blue wash via
-  # var(--color-primary), but `baton_c` / `title_c` were `oklch(0.44 0.06 250)` — C 0.06 is a
+  # var(--color-primary), but `baton_c` / `title_c` were `oklch 0.44 0.06 250` — C 0.06 is a
   # Rule-N near-neutral (see `delete_style/1` in story_map_components.ex), and Rule B ran
   # `primary` to 55% to reach L 0.44, landing at C ~0.09 and reading as active Human-blue on a
   # cancelled run. The ink goes neutral; the wash stays.
@@ -497,7 +497,7 @@ defmodule RelayWeb.RunComponents do
           @rejection.rejected_at
         )}
       </div>
-      <%!-- `oklch(0.50 0.04 250)` is slate, not Human-blue: a Rule-N near-neutral (see
+      <%!-- `oklch 0.50 0.04 250` is slate, not Human-blue: a Rule-N near-neutral (see
       `delete_style/1` in story_map_components.ex). Rule B needed `primary` at 70% to reach L 0.50,
       which lands at C 0.10 and reads as a blue statement this hint line never made. --%>
       <div style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin-top:4px;">
@@ -926,7 +926,7 @@ defmodule RelayWeb.RunComponents do
       <div style="font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));">
         QUEUED · {String.upcase(@flow.key)} FLOW
       </div>
-      <%!-- `oklch(0.55 0.06 292)` is a violet-tinted grey, not violet ink: a Rule-N near-neutral
+      <%!-- `oklch 0.55 0.06 292` is a violet-tinted grey, not violet ink: a Rule-N near-neutral
       (see `delete_style/1` in story_map_components.ex). Rule B needed `secondary` at 95% to reach
       L 0.55, which lands at C 0.15 — the QUEUED label above carries the AI signal, not this. --%>
       <div style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">

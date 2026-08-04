@@ -31,10 +31,11 @@
 @plugin "../vendor/daisyui-theme" {
   name: "dark";
   default: false;
-  /* RE237: theme resolution is explicit — root.html.heex always writes data-theme. Leaving
-     prefersdark on would let daisyUI apply dark tokens under OS-dark in contexts that have no
-     data-theme (the storybook iframe), where the `dark:` custom variant would NOT match — the
-     exact half-and-half state this card exists to remove. */
+  /* RE237: theme resolution is explicit — data-theme is always written before first paint, by
+     root.html.heex in the app and by assets/js/storybook.js under /storybook. Leaving
+     prefersdark on would add a SECOND, competing source of dark tokens keyed on the OS instead,
+     which the `dark:` custom variant (keyed on data-theme) would NOT match — the exact
+     half-and-half state this card exists to remove. */
   prefersdark: false;
   color-scheme: "dark";
   --color-base-100: oklch(0.26 0.02 255);
@@ -119,13 +120,11 @@
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
-/* RE237 caveat: /storybook renders under PhoenixStorybook's own root layout, not
-   root.html.heex, so <html> there carries NO data-theme. With `prefersdark: false` the light
-   theme is the only one the storybook ever shows, and every `[data-theme="dark"]` rule below
-   (and the `dark:` variant above) is unreachable on that route — they exist so this file stays
-   a faithful mirror of app.css, where they DO fire. Giving the storybook a real theme switch
-   is a follow-up: PhoenixStorybook 1.3's `color_mode` toggles a `.dark` class, not
-   `data-theme`, so it needs its own bridge. */
+/* RE237: /storybook renders under PhoenixStorybook's own root layout, not root.html.heex, so
+   the app's theme resolver never runs there. assets/js/storybook.js is the bridge — it writes
+   the same explicit `data-theme` onto <html> from the same `phx:theme` preference, in both the
+   chrome document and the story iframes. So the `[data-theme="dark"]` rules below and the
+   `dark:` variant above fire on this route exactly as they do in app.css. */
 
 /* RE237 — mirror of the modal-scrim rule in app.css (see that file for the rationale). */
 .modal-scrim {

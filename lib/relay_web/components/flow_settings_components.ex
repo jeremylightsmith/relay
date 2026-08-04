@@ -121,7 +121,7 @@ defmodule RelayWeb.FlowSettingsComponents do
       <div style="font-size:13.5px;font-weight:600;color:color-mix(in oklab, var(--color-primary) 25%, var(--color-base-content));margin-bottom:3px;">
         New flow
       </div>
-      <%!-- `oklch(0.44 0.04 250)` is a slate-grey, not Human-blue: C 0.04 is a Rule-N near-neutral
+      <%!-- `oklch 0.44 0.04 250` is a slate-grey, not Human-blue: C 0.04 is a Rule-N near-neutral
         (see `delete_style/1` in story_map_components.ex). Rule B needed `primary` at 55% to reach
         L 0.44, landing at C 0.09 — a blue statement this helper copy never made. --%>
       <p style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0 0 12px 0;">
@@ -215,7 +215,7 @@ defmodule RelayWeb.FlowSettingsComponents do
         <div style="font-size:14px;font-weight:600;color:color-mix(in oklab, var(--color-primary) 25%, var(--color-base-content));margin-bottom:3px;">
           Flows are off until you turn them on
         </div>
-        <%!-- `oklch(0.44 0.04 250)` is a slate-grey, not Human-blue: C 0.04 is a Rule-N near-neutral
+        <%!-- `oklch 0.44 0.04 250` is a slate-grey, not Human-blue: C 0.04 is a Rule-N near-neutral
           (see `delete_style/1` in story_map_components.ex). Rule B needed `primary` at 55% to reach
           L 0.44, landing at C 0.09 — a blue statement this helper copy never made. --%>
         <p style="font-size:13px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0;max-width:620px;">
