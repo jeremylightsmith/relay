@@ -86,9 +86,12 @@ defmodule RelayWeb.BoardSettingsMembersTest do
     row = view |> element("#member-row-#{me.id} span[style*='border-radius:50%']") |> render()
 
     # matches `docs/designs/Relay Board.dc.html` member row avatarStyle (line ~1406) via
-    # RelayWeb.CoreComponents.identity_color/1 (RE237: hsl(), not a token), at the shared
-    # avatar's size-derived font (round(34*0.42) = 14px)
-    assert row =~ "background:hsl("
+    # RelayWeb.CoreComponents.identity_color/1 (RE237: oklch() held at fixed perceptual
+    # lightness, not a token), at the shared avatar's size-derived font (round(34*0.42) = 14px).
+    # Pinned to the literal formula — not a re-derived call — so a regression to hsl() or a
+    # non-perceptual lightness is caught here.
+    hue = RelayWeb.CoreComponents.identity_hue(me.email)
+    assert row =~ "background:oklch(0.62 0.13 #{hue})"
     assert row =~ "font-size:14px"
   end
 

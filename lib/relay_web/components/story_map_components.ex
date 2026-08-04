@@ -1643,54 +1643,49 @@ defmodule RelayWeb.StoryMapComponents do
     "font-size:#{size};line-height:1.3;font-weight:500;color:#{title_color(done?)};"
   end
 
+  # The ONE place a story-map status hue becomes its daisyUI role — RE237. `card_accent/2`,
+  # `line_accent/2`, `line_color/2`, `tint/1` and `badge_colors/1` all key off this same
+  # four-hue vocabulary; deriving each from here means adding or repointing a hue is a one-line
+  # change instead of five.
+  defp hue_role(:green), do: "success"
+  defp hue_role(:amber), do: "warning"
+  defp hue_role(:violet), do: "secondary"
+  defp hue_role(:blue), do: "primary"
+
+  defp role_token(hue), do: "var(--color-#{hue_role(hue)})"
+  defp role_mix(hue, pct, base), do: "color-mix(in oklab, var(--color-#{hue_role(hue)}) #{pct}%, #{base})"
+
   # The hued left edge of a Compact box and of a tray card — the artboard's mid-tone hued fill,
   # green when done. `statusHue` never yields a neutral, so `:neutral` takes this module's own
   # neutral (chroma 0.02 at 255). RE237: the artboard's lightness sits in Rule B's mid-tone
   # bucket for every named hue, so each becomes its role token directly.
   defp card_accent(_hue, true), do: "var(--color-success)"
   defp card_accent(:neutral, _done?), do: "color-mix(in oklab, var(--color-base-content) 40%, var(--color-base-100))"
-  defp card_accent(:green, _done?), do: "var(--color-success)"
-  defp card_accent(:amber, _done?), do: "var(--color-warning)"
-  defp card_accent(:violet, _done?), do: "var(--color-secondary)"
-  defp card_accent(:blue, _done?), do: "var(--color-primary)"
+  defp card_accent(hue, _done?), do: role_token(hue)
 
   # Map zoom's 2px line border and its text colour (artboard `lineStyle`, line ~379).
   defp line_accent(_hue, true), do: "color-mix(in oklab, var(--color-success) 65%, var(--color-base-100))"
 
   defp line_accent(:neutral, _done?), do: "color-mix(in oklab, var(--color-base-content) 35%, var(--color-base-100))"
 
-  defp line_accent(:green, _done?), do: "color-mix(in oklab, var(--color-success) 75%, var(--color-base-100))"
-  defp line_accent(:amber, _done?), do: "var(--color-warning)"
-  defp line_accent(:violet, _done?), do: "color-mix(in oklab, var(--color-secondary) 70%, var(--color-base-100))"
-  defp line_accent(:blue, _done?), do: "color-mix(in oklab, var(--color-primary) 75%, var(--color-base-100))"
+  defp line_accent(:green, _done?), do: role_mix(:green, 75, "var(--color-base-100)")
+  defp line_accent(:amber, _done?), do: role_token(:amber)
+  defp line_accent(:violet, _done?), do: role_mix(:violet, 70, "var(--color-base-100)")
+  defp line_accent(:blue, _done?), do: role_mix(:blue, 75, "var(--color-base-100)")
 
   defp line_color(_hue, true), do: "color-mix(in oklab, var(--color-base-content) 60%, transparent)"
   defp line_color(:neutral, _done?), do: "color-mix(in oklab, var(--color-base-content) 75%, transparent)"
-  defp line_color(:green, _done?), do: "color-mix(in oklab, var(--color-success) 40%, var(--color-base-content))"
-  defp line_color(:amber, _done?), do: "color-mix(in oklab, var(--color-warning) 30%, var(--color-base-content))"
-  defp line_color(:violet, _done?), do: "color-mix(in oklab, var(--color-secondary) 45%, var(--color-base-content))"
-  defp line_color(:blue, _done?), do: "color-mix(in oklab, var(--color-primary) 40%, var(--color-base-content))"
+  defp line_color(:green, _done?), do: role_mix(:green, 40, "var(--color-base-content)")
+  defp line_color(:amber, _done?), do: role_mix(:amber, 30, "var(--color-base-content)")
+  defp line_color(:violet, _done?), do: role_mix(:violet, 45, "var(--color-base-content)")
+  defp line_color(:blue, _done?), do: role_mix(:blue, 40, "var(--color-base-content)")
 
-  defp tint(:green),
-    do:
-      {"color-mix(in oklab, var(--color-success) 10%, var(--color-base-100))",
-       "color-mix(in oklab, var(--color-success) 25%, var(--color-base-100))"}
+  defp tint(:green), do: {role_mix(:green, 10, "var(--color-base-100)"), role_mix(:green, 25, "var(--color-base-100)")}
+  defp tint(:amber), do: {role_mix(:amber, 10, "var(--color-base-100)"), role_mix(:amber, 35, "var(--color-base-100)")}
 
-  defp tint(:amber),
-    do:
-      {"color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100))",
-       "color-mix(in oklab, var(--color-warning) 35%, var(--color-base-100))"}
+  defp tint(:violet), do: {role_mix(:violet, 10, "var(--color-base-100)"), role_mix(:violet, 25, "var(--color-base-100)")}
 
-  defp tint(:violet),
-    do:
-      {"color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100))",
-       "color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100))"}
-
-  defp tint(:blue),
-    do:
-      {"color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100))",
-       "color-mix(in oklab, var(--color-primary) 25%, var(--color-base-100))"}
-
+  defp tint(:blue), do: {role_mix(:blue, 10, "var(--color-base-100)"), role_mix(:blue, 25, "var(--color-base-100)")}
   defp tint(:neutral), do: {"var(--color-field-hover)", "var(--color-base-300)"}
 
   defp title_color(true), do: "color-mix(in oklab, var(--color-base-content) 80%, transparent)"
@@ -1698,24 +1693,16 @@ defmodule RelayWeb.StoryMapComponents do
 
   # The artboard's `stageColor` (lines ~299-304), keyed on the ONE hue instead of on the label.
   defp badge_colors(:green),
-    do:
-      {"color-mix(in oklab, var(--color-success) 15%, var(--color-base-100))",
-       "color-mix(in oklab, var(--color-success) 55%, var(--color-base-content))"}
+    do: {role_mix(:green, 15, "var(--color-base-100)"), role_mix(:green, 55, "var(--color-base-content)")}
 
   defp badge_colors(:amber),
-    do:
-      {"color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100))",
-       "color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content))"}
+    do: {role_mix(:amber, 15, "var(--color-base-100)"), role_mix(:amber, 55, "var(--color-base-content)")}
 
   defp badge_colors(:violet),
-    do:
-      {"color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100))",
-       "color-mix(in oklab, var(--color-secondary) 75%, var(--color-base-content))"}
+    do: {role_mix(:violet, 10, "var(--color-base-100)"), role_mix(:violet, 75, "var(--color-base-content)")}
 
   defp badge_colors(:blue),
-    do:
-      {"color-mix(in oklab, var(--color-primary) 15%, var(--color-base-100))",
-       "color-mix(in oklab, var(--color-primary) 60%, var(--color-base-content))"}
+    do: {role_mix(:blue, 15, "var(--color-base-100)"), role_mix(:blue, 60, "var(--color-base-content)")}
 
   defp badge_colors(:neutral),
     do: {"var(--color-base-300)", "color-mix(in oklab, var(--color-base-content) 70%, transparent)"}

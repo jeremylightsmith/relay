@@ -790,13 +790,19 @@ defmodule RelayWeb.CoreComponents do
   same formula the member stack, board settings and the card owner cluster already draw, and
   the ONE definition of a person's colour.
 
-  RE237: this is an `hsl()`, not a token. The hue is per-person and arbitrary (seeded from an
-  email hash), so it cannot be one of the six named brand roles the token vocabulary covers —
-  there is nothing to map it onto. Its lightness and saturation stay fixed across themes on
-  purpose: unlike a token, this fill never inverts, so ink drawn on it (`avatar_circle_style/4`)
-  can stay a single constant color too.
+  RE237: this stays an OKLCH color, not a token — theme-tokens:allow, see
+  `test/relay_web/theme_tokens_test.exs` `@allowlist`. The hue is per-person and arbitrary
+  (seeded from an email hash), so it cannot be one of the six named brand roles the token
+  vocabulary covers — there is nothing to map it onto. Its lightness and saturation stay fixed
+  across themes on purpose: unlike a token, this fill never inverts, so ink drawn on it
+  (`avatar_circle_style/4`) can stay a single constant color too. The lightness specifically must
+  stay in OKLCH's *perceptual* L channel, not HSL's: HSL's L is not perceptually uniform, so a
+  flat HSL color at L=58% swings from oklab L 0.53 to 0.83 across the hue circle and starts
+  failing contrast against the fixed `--color-neutral-content` ink at some hues. OKLCH holds L at
+  a constant 0.62 for every hue, which is what makes a single fixed ink color legible everywhere.
   """
-  def identity_color(email), do: "hsl(#{identity_hue(email)} 55% 58%)"
+  # theme-tokens:allow: no role for a hue
+  def identity_color(email), do: "oklch(0.62 0.13 #{identity_hue(email)})"
 
   @doc """
   Renders the owner avatar cluster for a card — the mockup's "who holds the

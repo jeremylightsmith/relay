@@ -42,9 +42,10 @@ defmodule RelayWeb.CoreComponentsTest do
       # 24px circle with a 2px separation ring per the mockup (lines ~114-124)
       assert html =~ "width:24px;height:24px"
       assert html =~ "box-shadow:0 0 0 2px var(--color-base-100)"
-      # avatar fill is the one identity-color formula (RE237: hsl(), not a token — see
+      # avatar fill is the one identity-color formula (RE237: oklch() held at fixed perceptual
+      # lightness so every hue stays legible under the fixed neutral-content ink — see
       # CoreComponents.identity_color/1)
-      assert html =~ "background:hsl("
+      assert html =~ "background:oklch("
       refute html =~ ~s(data-role="member-overflow")
     end
 
@@ -1975,8 +1976,8 @@ defmodule RelayWeb.CoreComponentsTest do
       a = render_component(&CoreComponents.avatar/1, email: "dana@acme.co", size: 24)
       b = render_component(&CoreComponents.avatar/1, email: "dana@acme.co", size: 34)
 
-      [hue] = Regex.run(~r/background:hsl\((\d+) 55% 58%\)/, a, capture: :all_but_first)
-      assert b =~ "background:hsl(#{hue} 55% 58%)"
+      [hue] = Regex.run(~r/background:oklch\(0\.62 0\.13 (\d+)\)/, a, capture: :all_but_first)
+      assert b =~ "background:oklch(0.62 0.13 #{hue})"
     end
 
     test "role tint fills with the primary token" do
@@ -2007,7 +2008,7 @@ defmodule RelayWeb.CoreComponentsTest do
       html = render_component(&CoreComponents.avatar/1, name: "Dana Kim", email: "dana@acme.co")
 
       assert CoreComponents.identity_color("dana@acme.co") ==
-               "hsl(#{CoreComponents.identity_hue("dana@acme.co")} 55% 58%)"
+               "oklch(0.62 0.13 #{CoreComponents.identity_hue("dana@acme.co")})"
 
       assert html =~ "background:#{CoreComponents.identity_color("dana@acme.co")}"
     end

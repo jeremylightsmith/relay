@@ -39,8 +39,11 @@ defmodule RelayWeb.BoardLiveMembersTest do
     row = view |> element("#card-drawer-assign-user-#{user.id} span[style*='border-radius:50%']") |> render()
 
     # matches `docs/designs/Relay Board.dc.html` avatarFor/mkAvatar (lines ~1166, ~1194) via
-    # RelayWeb.CoreComponents.identity_color/1 (RE237: hsl(), not a token)
-    assert row =~ "background:hsl("
+    # RelayWeb.CoreComponents.identity_color/1 (RE237: oklch() held at fixed perceptual
+    # lightness, not a token). Pinned to the literal formula — not a re-derived call — so a
+    # regression to hsl() or a non-perceptual lightness is caught here.
+    hue = RelayWeb.CoreComponents.identity_hue(user.email)
+    assert row =~ "background:oklch(0.62 0.13 #{hue})"
   end
 
   test "picking a member assigns them as the active owner", %{conn: conn, user: user} do

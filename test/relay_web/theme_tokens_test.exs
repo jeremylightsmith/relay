@@ -14,6 +14,14 @@ defmodule RelayWeb.ThemeTokensTest do
   link (`href="#abc"`, `href="#deadbeef"`) — none have appeared yet, but a future one would need
   an `@allowlist` entry. Tighten or note further gaps in Task 9, which is where the guardrail
   gets proven against a real violation.
+
+  A genuine exception (a color that cannot be a token, like a per-person hash-derived hue) is
+  recorded one of two ways: an `@allowlist` entry keyed on the exact matched literal (only safe
+  when that literal is unique to the file — a bare `"oklch("` entry would blanket-exempt every
+  oklch in the file, since the match text is always just the function-call prefix, not its
+  arguments), or a trailing `# theme-tokens:allow: <reason>` comment on the one offending source
+  line, which exempts only that line. Prefer the marker when the same pattern (e.g. `oklch(`)
+  appears more than once in a file and only one site is a real exception.
   """
   use ExUnit.Case, async: true
 
@@ -92,19 +100,26 @@ defmodule RelayWeb.ThemeTokensTest do
     rel = relative(path)
     ext = Path.extname(path)
 
-    path
-    |> File.read!()
-    |> strip_comments(ext)
-    |> String.split("\n")
-    |> Enum.with_index(1)
-    |> drop_theme_blocks()
+    numbered_lines =
+      path
+      |> File.read!()
+      |> strip_comments(ext)
+      |> String.split("\n")
+      |> Enum.with_index(1)
+      |> drop_theme_blocks()
+
+    by_line_no = Map.new(numbered_lines, fn {line, line_no} -> {line_no, line} end)
+
+    numbered_lines
     |> Enum.reject(&whole_line_comment?(&1, ext))
     |> Enum.flat_map(fn {line, line_no} ->
       @color_pattern
       |> Regex.scan(line)
       |> Enum.map(fn [match | _] -> {rel, line_no, match, line} end)
     end)
-    |> Enum.reject(fn {rel, _line_no, match, _line} -> allowed?(rel, match) end)
+    |> Enum.reject(fn {rel, line_no, match, line} ->
+      allowed?(rel, match, line, Map.get(by_line_no, line_no - 1))
+    end)
   end
 
   # A literal named in a comment is documentation, not a rendered color — the mapping table at
@@ -139,7 +154,17 @@ defmodule RelayWeb.ThemeTokensTest do
     Enum.reverse(kept)
   end
 
-  defp allowed?(rel, match) do
-    Enum.any?(@allowlist, fn {path, literal, _why} -> path == rel and literal == match end)
+  defp allowed?(rel, match, line, prev_line) do
+    Enum.any?(@allowlist, fn {path, literal, _why} -> path == rel and literal == match end) or
+      marked_allowed?(line) or marked_allowed?(prev_line)
   end
+
+  # A `# theme-tokens:allow: <reason>` marker exempts only the ONE line it annotates — the
+  # narrower alternative to an `@allowlist` entry keyed on the matched literal, which for a
+  # pattern like "oklch(" would exempt every occurrence in the file (see moduledoc). It's
+  # honoured as a trailing comment on the offending line OR as a whole-line comment immediately
+  # above it, since `mix format` hoists a trailing comment on a one-line `def ... do: ...` onto
+  # its own line above.
+  defp marked_allowed?(nil), do: false
+  defp marked_allowed?(line), do: String.contains?(line, "theme-tokens:allow")
 end
