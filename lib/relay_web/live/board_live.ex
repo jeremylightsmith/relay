@@ -75,16 +75,30 @@ defmodule RelayWeb.BoardLive do
   RE259 adds the filter bar and the two view-narrowing controls. Four more keys of the same
   board-wide shared view — `:story_map_owner_filter`, `:story_map_needs_filter`,
   `:story_map_collapsed`, `:story_map_focus` — assigned in the same one place
-  (`assign_story_map_view/2`) and written by the same six-event pattern: parse the wire value,
+  (`assign_story_map_view/2`) and written by the same event pattern — seven handlers, counting
+  RE276's `hide_complete` below: parse the wire value,
   write through `Relay.StoryMap`, re-render from that write's own broadcast. **Filtering is a
   pre-pass**: `story_map_viewport/1` narrows the card list with
-  `RelayWeb.StoryMapFilter.visible/3` and builds the grid from the result, so no placement
+  `RelayWeb.StoryMapFilter.visible/4` and builds the grid from the result, so no placement
   rule in `StoryMapGrid` knows filtering exists, `grid.total` is the visible count and
   `length(@story_map_cards)` is the total. Collapse and focus reach the grid as one MapSet via
   `StoryMapGrid.collapsed_set/3` — focus IS a collapse of everything else, and that rule lives
   in the grid, not here. Opening a task draft now expands its activity (dropping it from
   `collapsed` and clearing a focus that is elsewhere) in the same `merge_view/2` that turns
   Hide tasks off, because `＋ Add task` must never open an input the user cannot see.
+
+  RE276 adds an eighth key, `:story_map_hide_complete`, and it is the first defaulting to ON:
+  the map opens showing only incomplete cards. `story_map_viewport/1` turns it into the
+  `hidden_stage_ids` set the pre-pass excludes — `Relay.Boards.top_level_done_stage_ids/1`
+  when on, empty when off — so the meaning of "complete" lives at this call site and
+  `StoryMapFilter` stays a pure set-exclusion. It is deliberately NOT `Cards.done?/2` (the
+  terminal stage's `:ready` cards, which drives the card face's strikethrough); the two answer
+  different questions and are not merged. The tray narrows for free, because `grid.unmapped`
+  comes out of the same filtered list. `:story_map_filter_active` is
+  `Relay.StoryMap.filters_active?/1` over the same view map — filters differ from the board's
+  DEFAULTS — assigned in `assign_story_map_view/2` and passed down as an attr, and `Clear`
+  merges `Map.take(view_defaults(), filter_keys())` rather than re-typing which keys are
+  filters.
   """
 
   use RelayWeb, :live_view
@@ -451,6 +465,8 @@ defmodule RelayWeb.BoardLive do
         needs_input_filter={@story_map_needs_filter}
         collapsed={@story_map_collapsed}
         focus={@story_map_focus}
+        hide_complete={@story_map_hide_complete}
+        filter_active={@story_map_filter_active}
       />
       <.card_drawer
         :if={@selected_card}
@@ -711,6 +727,8 @@ defmodule RelayWeb.BoardLive do
   attr :needs_input_filter, :boolean, required: true
   attr :collapsed, :list, required: true
   attr :focus, :any, required: true, doc: "the focused activity id, or nil"
+  attr :hide_complete, :boolean, required: true
+  attr :filter_active, :boolean, required: true
 
   defp story_map_viewport(assigns) do
     # RE259 — filtering is a PRE-PASS, not a grid concern: the grid is built from the
@@ -724,7 +742,25 @@ defmodule RelayWeb.BoardLive do
     # `{:error, :not_empty}` (the existing defence in depth), so the outcome is a refused
     # click, not lost cards. Accepted; the alternative is a second set of unfiltered
     # counts threaded through the grid for one edge case.
-    visible = StoryMapFilter.visible(assigns.cards, assigns.owner_filter, assigns.needs_input_filter)
+    #
+    # RE276 — "complete" is a property of the STAGE, resolved to one MapSet per render HERE,
+    # at the call site that knows what the toggle means; `StoryMapFilter` just excludes a set.
+    # Deliberately `Boards.top_level_done_stage_ids/1` and NOT `Cards.done?/2`: this hides a
+    # finished COLUMN (any top-level `:complete` stage, whatever the card's status) while
+    # `done?/2` marks the terminal stage's `:ready` cards for the card face's strikethrough.
+    # Both are right for their own job; merging them would break one of the two.
+    hidden_stage_ids =
+      if assigns.hide_complete,
+        do: MapSet.new(Boards.top_level_done_stage_ids(assigns.board.stages)),
+        else: MapSet.new()
+
+    visible =
+      StoryMapFilter.visible(
+        assigns.cards,
+        assigns.owner_filter,
+        assigns.needs_input_filter,
+        hidden_stage_ids
+      )
 
     assigns =
       assigns
@@ -743,7 +779,6 @@ defmodule RelayWeb.BoardLive do
       # Chips come from the UNFILTERED list plus the selection, so selecting an owner
       # never removes the other chips.
       |> assign(:chips, StoryMapFilter.chips(assigns.cards, assigns.owner_filter))
-      |> assign(:filter_active, StoryMapFilter.active?(assigns.owner_filter, assigns.needs_input_filter))
       |> assign(:focus_activity, StoryMapGrid.resolve_focus(assigns.activities, assigns.focus))
       |> assign(:stalled_ids, MapSet.new(assigns.stalled_cards, & &1.card.id))
 
@@ -758,6 +793,7 @@ defmodule RelayWeb.BoardLive do
       <StoryMapComponents.story_map_filter_bar
         chips={@chips}
         needs_input={@needs_input_filter}
+        hide_complete={@hide_complete}
         focus_name={@focus_activity && @focus_activity.name}
         filter_active={@filter_active}
         visible={@grid.total}
@@ -1706,7 +1742,7 @@ defmodule RelayWeb.BoardLive do
     {:noreply, socket}
   end
 
-  # RE259 — the filter bar and the two view-narrowing controls. All six are shared view
+  # RE259 + RE276 — the filter bar and the two view-narrowing controls. All seven are shared view
   # writes: the wire value is parsed BEFORE the write and a value this board does not have is
   # a silent no-op (`set_story_map_zoom`'s pattern), and none of them is in the read_only?
   # guard list, for the reason written above `toggle_story_map_tray` — view state is not
@@ -1740,15 +1776,26 @@ defmodule RelayWeb.BoardLive do
     {:noreply, socket}
   end
 
-  # One write, one broadcast: `Clear` must never leave a half-cleared bar visible.
-  def handle_event("clear_story_map_filters", _params, socket) do
+  def handle_event("toggle_story_map_hide_complete", _params, socket) do
     log_view_write(
-      StoryMap.merge_view(socket.assigns.board, %{
-        "owner_filter" => [],
-        "needs_input_filter" => false
-      }),
-      "filters"
+      StoryMap.toggle_view(socket.assigns.board, "hide_complete"),
+      "hide_complete"
     )
+
+    {:noreply, socket}
+  end
+
+  # One write, one broadcast: `Clear` must never leave a half-cleared bar visible.
+  #
+  # RE276 — it resets to the board's DEFAULTS, derived from `StoryMap.filter_keys/0`, not to a
+  # re-typed literal of "everything off". Two reasons: a fourth filter key later needs no
+  # change here, and with `hide_complete` defaulting to true "off" and "default" are different
+  # places — `Clear` means "put the filters back how this board starts", which is the one
+  # worth one-clicking back to.
+  def handle_event("clear_story_map_filters", _params, socket) do
+    defaults = Map.take(StoryMap.view_defaults(), StoryMap.filter_keys())
+
+    log_view_write(StoryMap.merge_view(socket.assigns.board, defaults), "filters")
 
     {:noreply, socket}
   end
@@ -3411,6 +3458,11 @@ defmodule RelayWeb.BoardLive do
     # already holds that. `List.wrap/1` and `== true` keep a hand-edited jsonb row from
     # crashing a viewer, the same way zoom_from_view/1 does.
     |> assign(:story_map_focus, view["focus"])
+    |> assign(:story_map_hide_complete, view["hide_complete"] == true)
+    # RE276 — derived HERE, the one place that already explodes the view map, so the `Clear`
+    # link cannot fall out of step with the filters it clears. `story_map_viewport/1` takes it
+    # as an attr rather than recomputing it.
+    |> assign(:story_map_filter_active, StoryMap.filters_active?(view))
   end
 
   defp zoom_from_view(view) do

@@ -10,9 +10,11 @@ defmodule RelayWeb.StoryMapComponents do
   RE261's structure editing — the `⠿` grip, the click-to-rename name and the `✕` delete on the
   activity band, the task column header and the release label. RE259 adds the FILTER bar
   (owner chips, the Needs-input toggle, the `Clear` link and the count label), the band's `▾`
-  collapse and `◎` focus buttons, and the collapsed stub column. The artboard's `✦` suggest
-  button and its dashed `+ filter` button are still deliberately not rendered — the first is
-  RE258, and the second has no behaviour to offer.
+  collapse and `◎` focus buttons, and the collapsed stub column; RE276 adds the `Hide complete`
+  toggle beside `Needs input`, in the same chrome and pressed by default. The artboard's `✦`
+  suggest button and its dashed `+ filter` button are still deliberately not rendered — the
+  first is RE258, and the second is a filter-type PICKER, which this bar does not have: its
+  filters are fixed controls, so `+ filter` would still open nothing.
 
   **Delete is blocked, not cascading (RE261).** A ✕ is `disabled` and greyed (the artboard's
   `delOff`) while its structure still holds cards, and its `title` names the exact count the
@@ -219,16 +221,25 @@ defmodule RelayWeb.StoryMapComponents do
   artboard's per-person colour survives our real, unbounded roster.
 
   Two deliberate omissions from the artboard: the dashed `+ filter` button (line 69), which
-  has no behaviour behind it and would be a lie until a second filter type exists, and the
-  count label's ownership — it MOVED here from the app bar's `<:actions>` slot, keeping the
-  DOM id `story-map-count` so existing selectors still resolve.
+  opens a filter-type PICKER this bar does not have — RE276's `Hide complete` is a second
+  filter type, but it is a fixed control beside `Needs input` rather than something a picker
+  adds, so the button would still open nothing — and the count label's ownership: it MOVED
+  here from the app bar's `<:actions>` slot, keeping the DOM id `story-map-count` so existing
+  selectors still resolve.
 
-  `filter_active` is owner-or-Needs-input only (the artboard's `filterActive`, line ~535):
-  collapse and focus narrow the view but are not "filters", and focus is exited at its own
-  chip.
+  `filter_active` is `Relay.StoryMap.filters_active?/1` — do the three filter keys differ from
+  the board's DEFAULTS — and it drives the `Clear` link and nothing else. Collapse and focus
+  narrow the view but are not "filters", and focus is exited at its own chip.
+
+  **The count label deliberately does not read it** (RE276). The artboard's `countLabel` keyed
+  off `filterActive`, which only worked while every filter defaulted to off; `hide_complete`
+  defaults to ON, so a fresh board already hides cards. The rule is `<visible> of <total>`
+  whenever `visible < total`, `<total> cards` otherwise — truthful whichever filter caused the
+  gap.
   """
   attr :chips, :list, required: true, doc: "RelayWeb.StoryMapFilter.chips/2's shape"
   attr :needs_input, :boolean, required: true
+  attr :hide_complete, :boolean, required: true
   attr :focus_name, :string, default: nil, doc: "the focused activity's name, or nil"
   attr :filter_active, :boolean, required: true
   attr :visible, :integer, required: true, doc: "cards passing the filter"
@@ -268,10 +279,19 @@ defmodule RelayWeb.StoryMapComponents do
         id="story-map-needs-input-filter"
         phx-click="toggle_story_map_needs_filter"
         aria-pressed={to_string(@needs_input)}
-        style={needs_input_style(@needs_input)}
+        style={filter_toggle_style(@needs_input)}
       >
         <span style="width:6px;height:6px;border-radius:50%;background:oklch(0.7 0.13 65);"></span>
         Needs input
+      </button>
+      <button
+        type="button"
+        id="story-map-hide-complete-filter"
+        phx-click="toggle_story_map_hide_complete"
+        aria-pressed={to_string(@hide_complete)}
+        style={filter_toggle_style(@hide_complete)}
+      >
+        Hide complete
       </button>
       <button
         :if={@focus_name}
@@ -296,7 +316,7 @@ defmodule RelayWeb.StoryMapComponents do
         id="story-map-count"
         style="font-family:var(--font-mono);font-size:11px;color:oklch(0.5 0.02 255);"
       >
-        {count_label(@filter_active, @visible, @total)}
+        {count_label(@visible, @total)}
       </span>
     </div>
     """
@@ -327,8 +347,10 @@ defmodule RelayWeb.StoryMapComponents do
   defp chip_hue(%{actor: :ai}), do: hue_deg(:violet)
   defp chip_hue(%{email: email}), do: CoreComponents.identity_hue(email)
 
-  # Artboard `needsStyle` (line ~572).
-  defp needs_input_style(on?) do
+  # Artboard `needsStyle` (line ~572) — the filter bar's toggle chrome, shared by `Needs input`
+  # and RE276's `Hide complete`. No artboard covers the second control, so it is built as a
+  # SIBLING of the first and must stay indistinguishable from it: one function, two callers.
+  defp filter_toggle_style(on?) do
     {background, color, border} =
       if on?,
         do: {"oklch(0.96 0.05 65)", "oklch(0.5 0.13 65)", "oklch(0.82 0.09 65)"},
@@ -346,9 +368,13 @@ defmodule RelayWeb.StoryMapComponents do
       "color:oklch(0.46 0.14 292);border:1px solid oklch(0.88 0.05 292);"
   end
 
-  # Artboard `countLabel` (line ~575).
-  defp count_label(true, visible, total), do: "#{visible} of #{total}"
-  defp count_label(_filter_active, _visible, total), do: "#{total} cards"
+  # Artboard `countLabel` (line ~575), corrected by RE276. The artboard keyed this off
+  # `filterActive`, which was only ever right while every filter defaulted to OFF: with
+  # hide-complete defaulting to ON a fresh board already hides cards, so `<total> cards` would
+  # be a lie on first paint for every board. The rule is now the two NUMBERS — truthful
+  # whichever filter caused the gap, and `filter_active` is left to the `Clear` link alone.
+  defp count_label(visible, total) when visible < total, do: "#{visible} of #{total}"
+  defp count_label(_visible, total), do: "#{total} cards"
 
   @doc """
   A collapsed activity's stub column (RE259) — `docs/designs/Relay Story Map.dc.html` lines

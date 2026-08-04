@@ -99,11 +99,13 @@ defmodule RelayWeb.StoryMapFilterTest do
     end
   end
 
-  describe "visible/3 — owner AND needs-input" do
-    test "an empty selection means every owner" do
+  describe "visible/4 — owner AND needs-input AND hidden stages" do
+    defp staged(card, stage_id), do: %{card | stage_id: stage_id}
+
+    test "an empty selection means every owner, and an empty hidden set excludes nothing" do
       cards = [card(1, [human_owner(dana())]), card(2, [ai_owner()])]
 
-      assert StoryMapFilter.visible(cards, [], false) == cards
+      assert StoryMapFilter.visible(cards, [], false, MapSet.new()) == cards
     end
 
     test "a card passes when ANY of its owners is selected" do
@@ -111,7 +113,7 @@ defmodule RelayWeb.StoryMapFilterTest do
       both = card(1, [human_owner(dana()), human_owner(mara())])
       just_mara = card(2, [human_owner(mara())])
 
-      assert StoryMapFilter.visible([both, just_mara], ["u:3"], false) == [both]
+      assert StoryMapFilter.visible([both, just_mara], ["u:3"], false, MapSet.new()) == [both]
     end
 
     test "owner and needs-input compose with AND" do
@@ -119,8 +121,8 @@ defmodule RelayWeb.StoryMapFilterTest do
       b = card(2, [human_owner(dana())], :working)
       c = card(3, [ai_owner()], :needs_input)
 
-      assert StoryMapFilter.visible([a, b, c], [], true) == [a, c]
-      assert StoryMapFilter.visible([a, b, c], ["u:3"], true) == [a]
+      assert StoryMapFilter.visible([a, b, c], [], true, MapSet.new()) == [a, c]
+      assert StoryMapFilter.visible([a, b, c], ["u:3"], true, MapSet.new()) == [a]
     end
 
     test "needs-input is strictly :needs_input — a failed card is not included" do
@@ -128,20 +130,33 @@ defmodule RelayWeb.StoryMapFilterTest do
       failed = card(2, [], :failed)
       review = card(3, [], :in_review)
 
-      assert StoryMapFilter.visible([needs, failed, review], [], true) == [needs]
+      assert StoryMapFilter.visible([needs, failed, review], [], true, MapSet.new()) == [needs]
     end
 
     test "an unowned card is hidden by any owner selection" do
-      assert StoryMapFilter.visible([card(1, [])], ["u:3"], false) == []
+      assert StoryMapFilter.visible([card(1, [])], ["u:3"], false, MapSet.new()) == []
     end
-  end
 
-  describe "active?/2" do
-    test "is true for either filter and false for neither" do
-      refute StoryMapFilter.active?([], false)
-      assert StoryMapFilter.active?(["u:3"], false)
-      assert StoryMapFilter.active?([], true)
-      assert StoryMapFilter.active?(["u:3"], true)
+    test "a card whose stage is hidden is excluded, whatever its owner or status" do
+      # RE276 — the module does not know WHY the stage is hidden; it excludes a SET of ids.
+      # Status is deliberately irrelevant here: a :queued card parked in a done column is
+      # still sitting in a finished column.
+      done = staged(card(1, [human_owner(dana())], :queued), 99)
+      open = staged(card(2, [human_owner(dana())]), 7)
+
+      assert StoryMapFilter.visible([done, open], [], false, MapSet.new([99])) == [open]
+    end
+
+    test "the hidden set composes with the other two terms as a third AND" do
+      done_needs = staged(card(1, [ai_owner()], :needs_input), 99)
+      open_needs = staged(card(2, [ai_owner()], :needs_input), 7)
+      open_ready = staged(card(3, [ai_owner()]), 7)
+
+      cards = [done_needs, open_needs, open_ready]
+
+      assert StoryMapFilter.visible(cards, ["agent"], true, MapSet.new([99])) == [open_needs]
+      # And an empty hidden set leaves the RE259 behaviour exactly as it was.
+      assert StoryMapFilter.visible(cards, ["agent"], true, MapSet.new()) == [done_needs, open_needs]
     end
   end
 end

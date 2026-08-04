@@ -257,10 +257,16 @@ defmodule Relay.Boards do
 
   @doc """
   The ids of the board's **top-level** Done stages (`parent_id == nil`,
-  `category == :complete`) from an in-memory `stages` list. Used by the API
-  index to drop the Done column by default (RLY-67). A `:done` **sub-lane**
-  (a child stage) is intentionally excluded — only the board's terminal Done
-  column is dropped, not a done lane nested under an in-progress parent.
+  `category == :complete`) from an in-memory `stages` list. Two callers: the API
+  index drops the Done column by default with it (RLY-67), and the story map's
+  `Hide complete` filter hides those stages' cards (RE276). A `:done` **sub-lane**
+  (a child stage) is intentionally excluded from both — only a board's top-level
+  complete columns count, not a done lane nested under an in-progress parent.
+
+  Note this is **not** `Relay.Cards.done?/2` and must not be merged with it:
+  `done?/2` is the terminal stage's `:ready` cards (it drives the card face's
+  strikethrough); this is *every* top-level `:complete` stage whatever the card's
+  status. Both are correct for their own job — do not add a third copy.
   """
   def top_level_done_stage_ids(stages) when is_list(stages) do
     for %Stage{parent_id: nil, category: :complete, id: id} <- stages, do: id

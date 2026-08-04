@@ -37,7 +37,9 @@ defmodule Relay.StoryMap do
 
   **Shared view settings (RE257, RE259).** The map's view state is board-wide, not per
   socket: `view_defaults/0` is the one definition of the key set (`"tray_open"`, `"zoom"`,
-  `"hide_tasks"`, `"owner_filter"`, `"needs_input_filter"`, `"collapsed"`, `"focus"`),
+  `"hide_tasks"`, `"owner_filter"`, `"needs_input_filter"`, `"collapsed"`, `"focus"`,
+  `"hide_complete"`), `filter_keys/0` is which of those are filters and `filters_active?/1`
+  answers whether they differ from the defaults (RE276),
   `view/1` merges it under the stored `boards.story_map_view` column dropping unknown keys,
   and every write goes through `merge_view/2` — `put_view/3` is one key, `toggle_view/2`
   flips a boolean and `toggle_view_member/4` flips one member of a list, both computed on the
@@ -100,6 +102,13 @@ defmodule Relay.StoryMap do
   # which is the point on a shared planning surface ("everyone look at Checkout").
   # "owner_filter" holds `RelayWeb.StoryMapFilter`'s owner keys, "collapsed" holds
   # story_activity ids, and "focus" holds one story_activity id or nil.
+  #
+  # RE276's "hide_complete" is the first key whose default is ON: the map opens showing only
+  # incomplete cards. It is shared for the same geometry reason as the rest — a filter that
+  # empties a band changes what every other viewer's cursor is over. Its default being `true`
+  # is what makes `filter_keys/0` and `filters_active?/1` below necessary: "off" and "default"
+  # are no longer the same place, so "is a filter on" has to mean "does it differ from the
+  # board's defaults".
   @view_defaults %{
     "tray_open" => true,
     "zoom" => "compact",
@@ -107,8 +116,16 @@ defmodule Relay.StoryMap do
     "owner_filter" => [],
     "needs_input_filter" => false,
     "collapsed" => [],
-    "focus" => nil
+    "focus" => nil,
+    "hide_complete" => true
   }
+
+  # RE276 — which of the view keys are FILTERS: the subset `Clear` resets to `view_defaults/0`
+  # and the subset `filters_active?/1` compares against it. Collapse, focus, zoom, hide_tasks
+  # and the tray narrow or resize the view but are not filters — RE259 drew that line and it
+  # stands. Written here so `RelayWeb.BoardLive`'s `clear_story_map_filters` stops re-typing a
+  # literal of filter keys, which would be a second place to forget one.
+  @filter_keys ["owner_filter", "needs_input_filter", "hide_complete"]
 
   @doc "The board's activities in `position` order. Takes a board or a board id."
   def list_activities(board) do
@@ -600,6 +617,32 @@ defmodule Relay.StoryMap do
   end
 
   @doc """
+  The subset of `view_defaults/0`'s keys that are FILTERS — the keys `Clear` resets and
+  `filters_active?/1` compares.
+
+  The one definition: `RelayWeb.BoardLive`'s `clear_story_map_filters` merges
+  `Map.take(view_defaults(), filter_keys())` rather than re-typing a literal, so adding a
+  fourth filter later needs no change there.
+  """
+  def filter_keys, do: @filter_keys
+
+  @doc """
+  Whether `view`'s filters differ from the board's defaults — what drives the `Clear` link.
+
+  Deliberately **not** "any filter is on". With `hide_complete` defaulting to `true`, "off"
+  and "default" are no longer the same place, and the default is the one worth one-clicking
+  back to. So `Clear` appears once hide-complete is switched OFF, reached without
+  special-casing an unchecked box as "a filter".
+
+  It lives here, beside the two things it derives from, rather than in
+  `RelayWeb.StoryMapFilter` — which is why that module's `active?/2` is gone: two answers to
+  "is a filter on" is exactly the drift the one-definition rule exists to stop.
+  """
+  def filters_active?(view) when is_map(view) do
+    Map.take(view, @filter_keys) != Map.take(@view_defaults, @filter_keys)
+  end
+
+  @doc """
   Writes several shared view settings **in one row write and one broadcast**, and is the
   single writer every other one composes.
 
@@ -609,7 +652,7 @@ defmodule Relay.StoryMap do
   Validates **every** key against `view_defaults/0` before touching the row: one unknown key
   refuses the whole batch with `{:error, :unknown_key}` and writes nothing, so a stale or
   forged client cannot inject arbitrary keys into the board row. The board row is **re-read**
-  rather than trusted from the caller's struct: with seven keys in the set, merging into a
+  rather than trusted from the caller's struct: with eight keys in the set, merging into a
   stale in-memory view would silently clobber another session's write.
 
   One write means "expand this activity **and** turn Hide tasks off" is atomic and sends ONE

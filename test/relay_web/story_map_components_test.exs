@@ -1151,6 +1151,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
           [
             chips: [dana_chip(false), ai_chip(false)],
             needs_input: false,
+            hide_complete: true,
             focus_name: nil,
             filter_active: false,
             visible: 5,
@@ -1232,7 +1233,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
                  "border:1px solid oklch(0.88 0.05 292);"
     end
 
-    test "Clear appears only while a filter is active, and the count follows it" do
+    test "Clear follows filter_active, and the count follows the NUMBERS not the filter" do
       resting = filter_bar([])
       filtering = filter_bar(filter_active: true, visible: 2, total: 5)
 
@@ -1242,11 +1243,45 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert filtering =~ "story-map-clear-filters"
       assert filtering =~ "2 of 5"
 
+      # RE276 — hide-complete is ON by default, so a fresh board already hides cards with no
+      # filter "active". The label must be truthful whichever filter caused the gap, so it
+      # reads the two numbers and never `filter_active`.
+      default_hiding = filter_bar(filter_active: false, visible: 4, total: 5)
+      assert default_hiding =~ "4 of 5"
+      refute default_hiding =~ "story-map-clear-filters"
+
       assert style_of(filtering, "#story-map-clear-filters") ==
                "font-size:11px;font-weight:600;color:oklch(0.55 0.14 250);"
 
       assert style_of(filtering, "#story-map-count") ==
                "font-family:var(--font-mono);font-size:11px;color:oklch(0.5 0.02 255);"
+    end
+
+    test "the Hide complete toggle is the Needs input button's chrome, pressed by default" do
+      # No artboard covers this control; it is a SIBLING of the Needs input toggle built to
+      # `docs/designs/Relay Story Map.dc.html` lines 59-77, and must be indistinguishable from
+      # it in size, radius, type and pressed treatment (`needsStyle`, line ~572).
+      on = filter_bar([])
+      off = filter_bar(hide_complete: false)
+
+      assert style_of(on, "#story-map-hide-complete-filter") ==
+               "display:flex;align-items:center;gap:6px;border-radius:8px;padding:5px 10px;" <>
+                 "font-size:11.5px;font-weight:600;background:oklch(0.96 0.05 65);" <>
+                 "color:oklch(0.5 0.13 65);border:1px solid oklch(0.82 0.09 65);"
+
+      assert style_of(off, "#story-map-hide-complete-filter") ==
+               style_of(filter_bar([]), "#story-map-needs-input-filter")
+
+      assert attr_of(on, "#story-map-hide-complete-filter", "aria-pressed") == "true"
+      assert attr_of(off, "#story-map-hide-complete-filter", "aria-pressed") == "false"
+
+      assert attr_of(on, "#story-map-hide-complete-filter", "phx-click") ==
+               "toggle_story_map_hide_complete"
+
+      # Phrased to match `Hide tasks` next door, and NOT carrying Needs input's amber dot —
+      # that 6px marker belongs to that filter, not to the shared chrome.
+      assert text_of(on, "#story-map-hide-complete-filter") == "Hide complete"
+      assert style_of(on, "#story-map-hide-complete-filter span") == ""
     end
 
     test "the artboard's + filter button is deliberately absent" do

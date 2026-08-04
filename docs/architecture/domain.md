@@ -249,6 +249,15 @@ sharing behavior.
   `Relay.Cards.needs_input?/1`, the one definition that the `NEEDS YOU` badge also reads.
   Filtering is a **pre-pass** in `BoardLive`: the grid is built from the visible cards, so no
   placement rule knows filtering exists and every count the map already draws narrows with it.
+  **Hide complete (RE276):** an eighth key, and the first defaulting to ON — the map opens
+  showing only incomplete cards. It is a third AND term in `StoryMapFilter.visible/4`, a
+  `MapSet` of stage ids to exclude; `BoardLive` resolves what "complete" means at the pre-pass
+  (`Relay.Boards.top_level_done_stage_ids/1` — any top-level `:complete` stage, deliberately
+  NOT `Cards.done?/2`, which is the terminal stage's `:ready` cards and drives the
+  strikethrough) so the filter module stays pure. `Clear` therefore resets to the board's
+  DEFAULTS via `StoryMap.filter_keys/0`, not to "everything off", and
+  `StoryMap.filters_active?/1` is the one answer to "is a filter on"
+  (`RelayWeb.StoryMapFilter.active?/2` is gone).
   Collapse and focus reach the grid as one MapSet through
   `RelayWeb.StoryMapGrid.collapsed_set/3` — focus IS a collapse of everything else, and the
   focused activity is never in the set, so no stored state can blank the map; an unresolvable
@@ -257,12 +266,12 @@ sharing behavior.
   so a stub can never be a CARD drop target — it stays a RE261 header-reorder source and target,
   as the artboard's stub does. The map's no-card-can-disappear invariant becomes a
   three-way partition — cells, tray, or exactly one stub's count — that sums to `total`.
-  Like zoom and the tray, none of the six events is in the `read_only?` guard list: view state
+  Like zoom and the tray, none of the seven events is in the `read_only?` guard list: view state
   is not board data.
   **Shared view (RE257):** the map's view settings are **board-wide**, stored in the
   `boards.story_map_view` jsonb column and written only through `merge_view/2`, which
   `put_view/3`, `toggle_view/2` and `toggle_view_member/4` all compose.
-  `view_defaults/0` is the one definition of the key set (the seven keys in
+  `view_defaults/0` is the one definition of the key set (the eight keys in
   [`state.md`](state.md)), `view/1` merges it
   under the stored map dropping unknown keys, and every writer refuses a key outside the set
   with `{:error, :unknown_key}` and re-read the row before merging so a concurrent write is
