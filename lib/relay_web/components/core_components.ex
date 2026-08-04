@@ -1533,7 +1533,7 @@ defmodule RelayWeb.CoreComponents do
   `"add_owner"` / `"remove_owner"` (phx-value
   `actor_type` + `user_id`) from the owners rail's controls,
   `"validate_comment"` / `"post_comment"` (form params `comment[body]`)
-  from the timeline composer, and `"answer_input"` (form params
+  from the Notes composer, and `"answer_input"` (form params
   `answer[body]`) from the needs-input panel's composer, and the MMF 15
   review-panel events: `"review_approve"`, `"review_open_reject"`,
   `"review_cancel_reject"`, and `"review_reject"` (form params `reject[note]` +
