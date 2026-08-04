@@ -392,7 +392,7 @@ defmodule RelayWeb.StoryMapComponents do
       draggable={to_string(not @read_only)}
       phx-click={if(@focusing, do: "set_story_map_focus", else: "toggle_story_map_collapse")}
       phx-value-activity-id={@activity.id}
-      aria-label={"Expand #{@activity.name}"}
+      aria-label={if(@focusing, do: "Focus #{@activity.name}", else: "Expand #{@activity.name}")}
       style={stub_style(@index)}
     >
       <span style="font-size:12px;color:oklch(0.5 0.02 255);">▸</span>

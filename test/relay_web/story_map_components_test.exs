@@ -1315,6 +1315,14 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert attr_of(stub([]), "#story-map-stub-7", "phx-value-activity-id") == "7"
     end
 
+    test "the aria-label names what the click ACTUALLY does in each mode" do
+      # Focus mode is precisely when every non-focused band is a stub, so a label that
+      # always said "Expand" would mis-describe the common case to a screen reader.
+      assert attr_of(stub([]), "#story-map-stub-7", "aria-label") == "Expand Checkout"
+
+      assert attr_of(stub(focusing: true), "#story-map-stub-7", "aria-label") == "Focus Checkout"
+    end
+
     test "the stub stays a RE261 reorder source and target while collapsed" do
       html = stub([])
 

@@ -55,7 +55,7 @@ defmodule Relay.Cards do
     :board_id,
     :stage_id,
     # RE264 — the story map's placement, read straight off this list by
-    # RelayWeb.StoryMapGrid.build/6. Without them every card comes back unplaced.
+    # RelayWeb.StoryMapGrid.build/7. Without them every card comes back unplaced.
     :story_activity_id,
     :story_task_id,
     :release_id,

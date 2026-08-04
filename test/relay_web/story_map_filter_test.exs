@@ -3,8 +3,13 @@ defmodule RelayWeb.StoryMapFilterTest do
   RE259 — the owner-key wire format and the filter predicate, unit-tested against plain
   structs. No DB, no LiveView: this module owns the key format the way
   `RelayWeb.StoryMapGrid` owns the column keys, so it is proven the same way.
+
+  NOT `async: true`: the no-atom-leak test below reads `:erlang.system_info(:atom_count)`,
+  which is a VM-GLOBAL counter. Run concurrently, every other async test loading a module
+  moves it, and the assertion fails on unlucky seeds for reasons that have nothing to do
+  with this module. Sync tests run one at a time, so the delta is the code under test.
   """
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias RelayWeb.StoryMapFilter
   alias Schemas.Card

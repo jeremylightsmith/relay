@@ -54,8 +54,10 @@ defmodule RelayWeb.StoryMapGrid do
   forged drop reaches the server — belt and braces alongside the renderer not marking it
   droppable. `total` is the count of the cards `build/7` was **given**, which under
   `RelayWeb.BoardLive`'s filter pre-pass is the VISIBLE count; the lane counts likewise tally
-  only what renders, so a lane label narrows with the filter and with collapse exactly as the
-  artboard's `relLabels` does.
+  only what renders, so a lane label narrows with the filter as the artboard's `relLabels` does
+  — and, a deliberate extension, with collapse too, since a collapsed activity's cards render
+  nowhere. (The artboard's `relLabels` is filter-aware only; it keeps counting a collapsed
+  activity's cards.)
 
   Keys are strings so they go straight into DOM ids: a task column is `"t:<task_id>"`, a
   no-task column `"nt:<activity_id>"`, a merged column `"m:<activity_id>"`, a collapsed stub
