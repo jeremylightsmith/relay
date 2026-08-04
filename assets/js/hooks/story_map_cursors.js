@@ -24,7 +24,13 @@
 // transition that smooths the 20Hz stream.
 const PUSH_FLOOR_MS = 50
 const SWEEP_MS = 1000
-const STALE_MS = 5000
+// A LOST-MESSAGE BACKSTOP, not an idle timeout: deliberate departure is already immediate via
+// cursor_left (pointerleave/visibilitychange) and a real presence_diff (a hard-crashed tab's
+// process exit untracks it from Phoenix.Presence, which the server turns into
+// story_map_cursor_gone). This sweep's only job is the case neither of those cover — a dropped
+// PubSub message — so it must be well above how long someone can rest a pointer over a card
+// while they point at it and talk, or it deletes a still-present collaborator's cursor.
+const STALE_MS = 30_000
 const SURFACE_ID = "story-map-surface"
 const GRID_ID = "story-map-grid"
 
@@ -54,15 +60,13 @@ const StoryMapCursors = {
       surface.addEventListener("pointerleave", this.onLeave)
     }
     document.addEventListener("visibilitychange", this.onVisibility)
-    window.addEventListener("phx:disconnected", this.onLeave)
 
     this.handleEvent("story_map_cursor", ({user_id, name, color, x, y}) => {
       this.upsert(user_id, name, color, x, y)
     })
     this.handleEvent("story_map_cursor_gone", ({user_id}) => this.remove(user_id))
 
-    // A hard-crashed tab's leave message can be missed; nothing unheard-from for 5s stays on
-    // screen.
+    // See STALE_MS above: this sweep only catches a dropped PubSub message.
     this.sweep = setInterval(() => {
       const cutoff = Date.now() - STALE_MS
       for (const [id, cursor] of this.cursors) {
@@ -80,7 +84,6 @@ const StoryMapCursors = {
       surface.removeEventListener("pointerleave", this.onLeave)
     }
     document.removeEventListener("visibilitychange", this.onVisibility)
-    window.removeEventListener("phx:disconnected", this.onLeave)
   },
 
   queue(e) {

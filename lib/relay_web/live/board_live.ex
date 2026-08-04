@@ -1636,7 +1636,9 @@ defmodule RelayWeb.BoardLive do
   # RE257 — one cursor frame from this socket's pointer. Gated on the story map (interview
   # decision 3: only people viewing the map have a cursor), floored per socket, and relayed
   # through Relay.Presence's cursor topic — never Relay.Events, which would bump the board
-  # version 20 times a second.
+  # version 20 times a second. Deliberately OUTSIDE the read_only? guard list, like
+  # toggle_story_map_tray/set_story_map_zoom above — a cursor changes no card data, so it stays
+  # live on an archived (read-only) board too.
   def handle_event("cursor_moved", %{"x" => x, "y" => y}, socket) when is_number(x) and is_number(y) do
     now = System.monotonic_time(:millisecond)
 
@@ -1662,6 +1664,7 @@ defmodule RelayWeb.BoardLive do
   # A malformed frame is a silent no-op, never a crash: this is client input on a 20Hz path.
   def handle_event("cursor_moved", _params, socket), do: {:noreply, socket}
 
+  # Also deliberately outside the read_only? guard list — see cursor_moved/3 above.
   def handle_event("cursor_left", _params, socket) do
     if socket.assigns.live_action == :story_map do
       Presence.broadcast_cursor_gone(socket.assigns.board.id, socket.assigns.current_scope.user.id)

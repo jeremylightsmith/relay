@@ -44,6 +44,18 @@ defmodule RelayWeb.StoryMapCursorsHookTest do
     refute src =~ "@keyframes"
   end
 
+  test "the stale sweep is a lost-message backstop, not an idle timeout", %{src: src} do
+    [_, ms] = Regex.run(~r/STALE_MS\s*=\s*([\d_]+)/, src)
+
+    assert String.to_integer(String.replace(ms, "_", "")) >= 30_000,
+           "STALE_MS must be long enough that holding the pointer still never reads as a departure " <>
+             "(cursor_left and presence_diff already remove a cursor immediately on real departure)"
+  end
+
+  test "there is no phx:disconnected listener (LiveView never dispatches that event)", %{src: src} do
+    refute src =~ "phx:disconnected"
+  end
+
   test "the hook is registered in the bundle" do
     app = File.read!(Path.expand("../../assets/js/app.js", __DIR__))
 
