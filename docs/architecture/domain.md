@@ -237,11 +237,30 @@ sharing behavior.
   merged column keeps its `story_task_id` when that task still belongs to the target activity —
   a purely vertical drag changes release only and must not silently unset the task; the
   activity is then derived from the task by `StoryMap.resolve_placement/2`.
+  **Filter & focus (RE259):** the artboard's filter bar plus two view-narrowing controls,
+  four more keys of the shared view below. `RelayWeb.StoryMapFilter` is the pure model beside
+  `StoryMapGrid`: it owns the **owner-key wire format** (`"agent"`, `"u:<user_id>"`) exactly
+  once, builds the bar's chip set (every owner of a card on this map **union** every selected
+  key, so a selection stays clearable after its last card moves away), and answers the
+  predicate — owner and Needs-input compose with AND, an empty selection means every owner,
+  and a card passes when **any** of its owners is selected. "Needs input" is strictly
+  `Relay.Cards.needs_input?/1`, the one definition that the `NEEDS YOU` badge also reads.
+  Filtering is a **pre-pass** in `BoardLive`: the grid is built from the visible cards, so no
+  placement rule knows filtering exists and every count the map already draws narrows with it.
+  Collapse and focus reach the grid as one MapSet through
+  `RelayWeb.StoryMapGrid.collapsed_set/3` — focus IS a collapse of everything else, and the
+  focused activity is never in the set, so no stored state can blank the map; an unresolvable
+  focus id is no focus (`resolve_focus/2`). A collapsed activity contributes one
+  `"c:<activity_id>"` stub column and no band, and `decode_placement/2` has no `"c:"` clause,
+  so a stub can never be a drop target. The map's no-card-can-disappear invariant becomes a
+  three-way partition — cells, tray, or exactly one stub's count — that sums to `total`.
+  Like zoom and the tray, none of the six events is in the `read_only?` guard list: view state
+  is not board data.
   **Shared view (RE257):** the map's view settings are **board-wide**, stored in the
-  `boards.story_map_view` jsonb column and written only through `put_view/3` or `toggle_view/2`.
-  `view_defaults/0` is the one definition of the key set (today
-  `%{"tray_open" => true, "zoom" => "compact", "hide_tasks" => false}` — jsonb, so zoom is a
-  string parsed back by `parse_zoom/1`, never `String.to_atom/1`), `view/1` merges it
+  `boards.story_map_view` jsonb column and written only through `merge_view/2`, which
+  `put_view/3`, `toggle_view/2` and `toggle_view_member/4` all compose.
+  `view_defaults/0` is the one definition of the key set (the seven keys in
+  [`state.md`](state.md)), `view/1` merges it
   under the stored map dropping unknown keys, and both writers refuse a key outside the set
   with `{:error, :unknown_key}` and re-read the row before merging so a concurrent write is
   not clobbered. `toggle_view/2` exists so a boolean flip is computed on the **committed row**:
@@ -252,8 +271,7 @@ sharing behavior.
   is deliberately no optimistic local assign: the clicker re-renders from the same broadcast
   everyone else does, so viewers cannot disagree. `story_map_draft` / `story_map_draft_name` /
   `story_map_compose` stay **per-tab** (RE263) — sharing them would hand one person the ability
-  to clear another's in-progress input. RE259 (filter & focus) extends the shared view by adding
-  a key to `view_defaults/0`.
+  to clear another's in-progress input.
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
 
 ## Core schemas

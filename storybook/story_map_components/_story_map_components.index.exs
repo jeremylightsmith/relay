@@ -10,4 +10,6 @@ defmodule Storybook.StoryMapComponents do
   def entry("story_map_column_header"), do: [icon: {:fa, "table-columns", :thin}]
   def entry("story_map_toolbar"), do: [icon: {:fa, "sliders", :thin}]
   def entry("presence_stack"), do: [icon: {:fa, "users", :thin}]
+  def entry("story_map_filter_bar"), do: [icon: {:fa, "filter", :thin}]
+  def entry("story_map_collapsed_stub"), do: [icon: {:fa, "compress", :thin}]
 end

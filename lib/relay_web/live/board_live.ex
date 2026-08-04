@@ -70,6 +70,20 @@ defmodule RelayWeb.BoardLive do
   relayed on `Relay.Presence`'s cursor topic, and every receiver forwards it to its own client
   with `push_event/3`, which sends no template diff. The `StoryMapCursors` hook owns
   `#story-map-cursor-layer` (`phx-update="ignore"`), so the server holds no cursor state at all.
+
+  RE259 adds the filter bar and the two view-narrowing controls. Four more keys of the same
+  board-wide shared view — `:story_map_owner_filter`, `:story_map_needs_filter`,
+  `:story_map_collapsed`, `:story_map_focus` — assigned in the same one place
+  (`assign_story_map_view/2`) and written by the same six-event pattern: parse the wire value,
+  write through `Relay.StoryMap`, re-render from that write's own broadcast. **Filtering is a
+  pre-pass**: `story_map_viewport/1` narrows the card list with
+  `RelayWeb.StoryMapFilter.visible/3` and builds the grid from the result, so no placement
+  rule in `StoryMapGrid` knows filtering exists, `grid.total` is the visible count and
+  `length(@story_map_cards)` is the total. Collapse and focus reach the grid as one MapSet via
+  `StoryMapGrid.collapsed_set/3` — focus IS a collapse of everything else, and that rule lives
+  in the grid, not here. Opening a task draft now expands its activity (dropping it from
+  `collapsed` and clearing a focus that is elsewhere) in the same `merge_view/2` that turns
+  Hide tasks off, because `＋ Add task` must never open an input the user cannot see.
   """
 
   use RelayWeb, :live_view
@@ -87,6 +101,7 @@ defmodule RelayWeb.BoardLive do
   alias Relay.Votes
   alias RelayWeb.ChangesetErrors
   alias RelayWeb.StoryMapComponents
+  alias RelayWeb.StoryMapFilter
   alias RelayWeb.StoryMapGrid
   alias Schemas.Board
   alias Schemas.Card
@@ -135,13 +150,6 @@ defmodule RelayWeb.BoardLive do
         />
       </:title>
       <:actions>
-        <span
-          :if={@live_action == :story_map}
-          id="story-map-count"
-          style="font-family:var(--font-mono);font-size:11px;color:oklch(0.5 0.02 255);"
-        >
-          {length(@story_map_cards)} cards
-        </span>
         <StoryMapComponents.presence_stack
           :if={@live_action == :story_map}
           people={@presence_people}
@@ -438,6 +446,10 @@ defmodule RelayWeb.BoardLive do
         embed={@embed}
         zoom={@story_map_zoom}
         hide_tasks={@story_map_hide_tasks}
+        owner_filter={@story_map_owner_filter}
+        needs_input_filter={@story_map_needs_filter}
+        collapsed={@story_map_collapsed}
+        focus={@story_map_focus}
       />
       <.card_drawer
         :if={@selected_card}
@@ -675,7 +687,7 @@ defmodule RelayWeb.BoardLive do
 
   # RE264 — the story-map viewport: the tray on the left, the scrolling map body on the right
   # (artboard line ~78). The grid is built HERE, once, so both the tray and the grid read the
-  # same view model without a second `StoryMapGrid.build/6`.
+  # same view model without a second `StoryMapGrid.build/7`.
   attr :board, :any, required: true
   attr :activities, :list, required: true
   attr :tasks, :list, required: true
@@ -693,8 +705,25 @@ defmodule RelayWeb.BoardLive do
   attr :embed, :boolean, required: true
   attr :zoom, :atom, required: true
   attr :hide_tasks, :boolean, required: true
+  attr :owner_filter, :list, required: true
+  attr :needs_input_filter, :boolean, required: true
+  attr :collapsed, :list, required: true
+  attr :focus, :any, required: true, doc: "the focused activity id, or nil"
 
   defp story_map_viewport(assigns) do
+    # RE259 — filtering is a PRE-PASS, not a grid concern: the grid is built from the
+    # VISIBLE cards, so its placement rules are untouched, `grid.total` is the visible
+    # count and `length(@cards)` is the total — the two numbers the count label needs.
+    # Every count the map already shows (band badges, lane `N cards`, the ✕ block) then
+    # narrows with the filter for free, exactly as the artboard does.
+    #
+    # Consequence worth stating: the ✕ delete button un-blocks when a filter hides an
+    # activity's last card. The SERVER still refuses a non-empty delete with
+    # `{:error, :not_empty}` (the existing defence in depth), so the outcome is a refused
+    # click, not lost cards. Accepted; the alternative is a second set of unfiltered
+    # counts threaded through the grid for one edge case.
+    visible = StoryMapFilter.visible(assigns.cards, assigns.owner_filter, assigns.needs_input_filter)
+
     assigns =
       assigns
       |> assign(
@@ -703,69 +732,95 @@ defmodule RelayWeb.BoardLive do
           assigns.activities,
           assigns.tasks,
           assigns.releases,
-          assigns.cards,
+          visible,
           assigns.draft,
-          assigns.hide_tasks
+          assigns.hide_tasks,
+          StoryMapGrid.collapsed_set(assigns.activities, assigns.collapsed, assigns.focus)
         )
       )
+      # Chips come from the UNFILTERED list plus the selection, so selecting an owner
+      # never removes the other chips.
+      |> assign(:chips, StoryMapFilter.chips(assigns.cards, assigns.owner_filter))
+      |> assign(:filter_active, StoryMapFilter.active?(assigns.owner_filter, assigns.needs_input_filter))
+      |> assign(:focus_activity, StoryMapGrid.resolve_focus(assigns.activities, assigns.focus))
       |> assign(:stalled_ids, MapSet.new(assigns.stalled_cards, & &1.card.id))
 
     ~H"""
+    <%!-- RE259 — the filter bar and the map share ONE height-owning flex column, so the
+          two `h-[calc(100dvh_-_53px)]` magic numbers stay at one and `#story-map` becomes
+          `flex-1 min-h-0` instead of the arithmetic doubling. --%>
     <div
-      id="story-map"
-      phx-hook="StoryMapDnD"
-      class={["flex min-h-0", if(@embed, do: "h-dvh", else: "h-[calc(100dvh_-_53px)]")]}
-      style="background:oklch(0.95 0.006 255);"
+      id="story-map-viewport"
+      class={["flex min-h-0 flex-col", if(@embed, do: "h-dvh", else: "h-[calc(100dvh_-_53px)]")]}
     >
-      <%!--
-      RE262 — the tray renders unconditionally, unlike the artboard's `trayShown:
-      unmappedAll.length>0`. It is the only drop target that unmaps a card, so hiding it when
-      the list empties makes unmapping unreachable exactly when every card is placed — the
-      steady state this feature drives a board toward.
-      --%>
-      <StoryMapComponents.unmapped_tray
-        cards={@grid.unmapped}
-        board={@board}
-        stages={@board.stages}
-        stalled_ids={@stalled_ids}
-        open={@tray_open}
+      <StoryMapComponents.story_map_filter_bar
+        chips={@chips}
+        needs_input={@needs_input_filter}
+        focus_name={@focus_activity && @focus_activity.name}
+        filter_active={@filter_active}
+        visible={@grid.total}
+        total={length(@cards)}
       />
-      <div id="story-map-surface" class="relative min-w-0 flex-1 overflow-auto">
+      <div
+        id="story-map"
+        phx-hook="StoryMapDnD"
+        class="flex min-h-0 flex-1"
+        style="background:oklch(0.95 0.006 255);"
+      >
         <%!--
-        RE257 — the cursor overlay. Absolutely positioned at the scroll container's CONTENT
-        origin (which is #story-map-grid's origin) and 0x0, so its children are placed in the
-        same raw-pixel content space the hook measures, scroll with the map, and are never
-        clipped. phx-update="ignore" because the hook owns every node inside it; the server
-        holds no cursor state.
+        RE262 — the tray renders unconditionally, unlike the artboard's `trayShown:
+        unmappedAll.length>0`. It is the only drop target that unmaps a card, so hiding it when
+        the list empties makes unmapping unreachable exactly when every card is placed — the
+        steady state this feature drives a board toward.
         --%>
-        <div
-          id="story-map-cursor-layer"
-          phx-hook="StoryMapCursors"
-          phx-update="ignore"
-          style="position:absolute;top:0;left:0;width:0;height:0;z-index:40;pointer-events:none;"
-        >
-        </div>
-        <StoryMapComponents.story_map
-          :if={@grid.bands != []}
-          grid={@grid}
+        <StoryMapComponents.unmapped_tray
+          cards={@grid.unmapped}
           board={@board}
           stages={@board.stages}
           stalled_ids={@stalled_ids}
-          draft={@draft}
-          draft_name={@draft_name}
-          edit={@edit}
-          edit_name={@edit_name}
-          read_only={@read_only}
-          compose={@compose}
-          compose_form={@compose_form}
-          zoom={@zoom}
+          open={@tray_open}
         />
-        <StoryMapComponents.story_map_empty
-          :if={@grid.bands == []}
-          draft={@draft}
-          draft_name={@draft_name}
-          read_only={@read_only}
-        />
+        <div id="story-map-surface" class="relative min-w-0 flex-1 overflow-auto">
+          <%!--
+          RE257 — the cursor overlay. Absolutely positioned at the scroll container's
+          CONTENT origin (which is #story-map-grid's origin) and 0x0, so its children are
+          placed in the same raw-pixel content space the hook measures, scroll with the
+          map, and are never clipped. phx-update="ignore" because the hook owns every node
+          inside it; the server holds no cursor state.
+          --%>
+          <div
+            id="story-map-cursor-layer"
+            phx-hook="StoryMapCursors"
+            phx-update="ignore"
+            style="position:absolute;top:0;left:0;width:0;height:0;z-index:40;pointer-events:none;"
+          >
+          </div>
+          <%!-- RE259 — the branch is on ACTIVITIES, not `grid.bands`: a board whose every
+                activity is collapsed has no bands but is not empty, and would otherwise
+                render the day-one panel on top of its own stubs. --%>
+          <StoryMapComponents.story_map
+            :if={@activities != []}
+            grid={@grid}
+            board={@board}
+            stages={@board.stages}
+            stalled_ids={@stalled_ids}
+            draft={@draft}
+            draft_name={@draft_name}
+            edit={@edit}
+            edit_name={@edit_name}
+            read_only={@read_only}
+            compose={@compose}
+            compose_form={@compose_form}
+            zoom={@zoom}
+            focus={@focus_activity}
+          />
+          <StoryMapComponents.story_map_empty
+            :if={@activities == []}
+            draft={@draft}
+            draft_name={@draft_name}
+            read_only={@read_only}
+          />
+        </div>
       </div>
     </div>
     """
@@ -1648,6 +1703,96 @@ defmodule RelayWeb.BoardLive do
     {:noreply, socket}
   end
 
+  # RE259 — the filter bar and the two view-narrowing controls. All six are shared view
+  # writes: the wire value is parsed BEFORE the write and a value this board does not have is
+  # a silent no-op (`set_story_map_zoom`'s pattern), and none of them is in the read_only?
+  # guard list, for the reason written above `toggle_story_map_tray` — view state is not
+  # board data, so it stays live on an archived board.
+  def handle_event("toggle_story_map_owner_filter", %{"owner" => owner}, socket) do
+    case StoryMapFilter.parse_owner_key(owner) do
+      {:ok, parsed} ->
+        # parse |> owner_key NORMALIZES, so "u:007" can only ever be stored as "u:7".
+        log_view_write(
+          StoryMap.toggle_view_member(
+            socket.assigns.board,
+            "owner_filter",
+            StoryMapFilter.owner_key(parsed)
+          ),
+          "owner_filter"
+        )
+
+        {:noreply, socket}
+
+      :error ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("toggle_story_map_needs_filter", _params, socket) do
+    log_view_write(
+      StoryMap.toggle_view(socket.assigns.board, "needs_input_filter"),
+      "needs_input_filter"
+    )
+
+    {:noreply, socket}
+  end
+
+  # One write, one broadcast: `Clear` must never leave a half-cleared bar visible.
+  def handle_event("clear_story_map_filters", _params, socket) do
+    log_view_write(
+      StoryMap.merge_view(socket.assigns.board, %{
+        "owner_filter" => [],
+        "needs_input_filter" => false
+      }),
+      "filters"
+    )
+
+    {:noreply, socket}
+  end
+
+  def handle_event("toggle_story_map_collapse", %{"activity-id" => activity_id}, socket) do
+    case find_story_activity(socket, activity_id) do
+      nil ->
+        {:noreply, socket}
+
+      activity ->
+        # The artboard's `toggleCollapse` clears focus in the SAME update (line ~659), and it
+        # must: while focusing, ▾ on the focused band is the only expanded activity.
+        log_view_write(
+          StoryMap.toggle_view_member(
+            socket.assigns.board,
+            "collapsed",
+            activity.id,
+            %{"focus" => nil}
+          ),
+          "collapsed"
+        )
+
+        {:noreply, socket}
+    end
+  end
+
+  # The artboard's `setFocusEv` (line ~661): focusing the already-focused activity exits.
+  # Computed from the assign rather than the committed row, unlike the toggles above,
+  # because the two-fast-clicks outcome here is benign — both clicks land on "focus this
+  # one", which is what a double-click means — where a lost boolean flip is a dead button.
+  def handle_event("set_story_map_focus", %{"activity-id" => activity_id}, socket) do
+    case find_story_activity(socket, activity_id) do
+      nil ->
+        {:noreply, socket}
+
+      activity ->
+        focus = if socket.assigns.story_map_focus == activity.id, do: nil, else: activity.id
+        log_view_write(StoryMap.merge_view(socket.assigns.board, %{"focus" => focus}), "focus")
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("clear_story_map_focus", _params, socket) do
+    log_view_write(StoryMap.merge_view(socket.assigns.board, %{"focus" => nil}), "focus")
+    {:noreply, socket}
+  end
+
   # RE257 — one cursor frame from this socket's pointer. Gated on the story map (interview
   # decision 3: only people viewing the map have a cursor), floored per socket, and relayed
   # through Relay.Presence's cursor topic — never Relay.Events, which would bump the board
@@ -1694,11 +1839,8 @@ defmodule RelayWeb.BoardLive do
     {:noreply, open_story_map_draft(socket, :activity)}
   end
 
-  # The activity is resolved from @story_activities — already board-scoped by mount_board/2,
-  # which gates on Boards.get_board!/2 — never by id from the database. A forged activity-id
-  # from another board finds nothing and is ignored.
   def handle_event("story_map_add_task", %{"activity-id" => activity_id}, socket) do
-    case Enum.find(socket.assigns.story_activities, &(to_string(&1.id) == activity_id)) do
+    case find_story_activity(socket, activity_id) do
       nil -> {:noreply, socket}
       activity -> {:noreply, open_story_map_draft(socket, {:task, activity.id})}
     end
@@ -3218,18 +3360,31 @@ defmodule RelayWeb.BoardLive do
   end
 
   # RE260 — a task draft is a NEW TASK COLUMN, and there is nowhere to render one while the
-  # activity is merged. The user asked to add a task, so showing tasks is the coherent response;
-  # the other two draft shapes (activity, release) are unaffected.
+  # activity is merged. RE259 adds the other two ways it can be invisible: collapsed, or
+  # focused away. The user asked to add a task, so showing that activity is the coherent
+  # response (the artboard's `addTask`, line ~617) — otherwise `＋ Add task` opens an input
+  # they cannot see. The other two draft shapes (activity, release) are unaffected.
   #
-  # RE257 — through put_view/3, NOT a local assign: hide_tasks is shared board-wide now, and an
-  # optimistic assign here would make this a SECOND writer of one piece of state. This socket
-  # re-renders from the write's own broadcast like every other viewer.
-  defp show_tasks_for_draft(socket, {:task, _activity_id}) do
-    log_view_write(StoryMap.put_view(socket.assigns.board, "hide_tasks", false), "hide_tasks")
+  # RE257 — through the shared view, NOT a local assign: these are shared board-wide now, and
+  # an optimistic assign here would make this a SECOND writer of one piece of state. This
+  # socket re-renders from the write's own broadcast like every other viewer. ONE
+  # `merge_view/2` so the three keys land together.
+  defp show_tasks_for_draft(socket, {:task, activity_id}) do
+    changes = %{
+      "hide_tasks" => false,
+      "collapsed" => List.delete(socket.assigns.story_map_collapsed, activity_id),
+      "focus" => focus_after_add_task(socket.assigns.story_map_focus, activity_id)
+    }
+
+    log_view_write(StoryMap.merge_view(socket.assigns.board, changes), "hide_tasks")
     socket
   end
 
   defp show_tasks_for_draft(socket, _draft), do: socket
+
+  # Focusing THIS activity already shows it; focusing another one hides it, so the focus goes.
+  defp focus_after_add_task(activity_id, activity_id), do: activity_id
+  defp focus_after_add_task(_focus, _activity_id), do: nil
 
   # RE257 — the shared view, assigned in exactly one place so mount and the broadcast cannot
   # drift. `zoom` round-trips through jsonb as a string and comes back through `parse_zoom/1`,
@@ -3240,6 +3395,13 @@ defmodule RelayWeb.BoardLive do
     |> assign(:story_map_tray_open, view["tray_open"])
     |> assign(:story_map_zoom, zoom_from_view(view))
     |> assign(:story_map_hide_tasks, view["hide_tasks"] == true)
+    |> assign(:story_map_owner_filter, List.wrap(view["owner_filter"]))
+    |> assign(:story_map_needs_filter, view["needs_input_filter"] == true)
+    |> assign(:story_map_collapsed, List.wrap(view["collapsed"]))
+    # Raw here on purpose: resolving it needs the activity list, and story_map_viewport/1
+    # already holds that. `List.wrap/1` and `== true` keep a hand-edited jsonb row from
+    # crashing a viewer, the same way zoom_from_view/1 does.
+    |> assign(:story_map_focus, view["focus"])
   end
 
   defp zoom_from_view(view) do
@@ -3321,6 +3483,13 @@ defmodule RelayWeb.BoardLive do
 
   defp after_story_map_create(socket, {:error, changeset}) do
     put_flash(socket, :error, Enum.join(ChangesetErrors.messages(changeset), ", "))
+  end
+
+  # The activity is resolved from @story_activities — already board-scoped by mount_board/2,
+  # which gates on Boards.get_board!/2 — never by id from the database. A forged activity-id
+  # from another board finds nothing and every caller is a silent no-op.
+  defp find_story_activity(socket, activity_id) do
+    Enum.find(socket.assigns.story_activities, &(to_string(&1.id) == activity_id))
   end
 
   # RE261 — the three kinds, resolved from the assigns mount_board/2 already loaded

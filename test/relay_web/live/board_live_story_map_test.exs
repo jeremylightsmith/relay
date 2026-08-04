@@ -15,6 +15,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
   alias Relay.Presence
   alias Relay.Repo
   alias Relay.StoryMap
+  alias RelayWeb.StoryMapFilter
 
   setup :register_and_log_in_user
 
@@ -1724,6 +1725,217 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       _ = render(view_a)
 
       refute_push_event(view_a, "story_map_cursor", %{})
+    end
+  end
+
+  describe "filter & focus (RE259)" do
+    # `sso` is on Sign in / MVP, `audit` on Onboard with no task, `limits` on Sign in with no
+    # release, `bulk` under Plan the backlog, `dashboards` unmapped.
+    setup ctx do
+      {:ok, ai_card} = Cards.add_owner(ctx.audit, :agent)
+      {:ok, mine} = Cards.add_owner(ctx.sso, {:user, ctx.user.id})
+      {:ok, blocked} = Cards.set_status(ctx.bulk, %{status: :needs_input})
+      {:ok, failed} = Cards.set_status(ctx.limits, %{status: :failed})
+
+      %{ai_card: ai_card, mine: mine, blocked: blocked, failed: failed}
+    end
+
+    test "the bar renders on the map with a chip per owner, and nowhere else",
+         %{conn: conn} = ctx do
+      {:ok, board_view, _html} = live(conn, ~p"/board/#{ctx.board.slug}")
+      refute has_element?(board_view, "#story-map-filter-bar")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-filter-bar")
+      assert has_element?(view, "##{StoryMapFilter.chip_dom_id("agent")}")
+      assert has_element?(view, "##{StoryMapFilter.chip_dom_id("u:#{ctx.user.id}")}")
+      assert has_element?(view, "#story-map-needs-input-filter")
+      assert has_element?(view, "#story-map-count", "5 cards")
+      refute has_element?(view, "#story-map-clear-filters")
+    end
+
+    test "an owner chip narrows the map and the count, and Clear restores it",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("##{StoryMapFilter.chip_dom_id("agent")}") |> render_click()
+
+      assert has_element?(view, "##{StoryMapFilter.chip_dom_id("agent")}[aria-pressed='true']")
+      assert has_element?(view, "#story-map-count", "1 of 5")
+      assert has_element?(view, "##{card_dom_id(ctx.board, ctx.ai_card)}")
+      refute has_element?(view, "##{card_dom_id(ctx.board, ctx.mine)}")
+      # The tray narrows with the map — it renders grid.unmapped, built from the same list.
+      refute has_element?(view, "##{tray_dom_id(ctx.board, ctx.dashboards)}")
+
+      view |> element("#story-map-clear-filters") |> render_click()
+
+      assert has_element?(view, "#story-map-count", "5 cards")
+      assert has_element?(view, "##{StoryMapFilter.chip_dom_id("agent")}[aria-pressed='false']")
+      assert has_element?(view, "##{card_dom_id(ctx.board, ctx.mine)}")
+    end
+
+    test "Needs input keeps only :needs_input cards — not every human-blocked one",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-needs-input-filter") |> render_click()
+
+      assert has_element?(view, "#story-map-needs-input-filter[aria-pressed='true']")
+      assert has_element?(view, "##{card_dom_id(ctx.board, ctx.blocked)}")
+      # `:failed` is human-blocked too, and is deliberately NOT "needs input".
+      refute has_element?(view, "##{card_dom_id(ctx.board, ctx.failed)}")
+      assert has_element?(view, "#story-map-count", "1 of 5")
+    end
+
+    test "a forged owner key is a silent no-op that writes nothing", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      render_click(view, "toggle_story_map_owner_filter", %{"owner" => "u:nope"})
+
+      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["owner_filter"] == []
+      assert has_element?(view, "#story-map-count", "5 cards")
+    end
+
+    test "▾ collapses the band to a counted stub and removes its cells",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-collapse-#{ctx.onboard.id}") |> render_click()
+
+      assert has_element?(view, "#story-map-stub-#{ctx.onboard.id}", "Onboard")
+      # All three of Onboard's cards (sso, audit, limits) are hidden, and the stub's badge
+      # is the only thing that says how many.
+      assert has_element?(view, "#story-map-stub-#{ctx.onboard.id}", "3")
+      refute has_element?(view, "#story-map-activity-#{ctx.onboard.id}")
+      refute has_element?(view, "##{card_dom_id(ctx.board, ctx.sso)}")
+      # The neighbour is untouched.
+      assert has_element?(view, "#story-map-activity-#{ctx.plan.id}")
+    end
+
+    test "clicking the stub expands it again, cards back in their cells",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-collapse-#{ctx.onboard.id}") |> render_click()
+      view |> element("#story-map-stub-#{ctx.onboard.id}") |> render_click()
+
+      refute has_element?(view, "#story-map-stub-#{ctx.onboard.id}")
+      sso_cell = "#story-map-cell-t-#{ctx.sign_in.id}-r-#{ctx.mvp.id}"
+      assert has_element?(view, "#{sso_cell} ##{card_dom_id(ctx.board, ctx.sso)}")
+    end
+
+    test "◎ stubs every other band, and the chip's ✕ exits", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-focus-#{ctx.onboard.id}") |> render_click()
+
+      assert has_element?(view, "#story-map-exit-focus", "Onboard")
+      assert has_element?(view, "#story-map-activity-#{ctx.onboard.id}")
+      assert has_element?(view, "#story-map-stub-#{ctx.plan.id}")
+
+      view |> element("#story-map-exit-focus") |> render_click()
+
+      refute has_element?(view, "#story-map-exit-focus")
+      assert has_element?(view, "#story-map-activity-#{ctx.onboard.id}")
+      assert has_element?(view, "#story-map-activity-#{ctx.plan.id}")
+    end
+
+    test "◎ on the focused band toggles focus off", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-focus-#{ctx.onboard.id}") |> render_click()
+      view |> element("#story-map-focus-#{ctx.onboard.id}") |> render_click()
+
+      refute has_element?(view, "#story-map-exit-focus")
+      assert has_element?(view, "#story-map-activity-#{ctx.plan.id}")
+    end
+
+    test "▾ on the focused band exits focus in the same write, never blanking the map",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-focus-#{ctx.onboard.id}") |> render_click()
+      view |> element("#story-map-collapse-#{ctx.onboard.id}") |> render_click()
+
+      refute has_element?(view, "#story-map-exit-focus")
+      assert has_element?(view, "#story-map-stub-#{ctx.onboard.id}")
+      # The other band came back rather than every band being a stub.
+      assert has_element?(view, "#story-map-activity-#{ctx.plan.id}")
+    end
+
+    test "＋ Add task on a collapsed, focused-away activity expands it", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-collapse-#{ctx.onboard.id}") |> render_click()
+      view |> element("#story-map-focus-#{ctx.plan.id}") |> render_click()
+
+      # The band header is not reachable while stubbed, so drive the event the ＋ pushes.
+      render_click(view, "story_map_add_task", %{"activity-id" => to_string(ctx.onboard.id)})
+
+      # Otherwise the draft would open on an activity the user cannot see.
+      refute has_element?(view, "#story-map-stub-#{ctx.onboard.id}")
+      refute has_element?(view, "#story-map-exit-focus")
+      assert has_element?(view, "#story-map-draft-input")
+
+      view_state = StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))
+      assert view_state["collapsed"] == []
+      assert view_state["focus"] == nil
+      assert view_state["hide_tasks"] == false
+    end
+
+    test "the narrowed view is SHARED — a collapse in one session lands in the other",
+         %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view_b, "#story-map-activity-#{ctx.plan.id}")
+
+      view_a |> element("#story-map-collapse-#{ctx.plan.id}") |> render_click()
+
+      assert has_element?(view_b, "#story-map-stub-#{ctx.plan.id}")
+      assert has_element?(view_a, "#story-map-stub-#{ctx.plan.id}")
+
+      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["collapsed"] ==
+               [ctx.plan.id]
+
+      {:ok, view_c, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      assert has_element?(view_c, "#story-map-stub-#{ctx.plan.id}")
+    end
+
+    test "an owner filter is shared too", %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view_a |> element("##{StoryMapFilter.chip_dom_id("agent")}") |> render_click()
+
+      assert has_element?(view_b, "#story-map-count", "1 of 5")
+    end
+
+    test "a focus on an activity another tab deleted is no focus", %{conn: conn} = ctx do
+      {:ok, _view} = StoryMap.merge_view(ctx.board, %{"focus" => 999_999})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      # An unresolved focus that still collapsed everything else would blank the map.
+      assert has_element?(view, "#story-map-activity-#{ctx.onboard.id}")
+      assert has_element?(view, "#story-map-activity-#{ctx.plan.id}")
+      refute has_element?(view, "#story-map-exit-focus")
+    end
+
+    test "the bar stays live on an archived board — view state is not board data",
+         %{conn: conn} = ctx do
+      {:ok, _board} = Boards.archive_board(ctx.board)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-collapse-#{ctx.onboard.id}") |> render_click()
+      assert has_element?(view, "#story-map-stub-#{ctx.onboard.id}")
+
+      view |> element("#story-map-needs-input-filter") |> render_click()
+      assert has_element?(view, "#story-map-needs-input-filter[aria-pressed='true']")
     end
   end
 end
