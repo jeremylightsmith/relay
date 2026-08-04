@@ -5,9 +5,11 @@ defmodule RelayWeb.StoryMapGrid do
   artboard (`docs/designs/Relay Story Map.dc.html`, `eff/1`) encodes lives here, so the rules
   are unit-testable without mounting a LiveView.
 
-  **The invariant: no card can disappear.** Every card handed to `build/6` lands exactly once —
-  in one `cells` entry or in `unmapped` — and `total` is the input count. The rules are ordered
-  and the last one is total:
+  **The invariant: no card can disappear.** Every card handed to `build/7` is accounted for
+  exactly once — in one `cells` entry, in `unmapped`, or in the `count` of exactly one
+  collapsed stub column. The three-way partition sums to `total`, which is a testable
+  statement rather than a weakened one, and a test asserts the sum. The placement rules are
+  ordered and the last one is total:
 
     1. no activity, or an activity this board does not have, goes to the tray — *even if the
        card has a release* (the artboard's `unmappedAll = !e.act && !e.task`);
@@ -39,9 +41,25 @@ defmodule RelayWeb.StoryMapGrid do
   `span` is 1, and the no-card-can-disappear invariant is untouched: the merge changes only
   which column key a card's cell carries, never whether it has one.
 
+  **Collapse and focus (RE259).** `collapsed` is a MapSet of activity ids (the same trailing
+  defaulted-parameter choice this module already documents for `hide_tasks?`); focus is not a
+  separate argument because focus **is** a collapse of everything else, resolved by
+  `collapsed_set/3`. A collapsed activity contributes exactly one column,
+  `%{key: "c:<activity_id>", collapsed?: true, count: n, …}` — `collapsed?` joins `no_task?` /
+  `bare?` / `draft?` / `merged?` — and **no band**, because the renderer's stub spans
+  `grid-row:1 / -1` in the band's place. Its cards render nowhere and are counted on the stub
+  instead. **Collapse wins over Hide tasks** (the artboard's `if(collapsed) … else
+  if(hideTasks)` order), so a collapsed activity is a stub whether or not tasks are merged.
+  `decode_placement/2` has no `"c:"` clause, so a stub can never be a drop target even if a
+  forged drop reaches the server — belt and braces alongside the renderer not marking it
+  droppable. `total` is the count of the cards `build/7` was **given**, which under
+  `RelayWeb.BoardLive`'s filter pre-pass is the VISIBLE count; the lane counts likewise tally
+  only what renders, so a lane label narrows with the filter and with collapse exactly as the
+  artboard's `relLabels` does.
+
   Keys are strings so they go straight into DOM ids: a task column is `"t:<task_id>"`, a
-  no-task column `"nt:<activity_id>"`, a merged column `"m:<activity_id>"`, a lane
-  `"r:<release_id>"` or `"r:none"`.
+  no-task column `"nt:<activity_id>"`, a merged column `"m:<activity_id>"`, a collapsed stub
+  `"c:<activity_id>"`, a lane `"r:<release_id>"` or `"r:none"`.
 
   No `use Boundary` — a pure web-layer helper inside the `RelayWeb` boundary, like
   `RelayWeb.FlowLayout`.
@@ -72,26 +90,33 @@ defmodule RelayWeb.StoryMapGrid do
   `hide_tasks?` never co-exist (`RelayWeb.BoardLive` turns Hide tasks off when a task draft
   opens), and the merged branch ignores the draft outright, so the pair is still total.
 
+  `collapsed` (RE259) is a MapSet of activity ids that render as stubs — derive it with
+  `collapsed_set/3` rather than by hand, so the focus rule has one home. Like `hide_tasks?`
+  it is a trailing defaulted parameter, so RE264's existing call sites and tests are
+  untouched.
+
   Fields of the returned struct:
 
     * `bands` — `[%{activity:, span:, count:, start:}]`, one per activity, left to right.
       `start` is the **0-based index into `columns`** of the band's first column; `span` how
-      many columns it covers (always ≥ 1); `count` how many cards sit under it.
+      many columns it covers (always ≥ 1); `count` how many cards sit under it. A collapsed
+      activity contributes no band.
     * `columns` — `[%{key:, activity:, task:, no_task?:, bare?:, draft?:, merged?:,
-      task_count:, last_of_activity?:, count:}]`, left to right. `bare?` marks a
+      collapsed?:, task_count:, last_of_activity?:, count:}]`, left to right. `bare?` marks a
       `— No task yet` column that holds no cards, which the renderer turns into the clickable
       `＋ Add task` invitation (the artboard's `bare`); `draft?` marks RE263's open new-task
       column, whose key is `"draft:<activity_id>"` and which never appears in `cells`; `count`
       is how many cards sit in it, and is what RE261's ✕ blocks on; `merged?` marks RE260's
       Hide-tasks column, whose `task_count` is the activity's task count for the
-      `<n> tasks · merged` header (unrelated to `count`, the card tally).
+      `<n> tasks · merged` header (unrelated to `count`, the card tally); `collapsed?` marks
+      RE259's stub column, whose `count` is how many cards are hidden under it.
     * `lanes` — `[%{key:, release:, count:}]`, top to bottom. `release` is `nil` on the
       synthetic `(No release)` lane.
     * `cells` — `%{{column_key, lane_key} => [card]}`. A pair with no cards is simply absent.
     * `unmapped` — the tray's cards.
     * `total` — `length(cards)`.
   """
-  def build(activities, tasks, releases, cards, draft \\ nil, hide_tasks? \\ false) do
+  def build(activities, tasks, releases, cards, draft \\ nil, hide_tasks? \\ false, collapsed \\ MapSet.new()) do
     tasks_by_id = Map.new(tasks, &{&1.id, &1})
     activity_ids = MapSet.new(activities, & &1.id)
     tasks_by_activity = Enum.group_by(tasks, & &1.story_activity_id)
@@ -102,11 +127,14 @@ defmodule RelayWeb.StoryMapGrid do
       for {:grid, activity_id, nil, _card} <- placements, into: MapSet.new(), do: activity_id
 
     {columns, bands} =
-      backbone(activities, tasks_by_activity, no_task_ids, draft_activity_id(draft), hide_tasks?)
+      backbone(activities, tasks_by_activity, no_task_ids, draft_activity_id(draft), hide_tasks?, collapsed)
 
     lanes = lane_list(releases)
-    {cells, unmapped} = fill(placements, MapSet.new(lanes, & &1.key), last_key(lanes), hide_tasks?)
-    columns = count_columns(columns, cells)
+
+    {cells, unmapped, stub_counts} =
+      fill(placements, MapSet.new(lanes, & &1.key), last_key(lanes), hide_tasks?, collapsed)
+
+    columns = count_columns(columns, cells, stub_counts)
 
     %__MODULE__{
       bands: count_bands(bands, columns),
@@ -124,6 +152,36 @@ defmodule RelayWeb.StoryMapGrid do
   # there were no draft at all.
   defp draft_activity_id({:task, activity_id}), do: activity_id
   defp draft_activity_id(_draft), do: nil
+
+  @doc """
+  The set of activity ids that render as a **stub** — the one place the focus rule lives, so
+  `RelayWeb.BoardLive` holds no policy about it.
+
+  With no focus it is `collapsed_ids` intersected with the board's real activities, so a
+  stale entry left over after RE261 deleted an activity is inert. **With a focus it is every
+  activity except the focused one** — focus *is* a collapse of everything else (the
+  artboard's line ~406) — and the focused activity is never in the set even when
+  `collapsed_ids` names it. That last clause is what makes this total: no combination of
+  stored keys, including a row raced in from another tab, can collapse every band and blank
+  the map. An unresolvable focus id is no focus at all (`resolve_focus/2`).
+  """
+  def collapsed_set(activities, collapsed_ids, focus_id) do
+    ids = MapSet.new(activities, & &1.id)
+
+    case resolve_focus(activities, focus_id) do
+      nil -> collapsed_ids |> List.wrap() |> MapSet.new() |> MapSet.intersection(ids)
+      focus -> MapSet.delete(ids, focus.id)
+    end
+  end
+
+  @doc """
+  The focused activity struct, or `nil` when there is no focus or the id is one this board
+  does not have. The `nil` matters: if the focused activity is deleted in another tab, an
+  unresolved focus would collapse **every** band. An unknown id is no focus.
+  """
+  def resolve_focus(activities, focus_id) do
+    focus_id && Enum.find(activities, &(&1.id == focus_id))
+  end
 
   @doc """
   The DOM id of one body cell. `:` is not legal in a CSS selector, so the keys' colons become
@@ -211,25 +269,62 @@ defmodule RelayWeb.StoryMapGrid do
     end
   end
 
-  defp backbone(activities, tasks_by_activity, no_task_ids, draft_activity_id, hide_tasks?) do
+  defp backbone(activities, tasks_by_activity, no_task_ids, draft_activity_id, hide_tasks?, collapsed) do
     {grouped, _next} =
       Enum.map_reduce(activities, 0, fn activity, start ->
-        tasks = Map.get(tasks_by_activity, activity.id, [])
-
-        columns =
-          if hide_tasks? do
-            [merged_column(activity, length(tasks))]
-          else
-            unmerged_columns(activity, tasks, no_task_ids, draft_activity_id)
-          end
-
-        columns = mark_last(columns)
-        band = %{activity: activity, span: length(columns), count: 0, start: start}
-
-        {{columns, band}, start + length(columns)}
+        backbone_group(
+          MapSet.member?(collapsed, activity.id),
+          activity,
+          start,
+          tasks_by_activity,
+          no_task_ids,
+          draft_activity_id,
+          hide_tasks?
+        )
       end)
 
-    {Enum.flat_map(grouped, &elem(&1, 0)), Enum.map(grouped, &elem(&1, 1))}
+    {Enum.flat_map(grouped, &elem(&1, 0)), grouped |> Enum.map(&elem(&1, 1)) |> Enum.reject(&is_nil/1)}
+  end
+
+  # RE259 — a collapsed activity is ONE column and NO band: the stub spans `grid-row:1 / -1`
+  # in the band's place (the artboard's `topCells` stub branch, line ~416), so a band header
+  # rendered over it would be a second header.
+  defp backbone_group(true, activity, start, _tasks_by_activity, _no_task_ids, _draft_activity_id, _hide_tasks?) do
+    {{[collapsed_column(activity)], nil}, start + 1}
+  end
+
+  defp backbone_group(false, activity, start, tasks_by_activity, no_task_ids, draft_activity_id, hide_tasks?) do
+    tasks = Map.get(tasks_by_activity, activity.id, [])
+
+    columns =
+      if hide_tasks? do
+        [merged_column(activity, length(tasks))]
+      else
+        unmerged_columns(activity, tasks, no_task_ids, draft_activity_id)
+      end
+
+    columns = mark_last(columns)
+    band = %{activity: activity, span: length(columns), count: 0, start: start}
+
+    {{columns, band}, start + length(columns)}
+  end
+
+  # RE259 — the stub. `last_of_activity?` is set directly rather than through `mark_last/1`
+  # because the activity is exactly one column wide by construction.
+  defp collapsed_column(activity) do
+    %{
+      key: "c:#{activity.id}",
+      activity: activity,
+      task: nil,
+      no_task?: false,
+      bare?: false,
+      draft?: false,
+      merged?: false,
+      collapsed?: true,
+      task_count: 0,
+      last_of_activity?: true,
+      count: 0
+    }
   end
 
   defp unmerged_columns(activity, tasks, no_task_ids, draft_activity_id) do
@@ -259,6 +354,7 @@ defmodule RelayWeb.StoryMapGrid do
       bare?: false,
       draft?: false,
       merged?: true,
+      collapsed?: false,
       task_count: task_count,
       last_of_activity?: false,
       count: 0
@@ -274,6 +370,7 @@ defmodule RelayWeb.StoryMapGrid do
       bare?: false,
       draft?: false,
       merged?: false,
+      collapsed?: false,
       task_count: 0,
       last_of_activity?: false,
       count: 0
@@ -293,6 +390,7 @@ defmodule RelayWeb.StoryMapGrid do
       bare?: bare?,
       draft?: false,
       merged?: false,
+      collapsed?: false,
       task_count: 0,
       last_of_activity?: false,
       count: 0
@@ -311,6 +409,7 @@ defmodule RelayWeb.StoryMapGrid do
       bare?: false,
       draft?: true,
       merged?: false,
+      collapsed?: false,
       task_count: 0,
       last_of_activity?: false,
       count: 0
@@ -329,20 +428,26 @@ defmodule RelayWeb.StoryMapGrid do
 
   defp last_key(lanes), do: lanes |> List.last() |> Map.fetch!(:key)
 
-  defp fill(placements, lane_keys, last_lane_key, hide_tasks?) do
-    {cells, unmapped} =
-      Enum.reduce(placements, {%{}, []}, fn
-        {:tray, card}, {cells, unmapped} ->
-          {cells, [card | unmapped]}
+  defp fill(placements, lane_keys, last_lane_key, hide_tasks?, collapsed) do
+    {cells, unmapped, stub_counts} =
+      Enum.reduce(placements, {%{}, [], %{}}, fn
+        {:tray, card}, {cells, unmapped, stubs} ->
+          {cells, [card | unmapped], stubs}
 
-        {:grid, activity_id, task_id, card}, {cells, unmapped} ->
-          key =
-            {column_key(activity_id, task_id, hide_tasks?), lane_key(card, lane_keys, last_lane_key)}
+        {:grid, activity_id, task_id, card}, {cells, unmapped, stubs} ->
+          if MapSet.member?(collapsed, activity_id) do
+            # The third leg of the partition: the card renders nowhere, and the stub's badge
+            # is the only thing that says how many are hidden.
+            {cells, unmapped, Map.update(stubs, activity_id, 1, &(&1 + 1))}
+          else
+            key =
+              {column_key(activity_id, task_id, hide_tasks?), lane_key(card, lane_keys, last_lane_key)}
 
-          {Map.update(cells, key, [card], &[card | &1]), unmapped}
+            {Map.update(cells, key, [card], &[card | &1]), unmapped, stubs}
+          end
       end)
 
-    {Map.new(cells, fn {key, cards} -> {key, sort_cell(Enum.reverse(cards))} end), Enum.reverse(unmapped)}
+    {Map.new(cells, fn {key, cards} -> {key, sort_cell(Enum.reverse(cards))} end), Enum.reverse(unmapped), stub_counts}
   end
 
   # RE262's sort rule, one line and total: `story_map_position` ascending, nils last, ties and
@@ -371,9 +476,16 @@ defmodule RelayWeb.StoryMapGrid do
   # exposing it is what lets a task's ✕ and its "Move N cards out" tooltip come from the SAME
   # numbers the band badge and the lane label show. One count, computed once, over exactly the
   # cards the grid renders — so "the header says 3" and "the ✕ is blocked" can never disagree.
-  defp count_columns(columns, cells) do
+  defp count_columns(columns, cells, stub_counts) do
     per_column = tally(cells, fn {column_key, _lane_key} -> column_key end)
-    Enum.map(columns, &%{&1 | count: Map.get(per_column, &1.key, 0)})
+
+    Enum.map(columns, fn
+      %{collapsed?: true, activity: activity} = column ->
+        %{column | count: Map.get(stub_counts, activity.id, 0)}
+
+      column ->
+        %{column | count: Map.get(per_column, column.key, 0)}
+    end)
   end
 
   defp count_bands(bands, columns) do
