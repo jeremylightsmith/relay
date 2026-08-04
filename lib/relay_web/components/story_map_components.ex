@@ -98,7 +98,7 @@ defmodule RelayWeb.StoryMapComponents do
     stage = Enum.find(stages, &(&1.id == card.stage_id))
     ref = Cards.ref(board, card)
     done? = Cards.done?(card, stages)
-    needs? = card.status == :needs_input
+    needs? = Cards.needs_input?(card)
     stalled? = MapSet.member?(stalled_ids, card.id)
     pct = Cards.sub_task_pct(card)
 

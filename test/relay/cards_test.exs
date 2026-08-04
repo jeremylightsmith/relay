@@ -856,6 +856,19 @@ defmodule Relay.CardsTest do
     end
   end
 
+  describe "needs_input?/1 (RE259)" do
+    test "is exactly the :needs_input status, and nothing else amber" do
+      # The ONE definition: RelayWeb.StoryMapFilter and StoryMapComponents.card_face/4 both
+      # call it, so the toggle and the NEEDS YOU badge can never disagree. A stalled or
+      # failed card is human-blocked but is NOT needs-input.
+      assert Cards.needs_input?(%Card{status: :needs_input})
+      refute Cards.needs_input?(%Card{status: :in_review})
+      refute Cards.needs_input?(%Card{status: :failed})
+      refute Cards.needs_input?(%Card{status: :working})
+      refute Cards.needs_input?(%Card{status: :ready})
+    end
+  end
+
   describe "owner management" do
     setup %{stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "Owned"})
