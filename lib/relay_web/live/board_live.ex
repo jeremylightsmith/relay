@@ -75,7 +75,8 @@ defmodule RelayWeb.BoardLive do
   RE259 adds the filter bar and the two view-narrowing controls. Four more keys of the same
   board-wide shared view — `:story_map_owner_filter`, `:story_map_needs_filter`,
   `:story_map_collapsed`, `:story_map_focus` — assigned in the same one place
-  (`assign_story_map_view/2`) and written by the same six-event pattern: parse the wire value,
+  (`assign_story_map_view/2`) and written by the same event pattern — seven handlers, counting
+  RE276's `hide_complete` below: parse the wire value,
   write through `Relay.StoryMap`, re-render from that write's own broadcast. **Filtering is a
   pre-pass**: `story_map_viewport/1` narrows the card list with
   `RelayWeb.StoryMapFilter.visible/4` and builds the grid from the result, so no placement
@@ -1741,7 +1742,7 @@ defmodule RelayWeb.BoardLive do
     {:noreply, socket}
   end
 
-  # RE259 — the filter bar and the two view-narrowing controls. All six are shared view
+  # RE259 + RE276 — the filter bar and the two view-narrowing controls. All seven are shared view
   # writes: the wire value is parsed BEFORE the write and a value this board does not have is
   # a silent no-op (`set_story_map_zoom`'s pattern), and none of them is in the read_only?
   # guard list, for the reason written above `toggle_story_map_tray` — view state is not

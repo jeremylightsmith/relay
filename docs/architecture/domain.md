@@ -266,7 +266,7 @@ sharing behavior.
   so a stub can never be a CARD drop target — it stays a RE261 header-reorder source and target,
   as the artboard's stub does. The map's no-card-can-disappear invariant becomes a
   three-way partition — cells, tray, or exactly one stub's count — that sums to `total`.
-  Like zoom and the tray, none of the six events is in the `read_only?` guard list: view state
+  Like zoom and the tray, none of the seven events is in the `read_only?` guard list: view state
   is not board data.
   **Shared view (RE257):** the map's view settings are **board-wide**, stored in the
   `boards.story_map_view` jsonb column and written only through `merge_view/2`, which

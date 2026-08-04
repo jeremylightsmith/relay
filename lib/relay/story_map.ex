@@ -652,7 +652,7 @@ defmodule Relay.StoryMap do
   Validates **every** key against `view_defaults/0` before touching the row: one unknown key
   refuses the whole batch with `{:error, :unknown_key}` and writes nothing, so a stale or
   forged client cannot inject arbitrary keys into the board row. The board row is **re-read**
-  rather than trusted from the caller's struct: with seven keys in the set, merging into a
+  rather than trusted from the caller's struct: with eight keys in the set, merging into a
   stale in-memory view would silently clobber another session's write.
 
   One write means "expand this activity **and** turn Hide tasks off" is atomic and sends ONE
