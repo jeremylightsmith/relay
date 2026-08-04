@@ -480,7 +480,7 @@ defmodule RelayWeb.CoreComponents do
 
   defp stage_type_icon_style(:queue, s),
     do:
-      "width:#{s}px;height:#{s}px;border-radius:3px;border:1.5px solid oklch(0.68 0.02 255);box-sizing:border-box;flex:0 0 auto;display:block;background:transparent;"
+      "width:#{s}px;height:#{s}px;border-radius:3px;border:1.5px solid color-mix(in oklab, var(--color-base-content) 45%, var(--color-base-100));box-sizing:border-box;flex:0 0 auto;display:block;background:transparent;"
 
   defp stage_type_icon_style(:work, s),
     do: "width:#{s}px;height:#{s}px;border-radius:2px;background:var(--color-primary);flex:0 0 auto;display:block;"
@@ -564,7 +564,7 @@ defmodule RelayWeb.CoreComponents do
     ~H"""
     <span
       class={@class}
-      style="display:inline-flex;align-items:center;gap:3px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:oklch(0.56 0.02 255);"
+      style="display:inline-flex;align-items:center;gap:3px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
       title="Public supporters"
       data-support-count={@count}
       {@rest}
@@ -591,9 +591,9 @@ defmodule RelayWeb.CoreComponents do
   defp support_pill_style(voted, size) do
     base =
       if voted do
-        "color:oklch(1 0 0);background:oklch(0.60 0.14 250);border:1px solid oklch(0.60 0.14 250);"
+        "color:var(--color-primary-content);background:var(--color-primary);border:1px solid var(--color-primary);"
       else
-        "color:oklch(0.48 0.10 250);background:oklch(1 0 0);border:1px solid oklch(0.86 0.05 250);"
+        "color:color-mix(in oklab, var(--color-primary) 65%, var(--color-base-content));background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100));"
       end
 
     dims =
@@ -631,11 +631,16 @@ defmodule RelayWeb.CoreComponents do
             <.avatar name={sp[:name]} email={sp[:email]} src={sp[:src]} size={24} tint={:identity} />
           </span>
         </div>
-        <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.55 0.02 255);">
+        <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
           {@total} {if(@total == 1, do: "supporter", else: "supporters")}
         </span>
       </div>
-      <span :if={@more > 0} style="font-size:11.5px;color:oklch(0.60 0.02 255);">+ {@more} more</span>
+      <span
+        :if={@more > 0}
+        style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);"
+      >
+        + {@more} more
+      </span>
     </div>
     """
   end
@@ -679,7 +684,7 @@ defmodule RelayWeb.CoreComponents do
       title={@title || "Relay AI"}
       data-avatar="ai"
     >
-      <span style={"width:#{@mark_size}px;height:#{@mark_size}px;border-radius:50%;border:1.5px solid oklch(1 0 0);display:block"}>
+      <span style={"width:#{@mark_size}px;height:#{@mark_size}px;border-radius:50%;border:1.5px solid var(--color-secondary-content);display:block"}>
       </span>
     </span>
     """
@@ -733,7 +738,7 @@ defmodule RelayWeb.CoreComponents do
       "height:#{size}px",
       "border-radius:50%",
       fill && "background:#{fill}",
-      "color:oklch(1 0 0)",
+      "color:var(--color-neutral-content)",
       "display:flex",
       "align-items:center",
       "justify-content:center",
@@ -781,10 +786,17 @@ defmodule RelayWeb.CoreComponents do
   def identity_hue(email), do: rem(:erlang.phash2(email || ""), 360)
 
   @doc """
-  `identity_hue/1` as a fill — the same `oklch(0.62 0.13 <hue>)` formula the member stack, board
-  settings and the card owner cluster already draw, and the ONE definition of a person's colour.
+  `identity_hue/1` as a fill — a fixed-lightness, moderately-saturated color at that hue, the
+  same formula the member stack, board settings and the card owner cluster already draw, and
+  the ONE definition of a person's colour.
+
+  RE237: this is an `hsl()`, not a token. The hue is per-person and arbitrary (seeded from an
+  email hash), so it cannot be one of the six named brand roles the token vocabulary covers —
+  there is nothing to map it onto. Its lightness and saturation stay fixed across themes on
+  purpose: unlike a token, this fill never inverts, so ink drawn on it (`avatar_circle_style/4`)
+  can stay a single constant color too.
   """
-  def identity_color(email), do: "oklch(0.62 0.13 #{identity_hue(email)})"
+  def identity_color(email), do: "hsl(#{identity_hue(email)} 55% 58%)"
 
   @doc """
   Renders the owner avatar cluster for a card — the mockup's "who holds the
@@ -898,7 +910,7 @@ defmodule RelayWeb.CoreComponents do
       id="board-view-tabs"
       role="navigation"
       aria-label="Board view"
-      style="display:flex;background:oklch(0.955 0.006 255);border-radius:8px;padding:2px;flex:0 0 auto;margin-left:13px;"
+      style="display:flex;background:var(--color-field-hover);border-radius:8px;padding:2px;flex:0 0 auto;margin-left:13px;"
     >
       <.link
         navigate={~p"/board/#{@board_slug}"}
@@ -921,12 +933,12 @@ defmodule RelayWeb.CoreComponents do
   end
 
   defp board_view_tab_style(true) do
-    "font-size:12px;font-weight:600;color:oklch(0.32 0.02 255);padding:4px 11px;" <>
-      "border-radius:6px;background:oklch(1 0 0);box-shadow:0 1px 2px oklch(0 0 0/0.08);"
+    "font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);padding:4px 11px;" <>
+      "border-radius:6px;background:var(--color-base-100);box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 8%, transparent);"
   end
 
   defp board_view_tab_style(_active) do
-    "font-size:12px;font-weight:600;color:oklch(0.5 0.02 255);padding:4px 11px;border-radius:6px;"
+    "font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);padding:4px 11px;border-radius:6px;"
   end
 
   @doc """
@@ -976,15 +988,16 @@ defmodule RelayWeb.CoreComponents do
 
   defp member_email(m), do: Map.get(m, :email) || ""
 
-  # The stack's white separation ring + -7px tuck (mockup lines ~114-124).
-  defp member_wrap(0), do: "display:flex;border-radius:50%;box-shadow:0 0 0 2px oklch(1 0 0)"
+  # The stack's separation ring (cut from the surface, so it follows the theme) + -7px tuck
+  # (mockup lines ~114-124).
+  defp member_wrap(0), do: "display:flex;border-radius:50%;box-shadow:0 0 0 2px var(--color-base-100)"
   defp member_wrap(_index), do: member_wrap(0) <> ";margin-left:-7px"
 
   defp member_overflow_style do
-    "width:24px;height:24px;border-radius:50%;background:oklch(0.94 0.006 255);" <>
-      "color:oklch(0.50 0.02 255);display:flex;align-items:center;justify-content:center;" <>
+    "width:24px;height:24px;border-radius:50%;background:var(--color-base-300);" <>
+      "color:color-mix(in oklab, var(--color-base-content) 70%, transparent);display:flex;align-items:center;justify-content:center;" <>
       "font-size:10px;font-weight:600;flex:0 0 auto;box-sizing:border-box;" <>
-      "box-shadow:0 0 0 2px oklch(1 0 0);margin-left:-7px;"
+      "box-shadow:0 0 0 2px var(--color-base-100);margin-left:-7px;"
   end
 
   @doc """
@@ -1119,7 +1132,7 @@ defmodule RelayWeb.CoreComponents do
     >
       <span
         class="card-title"
-        style={"font-size:12.5px;font-weight:500;line-height:1.35;letter-spacing:-0.01em;color:#{if(@done, do: "oklch(0.62 0.02 255)", else: "var(--color-base-content)")};"}
+        style={"font-size:12.5px;font-weight:500;line-height:1.35;letter-spacing:-0.01em;color:#{if(@done, do: "color-mix(in oklab, var(--color-base-content) 50%, transparent)", else: "var(--color-base-content)")};"}
       >
         {@title}
       </span>
@@ -1133,7 +1146,7 @@ defmodule RelayWeb.CoreComponents do
       />
       <div
         :if={@status == :working and @progress != nil and is_nil(@run)}
-        style="height:5px;border-radius:3px;background:oklch(0.93 0.02 292);overflow:hidden;"
+        style="height:5px;border-radius:3px;background:color-mix(in oklab, var(--color-secondary) 15%, var(--color-base-100));overflow:hidden;"
       >
         <div style={"height:100%;width:#{@progress || 0}%;background:var(--color-secondary);border-radius:3px;"}>
         </div>
@@ -1171,7 +1184,7 @@ defmodule RelayWeb.CoreComponents do
           class="card-retry-chip"
           phx-click="retry_card"
           phx-value-ref={@ref}
-          style="font-size:10px;font-weight:600;font-family:var(--font-mono);color:oklch(0.50 0.14 15);background:oklch(1 0 0);border:1px solid oklch(0.84 0.08 20);border-radius:5px;padding:2px 7px;flex:0 0 auto;cursor:pointer;"
+          style="font-size:10px;font-weight:600;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-error) 65%, var(--color-base-content));background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-error) 40%, var(--color-base-100));border-radius:5px;padding:2px 7px;flex:0 0 auto;cursor:pointer;"
         >
           Retry
         </button>
@@ -1179,18 +1192,18 @@ defmodule RelayWeb.CoreComponents do
       <div
         :if={@status == :needs_input and is_nil(@run)}
         class="card-needs-input"
-        style="display:flex;align-items:center;gap:6px;background:oklch(0.97 0.03 75);border:1px solid oklch(0.87 0.07 75);border-radius:6px;padding:6px 8px;"
+        style="display:flex;align-items:center;gap:6px;background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));border-radius:6px;padding:6px 8px;"
       >
         <span style="width:6px;height:6px;border-radius:50%;background:var(--color-warning);flex:0 0 auto;">
         </span>
-        <span style="font-size:10px;font-weight:600;letter-spacing:0.03em;color:oklch(0.52 0.11 65);font-family:var(--font-mono);">
+        <span style="font-size:10px;font-weight:600;letter-spacing:0.03em;color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));font-family:var(--font-mono);">
           needs you
         </span>
       </div>
       <p
         :if={@status == :needs_input && @question && is_nil(@run)}
         class="card-question-preview truncate"
-        style="font-size:11px;line-height:1.3;color:oklch(0.50 0.04 65);margin:0;"
+        style="font-size:11px;line-height:1.3;color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));margin:0;"
       >
         {@question}
       </p>
@@ -1199,7 +1212,7 @@ defmodule RelayWeb.CoreComponents do
           :if={@status == :working and @health == :none and is_nil(@run)}
           class="card-status"
           data-status={@status}
-          style="font-size:11px;font-family:var(--font-mono);color:oklch(0.52 0.10 292);"
+          style="font-size:11px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-secondary) 85%, var(--color-base-content));"
         >
           {if(@progress, do: "working · #{@progress}%", else: "working")}
         </span>
@@ -1220,7 +1233,7 @@ defmodule RelayWeb.CoreComponents do
         <span
           :if={@tag && @status != :working}
           class="card-tag"
-          style="font-size:11px;color:oklch(0.60 0.02 255);font-family:var(--font-mono);"
+          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);font-family:var(--font-mono);"
         >
           #{@tag}
         </span>
@@ -1291,29 +1304,41 @@ defmodule RelayWeb.CoreComponents do
   # RLY-191: a stalled live run re-earns the amber health escalation the RLY-137 quiet-shell
   # otherwise suppresses — the run face is telling a stuck story, so the shell agrees.
   defp card_shell_style(%{run: run, stalled?: true}) when run != nil,
-    do: "border:1px solid oklch(0.86 0.06 70);box-shadow:0 1px 3px oklch(0.6 0.08 70/0.12);"
+    do:
+      "border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));box-shadow:0 1px 3px color-mix(in oklab, var(--color-warning) 12%, transparent);"
 
   defp card_shell_style(%{run: run}) when run != nil,
-    do: "border:1px solid var(--color-base-300);box-shadow:0 1px 2px oklch(0.55 0.03 255/0.05);"
+    do:
+      "border:1px solid var(--color-base-300);box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 5%, transparent);"
 
   # RLY-148: the card shell escalates with health (artboard §02) — amber-tinted
   # border + shadow when stale, rose when stopped, the quiet RLY-48 shell otherwise.
   defp card_shell_style(%{health: :stale}),
-    do: "border:1px solid oklch(0.86 0.06 70);box-shadow:0 1px 3px oklch(0.6 0.08 70/0.12);"
+    do:
+      "border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));box-shadow:0 1px 3px color-mix(in oklab, var(--color-warning) 12%, transparent);"
 
   defp card_shell_style(%{health: :stopped}),
-    do: "border:1px solid oklch(0.86 0.07 20);box-shadow:0 1px 3px oklch(0.6 0.1 15/0.12);"
+    do:
+      "border:1px solid color-mix(in oklab, var(--color-error) 35%, var(--color-base-100));box-shadow:0 1px 3px color-mix(in oklab, var(--color-error) 12%, transparent);"
 
   defp card_shell_style(_assigns),
-    do: "border:1px solid var(--color-base-300);box-shadow:0 1px 2px oklch(0.55 0.03 255/0.05);"
+    do:
+      "border:1px solid var(--color-base-300);box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 5%, transparent);"
 
   # RLY-148 — the collapsed log strip, full artboard fidelity. Every value is pinned to
   # docs/designs/Relay Card Activity.dc.html §02 (violet pulse / amber tint / rose white-!
   # disc); the light theme's --color-secondary/-warning/-error are byte-identical to the
   # artboard's violet/amber/rose. Supersedes the 2026-07-16 gray-stale rejection.
-  defp strip_box_style(:live), do: "background:oklch(0.985 0.012 292);"
-  defp strip_box_style(:stale), do: "background:oklch(0.97 0.03 75);border:1px solid oklch(0.88 0.06 75);"
-  defp strip_box_style(:stopped), do: "background:oklch(0.97 0.03 20);border:1px solid oklch(0.88 0.06 20);"
+  defp strip_box_style(:live), do: "background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));"
+
+  defp strip_box_style(:stale),
+    do:
+      "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100));"
+
+  defp strip_box_style(:stopped),
+    do:
+      "background:color-mix(in oklab, var(--color-error) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 30%, var(--color-base-100));"
+
   defp strip_box_style(_health), do: ""
 
   defp strip_dot_style(:live),
@@ -1325,19 +1350,19 @@ defmodule RelayWeb.CoreComponents do
 
   defp strip_dot_style(:stopped),
     do:
-      "width:14px;height:14px;border-radius:50%;flex:0 0 auto;background:var(--color-error);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;"
+      "width:14px;height:14px;border-radius:50%;flex:0 0 auto;background:var(--color-error);color:var(--color-error-content);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;"
 
   defp strip_dot_style(_health), do: ""
 
-  defp strip_text_color(:live), do: "oklch(0.44 0.08 292)"
-  defp strip_text_color(:stale), do: "oklch(0.50 0.10 65)"
-  defp strip_text_color(:stopped), do: "oklch(0.50 0.14 15)"
-  defp strip_text_color(_health), do: "oklch(0.44 0.02 255)"
+  defp strip_text_color(:live), do: "color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content))"
+  defp strip_text_color(:stale), do: "color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content))"
+  defp strip_text_color(:stopped), do: "color-mix(in oklab, var(--color-error) 65%, var(--color-base-content))"
+  defp strip_text_color(_health), do: "color-mix(in oklab, var(--color-base-content) 75%, transparent)"
 
-  defp strip_time_color(:live), do: "oklch(0.60 0.02 255)"
-  defp strip_time_color(:stale), do: "oklch(0.52 0.11 65)"
-  defp strip_time_color(:stopped), do: "oklch(0.50 0.14 15)"
-  defp strip_time_color(_health), do: "oklch(0.60 0.02 255)"
+  defp strip_time_color(:live), do: "color-mix(in oklab, var(--color-base-content) 50%, transparent)"
+  defp strip_time_color(:stale), do: "color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
+  defp strip_time_color(:stopped), do: "color-mix(in oklab, var(--color-error) 65%, var(--color-base-content))"
+  defp strip_time_color(_health), do: "color-mix(in oklab, var(--color-base-content) 50%, transparent)"
 
   # RLY-148 §04 header chip — amber when stale; Retry joins it on stopped (Task 2).
   defp health_chip_color(:live), do: "var(--color-secondary)"
@@ -1412,17 +1437,17 @@ defmodule RelayWeb.CoreComponents do
   defp sublane_width(%{collapsed: true}), do: 34
   defp sublane_width(_sub), do: 178
 
-  defp lane_color(:review), do: "oklch(0.52 0.12 65)"
-  defp lane_color(:done), do: "oklch(0.47 0.11 155)"
-  defp lane_color(_ongoing), do: "oklch(0.52 0.02 255)"
+  defp lane_color(:review), do: "color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
+  defp lane_color(:done), do: "color-mix(in oklab, var(--color-success) 60%, var(--color-base-content))"
+  defp lane_color(_ongoing), do: "color-mix(in oklab, var(--color-base-content) 65%, transparent)"
 
-  defp lane_tint(:review), do: "oklch(0.966 0.032 75)"
-  defp lane_tint(:done), do: "oklch(0.964 0.03 155)"
+  defp lane_tint(:review), do: "color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100))"
+  defp lane_tint(:done), do: "color-mix(in oklab, var(--color-success) 10%, var(--color-base-100))"
   defp lane_tint(_ongoing), do: "transparent"
 
-  defp lane_divider(:review), do: "oklch(0.90 0.04 75)"
-  defp lane_divider(:done), do: "oklch(0.90 0.035 155)"
-  defp lane_divider(_ongoing), do: "oklch(0.915 0.008 255)"
+  defp lane_divider(:review), do: "color-mix(in oklab, var(--color-warning) 35%, var(--color-base-100))"
+  defp lane_divider(:done), do: "color-mix(in oklab, var(--color-success) 25%, var(--color-base-100))"
+  defp lane_divider(_ongoing), do: "var(--color-base-300)"
 
   # RLY-1 item 9 — WIP threshold: over → red, at → amber, else neutral. Effective
   # count is the stage's main lane plus its sub-lanes (@total_count); no limit → :none.
@@ -1435,9 +1460,16 @@ defmodule RelayWeb.CoreComponents do
   defp wip_border_color(:at), do: "var(--color-warning)"
   defp wip_border_color(_state), do: "var(--color-base-300)"
 
-  defp wip_chip_colors(:over), do: "background:oklch(0.96 0.03 15);color:oklch(0.55 0.16 15);"
-  defp wip_chip_colors(:at), do: "background:oklch(0.97 0.05 75);color:oklch(0.52 0.13 65);"
-  defp wip_chip_colors(_state), do: "background:oklch(0.96 0.006 255);color:oklch(0.48 0.02 255);"
+  defp wip_chip_colors(:over),
+    do:
+      "background:color-mix(in oklab, var(--color-error) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 80%, var(--color-base-content));"
+
+  defp wip_chip_colors(:at),
+    do:
+      "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
+
+  defp wip_chip_colors(_state),
+    do: "background:var(--color-field-hover);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
 
   @doc """
   The drawer's mono-uppercase section label (main headings + rail labels).
@@ -2068,7 +2100,7 @@ defmodule RelayWeb.CoreComponents do
 
           <nav
             id="card-drawer-tabs"
-            style="display:flex;gap:20px;padding:0 22px;border-bottom:1px solid oklch(0.94 0.005 255);"
+            style="display:flex;gap:20px;padding:0 22px;border-bottom:1px solid var(--color-base-300);"
           >
             <button
               :for={
@@ -2099,7 +2131,7 @@ defmodule RelayWeb.CoreComponents do
                 :if={@archived}
                 id="card-archived-banner"
                 class="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm"
-                style="background:oklch(0.97 0.04 85);border:1px solid oklch(0.85 0.09 85);color:oklch(0.42 0.09 85);"
+                style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
               >
                 <.icon name="hero-archive-box" class="size-4" />
                 <span class="flex-1">This card is archived.</span>
@@ -2130,28 +2162,31 @@ defmodule RelayWeb.CoreComponents do
                   :if={@card.status == :working and !@archived}
                   id="working-strip"
                   class="flex items-center gap-2.5 rounded-[10px] px-4 py-3"
-                  style="background:oklch(0.97 0.03 292);border:1px solid oklch(0.90 0.05 292);"
+                  style="background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));"
                 >
                   <span
                     class="working-pulse"
-                    style="width:7px;height:7px;border-radius:50%;background:oklch(0.56 0.16 292);animation:relaypulse 1.4s ease-in-out infinite;flex:0 0 auto;"
+                    style="width:7px;height:7px;border-radius:50%;background:var(--color-secondary);animation:relaypulse 1.4s ease-in-out infinite;flex:0 0 auto;"
                   >
                   </span>
-                  <span class="text-[12.5px] font-semibold" style="color:oklch(0.48 0.12 292);">
+                  <span
+                    class="text-[12.5px] font-semibold"
+                    style="color:color-mix(in oklab, var(--color-secondary) 75%, var(--color-base-content));"
+                  >
                     Relay AI is working
                   </span>
                   <span
                     :if={@working_progress}
                     id="working-strip-pct"
                     class="font-mono text-[11px]"
-                    style="color:oklch(0.52 0.10 292);"
+                    style="color:color-mix(in oklab, var(--color-secondary) 85%, var(--color-base-content));"
                   >
                     {@working_progress}%
                   </span>
                   <span style="flex:1;"></span>
                   <div
                     class="h-[5px] w-24 overflow-hidden rounded-[3px]"
-                    style="background:oklch(0.93 0.02 292);"
+                    style="background:color-mix(in oklab, var(--color-secondary) 15%, var(--color-base-100));"
                   >
                     <div
                       class="h-full rounded-[3px]"
@@ -2178,15 +2213,18 @@ defmodule RelayWeb.CoreComponents do
                   :if={@card.status == :in_review and !@archived}
                   id="review-panel"
                   class="flex flex-col gap-3 rounded-[10px] p-3.5"
-                  style="background:oklch(0.975 0.02 155);border:1px solid oklch(0.88 0.05 155);"
+                  style="background:color-mix(in oklab, var(--color-success) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-success) 30%, var(--color-base-100));"
                 >
                   <span
                     class="font-mono text-[10px] font-semibold tracking-[0.05em]"
-                    style="color:oklch(0.46 0.10 155);"
+                    style="color:color-mix(in oklab, var(--color-success) 60%, var(--color-base-content));"
                   >
                     READY FOR YOUR REVIEW
                   </span>
-                  <p class="text-[13px] leading-normal" style="color:oklch(0.36 0.03 155);">
+                  <p
+                    class="text-[13px] leading-normal"
+                    style="color:color-mix(in oklab, var(--color-success) 30%, var(--color-base-content));"
+                  >
                     {review_hint(@review_gate)}
                   </p>
                   <div :if={@review_gate && !@reject_open && !@embed} class="flex gap-2">
@@ -2194,8 +2232,8 @@ defmodule RelayWeb.CoreComponents do
                       id="review-approve"
                       type="button"
                       phx-click="review_approve"
-                      class="btn btn-sm flex-1 rounded-lg border-none font-semibold text-white"
-                      style="background:oklch(0.60 0.13 155);"
+                      class="btn btn-sm flex-1 rounded-lg border-none font-semibold text-success-content"
+                      style="background:var(--color-success);"
                     >
                       {@review_gate.approve_label}
                     </button>
@@ -2204,8 +2242,8 @@ defmodule RelayWeb.CoreComponents do
                       id="review-request-changes"
                       type="button"
                       phx-click="review_open_reject"
-                      class="btn btn-sm flex-1 rounded-lg bg-white font-semibold"
-                      style="border:1px solid oklch(0.88 0.01 255);color:oklch(0.38 0.02 255);"
+                      class="btn btn-sm flex-1 rounded-lg bg-base-100 font-semibold"
+                      style="border:1px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 85%, transparent);"
                     >
                       Request changes
                     </button>
@@ -2213,19 +2251,27 @@ defmodule RelayWeb.CoreComponents do
                   <div
                     :if={@review_gate && @reject_open && !@embed}
                     id="review-reject-panel"
-                    class="flex flex-col gap-2 rounded-lg bg-white p-3"
-                    style="border:1px solid oklch(0.90 0.02 255);"
+                    class="flex flex-col gap-2 rounded-lg bg-base-100 p-3"
+                    style="border:1px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));"
                   >
                     <div
                       class="flex items-center gap-2 rounded-lg px-3 py-2"
-                      style="background:oklch(0.985 0.02 195);border:1px solid oklch(0.90 0.03 195);"
+                      style="background:color-mix(in oklab, var(--color-accent) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-accent) 25%, var(--color-base-100));"
                     >
-                      <span class="text-[13px] leading-none" style="color:oklch(0.44 0.11 195);">
+                      <span
+                        class="text-[13px] leading-none"
+                        style="color:color-mix(in oklab, var(--color-accent) 50%, var(--color-base-content));"
+                      >
                         ↩
                       </span>
-                      <span class="text-[12.5px] leading-normal" style="color:oklch(0.38 0.04 210);">
+                      <span
+                        class="text-[12.5px] leading-normal"
+                        style="color:color-mix(in oklab, var(--color-accent) 35%, var(--color-base-content));"
+                      >
                         Returns to
-                        <b style="color:oklch(0.34 0.09 205);">{@review_gate.reject_target_name}</b>
+                        <b style="color:color-mix(in oklab, var(--color-accent) 20%, var(--color-base-content));">
+                          {@review_gate.reject_target_name}
+                        </b>
                         — the reject target set on this stage.
                       </span>
                     </div>
@@ -2256,8 +2302,8 @@ defmodule RelayWeb.CoreComponents do
                         <button
                           id="review-send-back"
                           type="submit"
-                          class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
-                          style="background:oklch(0.62 0.14 65);"
+                          class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
+                          style="background:var(--color-warning);"
                         >
                           Reject → {@review_gate.reject_target_name}
                         </button>
@@ -2266,7 +2312,7 @@ defmodule RelayWeb.CoreComponents do
                           type="button"
                           phx-click="review_cancel_reject"
                           class="btn btn-ghost btn-sm text-xs"
-                          style="color:oklch(0.55 0.02 255);"
+                          style="color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
                         >
                           Cancel
                         </button>
@@ -2437,7 +2483,7 @@ defmodule RelayWeb.CoreComponents do
                   <.section_label accent="text-secondary">AI Result</.section_label>
                   <div
                     class="space-y-3 rounded-[10px] border p-3.5"
-                    style="border-color:oklch(0.88 0.05 295);background:oklch(0.985 0.01 295);"
+                    style="border-color:color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));"
                   >
                     <div
                       :if={@card.ai_result["summary"]}
@@ -2520,7 +2566,7 @@ defmodule RelayWeb.CoreComponents do
                         <span class={[
                           "flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
                           if(st.done,
-                            do: "border-success bg-success text-white",
+                            do: "border-success bg-success text-success-content",
                             else: "border-base-300"
                           )
                         ]}>
@@ -2604,7 +2650,7 @@ defmodule RelayWeb.CoreComponents do
                             <span
                               :if={comment.kind in [:question, :changes_requested]}
                               class="font-mono"
-                              style={"font-size:9.5px;font-weight:600;letter-spacing:0.04em;color:#{comment_tag_color(comment.kind)};background:oklch(0.96 0.03 75);padding:1px 6px;border-radius:4px;"}
+                              style={"font-size:9.5px;font-weight:600;letter-spacing:0.04em;color:#{comment_tag_color(comment.kind)};background:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100));padding:1px 6px;border-radius:4px;"}
                             >
                               {comment_tag_label(comment.kind)}
                             </span>
@@ -2627,7 +2673,7 @@ defmodule RelayWeb.CoreComponents do
                             }
                             style={
                               comment.kind in [:question, :changes_requested] &&
-                                "background:oklch(0.96 0.03 75);border:1px solid oklch(0.88 0.06 75);"
+                                "background:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100));"
                             }
                           >
                             {Relay.Markdown.to_html(comment.body)}
@@ -2680,7 +2726,7 @@ defmodule RelayWeb.CoreComponents do
                       navigate={
                         ~p"/board/#{@board_slug}/flows/#{@latest_detail.flow_key}/metrics?#{[node: @latest_detail.current_node || @latest_detail.last_node, from: @ref]}"
                       }
-                      style="font-size:12px;font-weight:600;color:oklch(0.44 0.14 292);align-self:flex-start;"
+                      style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));align-self:flex-start;"
                     >
                       View in flow metrics →
                     </.link>
@@ -2781,7 +2827,7 @@ defmodule RelayWeb.CoreComponents do
                       class="activity-retry-chip"
                       phx-click="retry_card"
                       phx-value-ref={@ref}
-                      style="margin-left:auto;font-size:10px;font-weight:600;font-family:var(--font-mono);color:oklch(0.50 0.14 15);background:oklch(1 0 0);border:1px solid oklch(0.84 0.08 20);border-radius:5px;padding:2px 7px;flex:0 0 auto;cursor:pointer;"
+                      style="margin-left:auto;font-size:10px;font-weight:600;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-error) 65%, var(--color-base-content));background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-error) 40%, var(--color-base-100));border-radius:5px;padding:2px 7px;flex:0 0 auto;cursor:pointer;"
                     >
                       Retry
                     </button>
@@ -2815,10 +2861,13 @@ defmodule RelayWeb.CoreComponents do
                       <%= if Relay.Activity.kind(entry) == :move do %>
                         <span
                           class="activity-move-chip inline-flex items-center gap-2"
-                          style="background:oklch(0.965 0.006 255);border:1px solid oklch(0.90 0.006 255);border-radius:20px;padding:4px 12px;font-size:11.5px;font-family:var(--font-mono);color:oklch(0.50 0.02 255);"
+                          style="background:var(--color-field-hover);border:1px solid var(--color-field-border);border-radius:20px;padding:4px 12px;font-size:11.5px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
                         >
                           moved
-                          <span class="font-semibold" style="color:oklch(0.40 0.02 255);">
+                          <span
+                            class="font-semibold"
+                            style="color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
+                          >
                             {entry.meta["from_stage"]} → {entry.meta["to_stage"]}
                           </span>
                           · {relative_time(entry.inserted_at)}
@@ -2895,14 +2944,14 @@ defmodule RelayWeb.CoreComponents do
                     id={"#{@id}-reassign-toggle"}
                     class="self-start"
                     phx-click="toggle_reassign"
-                    style="background:transparent;border:none;color:oklch(0.50 0.13 250);font-size:12px;font-weight:600;padding:2px 0;cursor:pointer;"
+                    style="background:transparent;border:none;color:color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content));font-size:12px;font-weight:600;padding:2px 0;cursor:pointer;"
                   >
                     {if @reassign_open, do: "Done", else: "Reassign"}
                   </button>
                   <div
                     :if={!@archived and @reassign_open}
                     id={"#{@id}-reassign-picker"}
-                    style="display:flex;flex-direction:column;gap:4px;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:7px;"
+                    style="display:flex;flex-direction:column;gap:4px;background:var(--color-base-100);border:1px solid var(--color-base-300);border-radius:9px;padding:7px;"
                   >
                     <button
                       :for={m <- reassignable_members(@members)}
@@ -2920,12 +2969,12 @@ defmodule RelayWeb.CoreComponents do
                         name={m.user && m.user.name}
                         email={m.user && m.user.email}
                       />
-                      <span style="font-size:12.5px;color:oklch(0.34 0.02 255);flex:1;">
+                      <span style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);flex:1;">
                         {user_name(m.user)}
                       </span>
                       <span
                         :if={user_owner?(@card, m.user_id)}
-                        style="font-size:11px;color:oklch(0.50 0.13 250);"
+                        style="font-size:11px;color:color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content));"
                       >
                         ✓
                       </span>
@@ -2938,12 +2987,12 @@ defmodule RelayWeb.CoreComponents do
                       style="display:flex;align-items:center;gap:8px;background:transparent;border:none;border-radius:7px;padding:5px 6px;cursor:pointer;text-align:left;"
                     >
                       <.avatar size={22} actor={:ai} />
-                      <span style="font-size:12.5px;color:oklch(0.34 0.02 255);flex:1;">
+                      <span style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);flex:1;">
                         Relay AI
                       </span>
                       <span
                         :if={agent_owner?(@card)}
-                        style="font-size:11px;color:oklch(0.50 0.13 250);"
+                        style="font-size:11px;color:color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content));"
                       >
                         ✓
                       </span>
@@ -3021,7 +3070,7 @@ defmodule RelayWeb.CoreComponents do
 
               <%!-- PUBLIC SUPPORT (RLY-69) --%>
               <div style="display:flex;flex-direction:column;gap:8px;">
-                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.62 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">
+                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);font-family:'JetBrains Mono',ui-monospace,monospace;">
                   PUBLIC SUPPORT
                 </span>
                 <.supporters_row
@@ -3029,19 +3078,22 @@ defmodule RelayWeb.CoreComponents do
                   supporters={supporter_faces(@supporters)}
                   total={@vote_count}
                 />
-                <span :if={@vote_count == 0} style="font-size:12px;color:oklch(0.60 0.02 255);">
+                <span
+                  :if={@vote_count == 0}
+                  style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);"
+                >
                   No public supporters yet.
                 </span>
               </div>
 
               <%!-- PUBLIC DESCRIPTION (RLY-69) --%>
               <div style="display:flex;flex-direction:column;gap:8px;">
-                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.62 0.02 255);font-family:'JetBrains Mono',ui-monospace,monospace;">
+                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);font-family:'JetBrains Mono',ui-monospace,monospace;">
                   PUBLIC DESCRIPTION
                 </span>
                 <p
                   :if={@public_description && !@editing_public_desc}
-                  style="font-size:13px;line-height:1.55;color:oklch(0.42 0.02 255);margin:0;white-space:pre-wrap;"
+                  style="font-size:13px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);margin:0;white-space:pre-wrap;"
                 >
                   {@public_description}
                 </p>
@@ -3050,7 +3102,7 @@ defmodule RelayWeb.CoreComponents do
                   id="add-public-desc"
                   phx-click="start_public_desc"
                   type="button"
-                  style="align-self:flex-start;background:transparent;border:none;padding:0;font-size:12px;font-weight:600;color:oklch(0.55 0.11 250);cursor:pointer;"
+                  style="align-self:flex-start;background:transparent;border:none;padding:0;font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-primary) 85%, var(--color-base-content));cursor:pointer;"
                 >
                   + Add a public description
                 </button>
@@ -3062,19 +3114,19 @@ defmodule RelayWeb.CoreComponents do
                 >
                   <textarea
                     name="public_description"
-                    style="width:100%;min-height:62px;border:1px solid oklch(0.60 0.14 250);border-radius:8px;padding:8px 10px;font-size:12.5px;line-height:1.5;color:oklch(0.30 0.02 255);outline:none;"
+                    style="width:100%;min-height:62px;border:1px solid var(--color-primary);border-radius:8px;padding:8px 10px;font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);outline:none;"
                   >{@public_description}</textarea>
                   <div style="display:flex;gap:7px;margin-top:8px;">
                     <button
                       type="submit"
-                      style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:7px;padding:6px 13px;font-size:12px;font-weight:600;"
+                      style="background:var(--color-primary);color:var(--color-primary-content);border:none;border-radius:7px;padding:6px 13px;font-size:12px;font-weight:600;"
                     >
                       Save
                     </button>
                     <button
                       type="button"
                       phx-click="cancel_public_desc"
-                      style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.01 255);color:oklch(0.46 0.02 255);border-radius:7px;padding:6px 12px;font-size:12px;font-weight:600;"
+                      style="background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 75%, transparent);border-radius:7px;padding:6px 12px;font-size:12px;font-weight:600;"
                     >
                       Cancel
                     </button>
@@ -3152,12 +3204,12 @@ defmodule RelayWeb.CoreComponents do
     <section
       id={"#{@id_prefix}-panel"}
       class="flex flex-col gap-4 rounded-[10px] p-5"
-      style="background:oklch(0.975 0.025 75);border:1px solid oklch(0.87 0.07 75);"
+      style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));"
     >
       <div class="flex items-center justify-between">
         <span
           class="font-mono text-[10px] font-semibold tracking-[0.05em]"
-          style="color:oklch(0.52 0.11 65);"
+          style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
         >
           {panel_label(@park_kind)}
         </span>
@@ -3165,7 +3217,7 @@ defmodule RelayWeb.CoreComponents do
           :if={@card.blocked_since}
           id={"#{@id_prefix}-waiting"}
           class="font-mono text-[10px]"
-          style="color:oklch(0.52 0.11 65);"
+          style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
         >
           {waiting_label(@card.blocked_since)}
         </span>
@@ -3177,14 +3229,17 @@ defmodule RelayWeb.CoreComponents do
         id={"#{@id_prefix}-escalation"}
         class="flex flex-col gap-3"
       >
-        <p class="text-[13px] leading-normal" style="color:oklch(0.33 0.03 65);">
+        <p
+          class="text-[13px] leading-normal"
+          style="color:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-content));"
+        >
           <strong>{@node}</strong>
           failed after {attempt_label(@attempt)} — the flow handed this card to you.
         </p>
         <pre
           :if={@failure_detail}
           id={"#{@id_prefix}-failure-detail"}
-          style="background:oklch(0.20 0.02 255);color:oklch(0.94 0.006 255);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0;overflow-x:auto;"
+          style="background:var(--color-neutral);color:var(--color-neutral-content);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0;overflow-x:auto;"
         ><%= @failure_detail %></pre>
       </div>
       <%!-- RLY-71 stepper: one structured question at a time. An A4 park never reaches this
@@ -3193,14 +3248,14 @@ defmodule RelayWeb.CoreComponents do
         <div
           id={"#{@id_prefix}-progress"}
           class="font-mono text-[10px]"
-          style="color:oklch(0.52 0.11 65);"
+          style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
         >
           Question {@answer_step + 1} of {length(@answer_questions)}
         </div>
         <div
           id={"#{@id_prefix}-question"}
           class="needs-input-question md text-[13.5px] leading-normal break-words"
-          style="color:oklch(0.33 0.03 65);"
+          style="color:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-content));"
         >
           {Relay.Markdown.to_html(@stepper_question["prompt"])}
         </div>
@@ -3225,14 +3280,14 @@ defmodule RelayWeb.CoreComponents do
                 # as they need while a short one keeps the compact height.
                 "h-auto min-h-8 whitespace-normal px-3 py-2 text-left leading-snug",
                 Map.get(@answer_values, @answer_step) == option &&
-                  "needs-input-option-selected text-white"
+                  "needs-input-option-selected text-warning-content"
               ]
             }
             style={
               if(Map.get(@answer_values, @answer_step) == option,
-                do: "background:oklch(0.70 0.13 65);border-color:oklch(0.70 0.13 65);",
+                do: "background:var(--color-warning);border-color:var(--color-warning);",
                 else:
-                  "background:transparent;border:1px solid oklch(0.87 0.07 75);color:oklch(0.33 0.03 65);"
+                  "background:transparent;border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-content));"
               )
             }
           >
@@ -3257,7 +3312,7 @@ defmodule RelayWeb.CoreComponents do
               )
             }
             class="w-full resize-none rounded-[7px] p-[9px] text-[13px] leading-[1.45] outline-none"
-            style="border:1px solid oklch(0.86 0.05 75);background:oklch(1 0 0);color:oklch(0.30 0.02 255);"
+            style="border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
           ><%= stepper_custom_text(
             @answer_values,
             @answer_step,
@@ -3281,8 +3336,8 @@ defmodule RelayWeb.CoreComponents do
             type="button"
             phx-click="answer_next"
             disabled={not Map.has_key?(@answer_values, @answer_step)}
-            class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
-            style="background:oklch(0.70 0.13 65);"
+            class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
+            style="background:var(--color-warning);"
           >
             Next →
           </button>
@@ -3292,8 +3347,8 @@ defmodule RelayWeb.CoreComponents do
             type="button"
             phx-click="answer_submit"
             disabled={not Map.has_key?(@answer_values, @answer_step)}
-            class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
-            style="background:oklch(0.70 0.13 65);"
+            class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
+            style="background:var(--color-warning);"
           >
             Send to AI →
           </button>
@@ -3311,7 +3366,7 @@ defmodule RelayWeb.CoreComponents do
           :if={!@body_loading && @question && !(@park_kind == :escalation && @failure_detail)}
           id={"#{@id_prefix}-question"}
           class="needs-input-question md text-[13.5px] leading-normal"
-          style="color:oklch(0.33 0.03 65);"
+          style="color:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-content));"
         >
           {Relay.Markdown.to_html(@question)}
         </div>
@@ -3338,8 +3393,8 @@ defmodule RelayWeb.CoreComponents do
             <button
               id={"#{@id_prefix}-send"}
               type="submit"
-              class="btn btn-sm rounded-[7px] border-none font-semibold text-white"
-              style="background:oklch(0.70 0.13 65);"
+              class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
+              style="background:var(--color-warning);"
             >
               Send to AI →
             </button>
@@ -3351,7 +3406,7 @@ defmodule RelayWeb.CoreComponents do
               type="button"
               phx-click="retry_run"
               class="btn btn-sm rounded-[7px] font-semibold"
-              style="background:transparent;border:1px solid oklch(0.86 0.05 75);color:oklch(0.42 0.08 65);"
+              style="background:transparent;border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
             >
               Retry {@node}
             </button>
@@ -3422,12 +3477,12 @@ defmodule RelayWeb.CoreComponents do
   end
 
   defp drawer_tab_style(true) do
-    "font-size:13px;padding:0 0 10px 0;font-weight:600;color:oklch(0.30 0.02 255);" <>
+    "font-size:13px;padding:0 0 10px 0;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);" <>
       "border-bottom:2px solid var(--color-secondary);margin-bottom:-1px;background:transparent;border-left:none;border-right:none;border-top:none;cursor:pointer;"
   end
 
   defp drawer_tab_style(false) do
-    "font-size:13px;padding:0 0 10px 0;font-weight:500;color:oklch(0.55 0.02 255);" <>
+    "font-size:13px;padding:0 0 10px 0;font-weight:500;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);" <>
       "background:transparent;border:none;cursor:pointer;"
   end
 
@@ -3460,8 +3515,10 @@ defmodule RelayWeb.CoreComponents do
   defp comment_tag_label(:question), do: "QUESTION"
   defp comment_tag_label(:changes_requested), do: "CHANGES REQUESTED"
 
-  defp comment_tag_color(:question), do: "oklch(0.52 0.11 65)"
-  defp comment_tag_color(:changes_requested), do: "oklch(0.55 0.13 65)"
+  defp comment_tag_color(:question), do: "color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
+
+  defp comment_tag_color(:changes_requested),
+    do: "color-mix(in oklab, var(--color-warning) 65%, var(--color-base-content))"
 
   defp note_count_label(1), do: "1 note"
   defp note_count_label(count), do: "#{count} notes"
@@ -3676,18 +3733,18 @@ defmodule RelayWeb.CoreComponents do
         phx-click="expand_stage"
         phx-value-stage-id={@stage_id}
         aria-label={"Expand stage #{@name}"}
-        style="flex:0 0 auto;width:44px;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;border-radius:11px;background:oklch(0.965 0.004 255);border:1px dashed oklch(0.90 0.006 255);cursor:pointer;box-sizing:border-box;"
+        style="flex:0 0 auto;width:44px;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;border-radius:11px;background:var(--color-field-hover);border:1px dashed var(--color-field-border);cursor:pointer;box-sizing:border-box;"
       >
         <.stage_type_icon type={@type} />
         <h3
           class="stage-strip-name"
-          style="writing-mode:vertical-rl;transform:rotate(180deg);font-size:12px;font-weight:600;letter-spacing:0.01em;color:oklch(0.52 0.02 255);white-space:nowrap;"
+          style="writing-mode:vertical-rl;transform:rotate(180deg);font-size:12px;font-weight:600;letter-spacing:0.01em;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);white-space:nowrap;"
         >
           {@name}
         </h3>
         <span
           class="stage-count"
-          style="font-size:10px;font-family:var(--font-mono);color:oklch(0.65 0.02 255);"
+          style="font-size:10px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);"
         >
           {@total_count}
         </span>
@@ -3698,7 +3755,7 @@ defmodule RelayWeb.CoreComponents do
         class="stage-column"
         data-stage-id={@stage_id}
         data-wip={@wip_state}
-        style={"flex:0 0 auto;width:#{@stage_width}px;display:flex;flex-direction:column;height:100%;background:var(--color-base-100);border:1px solid #{wip_border_color(@wip_state)};border-radius:14px;overflow:hidden;box-shadow:0 1px 3px oklch(0.5 0.02 255/0.06);"}
+        style={"flex:0 0 auto;width:#{@stage_width}px;display:flex;flex-direction:column;height:100%;background:var(--color-base-100);border:1px solid #{wip_border_color(@wip_state)};border-radius:14px;overflow:hidden;box-shadow:0 1px 3px color-mix(in oklab, var(--color-neutral) 6%, transparent);"}
       >
         <header style="display:flex;align-items:center;gap:8px;padding:15px 15px 12px 15px;flex:0 0 auto;border-bottom:1px solid var(--color-base-300);">
           <.stage_type_icon type={@type} />
@@ -3716,16 +3773,16 @@ defmodule RelayWeb.CoreComponents do
             :if={@ai_enabled and @category != :complete}
             id={"#{@id}-ai-listening"}
             title="Relay AI is listening on this stage"
-            style="display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:600;letter-spacing:0.06em;font-family:var(--font-mono);background:oklch(0.95 0.03 292);color:oklch(0.46 0.14 292);padding:2px 6px;border-radius:5px;flex:0 0 auto;"
+            style="display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:600;letter-spacing:0.06em;font-family:var(--font-mono);background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));padding:2px 6px;border-radius:5px;flex:0 0 auto;"
           >
-            <span style="width:10px;height:10px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;flex:0 0 auto;">
-              <span style="width:4px;height:4px;border-radius:50%;border:1px solid oklch(1 0 0);"></span>
+            <span style="width:10px;height:10px;border-radius:50%;background:var(--color-secondary);display:flex;align-items:center;justify-content:center;flex:0 0 auto;">
+              <span style="width:4px;height:4px;border-radius:50%;border:1px solid var(--color-secondary-content);"></span>
             </span>AI
           </span>
           <span
             :if={@count}
             class="stage-count"
-            style="font-size:10.5px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);"
+            style="font-size:10.5px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);"
           >
             {@count}
           </span>
@@ -3748,7 +3805,7 @@ defmodule RelayWeb.CoreComponents do
             phx-value-stage-id={@stage_id}
             title="Add work"
             aria-label="New card"
-            style="min-width:44px;min-height:44px;border-radius:6px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:oklch(0.45 0.02 255);font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex:0 0 auto;"
+            style="min-width:44px;min-height:44px;border-radius:6px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 75%, transparent);font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex:0 0 auto;"
           >
             +
           </button>
@@ -3800,7 +3857,7 @@ defmodule RelayWeb.CoreComponents do
                   :if={@composing}
                   id={"#{@id}-composer"}
                   phx-click-away="cancel_compose"
-                  style="background:oklch(1 0 0);border:1px solid oklch(0.60 0.14 250);border-radius:9px;padding:9px;box-shadow:0 2px 8px oklch(0.55 0.05 255/0.10);"
+                  style="background:var(--color-base-100);border:1px solid var(--color-primary);border-radius:9px;padding:9px;box-shadow:0 2px 8px color-mix(in oklab, var(--color-neutral) 10%, transparent);"
                 >
                   <.form
                     for={@compose_form}
@@ -3826,15 +3883,15 @@ defmodule RelayWeb.CoreComponents do
                       <button
                         type="submit"
                         id={"#{@id}-compose-submit"}
-                        class="btn btn-xs min-h-[44px] border-none font-semibold text-white"
-                        style="background:oklch(0.60 0.14 250);"
+                        class="btn btn-xs min-h-[44px] border-none font-semibold text-primary-content"
+                        style="background:var(--color-primary);"
                       >
                         {@compose_cta}
                       </button>
                       <button
                         type="button"
                         class="btn btn-ghost btn-xs min-h-[44px]"
-                        style="color:oklch(0.55 0.02 255);"
+                        style="color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
                         phx-click="cancel_compose"
                       >
                         Cancel
@@ -3857,7 +3914,7 @@ defmodule RelayWeb.CoreComponents do
                     <div
                       id={"#{@id}-empty"}
                       class="stage-empty hidden only:block"
-                      style="border:1px dashed var(--color-base-300);border-radius:8px;padding:18px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);"
+                      style="border:1px dashed var(--color-base-300);border-radius:8px;padding:18px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);"
                     >
                       No cards yet
                     </div>
@@ -3898,7 +3955,7 @@ defmodule RelayWeb.CoreComponents do
                     phx-click="show_more_done"
                     phx-value-stage-id={@stage_id}
                     class="stage-show-more"
-                    style="flex:0 0 auto;padding:8px 10px;border:1px solid var(--color-base-300);border-radius:8px;background:var(--color-base-100);color:oklch(0.52 0.02 255);font-size:11px;font-weight:600;letter-spacing:0.01em;text-align:center;cursor:pointer;"
+                    style="flex:0 0 auto;padding:8px 10px;border:1px solid var(--color-base-300);border-radius:8px;background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-size:11px;font-weight:600;letter-spacing:0.01em;text-align:center;cursor:pointer;"
                   >
                     Show
                     <span style="font-family:var(--font-mono);">
@@ -3970,7 +4027,7 @@ defmodule RelayWeb.CoreComponents do
                 <div
                   id={"sublane-#{sub.id}-empty"}
                   class="stage-empty hidden only:block"
-                  style="border:1px dashed var(--color-base-300);border-radius:8px;padding:14px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:oklch(0.70 0.02 255);"
+                  style="border:1px dashed var(--color-base-300);border-radius:8px;padding:14px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 40%, transparent);"
                 >
                   Empty
                 </div>

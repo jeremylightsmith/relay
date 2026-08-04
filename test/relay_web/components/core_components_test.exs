@@ -39,12 +39,12 @@ defmodule RelayWeb.CoreComponentsTest do
       # initials: "AL" for Ada Lovelace, "G" for the email-only invited member
       assert html =~ ">AL<"
       assert html =~ ">G<"
-      # 24px circle with a 2px white ring per the mockup (lines ~114-124)
+      # 24px circle with a 2px separation ring per the mockup (lines ~114-124)
       assert html =~ "width:24px;height:24px"
-      assert html =~ "box-shadow:0 0 0 2px oklch(1 0 0)"
-      # avatar fill chroma matches the mockup's avatars builder
-      # (`docs/designs/Relay Board.dc.html` line ~1590: `oklch(0.62 0.13 <hue>)`)
-      assert html =~ "background:oklch(0.62 0.13 "
+      assert html =~ "box-shadow:0 0 0 2px var(--color-base-100)"
+      # avatar fill is the one identity-color formula (RE237: hsl(), not a token — see
+      # CoreComponents.identity_color/1)
+      assert html =~ "background:hsl("
       refute html =~ ~s(data-role="member-overflow")
     end
 
@@ -57,8 +57,8 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ">+2<"
       # overflow chip colors match the mockup's `moreStyle`
       # (`docs/designs/Relay Board.dc.html` line ~1596)
-      assert html =~ "background:oklch(0.94 0.006 255)"
-      assert html =~ "color:oklch(0.50 0.02 255)"
+      assert html =~ "background:var(--color-base-300)"
+      assert html =~ "color:color-mix(in oklab, var(--color-base-content) 70%, transparent)"
     end
 
     test "renders nothing for an empty list" do
@@ -236,8 +236,8 @@ defmodule RelayWeb.CoreComponentsTest do
       # strip identity + mockup values (Relay Board.dc.html lines ~75–81)
       assert html =~ ~s(id="stage-strip-6")
       assert html =~ "width:44px"
-      assert html =~ "border:1px dashed oklch(0.90 0.006 255)"
-      assert html =~ "background:oklch(0.965 0.004 255)"
+      assert html =~ "border:1px dashed var(--color-field-border)"
+      assert html =~ "background:var(--color-field-hover)"
       assert html =~ "border-radius:11px"
       assert html =~ "cursor:pointer"
       # 9px work-type icon (blue square)
@@ -349,7 +349,7 @@ defmodule RelayWeb.CoreComponentsTest do
 
       assert html =~ ~s(id="stage-col-4-ai-listening")
       assert html =~ "Relay AI is listening on this stage"
-      assert html =~ "oklch(0.46 0.14 292)"
+      assert html =~ "color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content))"
     end
 
     test "hides the AI-listening pill on human and complete-category stages" do
@@ -413,8 +413,8 @@ defmodule RelayWeb.CoreComponentsTest do
       assert human_submit_text == "Add"
       assert human =~ "Add work to Backlog"
       # Blue submit for both owners (decision 1).
-      assert ai =~ "oklch(0.60 0.14 250)"
-      assert human =~ "oklch(0.60 0.14 250)"
+      assert ai =~ "background:var(--color-primary)"
+      assert human =~ "background:var(--color-primary)"
       # Enter-submit hook wired on the textarea.
       assert ai =~ ~s(phx-hook="SubmitOnEnter")
     end
@@ -445,8 +445,8 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "opacity:0.6"
       assert html =~ "writing-mode:vertical-rl"
       # lane colour + the same left divider as an expanded lane
-      assert html =~ "oklch(0.52 0.12 65)"
-      assert html =~ "border-left:1px solid oklch(0.90 0.04 75)"
+      assert html =~ "color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
+      assert html =~ "border-left:1px solid color-mix(in oklab, var(--color-warning) 35%, var(--color-base-100))"
       # drop target + click-to-expand contract
       assert html =~ ~s(data-stage-id="401")
       assert html =~ ~s(class="sublane-strip stage-drop")
@@ -851,8 +851,10 @@ defmodule RelayWeb.CoreComponentsTest do
         )
 
       assert html =~ "QUESTION"
-      assert html =~ "oklch(0.52 0.11 65)"
-      assert html =~ "border:1px solid oklch(0.88 0.06 75);"
+      assert html =~ "color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
+      assert html =~
+               "border:1px solid color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100));"
+
       assert html =~ "timeline-comment-body md rounded-lg px-3 py-2"
     end
 
@@ -1039,7 +1041,7 @@ defmodule RelayWeb.CoreComponentsTest do
       html = render_component(&CoreComponents.card_drawer/1, attrs)
 
       # Done check box is filled green; done label is muted + struck through.
-      assert html =~ "border-success bg-success text-white"
+      assert html =~ "border-success bg-success text-success-content"
       assert html =~ "text-base-content/50 line-through"
       assert html =~ "hero-check"
     end
@@ -1580,7 +1582,7 @@ defmodule RelayWeb.CoreComponentsTest do
       # banner already uses
       assert html =~ ~s(id="needs-input-failure-detail")
       assert html =~ "M lib/relay/exports.ex"
-      assert html =~ "background:oklch(0.20 0.02 255)"
+      assert html =~ "background:var(--color-neutral)"
 
       # answering is the primary action; Retry sits beside it
       assert html =~ ~s(id="needs-input-send")
@@ -1700,10 +1702,10 @@ defmodule RelayWeb.CoreComponentsTest do
     test "live is violet with a pulsing dot and a tinted box" do
       html = strip(:live)
 
-      assert html =~ "oklch(0.985 0.012 292)"
+      assert html =~ "color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100))"
       assert html =~ "animation:relaypulse 1.4s ease-in-out infinite"
       assert html =~ "var(--color-secondary)"
-      assert html =~ "oklch(0.44 0.08 292)"
+      assert html =~ "color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content))"
     end
 
     # RLY-148 (supersedes the 2026-07-16 rejection): stale is §02's amber treatment —
@@ -1712,13 +1714,13 @@ defmodule RelayWeb.CoreComponentsTest do
       html = strip(:stale)
 
       assert html =~ ~s(data-health="stale")
-      assert html =~ "background:oklch(0.97 0.03 75)"
-      assert html =~ "border:1px solid oklch(0.88 0.06 75)"
+      assert html =~ "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100))"
+      assert html =~ "border:1px solid color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100))"
       assert html =~ "background:var(--color-warning)"
-      assert html =~ "color:oklch(0.50 0.10 65)"
-      assert html =~ "color:oklch(0.52 0.11 65)"
+      assert html =~ "color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content))"
+      assert html =~ "color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
       refute html =~ "animation:relaypulse"
-      refute html =~ "oklch(0.72 0.02 255)"
+      refute html =~ "oklch("
     end
 
     # RLY-148 card chrome (§02): a dead agent recolors the shell — amber border+shadow
@@ -1727,8 +1729,8 @@ defmodule RelayWeb.CoreComponentsTest do
       html = strip(:stale)
 
       assert html =~ "border-l-warning"
-      assert html =~ "border:1px solid oklch(0.86 0.06 70)"
-      assert html =~ "box-shadow:0 1px 3px oklch(0.6 0.08 70/0.12)"
+      assert html =~ "border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100))"
+      assert html =~ "box-shadow:0 1px 3px color-mix(in oklab, var(--color-warning) 12%, transparent)"
       assert html =~ "border-left:3px solid var(--color-warning)"
     end
 
@@ -1736,8 +1738,8 @@ defmodule RelayWeb.CoreComponentsTest do
       html = strip(:stopped, log_text: "agent stopped")
 
       assert html =~ "border-l-error"
-      assert html =~ "border:1px solid oklch(0.86 0.07 20)"
-      assert html =~ "box-shadow:0 1px 3px oklch(0.6 0.1 15/0.12)"
+      assert html =~ "border:1px solid color-mix(in oklab, var(--color-error) 35%, var(--color-base-100))"
+      assert html =~ "box-shadow:0 1px 3px color-mix(in oklab, var(--color-error) 12%, transparent)"
       assert html =~ "border-left:3px solid var(--color-error)"
     end
 
@@ -1746,7 +1748,7 @@ defmodule RelayWeb.CoreComponentsTest do
         html = strip(health)
 
         assert html =~ "border:1px solid var(--color-base-300)"
-        assert html =~ "box-shadow:0 1px 2px oklch(0.55 0.03 255/0.05)"
+        assert html =~ "box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 5%, transparent)"
         assert html =~ "border-l-secondary"
       end
     end
@@ -1756,7 +1758,7 @@ defmodule RelayWeb.CoreComponentsTest do
 
       assert html =~ ~s(data-health="stopped")
       assert html =~ "var(--color-error)"
-      assert html =~ "oklch(0.97 0.03 20)"
+      assert html =~ "color-mix(in oklab, var(--color-error) 10%, var(--color-base-100))"
       assert html =~ "agent stopped"
       refute html =~ "animation:relaypulse"
     end
@@ -1768,8 +1770,8 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(id="card-RLY-3-retry")
       assert html =~ ~s(phx-click="retry_card")
       assert html =~ ~s(phx-value-ref="RLY-3")
-      assert html =~ "border:1px solid oklch(0.84 0.08 20)"
-      assert html =~ "color:oklch(0.50 0.14 15)"
+      assert html =~ "border:1px solid color-mix(in oklab, var(--color-error) 40%, var(--color-base-100))"
+      assert html =~ "color:color-mix(in oklab, var(--color-error) 65%, var(--color-base-content))"
     end
 
     test "live and stale strips show no Retry" do
@@ -1941,7 +1943,7 @@ defmodule RelayWeb.CoreComponentsTest do
 
       assert html =~ ~s(data-avatar="initials")
       assert html =~ ">DK<"
-      assert html =~ "color:oklch(1 0 0)"
+      assert html =~ "color:var(--color-neutral-content)"
     end
 
     test "derives initials from the email local part when there is no name (the [E4] rule)" do
@@ -1964,8 +1966,8 @@ defmodule RelayWeb.CoreComponentsTest do
 
       assert html =~ ~s(data-avatar="ai")
       assert html =~ "background:var(--color-secondary)"
-      # round(22 * 0.36) = 8px mark with the 1.5px white border, as the card cluster draws it
-      assert html =~ "width:8px;height:8px;border-radius:50%;border:1.5px solid oklch(1 0 0)"
+      # round(22 * 0.36) = 8px mark with the 1.5px border, as the card cluster draws it
+      assert html =~ "width:8px;height:8px;border-radius:50%;border:1.5px solid var(--color-secondary-content)"
       refute html =~ "<img"
     end
 
@@ -1973,8 +1975,8 @@ defmodule RelayWeb.CoreComponentsTest do
       a = render_component(&CoreComponents.avatar/1, email: "dana@acme.co", size: 24)
       b = render_component(&CoreComponents.avatar/1, email: "dana@acme.co", size: 34)
 
-      [hue] = Regex.run(~r/background:oklch\(0\.62 0\.13 (\d+)\)/, a, capture: :all_but_first)
-      assert b =~ "background:oklch(0.62 0.13 #{hue})"
+      [hue] = Regex.run(~r/background:hsl\((\d+) 55% 58%\)/, a, capture: :all_but_first)
+      assert b =~ "background:hsl(#{hue} 55% 58%)"
     end
 
     test "role tint fills with the primary token" do
@@ -2005,7 +2007,7 @@ defmodule RelayWeb.CoreComponentsTest do
       html = render_component(&CoreComponents.avatar/1, name: "Dana Kim", email: "dana@acme.co")
 
       assert CoreComponents.identity_color("dana@acme.co") ==
-               "oklch(0.62 0.13 #{CoreComponents.identity_hue("dana@acme.co")})"
+               "hsl(#{CoreComponents.identity_hue("dana@acme.co")} 55% 58%)"
 
       assert html =~ "background:#{CoreComponents.identity_color("dana@acme.co")}"
     end

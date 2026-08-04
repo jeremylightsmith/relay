@@ -53,17 +53,18 @@ defmodule RelayWeb.StoryMapComponents do
   alias RelayWeb.StoryMapGrid
 
   # Artboard tokens (lines ~277-279): the grid lines and the two sticky header heights.
-  @gl_light "1px solid oklch(0.92 0.006 255)"
-  @gl_strong "2px solid oklch(0.83 0.02 255)"
-  @gl_dashed "1px dashed oklch(0.86 0.01 255)"
-  @no_task_bg "oklch(0.978 0.004 255)"
+  @gl_light "1px solid var(--color-base-300)"
+  @gl_strong "2px solid color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100))"
+  @gl_dashed "1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100))"
+  @no_task_bg "var(--color-base-200)"
   @h1 56
   @h2 40
 
   # `Schemas.Release` carries no colour, so the swimlane dot comes from lane position: this is
   # pixel-exact for the three seeded releases (artboard lines ~242-246) and everything beyond
   # them — including the synthetic `(No release)` lane — takes the artboard's neutral dot.
-  @lane_hues [250, 195]
+  # RE237: the artboard's raw hue degrees (250, 195) become their theme tokens directly.
+  @lane_dot_colors ["var(--color-primary)", "var(--color-accent)"]
 
   # RE260 — the ONE definition of the zoom closed set. `story_map_toolbar/1` renders its buttons
   # from this list and `parse_zoom/1` validates against it, so the control and the parser cannot
@@ -169,14 +170,14 @@ defmodule RelayWeb.StoryMapComponents do
 
     ~H"""
     <div id="story-map-toolbar" style="display:flex;align-items:center;gap:10px;">
-      <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.55 0.02 255);">
+      <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
         ZOOM
       </span>
       <div
         id="story-map-zoom"
         role="group"
         aria-label="Zoom"
-        style="display:flex;background:oklch(0.955 0.006 255);border-radius:8px;padding:3px;"
+        style="display:flex;background:var(--color-field-hover);border-radius:8px;padding:3px;"
       >
         <button
           :for={level <- @levels}
@@ -509,17 +510,17 @@ defmodule RelayWeb.StoryMapComponents do
   # one after the first. Tailwind rather than inline style because `avatar/1` owns the style
   # attribute; `-ml-2` is 0.5rem = 8px, and `avatar/1`'s `box-sizing:border-box` matches the
   # artboard's own `*{box-sizing:border-box}` so 26px is the outer size in both.
-  defp presence_avatar_class(0), do: "border-2 border-white"
-  defp presence_avatar_class(_index), do: "border-2 border-white -ml-2"
+  defp presence_avatar_class(0), do: "border-2 border-base-100"
+  defp presence_avatar_class(_index), do: "border-2 border-base-100 -ml-2"
 
   # The artboard's mock has three faces and so shows no overflow chip. This borrows the board's
   # existing +N chip colours (`CoreComponents.member_stack/1`, `Relay Board.dc.html` ~1596) at
   # the presence stack's 26px, so the two stacks read as one system.
   defp presence_overflow_style do
     "width:#{@presence_size}px;height:#{@presence_size}px;border-radius:50%;" <>
-      "background:oklch(0.94 0.006 255);color:oklch(0.50 0.02 255);display:flex;" <>
+      "background:var(--color-base-300);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);display:flex;" <>
       "align-items:center;justify-content:center;font-size:10px;font-weight:600;" <>
-      "flex:0 0 auto;box-sizing:border-box;border:2px solid oklch(1 0 0);margin-left:-8px;"
+      "flex:0 0 auto;box-sizing:border-box;border:2px solid var(--color-base-100);margin-left:-8px;"
   end
 
   @doc """
@@ -655,14 +656,19 @@ defmodule RelayWeb.StoryMapComponents do
   defp delete_title(count, kind), do: "Move #{count} cards out of this #{kind} before deleting it"
 
   # Artboard `delStyle` / `delOff`, lines ~397-398.
-  defp delete_style(0), do: "font-size:10px;color:oklch(0.62 0.03 25);"
-  defp delete_style(_count), do: "font-size:10px;color:oklch(0.82 0.01 255);cursor:not-allowed;"
+  defp delete_style(0), do: "font-size:10px;color:var(--color-error);"
+
+  defp delete_style(_count),
+    do: "font-size:10px;color:color-mix(in oklab, var(--color-base-content) 25%, transparent);cursor:not-allowed;"
 
   # The ⠿ drag handle. The activity header's is one step larger and darker than the task
   # header's (artboard lines ~176 and ~198); the release label's — this card's addition, which
   # the artboard does not have — matches the task's.
-  defp grip_style(:activity), do: "font-size:12px;color:oklch(0.7 0.03 255);cursor:grab;"
-  defp grip_style(_task_or_release), do: "font-size:11px;color:oklch(0.72 0.03 255);cursor:grab;"
+  defp grip_style(:activity),
+    do: "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 40%, transparent);cursor:grab;"
+
+  defp grip_style(_task_or_release),
+    do: "font-size:11px;color:color-mix(in oklab, var(--color-base-content) 40%, transparent);cursor:grab;"
 
   @doc """
   The CSS grid: sticky corner, the two backing header bands, lane striping, the sticky release
@@ -689,7 +695,7 @@ defmodule RelayWeb.StoryMapComponents do
     ~H"""
     <div id="story-map-grid" style={grid_style(@grid, @draft)}>
       <div style={corner_style()}>
-        <span style="font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:0.05em;color:oklch(0.55 0.02 255);">
+        <span style="font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
           RELEASE ↓
         </span>
       </div>
@@ -741,7 +747,7 @@ defmodule RelayWeb.StoryMapComponents do
             count={lane.count}
           />
         </div>
-        <span style="font-family:var(--font-mono);font-size:9px;color:oklch(0.6 0.02 255);">
+        <span style="font-family:var(--font-mono);font-size:9px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);">
           {lane.count} cards
         </span>
       </div>
@@ -823,7 +829,7 @@ defmodule RelayWeb.StoryMapComponents do
           />
         </div>
         <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
-          <span style="font-family:var(--font-mono);font-size:9px;font-weight:600;color:oklch(0.5 0.02 255);background:oklch(0.93 0.006 255);border-radius:20px;padding:2px 6px;">
+          <span style="font-family:var(--font-mono);font-size:9px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);background:var(--color-base-300);border-radius:20px;padding:2px 6px;">
             {band.count}
           </span>
           <span style="flex:1;"></span>
@@ -956,11 +962,11 @@ defmodule RelayWeb.StoryMapComponents do
         phx-change="validate_card"
         phx-submit="create_card_in_cell"
         phx-click-away="cancel_compose_cell"
-        style="display:flex;align-items:center;gap:6px;background:oklch(1 0 0);border:1.5px solid oklch(0.6 0.14 250);border-radius:9px;padding:7px 9px;"
+        style="display:flex;align-items:center;gap:6px;background:var(--color-base-100);border:1.5px solid var(--color-primary);border-radius:9px;padding:7px 9px;"
       >
         <input type="hidden" name="column" value={@column.key} />
         <input type="hidden" name="lane" value={@lane.key} />
-        <span style="color:oklch(0.6 0.14 250);font-size:14px;line-height:1;">+</span>
+        <span style="color:var(--color-primary);font-size:14px;line-height:1;">+</span>
         <input
           type="text"
           id={@compose_id <> "-input"}
@@ -971,14 +977,14 @@ defmodule RelayWeb.StoryMapComponents do
           autocomplete="off"
           phx-keydown="cancel_compose_cell"
           phx-key="escape"
-          style="border:none;outline:none;font-size:11.5px;width:100%;background:transparent;color:oklch(0.3 0.02 255);"
+          style="border:none;outline:none;font-size:11.5px;width:100%;background:transparent;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
         />
         <button
           type="button"
           id={@compose_id <> "-cancel"}
           phx-click="cancel_compose_cell"
           aria-label="Close the composer"
-          style="font-size:11px;color:oklch(0.6 0.02 255);"
+          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);"
         >
           ✕
         </button>
@@ -1053,7 +1059,7 @@ defmodule RelayWeb.StoryMapComponents do
       phx-value-ref={@ref}
     >
       <div :if={@zoom == :full} style="display:flex;align-items:center;justify-content:space-between;">
-        <span style="font-family:var(--font-mono);font-size:9.5px;color:oklch(0.55 0.02 255);">
+        <span style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
           {@ref}
         </span>
         <.face_avatar avatar={@avatar} owners={@owners} active_owner={@active_owner} />
@@ -1063,7 +1069,7 @@ defmodule RelayWeb.StoryMapComponents do
       <div
         :if={@zoom == :full and (@pct && @pct > 0)}
         class="story-map-card-bar"
-        style={"position:absolute;left:0;bottom:0;height:3px;width:#{@pct}%;background:oklch(0.56 0.16 292);"}
+        style={"position:absolute;left:0;bottom:0;height:3px;width:#{@pct}%;background:var(--color-secondary);"}
       >
       </div>
     </article>
@@ -1097,16 +1103,18 @@ defmodule RelayWeb.StoryMapComponents do
           aria-label="Collapse the unmapped tray"
           style="display:flex;align-items:center;gap:8px;padding:11px 14px 9px;text-align:left;"
         >
-          <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.5 0.02 255);">
+          <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
             UNMAPPED
           </span>
           <span id="story-map-tray-count" style={inverted_count_style("2px 7px")}>
             {length(@cards)}
           </span>
           <span style="flex:1;"></span>
-          <span style="font-size:11px;color:oklch(0.5 0.02 255);">‹</span>
+          <span style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
+            ‹
+          </span>
         </button>
-        <div style="font-size:11px;line-height:1.35;color:oklch(0.55 0.02 255);padding:0 14px 10px;">
+        <div style="font-size:11px;line-height:1.35;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);padding:0 14px 10px;">
           No activity yet. Drag onto the map to place — or drop a card here to unmap it.
         </div>
         <div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:0 12px 14px;">
@@ -1125,11 +1133,13 @@ defmodule RelayWeb.StoryMapComponents do
         aria-label="Expand the unmapped tray"
         style="height:100%;width:100%;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;"
       >
-        <span style="font-size:11px;color:oklch(0.5 0.02 255);">›</span>
+        <span style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
+          ›
+        </span>
         <span id="story-map-tray-count" style={inverted_count_style("2px 6px")}>
           {length(@cards)}
         </span>
-        <span style="writing-mode:vertical-rl;font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:oklch(0.5 0.02 255);">
+        <span style="writing-mode:vertical-rl;font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
           UNMAPPED
         </span>
       </button>
@@ -1161,10 +1171,13 @@ defmodule RelayWeb.StoryMapComponents do
       id="story-map-empty"
       class="flex h-full flex-col items-center justify-center gap-3 px-6 text-center"
     >
-      <h2 style="font-size:15px;font-weight:600;color:oklch(0.34 0.02 255);">
+      <h2 style="font-size:15px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);">
         No story map yet
       </h2>
-      <p class="max-w-md" style="font-size:12.5px;line-height:1.5;color:oklch(0.5 0.02 255);">
+      <p
+        class="max-w-md"
+        style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
+      >
         Activities and their Tasks form the backbone across the top; Releases are the swimlanes
         down the left, and your cards fill the grid where the two cross.
       </p>
@@ -1295,10 +1308,10 @@ defmodule RelayWeb.StoryMapComponents do
       data-ref={@face.ref}
       phx-click="select_card"
       phx-value-ref={@face.ref}
-      style={"flex:0 0 auto;background:oklch(1 0 0);border:1px solid oklch(0.9 0.006 255);border-left:3px solid #{card_accent(@face.hue, @face.done)};border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:7px;cursor:pointer;box-shadow:0 1px 2px oklch(0.4 0.05 260/0.07);"}
+      style={"flex:0 0 auto;background:var(--color-base-100);border:1px solid var(--color-field-border);border-left:3px solid #{card_accent(@face.hue, @face.done)};border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:7px;cursor:pointer;box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 7%, transparent);"}
     >
       <div style="display:flex;align-items:center;justify-content:space-between;">
-        <span style="font-family:var(--font-mono);font-size:9.5px;color:oklch(0.55 0.02 255);">
+        <span style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);">
           {@face.ref}
         </span>
         <.face_avatar
@@ -1307,7 +1320,7 @@ defmodule RelayWeb.StoryMapComponents do
           active_owner={@face.active_owner}
         />
       </div>
-      <span style="font-size:12px;line-height:1.3;font-weight:500;color:oklch(0.28 0.02 255);">
+      <span style="font-size:12px;line-height:1.3;font-weight:500;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);">
         {@face.title}
       </span>
     </div>
@@ -1320,8 +1333,18 @@ defmodule RelayWeb.StoryMapComponents do
 
   defp face_avatar(assigns) do
     ~H"""
-    <span :if={@avatar == :check} style={disc_style("oklch(0.6 0.13 155)")}>✓</span>
-    <span :if={@avatar == :bang} style={disc_style("oklch(0.72 0.13 65)")}>!</span>
+    <span
+      :if={@avatar == :check}
+      style={disc_style("var(--color-success)", "var(--color-success-content)")}
+    >
+      ✓
+    </span>
+    <span
+      :if={@avatar == :bang}
+      style={disc_style("var(--color-warning)", "var(--color-warning-content)")}
+    >
+      !
+    </span>
     <CoreComponents.owner_avatars
       :if={@avatar == :owners}
       owners={@owners}
@@ -1331,8 +1354,8 @@ defmodule RelayWeb.StoryMapComponents do
     """
   end
 
-  defp disc_style(background) do
-    "width:18px;height:18px;border-radius:50%;background:#{background};color:oklch(1 0 0);" <>
+  defp disc_style(background, ink) do
+    "width:18px;height:18px;border-radius:50%;background:#{background};color:#{ink};" <>
       "display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;flex:0 0 auto;"
   end
 
@@ -1342,8 +1365,8 @@ defmodule RelayWeb.StoryMapComponents do
   defp segment_style(active?) do
     {background, color} =
       if active?,
-        do: {"oklch(1 0 0)", "oklch(0.3 0.02 255)"},
-        else: {"transparent", "oklch(0.5 0.02 255)"}
+        do: {"var(--color-base-100)", "color-mix(in oklab, var(--color-base-content) 95%, transparent)"},
+        else: {"transparent", "color-mix(in oklab, var(--color-base-content) 70%, transparent)"}
 
     "font-size:12px;font-weight:600;padding:4px 12px;border-radius:6px;" <>
       "color:#{color};background:#{background};"
@@ -1356,12 +1379,15 @@ defmodule RelayWeb.StoryMapComponents do
   # Artboard `htBg` / `htFg` / `htBorder` (line ~569): violet while hiding, white while not.
   defp hide_tasks_style(true) do
     "font-size:12px;font-weight:600;padding:5px 11px;border-radius:8px;" <>
-      "color:oklch(0.47 0.14 292);background:oklch(0.95 0.035 292);border:1px solid oklch(0.85 0.06 292);"
+      "color:color-mix(in oklab, var(--color-secondary) 70%, var(--color-base-content));" <>
+      "background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));" <>
+      "border:1px solid color-mix(in oklab, var(--color-secondary) 35%, var(--color-base-100));"
   end
 
   defp hide_tasks_style(_hiding) do
     "font-size:12px;font-weight:600;padding:5px 11px;border-radius:8px;" <>
-      "color:oklch(0.45 0.02 255);background:oklch(1 0 0);border:1px solid oklch(0.9 0.006 255);"
+      "color:color-mix(in oklab, var(--color-base-content) 75%, transparent);background:var(--color-base-100);" <>
+      "border:1px solid var(--color-field-border);"
   end
 
   # Artboard `htLabel` (line ~568): the button says what the click will DO.
@@ -1400,13 +1426,13 @@ defmodule RelayWeb.StoryMapComponents do
 
   # Artboard `inputStyle`, line ~404.
   defp input_style do
-    "flex:1;min-width:0;border:1.5px solid oklch(0.6 0.14 250);border-radius:5px;" <>
+    "flex:1;min-width:0;border:1.5px solid var(--color-primary);border-radius:5px;" <>
       "padding:2px 5px;font-size:12px;font-weight:600;outline:none;" <>
-      "color:oklch(0.3 0.02 255);background:white;"
+      "color:color-mix(in oklab, var(--color-base-content) 95%, transparent);background:var(--color-base-100);"
   end
 
   # Artboard `iconStyle`, line ~396.
-  defp icon_style, do: "font-size:12px;color:oklch(0.55 0.02 255);"
+  defp icon_style, do: "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
 
   # Artboard `addActStyle`, line ~513. The COLUMN's width is `grid_style/2`'s business; this is
   # only the cell. The padding appears solely while the draft is open, so the resting state is
@@ -1415,64 +1441,61 @@ defmodule RelayWeb.StoryMapComponents do
     padding = if draft == :activity, do: "padding:0 8px;", else: ""
 
     "grid-column:#{length(grid.columns) + 2};grid-row:1 / span 2;position:sticky;top:0;" <>
-      "z-index:22;background:oklch(0.965 0.006 255);border-bottom:#{@gl_light};" <>
+      "z-index:22;background:var(--color-field-hover);border-bottom:#{@gl_light};" <>
       "display:flex;align-items:center;justify-content:center;#{padding}"
   end
 
   # Artboard line ~159.
   defp add_activity_button_style do
-    "width:34px;height:34px;border-radius:9px;border:1px dashed oklch(0.82 0.01 255);" <>
-      "color:oklch(0.55 0.02 255);font-size:15px;line-height:1;background:white;"
+    "width:34px;height:34px;border-radius:9px;border:1px dashed color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100));" <>
+      "color:color-mix(in oklab, var(--color-base-content) 60%, transparent);font-size:15px;line-height:1;background:var(--color-base-100);"
   end
 
   # Artboard `addRelStyle`, line ~512: the 44px row under the last swimlane label.
   defp add_release_style(grid) do
     "grid-column:1;grid-row:#{length(grid.lanes) + 3};position:sticky;left:0;z-index:16;" <>
-      "background:oklch(0.96 0.006 255);border-right:#{@gl_strong};border-top:#{@gl_light};" <>
+      "background:var(--color-field-hover);border-right:#{@gl_strong};border-top:#{@gl_light};" <>
       "display:flex;align-items:center;padding:8px 12px;"
   end
 
   # Artboard line ~154.
   defp add_release_button_style do
     "display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;" <>
-      "color:oklch(0.55 0.02 255);border:1px dashed oklch(0.85 0.008 255);" <>
+      "color:color-mix(in oklab, var(--color-base-content) 60%, transparent);border:1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100));" <>
       "border-radius:8px;padding:4px 9px;width:100%;"
   end
 
   defp corner_style do
     "grid-column:1;grid-row:1 / span 2;position:sticky;top:0;left:0;z-index:35;" <>
-      "background:oklch(0.96 0.006 255);border-right:#{@gl_strong};border-bottom:#{@gl_strong};" <>
+      "background:var(--color-field-hover);border-right:#{@gl_strong};border-bottom:#{@gl_strong};" <>
       "display:flex;align-items:flex-end;padding:8px 12px;"
   end
 
   defp band_backing(1) do
-    "grid-column:1 / -1;grid-row:1;position:sticky;top:0;z-index:8;background:oklch(0.96 0.006 255);"
+    "grid-column:1 / -1;grid-row:1;position:sticky;top:0;z-index:8;background:var(--color-field-hover);"
   end
 
   defp band_backing(2) do
-    "grid-column:1 / -1;grid-row:2;position:sticky;top:#{@h1}px;z-index:8;background:oklch(0.965 0.005 255);"
+    "grid-column:1 / -1;grid-row:2;position:sticky;top:#{@h1}px;z-index:8;background:var(--color-field-hover);"
   end
 
   defp lane_stripe_style(index) do
-    background = if rem(index, 2) == 1, do: "oklch(0.975 0.004 255)", else: "transparent"
+    background = if rem(index, 2) == 1, do: "var(--color-field-hover)", else: "transparent"
     "grid-column:1 / -1;grid-row:#{index + 3};z-index:0;background:#{background};border-bottom:#{@gl_light};"
   end
 
   defp lane_label_style(index) do
     "grid-column:1;grid-row:#{index + 3};position:sticky;left:0;z-index:16;" <>
-      "background:oklch(0.96 0.006 255);border-right:#{@gl_strong};display:flex;" <>
+      "background:var(--color-field-hover);border-right:#{@gl_strong};display:flex;" <>
       "flex-direction:column;gap:5px;padding:8px 12px;"
   end
 
-  defp lane_dot(index) do
-    case Enum.at(@lane_hues, index) do
-      nil -> "oklch(0.7 0.02 255)"
-      hue -> "oklch(0.6 0.13 #{hue})"
-    end
-  end
+  defp lane_dot(index),
+    do: Enum.at(@lane_dot_colors, index, "color-mix(in oklab, var(--color-base-content) 40%, var(--color-base-100))")
 
   # Artboard line ~141.
-  defp lane_name_style, do: "font-size:12.5px;font-weight:600;color:oklch(0.3 0.02 255);"
+  defp lane_name_style,
+    do: "font-size:12.5px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
 
   defp lane_dom_id(%{release: nil}), do: "story-map-release-none"
   defp lane_dom_id(%{release: release}), do: "story-map-release-#{release.id}"
@@ -1481,11 +1504,12 @@ defmodule RelayWeb.StoryMapComponents do
   defp lane_name(%{release: release}), do: release.name
 
   # Artboard `nameStyle`, line ~431.
-  defp activity_name_style, do: "font-size:13px;font-weight:600;color:oklch(0.34 0.02 255);"
+  defp activity_name_style,
+    do: "font-size:13px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);"
 
   defp band_style(band) do
     "grid-column:#{band.start + 2} / span #{band.span};grid-row:1;align-self:stretch;" <>
-      "position:sticky;top:0;z-index:22;background:oklch(0.972 0.006 255);" <>
+      "position:sticky;top:0;z-index:22;background:var(--color-field-hover);" <>
       "border-right:#{@gl_strong};border-bottom:#{@gl_light};padding:8px 11px;" <>
       "display:flex;flex-direction:column;justify-content:center;"
   end
@@ -1508,8 +1532,8 @@ defmodule RelayWeb.StoryMapComponents do
   # no rename, no drop target. It names an activity, not a task, so there is nothing to edit.
   defp column_header_style(%{merged?: true}, index) do
     "grid-column:#{index + 2};grid-row:2;position:sticky;top:#{@h1}px;z-index:20;" <>
-      "background:oklch(0.985 0.004 255);border-right:#{@gl_strong};border-bottom:#{@gl_strong};" <>
-      "padding:7px 9px;font-size:10.5px;color:oklch(0.6 0.02 255);" <>
+      "background:var(--color-base-200);border-right:#{@gl_strong};border-bottom:#{@gl_strong};" <>
+      "padding:7px 9px;font-size:10.5px;color:color-mix(in oklab, var(--color-base-content) 50%, transparent);" <>
       "display:flex;align-items:center;gap:6px;"
   end
 
@@ -1519,9 +1543,11 @@ defmodule RelayWeb.StoryMapComponents do
         # Artboard line ~456: `tasks.length ? '1px dashed …' : GL_STRONG` — when the activity has
         # no tasks at all this single column *is* the activity boundary, so it carries the strong
         # separator. (The body cell, artboard line ~524, is dashed unconditionally.)
-        {@no_task_bg, if(column.last_of_activity?, do: @gl_strong, else: @gl_dashed), "oklch(0.58 0.02 255)"}
+        {@no_task_bg, if(column.last_of_activity?, do: @gl_strong, else: @gl_dashed),
+         "color-mix(in oklab, var(--color-base-content) 55%, transparent)"}
       else
-        {"oklch(1 0 0)", if(column.last_of_activity?, do: @gl_strong, else: @gl_light), "oklch(0.36 0.02 255)"}
+        {"var(--color-base-100)", if(column.last_of_activity?, do: @gl_strong, else: @gl_light),
+         "color-mix(in oklab, var(--color-base-content) 85%, transparent)"}
       end
 
     # RE263 — the bare `＋ Add task` header is the one clickable column header (artboard line
@@ -1560,15 +1586,18 @@ defmodule RelayWeb.StoryMapComponents do
   defp add_button_style(cards) do
     padding = if cards == [], do: "7px", else: "3px"
 
-    "border:1px dashed oklch(0.88 0.008 255);border-radius:8px;padding:#{padding};" <>
-      "color:oklch(0.72 0.02 255);font-size:12px;line-height:1;"
+    "border:1px dashed color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));border-radius:8px;padding:#{padding};" <>
+      "color:color-mix(in oklab, var(--color-base-content) 40%, transparent);font-size:12px;line-height:1;"
   end
 
   # The artboard's `lineStyle` (cardVM, line ~379): Map zoom is a bare title line, not a box, so
   # the whole face is this ONE string and the title span adds no styling of its own.
   defp card_shell(:map, hue, done?) do
     strike =
-      if done?, do: "text-decoration:line-through;text-decoration-color:oklch(0.75 0.05 155);", else: ""
+      if done?,
+        do:
+          "text-decoration:line-through;text-decoration-color:color-mix(in oklab, var(--color-success) 65%, var(--color-base-100));",
+        else: ""
 
     "font-size:9.5px;line-height:1.35;color:#{line_color(hue, done?)};" <>
       "border-left:2px solid #{line_accent(hue, done?)};padding-left:5px;cursor:grab;" <> strike
@@ -1578,7 +1607,7 @@ defmodule RelayWeb.StoryMapComponents do
   defp card_shell(:compact, hue, done?) do
     fade = if done?, do: "opacity:0.82;", else: ""
 
-    "background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);" <>
+    "background:var(--color-base-100);border:1px solid var(--color-base-300);" <>
       "border-left:3px solid #{card_accent(hue, done?)};border-radius:6px;padding:6px 8px;" <>
       "display:flex;flex-direction:column;cursor:grab;" <> fade
   end
@@ -1586,10 +1615,11 @@ defmodule RelayWeb.StoryMapComponents do
   # The artboard's full-zoom `boxStyle` (cardVM, lines ~332-334). `cursor:grab` — RE262 makes
   # every card face draggable.
   defp card_shell(:full, _hue, true) do
-    "background:oklch(0.97 0.015 150);border:1px solid oklch(0.88 0.04 150);border-radius:9px;" <>
+    "background:color-mix(in oklab, var(--color-success) 10%, var(--color-base-100));" <>
+      "border:1px solid color-mix(in oklab, var(--color-success) 30%, var(--color-base-100));border-radius:9px;" <>
       "padding:9px 10px;display:flex;flex-direction:column;gap:8px;" <>
-      "box-shadow:0 1px 2.5px oklch(0.4 0.05 260/0.1);position:relative;overflow:hidden;" <>
-      "cursor:grab;opacity:0.8;border-left:3px solid oklch(0.6 0.13 155);"
+      "box-shadow:0 1px 2.5px color-mix(in oklab, var(--color-neutral) 10%, transparent);position:relative;overflow:hidden;" <>
+      "cursor:grab;opacity:0.8;border-left:3px solid var(--color-success);"
   end
 
   defp card_shell(:full, hue, _done) do
@@ -1597,7 +1627,7 @@ defmodule RelayWeb.StoryMapComponents do
 
     "background:#{background};border:1px solid #{border};border-radius:9px;padding:9px 10px;" <>
       "display:flex;flex-direction:column;gap:8px;" <>
-      "box-shadow:0 1px 2.5px oklch(0.4 0.05 260/0.1);position:relative;overflow:hidden;" <>
+      "box-shadow:0 1px 2.5px color-mix(in oklab, var(--color-neutral) 10%, transparent);position:relative;overflow:hidden;" <>
       "cursor:grab;"
   end
 
@@ -1613,44 +1643,82 @@ defmodule RelayWeb.StoryMapComponents do
     "font-size:#{size};line-height:1.3;font-weight:500;color:#{title_color(done?)};"
   end
 
-  # The hued left edge of a Compact box and of a tray card — the artboard's
-  # `oklch(0.62 0.12 <h>)`, green when done. `statusHue` never yields a neutral, so `:neutral`
-  # takes this module's own neutral (chroma 0.02 at 255).
-  defp card_accent(_hue, true), do: "oklch(0.6 0.13 155)"
-  defp card_accent(:neutral, _done?), do: "oklch(0.7 0.02 255)"
-  defp card_accent(hue, _done?), do: "oklch(0.62 0.12 #{hue_deg(hue)})"
+  # The hued left edge of a Compact box and of a tray card — the artboard's mid-tone hued fill,
+  # green when done. `statusHue` never yields a neutral, so `:neutral` takes this module's own
+  # neutral (chroma 0.02 at 255). RE237: the artboard's lightness sits in Rule B's mid-tone
+  # bucket for every named hue, so each becomes its role token directly.
+  defp card_accent(_hue, true), do: "var(--color-success)"
+  defp card_accent(:neutral, _done?), do: "color-mix(in oklab, var(--color-base-content) 40%, var(--color-base-100))"
+  defp card_accent(:green, _done?), do: "var(--color-success)"
+  defp card_accent(:amber, _done?), do: "var(--color-warning)"
+  defp card_accent(:violet, _done?), do: "var(--color-secondary)"
+  defp card_accent(:blue, _done?), do: "var(--color-primary)"
 
   # Map zoom's 2px line border and its text colour (artboard `lineStyle`, line ~379).
-  defp line_accent(_hue, true), do: "oklch(0.75 0.03 155)"
-  defp line_accent(:neutral, _done?), do: "oklch(0.75 0.02 255)"
-  defp line_accent(hue, _done?), do: "oklch(0.7 0.1 #{hue_deg(hue)})"
+  defp line_accent(_hue, true), do: "color-mix(in oklab, var(--color-success) 65%, var(--color-base-100))"
 
-  defp line_color(_hue, true), do: "oklch(0.55 0.02 255)"
-  defp line_color(:neutral, _done?), do: "oklch(0.45 0.02 255)"
-  defp line_color(hue, _done?), do: "oklch(0.4 0.05 #{hue_deg(hue)})"
+  defp line_accent(:neutral, _done?), do: "color-mix(in oklab, var(--color-base-content) 35%, var(--color-base-100))"
 
-  # The artboard's `statusHue` (line ~360) as a degree — the ONE place the four hues become
-  # numbers, for every border that interpolates one.
-  defp hue_deg(:green), do: 155
-  defp hue_deg(:amber), do: 65
-  defp hue_deg(:violet), do: 292
-  defp hue_deg(:blue), do: 250
+  defp line_accent(:green, _done?), do: "color-mix(in oklab, var(--color-success) 75%, var(--color-base-100))"
+  defp line_accent(:amber, _done?), do: "var(--color-warning)"
+  defp line_accent(:violet, _done?), do: "color-mix(in oklab, var(--color-secondary) 70%, var(--color-base-100))"
+  defp line_accent(:blue, _done?), do: "color-mix(in oklab, var(--color-primary) 75%, var(--color-base-100))"
 
-  defp tint(:green), do: {"oklch(0.965 0.028 155)", "oklch(0.9 0.04 155)"}
-  defp tint(:amber), do: {"oklch(0.965 0.028 65)", "oklch(0.9 0.04 65)"}
-  defp tint(:violet), do: {"oklch(0.965 0.028 292)", "oklch(0.9 0.04 292)"}
-  defp tint(:blue), do: {"oklch(0.965 0.028 250)", "oklch(0.9 0.04 250)"}
-  defp tint(:neutral), do: {"oklch(0.97 0.006 255)", "oklch(0.92 0.006 255)"}
+  defp line_color(_hue, true), do: "color-mix(in oklab, var(--color-base-content) 60%, transparent)"
+  defp line_color(:neutral, _done?), do: "color-mix(in oklab, var(--color-base-content) 75%, transparent)"
+  defp line_color(:green, _done?), do: "color-mix(in oklab, var(--color-success) 40%, var(--color-base-content))"
+  defp line_color(:amber, _done?), do: "color-mix(in oklab, var(--color-warning) 30%, var(--color-base-content))"
+  defp line_color(:violet, _done?), do: "color-mix(in oklab, var(--color-secondary) 45%, var(--color-base-content))"
+  defp line_color(:blue, _done?), do: "color-mix(in oklab, var(--color-primary) 40%, var(--color-base-content))"
 
-  defp title_color(true), do: "oklch(0.4 0.02 255)"
-  defp title_color(_done), do: "oklch(0.28 0.02 255)"
+  defp tint(:green),
+    do:
+      {"color-mix(in oklab, var(--color-success) 10%, var(--color-base-100))",
+       "color-mix(in oklab, var(--color-success) 25%, var(--color-base-100))"}
+
+  defp tint(:amber),
+    do:
+      {"color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100))",
+       "color-mix(in oklab, var(--color-warning) 35%, var(--color-base-100))"}
+
+  defp tint(:violet),
+    do:
+      {"color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100))",
+       "color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100))"}
+
+  defp tint(:blue),
+    do:
+      {"color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100))",
+       "color-mix(in oklab, var(--color-primary) 25%, var(--color-base-100))"}
+
+  defp tint(:neutral), do: {"var(--color-field-hover)", "var(--color-base-300)"}
+
+  defp title_color(true), do: "color-mix(in oklab, var(--color-base-content) 80%, transparent)"
+  defp title_color(_done), do: "color-mix(in oklab, var(--color-base-content) 95%, transparent)"
 
   # The artboard's `stageColor` (lines ~299-304), keyed on the ONE hue instead of on the label.
-  defp badge_colors(:green), do: {"oklch(0.94 0.04 155)", "oklch(0.44 0.11 155)"}
-  defp badge_colors(:amber), do: {"oklch(0.96 0.05 65)", "oklch(0.5 0.13 65)"}
-  defp badge_colors(:violet), do: {"oklch(0.95 0.035 292)", "oklch(0.48 0.14 292)"}
-  defp badge_colors(:blue), do: {"oklch(0.95 0.03 250)", "oklch(0.46 0.12 250)"}
-  defp badge_colors(:neutral), do: {"oklch(0.94 0.006 255)", "oklch(0.5 0.02 255)"}
+  defp badge_colors(:green),
+    do:
+      {"color-mix(in oklab, var(--color-success) 15%, var(--color-base-100))",
+       "color-mix(in oklab, var(--color-success) 55%, var(--color-base-content))"}
+
+  defp badge_colors(:amber),
+    do:
+      {"color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100))",
+       "color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content))"}
+
+  defp badge_colors(:violet),
+    do:
+      {"color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100))",
+       "color-mix(in oklab, var(--color-secondary) 75%, var(--color-base-content))"}
+
+  defp badge_colors(:blue),
+    do:
+      {"color-mix(in oklab, var(--color-primary) 15%, var(--color-base-100))",
+       "color-mix(in oklab, var(--color-primary) 60%, var(--color-base-content))"}
+
+  defp badge_colors(:neutral),
+    do: {"var(--color-base-300)", "color-mix(in oklab, var(--color-base-content) 70%, transparent)"}
 
   defp badge_style(hue) do
     {background, color} = badge_colors(hue)
@@ -1662,15 +1730,15 @@ defmodule RelayWeb.StoryMapComponents do
   defp tray_style(open) do
     width = if open, do: "214px", else: "42px"
 
-    "flex:0 0 auto;width:#{width};border-right:2px solid oklch(0.88 0.02 255);" <>
-      "background:oklch(0.972 0.005 255);z-index:50;overflow:hidden;"
+    "flex:0 0 auto;width:#{width};border-right:2px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));" <>
+      "background:var(--color-field-hover);z-index:50;overflow:hidden;"
   end
 
   # The inverted mono count pill: white on the neutral dark pill. Shared by the UNMAPPED
   # tray's badge (artboard line ~87) and RE259's collapsed stub badge (line ~414), which are
   # the same pill at the same two paddings — so the tokens exist once.
   defp inverted_count_style(padding) do
-    "font-family:var(--font-mono);font-size:9px;font-weight:600;color:oklch(1 0 0);" <>
-      "background:oklch(0.55 0.02 255);border-radius:20px;padding:#{padding};"
+    "font-family:var(--font-mono);font-size:9px;font-weight:600;color:var(--color-neutral-content);" <>
+      "background:var(--color-neutral);border-radius:20px;padding:#{padding};"
   end
 end

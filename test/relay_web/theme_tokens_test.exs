@@ -41,14 +41,12 @@ defmodule RelayWeb.ThemeTokensTest do
   ]
 
   @pending [
-    "lib/relay_web/components/core_components.ex",
     "lib/relay_web/components/flow_editor_components.ex",
     "lib/relay_web/components/flow_graph_components.ex",
     "lib/relay_web/components/flow_metrics_components.ex",
     "lib/relay_web/components/flow_settings_components.ex",
     "lib/relay_web/components/run_components.ex",
     "lib/relay_web/components/run_status.ex",
-    "lib/relay_web/components/story_map_components.ex",
     "lib/relay_web/live/board_live.ex",
     "lib/relay_web/live/board_runners_live.ex",
     "lib/relay_web/live/board_settings_live.ex",

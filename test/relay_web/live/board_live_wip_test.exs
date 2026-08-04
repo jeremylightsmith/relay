@@ -45,8 +45,8 @@ defmodule RelayWeb.BoardLiveWipTest do
       refute has_element?(view, "#stage-col-5 .stage-wip[data-over]")
 
       style = chip_style(view, "#stage-col-5 .stage-wip")
-      assert style =~ "background:oklch(0.96 0.006 255)"
-      assert style =~ "color:oklch(0.48 0.02 255)"
+      assert style =~ "background:var(--color-field-hover)"
+      assert style =~ "color:color-mix(in oklab, var(--color-base-content) 70%, transparent)"
       assert style =~ "font-family:var(--font-mono)"
     end
 
@@ -60,8 +60,8 @@ defmodule RelayWeb.BoardLiveWipTest do
       assert has_element?(view, "#stage-col-5 .stage-wip[data-over]", "wip 4/3")
 
       style = chip_style(view, "#stage-col-5 .stage-wip")
-      assert style =~ "background:oklch(0.96 0.03 15)"
-      assert style =~ "color:oklch(0.55 0.16 15)"
+      assert style =~ "background:color-mix(in oklab, var(--color-error) 10%, var(--color-base-100))"
+      assert style =~ "color:color-mix(in oklab, var(--color-error) 80%, var(--color-base-content))"
     end
 
     test "no chip renders when wip_limit is nil", %{conn: conn, code: code, user: user} do
@@ -138,7 +138,9 @@ defmodule RelayWeb.BoardLiveWipTest do
 
       assert has_element?(view, "#stage-col-5[data-wip=at]")
       assert chip_style(view, "#stage-col-5") =~ "border:1px solid var(--color-warning)"
-      assert chip_style(view, "#stage-col-5 .stage-wip") =~ "color:oklch(0.52 0.13 65)"
+
+      assert chip_style(view, "#stage-col-5 .stage-wip") =~
+               "color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
     end
 
     test "over the limit the border and chip text turn red", %{conn: conn, code: code, user: user} do
@@ -150,7 +152,9 @@ defmodule RelayWeb.BoardLiveWipTest do
 
       assert has_element?(view, "#stage-col-5[data-wip=over]")
       assert chip_style(view, "#stage-col-5") =~ "border:1px solid var(--color-error)"
-      assert chip_style(view, "#stage-col-5 .stage-wip") =~ "color:oklch(0.55 0.16 15)"
+
+      assert chip_style(view, "#stage-col-5 .stage-wip") =~
+               "color:color-mix(in oklab, var(--color-error) 80%, var(--color-base-content))"
     end
 
     test "with no limit the border stays neutral and no chip renders", %{conn: conn, code: code, user: user} do

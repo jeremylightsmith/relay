@@ -244,16 +244,16 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ "Migrate 40 blog posts"
       assert html =~ "CODE · 62%"
       # card shell — artboard cardVM() full branch, lines ~332-334
-      assert html =~ "background:oklch(0.965 0.028 292)"
-      assert html =~ "border:1px solid oklch(0.9 0.04 292)"
+      assert html =~ "background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100))"
+      assert html =~ "border:1px solid color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100))"
       assert html =~ "border-radius:9px"
       assert html =~ "padding:9px 10px"
       # stage badge — artboard stageColor(), lines ~299-304
-      assert html =~ "background:oklch(0.95 0.035 292)"
-      assert html =~ "color:oklch(0.48 0.14 292)"
+      assert html =~ "background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100))"
+      assert html =~ "color:color-mix(in oklab, var(--color-secondary) 75%, var(--color-base-content))"
       assert html =~ "font-size:8.5px"
       # progress bar — artboard barStyle, line ~346
-      assert html =~ "height:3px;width:62%;background:oklch(0.56 0.16 292)"
+      assert html =~ "height:3px;width:62%;background:var(--color-secondary)"
       # the click contract BoardLive already handles
       assert html =~ ~s(phx-click="select_card")
       assert html =~ ~s(phx-value-ref="RLY1")
@@ -271,11 +271,11 @@ defmodule RelayWeb.StoryMapComponentsTest do
           avatar: :check
         )
 
-      assert html =~ "background:oklch(0.97 0.015 150)"
+      assert html =~ "background:color-mix(in oklab, var(--color-success) 10%, var(--color-base-100))"
       assert html =~ "opacity:0.8"
-      assert html =~ "border-left:3px solid oklch(0.6 0.13 155)"
+      assert html =~ "border-left:3px solid var(--color-success)"
       assert html =~ "✓"
-      refute html =~ "oklch(0.56 0.16 292)"
+      refute html =~ "story-map-card-bar"
     end
 
     test "a 0% card renders no bar — the artboard's `hasBar: full && !!c.pct`, line ~386" do
@@ -304,7 +304,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
           avatar: :bang
         )
 
-      assert html =~ "background:oklch(0.72 0.13 65)"
+      assert html =~ "background:var(--color-warning)"
       assert html =~ "!"
     end
   end
@@ -337,10 +337,14 @@ defmodule RelayWeb.StoryMapComponentsTest do
       # `last_of_activity?` branches deleted, because the corner, lane rail and band all emit
       # the strong border unconditionally.
       no_task = style_of(html, "#story-map-no-task-1")
-      assert no_task =~ "border-right:1px dashed oklch(0.86 0.01 255)"
-      assert no_task =~ "background:oklch(0.978 0.004 255)"
 
-      assert style_of(html, "#story-map-task-10") =~ "border-right:2px solid oklch(0.83 0.02 255)"
+      assert no_task =~
+               "border-right:1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100))"
+
+      assert no_task =~ "background:var(--color-base-200)"
+
+      assert style_of(html, "#story-map-task-10") =~
+               "border-right:2px solid color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100))"
     end
 
     test "an activity with no tasks: its one column is the activity boundary, so strong" do
@@ -350,12 +354,12 @@ defmodule RelayWeb.StoryMapComponentsTest do
       html = grid_html(no_task_cards_grid())
 
       assert style_of(html, "#story-map-no-task-1") =~
-               "border-right:2px solid oklch(0.83 0.02 255)"
+               "border-right:2px solid color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100))"
 
       # The body cell stays dashed — the artboard's cell branch (line ~524) has no such
       # condition.
       assert style_of(html, "#story-map-cell-nt-1-r-100") =~
-               "border-right:1px dashed oklch(0.86 0.01 255)"
+               "border-right:1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100))"
     end
 
     test "each card renders in the cell its assignment implies" do
@@ -402,7 +406,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ ~s(id="story-map-tray-card-RLY7")
       assert html =~ ~s(id="story-map-tray-card-RLY8")
       # tray card — artboard line ~472
-      assert html =~ "border-left:3px solid oklch(0.62 0.12"
+      assert html =~ "border-left:3px solid var(--color-secondary)"
       assert html =~ ~s(id="story-map-tray-toggle")
       assert html =~ ~s(phx-click="toggle_story_map_tray")
     end
@@ -472,7 +476,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
       button = style_of(html, "#story-map-add-activity")
       assert button =~ "width:34px;height:34px"
       assert button =~ "border-radius:9px"
-      assert button =~ "border:1px dashed oklch(0.82 0.01 255)"
+      assert button =~ "border:1px dashed color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100))"
       assert button =~ "font-size:15px"
       assert html =~ ~s(title="Add activity")
       assert html =~ ~s(phx-click="story_map_add_activity")
@@ -483,7 +487,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
       # Two columns of grid content, so the add-activity cell is grid-column 4 (1 = the rail).
       assert html =~ "grid-column:4;grid-row:1 / span 2;position:sticky;top:0;z-index:22;"
-      assert html =~ "background:oklch(0.965 0.006 255);border-bottom:1px solid oklch(0.92 0.006 255)"
+      assert html =~ "background:var(--color-field-hover);border-bottom:1px solid var(--color-base-300)"
     end
 
     test "with the :activity draft open the column widens to 156px and the ＋ becomes the input" do
@@ -503,10 +507,10 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
       # One lane, so the add-release row is grid-row 4 (artboard addRelStyle, line ~512).
       assert html =~ "grid-column:1;grid-row:4;position:sticky;left:0;z-index:16;"
-      assert html =~ "border-top:1px solid oklch(0.92 0.006 255)"
+      assert html =~ "border-top:1px solid var(--color-base-300)"
 
       button = style_of(html, "#story-map-add-release")
-      assert button =~ "border:1px dashed oklch(0.85 0.008 255)"
+      assert button =~ "border:1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100))"
       assert button =~ "border-radius:8px"
       assert button =~ "font-size:11.5px;font-weight:600"
       assert button =~ "padding:4px 9px;width:100%"
@@ -528,7 +532,9 @@ defmodule RelayWeb.StoryMapComponentsTest do
     test "the activity header's second line carries a spacer and a 12px ＋ (artboard iconStyle)" do
       html = grid_html()
 
-      assert style_of(html, "#story-map-add-task-1") == "font-size:12px;color:oklch(0.55 0.02 255);"
+      assert style_of(html, "#story-map-add-task-1") ==
+               "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+
       assert html =~ ~s(title="Add task")
       assert html =~ ~s(phx-click="story_map_add_task")
       assert html =~ ~s(phx-value-activity-id="1")
@@ -565,8 +571,11 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ ~s(value="Watch it live")
 
       cell = style_of(html, "#story-map-cell-draft-1-r-100")
-      assert cell =~ "border-right:1px dashed oklch(0.86 0.01 255)"
-      assert cell =~ "background:oklch(0.978 0.004 255)"
+
+      assert cell =~
+               "border-right:1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100))"
+
+      assert cell =~ "background:var(--color-base-200)"
     end
 
     test "on an activity with nothing under it the draft replaces the ＋ Add task placeholder" do
@@ -603,7 +612,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
       # Artboard inputStyle, line ~404.
       style = style_of(html, "#story-map-draft-input")
-      assert style =~ "border:1.5px solid oklch(0.6 0.14 250)"
+      assert style =~ "border:1.5px solid var(--color-primary)"
       assert style =~ "border-radius:5px"
       assert style =~ "padding:2px 5px"
       assert style =~ "font-size:12px;font-weight:600"
@@ -689,10 +698,10 @@ defmodule RelayWeb.StoryMapComponentsTest do
       style = add |> LazyHTML.attribute("style") |> List.first()
 
       # artboard addBtnStyle, line ~527
-      assert style =~ "border:1px dashed oklch(0.88 0.008 255)"
+      assert style =~ "border:1px dashed color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100))"
       assert style =~ "border-radius:8px"
       assert style =~ "padding:7px"
-      assert style =~ "color:oklch(0.72 0.02 255)"
+      assert style =~ "color:color-mix(in oklab, var(--color-base-content) 40%, transparent)"
       assert LazyHTML.attribute(add, "phx-click") == ["compose_cell"]
       assert LazyHTML.attribute(add, "phx-value-column") == ["t:10"]
       assert LazyHTML.attribute(add, "phx-value-lane") == ["r:100"]
@@ -739,7 +748,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
       style = form |> LazyHTML.attribute("style") |> List.first()
 
       # artboard composer, lines ~248-252
-      assert style =~ "border:1.5px solid oklch(0.6 0.14 250)"
+      assert style =~ "border:1.5px solid var(--color-primary)"
       assert style =~ "border-radius:9px"
       assert style =~ "padding:7px 9px"
       assert LazyHTML.attribute(form, "phx-submit") == ["create_card_in_cell"]
@@ -760,7 +769,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ ~s(name="column")
       assert html =~ ~s(name="lane")
       # the blue + glyph, artboard line ~250
-      assert html =~ "color:oklch(0.6 0.14 250);font-size:14px;line-height:1"
+      assert html =~ "color:var(--color-primary);font-size:14px;line-height:1"
     end
 
     test "the cell is still the drop zone Task 2 defined" do
@@ -788,9 +797,9 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ ~s(href="/board/my-board")
       assert html =~ ~s(href="/board/my-board/story-map")
       # container + active segment — artboard lines ~37-39
-      assert html =~ "background:oklch(0.955 0.006 255);border-radius:8px;padding:2px"
-      assert html =~ "box-shadow:0 1px 2px oklch(0 0 0/0.08)"
-      assert html =~ "color:oklch(0.32 0.02 255)"
+      assert html =~ "background:var(--color-field-hover);border-radius:8px;padding:2px"
+      assert html =~ "box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 8%, transparent)"
+      assert html =~ "color:color-mix(in oklab, var(--color-base-content) 90%, transparent)"
       assert html =~ ~s(aria-current="page")
     end
 
@@ -842,16 +851,20 @@ defmodule RelayWeb.StoryMapComponentsTest do
       html = toolbar(:compact, false)
 
       assert style_of(html, "#story-map-zoom") ==
-               "display:flex;background:oklch(0.955 0.006 255);border-radius:8px;padding:3px;"
+               "display:flex;background:var(--color-field-hover);border-radius:8px;padding:3px;"
 
-      assert style_of(html, "#story-map-zoom-compact") =~ "background:oklch(1 0 0);"
-      assert style_of(html, "#story-map-zoom-compact") =~ "color:oklch(0.3 0.02 255);"
+      assert style_of(html, "#story-map-zoom-compact") =~ "background:var(--color-base-100);"
+
+      assert style_of(html, "#story-map-zoom-compact") =~
+               "color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
 
       assert style_of(html, "#story-map-zoom-compact") =~
                "font-size:12px;font-weight:600;padding:4px 12px;border-radius:6px;"
 
       assert style_of(html, "#story-map-zoom-map") =~ "background:transparent;"
-      assert style_of(html, "#story-map-zoom-map") =~ "color:oklch(0.5 0.02 255);"
+
+      assert style_of(html, "#story-map-zoom-map") =~
+               "color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
     end
 
     test "aria-pressed marks exactly the active segment, for each zoom" do
@@ -874,11 +887,14 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
       assert style_of(off, "#story-map-hide-tasks") ==
                "font-size:12px;font-weight:600;padding:5px 11px;border-radius:8px;" <>
-                 "color:oklch(0.45 0.02 255);background:oklch(1 0 0);border:1px solid oklch(0.9 0.006 255);"
+                 "color:color-mix(in oklab, var(--color-base-content) 75%, transparent);background:var(--color-base-100);" <>
+                 "border:1px solid var(--color-field-border);"
 
       assert style_of(on, "#story-map-hide-tasks") ==
                "font-size:12px;font-weight:600;padding:5px 11px;border-radius:8px;" <>
-                 "color:oklch(0.47 0.14 292);background:oklch(0.95 0.035 292);border:1px solid oklch(0.85 0.06 292);"
+                 "color:color-mix(in oklab, var(--color-secondary) 70%, var(--color-base-content));" <>
+                 "background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));" <>
+                 "border:1px solid color-mix(in oklab, var(--color-secondary) 35%, var(--color-base-100));"
 
       assert off =~ "Hide tasks"
       assert attr_of(off, "#story-map-hide-tasks", "aria-pressed") == "false"
@@ -892,8 +908,8 @@ defmodule RelayWeb.StoryMapComponentsTest do
       html = card_html(:map, [])
 
       assert style_of(html, "#story-map-card-RLY1") ==
-               "font-size:9.5px;line-height:1.35;color:oklch(0.4 0.05 292);" <>
-                 "border-left:2px solid oklch(0.7 0.1 292);padding-left:5px;cursor:grab;"
+               "font-size:9.5px;line-height:1.35;color:color-mix(in oklab, var(--color-secondary) 45%, var(--color-base-content));" <>
+                 "border-left:2px solid color-mix(in oklab, var(--color-secondary) 70%, var(--color-base-100));padding-left:5px;cursor:grab;"
 
       # No ref row, no badge, no bar — the artboard renders only `{{ card.title }}` (line ~216).
       refute html =~ "justify-content:space-between"
@@ -905,17 +921,19 @@ defmodule RelayWeb.StoryMapComponentsTest do
       html = card_html(:map, hue: :green, done: true, badge: "DONE", avatar: :check)
 
       style = style_of(html, "#story-map-card-RLY1")
-      assert style =~ "color:oklch(0.55 0.02 255);"
-      assert style =~ "border-left:2px solid oklch(0.75 0.03 155);"
-      assert style =~ "text-decoration:line-through;text-decoration-color:oklch(0.75 0.05 155);"
+      assert style =~ "color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+      assert style =~ "border-left:2px solid color-mix(in oklab, var(--color-success) 65%, var(--color-base-100));"
+
+      assert style =~
+               "text-decoration:line-through;text-decoration-color:color-mix(in oklab, var(--color-success) 65%, var(--color-base-100));"
     end
 
     test "Compact is a white box with a 3px hued left border, 6px radius and no meta" do
       html = card_html(:compact, [])
 
       assert style_of(html, "#story-map-card-RLY1") ==
-               "background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);" <>
-                 "border-left:3px solid oklch(0.62 0.12 292);border-radius:6px;padding:6px 8px;" <>
+               "background:var(--color-base-100);border:1px solid var(--color-base-300);" <>
+                 "border-left:3px solid var(--color-secondary);border-radius:6px;padding:6px 8px;" <>
                  "display:flex;flex-direction:column;cursor:grab;"
 
       assert html =~ "font-size:11.5px;line-height:1.3;font-weight:500;"
@@ -928,7 +946,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
       html = card_html(:compact, hue: :green, done: true, badge: "DONE", avatar: :check)
 
       style = style_of(html, "#story-map-card-RLY1")
-      assert style =~ "border-left:3px solid oklch(0.6 0.13 155);"
+      assert style =~ "border-left:3px solid var(--color-success);"
       assert style =~ "opacity:0.82;"
     end
 
@@ -984,9 +1002,9 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
       assert style_of(html, "#story-map-merged-1") ==
                "grid-column:2;grid-row:2;position:sticky;top:56px;z-index:20;" <>
-                 "background:oklch(0.985 0.004 255);border-right:2px solid oklch(0.83 0.02 255);" <>
-                 "border-bottom:2px solid oklch(0.83 0.02 255);padding:7px 9px;font-size:10.5px;" <>
-                 "color:oklch(0.6 0.02 255);display:flex;align-items:center;gap:6px;"
+                 "background:var(--color-base-200);border-right:2px solid color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100));" <>
+                 "border-bottom:2px solid color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100));padding:7px 9px;font-size:10.5px;" <>
+                 "color:color-mix(in oklab, var(--color-base-content) 50%, transparent);display:flex;align-items:center;gap:6px;"
     end
 
     test "it is not a rename affordance, not a drag grip and not an add-task button" do
@@ -1092,12 +1110,12 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ "background:#{CoreComponents.identity_color("dana@acme.co")}"
       assert html =~ "background:#{CoreComponents.identity_color("mara@acme.co")}"
       # white initials at weight 600
-      assert html =~ "color:oklch(1 0 0)"
+      assert html =~ "color:var(--color-neutral-content)"
       assert html =~ "font-weight:600"
       assert html =~ ">DK<"
       assert html =~ ">ML<"
       # 2px white border on every circle; -8px tuck on every circle AFTER the first
-      assert html =~ "border-2 border-white"
+      assert html =~ "border-2 border-base-100"
       assert html =~ "-ml-2"
     end
 
@@ -1118,8 +1136,8 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ ~s(id="story-map-presence-overflow")
       assert html =~ "+3"
       # the board's existing overflow-chip colours, at the stack's 26px
-      assert html =~ "width:26px;height:26px;border-radius:50%;background:oklch(0.94 0.006 255)"
-      assert html =~ "border:2px solid oklch(1 0 0);margin-left:-8px;"
+      assert html =~ "width:26px;height:26px;border-radius:50%;background:var(--color-base-300)"
+      assert html =~ "border:2px solid var(--color-base-100);margin-left:-8px;"
     end
 
     test "exactly five people show five faces and no chip" do

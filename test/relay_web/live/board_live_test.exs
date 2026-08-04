@@ -2268,10 +2268,10 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(view, "#timeline-comment-#{q.id}", "QUESTION")
       assert has_element?(view, "#timeline-comment-#{cr.id}", "CHANGES REQUESTED")
-      assert html =~ "oklch(0.52 0.11 65)"
-      assert html =~ "oklch(0.55 0.13 65)"
+      assert html =~ "color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
+      assert html =~ "color-mix(in oklab, var(--color-warning) 65%, var(--color-base-content))"
       # tinted bubble for tagged comments
-      assert html =~ "oklch(0.88 0.06 75)"
+      assert html =~ "color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100))"
     end
 
     test "the activity log lists entries newest first", %{conn: conn, backlog: backlog, user: user} do
@@ -2357,7 +2357,7 @@ defmodule RelayWeb.BoardLiveTest do
       strip_html = view |> element("#stage-strip-#{spec.id}") |> render()
       assert strip_html =~ "width:44px"
       assert strip_html =~ "writing-mode:vertical-rl"
-      assert strip_html =~ "border:1px dashed oklch(0.90 0.006 255)"
+      assert strip_html =~ "border:1px dashed var(--color-field-border)"
     end
 
     test "the strip is a DnD drop zone carrying its stage id", %{conn: conn, spec: spec, user: user} do
@@ -2459,7 +2459,7 @@ defmodule RelayWeb.BoardLiveTest do
       strip_html = view |> element("#sublane-#{review.id}-strip") |> render()
       assert strip_html =~ "flex:0 0 34px"
       assert strip_html =~ "writing-mode:vertical-rl"
-      assert strip_html =~ "oklch(0.52 0.12 65)"
+      assert strip_html =~ "color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
     end
 
     test "a sub-lane with a card renders expanded", %{conn: conn, review: review, board: board} do

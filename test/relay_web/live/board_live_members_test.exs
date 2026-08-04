@@ -38,9 +38,9 @@ defmodule RelayWeb.BoardLiveMembersTest do
     view |> element("#card-drawer-reassign-toggle") |> render_click()
     row = view |> element("#card-drawer-assign-user-#{user.id} span[style*='border-radius:50%']") |> render()
 
-    # matches `docs/designs/Relay Board.dc.html` avatarFor/mkAvatar (lines ~1166, ~1194):
-    # oklch(0.62 0.13 <hue>), never 0.15
-    assert row =~ "background:oklch(0.62 0.13 "
+    # matches `docs/designs/Relay Board.dc.html` avatarFor/mkAvatar (lines ~1166, ~1194) via
+    # RelayWeb.CoreComponents.identity_color/1 (RE237: hsl(), not a token)
+    assert row =~ "background:hsl("
   end
 
   test "picking a member assigns them as the active owner", %{conn: conn, user: user} do

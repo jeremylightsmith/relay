@@ -751,7 +751,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       html = view |> element(button) |> render()
       assert html =~ "Move 3 cards out of this activity before deleting it"
       # The artboard's `delOff` (line ~398), not the enabled `delStyle`.
-      assert html =~ "color:oklch(0.82 0.01 255);cursor:not-allowed;"
+      assert html =~ "color:color-mix(in oklab, var(--color-base-content) 25%, transparent);cursor:not-allowed;"
 
       render_click(view, "story_map_delete", %{"kind" => "activity", "id" => to_string(ctx.onboard.id)})
 
@@ -782,7 +782,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       refute has_element?(view, "#{button}[disabled]")
       assert view |> element(button) |> render() =~ "Delete task"
       # The artboard's enabled `delStyle` (line ~397).
-      assert view |> element(button) |> render() =~ "color:oklch(0.62 0.03 25);"
+      assert view |> element(button) |> render() =~ "color:var(--color-error);"
 
       view |> element(button) |> render_click()
 
