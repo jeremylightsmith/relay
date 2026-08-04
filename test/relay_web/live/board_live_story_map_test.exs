@@ -307,7 +307,9 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
     test "unassign_card returns a mapped card to the tray and expands a collapsed tray",
          %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
 
       view |> element("#story-map-tray-toggle") |> render_click()
       refute has_element?(view, "#story-map-tray ##{tray_dom_id(ctx.board, ctx.dashboards)}")
@@ -321,6 +323,12 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       cleared = Cards.get_card_by_ref(ctx.board, Cards.ref(ctx.board, ctx.audit))
       assert cleared.story_map_position == nil
+
+      # RE257 — the tray is a SHARED view setting, so the re-expand goes through put_view/3:
+      # it is persisted and every other viewer follows. An optimistic local assign here would
+      # leave B collapsed and the row saying false, which is the divergence this pins against.
+      assert Repo.get!(Schemas.Board, ctx.board.id).story_map_view == %{"tray_open" => true}
+      assert has_element?(view_b, "#story-map-tray-toggle[aria-expanded='true']")
     end
 
     test "unmapping still works once every card is placed", %{conn: conn} = ctx do

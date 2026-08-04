@@ -35,8 +35,9 @@ defmodule RelayWeb.BoardLive do
 
   RE260 adds the map's two view-only chrome controls: `:story_map_zoom` (`:map` | `:compact` |
   `:full`, defaulting to `:compact`) and `:story_map_hide_tasks`. Both are socket assigns only —
-  they reset on reload exactly like `:story_map_tray_open`, and `refresh_story_map/1` never
-  touches them, so another tab's broadcast cannot reset your view. `:story_map_hide_tasks` is
+  unlike `:story_map_tray_open`, which RE257 moved onto the board-wide shared view, these two
+  are per socket and reset on reload, and `refresh_story_map/1` never touches them, so another
+  tab's broadcast cannot reset your view. `:story_map_hide_tasks` is
   the sixth argument to `StoryMapGrid.build/6`; `:story_map_zoom` reaches only the renderer.
   Opening a `{:task, _}` draft turns Hide tasks off, because a new task column has nowhere to
   render while the activity is merged.
@@ -861,9 +862,10 @@ defmodule RelayWeb.BoardLive do
       # on this socket, so one form assign is the whole state.
       |> assign(:story_map_compose, nil)
       # RE260 — the two view-only chrome assigns. Compact is the DEFAULT face (a deliberate
-      # change from RE264's Full). Both are socket-only, exactly like :story_map_tray_open —
-      # no URL param, no localStorage — and both are deliberately untouched by
-      # refresh_story_map/1, so another tab's broadcast never resets your view.
+      # change from RE264's Full). Both are socket-only — no URL param, no localStorage — and
+      # deliberately untouched by refresh_story_map/1, so another tab's broadcast never resets
+      # your view. NOT like :story_map_tray_open, which RE257 moved onto the board-wide shared
+      # view (StoryMap.view/1); RE259/RE260 are where these two would join it.
       |> assign(:story_map_zoom, :compact)
       |> assign(:story_map_hide_tasks, false)
       |> assign_stalled()
@@ -1227,7 +1229,14 @@ defmodule RelayWeb.BoardLive do
          {:ok, _cleared} <- StoryMap.unassign_card(card) do
       # The artboard's `onTrayDrop` sets `trayOpen:true` (line ~565): a drop onto the collapsed
       # 42px rail expands it, so the card you just unmapped is visible where it landed.
-      {:noreply, assign(socket, :story_map_tray_open, true)}
+      #
+      # RE257 — the tray is a SHARED view setting, so this writes through put_view/3 and this
+      # socket re-renders from the write's own broadcast, exactly like
+      # "toggle_story_map_tray". An optimistic local assign here would be a SECOND writer of
+      # one piece of state: the dropper's tray would open while every other viewer's (and the
+      # persisted row) stayed collapsed, and nothing would ever reconcile them.
+      _ = StoryMap.put_view(socket.assigns.board, "tray_open", true)
+      {:noreply, socket}
     else
       _other -> {:noreply, socket}
     end
