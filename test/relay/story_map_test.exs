@@ -769,7 +769,8 @@ defmodule Relay.StoryMapTest do
     test "view_defaults/0 is the one definition of the shared key set" do
       # RE257 — every setting that drives grid GEOMETRY lives here, because raw-pixel cursors
       # are only sound while every viewer renders the same grid. jsonb, so zoom is a string.
-      # RE259 adds the four filter/focus keys: two lists and one nullable id.
+      # RE259 adds the four filter/focus keys: two lists and one nullable id. RE276 adds the
+      # eighth, and it is the first key whose default is ON — the map opens filtered.
       assert StoryMap.view_defaults() == %{
                "tray_open" => true,
                "zoom" => "compact",
@@ -777,8 +778,49 @@ defmodule Relay.StoryMapTest do
                "owner_filter" => [],
                "needs_input_filter" => false,
                "collapsed" => [],
-               "focus" => nil
+               "focus" => nil,
+               "hide_complete" => true
              }
+    end
+
+    test "filter_keys/0 is the FILTER subset — not collapse, focus, zoom, tray or hide_tasks" do
+      assert StoryMap.filter_keys() == ["owner_filter", "needs_input_filter", "hide_complete"]
+
+      # Every filter key is a real view key: `Clear` merges Map.take(view_defaults(), …) and a
+      # key outside the set would be refused by merge_view/2 at run time instead of here.
+      for key <- StoryMap.filter_keys() do
+        assert Map.has_key?(StoryMap.view_defaults(), key)
+      end
+
+      # RE259 drew this line and it stands: these narrow or resize the view, they do not filter.
+      refute "collapsed" in StoryMap.filter_keys()
+      refute "focus" in StoryMap.filter_keys()
+      refute "zoom" in StoryMap.filter_keys()
+      refute "hide_tasks" in StoryMap.filter_keys()
+      refute "tray_open" in StoryMap.filter_keys()
+    end
+
+    test "filters_active?/1 compares against the DEFAULTS, so hide-complete OFF is active" do
+      defaults = StoryMap.view_defaults()
+
+      refute StoryMap.filters_active?(defaults)
+
+      # With a default-ON filter, "off" and "default" are no longer the same place.
+      assert StoryMap.filters_active?(%{defaults | "hide_complete" => false})
+      assert StoryMap.filters_active?(%{defaults | "owner_filter" => ["u:3"]})
+      assert StoryMap.filters_active?(%{defaults | "needs_input_filter" => true})
+
+      # Collapse and focus narrow the view but are not filters — Clear does not clear them.
+      refute StoryMap.filters_active?(%{defaults | "collapsed" => [7]})
+      refute StoryMap.filters_active?(%{defaults | "focus" => 7})
+      refute StoryMap.filters_active?(%{defaults | "hide_tasks" => true})
+    end
+
+    test "toggle_view/2 flips hide_complete off its default and back", %{board: board} do
+      # The key's default is a boolean, so it goes through the same committed-row toggle every
+      # other boolean key does — no new writer.
+      assert {:ok, %{"hide_complete" => false}} = StoryMap.toggle_view(board, "hide_complete")
+      assert {:ok, %{"hide_complete" => true}} = StoryMap.toggle_view(board, "hide_complete")
     end
 
     test "view/1 merges the defaults under a board that has never been written", %{board: board} do

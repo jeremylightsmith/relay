@@ -434,6 +434,18 @@ defmodule Relay.BoardsTest do
       stages = Boards.list_stages(board)
       assert Boards.top_level_done_stage_ids(stages) == [done.id]
     end
+
+    test "returns EVERY top-level complete stage, not just the terminal one" do
+      # RE276's filter hides all of them, unlike `Cards.done?/2` which is the terminal stage
+      # only — a board with `Shipped` + `Archive` is where the two predicates diverge.
+      board = insert(:board)
+      _backlog = insert(:stage, board: board, position: 1, category: :unstarted)
+      shipped = insert(:stage, board: board, name: "Shipped", position: 2, category: :complete)
+      archive = insert(:stage, board: board, name: "Archive", position: 3, category: :complete)
+
+      stages = Boards.list_stages(board)
+      assert Enum.sort(Boards.top_level_done_stage_ids(stages)) == Enum.sort([shipped.id, archive.id])
+    end
   end
 
   describe "intake_stage/1" do

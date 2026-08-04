@@ -40,6 +40,7 @@ The board's **shared story-map view settings** are a closed key set of the same 
 | `needs_input_filter` | `false` | boolean | `toggle_view/2` |
 | `collapsed` | `[]` | list of `story_activity` ids | `toggle_view_member/4` |
 | `focus` | `nil` | one `story_activity` id or nil | `merge_view/2` |
+| `hide_complete` | `true` | boolean | `toggle_view/2` |
 
 — `view/1` drops any stored key outside the set, and every writer refuses one. The **shape
 of a key's default is load-bearing**: `toggle_view/2` refuses a key whose default is not a
@@ -49,9 +50,17 @@ with `true` and break every viewer's map. All three writers compose the single
 `merge_view/2`, which validates every key, re-reads the committed row, writes once and
 broadcasts once — so a multi-key change ("expand this activity **and** turn Hide tasks
 off") is atomic. They live in the `boards.story_map_view` jsonb column — a bag rather than
-a column per setting, which is why RE259 (filter & focus) added four keys with no
-migration. Values are jsonb, so `zoom` is stored as a string and read back through
-`RelayWeb.StoryMapComponents.parse_zoom/1`.
+a column per setting, which is why RE259 (filter & focus) added four keys and RE276
+(`hide_complete`) an eighth, all with no migration. Values are jsonb, so `zoom` is stored as
+a string and read back through `RelayWeb.StoryMapComponents.parse_zoom/1`.
+
+Three of the eight are **filters** — `Relay.StoryMap.filter_keys/0` owns that subset
+(`owner_filter`, `needs_input_filter`, `hide_complete`), so `Clear` resets exactly them by
+merging `Map.take(view_defaults(), filter_keys())` rather than re-typing a literal.
+`hide_complete` defaults to **`true`**, which is why "is a filter on" is
+`Relay.StoryMap.filters_active?/1` — *do these keys differ from the defaults* — rather than
+"is any of them truthy": with a default-on filter, "off" and "default" are different places
+and the default is the one `Clear` returns to.
 
 ## Card status
 
