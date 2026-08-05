@@ -45,6 +45,21 @@ defmodule RelayWeb.TalkComponentsTest do
     assert html =~ "line-height:19px"
   end
 
+  # RE268 quality review — `talk_seed/1`'s toggle button carried a hardcoded id, so a page
+  # rendering more than one `talk_pane` (the storybook page renders four) emitted duplicate DOM
+  # ids. Defaults to the old literal for standalone (test/story) use, but `talk_pane` overrides
+  # it the same way `-transcript` is already derived from `@id`.
+  test "the seed toggle defaults its id but accepts an override" do
+    default = render_component(&TalkComponents.talk_seed/1, ref: "DE3", open?: false)
+    assert default =~ ~s(id="talk-seed-toggle")
+
+    overridden =
+      render_component(&TalkComponents.talk_seed/1, ref: "DE3", open?: false, id: "talk-pane-seed-toggle")
+
+    assert overridden =~ ~s(id="talk-pane-seed-toggle")
+    refute overridden =~ ~s(id="talk-seed-toggle")
+  end
+
   test "the collapsed seed line reads `▸ seeded with REF · summary`" do
     html =
       render_component(&TalkComponents.talk_seed/1,
@@ -101,6 +116,27 @@ defmodule RelayWeb.TalkComponentsTest do
     assert html =~ "scrollback kept · esc back to the card"
   end
 
+  # RE268 quality review — the artboard sets `font-size:11px` on the title bar and `10.5px` on
+  # the footer copy and slash chips with NO line-height override, so each inherits the
+  # surrounding normal line-height. Concatenating `mono()` (11.5px/19px) and only overriding
+  # font-size left a stray `line-height:19px` on all three — never visible as a rendering bug at
+  # this line-height, but a real drift from the pinned artboard values.
+  test "the title bar, footer copy and slash chips carry no stray 19px line-height" do
+    html = render_component(&TalkComponents.talk_pane/1, pane(%{}))
+
+    [title_tag] = Regex.run(~r/<span[^>]*>\s*relay talk DE3/, html)
+    assert title_tag =~ "font-size:11px"
+    refute title_tag =~ "line-height:19px"
+
+    [footer_tag] = Regex.run(~r/<span[^>]*>\s*scrollback kept/, html)
+    assert footer_tag =~ "font-size:10.5px"
+    refute footer_tag =~ "line-height:19px"
+
+    [chip_tag] = Regex.run(~r/<button[^>]*>\s*fix it/, html)
+    assert chip_tag =~ "font-size:10.5px"
+    refute chip_tag =~ "line-height:19px"
+  end
+
   test "the state chip and the thinking indicator only appear while busy" do
     idle = render_component(&TalkComponents.talk_pane/1, pane(%{}))
     busy = render_component(&TalkComponents.talk_pane/1, pane(%{busy?: true}))
@@ -113,12 +149,36 @@ defmodule RelayWeb.TalkComponentsTest do
     assert busy =~ "thinking…"
   end
 
+  # RE268 quality review — `v5pulse` is an artboard-only keyframe (never shipped to
+  # assets/css/app.css), so the busy indicator rendered static. The app already ships the
+  # identical keyframe as `relaypulse` (assets/css/app.css:666, mirrored into storybook.css) and
+  # uses it a few hundred lines away in this same drawer (core_components.ex health chip).
+  test "the thinking indicator pulses with the app's shared keyframe, not the artboard's" do
+    busy = render_component(&TalkComponents.talk_pane/1, pane(%{busy?: true}))
+
+    assert busy =~ "animation:relaypulse 1.2s ease-in-out infinite"
+    refute busy =~ "v5pulse"
+  end
+
   test "the send control becomes Stop while a turn is in flight" do
     idle = render_component(&TalkComponents.talk_pane/1, pane(%{}))
     busy = render_component(&TalkComponents.talk_pane/1, pane(%{busy?: true}))
 
     refute idle =~ "talk_stop"
     assert busy =~ "talk_stop"
+  end
+
+  # RE268 quality review — `talk-composer`, `talk-stop` and `talk-seed-toggle` were hardcoded,
+  # even though `talk_pane/1` takes an `id` and already derives `-transcript` from it. The
+  # storybook page renders four `talk_pane` variations on one page with distinct `id`s
+  # specifically to catch this: without deriving, each of those three ids would repeat 3-4 times.
+  test "the composer, stop button and seed toggle derive their ids from the pane's id" do
+    idle = render_component(&TalkComponents.talk_pane/1, pane(%{id: "talk-pane-2"}))
+    busy = render_component(&TalkComponents.talk_pane/1, pane(%{id: "talk-pane-2", busy?: true}))
+
+    assert idle =~ ~s(id="talk-pane-2-composer")
+    assert idle =~ ~s(id="talk-pane-2-seed-toggle")
+    assert busy =~ ~s(id="talk-pane-2-stop")
   end
 
   test "the slash-chip row is the mockup's five chips" do

@@ -1021,10 +1021,7 @@ defmodule RelayWeb.BoardLive do
       |> stream_configure(:conversation, dom_id: &conversation_dom_id/1)
       |> stream_configure(:activity, dom_id: &activity_dom_id/1)
       |> stream_configure(:talk_events, dom_id: &"talk-event-#{&1.id}")
-      |> assign(:talk_session, nil)
-      |> assign(:talk_active_turn, nil)
-      |> assign(:talk_seed_open?, false)
-      |> stream(:talk_events, [], reset: true)
+      |> reset_talk()
 
     socket =
       Enum.reduce(board.stages, socket, fn stage, acc ->
@@ -3897,11 +3894,16 @@ defmodule RelayWeb.BoardLive do
     case Talk.post_message(card, socket.assigns.current_scope.user, text) do
       {:ok, turn} ->
         session = Talk.session_for_card(card)
+        # RE268 quality review — insert just the one new line instead of re-streaming the whole
+        # transcript (`Talk.events/2` defaults to a 500-event fetch): `post_message/3` just
+        # appended exactly one `client_seq: 0` user event, so it is the newest (highest-`seq`)
+        # row, which `limit: 1` returns.
+        [event] = Talk.events(session, limit: 1)
 
         socket
         |> assign(:talk_session, session)
         |> assign(:talk_active_turn, turn)
-        |> stream(:talk_events, Talk.events(session), reset: true)
+        |> stream_insert(:talk_events, event)
 
       # A blank draft and "one turn in flight at a time" are both silent no-ops: the composer
       # already prevents the empty case, and refusing a second turn is a UI-less rule since Stop
@@ -3978,12 +3980,9 @@ defmodule RelayWeb.BoardLive do
           |> close_header_popovers()
           |> assign(:card_runs, [])
           |> assign(:drawer_tab, :detail)
-          |> assign(:talk_session, nil)
-          |> assign(:talk_active_turn, nil)
-          |> assign(:talk_seed_open?, false)
+          |> reset_talk()
           |> stream_notes([])
           |> stream(:activity, [], reset: true)
-          |> stream(:talk_events, [], reset: true)
 
         maybe_start_body_load(socket, card, ref, connected?(socket))
 
@@ -4020,15 +4019,23 @@ defmodule RelayWeb.BoardLive do
           reject_open: false,
           reject_form: nil,
           reject_error: nil,
-          body_loading?: false,
-          talk_session: nil,
-          talk_active_turn: nil,
-          talk_seed_open?: false
+          body_loading?: false
         )
+        |> reset_talk()
         |> stream_notes([])
         |> stream(:activity, [], reset: true)
-        |> stream(:talk_events, [], reset: true)
     end
+  end
+
+  # RE268 — the four Talk assigns that describe "no Talk state is loaded for this card"; used at
+  # mount and both branches of assign_selected_card/2 so a fourth Talk assign can never be added
+  # to two of those sites and missed on the third.
+  defp reset_talk(socket) do
+    socket
+    |> assign(:talk_session, nil)
+    |> assign(:talk_active_turn, nil)
+    |> assign(:talk_seed_open?, false)
+    |> stream(:talk_events, [], reset: true)
   end
 
   # RLY-227 — the refs the drawer's prev/next chevrons + swipe navigate to, from

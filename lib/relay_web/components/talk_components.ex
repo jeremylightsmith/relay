@@ -37,6 +37,10 @@ defmodule RelayWeb.TalkComponents do
     """
   end
 
+  attr :id, :string,
+    default: "talk-seed-toggle",
+    doc: "the toggle button's id — `talk_pane/1` derives it from its own `@id`, the way `-transcript` already is"
+
   attr :ref, :string, required: true
   attr :summary, :string, default: ""
   attr :fields, :list, default: []
@@ -48,7 +52,7 @@ defmodule RelayWeb.TalkComponents do
       <span style={mono() <> "color:oklch(0.52 0.02 262);"}>relay talk {@ref}</span>
       <button
         type="button"
-        id="talk-seed-toggle"
+        id={@id}
         phx-click="talk_toggle_seed"
         style={"text-align:left;background:transparent;border:none;padding:0;" <> mono() <> "color:oklch(0.62 0.09 150);"}
       >
@@ -93,7 +97,7 @@ defmodule RelayWeb.TalkComponents do
           <span style="width:9px;height:9px;border-radius:50%;background:oklch(0.75 0.13 85);"></span>
           <span style="width:9px;height:9px;border-radius:50%;background:oklch(0.7 0.14 145);"></span>
         </span>
-        <span style={mono() <> "color:oklch(0.66 0.02 262);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"}>
+        <span style={mono_family() <> "font-size:11px;color:oklch(0.66 0.02 262);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"}>
           relay talk {@ref} — {@title}
         </span>
         <span style={chip_style(@busy?)}>{if @busy?, do: "working", else: "card running"}</span>
@@ -108,7 +112,13 @@ defmodule RelayWeb.TalkComponents do
       </div>
 
       <div style="flex:1;min-height:0;overflow-y:auto;padding:15px 16px;display:flex;flex-direction:column;gap:2px;">
-        <.talk_seed ref={@ref} summary={@seed_summary} fields={@seed_fields} open?={@seed_open?} />
+        <.talk_seed
+          id={"#{@id}-seed-toggle"}
+          ref={@ref}
+          summary={@seed_summary}
+          fields={@seed_fields}
+          open?={@seed_open?}
+        />
 
         <div id={"#{@id}-transcript"} phx-update={@stream && "stream"}>
           <div :for={{dom_id, event} <- @items} id={dom_id}>
@@ -118,13 +128,13 @@ defmodule RelayWeb.TalkComponents do
 
         <div :if={@busy?} style="display:flex;gap:8px;padding-top:4px;">
           <span style={mono() <> "color:oklch(0.62 0.14 300);"}>✳</span>
-          <span style={mono() <> "color:oklch(0.58 0.03 262);animation:v5pulse 1.2s ease-in-out infinite;"}>
+          <span style={mono() <> "color:oklch(0.58 0.03 262);animation:relaypulse 1.2s ease-in-out infinite;"}>
             thinking…
           </span>
         </div>
 
         <form
-          id="talk-composer"
+          id={"#{@id}-composer"}
           phx-submit="talk_send"
           style="display:flex;gap:8px;padding-top:9px;align-items:baseline;"
         >
@@ -146,19 +156,19 @@ defmodule RelayWeb.TalkComponents do
             type="button"
             phx-click="talk_slash"
             phx-value-text={label}
-            style={mono() <> "font-size:10.5px;font-weight:500;padding:4px 8px;border-radius:5px;border:1px solid oklch(0.3 0.02 262);background:oklch(0.22 0.018 262);color:oklch(0.72 0.02 262);"}
+            style={mono_family() <> "font-size:10.5px;font-weight:500;padding:4px 8px;border-radius:5px;border:1px solid oklch(0.3 0.02 262);background:oklch(0.22 0.018 262);color:oklch(0.72 0.02 262);"}
           >
             {label}
           </button>
         </div>
         <div style="display:flex;align-items:center;gap:9px;">
-          <span style={mono() <> "font-size:10.5px;color:oklch(0.74 0.02 262);flex:1;min-width:0;"}>
+          <span style={mono_family() <> "font-size:10.5px;color:oklch(0.74 0.02 262);flex:1;min-width:0;"}>
             scrollback kept · esc back to the card
           </span>
           <button
             :if={@busy?}
             type="button"
-            id="talk-stop"
+            id={"#{@id}-stop"}
             phx-click="talk_stop"
             style={mono() <> "flex:0 0 auto;font-size:10px;font-weight:600;padding:4px 8px;border-radius:5px;border:1px solid oklch(0.32 0.03 220);background:oklch(0.23 0.03 220);color:oklch(0.76 0.1 220);"}
           >
@@ -172,17 +182,26 @@ defmodule RelayWeb.TalkComponents do
 
   defp mono, do: "font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;line-height:19px;"
 
+  # For the elements the artboard sets its own `font-size` on with NO `line-height` override
+  # (title bar, footer copy, slash chips) — concatenating `mono()` would leave a stray
+  # `line-height:19px` behind after the font-size override, which is not what the artboard draws.
+  defp mono_family, do: "font-family:'JetBrains Mono',ui-monospace,monospace;"
+
   defp slash_chips, do: ["why did review reject?", "fix it", "/card", "/run", "/clear"]
 
   defp out_color(%{dim: true}), do: "oklch(0.58 0.03 262)"
   defp out_color(_event), do: "oklch(0.86 0.015 262)"
 
-  defp chip_style(true) do
-    "display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:4px;flex:0 0 auto;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.04em;background:oklch(0.28 0.05 300);color:oklch(0.82 0.09 300);"
-  end
+  # The busy/idle clauses differ only in bg/fg — shared here so neither can drift out of sync,
+  # and so the JetBrains Mono stack is spelled out once (via `mono_family/0`) instead of twice.
+  defp chip_style(busy?) do
+    {bg, fg} =
+      if busy?,
+        do: {"oklch(0.28 0.05 300)", "oklch(0.82 0.09 300)"},
+        else: {"oklch(0.26 0.02 262)", "oklch(0.68 0.02 262)"}
 
-  defp chip_style(false) do
-    "display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:4px;flex:0 0 auto;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.04em;background:oklch(0.26 0.02 262);color:oklch(0.68 0.02 262);"
+    "display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:4px;flex:0 0 auto;" <>
+      mono_family() <> "font-size:9.5px;font-weight:600;letter-spacing:0.04em;background:#{bg};color:#{fg};"
   end
 
   # One component serves both LiveView (`@stream`, a `Phoenix.LiveView.LiveStream` yielding

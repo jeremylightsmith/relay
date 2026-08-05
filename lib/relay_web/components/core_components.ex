@@ -1925,6 +1925,7 @@ defmodule RelayWeb.CoreComponents do
         <aside
           id="card-drawer-panel"
           phx-hook={@card_nav_enabled && "ArrowKeyGuard"}
+          data-guard-keys={@card_nav_enabled && "ArrowLeft,ArrowRight"}
           class="drawer-panel flex h-dvh w-full flex-col overflow-y-auto bg-base-100 shadow-xl drawer:overflow-hidden drawer:w-[min(760px,94vw)]"
         >
           <header class="flex items-start gap-3 border-b border-base-300 p-5">
@@ -2870,15 +2871,18 @@ defmodule RelayWeb.CoreComponents do
               </div>
 
               <%!--
-                RE268 — the Talk pane (ADR 0009). `max-drawer:hidden drawer:block` is a
-                DIFFERENT class token than the tab-visibility `"hidden"` above (deliberately —
-                colliding on the literal `hidden` token would make the tab-hide check below
-                ambiguous with the "a terminal is referred out below the drawer breakpoint" rule);
-                it degrades a phone viewport to no terminal rather than a squeezed one.
+                RE268 — the Talk pane (ADR 0009). `drawer:block` and `hidden` are equal
+                specificity, and `drawer:block` sorts later in the built stylesheet — so it beats
+                `hidden` at >=45rem (the same precedence `boards_live.ex` relies on the OTHER
+                way, to show a paragraph on desktop). Carrying both classes at once, as this did
+                before, rendered the terminal under every tab on desktop. The two rules must be
+                mutually exclusive: `max-drawer:hidden drawer:block` ONLY while Talk is the
+                active tab (still hidden below the drawer breakpoint even then); plain `hidden`
+                otherwise, so no viewport width can override the tab-hide.
               --%>
               <div
                 id="card-drawer-tab-panel-talk"
-                class={[@drawer_tab != :talk && "hidden", "max-drawer:hidden drawer:block"]}
+                class={if @drawer_tab == :talk, do: "max-drawer:hidden drawer:block", else: "hidden"}
               >
                 <TalkComponents.talk_pane
                   id="talk-pane"

@@ -1,8 +1,12 @@
 // RE268 · TypingKeyGuard — a capture-phase keydown guard for single-letter shortcuts bound with
 // `phx-window-keydown`. LiveView's window bindings fire regardless of focus, so `t` (open Talk)
-// would swallow the `t` in "throughput" typed into any drawer field. Sibling of ArrowKeyGuard,
-// which does the same for Left/Right; kept separate because that hook is mounted only when
-// card navigation is on, and this guard must apply on every drawer.
+// would swallow the `t` in "throughput" typed into any drawer field.
+//
+// Also mounted as `ArrowKeyGuard` (RLY-234, app.js): that hook did the identical
+// capture-phase/INPUT-TEXTAREA/isContentEditable dance hardcoded to Left/Right, so it now reuses
+// this implementation via `data-guard-keys="ArrowLeft,ArrowRight"` instead of carrying its own
+// copy. The two mount points stay separate (ArrowKeyGuard only when card nav is on, TypingKeyGuard
+// on every drawer) — only the JS body was duplicated, and that's what's gone.
 //
 // Guarded keys are declared on the element as `data-guard-keys="t"` (comma-separated).
 const TypingKeyGuard = {

@@ -31,6 +31,20 @@ defmodule RelayWeb.BoardLiveTalkTest do
     assert has_element?(view, "#card-drawer-tab-panel-talk.hidden")
   end
 
+  # RE268 quality review — `drawer:block` beats `hidden` at >=45rem (equal specificity, later in
+  # the stylesheet; see `lib/relay_web/live/boards_live.ex:69` for the same precedence used the
+  # other way). Carrying BOTH classes on a non-Talk tab rendered the 548px terminal under every
+  # tab on desktop. The panel must carry the desktop-visibility class ONLY while Talk is active.
+  test "the Talk panel carries no drawer:block class while another tab is active", ctx do
+    view = open(ctx.conn, ctx.board, ctx.ref)
+
+    html = render(view)
+    [panel_tag] = Regex.run(~r/<div id="card-drawer-tab-panel-talk"[^>]*>/, html)
+
+    assert panel_tag =~ "hidden"
+    refute panel_tag =~ "drawer:block"
+  end
+
   test "clicking the tab reveals the terminal pane with the seed line", ctx do
     view = open(ctx.conn, ctx.board, ctx.ref)
 
@@ -54,7 +68,7 @@ defmodule RelayWeb.BoardLiveTalkTest do
     view = open(ctx.conn, ctx.board, ctx.ref)
     view |> element("#card-drawer-tab-talk") |> render_click()
 
-    html = view |> element("#talk-seed-toggle") |> render_click()
+    html = view |> element("#talk-pane-seed-toggle") |> render_click()
 
     assert html =~ "▾ seeded with #{ctx.ref}"
     assert html =~ "description"
@@ -66,10 +80,10 @@ defmodule RelayWeb.BoardLiveTalkTest do
     view = open(ctx.conn, ctx.board, ctx.ref)
     view |> element("#card-drawer-tab-talk") |> render_click()
 
-    html = view |> form("#talk-composer", %{"text" => "why is this stuck?"}) |> render_submit()
+    html = view |> form("#talk-pane-composer", %{"text" => "why is this stuck?"}) |> render_submit()
 
     assert html =~ "why is this stuck?"
-    assert has_element?(view, "#talk-stop")
+    assert has_element?(view, "#talk-pane-stop")
 
     turn = FakeTalkExecutor.claim(executor)
     FakeTalkExecutor.stream(turn, [{:tool, "Read · lib/relay.ex"}, {:out, "It is waiting on you."}])
@@ -79,30 +93,30 @@ defmodule RelayWeb.BoardLiveTalkTest do
     assert html =~ "It is waiting on you."
 
     {:ok, _} = Talk.finish_turn(turn, :done, %{session_id: "s"})
-    refute has_element?(view, "#talk-stop")
+    refute has_element?(view, "#talk-pane-stop")
   end
 
   test "Stop ends the turn and keeps the partial output", ctx do
     executor = insert(:executor, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
     view = open(ctx.conn, ctx.board, ctx.ref)
     view |> element("#card-drawer-tab-talk") |> render_click()
-    view |> form("#talk-composer", %{"text" => "take your time"}) |> render_submit()
+    view |> form("#talk-pane-composer", %{"text" => "take your time"}) |> render_submit()
 
     turn = FakeTalkExecutor.claim(executor)
     FakeTalkExecutor.stream(turn, [{:out, "half an ans"}])
 
-    view |> element("#talk-stop") |> render_click()
+    view |> element("#talk-pane-stop") |> render_click()
 
     assert Talk.get_turn(turn.id).status == :stopped
     assert render(view) =~ "half an ans"
-    refute has_element?(view, "#talk-stop")
+    refute has_element?(view, "#talk-pane-stop")
   end
 
   test "closing the drawer does not stop a turn — it finishes and its output is waiting", ctx do
     executor = insert(:executor, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
     view = open(ctx.conn, ctx.board, ctx.ref)
     view |> element("#card-drawer-tab-talk") |> render_click()
-    view |> form("#talk-composer", %{"text" => "take your time"}) |> render_submit()
+    view |> form("#talk-pane-composer", %{"text" => "take your time"}) |> render_submit()
 
     # Detaching is not cancelling (ADR 0009 §1): only Stop stops. Navigating to the bare board
     # ends this LiveView process, which is the strongest form of "the drawer was closed".
@@ -138,7 +152,7 @@ defmodule RelayWeb.BoardLiveTalkTest do
     view = open(ctx.conn, ctx.board, ctx.ref)
     view |> element("#card-drawer-tab-talk") |> render_click()
 
-    html = view |> form("#talk-composer", %{"text" => "/clear"}) |> render_submit()
+    html = view |> form("#talk-pane-composer", %{"text" => "/clear"}) |> render_submit()
 
     refute html =~ "an earlier answer"
     assert Relay.Repo.aggregate(Schemas.TalkEvent, :count) > 0
