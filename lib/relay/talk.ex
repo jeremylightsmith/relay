@@ -90,36 +90,47 @@ defmodule Relay.Talk do
   """
   def post_message(%Card{} = card, %User{} = author, text) when is_binary(text) do
     prompt = String.trim(text)
-    session = session_for_card(card)
 
-    cond do
-      prompt == "" ->
-        {:error, :blank}
-
-      active_turn(session) ->
-        {:error, :turn_in_flight}
-
-      true ->
-        {:ok, {turn, event}} = Repo.transaction(fn -> do_post(card, session, author, prompt) end)
-        broadcast(card.id, {:talk_event, event})
-        broadcast(card.id, {:talk_turn_changed, turn})
-        # Wakes the claim long-poll: `{:run_changed, card_id}` is already one of the tags
-        # `RelayWeb.Api.NodeJobController.maybe_wait/4` retries a claim on, so a talk job needs
-        # no second wake channel.
-        Runs.broadcast_run_changed(card.board_id, card.id)
-        {:ok, turn}
+    if prompt == "" do
+      {:error, :blank}
+    else
+      session = session_for_card(card)
+      fn -> do_post(card, session, author, prompt) end |> Repo.transaction() |> handle_post(card)
     end
   end
 
+  defp handle_post({:ok, {turn, event}}, card) do
+    broadcast(card.id, {:talk_event, event})
+    broadcast(card.id, {:talk_turn_changed, turn})
+    # Wakes the claim long-poll: `{:run_changed, card_id}` is already one of the tags
+    # `RelayWeb.Api.NodeJobController.maybe_wait/4` retries a claim on, so a talk job needs no
+    # second wake channel.
+    Runs.broadcast_run_changed(card.board_id, card.id)
+    {:ok, turn}
+  end
+
+  defp handle_post({:error, :turn_in_flight}, _card), do: {:error, :turn_in_flight}
+
+  # The "one turn in flight" guard has to live INSIDE the transaction, after the same session
+  # row lock `insert_events!/3` takes — otherwise it is check-then-act: two near-simultaneous
+  # posts can both see no active turn before either has committed one, and both insert a
+  # `:queued` turn against the same `resume_session` (ADR 0009 §3). Locking first serializes
+  # the check against any other post's commit.
   defp do_post(card, session, author, prompt) do
+    locked = lock_session!(session.id)
+
+    if active_turn(locked) do
+      Repo.rollback(:turn_in_flight)
+    end
+
     turn =
-      %TalkTurn{talk_session_id: session.id, author_id: author.id, prompt: prompt}
+      %TalkTurn{talk_session_id: locked.id, author_id: author.id, prompt: prompt}
       |> TalkTurn.changeset(%{status: :queued})
       |> Repo.insert!()
 
     # The human's own line is `client_seq: 0`; the executor numbers its lines from 1, so the
     # two writers of one turn's transcript can never collide on the unique index.
-    [event] = insert_events!(session, turn, [%{"client_seq" => 0, "kind" => "user", "text" => prompt, "dim" => false}])
+    [event] = insert_events!(locked, turn, [%{"client_seq" => 0, "kind" => "user", "text" => prompt, "dim" => false}])
 
     payload = %{
       "turn_id" => turn.id,
@@ -127,11 +138,11 @@ defmodule Relay.Talk do
       "prompt" => prompt,
       "author" => author.name || author.email,
       "branch" => card.branch,
-      "resume_session" => session.claude_session_id,
-      "seed" => %{"summary" => session.seed_summary, "fields" => session.seed_fields}
+      "resume_session" => locked.claude_session_id,
+      "seed" => %{"summary" => locked.seed_summary, "fields" => locked.seed_fields}
     }
 
-    job = Runs.insert_talk_job!(card, payload, session.pinned_executor_name)
+    job = Runs.insert_talk_job!(card, payload, locked.pinned_executor_name)
     turn = turn |> TalkTurn.changeset(%{node_job_id: job.id}) |> Repo.update!()
     {turn, event}
   end
@@ -153,7 +164,7 @@ defmodule Relay.Talk do
   # One transaction, one lock: SELECT ... FOR UPDATE on the session row serialises seq
   # assignment, so two concurrent batches can never claim the same number.
   defp insert_events!(session, turn, raw) do
-    locked = Repo.one!(from s in TalkSession, where: s.id == ^session.id, lock: "FOR UPDATE")
+    locked = lock_session!(session.id)
 
     seen =
       from(e in TalkEvent, where: e.talk_turn_id == ^turn.id, select: e.client_seq)
@@ -163,7 +174,7 @@ defmodule Relay.Talk do
     {stored, last} =
       raw
       |> Enum.map(&normalize_event/1)
-      |> Enum.reject(&(&1.client_seq in seen))
+      |> Enum.reject(&(&1 == :invalid or &1.client_seq in seen))
       |> Enum.uniq_by(& &1.client_seq)
       |> Enum.reduce({[], locked.last_event_seq}, fn attrs, {acc, seq} ->
         next = seq + 1
@@ -188,18 +199,22 @@ defmodule Relay.Talk do
     Enum.reverse(stored)
   end
 
-  # An unknown kind degrades to `:out` rather than raising: the executor is untrusted input, and
-  # a mangled line must never cost the whole batch.
+  # An unknown kind degrades to `:out` rather than raising, and a line without an integer
+  # `client_seq` or with a non-boolean `dim` is dropped entirely (`:invalid`) rather than
+  # reaching `Repo.insert!` and raising: the executor is untrusted input, and a mangled line
+  # must never cost the whole batch.
   defp normalize_event(raw) do
-    kind = to_string(raw["kind"] || raw[:kind])
-    kind = Enum.find(TalkEvent.kinds(), :out, &(Atom.to_string(&1) == kind))
+    client_seq = raw["client_seq"] || raw[:client_seq]
+    dim = raw["dim"] || raw[:dim] || false
 
-    %{
-      client_seq: raw["client_seq"] || raw[:client_seq],
-      kind: kind,
-      text: to_string(raw["text"] || raw[:text] || ""),
-      dim: raw["dim"] || raw[:dim] || false
-    }
+    if is_integer(client_seq) and is_boolean(dim) do
+      kind = to_string(raw["kind"] || raw[:kind])
+      kind = Enum.find(TalkEvent.kinds(), :out, &(Atom.to_string(&1) == kind))
+
+      %{client_seq: client_seq, kind: kind, text: to_string(raw["text"] || raw[:text] || ""), dim: dim}
+    else
+      :invalid
+    end
   end
 
   @doc """
@@ -256,12 +271,16 @@ defmodule Relay.Talk do
   def events(%TalkSession{} = session, opts \\ []) do
     limit = Keyword.get(opts, :limit, 500)
 
-    Repo.all(
-      from e in TalkEvent,
-        where: e.talk_session_id == ^session.id and e.seq > ^session.cleared_through_seq,
-        order_by: [asc: e.seq],
-        limit: ^limit
+    # `limit` must bound the NEWEST lines, not the oldest — take the highest `limit` seqs
+    # (`desc`) then reverse in memory, so a long session's default read shows the recent
+    # tail instead of stalling at seq 1..limit forever.
+    from(e in TalkEvent,
+      where: e.talk_session_id == ^session.id and e.seq > ^session.cleared_through_seq,
+      order_by: [desc: e.seq],
+      limit: ^limit
     )
+    |> Repo.all()
+    |> Enum.reverse()
   end
 
   @doc "`/clear`: hides everything written so far. Deletes nothing — the transcript is a record, and hiding it is a view decision."
@@ -352,6 +371,12 @@ defmodule Relay.Talk do
   end
 
   defp board_of(%Card{} = card), do: Repo.get!(Board, card.board_id)
+
+  # SELECT ... FOR UPDATE on the session row: the one lock every writer serialises through,
+  # whether assigning `seq` (`insert_events!/3`) or guarding "one turn in flight" (`do_post/4`).
+  defp lock_session!(session_id) do
+    Repo.one!(from s in TalkSession, where: s.id == ^session_id, lock: "FOR UPDATE")
+  end
 
   defp broadcast(card_id, message), do: Phoenix.PubSub.broadcast(@pubsub, topic(card_id), message)
 end

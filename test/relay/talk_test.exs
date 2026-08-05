@@ -180,6 +180,56 @@ defmodule Relay.TalkTest do
     assert second.id == turn.node_job_id
   end
 
+  test "events/2 with :limit returns the highest seqs, in ascending order", ctx do
+    {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
+    {:ok, _} = Talk.append_events(turn, [event(1, "out", "a"), event(2, "out", "b"), event(3, "out", "c")])
+
+    session = Talk.session_for_card(ctx.card)
+    seqs = session |> Talk.events(limit: 2) |> Enum.map(& &1.seq)
+
+    assert seqs == [3, 4]
+  end
+
+  test "only one turn wins when posts race on the same session", ctx do
+    results =
+      1..5
+      |> Task.async_stream(fn i -> Talk.post_message(ctx.card, ctx.author, "msg #{i}") end,
+        max_concurrency: 5,
+        timeout: :infinity
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    assert Enum.count(results, &match?({:ok, _}, &1)) == 1
+    assert Enum.count(results, &(&1 == {:error, :turn_in_flight})) == 4
+  end
+
+  test "finish_turn as :stopped or :failed leaves the claude session id and pin untouched", ctx do
+    {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
+    {:ok, _claimed} = Runs.claim_next_job(ctx.executor)
+
+    {:ok, stopped} = Talk.finish_turn(turn, :stopped)
+    assert stopped.status == :stopped
+
+    session = Talk.session_for_card(ctx.card)
+    assert session.claude_session_id == nil
+    assert session.pinned_executor_name == nil
+  end
+
+  test "an unknown event kind degrades to :out", ctx do
+    {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
+    {:ok, [stored]} = Talk.append_events(turn, [event(1, "mystery", "huh")])
+
+    assert stored.kind == :out
+  end
+
+  test "a line missing client_seq is dropped without failing the batch", ctx do
+    {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
+    bad = %{"kind" => "out", "text" => "no client_seq", "dim" => false}
+
+    assert {:ok, stored} = Talk.append_events(turn, [bad, event(1, "out", "good")])
+    assert Enum.map(stored, & &1.text) == ["good"]
+  end
+
   defp event(client_seq, kind, text) do
     %{"client_seq" => client_seq, "kind" => kind, "text" => text, "dim" => kind == "tool"}
   end
