@@ -69,8 +69,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 36
-EXECUTOR_FINGERPRINT = "4c9429267556ce0d169eac2874bcf80a0fc444935b5a30d0b54f7e69d3e7118a"
+EXECUTOR_VERSION = 37
+EXECUTOR_FINGERPRINT = "e18ca59e140d236285f23a22da4fc64b267afec6f237d5f9459cfab2d5a1d25d"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1408,6 +1408,15 @@ class ExecutorPool:
 
             # Reclaim a retained (failed) worktree for a new run of the same card: re-baseline it.
             if rec and rec["state"] == "retained":
+                # Refuse rather than steal a retained tree a talk turn has reattached to for a
+                # post-mortem (RE268 quality review round 2, finding 2, IMPORTANT):
+                # assign_talk's docstring promises to reuse it AS IT IS — exactly the flow
+                # someone asking "why did this fail?" while the run is retried relies on — but
+                # re-baselining here hard-resets the tree (via create_or_rebaseline) while that
+                # talk turn's claude process is reading it. Same precedent as the "different
+                # live run" refusal below.
+                if rec.get("talk_live"):
+                    return None
                 if self._active_count() >= self.max_worktrees:
                     return None
                 if rec.get("partition") is None:
@@ -1438,8 +1447,15 @@ class ExecutorPool:
 
         If a node job's own release already finished but was DEFERRED because this talk turn was
         still here (`pending_finish`), finish it now — last occupant out tears down. Otherwise,
-        if this worktree was never bound to a real run (`run_id` None — talk-only), retire it so
-        it stops permanently consuming an exclusive slot (finding 2)."""
+        if this worktree was TALK-CREATED (never bound to a real run — `rec["talk"]`), retire it
+        so it stops permanently consuming an exclusive slot (finding 2).
+
+        Gated on `rec.get("talk")`, NOT merely `run_id is None` (RE268 quality review round 2,
+        finding 1, CRITICAL): `recover()` rebuilds every restart-adopted per-card worktree as
+        `{"run_id": None, "state": "active", ...}` too — the identical shape, with no "talk"
+        marker. Retiring on run_id alone mistook a recovered worktree for talk-only and retired
+        (stashed + hard-reset) it out from under its resuming job, whose commits were supposed to
+        survive untouched."""
         with self.lock:
             rec = self.wts.get(slot)
             if rec is None:
@@ -1450,7 +1466,7 @@ class ExecutorPool:
                 return                      # a node job still occupies this worktree
             if pending is not None:
                 self._finish_locked(slot, rec, pending)
-            elif rec["run_id"] is None and rec["state"] == "active":
+            elif rec.get("talk") and rec["run_id"] is None and rec["state"] == "active":
                 self._retire_talk_only_locked(slot, rec)
 
     def assign_talk(self, ref):
@@ -2346,19 +2362,37 @@ class TalkEventSender:
     full queue, `_send` swallows errors) — right for a live feed, wrong for a record this
     feature promises to keep. Here nothing is dropped: a failed POST is retried with backoff,
     `client_seq` makes the retry safe, and exhausting the budget sets `failed` so the turn is
-    reported `failed` with a visible :error line rather than leaving a silent hole."""
+    reported `failed` with a visible :error line rather than leaving a silent hole.
 
-    def __init__(self, turn_id, batch=40, max_attempts=6, backoff=_talk_backoff):
+    `flush_interval` (RE268 quality review round 2, finding 3) makes a pending line flush on
+    its own once it has waited that long, rather than only at `batch` lines or after the whole
+    claude process exits: batch=40 is a size cap, not a delay, and a typical short turn (a
+    couple of tool lines, a couple of text blocks) never reaches 40 — so without this every
+    turn's transcript arrived in one POST at the very end, defeating the point of the on_event
+    streaming hook. `clock` is injectable so tests don't depend on real wall time."""
+
+    def __init__(self, turn_id, batch=40, max_attempts=6, backoff=_talk_backoff,
+                flush_interval=1.0, clock=time.monotonic):
         self.turn_id = turn_id
         self.batch = batch
         self.max_attempts = max_attempts
         self.backoff = backoff
+        self.flush_interval = flush_interval
+        self.clock = clock
         self.failed = False
         self._next_seq = 1
         self._pending = []
         self._lock = threading.Lock()
+        self._last_flush = clock()
 
     def enqueue(self, kind, text, dim=False):
+        # Flush whatever is ALREADY pending first if it has gone stale — before this new line
+        # joins it — so a slow trickle of events posts as it arrives instead of all landing in
+        # one batch the moment 40 lines finally accumulate.
+        with self._lock:
+            stale = bool(self._pending) and (self.clock() - self._last_flush) >= self.flush_interval
+        if stale:
+            self.flush()
         with self._lock:
             self._pending.append({"client_seq": self._next_seq, "kind": kind,
                                   "text": text, "dim": bool(dim)})
@@ -2375,7 +2409,10 @@ class TalkEventSender:
                 if not self._pending:
                     return not self.failed
                 chunk, self._pending = self._pending[:self.batch], self._pending[self.batch:]
-            if not self._post(chunk):
+            ok = self._post(chunk)
+            with self._lock:
+                self._last_flush = self.clock()
+            if not ok:
                 self.failed = True
                 return False
 
@@ -2449,6 +2486,29 @@ def run_talk_job(job, slot_path, control):
     return "done", session_id, ""
 
 
+def checkout_talk_branch(slot_path, branch):
+    """After `create_or_rebaseline` leaves a freshly-created talk worktree DETACHED at base, put
+    it ON THE CARD'S BRANCH when the remote has one (RE268 quality review round 2, finding 4;
+    ADR 0009's worktree table: a talk turn with no live run gets its worktree "on the card's
+    branch, or the base branch if it has none").
+
+    Without this, a talk turn attached to a card whose worktree had to be created fresh (the
+    run is done/cancelled and was torn down, or the card was never run at all — exactly the
+    case a talk turn can reach that the flow engine never would) read origin/main and
+    confidently described "this working tree" while seeing none of the card's actual work.
+
+    A no-op when there is no branch yet, or it has not reached the remote — the existing
+    detached-at-base state (already correct for a brand-new card) is left alone."""
+    if not branch:
+        return
+    exists = subprocess.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}"],
+                            cwd=slot_path, capture_output=True, text=True)
+    if exists.returncode != 0:
+        return
+    subprocess.run(["git", "checkout", "-q", "-B", branch, f"origin/{branch}"],
+                   cwd=slot_path, capture_output=True, text=True)
+
+
 def execute_talk(job, slot, reset, control, pool):
     """Worker body for one talk turn. Mirrors execute_one's discipline — always report, never
     leak a slot — but has no run_state to act on: a talk worktree deliberately OUTLIVES any run
@@ -2457,6 +2517,7 @@ def execute_talk(job, slot, reset, control, pool):
     try:
         if reset and not DRY:
             pool.create_or_rebaseline(slot)
+            checkout_talk_branch(slot_path, job.get("branch"))
             hook_err = pool.run_prepare_hook(slot_path, job.get("ref"), job.get("branch"))
             if hook_err:
                 report_talk_outcome(job["turn_id"], "failed", None, f"prepare hook failed: {hook_err}")
@@ -3139,7 +3200,13 @@ def cmd_execute(args):
             wake.clear()
             continue
         if assigned is None:                        # no free slot for this job's isolation
-            reject(job, f"no free {job.get('isolation')!r} slot advertised {cap}")
+            # A talk job carries no "isolation" key (that's a node-job field) — assign_talk
+            # always wants an exclusive per-card slot, so name that rather than printing the
+            # nonsense `no free None slot ...` (RE268 quality review round 2, finding 5).
+            if job.get("kind") == "talk":
+                reject(job, f"no free exclusive slot for a talk turn advertised {cap}")
+            else:
+                reject(job, f"no free {job.get('isolation')!r} slot advertised {cap}")
             if args.once:
                 break
             wake.wait(1)                            # back off — don't hot-loop re-polling

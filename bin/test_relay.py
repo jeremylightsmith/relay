@@ -3011,6 +3011,32 @@ class ExecuteTalkTest(unittest.TestCase):
         relay.execute_talk(self._job(), "exec-DE3", True, relay.JobControl(), pool)
         self.assertEqual(pool.created, ["exec-DE3"])
 
+    def test_a_reset_turn_checks_out_the_cards_branch(self):
+        """RE268 review round 2, finding 4: a talk-created worktree (the reset path — the
+        card's run is done/cancelled and torn down, or the card was never run) must land ON
+        THE CARD'S BRANCH, not sit detached at origin/main reading none of the card's work."""
+        self._stub_stream(ok=True)
+        pool = self._Pool()
+        calls = []
+        self.addCleanup(setattr, relay, "checkout_talk_branch", relay.checkout_talk_branch)
+        relay.checkout_talk_branch = lambda path, branch: calls.append((path, branch))
+        relay.execute_talk(self._job(branch="rly-1-feature"), "exec-DE3", True,
+                           relay.JobControl(), pool)
+        self.assertEqual(calls, [("/tmp/exec-DE3", "rly-1-feature")])
+
+    def test_a_reused_turn_does_not_touch_the_branch(self):
+        """No reset -> the worktree already carries whatever state a node job or an earlier
+        talk turn left it in (possibly dirty, mid-edit — the whole point); a reused turn must
+        not force a branch checkout on top of that."""
+        self._stub_stream(ok=True)
+        pool = self._Pool()
+        calls = []
+        self.addCleanup(setattr, relay, "checkout_talk_branch", relay.checkout_talk_branch)
+        relay.checkout_talk_branch = lambda path, branch: calls.append((path, branch))
+        relay.execute_talk(self._job(branch="rly-1-feature"), "exec-DE3", False,
+                           relay.JobControl(), pool)
+        self.assertEqual(calls, [])
+
     def test_a_failing_prepare_hook_reports_failed_without_running_the_turn(self):
         called = []
         relay._stream_claude_job = lambda *a, **k: called.append(True) or (True, None)
@@ -3201,6 +3227,24 @@ class ExecuteLoopTest(unittest.TestCase):
         relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
 
         self.assertEqual(talk_reports, [(78, "failed")])
+
+    def test_an_unplaceable_talk_jobs_rejection_detail_is_kind_aware(self):
+        """RE268 review round 2, finding 5: reject()'s "no free slot" message reads
+        `no free {job.get('isolation')!r} slot ...` — but "isolation" is a node-job key a talk
+        job never carries, so a rejected talk turn's human-visible detail read the nonsense
+        `no free None slot advertised {...}`. It must name what was actually rejected."""
+        talk_job = {"id": "tj-3", "kind": "talk", "ref": "DE3", "turn_id": 79,
+                   "prompt": "why?", "seed": {"fields": []}, "resume_session": None}
+        relay.claim_node_job = lambda executor, capacity, timeout: talk_job
+        talk_reports = []
+        relay.report_talk_outcome = lambda tid, status, sid, detail: (
+            talk_reports.append(detail) or status)
+        relay.report_outcome = lambda *a: self.fail("must not use the node-job outcome route")
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+
+        self.assertNotIn("None", talk_reports[0])
+        self.assertIn("talk", talk_reports[0])
 
     def test_once_never_auto_updates(self):
         """A single-job invocation restarting itself would re-run the whole command; the job
@@ -3963,6 +4007,58 @@ class RealGitWorktreeTest(unittest.TestCase):
 
         self.assertEqual(outcome, "succeeded")
         self.assertEqual(self.head_ref(), "refs/heads/" + branch)
+
+
+class TalkBranchCheckoutTest(unittest.TestCase):
+    """RE268 quality review round 2, finding 4: `execute_talk`'s reset path (create_or_rebaseline
+    + the prepare hook) leaves a freshly-created talk worktree DETACHED at base — the hook only
+    warms the tree, it checks nothing out. ADR 0009's worktree table is explicit: a talk turn
+    with no live run must land "on the card's branch, or the base branch if it has none." Drives
+    real git plumbing (RealGitWorktreeTest's style, above) rather than mocking `subprocess.run`.
+    `refs/remotes/origin/<branch>` is what `git_fetch_with_retry` actually leaves behind — this
+    simulates that without a real network fetch."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="relay-talk-branch-test-")
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.email", "t@example.com")
+        self.git("config", "user.name", "T")
+        self.write("seed.txt", "seed")
+        self.git("add", "-A"); self.git("commit", "-qm", "seed")
+
+    def git(self, *args):
+        return relay.subprocess.run(["git", *args], cwd=self.dir, capture_output=True, text=True)
+
+    def write(self, name, text):
+        with open(os.path.join(self.dir, name), "w") as f:
+            f.write(text)
+
+    def head_ref(self):
+        return self.git("symbolic-ref", "-q", "HEAD").stdout.strip()
+
+    def test_checks_out_the_branch_when_the_remote_has_it(self):
+        self.git("checkout", "-q", "-b", "rly-1-feature")
+        self.write("work.txt", "committed on the card's branch")
+        self.git("add", "-A"); self.git("commit", "-qm", "card work")
+        sha = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("update-ref", "refs/remotes/origin/rly-1-feature", sha)
+        self.git("checkout", "-q", "--detach", "main")   # what create_or_rebaseline leaves fresh
+
+        relay.checkout_talk_branch(self.dir, "rly-1-feature")
+
+        self.assertEqual(self.head_ref(), "refs/heads/rly-1-feature")
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "work.txt")))
+
+    def test_stays_detached_when_there_is_no_branch_yet(self):
+        self.git("checkout", "-q", "--detach", "main")
+        relay.checkout_talk_branch(self.dir, None)
+        self.assertEqual(self.head_ref(), "")
+
+    def test_stays_detached_when_the_branch_has_not_reached_the_remote(self):
+        self.git("checkout", "-q", "--detach", "main")
+        relay.checkout_talk_branch(self.dir, "never-pushed")
+        self.assertEqual(self.head_ref(), "")
 
 
 class OutcomeCommandTest(unittest.TestCase):
@@ -5489,7 +5585,7 @@ class TalkEventSenderTest(unittest.TestCase):
         relay.api = always_fails
         s = relay.TalkEventSender(turn_id=7, max_attempts=2, backoff=lambda _a: 0)
         s.enqueue("out", "a")
-        self.assertFalse(s.flush())
+        self.assertFalse(capture_ret(s.flush))
         self.assertTrue(s.failed)
 
     def test_the_final_attempt_does_not_sleep_after_giving_up(self):
@@ -5503,7 +5599,7 @@ class TalkEventSenderTest(unittest.TestCase):
         s = relay.TalkEventSender(turn_id=7, max_attempts=3, backoff=lambda a: 100 + a)
 
         s.enqueue("out", "a")
-        self.assertFalse(s.flush())
+        self.assertFalse(capture_ret(s.flush))
 
         self.assertEqual(sleeps, [100, 101])   # attempts 0,1 sleep; attempt 2 (the last) does not
 
@@ -5514,7 +5610,7 @@ class TalkEventSenderTest(unittest.TestCase):
         relay.api = lambda *a, **kw: (_ for _ in ()).throw(SystemExit("down"))
         s = relay.TalkEventSender(turn_id=7, max_attempts=1, backoff=lambda _a: 0)
         s.enqueue("out", "a")
-        self.assertFalse(s.flush())
+        self.assertFalse(capture_ret(s.flush))
         self.assertTrue(s.failed)
 
         relay.api = lambda m, p, b=None, **kw: (
@@ -5524,6 +5620,24 @@ class TalkEventSenderTest(unittest.TestCase):
         self.assertTrue(delivered)
         self.assertFalse(s.failed)
         self.assertEqual(self.posted[0][2]["events"][-1]["text"], "some output was lost")
+
+    def test_a_stale_pending_line_flushes_before_a_new_one_joins_it(self):
+        """RE268 review round 2, finding 3: `enqueue` only flushed at batch=40, and the only
+        other flush was the one `run_talk_job` does AFTER the process exits — so a typical short
+        turn (a couple of tool lines, a couple of text blocks) delivered its whole transcript in
+        ONE post at the very end, defeating the point of the on_event streaming hook. A line
+        older than `flush_interval` must flush on its own, ahead of whatever enqueues next."""
+        clock = {"t": 0.0}
+        s = relay.TalkEventSender(turn_id=7, flush_interval=1.0, clock=lambda: clock["t"])
+        s.enqueue("out", "a")
+        self.assertEqual(self.posted, [])                 # still buffered — under the interval
+        clock["t"] = 1.5
+        s.enqueue("out", "b")                              # "a" is now stale -> flushes alone
+        self.assertEqual(len(self.posted), 1)
+        self.assertEqual([e["text"] for e in self.posted[0][2]["events"]], ["a"])
+        s.flush()                                          # drain what's left ("b")
+        self.assertEqual(len(self.posted), 2)
+        self.assertEqual([e["text"] for e in self.posted[1][2]["events"]], ["b"])
 
 
 class TalkWorktreeTest(unittest.TestCase):
@@ -5620,6 +5734,21 @@ class TalkOccupancyTest(unittest.TestCase):
         pool.release_talk(slot)
         self.assertNotIn(slot, pool.wts)                  # finished once talk also releases
 
+    def test_assign_refuses_to_rebaseline_a_retained_tree_with_a_live_talk_turn(self):
+        """RE268 quality review round 2, finding 2 (IMPORTANT): assign_talk's docstring promises
+        a retained (failed) worktree is reused AS IT IS — post-mortem is exactly what a talk
+        turn is for. But assign()'s own retained-reclaim branch re-baselines unconditionally, so
+        a node job's claim for the same card hard-resets the tree (via create_or_rebaseline)
+        while the talk turn's claude process is reading it. assign() must refuse — the same
+        "refuse rather than steal a live worktree" precedent it already applies when the
+        worktree is bound to a different live run."""
+        pool = self._pool()
+        pool.wts["exec-DE3"] = {"run_id": None, "state": "retained", "live": False,
+                                "partition": None}
+        pool.assign_talk("DE3")           # attaches -> talk_live True (the post-mortem case)
+        j = job("exclusive_shell", vars={"ref": "DE3"})
+        self.assertIsNone(pool.assign(j))
+
 
 class TalkOnlyIdleRetirementTest(unittest.TestCase):
     """RE268 quality review finding 2 (IMPORTANT): a talk-only worktree (never bound to a real
@@ -5667,6 +5796,22 @@ class TalkOnlyIdleRetirementTest(unittest.TestCase):
         pool.release_talk("exec-OTHER")                  # retired #2 -> triggers eviction check
         self.assertIn("exec-DE3", pool.wts)                # not evicted: a talk turn is live in it
         self.assertIn("exec-OTHER", pool.wts)
+
+    def test_a_restart_recovered_worktree_is_not_retired_as_talk_only(self):
+        """RE268 quality review round 2, finding 1 (CRITICAL): recover() rebuilds every adopted
+        per-card worktree as {"run_id": None, "state": "active", ...} with NO "talk" marker — the
+        same run_id/state shape a talk-only worktree has. release_talk's retirement test must
+        key off the "talk" marker the record actually carries, not merely run_id is None, or a
+        restart-recovered worktree gets retired (stashed + hard-reset) out from under its
+        resuming job, which expects its branch commits to survive untouched."""
+        pool = self._pool()
+        with pool.lock:
+            pool.wts["exec-DE3"] = {"run_id": None, "state": "active", "live": False,
+                                    "partition": pool._take_partition()}
+        pool.assign_talk("DE3")          # a talk turn attaches to the recovered worktree
+        pool.release_talk("exec-DE3")
+        self.assertEqual(pool.wts["exec-DE3"]["state"], "active")   # NOT retired
+        self.assertIsNotNone(pool.wts["exec-DE3"]["partition"])      # partition still held
 
 
 class TalkOutcomeTest(unittest.TestCase):
