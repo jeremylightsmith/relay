@@ -113,6 +113,7 @@ defmodule RelayWeb.BoardLive do
   alias Relay.Presence
   alias Relay.Runs
   alias Relay.StoryMap
+  alias Relay.Talk
   alias Relay.Votes
   alias RelayWeb.ChangesetErrors
   alias RelayWeb.StoryMapComponents
@@ -122,6 +123,9 @@ defmodule RelayWeb.BoardLive do
   alias Schemas.Card
   alias Schemas.Run
   alias Schemas.Stage
+  alias Schemas.TalkEvent
+  alias Schemas.TalkSession
+  alias Schemas.TalkTurn
 
   require Logger
 
@@ -523,6 +527,10 @@ defmodule RelayWeb.BoardLive do
         archived={Card.archived?(@selected_card)}
         body_loading={@body_loading?}
         drawer_tab={@drawer_tab}
+        talk_session={@talk_session}
+        talk_active_turn={@talk_active_turn}
+        talk_seed_open?={@talk_seed_open?}
+        talk_events={@streams.talk_events}
         runs={@card_runs}
         run_flow={@card_runs != [] && Enum.find(@flows, &(&1.key == hd(@card_runs).flow_key))}
         queued_flow={
@@ -1012,6 +1020,11 @@ defmodule RelayWeb.BoardLive do
       |> assign(:note_ids, MapSet.new())
       |> stream_configure(:conversation, dom_id: &conversation_dom_id/1)
       |> stream_configure(:activity, dom_id: &activity_dom_id/1)
+      |> stream_configure(:talk_events, dom_id: &"talk-event-#{&1.id}")
+      |> assign(:talk_session, nil)
+      |> assign(:talk_active_turn, nil)
+      |> assign(:talk_seed_open?, false)
+      |> stream(:talk_events, [], reset: true)
 
     socket =
       Enum.reduce(board.stages, socket, fn stage, acc ->
@@ -1086,6 +1099,7 @@ defmodule RelayWeb.BoardLive do
         story_map_add_activity story_map_add_task story_map_add_release story_map_draft_submit
         story_map_rename_start story_map_rename_change story_map_rename_submit
         story_map_rename_cancel story_map_delete story_map_reorder
+        talk_send talk_stop talk_clear talk_slash
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -2298,10 +2312,44 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("take_over", _params, socket), do: {:noreply, socket}
 
-  # RLY-137 — the drawer's Detail | Run | Activity tab bar: a local assign, no server
-  # round trip beyond the click itself.
-  def handle_event("drawer_tab", %{"tab" => tab}, socket) when tab in ~w(detail run activity) do
-    {:noreply, assign(socket, :drawer_tab, String.to_existing_atom(tab))}
+  # RLY-137/RE268 — the drawer's Detail | Run | Talk | Activity tab bar. Talk is the one tab
+  # with a server-side subscription (select_drawer_tab/2 below); the other three are a plain
+  # local assign, no round trip beyond the click itself.
+  def handle_event("drawer_tab", %{"tab" => tab}, socket) when tab in ~w(detail run talk activity) do
+    {:noreply, select_drawer_tab(socket, String.to_existing_atom(tab))}
+  end
+
+  # RE268 — the `t` shortcut (guarded against typing by TypingKeyGuard on the tabs nav).
+  def handle_event("talk_shortcut", %{"key" => "t"}, socket) do
+    {:noreply, select_drawer_tab(socket, :talk)}
+  end
+
+  # RE268 — the composer and the slash-chip row post the same way; a leading "/clear" routes to
+  # Talk.clear/1 instead of starting a turn. Applied locally from post_message/3's own return
+  # (not the PubSub echo alone): the echo is a same-process self-send that lands in a LATER
+  # handle_info, so relying on it here would leave the very submit that just happened missing
+  # from the diff `render_submit/1` hands back to the caller.
+  def handle_event("talk_send", %{"text" => text}, socket) do
+    {:noreply, submit_talk(socket, text)}
+  end
+
+  def handle_event("talk_slash", %{"text" => text}, socket) do
+    {:noreply, submit_talk(socket, text)}
+  end
+
+  def handle_event("talk_stop", _params, %{assigns: %{talk_active_turn: %TalkTurn{} = turn}} = socket) do
+    {:ok, _stopped} = Talk.stop_turn(turn)
+    {:noreply, socket}
+  end
+
+  def handle_event("talk_stop", _params, socket), do: {:noreply, socket}
+
+  def handle_event("talk_toggle_seed", _params, socket) do
+    {:noreply, update(socket, :talk_seed_open?, &(!&1))}
+  end
+
+  def handle_event("talk_clear", _params, socket) do
+    {:noreply, clear_talk(socket)}
   end
 
   # MMF 18 — realtime application of Relay.Events broadcasts. Every open
@@ -2472,6 +2520,27 @@ defmodule RelayWeb.BoardLive do
 
   def handle_info({:node_finished, %Run{card_id: card_id}, _execution}, socket),
     do: {:noreply, mark_run_dirty(socket, card_id)}
+
+  # RE268 — Talk's transcript, applied only while the open drawer's session matches (the socket
+  # is subscribed only for the card whose Talk tab is open, but a message already in flight when
+  # the tab is switched away is a real race — this guard makes that a no-op instead of a crash
+  # or a leak onto the wrong card).
+  def handle_info({:talk_event, %TalkEvent{talk_session_id: session_id} = event}, socket) do
+    case socket.assigns.talk_session do
+      %TalkSession{id: ^session_id} -> {:noreply, stream_insert(socket, :talk_events, event)}
+      _other -> {:noreply, socket}
+    end
+  end
+
+  def handle_info({:talk_turn_changed, %TalkTurn{talk_session_id: session_id}}, socket) do
+    case socket.assigns.talk_session do
+      %TalkSession{id: ^session_id} = session ->
+        {:noreply, assign(socket, :talk_active_turn, Talk.active_turn(session))}
+
+      _other ->
+        {:noreply, socket}
+    end
+  end
 
   # RLY-204 — flush the coalesced burst: refetch ONLY the dirty cards' summaries/faces, restream
   # each, and refresh the open drawer's timeline when its card is dirty. This replaces the old
@@ -3791,6 +3860,73 @@ defmodule RelayWeb.BoardLive do
     end
   end
 
+  # RE268 — entering Talk subscribes to the card's transcript topic and (re)loads the
+  # session/active turn, so a stale seed or a stale Stop affordance can never survive a tab
+  # switch; leaving it unsubscribes — a card can accrue a long session over its life and there
+  # is no reason to stream every line to a socket sitting on Detail.
+  defp select_drawer_tab(%{assigns: %{drawer_tab: :talk, selected_card: %Card{} = card}} = socket, tab)
+       when tab != :talk do
+    Talk.unsubscribe(card.id)
+    assign(socket, :drawer_tab, tab)
+  end
+
+  defp select_drawer_tab(%{assigns: %{selected_card: %Card{} = card}} = socket, :talk) do
+    if socket.assigns.drawer_tab != :talk, do: Talk.subscribe(card.id)
+    session = Talk.session_for_card(card)
+
+    socket
+    |> assign(:drawer_tab, :talk)
+    |> assign(:talk_session, session)
+    |> assign(:talk_active_turn, Talk.active_turn(session))
+    |> stream(:talk_events, Talk.events(session), reset: true)
+  end
+
+  defp select_drawer_tab(socket, tab), do: assign(socket, :drawer_tab, tab)
+
+  defp submit_talk(socket, raw_text) do
+    text = String.trim(raw_text || "")
+
+    if text == "/clear" do
+      clear_talk(socket)
+    else
+      do_submit_talk(socket, text)
+    end
+  end
+
+  defp do_submit_talk(%{assigns: %{selected_card: %Card{} = card}} = socket, text) do
+    case Talk.post_message(card, socket.assigns.current_scope.user, text) do
+      {:ok, turn} ->
+        session = Talk.session_for_card(card)
+
+        socket
+        |> assign(:talk_session, session)
+        |> assign(:talk_active_turn, turn)
+        |> stream(:talk_events, Talk.events(session), reset: true)
+
+      # A blank draft and "one turn in flight at a time" are both silent no-ops: the composer
+      # already prevents the empty case, and refusing a second turn is a UI-less rule since Stop
+      # already replaces the composer while one is live.
+      {:error, _reason} ->
+        socket
+    end
+  end
+
+  defp clear_talk(%{assigns: %{talk_session: %TalkSession{} = session}} = socket) do
+    {:ok, cleared} = Talk.clear(session)
+    socket |> assign(:talk_session, cleared) |> stream(:talk_events, [], reset: true)
+  end
+
+  defp clear_talk(socket), do: socket
+
+  defp maybe_unsubscribe_talk(socket) do
+    case {Map.get(socket.assigns, :drawer_tab), Map.get(socket.assigns, :selected_card)} do
+      {:talk, %Card{} = card} -> Talk.unsubscribe(card.id)
+      _other -> :ok
+    end
+
+    socket
+  end
+
   # The drawer is URL-driven: ?card=<ref> selects a card; no param — or a
   # ref that doesn't resolve on this user's board (unknown, malformed, or
   # another board's card) — means no drawer. Authorization is the board
@@ -3799,6 +3935,10 @@ defmodule RelayWeb.BoardLive do
   # RLY-68 optimistic open: paint from the light card immediately, then
   # (when connected) fetch the heavy body/timeline/conversation async.
   defp assign_selected_card(socket, ref) do
+    # RE268 — a card switch (or a close, which routes here with ref: nil) always leaves
+    # Talk's subscription behind if the drawer was open on it; the branches below reset the
+    # Talk assigns for the new selection regardless.
+    socket = maybe_unsubscribe_talk(socket)
     card = if ref, do: Cards.get_card_light_by_ref(socket.assigns.board, ref)
 
     case card do
@@ -3838,8 +3978,12 @@ defmodule RelayWeb.BoardLive do
           |> close_header_popovers()
           |> assign(:card_runs, [])
           |> assign(:drawer_tab, :detail)
+          |> assign(:talk_session, nil)
+          |> assign(:talk_active_turn, nil)
+          |> assign(:talk_seed_open?, false)
           |> stream_notes([])
           |> stream(:activity, [], reset: true)
+          |> stream(:talk_events, [], reset: true)
 
         maybe_start_body_load(socket, card, ref, connected?(socket))
 
@@ -3876,10 +4020,14 @@ defmodule RelayWeb.BoardLive do
           reject_open: false,
           reject_form: nil,
           reject_error: nil,
-          body_loading?: false
+          body_loading?: false,
+          talk_session: nil,
+          talk_active_turn: nil,
+          talk_seed_open?: false
         )
         |> stream_notes([])
         |> stream(:activity, [], reset: true)
+        |> stream(:talk_events, [], reset: true)
     end
   end
 

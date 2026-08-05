@@ -36,6 +36,14 @@ defmodule RelayWeb.PublicBoardLiveTest do
       assert {:ok, _view, _html} = live(conn, ~p"/board/#{board.slug}/public")
     end
 
+    # RE268 — the public board renders its own `#public-card-modal`, never `card_drawer/1`, so
+    # public viewers get no Talk surface, ever (ADR 0009: Talk is authenticated-member only).
+    test "offers no Talk surface — public viewers never see the tab", %{conn: conn, board: board} do
+      {:ok, _view, html} = live(conn, ~p"/board/#{board.slug}/public")
+
+      refute html =~ "card-drawer-tab-talk"
+    end
+
     test "shows three columns — Unstarted, Planning, In progress — each with a count",
          %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/public")

@@ -34,6 +34,7 @@ defmodule RelayWeb.CoreComponents do
   alias Phoenix.LiveView.JS
   alias Relay.Cards
   alias RelayWeb.RunComponents
+  alias RelayWeb.TalkComponents
   alias RelayWeb.TimeAgo
   alias Schemas.Activity
 
@@ -1820,9 +1821,9 @@ defmodule RelayWeb.CoreComponents do
       "RLY-87: hosted inside the native shell — drops the web review buttons (the native action bar is the only actor) and the drawer's own dismissal affordances (scrim + close ✕), which the native back chevron owns. Keeps the review panel's label and hint: the context for the decision is the point of the screen."
 
   attr :drawer_tab, :atom,
-    values: [:detail, :run, :activity],
+    values: [:detail, :run, :talk, :activity],
     default: :detail,
-    doc: "RLY-137: which of the drawer's three tab panels is visible"
+    doc: "RLY-137/RE268: which of the drawer's tab panels is visible"
 
   attr :runs, :list,
     default: [],
@@ -1869,6 +1870,18 @@ defmodule RelayWeb.CoreComponents do
     doc: "RLY-227: ref of the next card in this card's stage column, or nil at the column's end"
 
   attr :board_slug, :string, required: true, doc: "the current board slug, for the flow-metrics deep-link"
+
+  attr :talk_session, :any,
+    default: nil,
+    doc: "RE268: the card's %Schemas.TalkSession{} (nil until the Talk tab has been opened)"
+
+  attr :talk_active_turn, :any,
+    default: nil,
+    doc: "RE268: the card's live %Schemas.TalkTurn{}, or nil — drives the composer/Stop toggle"
+
+  attr :talk_seed_open?, :boolean, default: false, doc: "RE268: whether the Talk pane's seed line is expanded"
+
+  attr :talk_events, :any, default: nil, doc: "RE268: the @streams.talk_events assign"
 
   def card_drawer(assigns) do
     latest = List.first(assigns.runs)
@@ -2068,6 +2081,36 @@ defmodule RelayWeb.CoreComponents do
               </button>
             </div>
             <%!--
+              RE268 — the Talk entry point, always in the same place, in every card state
+              (ADR 0009 §6 change 6: "Talk button in the header on every card, shortcut t"). Not
+              gated on @archived — Talk stays reachable on an archived (read-only) board; only
+              writes are refused there.
+            --%>
+            <button
+              type="button"
+              id="card-drawer-talk-button"
+              phx-click="drawer_tab"
+              phx-value-tab="talk"
+              data-active={to_string(@drawer_tab == :talk)}
+              style={
+                "display:flex;align-items:center;gap:7px;height:28px;padding:0 11px;border-radius:7px;font-size:12px;font-weight:600;border:1px solid " <>
+                  (if @drawer_tab == :talk,
+                     do: "color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100))",
+                     else: "var(--color-field-border)"
+                   ) <>
+                  ";background:" <>
+                  (if @drawer_tab == :talk,
+                     do: "color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100))",
+                     else: "var(--color-base-100)"
+                   ) <> ";color:color-mix(in oklab, var(--color-base-content) 85%, transparent);"
+              }
+            >
+              <.icon name="hero-command-line" class="size-[14px]" /> Talk
+              <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 45%, transparent);border:1px solid var(--color-field-border);border-radius:3px;padding:0 3px;line-height:13px;">
+                t
+              </span>
+            </button>
+            <%!--
               RE281 — card-level actions. Renders in `embed` too: @embed suppresses dismissal
               affordances (scrim, ✕), and Archive is not one — parity with today, where the
               rail's Archive already renders in embed. The h-11 wrapper centres the artboard's
@@ -2118,6 +2161,10 @@ defmodule RelayWeb.CoreComponents do
 
           <nav
             id="card-drawer-tabs"
+            phx-window-keydown="talk_shortcut"
+            phx-key="t"
+            phx-hook="TypingKeyGuard"
+            data-guard-keys="t"
             style="display:flex;gap:20px;padding:0 22px;border-bottom:1px solid var(--color-base-300);"
           >
             <button
@@ -2125,6 +2172,7 @@ defmodule RelayWeb.CoreComponents do
                 {tab, label, show} <- [
                   {:detail, "Detail", true},
                   {:run, "Run", @show_run_tab?},
+                  {:talk, "Talk", true},
                   {:activity, "Activity", true}
                 ]
               }
@@ -2821,6 +2869,29 @@ defmodule RelayWeb.CoreComponents do
                 <% end %>
               </div>
 
+              <%!--
+                RE268 — the Talk pane (ADR 0009). `max-drawer:hidden drawer:block` is a
+                DIFFERENT class token than the tab-visibility `"hidden"` above (deliberately —
+                colliding on the literal `hidden` token would make the tab-hide check below
+                ambiguous with the "a terminal is referred out below the drawer breakpoint" rule);
+                it degrades a phone viewport to no terminal rather than a squeezed one.
+              --%>
+              <div
+                id="card-drawer-tab-panel-talk"
+                class={[@drawer_tab != :talk && "hidden", "max-drawer:hidden drawer:block"]}
+              >
+                <TalkComponents.talk_pane
+                  id="talk-pane"
+                  ref={@ref}
+                  title={@card.title}
+                  seed_summary={@talk_session && @talk_session.seed_summary}
+                  seed_fields={(@talk_session && @talk_session.seed_fields) || []}
+                  seed_open?={@talk_seed_open?}
+                  busy?={talk_busy?(@talk_active_turn)}
+                  stream={@talk_events}
+                />
+              </div>
+
               <div id="card-drawer-tab-panel-activity" class={[@drawer_tab != :activity && "hidden"]}>
                 <section class="space-y-2 border-t border-base-300 pt-4">
                   <.section_label>Activity</.section_label>
@@ -3503,6 +3574,11 @@ defmodule RelayWeb.CoreComponents do
     "font-size:13px;padding:0 0 10px 0;font-weight:500;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);" <>
       "background:transparent;border:none;cursor:pointer;"
   end
+
+  # RE268 — the pane's chip/composer flip on whether a turn is still live
+  # (`Schemas.TalkTurn.active_statuses/0`), never on a re-typed status list.
+  defp talk_busy?(nil), do: false
+  defp talk_busy?(%{status: status}), do: status in Schemas.TalkTurn.active_statuses()
 
   defp owner_name(%{actor_type: :agent}), do: "Relay AI"
   defp owner_name(%{actor_type: :user, user: user}), do: user.name || user.email

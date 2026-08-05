@@ -59,7 +59,14 @@ defmodule RelayWeb.ThemeTokensTest do
     {"lib/relay_web/controllers/page_html/home.html.heex", "#34A853", "Google brand mark"},
     # A mask channel, not a color: only the alpha of this gradient is read.
     {"assets/css/app.css", "#000", "mask-image channel, not a color"},
-    {"assets/css/storybook.css", "#000", "mask-image channel, not a color"}
+    {"assets/css/storybook.css", "#000", "mask-image channel, not a color"},
+    # RE268: the Talk pane (RelayWeb.TalkComponents) is a terminal, matching the artboard —
+    # deliberately dark in BOTH daisyUI themes so it never drifts with data-theme. Every
+    # literal in the file is one of these fixed terminal colors (most of them inside `~H`
+    # template bodies, where a `# theme-tokens:allow:` marker can't survive — HEEx has no `#`
+    # comment), so this is a whole-file exemption rather than one marker per line. Pinned by
+    # talk_components_test.exs.
+    {"lib/relay_web/components/talk_components.ex", "oklch(", "RE268: terminal pane is intentionally fixed-dark"}
   ]
 
   # The OTHER hatch: every `# theme-tokens:allow: <reason>` marker in the scanned tree, pinned
