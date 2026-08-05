@@ -5,6 +5,9 @@ defmodule Relay.Runs.NodeJobKindTest do
   """
   use Relay.DataCase, async: true
 
+  import Ecto.Query
+
+  alias Relay.Repo
   alias Relay.Runs
   alias Schemas.NodeJob
 
@@ -96,6 +99,9 @@ defmodule Relay.Runs.NodeJobKindTest do
   test "a talk job is never requeued by the orphan reaper", ctx do
     Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1}, nil)
     {:ok, claimed} = Runs.claim_next_job(ctx.executor)
+    # Past the executor's grace window, so a flow job in this same state WOULD be requeued —
+    # this proves the `kind` filter is what spares the talk job, not the grace-window clause.
+    backdate_claim(claimed, 600)
 
     :ok = Runs.requeue_orphaned_jobs(ctx.board, ctx.executor, [])
 
@@ -114,5 +120,50 @@ defmodule Relay.Runs.NodeJobKindTest do
   test "plan_task_count counts the plan's task headings" do
     assert Runs.plan_task_count(nil) == 0
     assert Runs.plan_task_count("## Task 1: A\n\n## Task 2: B\n") == 2
+  end
+
+  test "a talk changeset carrying a run_id or node_execution_id is invalid", ctx do
+    changeset =
+      NodeJob.changeset(%NodeJob{
+        kind: :talk,
+        card_id: ctx.card.id,
+        node_key: "talk",
+        state: :queued,
+        run_id: 1
+      })
+
+    refute changeset.valid?
+    assert "must be nil on a talk job" in errors_on(changeset).run_id
+
+    changeset =
+      NodeJob.changeset(%NodeJob{
+        kind: :talk,
+        card_id: ctx.card.id,
+        node_key: "talk",
+        state: :queued,
+        node_execution_id: 1
+      })
+
+    refute changeset.valid?
+    assert "must be nil on a talk job" in errors_on(changeset).node_execution_id
+  end
+
+  test "a flow changeset missing run_id or node_execution_id is invalid", ctx do
+    changeset =
+      NodeJob.changeset(%NodeJob{
+        kind: :node,
+        card_id: ctx.card.id,
+        node_key: "some-node",
+        state: :queued
+      })
+
+    refute changeset.valid?
+    assert "can't be blank" in errors_on(changeset).run_id
+    assert "can't be blank" in errors_on(changeset).node_execution_id
+  end
+
+  defp backdate_claim(job, seconds) do
+    at = DateTime.utc_now() |> DateTime.add(-seconds, :second) |> DateTime.truncate(:second)
+    Repo.update_all(from(j in NodeJob, where: j.id == ^job.id), set: [claimed_at: at])
   end
 end

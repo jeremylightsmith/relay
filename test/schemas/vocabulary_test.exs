@@ -44,6 +44,7 @@ defmodule Schemas.VocabularyTest do
           {Schemas.Run, :statuses, :status},
           {Schemas.Run, :parked_reasons, :parked_reason},
           {Schemas.NodeJob, :states, :state},
+          {Schemas.NodeJob, :kinds, :kind},
           {Schemas.NodeExecution, :outcomes, :outcome},
           {Schemas.Flow, :isolation_classes, :isolation}
         ] do
