@@ -5140,6 +5140,194 @@ class NoHardcodedScratchPathTest(unittest.TestCase):
             "$RELAY_NODE_SCRATCH's directory instead:\n" + "\n".join(hits))
 
 
+class TalkPromptTest(unittest.TestCase):
+    """RE268 — the prompt is built in PRODUCT code, not a .claude/agents definition: a recorded
+    exception to ADR 0006 (ADR 0009 §5), because Talk must behave identically on every board
+    regardless of what the connected repo ships."""
+
+    def setUp(self):
+        self.job = json.loads(json.dumps(CONTRACT["talk_claim"]["first_turn"]))
+
+    def test_the_preamble_names_the_pane_the_tools_and_the_read_only_rule(self):
+        p = relay.talk_prompt(self.job)
+        self.assertIn("terminal", p.lower())
+        self.assertIn("bin/relay why", p)
+        self.assertIn("bin/relay runs", p)
+        self.assertIn("must not", p.lower())
+
+    def test_the_seed_block_carries_every_injected_field(self):
+        p = relay.talk_prompt(self.job)
+        for f in self.job["seed"]["fields"]:
+            self.assertIn(f["label"], p)
+            self.assertIn(f["value"], p)
+
+    def test_the_humans_text_is_last_and_verbatim(self):
+        p = relay.talk_prompt(self.job)
+        self.assertTrue(p.rstrip().endswith(self.job["prompt"]))
+
+    def test_a_brace_in_the_humans_text_is_never_rendered_as_a_var(self):
+        self.job["prompt"] = "why does {ref} appear twice?"
+        self.assertIn("{ref}", relay.talk_prompt(self.job))
+
+
+class TalkEventMappingTest(unittest.TestCase):
+    """The recorded stream-json seam (ADR 0009 § Testing): assistant text -> :out, tool
+    invocations -> a single dim :tool line, a turn error -> :error."""
+
+    def _replay(self):
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "test", "fixtures", "talk_stream.jsonl")
+        with open(path, encoding="utf-8") as f:
+            return [json.loads(line) for line in f if line.strip()]
+
+    def test_assistant_text_becomes_an_out_line(self):
+        evs = [e for ev in self._replay() for e in relay.talk_events_from(ev)]
+        outs = [e for e in evs if e["kind"] == "out"]
+        self.assertTrue(outs)
+        self.assertFalse(any(e["dim"] for e in outs))
+
+    def test_a_tool_use_becomes_one_dim_tool_line_naming_its_target(self):
+        evs = [e for ev in self._replay() for e in relay.talk_events_from(ev)]
+        tools = [e for e in evs if e["kind"] == "tool"]
+        self.assertEqual(len(tools), 1)
+        self.assertTrue(tools[0]["dim"])
+        self.assertIn("Read", tools[0]["text"])
+        self.assertIn("lib/relay.ex", tools[0]["text"])
+
+    def test_a_clean_result_emits_no_line(self):
+        self.assertEqual(relay.talk_events_from({"type": "result", "is_error": False}), [])
+
+    def test_an_errored_result_emits_an_error_line(self):
+        out = relay.talk_events_from({"type": "result", "is_error": True, "result": "boom"})
+        self.assertEqual([e["kind"] for e in out], ["error"])
+        self.assertIn("boom", out[0]["text"])
+
+    def test_an_unknown_event_type_is_ignored_rather_than_crashing_the_turn(self):
+        self.assertEqual(relay.talk_events_from({"type": "wat"}), [])
+
+
+class TalkEventSenderTest(unittest.TestCase):
+    """Delivery is at-least-once and MUST NOT DROP — the whole reason Talk does not reuse
+    LogForwarder, whose enqueue drops on a full queue and whose _send swallows errors."""
+
+    def setUp(self):
+        self.posted = []
+
+        def fake_api(method, path, body=None, **kw):
+            self.posted.append((method, path, body, kw))
+            return {"status": "ok", "accepted": len(body["events"])}
+
+        self.orig, relay.api = relay.api, fake_api
+
+    def tearDown(self):
+        relay.api = self.orig
+
+    def test_client_seq_is_per_turn_and_starts_at_one(self):
+        s = relay.TalkEventSender(turn_id=7)
+        s.enqueue("out", "a")
+        s.enqueue("tool", "Read · x", dim=True)
+        self.assertTrue(s.flush())
+        self.assertEqual([e["client_seq"] for e in self.posted[0][2]["events"]], [1, 2])
+
+    def test_it_posts_the_turns_events_route_idempotently(self):
+        s = relay.TalkEventSender(turn_id=7)
+        s.enqueue("out", "a")
+        s.flush()
+        method, path, _body, kw = self.posted[0]
+        self.assertEqual((method, path), ("POST", "/api/talk/turns/7/events"))
+        self.assertTrue(kw.get("idempotent"))
+
+    def test_a_failing_post_is_retried_with_the_same_client_seqs(self):
+        calls = {"n": 0}
+
+        def flaky(method, path, body=None, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise SystemExit("boom")
+            self.posted.append((method, path, body, kw))
+            return {"status": "ok", "accepted": len(body["events"])}
+
+        relay.api = flaky
+        s = relay.TalkEventSender(turn_id=7, backoff=lambda _a: 0)
+        s.enqueue("out", "a")
+        self.assertTrue(s.flush())
+        self.assertEqual([e["client_seq"] for e in self.posted[0][2]["events"]], [1])
+
+    def test_exhausting_the_budget_reports_failure_rather_than_discarding(self):
+        def always_fails(*a, **kw):
+            raise SystemExit("down")
+
+        relay.api = always_fails
+        s = relay.TalkEventSender(turn_id=7, max_attempts=2, backoff=lambda _a: 0)
+        s.enqueue("out", "a")
+        self.assertFalse(s.flush())
+        self.assertTrue(s.failed)
+
+
+class TalkWorktreeTest(unittest.TestCase):
+    """ADR 0009 §2: a turn always uses the card's exclusive per-card worktree, attaching to the
+    live one when there is one. NEVER the shared <ns>-clean tree, which other cards' jobs are
+    using."""
+
+    def _pool(self, **cfg):
+        base = {"namespace": "exec", "capacity": {"shared_clean": 2, "exclusive": 2},
+                "max_retained_failed": 3}
+        base.update(cfg)
+        return relay.ExecutorPool(base)
+
+    def test_a_card_with_no_worktree_gets_its_own_and_is_reset(self):
+        pool = self._pool()
+        self.assertEqual(pool.assign_talk("DE3"), ("exec-DE3", True))
+
+    def test_it_attaches_to_a_live_exclusive_worktree_without_resetting_it(self):
+        pool = self._pool()
+        pool.assign(job("exclusive_shell", vars={"ref": "DE3"}))
+        self.assertEqual(pool.assign_talk("DE3"), ("exec-DE3", False))
+
+    def test_it_reuses_a_retained_failed_worktree_as_it_is(self):
+        pool = self._pool()
+        pool.wts["exec-DE3"] = {"run_id": None, "state": "retained", "live": False, "partition": None}
+        self.assertEqual(pool.assign_talk("DE3"), ("exec-DE3", False))
+
+    def test_a_shared_clean_card_still_gets_its_own_tree(self):
+        pool = self._pool()
+        pool.assign(job("shared_clean_agent", vars={"ref": "CA1"}))
+        slot, _reset = pool.assign_talk("CA1")
+        self.assertNotEqual(slot, pool.shared_name)
+        self.assertEqual(slot, "exec-CA1")
+
+    def test_it_refuses_rather_than_stealing_when_there_is_no_room(self):
+        pool = self._pool(capacity={"shared_clean": 1, "exclusive": 0})
+        self.assertIsNone(pool.assign_talk("DE3"))
+
+    def test_a_talk_worktree_is_not_released_by_a_run_ending(self):
+        pool = self._pool()
+        pool.assign_talk("DE3")
+        pool.release_run(run_id=None, status="done")   # the None binding must NOT match
+        pool.release_run(run_id="run-9", status="done")
+        self.assertIn("exec-DE3", pool.wts)
+
+
+class TalkOutcomeTest(unittest.TestCase):
+    def setUp(self):
+        self.posted = []
+        self.orig = relay.api
+        relay.api = lambda m, p, b=None, **kw: (self.posted.append((m, p, b)), {"status": "ok", "turn_state": b["status"]})[1]
+
+    def tearDown(self):
+        relay.api = self.orig
+
+    def test_it_posts_the_talk_outcome_route_with_the_fixture_key_set(self):
+        relay.report_talk_outcome(7, "done", "sess-abc", "")
+        method, path, body = self.posted[0]
+        self.assertEqual((method, path), ("POST", "/api/talk/turns/7/outcome"))
+        self.assertEqual(set(body), set(CONTRACT["talk_outcome"]["request"]))
+
+    def test_a_revoked_turn_reports_stopped_not_failed(self):
+        relay.report_talk_outcome(7, "stopped", None, "")
+        self.assertEqual(self.posted[0][2]["status"], "stopped")
+
+
 if __name__ == "__main__":
     # buffer=True captures each test's stdout/stderr and replays it only if that test fails.
     # These tests drive the real `relay` CLI through error/scenario paths, so without buffering

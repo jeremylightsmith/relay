@@ -69,8 +69,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 34
-EXECUTOR_FINGERPRINT = "55e73eab14de21f0cc5a1f36da2b0145d8883a0536c0c8ca0ef2caa0ddc5c592"
+EXECUTOR_VERSION = 35
+EXECUTOR_FINGERPRINT = "48f538869a452d95c43c3e7010484d050da8ebfd392640f26d2dfa4a9c32625a"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1427,6 +1427,35 @@ class ExecutorPool:
             # never runs twice at once). Refuse rather than steal a live worktree.
             return None
 
+    def release_talk(self, slot):
+        """Mark a talk turn's worktree idle. Deliberately does NOT tear it down: a session spans
+        runs, so the tree must outlive them (ADR 0009 §2)."""
+        with self.lock:
+            rec = self.wts.get(slot)
+            if rec:
+                rec["live"] = False
+
+    def assign_talk(self, ref):
+        """Reserve the CARD'S OWN worktree for a talk turn (ADR 0009 §2): attach to the live one
+        when a node job has it (dirty reads are the point), reuse a retained failed one as it is
+        (post-mortem is exactly what people ask about), and create one otherwise. Returns
+        (slot_name, reset?) or None when there is no room — NEVER the shared `<ns>-clean` tree,
+        which other CARDS' jobs are using and which a talk turn must not disturb.
+
+        A talk-created worktree is bound to no run (`run_id` None), so `release_run` can never
+        tear it down: the tree must survive a run ending, because a session spans runs."""
+        name = self.wt_name(ref)
+        with self.lock:
+            rec = self.wts.get(name)
+            if rec is not None:
+                rec["live"] = True
+                return name, False
+            if self._active_count() >= self.max_worktrees:
+                return None
+            self.wts[name] = {"run_id": None, "state": "active", "live": True,
+                              "partition": self._take_partition(), "talk": True}
+            return name, True
+
     # ---- release (outcome / revoke path) --------------------------------
     def release(self, job, slot, run_state):
         """Free/keep the worktree per the outcome's run_state. shared_clean always frees a slot.
@@ -1450,10 +1479,15 @@ class ExecutorPool:
         """Recovery path: the heartbeat named `run_id` terminal (server-side) while this executor
         holds its worktree with no live job. Tear it down (done/cancelled) or retain it (failed)
         per `status`. A legacy server may send status=None → default to removal (the old
-        behavior). Never touch a worktree with a live job (defense-in-depth)."""
+        behavior). Never touch a worktree with a live job (defense-in-depth).
+
+        `rec["run_id"] is not None` guards a talk-created (or recovered) worktree, which
+        deliberately carries `run_id: None` (ADR 0009 §2 — a talk session spans runs and must
+        outlive them): a legacy `release_runs` entry of `null` must never match it and tear down
+        a tree bound to nothing."""
         with self.lock:
             for name, rec in list(self.wts.items()):
-                if rec["run_id"] == run_id and rec["state"] == "active" and not rec["live"]:
+                if rec["run_id"] is not None and rec["run_id"] == run_id and rec["state"] == "active" and not rec["live"]:
                     self._finish_locked(name, rec, status or "done")
 
     def _finish_locked(self, slot, rec, run_state):
@@ -1845,7 +1879,7 @@ def report_outcome(job_id, outcome, detail, git_sha, session_id=None):
 
 
 def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None,
-                      agent=None, partition=None, scratch=None, plan=None):
+                      agent=None, partition=None, scratch=None, plan=None, on_event=None):
     """Executor variant of _stream_claude. Runs `claude -p` (or `--resume <session_id>` on a
     needs-input re-entry), streams events, captures the claude session id from the stream-json
     events (init/result carry `session_id`), and sets $RELAY_NODE_OUTCOME so an agent node can
@@ -1856,7 +1890,9 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
     slot's own test database. `scratch`, if given, is exported as RELAY_NODE_SCRATCH
     (RLY-214) — the agent's own scratch file for this node, per `scratch_path(slot, ref,
     node)`. `plan`, if given, is exported as RELAY_PLAN (RLY-223) — the per-ref materialized
-    plan the agent reads. Returns (ok, captured_session_id). `on_proc` receives the live Popen."""
+    plan the agent reads. `on_event`, if given, is called with each parsed stream-json event as
+    it arrives, so a talk turn can stream its transcript while the turn is still working.
+    Returns (ok, captured_session_id). `on_proc` receives the live Popen."""
     cmd = ["claude", "-p", prompt, "--dangerously-skip-permissions",
            "--verbose", "--output-format", "stream-json"]
     if session_id:
@@ -1891,6 +1927,8 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
             ev = json.loads(line)
             captured = ev.get("session_id") or captured
             _print_claude_event(ev, tag)
+            if on_event:
+                on_event(ev)
         except Exception:
             print(f"    {tag}" + line[:200], flush=True)
     return proc.wait() == 0, captured
@@ -2162,6 +2200,192 @@ def run_node_job(job, slot_path, control, partition=None):
                               capture_output=True, text=True)
     git_sha = sha_proc.stdout.strip() if sha_proc.returncode == 0 else None
     return outcome, detail, git_sha, session_id
+
+
+# ---- Talk (RE268 / ADR 0009) ------------------------------------------------
+# The turn prompt is built HERE, in product code, and deliberately not from a
+# `.claude/agents/*.md` definition — a recorded exception to ADR 0006 (ADR 0009 §5). Talk is a
+# property of Relay itself and must behave the same on every board regardless of what the
+# connected repo ships.
+TALK_PREAMBLE = """You are attached to a Relay card as a terminal session.
+
+This is a TERMINAL, not a chat. There is no message frame and no partner persona: you answer,
+you run commands, you print what you find. Be direct and short.
+
+You may read any file in this working tree and run any read-only command. The tree is the card's
+own worktree and may be dirty, mid-edit — that is deliberate, and it is often exactly what is
+being asked about.
+
+To learn what the card's runs actually did, use the Relay CLI rather than guessing:
+  bin/relay why  {ref}     — why the card is where it is, including rejections
+  bin/relay runs {ref}     — the card's run history and per-node outcomes
+  bin/relay card {ref}     — the card's current fields
+
+In this step you must NOT change anything: do not edit files, do not commit, do not push, and do
+not modify the card. If you are asked to change something, say plainly that you cannot yet.
+"""
+
+
+def talk_prompt(job):
+    """preamble + seed block + the human's text, in that order.
+
+    The human's text is spliced VERBATIM and never passed through render(): someone asking
+    "why does {ref} appear twice?" must see those characters reach the model unchanged, and a
+    person's typing must never reach into a var namespace."""
+    seed = job.get("seed") or {}
+    lines = [TALK_PREAMBLE.replace("{ref}", str(job.get("ref") or "")), "<card>"]
+    lines.append(f"ref          {job.get('ref')}")
+    for f in seed.get("fields") or []:
+        lines.append(f"{str(f.get('label', '')).ljust(12)} {f.get('value', '')}")
+    lines += ["</card>", "", str(job.get("prompt") or "")]
+    return "\n".join(lines)
+
+
+def talk_events_from(ev):
+    """Map ONE stream-json event to the transcript lines it produces (ADR 0009):
+    assistant text -> :out, a tool invocation -> one dim :tool line `<tool> · <short target>`,
+    an errored result -> :error. Anything else produces nothing — an unrecognised event must
+    never cost the turn."""
+    out = []
+    if ev.get("type") == "assistant":
+        for b in ev.get("message", {}).get("content", []) or []:
+            if b.get("type") == "text" and b.get("text", "").strip():
+                out.append({"kind": "out", "text": b["text"].strip()[:4000], "dim": False})
+            elif b.get("type") == "tool_use":
+                inp = b.get("input") or {}
+                brief = (inp.get("command") or inp.get("file_path") or inp.get("path")
+                         or inp.get("pattern") or inp.get("description") or "")
+                text = f"{b.get('name')} · {str(brief)[:140]}".strip(" ·")
+                out.append({"kind": "tool", "text": text, "dim": True})
+    elif ev.get("type") == "result" and ev.get("is_error"):
+        out.append({"kind": "error",
+                    "text": str(ev.get("result") or "the turn ended with an error")[:600],
+                    "dim": False})
+    return out
+
+
+def _talk_backoff(attempt):
+    return min(8, 0.5 * (2 ** attempt))
+
+
+class TalkEventSender:
+    """At-least-once transcript delivery for ONE talk turn.
+
+    Deliberately unlike LogForwarder, which is best-effort BY CONSTRUCTION (`enqueue` drops on a
+    full queue, `_send` swallows errors) — right for a live feed, wrong for a record this
+    feature promises to keep. Here nothing is dropped: a failed POST is retried with backoff,
+    `client_seq` makes the retry safe, and exhausting the budget sets `failed` so the turn is
+    reported `failed` with a visible :error line rather than leaving a silent hole."""
+
+    def __init__(self, turn_id, batch=40, max_attempts=6, backoff=_talk_backoff):
+        self.turn_id = turn_id
+        self.batch = batch
+        self.max_attempts = max_attempts
+        self.backoff = backoff
+        self.failed = False
+        self._next_seq = 1
+        self._pending = []
+        self._lock = threading.Lock()
+
+    def enqueue(self, kind, text, dim=False):
+        with self._lock:
+            self._pending.append({"client_seq": self._next_seq, "kind": kind,
+                                  "text": text, "dim": bool(dim)})
+            self._next_seq += 1
+            ready = len(self._pending) >= self.batch
+        if ready:
+            self.flush()
+
+    def flush(self):
+        """Drain everything queued. Returns False once the retry budget is exhausted, and from
+        then on stays False — a turn that has lost lines must not report success."""
+        while True:
+            with self._lock:
+                if not self._pending:
+                    return not self.failed
+                chunk, self._pending = self._pending[:self.batch], self._pending[self.batch:]
+            if not self._post(chunk):
+                self.failed = True
+                return False
+
+    def _post(self, chunk):
+        last = None
+        for attempt in range(self.max_attempts):
+            try:
+                api("POST", f"/api/talk/turns/{self.turn_id}/events",
+                    {"events": chunk}, idempotent=True)
+                return True
+            except (Exception, SystemExit) as e:
+                last = e
+                time.sleep(self.backoff(attempt))
+        log(f"talk turn {self.turn_id}: dropping {len(chunk)} line(s) after "
+            f"{self.max_attempts} attempts: {last}", kind="error")
+        return False
+
+
+def talk_outcome_body(status, session_id, detail):
+    """The exact body POSTed to /api/talk/turns/:id/outcome. Pure and separate from the POST so
+    bin/test_relay.py can pin its key set against the fixture's `talk_outcome.request`."""
+    return {"status": status, "session_id": session_id, "detail": detail}
+
+
+def report_talk_outcome(turn_id, status, session_id, detail):
+    resp = api("POST", f"/api/talk/turns/{turn_id}/outcome",
+               talk_outcome_body(status, session_id, detail), idempotent=True)
+    return (resp or {}).get("turn_state")
+
+
+def run_talk_job(job, slot_path, control):
+    """Run one claimed talk turn in `slot_path`; return (status, session_id, detail).
+    Does NOT report — execute_talk POSTs the outcome."""
+    turn_id = job["turn_id"]
+    sender = TalkEventSender(turn_id)
+    tag = f"[{job.get('ref')} talk] "
+
+    def on_event(ev):
+        for line in talk_events_from(ev):
+            sender.enqueue(line["kind"], line["text"], line["dim"])
+
+    ok, session_id = _stream_claude_job(
+        talk_prompt(job), cwd=slot_path, tag=tag,
+        session_id=job.get("resume_session"), on_proc=control.register,
+        on_event=on_event)
+
+    delivered = sender.flush()
+    if control.cancelled():
+        return "stopped", session_id, "stopped by the person"
+    if not delivered:
+        sender.failed = False        # one last, best-effort visible failure line
+        sender.enqueue("error", "some output was lost: the transcript could not be delivered")
+        sender.flush()
+        return "failed", session_id, "transcript delivery failed"
+    if not ok:
+        return "failed", session_id, "the claude session exited non-zero"
+    return "done", session_id, ""
+
+
+def execute_talk(job, slot, reset, control, pool):
+    """Worker body for one talk turn. Mirrors execute_one's discipline — always report, never
+    leak a slot — but has no run_state to act on: a talk worktree deliberately OUTLIVES any run
+    (ADR 0009 §2), so nothing is torn down here."""
+    slot_path = worktree_path(slot)
+    try:
+        if reset and not DRY:
+            pool.create_or_rebaseline(slot)
+            hook_err = pool.run_prepare_hook(slot_path, job.get("ref"), job.get("branch"))
+            if hook_err:
+                report_talk_outcome(job["turn_id"], "failed", None, f"prepare hook failed: {hook_err}")
+                return
+        status, session_id, detail = run_talk_job(job, slot_path, control)
+        report_talk_outcome(job["turn_id"], status, session_id, detail)
+    except (Exception, SystemExit) as e:
+        try:
+            report_talk_outcome(job["turn_id"], "failed", None, f"talk worker crashed: {e}")
+        except (Exception, SystemExit) as report_err:
+            log(f"failed to report talk crash for turn {job.get('turn_id')}: {report_err}",
+                kind="error")
+    finally:
+        pool.release_talk(slot)
 
 
 def execute_one(job, slot, reset, control, pool):
@@ -2702,6 +2926,12 @@ def cmd_execute(args):
         way."""
         job_id = job.get("id") if isinstance(job, dict) else None
         log(f"rejecting claimed job {job_id or job!r}: {detail}", kind="error")
+        if isinstance(job, dict) and job.get("kind") == "talk" and job.get("turn_id"):
+            try:
+                report_talk_outcome(job["turn_id"], "failed", None, detail)
+            except (Exception, SystemExit) as e:
+                log(f"failed to report talk rejection for {job_id}: {e}", kind="error")
+            return
         if job_id is None:
             return
         try:
@@ -2726,11 +2956,14 @@ def cmd_execute(args):
         hb.start()
 
     def worker(job, slot, reset, control):
-        ref = (job.get("vars") or {}).get("ref") or job["id"]
+        ref = (job.get("vars") or {}).get("ref") or job.get("ref") or job["id"]
         NODE_JOB_IDS[ref] = job["id"]
         RUN_IDS[ref] = job.get("run_id")
         try:
-            execute_one(job, slot, reset, control, pool)
+            if job.get("kind") == "talk":
+                execute_talk(job, slot, reset, control, pool)
+            else:
+                execute_one(job, slot, reset, control, pool)
         finally:
             with lock:
                 in_flight.pop(job["id"], None)
@@ -2801,7 +3034,12 @@ def cmd_execute(args):
                 break
             continue
         try:
-            assigned = pool.assign(job)
+            if job.get("kind") == "talk":
+                assigned = pool.assign_talk(job["ref"])
+                if assigned is not None:
+                    assigned = (assigned[0], assigned[1])
+            else:
+                assigned = pool.assign(job)
         except (KeyError, TypeError) as e:          # malformed job: assign can't even read it
             reject(job, f"malformed job: {e}")
             if args.once:

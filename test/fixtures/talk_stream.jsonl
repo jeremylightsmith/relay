@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","session_id":"sess-abc"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Let me check the file that owns this."}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"lib/relay.ex"}}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"It is waiting on a review."}]}}
+{"type":"result","is_error":false,"session_id":"sess-abc","num_turns":3}

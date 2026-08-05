@@ -582,6 +582,54 @@ silently billed to the paid API.
   disabled for that process, leaving RLY-184's fail-stop as the behaviour. Three failed attempts
   disable it the same way. Opt out with `"auto_update": false`.
 
+### Talk turns (RE268, ADR 0009)
+
+The claim loop's `worker()` branches on `job.get("kind")`: a `"talk"` job runs `execute_talk`
+instead of `execute_one`, and `reject()` reports a rejected talk job through
+`report_talk_outcome` (`POST /api/talk/turns/:id/outcome`) rather than the node-job outcome
+route — a talk job has no `run_id` for that route to accept. No second thread: it is the same
+claim/execute/report loop, one more branch.
+
+- **Worktree.** A talk turn always runs in the card's own exclusive per-card worktree
+  `<ns>-<ref>` — **never** the shared `<ns>-clean` tree, which other cards' jobs are using.
+  `ExecutorPool.assign_talk/1` attaches to a live worktree a node job already holds (dirty
+  reads are the point — the tree may be mid-edit, and that is often exactly what is being asked
+  about), reuses a retained failed one as-is (post-mortem is what people ask about), or creates
+  one on demand for a card the flow engine would never itself dispatch. `release_talk/1` marks
+  the slot idle without tearing it down: a Talk session spans runs, so the tree must **outlive**
+  any one run. Because a talk-created (or recovered) worktree carries `run_id: None`,
+  `release_run/2` — the run-terminal recovery path — explicitly skips any record whose
+  `run_id` is `None`, so a legacy `release_runs` entry can never tear down a tree bound to
+  nothing.
+- **Prompt.** `talk_prompt(job)` is built in **product code**, not a `.claude/agents/*.md`
+  definition — a recorded exception to ADR 0006 (ADR 0009 §5): Talk is a property of Relay
+  itself and must behave identically on every connected repo. It is the preamble (names the
+  pane, the read-only rule, and `bin/relay why`/`runs`/`card`) + the card's seed fields + the
+  human's text, spliced in **verbatim and last** — never passed through `render()`, so a
+  person's `{ref}`-shaped typing can never reach into the var namespace.
+- **Event mapping.** `_stream_claude_job` gained an `on_event=None` callback, invoked with each
+  parsed stream-json event as it arrives — this is what lets a turn's transcript stream *while
+  the turn is still working*, not all at once at the end. `talk_events_from(ev)` maps one event
+  to the transcript lines it produces: assistant text → an `:out` line, a `tool_use` block → one
+  dim `:tool` line naming its target, an errored `result` → an `:error` line. Anything else
+  (including an unrecognised event type) produces nothing — a mangled or unfamiliar event must
+  never cost the turn.
+- **Delivery.** `TalkEventSender` batches and POSTs lines to `/api/talk/turns/:id/events`
+  at-least-once — deliberately unlike `LogForwarder`, which drops by construction (`enqueue` on
+  a full queue, swallowed `_send` errors). Each line's `client_seq` is per-turn and
+  monotonic from 1, which is what makes a retried batch idempotent server-side
+  (`Relay.Talk.append_events/2` dedupes on it). A failed POST retries with backoff up to
+  `max_attempts`; exhausting the budget sets `failed` and `run_talk_job` appends one last,
+  best-effort `:error` line saying the transcript could not be fully delivered, then reports the
+  turn `failed` rather than silently reporting a `done` turn with missing output.
+- **Stop.** Arrives as an ordinary revoke on the existing heartbeat — `ExecutorHeartbeat`
+  already terminates a revoked job's subprocess via its `JobControl`; `run_talk_job` checks
+  `control.cancelled()` after the process exits and reports `stopped` (not `failed`) with
+  whatever partial output was already delivered. No talk-specific channel was added.
+
+`EXECUTOR_VERSION` 33 → 34 for this change; `Relay.Runs.min_executor_version/0` is **not**
+raised — an executor without Talk is not worse than a stopped one.
+
 ### Declaring an outcome
 
 An agent node **must declare its verdict** before it exits, by running:
