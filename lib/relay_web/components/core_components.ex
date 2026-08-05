@@ -1610,9 +1610,22 @@ defmodule RelayWeb.CoreComponents do
     default: false,
     doc: "whether the OWNERS reassign picker popover is open"
 
+  attr :overflow_open, :boolean,
+    default: false,
+    doc: "RE281: whether the drawer header's ⋯ overflow menu (card-level actions) is open"
+
   attr :stages, :list,
     default: [],
-    doc: "move targets: the board's other stages (each exposing id and name); [] hides the menu"
+    doc:
+      "RE281: EVERY stage on the board in position order — each %{id, name, current?}. The current one is listed and marked, not hidden; fewer than two entries hides the chip's move affordance"
+
+  attr :stage_menu_open, :boolean,
+    default: false,
+    doc: "RE281: whether the header's stage (Move to) popover is open"
+
+  attr :stage_filter, :string,
+    default: "",
+    doc: "RE281: the stage popover's filter text; case-insensitive substring on the stage name"
 
   attr :conversation, :any,
     required: true,
@@ -1763,6 +1776,7 @@ defmodule RelayWeb.CoreComponents do
       |> assign(:parked_run, parked_run)
       |> assign(:park_kind, park_kind)
       |> assign(:show_run_tab?, assigns.runs != [] or assigns.queued_flow != nil)
+      |> assign(:visible_stages, filter_stages(assigns.stages, assigns.stage_filter))
 
     ~H"""
     <div id={@id} class="drawer drawer-end" phx-window-keydown="close_drawer" phx-key="escape">
@@ -1786,12 +1800,99 @@ defmodule RelayWeb.CoreComponents do
           <header class="flex items-start gap-3 border-b border-base-300 p-5">
             <div class="flex min-w-0 flex-1 flex-col gap-1.5">
               <div class="flex items-center gap-2">
-                <span class={[
-                  "drawer-stage-chip badge badge-sm font-medium",
-                  if(@stage_owner == :human, do: "badge-primary", else: "badge-secondary")
-                ]}>
-                  {@stage_name}
-                </span>
+                <%!--
+                  RE281 — the chip IS the Move-to control. It degrades to a plain, non-clickable
+                  span when there is nowhere to move to (archived card, or a board with a single
+                  stage), which is also the archived shape the artboard never draws. The owner
+                  tint is a deliberate deviation from the artboard's fixed violet: Human = blue /
+                  AI = violet is the palette rule, and a fixed violet would erase whose stage the
+                  card is on.
+                --%>
+                <div class="relative flex-none">
+                  <button
+                    :if={!@archived and length(@stages) > 1}
+                    type="button"
+                    id="card-drawer-stage-chip"
+                    phx-click="toggle_stage_menu"
+                    aria-haspopup="listbox"
+                    aria-expanded={to_string(@stage_menu_open)}
+                    class={[
+                      "drawer-stage-chip badge badge-sm h-5 gap-[5px] whitespace-nowrap rounded-[4px] border-none py-0 pl-[9px] pr-[7px] text-[12px] font-medium",
+                      if(@stage_owner == :human, do: "badge-primary", else: "badge-secondary")
+                    ]}
+                  >
+                    {@stage_name}
+                    <.icon name="hero-chevron-down" class="size-[11px]" />
+                  </button>
+                  <span
+                    :if={@archived or length(@stages) <= 1}
+                    id="card-drawer-stage-chip"
+                    class={[
+                      "drawer-stage-chip badge badge-sm h-5 whitespace-nowrap rounded-[4px] border-none px-[9px] py-0 text-[12px] font-medium",
+                      if(@stage_owner == :human, do: "badge-primary", else: "badge-secondary")
+                    ]}
+                  >
+                    {@stage_name}
+                  </span>
+                  <div
+                    :if={@stage_menu_open and !@archived}
+                    id="card-drawer-stage-menu"
+                    class="absolute left-0 top-[26px] z-[24] flex w-[214px] flex-col gap-[5px] rounded-[9px] border border-base-300 bg-base-100 p-1.5 shadow-[0_8px_28px_oklch(0.26_0.02_255/0.16)]"
+                  >
+                    <span class="px-1 pt-[3px] font-mono text-[9.5px] font-semibold uppercase tracking-[0.6px] text-base-content/50">
+                      Move to
+                    </span>
+                    <form
+                      id="card-drawer-stage-filter-form"
+                      phx-change="filter_stages"
+                      phx-submit="filter_stages"
+                    >
+                      <input
+                        type="text"
+                        id="card-drawer-stage-filter"
+                        name="q"
+                        value={@stage_filter}
+                        autocomplete="off"
+                        placeholder="Filter stages…"
+                        class="w-full rounded-md border border-base-300 bg-base-200/40 px-[9px] py-1.5 text-[12px] outline-none"
+                      />
+                    </form>
+                    <div class="flex max-h-[230px] flex-col gap-px overflow-y-auto">
+                      <span
+                        :if={@visible_stages == []}
+                        id="card-drawer-stage-none"
+                        class="rounded-md px-[9px] py-1.5 text-[12.5px] font-medium text-base-content/50"
+                      >
+                        No stages match
+                      </span>
+                      <%= for stage <- @visible_stages do %>
+                        <span
+                          :if={stage.current?}
+                          id={"#{@id}-move-to-#{stage.id}"}
+                          class="flex w-full items-center gap-2 rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-semibold text-base-content"
+                        >
+                          <span class="size-[6px] flex-none rounded-[2px] bg-secondary"></span>
+                          {stage.name}
+                          <span class="ml-auto flex-none font-mono text-[10px] text-secondary">
+                            current
+                          </span>
+                        </span>
+                        <button
+                          :if={!stage.current?}
+                          type="button"
+                          id={"#{@id}-move-to-#{stage.id}"}
+                          phx-click="move_card"
+                          phx-value-ref={@ref}
+                          phx-value-stage_id={stage.id}
+                          class="flex w-full items-center gap-2 rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-base-content/80 hover:bg-base-300/50"
+                        >
+                          <span class="size-[6px] flex-none rounded-[2px] bg-base-300"></span>
+                          {stage.name}
+                        </button>
+                      <% end %>
+                    </div>
+                  </div>
+                </div>
                 <span class="drawer-card-ref font-mono text-xs text-base-content/60">{@ref}</span>
                 <span
                   :if={@done}
@@ -1847,6 +1948,43 @@ defmodule RelayWeb.CoreComponents do
               >
                 <.icon name="hero-chevron-right" class="size-5" />
               </button>
+            </div>
+            <%!--
+              RE281 — card-level actions. Renders in `embed` too: @embed suppresses dismissal
+              affordances (scrim, ✕), and Archive is not one — parity with today, where the
+              rail's Archive already renders in embed. The h-11 wrapper centres the artboard's
+              28×28 square against the 44px prev/next chevrons beside it.
+            --%>
+            <div :if={!@archived} class="relative flex h-11 flex-none items-center">
+              <button
+                type="button"
+                id="card-drawer-overflow"
+                phx-click="toggle_overflow_menu"
+                aria-haspopup="menu"
+                aria-expanded={to_string(@overflow_open)}
+                aria-label="Card actions"
+                class="flex size-7 items-center justify-center rounded-[7px] border border-base-300 bg-base-100 p-0"
+              >
+                <.icon name="hero-ellipsis-horizontal" class="size-[17px]" />
+              </button>
+              <div
+                :if={@overflow_open}
+                id="card-drawer-overflow-menu"
+                role="menu"
+                class="absolute right-0 top-[33px] z-[22] flex w-[190px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5 shadow-[0_8px_28px_oklch(0.26_0.02_255/0.16)]"
+              >
+                <button
+                  type="button"
+                  id="archive-card-button"
+                  role="menuitem"
+                  phx-click="archive_card"
+                  phx-value-ref={@ref}
+                  data-confirm="Archive this card? You can restore it from Archived."
+                  class="flex w-full items-center rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-error hover:bg-base-300/50"
+                >
+                  Archive
+                </button>
+              </div>
             </div>
             <.link
               :if={!@embed}
@@ -2641,56 +2779,6 @@ defmodule RelayWeb.CoreComponents do
               id={"#{@id}-rail"}
               class="flex w-full shrink-0 flex-col gap-5 border-t border-base-300 bg-base-200/30 p-5 text-sm drawer:w-[220px] drawer:overflow-y-auto drawer:border-l drawer:border-t-0"
             >
-              <%!-- STAGE: chip + Move to… + Archive --%>
-              <div class="rail-section flex flex-col gap-2">
-                <.section_label>Stage</.section_label>
-                <div class="rail-stage flex flex-wrap items-center gap-2">
-                  <span class={[
-                    "badge badge-sm font-medium",
-                    if(@stage_owner == :human, do: "badge-primary", else: "badge-secondary")
-                  ]}>
-                    {@stage_name}
-                  </span>
-                  <div :if={@stages != [] and !@archived} id={"#{@id}-move"} class="dropdown">
-                    <div
-                      tabindex="0"
-                      role="button"
-                      id={"#{@id}-move-button"}
-                      class="btn btn-ghost btn-xs"
-                    >
-                      Move to… <.icon name="hero-chevron-down" class="size-3" />
-                    </div>
-                    <ul
-                      tabindex="0"
-                      class="dropdown-content menu z-50 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg"
-                    >
-                      <li :for={stage <- @stages}>
-                        <button
-                          type="button"
-                          id={"#{@id}-move-to-#{stage.id}"}
-                          phx-click="move_card"
-                          phx-value-ref={@ref}
-                          phx-value-stage_id={stage.id}
-                        >
-                          {stage.name}
-                        </button>
-                      </li>
-                    </ul>
-                  </div>
-                  <button
-                    :if={!@archived}
-                    type="button"
-                    id="archive-card-button"
-                    phx-click="archive_card"
-                    phx-value-ref={@ref}
-                    data-confirm="Archive this card? You can restore it from Archived."
-                    class="btn btn-ghost btn-xs text-base-content/60"
-                  >
-                    <.icon name="hero-archive-box" class="size-3.5" /> Archive
-                  </button>
-                </div>
-              </div>
-
               <%!-- OWNERS: avatars + names, active owner ringed (ACTIVE WORKER merged here) --%>
               <div class="rail-section flex flex-col gap-2">
                 <.section_label>Owners</.section_label>
@@ -3250,6 +3338,17 @@ defmodule RelayWeb.CoreComponents do
     case Cards.sub_task_progress(card) do
       %{total: 0} -> nil
       progress -> progress
+    end
+  end
+
+  # RE281 — presentation-only narrowing of the header's stage list. BoardLive.move_targets/2
+  # owns "which stages exist and which one is current"; this owns "which of them the filter
+  # box is showing", so neither has to re-derive the other's answer. Matching is a
+  # case-insensitive substring on the DISPLAYED name, so "rev" finds "Code · Review".
+  defp filter_stages(stages, filter) do
+    case filter |> to_string() |> String.trim() |> String.downcase() do
+      "" -> stages
+      query -> Enum.filter(stages, &String.contains?(String.downcase(&1.name), query))
     end
   end
 

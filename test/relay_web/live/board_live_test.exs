@@ -744,12 +744,11 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#card-drawer .drawer-stage-chip.badge-primary", "Backlog")
     end
 
-    test "the properties rail shows stage, tags, and dates", %{conn: conn, card: card, user: user} do
+    test "the properties rail shows tags and dates", %{conn: conn, card: card, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
-      assert has_element?(view, "#card-drawer-rail .rail-stage", "Backlog")
       assert has_element?(view, "#card-drawer-rail .rail-tags", "spec")
 
       assert has_element?(
@@ -1310,6 +1309,7 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
+      view |> element("#card-drawer-overflow") |> render_click()
       html = view |> element("#archive-card-button") |> render_click()
 
       assert_patch(view, ~p"/board/#{board.slug}")
@@ -1333,6 +1333,7 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#card-archived-banner")
       assert has_element?(view, "#restore-card-button")
       refute has_element?(view, "#archive-card-button")
+      refute has_element?(view, "#card-drawer-overflow")
       refute has_element?(view, "#card-drawer-status-form")
 
       assert has_element?(
@@ -1374,8 +1375,8 @@ defmodule RelayWeb.BoardLiveTest do
         refute has_element?(view, "##{id}")
       end
 
-      assert has_element?(view, "#card-drawer-move")
-      assert has_element?(view, "#archive-card-button")
+      assert has_element?(view, "#card-drawer-stage-chip")
+      assert has_element?(view, "#card-drawer-overflow")
 
       # working — still no primary button
       {:ok, work} = Cards.create_card(code, %{title: "Working one"})
@@ -1538,7 +1539,7 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
-  describe "drawer move menu" do
+  describe "drawer stage chip · Move-to popover" do
     setup :register_and_log_in_user
 
     setup %{user: user} do
@@ -1550,18 +1551,6 @@ defmodule RelayWeb.BoardLiveTest do
       %{board: board, backlog: backlog, spec: spec, plan: plan, card: card}
     end
 
-    test "lists every stage except the card's current one",
-         %{conn: conn, backlog: backlog, spec: spec, plan: plan, user: user} do
-      board = Boards.get_or_create_default_board(user)
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
-      render_async(view)
-
-      assert has_element?(view, "#card-drawer-move")
-      refute has_element?(view, "#card-drawer-move-to-#{backlog.id}")
-      assert has_element?(view, "#card-drawer-move-to-#{spec.id}", "Spec")
-      assert has_element?(view, "#card-drawer-move-to-#{plan.id}", "Plan")
-    end
-
     test "labels a sub-lane target with the parent's name, not the raw composite Stage.name",
          %{conn: conn, board: board} do
       code = Enum.find(board.stages, &(&1.name == "Code"))
@@ -1570,11 +1559,13 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
+      view |> element("#card-drawer-stage-chip") |> render_click()
+
       assert has_element?(view, "#card-drawer-move-to-#{review.id}", "Code · Review")
       refute has_element?(view, "#card-drawer-move-to-#{review.id}", "Code:Review")
     end
 
-    test "a card sitting in a sub-lane shows the human label in the drawer chip and rail, not the raw composite Stage.name",
+    test "a card sitting in a sub-lane shows the human label in the drawer chip, not the raw composite Stage.name",
          %{conn: conn, board: board, card: card} do
       code = Enum.find(board.stages, &(&1.name == "Code"))
       {:ok, review} = Boards.enable_lane(code, :review)
@@ -1584,7 +1575,6 @@ defmodule RelayWeb.BoardLiveTest do
       render_async(view)
 
       assert has_element?(view, "#card-drawer .drawer-stage-chip", "Code · Review")
-      assert has_element?(view, "#card-drawer-rail", "Code · Review")
       refute has_element?(view, "#card-drawer", "Code:Review")
     end
 
@@ -1596,6 +1586,7 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
+      view |> element("#card-drawer-stage-chip") |> render_click()
       view |> element("#card-drawer-move-to-#{spec.id}") |> render_click()
 
       moved = Repo.get!(Card, card.id)
@@ -1614,10 +1605,187 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
+      view |> element("#card-drawer-stage-chip") |> render_click()
       view |> element("#card-drawer-move-to-#{plan.id}") |> render_click()
 
       assert has_element?(view, "#card-drawer .drawer-stage-chip.badge-secondary", "Plan")
+      refute has_element?(view, "#card-drawer-stage-menu")
+    end
+
+    test "the chip opens a popover listing every stage, the current one marked and inert",
+         %{conn: conn, backlog: backlog, spec: spec, plan: plan, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer-stage-menu")
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+
+      assert has_element?(view, "#card-drawer-stage-menu", "Move to")
+      assert has_element?(view, "#card-drawer-stage-filter[placeholder='Filter stages…']")
+
+      # The current stage is LISTED and marked — not hidden…
+      assert has_element?(view, "span#card-drawer-move-to-#{backlog.id}", "Backlog")
+      assert has_element?(view, "span#card-drawer-move-to-#{backlog.id}", "current")
+      # …and it is not a button, so it cannot be clicked to move the card where it already is.
+      refute has_element?(view, "button#card-drawer-move-to-#{backlog.id}")
+
+      assert has_element?(view, "button#card-drawer-move-to-#{spec.id}", "Spec")
+      assert has_element?(view, "button#card-drawer-move-to-#{plan.id}", "Plan")
+    end
+
+    test "typing in the filter narrows the list case-insensitively, then shows a no-match row",
+         %{conn: conn, spec: spec, plan: plan, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      view |> form("#card-drawer-stage-filter-form", %{"q" => "PL"}) |> render_change()
+
+      assert has_element?(view, "#card-drawer-move-to-#{plan.id}", "Plan")
+      refute has_element?(view, "#card-drawer-move-to-#{spec.id}")
+
+      view |> form("#card-drawer-stage-filter-form", %{"q" => "zzzz"}) |> render_change()
+
+      assert has_element?(view, "#card-drawer-stage-none", "No stages match")
       refute has_element?(view, "#card-drawer-move-to-#{plan.id}")
+    end
+
+    test "reopening the popover clears the previous filter text",
+         %{conn: conn, spec: spec, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      view |> form("#card-drawer-stage-filter-form", %{"q" => "plan"}) |> render_change()
+      refute has_element?(view, "#card-drawer-move-to-#{spec.id}")
+
+      # close, then reopen
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      view |> element("#card-drawer-stage-chip") |> render_click()
+
+      assert has_element?(view, "#card-drawer-stage-filter[value='']")
+      assert has_element?(view, "#card-drawer-move-to-#{spec.id}", "Spec")
+    end
+
+    test "picking a stage moves the card and closes the popover",
+         %{conn: conn, spec: spec, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      view |> form("#card-drawer-stage-filter-form", %{"q" => "spec"}) |> render_change()
+      view |> element("#card-drawer-move-to-#{spec.id}") |> render_click()
+
+      assert Repo.get!(Card, card.id).stage_id == spec.id
+      refute has_element?(view, "#card-drawer-stage-menu")
+      assert has_element?(view, "#card-drawer .drawer-stage-chip", "Spec")
+    end
+
+    test "the stage popover and the overflow menu close each other", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      assert has_element?(view, "#card-drawer-stage-menu")
+
+      view |> element("#card-drawer-overflow") |> render_click()
+      assert has_element?(view, "#card-drawer-overflow-menu")
+      refute has_element?(view, "#card-drawer-stage-menu")
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      assert has_element?(view, "#card-drawer-stage-menu")
+      refute has_element?(view, "#card-drawer-overflow-menu")
+    end
+
+    test "Esc closes an open popover before it closes the drawer", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      view |> element("#card-drawer") |> render_keydown(%{"key" => "Escape"})
+
+      refute has_element?(view, "#card-drawer-stage-menu")
+      assert has_element?(view, "#card-drawer")
+
+      view |> element("#card-drawer") |> render_keydown(%{"key" => "Escape"})
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      refute has_element?(view, "#card-drawer")
+    end
+
+    test "an archived card's chip is a plain badge with no chevron and no overflow button",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _archived} = Cards.archive_card(card)
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "span#card-drawer-stage-chip", "Backlog")
+      refute has_element?(view, "button#card-drawer-stage-chip")
+      refute has_element?(view, "#card-drawer-stage-chip .hero-chevron-down")
+      refute has_element?(view, "#card-drawer-overflow")
+      assert has_element?(view, "#restore-card-button")
+    end
+
+    test "the rail no longer carries a Stage section", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer-rail .rail-stage")
+      refute has_element?(view, "#card-drawer-move")
+      refute has_element?(view, "#card-drawer-move-button")
+      refute has_element?(view, "#card-drawer-rail #archive-card-button")
+    end
+  end
+
+  describe "drawer overflow menu" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      {:ok, card} = Cards.create_card(backlog, %{title: "Overflow me"})
+      %{board: board, backlog: backlog, card: card}
+    end
+
+    test "the ⋯ button toggles a menu carrying only Archive", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer-overflow-menu")
+
+      view |> element("#card-drawer-overflow") |> render_click()
+
+      assert has_element?(view, "#card-drawer-overflow-menu #archive-card-button", "Archive")
+      refute has_element?(view, "#card-drawer-overflow-menu", "Duplicate")
+      refute has_element?(view, "#card-drawer-overflow-menu", "Copy link")
+
+      view |> element("#card-drawer-overflow") |> render_click()
+
+      refute has_element?(view, "#card-drawer-overflow-menu")
+    end
+
+    test "opening a different card does not inherit an open menu",
+         %{conn: conn, board: board, backlog: backlog} do
+      {:ok, other} = Cards.create_card(backlog, %{title: "The next one"})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+      view |> element("#card-drawer-overflow") |> render_click()
+      assert has_element?(view, "#card-drawer-overflow-menu")
+
+      render_patch(view, ~p"/board/#{board.slug}?card=#{Cards.ref(board, other)}")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer-overflow-menu")
     end
   end
 
@@ -1912,6 +2080,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       view |> element("#card-drawer-reassign-toggle") |> render_click()
       view |> element("#card-drawer-assign-user-#{user.id}") |> render_click()
+      view |> element("#card-drawer-stage-chip") |> render_click()
       view |> element("#card-drawer-move-to-#{review.id}") |> render_click()
 
       entries = Repo.all(from a in Schemas.Activity, where: a.card_id == ^card.id, order_by: a.id)
@@ -2056,6 +2225,7 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
+      view |> element("#card-drawer-stage-chip") |> render_click()
       view |> element("#card-drawer-move-to-#{plan.id}") |> render_click()
 
       # RLY-112: a move renders as an inline pill chip, not a dot phrase.

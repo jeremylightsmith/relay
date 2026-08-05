@@ -504,6 +504,9 @@ defmodule RelayWeb.BoardLive do
         current_user_id={@current_scope.user.id}
         members={@members}
         reassign_open={@reassign_open}
+        overflow_open={@overflow_open}
+        stage_menu_open={@stage_menu_open}
+        stage_filter={@stage_filter}
         conversation={@streams.conversation}
         note_count={MapSet.size(@note_ids)}
         activity={@streams.activity}
@@ -983,6 +986,9 @@ defmodule RelayWeb.BoardLive do
       |> assign(:compose_form, empty_compose_form())
       |> assign(:members, Members.list_members(board))
       |> assign(:reassign_open, false)
+      |> assign(:overflow_open, false)
+      |> assign(:stage_menu_open, false)
+      |> assign(:stage_filter, "")
       |> assign(:body_loading?, false)
       |> assign(:flows, flows)
       |> assign(:run_summaries, run_summaries)
@@ -1147,6 +1153,18 @@ defmodule RelayWeb.BoardLive do
     {:noreply, push_patch(socket, to: card_path(socket.assigns, ref))}
   end
 
+  # RE281 — Esc is layered inside the drawer: an open header popover swallows the first Esc
+  # and closes, leaving the drawer up; only once nothing is open does Esc reach the drawer
+  # itself. These clauses sit ABOVE the card-mode clause on purpose — /cards/:ref never
+  # closes the drawer, but Esc must still close a popover there.
+  def handle_event("close_drawer", _params, %{assigns: %{stage_menu_open: true}} = socket) do
+    {:noreply, close_header_popovers(socket)}
+  end
+
+  def handle_event("close_drawer", _params, %{assigns: %{overflow_open: true}} = socket) do
+    {:noreply, close_header_popovers(socket)}
+  end
+
   # Card mode (/cards/:ref) has no board behind the drawer to close back to — the native
   # back chevron owns dismissal (RLY-87).
   def handle_event("close_drawer", _params, %{assigns: %{live_action: :card}} = socket) do
@@ -1181,6 +1199,8 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("archive_card", %{"ref" => ref}, socket) do
+    socket = close_header_popovers(socket)
+
     with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
          {:ok, archived} <- Cards.archive_card(card, current_actor(socket)) do
       {:noreply,
@@ -1281,6 +1301,8 @@ defmodule RelayWeb.BoardLive do
   # stage's other cards; when omitted (drawer) the card appends to the
   # bottom. Anything that doesn't resolve on THIS board is a silent no-op.
   def handle_event("move_card", %{"ref" => ref, "stage_id" => stage_id} = params, socket) do
+    socket = close_header_popovers(socket)
+
     with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
          %Stage{} = stage <- resolve_stage(socket, stage_id),
          index when is_integer(index) <- resolve_index(params, socket, stage) do
@@ -1988,6 +2010,34 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("toggle_reassign", _params, socket) do
     {:noreply, update(socket, :reassign_open, &(not &1))}
+  end
+
+  # RE281 — the two header popovers are mutually exclusive: opening either closes the
+  # other. Both toggles route through close_header_popovers/1 first, so "what closing
+  # means" (including clearing the filter) is stated once.
+  def handle_event("toggle_stage_menu", _params, socket) do
+    open? = not socket.assigns.stage_menu_open
+
+    {:noreply,
+     socket
+     |> close_header_popovers()
+     |> assign(:stage_menu_open, open?)}
+  end
+
+  def handle_event("toggle_overflow_menu", _params, socket) do
+    open? = not socket.assigns.overflow_open
+
+    {:noreply,
+     socket
+     |> close_header_popovers()
+     |> assign(:overflow_open, open?)}
+  end
+
+  # Server-side filtering on purpose: a JS hook would filter without a round trip, but
+  # would be invisible to Phoenix.LiveViewTest. Over a board's handful of stages the
+  # round trip is not the cost.
+  def handle_event("filter_stages", %{"q" => query}, socket) do
+    {:noreply, assign(socket, :stage_filter, query)}
   end
 
   # RLY-32: any board member (or the agent) can be assigned — the old
@@ -2895,18 +2945,31 @@ defmodule RelayWeb.BoardLive do
     Enum.find(socket.assigns.board.stages, &(&1.id == stage_id))
   end
 
-  # Drawer move targets: every stage on this board except the card's
-  # current one, in position order. Sub-lanes are ordinary move_card
-  # targets (per plan Architecture: "no move changes"), but must show a
-  # human label ("Code · Review") rather than the composite internal
-  # Stage.name ("Code:Review") built by Boards.enable_lane/2 — the same
-  # leak lane_label/1 already guards against on the board itself.
+  # RE281 — ONE place that shuts the drawer header's popovers, so every path that must
+  # dismiss them (a selection, Esc, opening a different card) says it once instead of
+  # each re-listing which popovers exist. Clearing the filter here is what makes the
+  # stage list always reopen on a clean query.
+  defp close_header_popovers(socket) do
+    socket
+    |> assign(:overflow_open, false)
+    |> assign(:stage_menu_open, false)
+    |> assign(:stage_filter, "")
+  end
+
+  # Drawer move targets: EVERY stage on this board, in position order, each flagged with
+  # whether it is the card's current one. RE281 — the header's Move-to popover LISTS the
+  # current stage, marked and inert, rather than hiding it, so the picker doubles as a
+  # "where am I" readout. Sub-lanes are ordinary move_card targets, but must show a human
+  # label ("Code · Review") rather than the composite internal Stage.name ("Code:Review")
+  # built by Boards.enable_lane/2 — the same leak lane_label/1 already guards against on
+  # the board itself.
   defp move_targets(board, %Card{stage_id: stage_id}) do
     stages_by_id = Map.new(board.stages, &{&1.id, &1})
 
-    board.stages
-    |> Enum.reject(&(&1.id == stage_id))
-    |> Enum.map(&%{id: &1.id, name: move_target_name(&1, stages_by_id)})
+    Enum.map(
+      board.stages,
+      &%{id: &1.id, name: move_target_name(&1, stages_by_id), current?: &1.id == stage_id}
+    )
   end
 
   defp move_target_name(%Stage{parent_id: nil} = stage, _stages_by_id), do: stage.name
@@ -3763,6 +3826,7 @@ defmodule RelayWeb.BoardLive do
           |> assign(:reject_open, false)
           |> assign(:reject_form, empty_reject_form())
           |> assign(:reject_error, nil)
+          |> close_header_popovers()
           |> assign(:card_runs, [])
           |> assign(:drawer_tab, :detail)
           |> stream_notes([])

@@ -1081,6 +1081,145 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(id="card-drawer-acceptance-criteria-view")
       assert html =~ "<strong>yes</strong>"
     end
+
+    test "the header ⋯ overflow menu matches the v5 artboard and carries only a danger Archive" do
+      attrs = drawer_attrs(%{}, %{overflow_open: true})
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      # Relay Card Detail v5.dc.html line ~73 — 28×28 bordered square, 17px dots.
+      assert html =~ ~s(id="card-drawer-overflow")
+      assert html =~ "flex size-7 items-center justify-center rounded-[7px] border border-base-300 bg-base-100 p-0"
+      assert html =~ "hero-ellipsis-horizontal size-[17px]"
+
+      # line ~75 — top:33px;right:0;z-index:22;width:190px;radius 9px;padding 6px;gap 1px.
+      assert html =~ ~s(id="card-drawer-overflow-menu")
+
+      assert html =~
+               "absolute right-0 top-[33px] z-[22] flex w-[190px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5 shadow-[0_8px_28px_oklch(0.26_0.02_255/0.16)]"
+
+      # line ~700 menuItems — 6px 9px, radius 6px, 12.5px/500, danger red, real hover.
+      assert html =~ ~s(id="archive-card-button")
+      assert html =~ "rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-error hover:bg-base-300/50"
+
+      # Decided in review: no Duplicate, no Copy link.
+      refute html =~ "Duplicate"
+      refute html =~ "Copy link"
+    end
+
+    test "an archived card renders no ⋯ overflow button at all" do
+      attrs = drawer_attrs(%{}, %{archived: true, overflow_open: true})
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      refute html =~ ~s(id="card-drawer-overflow")
+      refute html =~ ~s(id="archive-card-button")
+    end
+
+    test "the header stage chip is a nowrap trigger with the v5 artboard's geometry and its owner tint" do
+      attrs =
+        drawer_attrs(%{}, %{
+          stages: [
+            %{id: 1, name: "Plan", current?: false},
+            %{id: 2, name: "Code", current?: true}
+          ]
+        })
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      # Relay Card Detail v5.dc.html line ~46 — height:20px;padding:0 7px 0 9px;radius 4px;
+      # border:none;12px/500;gap 5px, plus an 11px chevron. white-space:nowrap is RE281's
+      # change-23 rule: a chip never wraps inside a fixed-height pill.
+      assert html =~ ~s(id="card-drawer-stage-chip")
+
+      assert html =~
+               "drawer-stage-chip badge badge-sm h-5 gap-[5px] whitespace-nowrap rounded-[4px] border-none py-0 pl-[9px] pr-[7px] text-[12px] font-medium badge-secondary"
+
+      assert html =~ "hero-chevron-down size-[11px]"
+    end
+
+    test "the stage popover matches the v5 artboard and marks the current stage inert" do
+      attrs =
+        drawer_attrs(%{}, %{
+          stage_menu_open: true,
+          stages: [
+            %{id: 1, name: "Plan", current?: false},
+            %{id: 2, name: "Code", current?: true}
+          ]
+        })
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      # line ~48 — top:26px;left:0;z-index:24;width:214px;radius 9px;padding 6px;gap 5px.
+      assert html =~
+               "absolute left-0 top-[26px] z-[24] flex w-[214px] flex-col gap-[5px] rounded-[9px] border border-base-300 bg-base-100 p-1.5 shadow-[0_8px_28px_oklch(0.26_0.02_255/0.16)]"
+
+      # line ~49 — mono 9.5px/600, .6px tracking, uppercase eyebrow.
+      assert html =~ "px-1 pt-[3px] font-mono text-[9.5px] font-semibold uppercase tracking-[0.6px] text-base-content/50"
+
+      # line ~50 — the filter input.
+      assert html =~ ~s(id="card-drawer-stage-filter")
+      assert html =~ ~s(placeholder="Filter stages…")
+      assert html =~ "w-full rounded-md border border-base-300 bg-base-200/40 px-[9px] py-1.5 text-[12px] outline-none"
+
+      # line ~51 — max-height:230px;overflow-y:auto;gap:1px.
+      assert html =~ "flex max-h-[230px] flex-col gap-px overflow-y-auto"
+
+      # line ~692 — non-current row: 12.5px/500, muted ink, 6px grey dot, real hover.
+      assert html =~
+               ~s(<button type="button" id="card-drawer-move-to-1")
+
+      assert html =~
+               "flex w-full items-center gap-2 rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-base-content/80 hover:bg-base-300/50"
+
+      assert html =~ ~s(<span class="size-[6px] flex-none rounded-[2px] bg-base-300">)
+
+      # line ~692-694 — current row: weight 600, full ink, violet dot, mono violet `current`
+      # tag pinned right, and NOT a button so it cannot be re-selected.
+      assert html =~ ~s(<span id="card-drawer-move-to-2")
+      refute html =~ ~s(<button type="button" id="card-drawer-move-to-2")
+      assert html =~ ~s(<span class="size-[6px] flex-none rounded-[2px] bg-secondary">)
+      assert html =~ "ml-auto flex-none font-mono text-[10px] text-secondary"
+      assert html =~ "current"
+    end
+
+    test "an archived card's chip is a plain span with no chevron and no popover" do
+      attrs =
+        drawer_attrs(%{}, %{
+          archived: true,
+          stage_menu_open: true,
+          stages: [
+            %{id: 1, name: "Plan", current?: false},
+            %{id: 2, name: "Code", current?: true}
+          ]
+        })
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      assert html =~ ~s(<span id="card-drawer-stage-chip")
+      refute html =~ ~s(<button type="button" id="card-drawer-stage-chip")
+      refute html =~ "hero-chevron-down size-[11px]"
+      refute html =~ ~s(id="card-drawer-stage-menu")
+    end
+
+    test "the popover shows a single inert No stages match row when the filter matches nothing" do
+      attrs =
+        drawer_attrs(%{}, %{
+          stage_menu_open: true,
+          stage_filter: "zzzz",
+          stages: [
+            %{id: 1, name: "Plan", current?: false},
+            %{id: 2, name: "Code", current?: true}
+          ]
+        })
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      assert html =~ ~s(id="card-drawer-stage-none")
+      assert html =~ "No stages match"
+      refute html =~ ~s(id="card-drawer-move-to-1")
+      refute html =~ ~s(id="card-drawer-move-to-2")
+    end
   end
 
   describe "inline_field/1" do

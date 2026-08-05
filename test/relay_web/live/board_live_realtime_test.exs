@@ -192,6 +192,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       render_async(view_a)
       render_async(view_b)
 
+      view_a |> element("#card-drawer-overflow") |> render_click()
       view_a |> element("#archive-card-button") |> render_click()
 
       refute has_element?(view_b, "#stage-col-1-cards .board-card", "Archive me")
