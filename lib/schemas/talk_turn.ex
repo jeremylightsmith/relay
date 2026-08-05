@@ -33,6 +33,9 @@ defmodule Schemas.TalkTurn do
   @doc "Turn statuses where the turn is still live — the pane shows Stop instead of send, and a second turn is refused."
   def active_statuses, do: [:queued, :claimed]
 
+  @doc "The end states the executor may report to `POST /api/talk/turns/:id/outcome` — everything except the ones only the server writes."
+  def reportable_statuses, do: statuses() -- active_statuses()
+
   @doc "Validates a programmatically-built turn row."
   def changeset(turn, attrs \\ %{}) do
     turn

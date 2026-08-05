@@ -165,7 +165,7 @@ defmodule RelayWeb.Api.FallbackController do
     |> put_view(json: ErrorJSON)
     |> render(:error,
       code: "unknown_status",
-      message: "status must be one of: done, stopped, failed"
+      message: "status must be one of: #{reportable_status_names()}"
     )
   end
 
@@ -179,4 +179,6 @@ defmodule RelayWeb.Api.FallbackController do
   # Embed errors nest, so this cannot join `traverse_errors/2`'s output directly — see
   # RelayWeb.ChangesetErrors, which owns that walk for both this and the flow editor.
   defp changeset_message(changeset), do: changeset |> ChangesetErrors.messages() |> Enum.join("; ")
+
+  defp reportable_status_names, do: Enum.map_join(Schemas.TalkTurn.reportable_statuses(), ", ", &Atom.to_string/1)
 end

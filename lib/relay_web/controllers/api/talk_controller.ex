@@ -21,12 +21,13 @@ defmodule RelayWeb.Api.TalkController do
   @doc "Appends a batch of transcript lines. At-least-once: a replayed `client_seq` is accepted and stored once, so the executor may retry freely."
   def events(conn, %{"id" => id} = params) do
     with {:ok, turn} <- fetch_turn(conn, id),
-         raw when is_list(raw) <- Map.get(params, "events", []) do
+         raw when is_list(raw) <- Map.get(params, "events", []),
+         true <- Enum.all?(raw, &is_map/1) do
       {:ok, stored} = Talk.append_events(turn, raw)
       json(conn, %{status: "ok", accepted: length(stored)})
     else
       {:error, reason} -> {:error, reason}
-      _not_a_list -> {:error, :invalid_events}
+      _invalid -> {:error, :invalid_events}
     end
   end
 
@@ -46,19 +47,15 @@ defmodule RelayWeb.Api.TalkController do
 
     with {int, ""} <- Integer.parse(to_string(id)),
          %{} = turn <- Talk.get_turn(int),
-         ^board <- (Talk.board_id_of(turn) == board.id && board) || nil do
+         true <- Talk.board_id_of(turn) == board.id do
       {:ok, turn}
     else
       _absent -> {:error, :not_found}
     end
   end
 
-  # The accepted end states are derived from `Schemas.TalkTurn.statuses/0` minus the ones only
-  # the server writes, so the transport can never name a status the domain lacks.
-  defp reportable_statuses, do: Schemas.TalkTurn.statuses() -- Schemas.TalkTurn.active_statuses()
-
   defp parse_status(value) when is_binary(value) do
-    case Enum.find(reportable_statuses(), &(Atom.to_string(&1) == value)) do
+    case Enum.find(Schemas.TalkTurn.reportable_statuses(), &(Atom.to_string(&1) == value)) do
       nil -> {:error, :unknown_status}
       status -> {:ok, status}
     end

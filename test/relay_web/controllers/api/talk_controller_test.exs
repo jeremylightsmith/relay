@@ -49,6 +49,20 @@ defmodule RelayWeb.Api.TalkControllerTest do
              ctx.conn |> post(~p"/api/talk/turns/#{ctx.turn.id}/outcome", Jason.encode!(body)) |> json_response(422)
   end
 
+  test "events must be a list of objects, not a list containing non-map elements", ctx do
+    body = %{"events" => ["oops"]}
+
+    assert %{"error" => %{"code" => "invalid_events"}} =
+             ctx.conn |> post(~p"/api/talk/turns/#{ctx.turn.id}/events", Jason.encode!(body)) |> json_response(422)
+  end
+
+  test "events must be a list, not a bare string", ctx do
+    body = %{"events" => "nope"}
+
+    assert %{"error" => %{"code" => "invalid_events"}} =
+             ctx.conn |> post(~p"/api/talk/turns/#{ctx.turn.id}/events", Jason.encode!(body)) |> json_response(422)
+  end
+
   test "another board's key cannot reach this turn", ctx do
     other = insert(:user)
     {:ok, other_board} = Relay.Boards.create_board(other, %{name: "Other", key: "OT"})
