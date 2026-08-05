@@ -595,12 +595,28 @@ claim/execute/report loop, one more branch.
   `ExecutorPool.assign_talk/1` attaches to a live worktree a node job already holds (dirty
   reads are the point — the tree may be mid-edit, and that is often exactly what is being asked
   about), reuses a retained failed one as-is (post-mortem is what people ask about), or creates
-  one on demand for a card the flow engine would never itself dispatch. `release_talk/1` marks
-  the slot idle without tearing it down: a Talk session spans runs, so the tree must **outlive**
-  any one run. Because a talk-created (or recovered) worktree carries `run_id: None`,
-  `release_run/2` — the run-terminal recovery path — explicitly skips any record whose
-  `run_id` is `None`, so a legacy `release_runs` entry can never tear down a tree bound to
-  nothing.
+  one on demand for a card the flow engine would never itself dispatch.
+
+  A node job and a talk turn can occupy the SAME worktree record at once, so occupancy is
+  tracked **per occupant**: `live` for the node job, `talk_live` for the talk turn.
+  `ExecutorPool.assign_talk/1` and `release_talk/1` only ever touch `talk_live`, never `live` —
+  an earlier version shared one `live` flag between both occupants, which let either tear the
+  tree down (or believe it idle) out from under the other: a node job's `release()` finishing
+  while a talk turn was still streaming would run `git worktree remove --force` mid-answer and
+  stash the person's uncommitted edits; a talk turn ending would clear `live` under a still-
+  running node job, defeating `release_run/2`'s "never touch a worktree with a live job"
+  guarantee. `release()`/`release_run/2` now DEFER a terminal disposition (`pending_finish`)
+  while the other occupant (`talk_live`) is still present; `release_talk/1` finishes it once
+  released — last occupant out tears down.
+
+  A talk-created worktree carries `run_id: None`, so `release_run/2` — the run-terminal
+  recovery path — explicitly skips any record whose `run_id` is `None`; a legacy
+  `release_runs` entry can never tear down a tree bound to nothing. Once such a tree goes fully
+  idle (its talk turn ends and no node job ever adopted it), `release_talk/1` **retires** it —
+  releasing its partition and marking it `retained`, evictable oldest-first exactly like a
+  failed run's leftover — so a card that was only ever talked to, never run, does not
+  permanently consume an exclusive slot (and keep the poller from ever idling). A retained tree
+  a talk turn has reattached to is excluded from that eviction while it is live.
 - **Prompt.** `talk_prompt(job)` is built in **product code**, not a `.claude/agents/*.md`
   definition — a recorded exception to ADR 0006 (ADR 0009 §5): Talk is a property of Relay
   itself and must behave identically on every connected repo. It is the preamble (names the
@@ -613,21 +629,36 @@ claim/execute/report loop, one more branch.
   to the transcript lines it produces: assistant text → an `:out` line, a `tool_use` block → one
   dim `:tool` line naming its target, an errored `result` → an `:error` line. Anything else
   (including an unrecognised event type) produces nothing — a mangled or unfamiliar event must
-  never cost the turn.
+  never cost the turn. The tool-use "brief" (command/file_path/path/pattern/description,
+  truncated to 140 chars) is one shared `_tool_brief` helper, used by both this and the
+  console/board-log renderer (`_print_claude_event`).
+
+  `_stream_claude_job` also gained `mirror=True`; a talk turn passes `mirror=False` so its
+  events print locally but are never also forwarded to the ref-keyed board-log mirror. Two
+  things make that necessary: the tag `run_talk_job` builds is ref-clean (`f"[{ref}] (talk) "`,
+  "talk" outside the brackets — an earlier `f"[{ref} talk] "` made `_ref_from_tag` extract a ref
+  that does not exist, e.g. "DE3 talk", spamming `POST /api/board/logs` under a phantom card),
+  and a talk job is deliberately **not** registered in `NODE_JOB_IDS`/`RUN_IDS` (also ref-keyed):
+  registering it would clobber a concurrently-running node job's own attribution for the same
+  card while the talk turn ran, and popping it in the `finally` would erase that node job's
+  attribution outright.
 - **Delivery.** `TalkEventSender` batches and POSTs lines to `/api/talk/turns/:id/events`
   at-least-once — deliberately unlike `LogForwarder`, which drops by construction (`enqueue` on
   a full queue, swallowed `_send` errors). Each line's `client_seq` is per-turn and
   monotonic from 1, which is what makes a retried batch idempotent server-side
   (`Relay.Talk.append_events/2` dedupes on it). A failed POST retries with backoff up to
-  `max_attempts`; exhausting the budget sets `failed` and `run_talk_job` appends one last,
-  best-effort `:error` line saying the transcript could not be fully delivered, then reports the
-  turn `failed` rather than silently reporting a `done` turn with missing output.
+  `max_attempts` (no sleep after the last attempt — the decision to give up is already made by
+  then); exhausting the budget sets `failed` and `run_talk_job` calls `send_best_effort` to
+  re-arm and try once more to deliver a single visible `:error` line saying the transcript could
+  not be fully delivered, then reports the turn `failed` rather than silently reporting a `done`
+  turn with missing output.
 - **Stop.** Arrives as an ordinary revoke on the existing heartbeat — `ExecutorHeartbeat`
   already terminates a revoked job's subprocess via its `JobControl`; `run_talk_job` checks
   `control.cancelled()` after the process exits and reports `stopped` (not `failed`) with
   whatever partial output was already delivered. No talk-specific channel was added.
 
-`EXECUTOR_VERSION` 33 → 34 for this change; `Relay.Runs.min_executor_version/0` is **not**
+`EXECUTOR_VERSION` 33 → 35 for this change (34 shipped the initial worker, 35 the occupancy/
+retirement/attribution hardening above); `Relay.Runs.min_executor_version/0` is **not**
 raised — an executor without Talk is not worse than a stopped one.
 
 ### Declaring an outcome
