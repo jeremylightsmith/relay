@@ -221,4 +221,31 @@ defmodule RelayWeb.BoardLiveTalkTest do
 
     assert ctx.card |> Talk.session_for_card() |> Talk.active_turn() == nil
   end
+
+  # RE268 round 2 — `drawer_tab` and `talk_shortcut` are deliberately NOT in the read_only?
+  # guard list (view state is not board data), but `Talk.session_for_card/1` WRITES: it inserts
+  # the session row and rewrites the seed on every call. Merely opening Talk on an archived
+  # board therefore mutated state the board promises is read-only.
+  test "opening Talk on an archived board writes nothing", ctx do
+    {:ok, _board} = Relay.Boards.archive_board(ctx.board)
+    view = open(ctx.conn, ctx.board, ctx.ref)
+
+    view |> element("#card-drawer-tab-talk") |> render_click()
+    render_keydown(view, "talk_shortcut", %{"key" => "t"})
+
+    assert Relay.Repo.aggregate(Schemas.TalkSession, :count) == 0
+    assert Talk.get_session(ctx.card) == nil
+  end
+
+  test "an archived board still renders a transcript a live board already wrote", ctx do
+    executor = insert(:executor, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
+    {:ok, _} = Talk.post_message(ctx.card, ctx.user, "why is this stuck?")
+    FakeTalkExecutor.run(executor, [{:out, "it is waiting on you"}])
+    {:ok, _board} = Relay.Boards.archive_board(ctx.board)
+
+    view = open(ctx.conn, ctx.board, ctx.ref)
+    html = view |> element("#card-drawer-tab-talk") |> render_click()
+
+    assert html =~ "it is waiting on you"
+  end
 end

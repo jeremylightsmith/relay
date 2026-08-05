@@ -3867,15 +3867,19 @@ defmodule RelayWeb.BoardLive do
     assign(socket, :drawer_tab, tab)
   end
 
+  # An archived board is read-only, and `Talk.session_for_card/1` WRITES (it inserts the session
+  # and rewrites the seed on every call). So the read-only path looks the transcript up instead —
+  # `Talk.get_session/1`, which may legitimately return nil for a card nobody ever talked to, a
+  # case the pane already renders (RE268).
   defp select_drawer_tab(%{assigns: %{selected_card: %Card{} = card}} = socket, :talk) do
     if socket.assigns.drawer_tab != :talk, do: Talk.subscribe(card.id)
-    session = Talk.session_for_card(card)
+    session = if socket.assigns.read_only?, do: Talk.get_session(card), else: Talk.session_for_card(card)
 
     socket
     |> assign(:drawer_tab, :talk)
     |> assign(:talk_session, session)
-    |> assign(:talk_active_turn, Talk.active_turn(session))
-    |> stream(:talk_events, Talk.events(session), reset: true)
+    |> assign(:talk_active_turn, session && Talk.active_turn(session))
+    |> stream(:talk_events, (session && Talk.events(session)) || [], reset: true)
   end
 
   defp select_drawer_tab(socket, tab), do: assign(socket, :drawer_tab, tab)

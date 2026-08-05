@@ -2954,13 +2954,21 @@ class ExecuteTalkTest(unittest.TestCase):
 
     def setUp(self):
         self._saved = {k: getattr(relay, k) for k in
-                       ("_stream_claude_job", "report_talk_outcome", "worktree_path", "DRY")}
+                       ("_stream_claude_job", "report_talk_outcome", "worktree_path", "DRY", "api")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
         relay.DRY = False
         relay.worktree_path = lambda name: "/tmp/" + name
         self.reported = []
         relay.report_talk_outcome = lambda tid, status, sid, detail: (
             self.reported.append((tid, status, sid, detail)) or status)
+        # execute_talk owns a real TalkEventSender now (RE268), so the transcript POST has to be
+        # captured rather than attempted. `lines` is every event that reached the wire.
+        self.lines = []
+        relay.api = lambda method, path, body=None, **kw: (
+            self.lines.extend((body or {}).get("events", [])) or {})
+
+    def _error_lines(self):
+        return [line["text"] for line in self.lines if line["kind"] == relay.TALK_KIND_ERROR]
 
     def _job(self, **overrides):
         j = {"turn_id": 7, "ref": "DE3", "prompt": "why?", "resume_session": None,
@@ -2991,6 +2999,25 @@ class ExecuteTalkTest(unittest.TestCase):
         relay.execute_talk(self._job(), "exec-DE3", False, relay.JobControl(), pool)
         self.assertEqual(self.reported[0][:2], (7, "failed"))
         self.assertEqual(pool.released, ["exec-DE3"])
+
+    def test_a_nonzero_claude_exit_writes_the_reason_into_the_transcript(self):
+        """RE268: only parsed stream-json reaches on_event, so a claude that dies at startup
+        (an expired --resume id, a missing binary) emits NO result event and produced NO line at
+        all. `detail` is stored on the turn but nothing renders it, so the person saw their own
+        message, the composer come back, and nothing else — ever."""
+        self._stub_stream(ok=False)
+        relay.execute_talk(self._job(), "exec-DE3", False, relay.JobControl(), self._Pool())
+        self.assertEqual(self._error_lines(), ["the claude session exited non-zero"])
+        self.assertEqual(self._error_lines(), [self.reported[0][3]])
+
+    def test_the_failure_line_continues_the_turns_client_seq(self):
+        """One turn has ONE transcript writer: a second TalkEventSender would restart client_seq
+        at 1 and the server's replay guard would drop every line it wrote."""
+        self._stub_stream(ok=False, events=[
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "thinking"}]}}])
+        relay.execute_talk(self._job(), "exec-DE3", False, relay.JobControl(), self._Pool())
+        self.assertEqual([line["client_seq"] for line in self.lines], [1, 2])
+        self.assertEqual(self.lines[-1]["kind"], relay.TALK_KIND_ERROR)
 
     def test_a_revoked_turn_reports_stopped_not_failed(self):
         control = relay.JobControl()
@@ -3046,6 +3073,7 @@ class ExecuteTalkTest(unittest.TestCase):
         self.assertEqual(self.reported[0][:2], (7, "failed"))
         self.assertIn("prepare blew up", self.reported[0][3])
         self.assertEqual(pool.released, ["exec-DE3"])           # still released, never leaked
+        self.assertEqual(self._error_lines(), [self.reported[0][3]])   # and visible in the pane
 
     def test_a_worker_crash_reports_failed_and_still_releases(self):
         def boom(*a, **k):
@@ -3057,6 +3085,26 @@ class ExecuteTalkTest(unittest.TestCase):
         self.assertEqual(self.reported[0][:2], (7, "failed"))
         self.assertIn("kaboom", self.reported[0][3])
         self.assertEqual(pool.released, ["exec-DE3"])
+        self.assertEqual(self._error_lines(), [self.reported[0][3]])   # and visible in the pane
+
+    def test_a_crash_after_the_session_started_keeps_the_session_id(self):
+        """RE268: the crash path used to POST session_id=None. If only the FIRST outcome POST
+        failed transiently, that threw away session continuity for every later turn on the card."""
+        def fake(prompt, cwd, tag="", session_id=None, on_proc=None, on_event=None, mirror=True):
+            return True, "sess-live"
+
+        relay._stream_claude_job = fake
+        boom = [RuntimeError("report blew up")]
+
+        def flaky(tid, status, sid, detail):
+            self.reported.append((tid, status, sid, detail))
+            if boom:
+                raise boom.pop()
+            return status
+
+        relay.report_talk_outcome = flaky
+        relay.execute_talk(self._job(), "exec-DE3", False, relay.JobControl(), self._Pool())
+        self.assertEqual(self.reported[1][:3], (7, "failed", "sess-live"))
 
     def test_the_tag_is_ref_clean_so_board_log_forwarding_is_not_misattributed(self):
         """RE268: the old tag `f"[{ref} talk] "` made `_ref_from_tag` extract 'DE3 talk' — a ref
@@ -3679,6 +3727,25 @@ class ExecutorVocabularyContractTest(unittest.TestCase):
         # drift from Relay.Runs.Audit.severities/0 must break CI. `check` ids are deliberately
         # not pinned — bin/relay prints them opaquely and must never branch on them.
         self.assertEqual(relay.AUDIT_SEVERITIES, tuple(self.vocab["audit_severities"]))
+
+    def test_talk_turn_statuses_match_the_fixture(self):
+        # RE268: these are the only statuses /api/talk/turns/:id/outcome accepts. A drift 422s
+        # BOTH the primary POST and the crash-path one, stranding the turn `:claimed` — which
+        # nothing reaps, and which then refuses every later turn with `turn_in_flight`.
+        self.assertEqual(relay.TALK_TURN_STATUSES,
+                         tuple(self.vocab["talk_turn_statuses"]["reportable"]))
+        self.assertEqual((relay.TALK_DONE, relay.TALK_STOPPED, relay.TALK_FAILED),
+                         relay.TALK_TURN_STATUSES)
+        for active in self.vocab["talk_turn_statuses"]["active"]:
+            self.assertNotIn(active, relay.TALK_TURN_STATUSES,
+                             "the executor must never report a server-only turn status")
+
+    def test_talk_event_kinds_match_the_fixture(self):
+        # A drift here is silent, not loud: Relay.Talk.normalize_event/1 degrades an unknown
+        # kind to :out, so a renamed "error" would render as ordinary output forever.
+        self.assertEqual(relay.TALK_EVENT_KINDS, tuple(self.vocab["talk_event_kinds"]))
+        for kind in (relay.TALK_KIND_TOOL, relay.TALK_KIND_OUT, relay.TALK_KIND_ERROR):
+            self.assertIn(kind, relay.TALK_EVENT_KINDS)
 
 
 class ExecutorIdentTest(unittest.TestCase):

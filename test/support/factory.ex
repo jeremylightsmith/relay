@@ -225,6 +225,8 @@ defmodule Relay.Factory do
 
   # Full-control factory: `board` (when overridden) must be persisted. `last_heartbeat`
   # defaults to now, so the row reads :fresh — backdate it to exercise :stale / :gone.
+  # `version` is the HIGHER of the two floors (RE268): the default executor is a fully current
+  # one, able to claim talk jobs as well as flow jobs. Override it to exercise an old executor.
   def executor_factory(attrs) do
     {board, attrs} = Map.pop_lazy(attrs, :board, fn -> insert(:board) end)
 
@@ -234,7 +236,7 @@ defmodule Relay.Factory do
       host: "mac.local",
       interval: 30,
       capacity: %{"shared_clean" => 3, "exclusive" => 1},
-      version: Relay.Runs.min_executor_version(),
+      version: Relay.Runs.min_talk_executor_version(),
       last_heartbeat: DateTime.truncate(DateTime.utc_now(), :second)
     }
 

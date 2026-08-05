@@ -66,7 +66,7 @@
       "host": "fixture-host",
       "interval": 30,
       "name": "fixture",
-      "version": 21
+      "version": 38
     }
   },
   "heartbeat": {
@@ -88,7 +88,7 @@
         "host": "fixture-host",
         "interval": 30,
         "name": "fixture",
-        "version": 21
+        "version": 38
       },
       "running": []
     },
@@ -207,6 +207,23 @@
         "done",
         "failed",
         "cancelled"
+      ]
+    },
+    "talk_event_kinds": [
+      "user",
+      "tool",
+      "out",
+      "error"
+    ],
+    "talk_turn_statuses": {
+      "active": [
+        "queued",
+        "claimed"
+      ],
+      "reportable": [
+        "done",
+        "stopped",
+        "failed"
       ]
     }
   }

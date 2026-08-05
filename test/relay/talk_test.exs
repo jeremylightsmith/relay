@@ -25,7 +25,15 @@ defmodule Relay.TalkTest do
       )
 
     author = insert(:user)
-    executor = insert(:executor, board: board, name: "mac-1", capacity: %{"exclusive" => 1})
+
+    executor =
+      insert(:executor,
+        board: board,
+        name: "mac-1",
+        capacity: %{"exclusive" => 1},
+        version: Runs.min_talk_executor_version()
+      )
+
     %{board: board, card: card, author: author, executor: executor}
   end
 
@@ -274,6 +282,49 @@ defmodule Relay.TalkTest do
 
     assert {:ok, stored} = Talk.append_events(turn, ["oops", event(1, "out", "good")])
     assert Enum.map(stored, & &1.text) == ["good"]
+  end
+
+  test "a line with no text, blank text, or a non-string text is dropped without failing the batch", ctx do
+    {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
+
+    missing = %{"client_seq" => 7, "kind" => "out", "dim" => false}
+    blank = %{"client_seq" => 8, "kind" => "out", "text" => "   ", "dim" => false}
+    object = %{"client_seq" => 9, "kind" => "out", "text" => %{"a" => 1}, "dim" => false}
+
+    assert {:ok, stored} = Talk.append_events(turn, [missing, blank, object, event(1, "out", "good")])
+    assert Enum.map(stored, & &1.text) == ["good"]
+  end
+
+  test "a line whose kind is not a string is dropped without failing the batch", ctx do
+    {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
+    bad = %{"client_seq" => 4, "kind" => %{"nope" => true}, "text" => "hi", "dim" => false}
+
+    assert {:ok, stored} = Talk.append_events(turn, [bad, event(1, "out", "good")])
+    assert Enum.map(stored, & &1.text) == ["good"]
+  end
+
+  test "a turn ended by Stop is not resurrected as :done by a late outcome", ctx do
+    {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
+    {:ok, stopped} = Talk.stop_turn(turn)
+
+    assert {:ok, still} = Talk.finish_turn(stopped, :done, %{session_id: "sess-late"})
+    assert still.status == :stopped
+    assert Talk.session_for_card(ctx.card).claude_session_id == nil
+    assert Talk.session_for_card(ctx.card).pinned_executor_name == nil
+  end
+
+  test "a replayed outcome POST does not rewrite the session or re-broadcast", ctx do
+    {:ok, _queued} = Talk.post_message(ctx.card, ctx.author, "one")
+    {:ok, job} = Runs.claim_next_job(ctx.executor)
+    {:ok, turn} = Talk.mark_claimed(job)
+
+    {:ok, done} = Talk.finish_turn(turn, :done, %{session_id: "sess-1"})
+    Talk.subscribe(ctx.card.id)
+
+    assert {:ok, again} = Talk.finish_turn(done, :failed, %{detail: "late"})
+    assert again.status == :done
+    refute_receive {:talk_turn_changed, _}, 50
+    assert Talk.session_for_card(ctx.card).claude_session_id == "sess-1"
   end
 
   defp event(client_seq, kind, text) do

@@ -694,11 +694,19 @@ claim/execute/report loop, one more branch.
   `control.cancelled()` after the process exits and reports `stopped` (not `failed`) with
   whatever partial output was already delivered. No talk-specific channel was added.
 
-`EXECUTOR_VERSION` 33 → 37 for this change (34 shipped the initial worker, 35 the occupancy/
+`EXECUTOR_VERSION` 33 → 38 for this change (34 shipped the initial worker, 35 the occupancy/
 retirement/attribution hardening above, 36 the recovery/retained-tree/streaming/branch fixes
-from a follow-up review, 37 the branch-checkout non-destructiveness fix above);
-`Relay.Runs.min_executor_version/0` is **not** raised — an executor without Talk is not worse
-than a stopped one.
+from a follow-up review, 37 the branch-checkout non-destructiveness fix above, 38 the
+failure-line-into-the-transcript fix from the whole-branch review).
+
+**Two version floors.** `Relay.Runs.min_executor_version/0` (21) is **not** raised — an executor
+without Talk is not worse than a stopped one for the flow work it still does correctly. Talk gets
+its own, higher floor instead: `Relay.Runs.min_talk_executor_version/0` (38), applied by
+`talk_capable?/1` inside `claim_next_job/1`, which narrows the claim to `NodeJob.flow_kinds()`
+for anything below it. Without that second floor a pre-Talk executor would happily claim the
+first (deliberately unpinned, capacity-exempt) turn on a card, `KeyError` on the `isolation` key
+a talk payload does not carry, and reject it to the flow-only outcome route — a 404 that leaves
+the turn `claimed` forever and wedges Talk for the whole board ([failures.md](failures.md) D4t).
 
 ### Declaring an outcome
 
@@ -861,4 +869,5 @@ locally will disagree with the server.
 `lib/relay_web/controllers/api/run_controller.ex`,
 `lib/relay_web/controllers/api/executor_controller.ex`,
 `lib/relay_web/controllers/api/flow_metrics_controller.ex`,
-`lib/relay_web/controllers/api/flow_controller.ex`.*
+`lib/relay_web/controllers/api/flow_controller.ex`,
+`lib/relay_web/controllers/api/talk_controller.ex`, `lib/relay/talk.ex`.*

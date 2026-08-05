@@ -85,6 +85,15 @@ defmodule Relay.Talk do
   end
 
   @doc """
+  The card's session as it already stands, or `nil` — the read-only twin of `session_for_card/1`.
+
+  `session_for_card/1` inserts the row and rewrites the seed on every call, so it cannot be used
+  to merely LOOK at a transcript: opening Talk on an archived board would write to a board the
+  UI promises is read-only (RE268).
+  """
+  def get_session(%Card{} = card), do: Repo.get_by(TalkSession, card_id: card.id)
+
+  @doc """
   Posts one human message: appends its `:user` line, inserts a `:queued` turn and the talk job
   that carries it, all in one transaction. The job is pinned to the session's holder (nil on the
   first turn, which is what lets any executor take it and BECOME the holder) and carries the
@@ -205,25 +214,39 @@ defmodule Relay.Talk do
     Enum.reverse(stored)
   end
 
-  # An unknown kind degrades to `:out` rather than raising, and a line that isn't even a map, or
-  # is a map without an integer `client_seq` or with a non-boolean `dim`, is dropped entirely
-  # (`:invalid`) rather than reaching `Repo.insert!` and raising: the executor is untrusted
-  # input, and a mangled line must never cost the whole batch — not even the batch containing it.
+  # An unknown (but string) kind degrades to `:out` rather than raising. EVERY other shape
+  # problem drops the one line (`:invalid`): not a map; no integer `client_seq`; a non-boolean
+  # `dim`; a `text` that is missing, blank or not a string; a `kind` that is present but not a
+  # string. The executor is untrusted input, and a mangled line must never cost the whole batch —
+  # not even the batch containing it. Each of those reached `Repo.insert!` before RE268's round-2
+  # review: a blank `text` raised `Ecto.InvalidChangesetError` (the changeset requires `:text`)
+  # and a non-string `text`/`kind` raised `Protocol.UndefinedError` in `to_string/1` — neither an
+  # `{:error, _}` the fallback controller can render, so the batch 500'd and rolled back whole.
   defp normalize_event(raw) when not is_map(raw), do: :invalid
 
   defp normalize_event(raw) do
-    client_seq = raw["client_seq"] || raw[:client_seq]
-    dim = raw["dim"] || raw[:dim] || false
+    client_seq = field(raw, :client_seq)
+    dim = field(raw, :dim) || false
+    text = field(raw, :text)
+    kind = field(raw, :kind)
 
-    if is_integer(client_seq) and is_boolean(dim) do
-      kind = to_string(raw["kind"] || raw[:kind])
-      kind = Enum.find(TalkEvent.kinds(), :out, &(Atom.to_string(&1) == kind))
-
-      %{client_seq: client_seq, kind: kind, text: to_string(raw["text"] || raw[:text] || ""), dim: dim}
+    if valid_event?(client_seq, dim, text, kind) do
+      %{client_seq: client_seq, kind: normalize_kind(kind), text: text, dim: dim}
     else
       :invalid
     end
   end
+
+  # The batch arrives as JSON (string keys) from the executor and as atom-keyed maps from
+  # `do_post/4`'s own seed line, so both are read here rather than at every call site.
+  defp field(raw, key), do: raw[Atom.to_string(key)] || raw[key]
+
+  defp valid_event?(client_seq, dim, text, kind) do
+    is_integer(client_seq) and is_boolean(dim) and is_binary(text) and
+      String.trim(text) != "" and (is_nil(kind) or is_binary(kind))
+  end
+
+  defp normalize_kind(kind), do: Enum.find(TalkEvent.kinds(), :out, &(Atom.to_string(&1) == kind))
 
   @doc """
   Marks the turn carried by a just-claimed talk job `:claimed` — an executor now holds it and
@@ -259,9 +282,26 @@ defmodule Relay.Talk do
   thing that makes the next turn a continuation — and records the claiming executor as the
   session's pin. `:stopped` and `:failed` leave both alone: a turn that never finished cannot
   vouch for a session id.
+
+  **First writer wins**, mirroring `stop_turn/1`'s guard: only an active turn moves. A turn the
+  person already Stopped must not be dragged back to `:done` by a `claude -p` that finished in
+  the window before the revoke reached the executor — that would resurrect a terminal state AND
+  let a turn that never finished vouch for a session id. An already-finalised turn still returns
+  `{:ok, turn}` (the `:already_finalized` precedent in
+  `RelayWeb.Api.NodeJobController.resolve_and_report/4`), so the executor's at-least-once retry
+  still 200s instead of re-broadcasting and rewriting the pin.
   """
   def finish_turn(%TalkTurn{} = turn, status, attrs \\ %{}) when status in @reportable_statuses do
     turn = Repo.get!(TalkTurn, turn.id)
+
+    if turn.status in TalkTurn.active_statuses() do
+      do_finish_turn(turn, status, attrs)
+    else
+      {:ok, turn}
+    end
+  end
+
+  defp do_finish_turn(turn, status, attrs) do
     session = Repo.get!(TalkSession, turn.talk_session_id)
     job = turn.node_job_id && Runs.get_job(turn.node_job_id)
 

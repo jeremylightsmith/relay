@@ -15,7 +15,15 @@ defmodule Relay.Runs.NodeJobKindTest do
     board = insert(:board)
     stage = insert(:stage, board: board)
     card = insert(:card, board: board, stage: stage)
-    executor = insert(:executor, board: board, name: "mac-1", capacity: %{"shared_clean" => 1, "exclusive" => 1})
+
+    executor =
+      insert(:executor,
+        board: board,
+        name: "mac-1",
+        capacity: %{"shared_clean" => 1, "exclusive" => 1},
+        version: Runs.min_talk_executor_version()
+      )
+
     %{board: board, card: card, executor: executor}
   end
 
@@ -35,7 +43,7 @@ defmodule Relay.Runs.NodeJobKindTest do
     assert job.card_id == ctx.card.id
   end
 
-  test "a talk job carries no run and is claimable by any executor", ctx do
+  test "a talk job carries no run and is claimable by any talk-capable executor", ctx do
     job = Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1, "prompt" => "why is this stuck?"}, nil)
 
     assert job.kind == :talk
@@ -56,11 +64,52 @@ defmodule Relay.Runs.NodeJobKindTest do
   end
 
   test "a talk job is claimable even when no isolation capacity is advertised", ctx do
-    idle = insert(:executor, board: ctx.board, name: "mac-2", capacity: %{"shared_clean" => 0, "exclusive" => 0})
+    idle =
+      insert(:executor,
+        board: ctx.board,
+        name: "mac-2",
+        capacity: %{"shared_clean" => 0, "exclusive" => 0},
+        version: Runs.min_talk_executor_version()
+      )
+
     job = Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1}, nil)
 
     assert {:ok, claimed} = Runs.claim_next_job(idle)
     assert claimed.id == job.id
+  end
+
+  # RE268 round 2 — the capacity exemption above is exactly what made this dangerous: an
+  # unpinned talk job was visible to EVERY executor the version floor let claim at all,
+  # including pre-Talk ones that KeyError on the missing `isolation` and then 404 on the
+  # flow-only outcome route, stranding the turn `:claimed` and wedging the whole board.
+  test "an executor below the talk floor never sees a talk job, but still claims flow work", ctx do
+    old =
+      insert(:executor,
+        board: ctx.board,
+        name: "old-box",
+        capacity: %{"shared_clean" => 1, "exclusive" => 1},
+        version: Runs.min_talk_executor_version() - 1
+      )
+
+    talk_job = Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1}, nil)
+
+    assert {:ok, nil} = Runs.claim_next_job(old)
+
+    run = insert(:run, card: ctx.card)
+    execution = insert(:node_execution, run: run)
+    flow_job = Runs.insert_job!(run, execution, %{"isolation" => "shared_clean"})
+
+    assert {:ok, claimed} = Runs.claim_next_job(old)
+    assert claimed.id == flow_job.id
+
+    assert {:ok, talk_claimed} = Runs.claim_next_job(ctx.executor)
+    assert talk_claimed.id == talk_job.id
+  end
+
+  test "an executor that reports no version at all is not talk-capable" do
+    refute Runs.talk_capable?(%Schemas.Executor{version: nil})
+    refute Runs.talk_capable?(%Schemas.Executor{version: Runs.min_talk_executor_version() - 1})
+    assert Runs.talk_capable?(%Schemas.Executor{version: Runs.min_talk_executor_version()})
   end
 
   test "a talk job is never reported through the flow outcome path", ctx do

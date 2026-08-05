@@ -121,7 +121,17 @@ defmodule RelayWeb.Api.ExecutorContractTest do
         "outcomes" => stringify(Schemas.NodeExecution.outcomes()),
         "audit_severities" => stringify(Relay.Runs.Audit.severities()),
         "isolation" => stringify(Schemas.Flow.isolation_classes()),
-        "node_types" => %{"runnable" => stringify(Schemas.Flow.Node.runnable_types())}
+        "node_types" => %{"runnable" => stringify(Schemas.Flow.Node.runnable_types())},
+        # RE268 — `bin/relay` types "done"/"stopped"/"failed" and "error" as literals on the
+        # talk wire, and a drift is silent in the worst direction: a renamed status 422s BOTH
+        # the primary and the crash-path outcome POST (stranding the turn `:claimed` forever),
+        # and a renamed event kind makes `normalize_event/1` degrade error lines to ordinary
+        # output, undetectably. AGENTS.md: anything mirrored into bin/relay is pinned here.
+        "talk_turn_statuses" => %{
+          "active" => stringify(Schemas.TalkTurn.active_statuses()),
+          "reportable" => stringify(Schemas.TalkTurn.reportable_statuses())
+        },
+        "talk_event_kinds" => stringify(Schemas.TalkEvent.kinds())
       },
       "claim_request" => normalize(claim_body(%{"shared_clean" => 1})),
       "claim" => %{
@@ -147,9 +157,11 @@ defmodule RelayWeb.Api.ExecutorContractTest do
 
   # One place builds the `executor` dict for both claim and heartbeat, mirroring bin/relay's
   # executor_ident (RLY-184). The version tracks the server's own minimum so the fixture always
-  # depicts a CURRENT executor — a literal would start 409ing the moment the minimum moves.
+  # depicts a CURRENT executor — a literal would start 409ing the moment the minimum moves. It
+  # is the TALK minimum (the higher of the two floors, RE268) because this fixture also claims a
+  # talk job, which `Relay.Runs.talk_capable?/1` hides from an executor below it.
   defp executor_ident do
-    %{"name" => "fixture", "host" => "fixture-host", "interval" => 30, "version" => Runs.min_executor_version()}
+    %{"name" => "fixture", "host" => "fixture-host", "interval" => 30, "version" => Runs.min_talk_executor_version()}
   end
 
   defp claim_body(capacity), do: %{"executor" => executor_ident(), "capacity" => capacity}

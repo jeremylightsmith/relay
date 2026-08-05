@@ -36,6 +36,14 @@ defmodule Schemas.VocabularyTest do
     assert Enum.all?(Schemas.NodeJob.claimed_states(), &(&1 in Schemas.NodeJob.active_states()))
   end
 
+  test "talk turn statuses partition exactly into active + reportable" do
+    assert Enum.sort(Schemas.TalkTurn.active_statuses() ++ Schemas.TalkTurn.reportable_statuses()) ==
+             Enum.sort(Ecto.Enum.values(Schemas.TalkTurn, :status))
+
+    assert Schemas.TalkTurn.active_statuses() -- Schemas.TalkTurn.reportable_statuses() ==
+             Schemas.TalkTurn.active_statuses()
+  end
+
   test "every closed set is defined once, delegating to its Ecto.Enum" do
     for {module, fun, field} <- [
           {Schemas.Card, :statuses, :status},
@@ -46,7 +54,9 @@ defmodule Schemas.VocabularyTest do
           {Schemas.NodeJob, :states, :state},
           {Schemas.NodeJob, :kinds, :kind},
           {Schemas.NodeExecution, :outcomes, :outcome},
-          {Schemas.Flow, :isolation_classes, :isolation}
+          {Schemas.Flow, :isolation_classes, :isolation},
+          {Schemas.TalkTurn, :statuses, :status},
+          {Schemas.TalkEvent, :kinds, :kind}
         ] do
       assert apply(module, fun, []) == Ecto.Enum.values(module, field),
              "#{inspect(module)}.#{fun}/0 must delegate to Ecto.Enum.values(#{inspect(module)}, #{inspect(field)})"

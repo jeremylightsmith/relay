@@ -66,7 +66,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
           "name" => "fake",
           "host" => "fake",
           "interval" => 30,
-          "version" => Runs.min_executor_version()
+          "version" => Runs.min_talk_executor_version()
         },
         "capacity" => capacity
       })
@@ -107,7 +107,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
           conn,
           ~p"/api/node-jobs/claim?wait=0",
           Jason.encode!(%{
-            "executor" => %{"name" => "idle", "version" => Runs.min_executor_version()},
+            "executor" => %{"name" => "idle", "version" => Runs.min_talk_executor_version()},
             "capacity" => %{"shared_clean" => 1}
           })
         )
@@ -122,7 +122,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
             conn,
             ~p"/api/node-jobs/claim",
             Jason.encode!(%{
-              "executor" => %{"name" => "zero-capacity", "version" => Runs.min_executor_version()},
+              "executor" => %{"name" => "zero-capacity", "version" => Runs.min_talk_executor_version()},
               "capacity" => %{"shared_clean" => 0, "exclusive" => 0}
             })
           )
@@ -549,7 +549,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
         |> post(
           ~p"/api/node-jobs/heartbeat",
           Jason.encode!(%{
-            "executor" => %{"name" => "current", "host" => "new", "version" => Runs.min_executor_version()},
+            "executor" => %{"name" => "current", "host" => "new", "version" => Runs.min_talk_executor_version()},
             "capacity" => %{"shared_clean" => 1},
             "running" => []
           })
@@ -567,7 +567,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
         |> post(
           ~p"/api/node-jobs/heartbeat",
           Jason.encode!(%{
-            "executor" => %{"name" => "box", "host" => "h", "version" => Runs.min_executor_version()},
+            "executor" => %{"name" => "box", "host" => "h", "version" => Runs.min_talk_executor_version()},
             "capacity" => %{"shared_clean" => 1},
             "running" => []
           })

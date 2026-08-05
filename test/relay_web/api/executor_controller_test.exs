@@ -12,7 +12,15 @@ defmodule RelayWeb.Api.ExecutorControllerTest do
   end
 
   test "lists the board's executors with advertised capacity and heartbeat", %{conn: conn, board: board} do
-    insert(:executor, board: board, name: "mac", host: "mac.local", capacity: %{"shared_clean" => 3, "exclusive" => 1})
+    # Version stated here rather than taken from the factory's default: this test is about what
+    # the route EXPOSES, so it must not move when a floor does (RE268 added a second one).
+    insert(:executor,
+      board: board,
+      name: "mac",
+      host: "mac.local",
+      capacity: %{"shared_clean" => 3, "exclusive" => 1},
+      version: Runs.min_executor_version()
+    )
 
     [body] = conn |> get(~p"/api/executors") |> json_response(200) |> Map.fetch!("data")
 

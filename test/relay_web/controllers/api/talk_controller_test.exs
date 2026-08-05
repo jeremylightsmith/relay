@@ -56,6 +56,34 @@ defmodule RelayWeb.Api.TalkControllerTest do
              ctx.conn |> post(~p"/api/talk/turns/#{ctx.turn.id}/events", Jason.encode!(body)) |> json_response(200)
   end
 
+  # RE268 round 2 — these two shapes reached `Repo.insert!` and raised (`Ecto.InvalidChangesetError`
+  # for the blank text, `Protocol.UndefinedError` in `to_string/1` for the object), neither an
+  # `{:error, _}` the fallback controller can render. The batch 500'd and rolled back WHOLE,
+  # taking every valid line with it — the exact outcome this route promises never to have.
+  test "a line with no text is dropped, not the whole batch", ctx do
+    body = %{
+      "events" => [
+        %{"client_seq" => 1, "kind" => "out", "dim" => false},
+        %{"client_seq" => 2, "kind" => "out", "text" => "answer", "dim" => false}
+      ]
+    }
+
+    assert %{"status" => "ok", "accepted" => 1} =
+             ctx.conn |> post(~p"/api/talk/turns/#{ctx.turn.id}/events", Jason.encode!(body)) |> json_response(200)
+  end
+
+  test "a line whose text is an object is dropped, not the whole batch", ctx do
+    body = %{
+      "events" => [
+        %{"client_seq" => 1, "kind" => "out", "text" => %{"a" => 1}, "dim" => false},
+        %{"client_seq" => 2, "kind" => "out", "text" => "answer", "dim" => false}
+      ]
+    }
+
+    assert %{"status" => "ok", "accepted" => 1} =
+             ctx.conn |> post(~p"/api/talk/turns/#{ctx.turn.id}/events", Jason.encode!(body)) |> json_response(200)
+  end
+
   test "events must be a list, not a bare string", ctx do
     body = %{"events" => "nope"}
 

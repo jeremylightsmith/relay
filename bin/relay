@@ -69,8 +69,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 38
-EXECUTOR_FINGERPRINT = "76c6cd076f342d51693e9abbdddc4c5ac49d6ea73718e97d06c3859634592b25"
+EXECUTOR_VERSION = 39
+EXECUTOR_FINGERPRINT = "8c32699f58dd7557182cf43ef520e70b4ecbdf671396acedd843a2ba90e824f4"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1287,6 +1287,18 @@ def plan_path(slot_path, ref):
 ACTIVE_RUN_STATES = ("running", "parked")
 TERMINAL_RUN_STATES = ("done", "failed", "cancelled")
 ISOLATION_CLASSES = ("shared_clean", "exclusive")
+# Talk (RE268). TALK_TURN_STATUSES are the end states POSTable to
+# /api/talk/turns/:id/outcome (Schemas.TalkTurn.reportable_statuses/0) — a drift 422s the
+# outcome POST and strands the turn `:claimed`, which nothing reaps. TALK_EVENT_KINDS is
+# Schemas.TalkEvent.kinds/0; a drift there is silent, because the server degrades an unknown
+# kind to :out and an error line would render as ordinary output.
+TALK_TURN_STATUSES = ("done", "stopped", "failed")
+TALK_DONE, TALK_STOPPED, TALK_FAILED = TALK_TURN_STATUSES
+TALK_EVENT_KINDS = ("user", "tool", "out", "error")
+# `user` is the server's own kind for the person's line; the executor only ever emits the
+# other three. Unpacked from the tuple rather than re-typed, so the fixture assertion (which
+# compares ORDER too) is the single definition of both membership and position.
+_, TALK_KIND_TOOL, TALK_KIND_OUT, TALK_KIND_ERROR = TALK_EVENT_KINDS
 
 
 RETAINED_MARKER = ".relay-retained"   # gitignored sentinel at a retained worktree's root
@@ -2344,17 +2356,22 @@ def talk_events_from(ev):
     """Map ONE stream-json event to the transcript lines it produces (ADR 0009):
     assistant text -> :out, a tool invocation -> one dim :tool line `<tool> · <short target>`,
     an errored result -> :error. Anything else produces nothing — an unrecognised event must
-    never cost the turn."""
+    never cost the turn.
+
+    A line whose text comes out EMPTY is not emitted (RE268): the server requires `text` and
+    drops a blank line anyway, so posting one is a guaranteed hole rather than a record. A
+    tool_use block with neither a name nor a brief is the only way to reach that."""
     out = []
     if ev.get("type") == "assistant":
         for b in ev.get("message", {}).get("content", []) or []:
             if b.get("type") == "text" and b.get("text", "").strip():
-                out.append({"kind": "out", "text": b["text"].strip()[:4000], "dim": False})
+                out.append({"kind": TALK_KIND_OUT, "text": b["text"].strip()[:4000], "dim": False})
             elif b.get("type") == "tool_use":
                 text = f"{b.get('name')} · {_tool_brief(b)}".strip(" ·")
-                out.append({"kind": "tool", "text": text, "dim": True})
+                if text.strip():
+                    out.append({"kind": TALK_KIND_TOOL, "text": text, "dim": True})
     elif ev.get("type") == "result" and ev.get("is_error"):
-        out.append({"kind": "error",
+        out.append({"kind": TALK_KIND_ERROR,
                     "text": str(ev.get("result") or "the turn ended with an error")[:600],
                     "dim": False})
     return out
@@ -2464,11 +2481,13 @@ def report_talk_outcome(turn_id, status, session_id, detail):
     return (resp or {}).get("turn_state")
 
 
-def run_talk_job(job, slot_path, control):
+def run_talk_job(job, slot_path, control, sender):
     """Run one claimed talk turn in `slot_path`; return (status, session_id, detail).
-    Does NOT report — execute_talk POSTs the outcome."""
-    turn_id = job["turn_id"]
-    sender = TalkEventSender(turn_id)
+    Does NOT report — execute_talk POSTs the outcome.
+
+    `sender` is OWNED by execute_talk and passed in, so one turn has exactly one transcript
+    writer: `client_seq` is that writer's per-turn counter, and a second sender would restart
+    it at 1 and have every line it wrote dropped by the server's replay guard (RE268)."""
     # Ref-clean, unlike the old `f"[{ref} talk] "` — _ref_from_tag() greedily reads everything
     # inside the brackets, so that shape extracted "DE3 talk" (a ref that doesn't exist) and
     # every forwarded line spammed the board-log endpoint under a phantom card (RE268).
@@ -2486,13 +2505,27 @@ def run_talk_job(job, slot_path, control):
 
     delivered = sender.flush()
     if control.cancelled():
-        return "stopped", session_id, "stopped by the person"
+        return TALK_STOPPED, session_id, "stopped by the person"
     if not delivered:
-        sender.send_best_effort("error", "some output was lost: the transcript could not be delivered")
-        return "failed", session_id, "transcript delivery failed"
+        sender.send_best_effort(TALK_KIND_ERROR,
+                                "some output was lost: the transcript could not be delivered")
+        return TALK_FAILED, session_id, "transcript delivery failed"
     if not ok:
-        return "failed", session_id, "the claude session exited non-zero"
-    return "done", session_id, ""
+        # A non-zero exit that emitted no `result` event (an expired --resume session id, a
+        # missing binary, a startup error on claude's stderr) produces NO transcript line at
+        # all: only parsed stream-json reaches on_event, and `detail` is stored but never
+        # rendered. Without this the person sees their own line, the composer come back, and
+        # nothing else — ever. The failure has to land IN the transcript (RE268).
+        return TALK_FAILED, session_id, talk_failure(sender, "the claude session exited non-zero")
+    return TALK_DONE, session_id, ""
+
+
+def talk_failure(sender, detail):
+    """Put `detail` in the transcript as an :error line, then hand it back for the outcome POST.
+    `send_best_effort` because a failing turn's last word must not itself be lost to a
+    half-exhausted retry budget (RE268)."""
+    sender.send_best_effort(TALK_KIND_ERROR, detail)
+    return detail
 
 
 def checkout_talk_branch(slot_path, branch):
@@ -2541,19 +2574,29 @@ def execute_talk(job, slot, reset, control, pool):
     leak a slot — but has no run_state to act on: a talk worktree deliberately OUTLIVES any run
     (ADR 0009 §2), so nothing is torn down here."""
     slot_path = worktree_path(slot)
+    # Hoisted out of the try so the crash path below can still carry it: if only the FIRST
+    # outcome POST failed transiently, dropping the session id costs session continuity for
+    # every later turn on this card (RE268).
+    session_id = None
+    # Every failure this function can reach must also land IN the transcript — `detail` is
+    # stored on the turn but nothing renders it, so a bare outcome POST is a silent dead end
+    # for the person watching the pane (RE268).
+    sender = TalkEventSender(job["turn_id"])
     try:
         if reset and not DRY:
             pool.create_or_rebaseline(slot)
             checkout_talk_branch(slot_path, job.get("branch"))
             hook_err = pool.run_prepare_hook(slot_path, job.get("ref"), job.get("branch"))
             if hook_err:
-                report_talk_outcome(job["turn_id"], "failed", None, f"prepare hook failed: {hook_err}")
+                detail = talk_failure(sender, f"prepare hook failed: {hook_err}")
+                report_talk_outcome(job["turn_id"], TALK_FAILED, None, detail)
                 return
-        status, session_id, detail = run_talk_job(job, slot_path, control)
+        status, session_id, detail = run_talk_job(job, slot_path, control, sender)
         report_talk_outcome(job["turn_id"], status, session_id, detail)
     except (Exception, SystemExit) as e:
         try:
-            report_talk_outcome(job["turn_id"], "failed", None, f"talk worker crashed: {e}")
+            detail = talk_failure(sender, f"talk worker crashed: {e}")
+            report_talk_outcome(job["turn_id"], TALK_FAILED, session_id, detail)
         except (Exception, SystemExit) as report_err:
             log(f"failed to report talk crash for turn {job.get('turn_id')}: {report_err}",
                 kind="error")

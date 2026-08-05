@@ -955,6 +955,29 @@ defmodule Relay.Runs do
   @doc "The minimum `bin/relay` EXECUTOR_VERSION this server will claim jobs to."
   def min_executor_version, do: @min_executor_version
 
+  # RE268 — a SECOND, higher floor that applies only to `kind: :talk` jobs. A talk job is
+  # unpinned on a card's first turn and deliberately bypasses the capacity filter, so without
+  # this ANY executor at or above @min_executor_version could take it — including every
+  # pre-Talk executor, which reads `job["isolation"]`, raises `KeyError`, rejects the job and
+  # then 404s on the flow-only outcome route. The turn is left `:claimed` forever (the orphan
+  # reaper deliberately skips talk jobs) and `Talk.post_message/3` refuses every later turn with
+  # `:turn_in_flight` — one stale executor wedges Talk for the whole board.
+  #
+  # Kept separate from @min_executor_version on purpose: raising THAT would also stop old
+  # executors doing the flow work they still handle correctly.
+  @min_talk_executor_version 39
+
+  @doc "The minimum `bin/relay` EXECUTOR_VERSION that may claim a `kind: :talk` job (ADR 0009)."
+  def min_talk_executor_version, do: @min_talk_executor_version
+
+  @doc """
+  Whether this executor is new enough to RUN a talk turn, not merely new enough to claim
+  flow work. See `min_talk_executor_version/0`.
+  """
+  def talk_capable?(%Executor{version: version}) when is_integer(version), do: version >= @min_talk_executor_version
+
+  def talk_capable?(%Executor{}), do: false
+
   # RE185: the version an executor can actually FETCH — what relay-config last published, as
   # recorded in `.relay/published.json` by `mix relay.publish_config`. Deliberately NOT this
   # repo's `EXECUTOR_VERSION` (source runs ahead of published) and NOT min_executor_version/0
@@ -1066,27 +1089,34 @@ defmodule Relay.Runs do
   inside a transaction so two executors never grab the same job. Returns
   `{:ok, job}` or `{:ok, nil}` when nothing matches.
   """
-  def claim_next_job(%Executor{board_id: board_id, name: name, capacity: capacity}) do
+  def claim_next_job(%Executor{board_id: board_id, name: name, capacity: capacity} = executor) do
     allowed = for {class, n} <- capacity, is_integer(n) and n > 0, do: class
+    # RE268 — a talk job is only visible to an executor that can actually run one
+    # (`talk_capable?/1`); an older executor still sees the flow kinds it handles correctly.
+    kinds = if talk_capable?(executor), do: NodeJob.kinds(), else: NodeJob.flow_kinds()
     # Never short-circuit on empty capacity: a job pinned to this executor (an
     # exclusive run it already holds — ADR 0006 §5) is claimable regardless of
     # advertised free capacity, since the executor is already holding that slot.
-    Repo.transaction(fn -> do_claim_next_job(board_id, name, allowed) end)
+    Repo.transaction(fn -> do_claim_next_job(board_id, name, allowed, kinds) end)
   end
 
-  defp do_claim_next_job(board_id, name, allowed) do
+  defp do_claim_next_job(board_id, name, allowed, kinds) do
     query =
       from j in NodeJob,
         join: c in Card,
         on: c.id == j.card_id,
         where: c.board_id == ^board_id,
         where: j.state == :queued,
+        where: j.kind in ^kinds,
         # Unpinned FLOW jobs need advertised free capacity in their class; a job already
         # pinned to this executor bypasses the capacity filter. An unpinned TALK job also
         # bypasses it (ADR 0009 §3): a turn runs in the card's own worktree and advertises no
         # isolation class, and the FIRST turn on a card is what CREATES the executor pin, so
         # refusing it for want of an advertised slot would mean a card nobody has talked to
-        # can never be talked to on a busy executor.
+        # can never be talked to on a busy executor. The exemption is the SERVER's: `assign_talk`
+        # in `bin/relay` still refuses a turn once the executor is at `max_worktrees`, and the
+        # person gets an immediate failed turn rather than a queue-and-wait (a known gap —
+        # runner.md "Talk"). This clause only ensures the job is offered at all.
         where:
           j.executor_name == ^name or
             (is_nil(j.executor_name) and

@@ -291,7 +291,9 @@ sharing behavior.
   card — `claude_session_id`, `pinned_executor_name`, the seed, `last_event_seq` /
   `cleared_through_seq`), `Schemas.TalkTurn` (one per human message, `queued → claimed → done |
   stopped | failed`; `queued → claimed` is written by the claim endpoint via
-  `Talk.mark_claimed/1`, so `Relay.Runs` keeps no Talk knowledge),
+  `Talk.mark_claimed/1`, so the claim path itself needs no knowledge of *turns* — `Relay.Runs`
+  knows only that a job can carry `kind: :talk`, via `insert_talk_job!/3`, `revoke_talk_job/1`,
+  `finish_talk_job!/1` and the `talk_capable?/1` floor on the claim),
   `Schemas.TalkEvent` (one per rendered transcript line, append-only). **The
   pin**: `finish_turn/3` records the claiming executor's name onto the session **on `:done`
   only** — a `:stopped` or `:failed` turn never finished, so it cannot vouch for the session id

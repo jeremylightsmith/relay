@@ -148,4 +148,5 @@ reserved for the genuine question above; the two never overlap (RLY-179).
 *Sources of truth: `lib/relay/application.ex`, `lib/relay/events.ex`,
 `lib/relay/agent_log.ex`, `lib/relay/board_watch.ex`,
 `lib/relay_web/api_log.ex`, `lib/relay/runs.ex`, `lib/relay/runs/supervisor.ex`,
-`lib/relay/runs/listener.ex`, `lib/relay/runs/executor_reaper.ex`, `lib/relay/runs/`.*
+`lib/relay/runs/listener.ex`, `lib/relay/runs/executor_reaper.ex`, `lib/relay/runs/`,
+`lib/relay/talk.ex`.*
