@@ -853,6 +853,7 @@ defmodule RelayWeb.CoreComponentsTest do
 
       assert html =~ "QUESTION"
       assert html =~ "color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
+
       assert html =~
                "border:1px solid color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100));"
 
@@ -1099,7 +1100,9 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(id="card-drawer-overflow-menu")
 
       assert html =~
-               "absolute right-0 top-[33px] z-[22] flex w-[190px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5 shadow-[0_8px_28px_oklch(0.26_0.02_255/0.16)]"
+               "absolute right-0 top-[33px] z-[22] flex w-[190px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5"
+
+      assert html =~ "box-shadow:0 8px 28px color-mix(in oklab, var(--color-neutral) 16%, transparent);"
 
       # line ~700 menuItems — 6px 9px, radius 6px, 12.5px/500, danger red, real hover.
       assert html =~ ~s(id="archive-card-button")
@@ -1155,7 +1158,9 @@ defmodule RelayWeb.CoreComponentsTest do
 
       # line ~48 — top:26px;left:0;z-index:24;width:214px;radius 9px;padding 6px;gap 5px.
       assert html =~
-               "absolute left-0 top-[26px] z-[24] flex w-[214px] flex-col gap-[5px] rounded-[9px] border border-base-300 bg-base-100 p-1.5 shadow-[0_8px_28px_oklch(0.26_0.02_255/0.16)]"
+               "absolute left-0 top-[26px] z-[24] flex w-[214px] flex-col gap-[5px] rounded-[9px] border border-base-300 bg-base-100 p-1.5"
+
+      assert html =~ "box-shadow:0 8px 28px color-mix(in oklab, var(--color-neutral) 16%, transparent);"
 
       # line ~49 — mono 9.5px/600, .6px tracking, uppercase eyebrow.
       assert html =~ "px-1 pt-[3px] font-mono text-[9.5px] font-semibold uppercase tracking-[0.6px] text-base-content/50"

@@ -1299,8 +1299,10 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
       assert style_of(on, "#story-map-hide-complete-filter") ==
                "display:flex;align-items:center;gap:6px;border-radius:8px;padding:5px 10px;" <>
-                 "font-size:11.5px;font-weight:600;background:oklch(0.96 0.05 65);" <>
-                 "color:oklch(0.5 0.13 65);border:1px solid oklch(0.82 0.09 65);"
+                 "font-size:11.5px;font-weight:600;" <>
+                 "background:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100));" <>
+                 "color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));" <>
+                 "border:1px solid color-mix(in oklab, var(--color-warning) 60%, var(--color-base-100));"
 
       assert style_of(off, "#story-map-hide-complete-filter") ==
                style_of(filter_bar([]), "#story-map-needs-input-filter")

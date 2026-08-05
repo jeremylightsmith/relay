@@ -1954,7 +1954,8 @@ defmodule RelayWeb.CoreComponents do
                   <div
                     :if={@stage_menu_open and !@archived}
                     id="card-drawer-stage-menu"
-                    class="absolute left-0 top-[26px] z-[24] flex w-[214px] flex-col gap-[5px] rounded-[9px] border border-base-300 bg-base-100 p-1.5 shadow-[0_8px_28px_oklch(0.26_0.02_255/0.16)]"
+                    class="absolute left-0 top-[26px] z-[24] flex w-[214px] flex-col gap-[5px] rounded-[9px] border border-base-300 bg-base-100 p-1.5"
+                    style="box-shadow:0 8px 28px color-mix(in oklab, var(--color-neutral) 16%, transparent);"
                   >
                     <span class="px-1 pt-[3px] font-mono text-[9.5px] font-semibold uppercase tracking-[0.6px] text-base-content/50">
                       Move to
@@ -2088,7 +2089,8 @@ defmodule RelayWeb.CoreComponents do
                 :if={@overflow_open}
                 id="card-drawer-overflow-menu"
                 role="menu"
-                class="absolute right-0 top-[33px] z-[22] flex w-[190px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5 shadow-[0_8px_28px_oklch(0.26_0.02_255/0.16)]"
+                class="absolute right-0 top-[33px] z-[22] flex w-[190px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5"
+                style="box-shadow:0 8px 28px color-mix(in oklab, var(--color-neutral) 16%, transparent);"
               >
                 <button
                   type="button"
