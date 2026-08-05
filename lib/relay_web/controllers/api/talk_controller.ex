@@ -18,11 +18,16 @@ defmodule RelayWeb.Api.TalkController do
 
   action_fallback RelayWeb.Api.FallbackController
 
-  @doc "Appends a batch of transcript lines. At-least-once: a replayed `client_seq` is accepted and stored once, so the executor may retry freely."
+  @doc """
+  Appends a batch of transcript lines. At-least-once: a replayed `client_seq` is accepted and
+  stored once, so the executor may retry freely. Only a non-list `events` 422s the whole batch —
+  a list containing a malformed element is `Relay.Talk`'s concern, which drops that one line and
+  stores the rest (the same "a mangled line must never cost the whole batch" rule as a map
+  missing `client_seq`).
+  """
   def events(conn, %{"id" => id} = params) do
     with {:ok, turn} <- fetch_turn(conn, id),
-         raw when is_list(raw) <- Map.get(params, "events", []),
-         true <- Enum.all?(raw, &is_map/1) do
+         raw when is_list(raw) <- Map.get(params, "events", []) do
       {:ok, stored} = Talk.append_events(turn, raw)
       json(conn, %{status: "ok", accepted: length(stored)})
     else

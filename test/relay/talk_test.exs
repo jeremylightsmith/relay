@@ -230,6 +230,13 @@ defmodule Relay.TalkTest do
     assert Enum.map(stored, & &1.text) == ["good"]
   end
 
+  test "a non-map element is dropped without failing the batch", ctx do
+    {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
+
+    assert {:ok, stored} = Talk.append_events(turn, ["oops", event(1, "out", "good")])
+    assert Enum.map(stored, & &1.text) == ["good"]
+  end
+
   defp event(client_seq, kind, text) do
     %{"client_seq" => client_seq, "kind" => kind, "text" => text, "dim" => kind == "tool"}
   end

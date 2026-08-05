@@ -49,11 +49,11 @@ defmodule RelayWeb.Api.TalkControllerTest do
              ctx.conn |> post(~p"/api/talk/turns/#{ctx.turn.id}/outcome", Jason.encode!(body)) |> json_response(422)
   end
 
-  test "events must be a list of objects, not a list containing non-map elements", ctx do
-    body = %{"events" => ["oops"]}
+  test "a non-map element in the batch is dropped, not the whole batch", ctx do
+    body = %{"events" => ["oops", %{"client_seq" => 1, "kind" => "out", "text" => "answer", "dim" => false}]}
 
-    assert %{"error" => %{"code" => "invalid_events"}} =
-             ctx.conn |> post(~p"/api/talk/turns/#{ctx.turn.id}/events", Jason.encode!(body)) |> json_response(422)
+    assert %{"status" => "ok", "accepted" => 1} =
+             ctx.conn |> post(~p"/api/talk/turns/#{ctx.turn.id}/events", Jason.encode!(body)) |> json_response(200)
   end
 
   test "events must be a list, not a bare string", ctx do

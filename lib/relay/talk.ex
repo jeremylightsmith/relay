@@ -48,6 +48,7 @@ defmodule Relay.Talk do
   alias Schemas.User
 
   @pubsub Relay.PubSub
+  @reportable_statuses TalkTurn.reportable_statuses()
 
   @doc "The per-card Talk topic."
   def topic(card_id), do: "card:#{card_id}:talk"
@@ -199,10 +200,12 @@ defmodule Relay.Talk do
     Enum.reverse(stored)
   end
 
-  # An unknown kind degrades to `:out` rather than raising, and a line without an integer
-  # `client_seq` or with a non-boolean `dim` is dropped entirely (`:invalid`) rather than
-  # reaching `Repo.insert!` and raising: the executor is untrusted input, and a mangled line
-  # must never cost the whole batch.
+  # An unknown kind degrades to `:out` rather than raising, and a line that isn't even a map, or
+  # is a map without an integer `client_seq` or with a non-boolean `dim`, is dropped entirely
+  # (`:invalid`) rather than reaching `Repo.insert!` and raising: the executor is untrusted
+  # input, and a mangled line must never cost the whole batch — not even the batch containing it.
+  defp normalize_event(raw) when not is_map(raw), do: :invalid
+
   defp normalize_event(raw) do
     client_seq = raw["client_seq"] || raw[:client_seq]
     dim = raw["dim"] || raw[:dim] || false
@@ -223,7 +226,7 @@ defmodule Relay.Talk do
   session's pin. `:stopped` and `:failed` leave both alone: a turn that never finished cannot
   vouch for a session id.
   """
-  def finish_turn(%TalkTurn{} = turn, status, attrs \\ %{}) when status in [:done, :stopped, :failed] do
+  def finish_turn(%TalkTurn{} = turn, status, attrs \\ %{}) when status in @reportable_statuses do
     turn = Repo.get!(TalkTurn, turn.id)
     session = Repo.get!(TalkSession, turn.talk_session_id)
     job = turn.node_job_id && Runs.get_job(turn.node_job_id)
