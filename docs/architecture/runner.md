@@ -598,16 +598,22 @@ claim/execute/report loop, one more branch.
   one on demand for a card the flow engine would never itself dispatch.
 
   A node job and a talk turn can occupy the SAME worktree record at once, so occupancy is
-  tracked **per occupant**: `live` for the node job, `talk_live` for the talk turn.
-  `ExecutorPool.assign_talk/1` and `release_talk/1` only ever touch `talk_live`, never `live` —
+  tracked **per occupant**: `live` for the node job, and a `talk_users` **count** for talk
+  turns — a count, not a flag, because two turns can legitimately overlap on one tree: Stop
+  finalises a turn server-side at once, but the executor only learns of the revoke on its next
+  heartbeat (15s), so a person who hits Stop and immediately retypes has turn 1 still running
+  when turn 2 is claimed into the same tree. A flag did not count the second occupant, and
+  turn 1's release then stashed and force-removed the tree turn 2 was answering in.
+  `ExecutorPool.assign_talk/1` and `release_talk/1` only ever touch `talk_users`, never `live` —
   an earlier version shared one `live` flag between both occupants, which let either tear the
   tree down (or believe it idle) out from under the other: a node job's `release()` finishing
   while a talk turn was still streaming would run `git worktree remove --force` mid-answer and
   stash the person's uncommitted edits; a talk turn ending would clear `live` under a still-
   running node job, defeating `release_run/2`'s "never touch a worktree with a live job"
   guarantee. `release()`/`release_run/2` now DEFER a terminal disposition (`pending_finish`)
-  while the other occupant (`talk_live`) is still present; `release_talk/1` finishes it once
-  released — last occupant out tears down.
+  while any other occupant (`live`, or `talk_users > 0`) is still present; `release_talk/1`
+  finishes it once the last one leaves — last occupant out tears down. The deferred disposition
+  is read only after those early returns, so a non-final release cannot discard it.
 
   A talk-created worktree carries `run_id: None`, so `release_run/2` — the run-terminal
   recovery path — explicitly skips any record whose `run_id` is `None`; a legacy
@@ -625,16 +631,19 @@ claim/execute/report loop, one more branch.
   retired (stashed + hard-reset) it out from under its resuming job.
 
   `ExecutorPool.assign/1` (the node-job path) likewise refuses to reclaim a **retained** tree a
-  talk turn has reattached to (`talk_live`) rather than re-baselining it out from under that
+  talk turn has reattached to (`talk_users > 0`) rather than re-baselining it out from under that
   turn's still-reading claude process — the same "refuse rather than steal a live
   worktree" precedent it already applies to a tree bound to a different live run.
 
-  **Known gap:** while a node job's terminal disposition sits deferred (`pending_finish`), the
-  record stays `state="active"` bound to the OLD run_id. If a NEW run for the same card is
-  dispatched before the talk turn ends, `assign/1`'s "different live run" branch refuses it
-  (the run_id no longer matches) and the run's first job is rejected as failed rather than
-  retried — a refusal, not a corruption, but worth a brief retry-before-reject in `assign/1` if
-  this proves to matter in practice. The window is bounded by one talk turn's lifetime.
+  **Bounded, and retried:** while a node job's terminal disposition sits deferred
+  (`pending_finish`), the record stays `state="active"` bound to the OLD run_id. If a NEW run
+  for the same card is dispatched before the talk turn ends, `assign/1`'s "different live run"
+  branch refuses it (the run_id no longer matches). That refusal used to be reported as a
+  **failed job**, so someone asking "why did this fail?" during a retry failed the retry. The
+  claim loop now retries placement for a bounded window (`PLACEMENT_ATTEMPTS` ×
+  `PLACEMENT_RETRY_S`, ~10s, `bin/relay`) before rejecting, which covers one talk turn handing
+  the tree back; only a persistent miss is treated as genuine capacity exhaustion. See
+  [failures.md](failures.md) E2t.
 
   A talk turn that creates its own worktree fresh (the card's run is done/cancelled and was
   torn down, or the card was never run) lands **on the card's own branch** when one exists, via
@@ -694,10 +703,11 @@ claim/execute/report loop, one more branch.
   `control.cancelled()` after the process exits and reports `stopped` (not `failed`) with
   whatever partial output was already delivered. No talk-specific channel was added.
 
-`EXECUTOR_VERSION` 33 → 38 for this change (34 shipped the initial worker, 35 the occupancy/
+`EXECUTOR_VERSION` 33 → 39 for this change (34 shipped the initial worker, 35 the occupancy/
 retirement/attribution hardening above, 36 the recovery/retained-tree/streaming/branch fixes
 from a follow-up review, 37 the branch-checkout non-destructiveness fix above, 38 the
-failure-line-into-the-transcript fix from the whole-branch review).
+failure-line-into-the-transcript fix from the whole-branch review, 39 the `talk_users`
+occupancy count, the bounded placement retry, and the rejected-turn transcript line).
 
 **Two version floors.** `Relay.Runs.min_executor_version/0` (21) is **not** raised — an executor
 without Talk is not worse than a stopped one for the flow work it still does correctly. Talk gets

@@ -5792,7 +5792,7 @@ class TalkWorktreeTest(unittest.TestCase):
 class TalkOccupancyTest(unittest.TestCase):
     """RE268: a node job and a talk turn attached to the
     SAME worktree record must not tear it down out from under each other. Occupancy is tracked
-    separately — `live` for the node job, `talk_live` for the talk turn — and the tree is only
+    separately — `live` for the node job, a `talk_users` count for talk turns — and the tree is only
     finished once BOTH occupants have released it (last one out tears down)."""
 
     def _pool(self, **cfg):
@@ -5883,7 +5883,7 @@ class TalkOccupancyTest(unittest.TestCase):
         pool = self._pool()
         pool.wts["exec-DE3"] = {"run_id": None, "state": "retained", "live": False,
                                 "partition": None}
-        pool.assign_talk("DE3")           # attaches -> talk_live True (the post-mortem case)
+        pool.assign_talk("DE3")           # attaches -> talk_users 1 (the post-mortem case)
         j = job("exclusive_shell", vars={"ref": "DE3"})
         self.assertIsNone(pool.assign(j))
 
