@@ -123,7 +123,7 @@ class ClaimContractKeysTest(unittest.TestCase):
     Spelling the sets out means renaming ANY server field fails this suite immediately.
     """
 
-    TOP_LEVEL = {"id", "run_id", "ref", "node_id", "node_type", "agent", "run",
+    TOP_LEVEL = {"id", "kind", "run_id", "ref", "node_id", "node_type", "agent", "run",
                  "isolation", "resume_session", "vars"}
     VARS = {"ref", "branch", "prior_detail", "findings", "sub_task"}
 
@@ -175,6 +175,37 @@ class ClaimContractKeysTest(unittest.TestCase):
         job(id="nj-mutated", vars={"ref": "MUT-1"})
         self.assertNotEqual(CONTRACT["claim"]["shared_clean_agent"]["id"], "nj-mutated")
         self.assertNotEqual(CONTRACT["claim"]["shared_clean_agent"]["vars"]["ref"], "MUT-1")
+
+
+class TalkContractKeysTest(unittest.TestCase):
+    """RE268 — the talk claim/events/outcome shapes, spelled out for the same reason the flow
+    claim is: the executor reads these keys without any test naming them."""
+
+    TOP_LEVEL = {"id", "kind", "ref", "turn_id", "prompt", "author", "branch", "seed",
+                 "resume_session"}
+
+    def test_the_talk_claim_has_exactly_the_keys_the_executor_reads(self):
+        payload = CONTRACT["talk_claim"]["first_turn"]
+        self.assertEqual(set(payload), self.TOP_LEVEL)
+        self.assertEqual(payload["kind"], "talk")
+
+    def test_a_flow_claim_declares_its_kind_too(self):
+        for case, payload in CONTRACT["claim"].items():
+            self.assertEqual(payload["kind"], "node", case)
+
+    def test_the_seed_carries_a_summary_and_labelled_fields(self):
+        seed = CONTRACT["talk_claim"]["first_turn"]["seed"]
+        self.assertIn("summary", seed)
+        self.assertTrue(all({"label", "value"} == set(f) for f in seed["fields"]))
+
+    def test_the_event_batch_shape_is_what_the_sender_builds(self):
+        sent = CONTRACT["talk_events"]["request"]["events"][0]
+        self.assertEqual(set(sent), {"client_seq", "kind", "text", "dim"})
+
+    def test_the_outcome_shape_is_what_the_worker_reports(self):
+        self.assertEqual(set(CONTRACT["talk_outcome"]["request"]),
+                         {"status", "session_id", "detail"})
+        self.assertEqual(CONTRACT["talk_outcome"]["response"]["turn_state"], "done")
 
 
 class ReverseContractTest(unittest.TestCase):

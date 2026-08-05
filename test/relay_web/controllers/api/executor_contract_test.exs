@@ -82,8 +82,37 @@ defmodule RelayWeb.Api.ExecutorContractTest do
     # 4. exclusive_shell — the Code shape.
     {_run, exclusive_shell} = claim_one(exclusive, %{"exclusive" => 1})
 
+    # 5. talk — the person-dispatched shape. Claimed on the SAME endpoint, distinguished only
+    #    by `kind`, which is the whole point of reusing `node_jobs` (ADR 0009).
+    talk_author = user
+
+    {:ok, talk_card} =
+      Relay.Cards.create_card(exclusive.next_up, %{title: "Talk card", description: "Why is this stuck?"})
+
+    {:ok, talk_turn} = Relay.Talk.post_message(talk_card, talk_author, "why is this stuck?")
+    talk_job = claim(exclusive, %{"exclusive" => 1})
+
+    talk_events_request = %{
+      "events" => [
+        %{"client_seq" => 1, "kind" => "tool", "text" => "Read · lib/relay.ex", "dim" => true},
+        %{"client_seq" => 2, "kind" => "out", "text" => "It is waiting on an open question.", "dim" => false}
+      ]
+    }
+
+    talk_events_response =
+      exclusive.conn
+      |> post(~p"/api/talk/turns/#{talk_turn.id}/events", Jason.encode!(talk_events_request))
+      |> json_response(200)
+
+    talk_outcome_request = %{"status" => "done", "session_id" => "sess-fixture", "detail" => nil}
+
+    talk_outcome_response =
+      exclusive.conn
+      |> post(~p"/api/talk/turns/#{talk_turn.id}/outcome", Jason.encode!(talk_outcome_request))
+      |> json_response(200)
+
     document = %{
-      "version" => 2,
+      "version" => 3,
       "vocabulary" => %{
         "run_states" => %{
           "active" => stringify(Schemas.Run.active_statuses()),
@@ -107,7 +136,10 @@ defmodule RelayWeb.Api.ExecutorContractTest do
       "heartbeat" => %{
         "request" => normalize(heartbeat_request),
         "response" => normalize(heartbeat_response)
-      }
+      },
+      "talk_claim" => %{"first_turn" => normalize(talk_job)},
+      "talk_events" => %{"request" => normalize(talk_events_request), "response" => normalize(talk_events_response)},
+      "talk_outcome" => %{"request" => normalize(talk_outcome_request), "response" => normalize(talk_outcome_response)}
     }
 
     assert_matches_fixture!(document)
@@ -187,6 +219,7 @@ defmodule RelayWeb.Api.ExecutorContractTest do
     "run_id" => "<run-id>",
     "resume_session" => "<session-id>",
     "session_id" => "<session-id>",
+    "turn_id" => "<talk-turn-id>",
     # RE185: the VALUE moves on every publish, but the contract is the key and its presence —
     # a literal would make this fixture churn (and fail) every time `.relay/published.json`
     # moves, which is not a transport change.

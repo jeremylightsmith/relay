@@ -159,6 +159,23 @@ defmodule RelayWeb.Api.FallbackController do
     |> render(:error, code: "invalid_executor", message: "executor must be an object")
   end
 
+  def call(conn, {:error, :unknown_status}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "unknown_status",
+      message: "status must be one of: done, stopped, failed"
+    )
+  end
+
+  def call(conn, {:error, :invalid_events}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid_events", message: "events must be a list")
+  end
+
   # Embed errors nest, so this cannot join `traverse_errors/2`'s output directly — see
   # RelayWeb.ChangesetErrors, which owns that walk for both this and the flow editor.
   defp changeset_message(changeset), do: changeset |> ChangesetErrors.messages() |> Enum.join("; ")

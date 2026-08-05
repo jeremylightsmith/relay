@@ -221,6 +221,19 @@ that stays server-side.
   response never turns finished work into a failure (RLY-202); and only a `:queued` (reassigned)
   or `:revoked` (zombie) job answers 409 `conflict`. The four outcomes and what each does to the
   run and the card are tabulated in the [state reference](state.md).
+- **Talk rides the same claim, a different transport (RE268 / ADR 0009).** Every
+  `POST /api/node-jobs/claim` reply now carries **`kind`** (`"node"` or `"talk"`), so the
+  executor can branch without a second endpoint. A `"talk"` claim carries exactly
+  `{id, kind, ref, turn_id, prompt, author, branch, seed, resume_session}` —
+  `RelayWeb.Api.NodeJobController.claim_payload/1`'s talk-only clause — never the flow shape's
+  `run_id`/`node_id`/`vars`. A talk turn's outcome does **not** go through
+  `POST /api/node-jobs/:id/outcome`: that route finalises a job through the run lifecycle via
+  `Relay.Runs.get_claimed_job/2`, which is flow-only (`kind in NodeJob.flow_kinds()`) and 404s a
+  talk job on purpose. Instead `RelayWeb.Api.TalkController`, board-scoped by the same
+  board-key auth, offers two routes: `POST /api/talk/turns/:id/events` appends a batch of
+  transcript lines (at-least-once — a replayed `client_seq` is accepted and stored once, per
+  `Relay.Talk.append_events/2`) and `POST /api/talk/turns/:id/outcome` ends the turn
+  (`done`/`stopped`/`failed`, 422 `unknown_status` on anything else) via `Relay.Talk.finish_turn/3`.
 - **The wire contract is pinned by a fixture.** `test/fixtures/executor_contract.json` is
   generated from these routes by
   `test/relay_web/controllers/api/executor_contract_test.exs` (never hand-edited) and read by

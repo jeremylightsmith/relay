@@ -278,13 +278,33 @@ defmodule RelayWeb.Api.NodeJobController do
     end
   end
 
-  # Never leaks worktree paths — those are executor-local. Serialises the payload
-  # W5 stored (raw run + resolved vars); {ref}/{branch} expansion stays executor-side.
+  # Never leaks worktree paths — those are executor-local. `kind` rides on BOTH shapes (RE268):
+  # the executor branches on it, and pinning it in the fixture is what makes a rename break CI
+  # rather than production.
+  defp claim_payload(%Schemas.NodeJob{kind: :talk} = job) do
+    payload = job.payload
+
+    %{
+      id: job.id,
+      kind: "talk",
+      ref: payload["ref"],
+      turn_id: payload["turn_id"],
+      prompt: payload["prompt"],
+      author: payload["author"],
+      branch: payload["branch"],
+      seed: payload["seed"] || %{},
+      resume_session: payload["resume_session"]
+    }
+  end
+
+  # Serialises the payload W5 stored (raw run + resolved vars); {ref}/{branch} expansion stays
+  # executor-side.
   defp claim_payload(job) do
     payload = job.payload
 
     %{
       id: job.id,
+      kind: "node",
       run_id: job.run_id,
       ref: get_in(payload, ["vars", "ref"]),
       node_id: job.node_key,
