@@ -39,11 +39,21 @@ defmodule RelayWeb.Api.TalkController do
   @doc "Ends a turn. `done` carries the `claude` session id that makes the NEXT turn a continuation."
   def outcome(conn, %{"id" => id} = params) do
     with {:ok, turn} <- fetch_turn(conn, id),
-         {:ok, status} <- parse_status(params["status"]) do
-      {:ok, updated} = Talk.finish_turn(turn, status, %{session_id: params["session_id"], detail: params["detail"]})
+         {:ok, status} <- parse_status(params["status"]),
+         {:ok, session_id} <- binary_or_nil(params["session_id"]),
+         {:ok, detail} <- binary_or_nil(params["detail"]) do
+      {:ok, updated} = Talk.finish_turn(turn, status, %{session_id: session_id, detail: detail})
       json(conn, %{status: "ok", turn_state: Atom.to_string(updated.status)})
     end
   end
+
+  # The executor is untrusted input — the same rule `Relay.Talk.normalize_event/1` states for the
+  # events route. Unchecked, a JSON object or number here fails `cast(…, :string)` and
+  # `Repo.update!` raises `Ecto.InvalidChangesetError`, which the FallbackController cannot
+  # render: a 500, and a turn left `:claimed` behind a `:done` job.
+  defp binary_or_nil(nil), do: {:ok, nil}
+  defp binary_or_nil(value) when is_binary(value), do: {:ok, value}
+  defp binary_or_nil(_value), do: {:error, :invalid_outcome}
 
   # A turn on another board is `:not_found`, never a 403 — the same rule the rest of /api uses,
   # so a probe cannot learn that an id exists elsewhere.

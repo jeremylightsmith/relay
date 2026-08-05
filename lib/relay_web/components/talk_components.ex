@@ -170,8 +170,14 @@ defmodule RelayWeb.TalkComponents do
 
       <div style="flex:0 0 auto;border-top:1px solid oklch(0.26 0.018 262);padding:9px 16px 11px 16px;display:flex;flex-direction:column;gap:7px;">
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <%!-- Gated on !@busy? for the same reason the composer is removed while busy (above):
+                four of these five route through talk_slash -> Talk.post_message/3, which answers
+                {:error, :turn_in_flight} and renders nothing. A live-looking control that does
+                nothing is exactly what the composer rule exists to prevent. /clear stays live —
+                it routes to clear_talk/1 and is safe mid-turn. --%>
           <button
             :for={label <- slash_chips()}
+            :if={!@busy? or label == slash_clear()}
             type="button"
             phx-click="talk_slash"
             phx-value-text={label}
@@ -206,7 +212,14 @@ defmodule RelayWeb.TalkComponents do
   # `line-height:19px` behind after the font-size override, which is not what the artboard draws.
   defp mono_family, do: "font-family:'JetBrains Mono',ui-monospace,monospace;"
 
-  defp slash_chips, do: ["why did review reject?", "fix it", "/card", "/run", "/clear"]
+  @doc """
+  The one slash command the pane handles itself rather than posting as a turn — so it is the one
+  chip that stays live while a turn is in flight. Defined here and called by `BoardLive`, rather
+  than the literal being typed in both places (AGENTS.md: a magic value is defined exactly once).
+  """
+  def slash_clear, do: "/clear"
+
+  defp slash_chips, do: ["why did review reject?", "fix it", "/card", "/run", slash_clear()]
 
   defp out_color(%{dim: true}), do: "oklch(0.58 0.03 262)"
   defp out_color(_event), do: "oklch(0.86 0.015 262)"

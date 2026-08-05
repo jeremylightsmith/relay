@@ -295,6 +295,18 @@ defmodule Relay.TalkTest do
     assert Enum.map(stored, & &1.text) == ["good"]
   end
 
+  test "a client_seq outside int4 is dropped instead of 500ing the whole batch", ctx do
+    {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
+
+    # Passes is_integer/1 and the Ecto cast, then raises Postgrex 22003 from Repo.insert! —
+    # rolling the transaction back and losing every valid line with it.
+    too_big = %{"client_seq" => 99_999_999_999_999, "kind" => "out", "text" => "boom", "dim" => false}
+    negative = %{"client_seq" => -1, "kind" => "out", "text" => "nope", "dim" => false}
+
+    assert {:ok, stored} = Talk.append_events(turn, [too_big, negative, event(1, "out", "good")])
+    assert Enum.map(stored, & &1.text) == ["good"]
+  end
+
   test "a line whose kind is not a string is dropped without failing the batch", ctx do
     {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
     bad = %{"client_seq" => 4, "kind" => %{"nope" => true}, "text" => "hi", "dim" => false}

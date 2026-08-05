@@ -3887,7 +3887,7 @@ defmodule RelayWeb.BoardLive do
   defp submit_talk(socket, raw_text) do
     text = String.trim(raw_text || "")
 
-    if text == "/clear" do
+    if text == RelayWeb.TalkComponents.slash_clear() do
       clear_talk(socket)
     else
       do_submit_talk(socket, text)
@@ -3910,9 +3910,9 @@ defmodule RelayWeb.BoardLive do
         |> stream_insert(:talk_events, event)
 
       # A blank draft and "one turn in flight at a time" are both silent no-ops: the composer
-      # already prevents the empty case, and a second turn cannot be typed at all — the composer
-      # is REMOVED while one is live (Stop renders in its place), so `:turn_in_flight` is only
-      # reachable by a race against the executor's own claim, not by anything a person did.
+      # already prevents the empty case, and while a turn is live the composer is REMOVED (Stop
+      # renders in its place) and the prompt chips are hidden, so nothing a person can click
+      # reaches here. What remains is a race against the executor's own claim.
       {:error, _reason} ->
         socket
     end

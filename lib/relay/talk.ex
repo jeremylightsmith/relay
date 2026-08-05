@@ -241,8 +241,14 @@ defmodule Relay.Talk do
   # `do_post/4`'s own seed line, so both are read here rather than at every call site.
   defp field(raw, key), do: raw[Atom.to_string(key)] || raw[key]
 
+  # `client_seq` is an int4 column, so an in-range check is part of validity, not a nicety: an
+  # out-of-range integer passes `is_integer/1` and the Ecto cast, then raises Postgrex 22003 from
+  # `Repo.insert!` — a 500 that rolls the whole batch back and loses every VALID line with it.
+  @client_seq_max 2_147_483_647
+
   defp valid_event?(client_seq, dim, text, kind) do
-    is_integer(client_seq) and is_boolean(dim) and is_binary(text) and
+    is_integer(client_seq) and client_seq >= 0 and client_seq <= @client_seq_max and
+      is_boolean(dim) and is_binary(text) and
       String.trim(text) != "" and (is_nil(kind) or is_binary(kind))
   end
 
@@ -301,15 +307,31 @@ defmodule Relay.Talk do
     end
   end
 
+  # One transaction, because the steps are not independent: `finish_talk_job!/1` committing while
+  # the turn update raises leaves the job `:done` and the turn `:claimed` — and from there
+  # `active_turn/1` keeps returning it, `post_message/3` refuses every later turn with
+  # `:turn_in_flight`, the orphan reaper skips talk jobs by design, and the executor's
+  # at-least-once retry re-raises forever. That wedges the card's Talk until a human hits Stop.
+  # The split state is reachable from ANY raise between the job update and the turn update, not
+  # just from bad input, so the fix belongs here rather than only at the controller.
   defp do_finish_turn(turn, status, attrs) do
-    session = Repo.get!(TalkSession, turn.talk_session_id)
-    job = turn.node_job_id && Runs.get_job(turn.node_job_id)
+    {:ok, {card_id, updated}} =
+      Repo.transaction(fn ->
+        session = Repo.get!(TalkSession, turn.talk_session_id)
+        job = turn.node_job_id && Runs.get_job(turn.node_job_id)
 
-    if job && job.state in NodeJob.active_states(), do: Runs.finish_talk_job!(job)
-    if job && status == :done, do: persist_session(session, job, attrs)
+        if job && job.state in NodeJob.active_states(), do: Runs.finish_talk_job!(job)
+        if job && status == :done, do: persist_session(session, job, attrs)
 
-    updated = turn |> TalkTurn.changeset(%{status: status, detail: attrs[:detail]}) |> Repo.update!()
-    broadcast(session.card_id, {:talk_turn_changed, updated})
+        updated =
+          turn |> TalkTurn.changeset(%{status: status, detail: attrs[:detail]}) |> Repo.update!()
+
+        {session.card_id, updated}
+      end)
+
+    # After commit, never inside: the module's own convention (`handle_post/2`, `append_events/2`)
+    # and the reason for it — a rollback after broadcasting announces a change that did not happen.
+    broadcast(card_id, {:talk_turn_changed, updated})
     {:ok, updated}
   end
 

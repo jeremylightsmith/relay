@@ -69,8 +69,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 39
-EXECUTOR_FINGERPRINT = "8c32699f58dd7557182cf43ef520e70b4ecbdf671396acedd843a2ba90e824f4"
+EXECUTOR_VERSION = 40
+EXECUTOR_FINGERPRINT = "d041963dc2a68e65f4d690d0f89b1bf3f02490db66c766bef958b7d3d0225cc5"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1301,6 +1301,12 @@ TALK_EVENT_KINDS = ("user", "tool", "out", "error")
 _, TALK_KIND_TOOL, TALK_KIND_OUT, TALK_KIND_ERROR = TALK_EVENT_KINDS
 
 
+# Bounded placement retry (RE268): a talk turn holding a retained tree makes `assign`
+# refuse a node job transiently. ~10s total covers one turn handing the tree back;
+# past that it is genuine capacity exhaustion and the job is rejected as before.
+PLACEMENT_ATTEMPTS = 10
+PLACEMENT_RETRY_S = 1.0
+
 RETAINED_MARKER = ".relay-retained"   # gitignored sentinel at a retained worktree's root
 
 
@@ -1427,7 +1433,7 @@ class ExecutorPool:
                 # re-baselining here hard-resets the tree (via create_or_rebaseline) while that
                 # talk turn's claude process is reading it. Same precedent as the "different
                 # live run" refusal below.
-                if rec.get("talk_live"):
+                if rec.get("talk_users", 0) > 0:
                     return None
                 if self._active_count() >= self.max_worktrees:
                     return None
@@ -1452,7 +1458,7 @@ class ExecutorPool:
         """Mark a talk turn's worktree idle. Deliberately does NOT touch `rec["live"]` — that
         flag is the NODE job's own occupancy, and a node job can be running in this same
         worktree right now (dirty reads are the point of assign_talk). Occupancy is tracked
-        per-occupant: `live` for a node job, `talk_live` for a talk turn (RE268) — a shared single
+        per-occupant: `live` for a node job, a `talk_users` COUNT for talk turns (RE268) — a shared
         flag let either occupant tear the tree down from under the other (a node job's
         `release()` finishing while a talk turn streamed inside it destroyed the tree mid-answer;
         a talk turn ending cleared `live` under a still-running node job).
@@ -1472,10 +1478,14 @@ class ExecutorPool:
             rec = self.wts.get(slot)
             if rec is None:
                 return
-            rec["talk_live"] = False
-            pending = rec.pop("pending_finish", None)
+            rec["talk_users"] = max(0, rec.get("talk_users", 0) - 1)
+            if rec["talk_users"] > 0:
+                return                      # another talk turn still occupies this worktree
             if rec["live"]:
                 return                      # a node job still occupies this worktree
+            # Popped only once we know we are the last occupant out: above the early returns it
+            # would discard the deferred disposition instead of leaving it for whoever is.
+            pending = rec.pop("pending_finish", None)
             if pending is not None:
                 self._finish_locked(slot, rec, pending)
             elif rec.get("talk") and rec["run_id"] is None and rec["state"] == "active":
@@ -1488,7 +1498,7 @@ class ExecutorPool:
         (slot_name, reset?) or None when there is no room — NEVER the shared `<ns>-clean` tree,
         which other CARDS' jobs are using and which a talk turn must not disturb.
 
-        Sets `talk_live`, never `live` — `live` is the node job's own occupancy flag and must
+        Increments `talk_users`, never `live` — `live` is the node job's own occupancy and must
         stay untouched by the talk turn attaching (see the shared-flag hazard in release_talk,
         above).
 
@@ -1498,12 +1508,12 @@ class ExecutorPool:
         with self.lock:
             rec = self.wts.get(name)
             if rec is not None:
-                rec["talk_live"] = True
+                rec["talk_users"] = rec.get("talk_users", 0) + 1
                 return name, False
             if self._active_count() >= self.max_worktrees:
                 return None
             self.wts[name] = {"run_id": None, "state": "active", "live": False,
-                              "talk_live": True, "partition": self._take_partition(),
+                              "talk_users": 1, "partition": self._take_partition(),
                               "talk": True}
             return name, True
 
@@ -1515,7 +1525,7 @@ class ExecutorPool:
         pinned run resumes in it (the mid-run reset-on-revoke is GONE — never-detach, RLY-231).
 
         A terminal disposition (done/cancelled/failed) is DEFERRED via `pending_finish` while a
-        talk turn is still occupying the same worktree (`talk_live`) — tearing it down here would
+        talk turn is still occupying the same worktree (`talk_users > 0`) — tearing it down would
         kill that turn's process mid-answer and stash its uncommitted edits out from under it
         (RE268). `release_talk` finishes it once the talk turn also releases: last occupant out
         tears down.
@@ -1537,7 +1547,7 @@ class ExecutorPool:
             rec["live"] = False
             if run_state is None or run_state in ACTIVE_RUN_STATES:
                 return                                  # revoke or still-live: keep active+bound
-            if rec.get("talk_live"):
+            if rec.get("talk_users", 0) > 0:
                 rec["pending_finish"] = run_state
                 return
             self._finish_locked(slot, rec, run_state)
@@ -1558,7 +1568,7 @@ class ExecutorPool:
         with self.lock:
             for name, rec in list(self.wts.items()):
                 if rec["run_id"] is not None and rec["run_id"] == run_id and rec["state"] == "active" and not rec["live"]:
-                    if rec.get("talk_live"):
+                    if rec.get("talk_users", 0) > 0:
                         rec["pending_finish"] = status or "done"
                         continue
                     self._finish_locked(name, rec, status or "done")
@@ -1598,13 +1608,13 @@ class ExecutorPool:
     # ---- retention eviction --------------------------------------------
     def _evict_retained_over_cap_locked(self):
         """Retained trees over `max_retained_failed` are evicted oldest-first. A retained tree a
-        talk turn has since reattached to (`talk_live`) is excluded from candidacy — the idle
+        talk turn has since reattached to (`talk_users > 0`) is excluded from candidacy — the idle
         retirement above makes a talk-only tree retained-and-reusable, and without this guard a
         SECOND idle talk-only tree retiring could push a currently-occupied one out from under
         its live talk turn (the same class of shared-occupancy hazard `release_talk` guards
         against, just reached via retirement rather than release)."""
         retained = [n for n, r in self.wts.items()
-                   if r["state"] == "retained" and not r.get("talk_live")]
+                   if r["state"] == "retained" and not r.get("talk_users", 0)]
         if len(retained) <= self.max_retained_failed:
             return
         # Oldest-first by the worktree dir's mtime (survives restarts; no in-memory clock).
@@ -3143,8 +3153,17 @@ def cmd_execute(args):
         job_id = job.get("id") if isinstance(job, dict) else None
         log(f"rejecting claimed job {job_id or job!r}: {detail}", kind="error")
         if isinstance(job, dict) and job.get("kind") == "talk" and job.get("turn_id"):
+            # The person is watching a terminal. A rejected turn that reports `failed` without
+            # writing a line leaves them with their own message, a returned composer, and
+            # nothing else — ever. This is the busiest-laptop path (all worktrees taken), so it
+            # fires FIRST in practice; the same guarantee run_talk_job/execute_talk already make
+            # has to hold here too (RE268).
             try:
-                report_talk_outcome(job["turn_id"], "failed", None, detail)
+                talk_failure(TalkEventSender(job["turn_id"]), detail)
+            except (Exception, SystemExit) as e:
+                log(f"failed to write talk rejection line for {job_id}: {e}", kind="error")
+            try:
+                report_talk_outcome(job["turn_id"], TALK_FAILED, None, detail)
             except (Exception, SystemExit) as e:
                 log(f"failed to report talk rejection for {job_id}: {e}", kind="error")
             return
@@ -3257,13 +3276,29 @@ def cmd_execute(args):
             if args.once:
                 break
             continue
-        try:
-            if job.get("kind") == "talk":
-                assigned = pool.assign_talk(job["ref"])
-            else:
-                assigned = pool.assign(job)
-        except (KeyError, TypeError) as e:          # malformed job: assign can't even read it
-            reject(job, f"malformed job: {e}")
+        # RE268: placement can fail TRANSIENTLY now, not just on real capacity exhaustion — a
+        # talk turn occupying a retained tree makes `assign` refuse it for the length of one
+        # turn. Rejecting on the first miss turned that into report_outcome("failed"), i.e. a
+        # FAILED RUN on the board caused by someone asking "why did this fail?" while that run
+        # was retried. Retry placement for a bounded window; only a persistent miss is a real
+        # capacity refusal. This helps the flow lane generally, not just Talk.
+        assigned, malformed = None, False
+        for placement_try in range(PLACEMENT_ATTEMPTS):
+            try:
+                if job.get("kind") == "talk":
+                    assigned = pool.assign_talk(job["ref"])
+                else:
+                    assigned = pool.assign(job)
+            except (KeyError, TypeError) as e:      # malformed job: assign can't even read it
+                reject(job, f"malformed job: {e}")
+                malformed = True
+                break
+            if assigned is not None:
+                break
+            if placement_try < PLACEMENT_ATTEMPTS - 1:
+                wake.wait(PLACEMENT_RETRY_S)
+                wake.clear()
+        if malformed:
             if args.once:
                 break
             wake.wait(1)                            # back off — don't hot-loop re-polling

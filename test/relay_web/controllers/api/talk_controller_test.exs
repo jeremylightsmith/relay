@@ -49,6 +49,26 @@ defmodule RelayWeb.Api.TalkControllerTest do
              ctx.conn |> post(~p"/api/talk/turns/#{ctx.turn.id}/outcome", Jason.encode!(body)) |> json_response(422)
   end
 
+  test "a non-string session_id or detail is refused, never a 500 that strands the turn", ctx do
+    # Unvalidated these reach cast(…, :string), Repo.update! raises Ecto.InvalidChangesetError,
+    # and the FallbackController cannot render it — a 500 AFTER finish_talk_job! has committed,
+    # leaving the job :done and the turn :claimed, which wedges the card's Talk permanently.
+    before = Talk.get_turn(ctx.turn.id).status
+
+    for body <- [
+          %{"status" => "done", "session_id" => 123, "detail" => nil},
+          %{"status" => "done", "session_id" => nil, "detail" => %{"a" => 1}}
+        ] do
+      assert %{"error" => %{"code" => "invalid_outcome"}} =
+               ctx.conn
+               |> post(~p"/api/talk/turns/#{ctx.turn.id}/outcome", Jason.encode!(body))
+               |> json_response(422)
+    end
+
+    # Refused before anything commits, so the turn is untouched — not stranded mid-finish.
+    assert Talk.get_turn(ctx.turn.id).status == before
+  end
+
   test "a non-map element in the batch is dropped, not the whole batch", ctx do
     body = %{"events" => ["oops", %{"client_seq" => 1, "kind" => "out", "text" => "answer", "dim" => false}]}
 

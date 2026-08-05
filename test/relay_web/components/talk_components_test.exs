@@ -201,6 +201,19 @@ defmodule RelayWeb.TalkComponentsTest do
     assert html =~ "oklch(0.22 0.018 262)"
   end
 
+  test "the prompt chips are hidden while a turn is live, but /clear stays" do
+    # Four of the five post a turn, which Talk refuses with {:error, :turn_in_flight} and the
+    # LiveView renders nothing for — a live-looking control that silently does nothing, which is
+    # the exact thing removing the composer while busy exists to prevent.
+    busy = render_component(&TalkComponents.talk_pane/1, pane(%{busy?: true}))
+
+    for label <- ["why did review reject?", "fix it", "/card", "/run"] do
+      refute busy =~ label
+    end
+
+    assert busy =~ TalkComponents.slash_clear()
+  end
+
   test "the receipt line and copy-resume button belong to later steps and are absent" do
     html = render_component(&TalkComponents.talk_pane/1, pane(%{}))
 

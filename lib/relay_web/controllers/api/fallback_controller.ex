@@ -169,6 +169,16 @@ defmodule RelayWeb.Api.FallbackController do
     )
   end
 
+  def call(conn, {:error, :invalid_outcome}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "invalid_outcome",
+      message: "session_id and detail must be strings when present"
+    )
+  end
+
   def call(conn, {:error, :invalid_events}) do
     conn
     |> put_status(:unprocessable_entity)

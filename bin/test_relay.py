@@ -5819,6 +5819,39 @@ class TalkOccupancyTest(unittest.TestCase):
         pool.release_talk(slot)                        # last occupant out
         self.assertNotIn(slot, pool.wts)                # now finished (done -> removed)
 
+    def test_two_overlapping_talk_turns_do_not_tear_the_tree_down_under_each_other(self):
+        """RE268 round-3 finding 0: talk occupancy is a COUNT, not a flag.
+
+        Stop writes :stopped and revokes server-side immediately, but the executor only learns
+        of the revoke on its next heartbeat (15s default) — so turn 1's thread is still live
+        when the person retypes and turn 2 is claimed into the same tree. With a boolean the
+        second occupant was not counted, and turn 1's release stashed and force-removed the
+        worktree turn 2's claude was answering in."""
+        pool = self._pool()
+        slot, _reset = pool.assign_talk("DE3")
+        pool.assign_talk("DE3")                        # second turn, same tree
+        self.assertEqual(pool.wts[slot]["talk_users"], 2)
+        pool.release_talk(slot)                        # turn 1 finishes
+        self.assertIn(slot, pool.wts)                  # tree survives for turn 2
+        self.assertEqual(pool.wts[slot]["talk_users"], 1)
+        pool.release_talk(slot)                        # turn 2 finishes
+        self.assertEqual(pool.wts[slot]["state"], "retained")   # last out -> talk-only retirement
+
+    def test_a_deferred_disposition_survives_a_non_final_talk_release(self):
+        """The pop used to run above the early return, discarding the node job's deferred
+        disposition whenever another occupant was still present."""
+        pool = self._pool()
+        j = job("exclusive_shell", vars={"ref": "DE3"})
+        slot, _reset = pool.assign(j)
+        pool.assign_talk("DE3")
+        pool.assign_talk("DE3")                        # two talk turns
+        pool.release(j, slot, "done")                  # deferred behind both
+        pool.release_talk(slot)                        # one leaves; disposition must be kept
+        self.assertIn(slot, pool.wts)
+        self.assertEqual(pool.wts[slot].get("pending_finish"), "done")
+        pool.release_talk(slot)                        # last out — now it finishes
+        self.assertNotIn(slot, pool.wts)
+
     def test_a_talk_release_never_touches_the_node_jobs_live_flag(self):
         pool = self._pool()
         j = job("exclusive_shell", vars={"ref": "DE3"})
