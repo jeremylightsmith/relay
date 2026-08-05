@@ -2085,32 +2085,29 @@ defmodule RelayWeb.CoreComponents do
               RE268 — the Talk entry point, always in the same place, in every card state
               (ADR 0009 §6 change 6: "Talk button in the header on every card, shortcut t"). Not
               gated on @archived — Talk stays reachable on an archived (read-only) board; only
-              writes are refused there.
+              writes are refused there. It IS gated on the drawer breakpoint: the panel it opens
+              is desktop-only, so rendering the entry point on a phone was a tap into nothing.
+
+              Class-based, like every other control in this header, via `talk_button_class/1` —
+              the same named-helper shape the Talk tab's `drawer_tab_style/1` uses for the
+              identical active/inactive conditional. The `h-11` wrapper is what centres the
+              artboard's 28px control against the 44px chevrons beside it (RE281).
             --%>
-            <button
-              type="button"
-              id="card-drawer-talk-button"
-              phx-click="drawer_tab"
-              phx-value-tab="talk"
-              data-active={to_string(@drawer_tab == :talk)}
-              style={
-                "display:flex;align-items:center;gap:7px;height:28px;padding:0 11px;border-radius:7px;font-size:12px;font-weight:600;border:1px solid " <>
-                  (if @drawer_tab == :talk,
-                     do: "color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100))",
-                     else: "var(--color-field-border)"
-                   ) <>
-                  ";background:" <>
-                  (if @drawer_tab == :talk,
-                     do: "color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100))",
-                     else: "var(--color-base-100)"
-                   ) <> ";color:color-mix(in oklab, var(--color-base-content) 85%, transparent);"
-              }
-            >
-              <.icon name="hero-command-line" class="size-[14px]" /> Talk
-              <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 45%, transparent);border:1px solid var(--color-field-border);border-radius:3px;padding:0 3px;line-height:13px;">
-                t
-              </span>
-            </button>
+            <div class="hidden h-11 flex-none items-center drawer:flex">
+              <button
+                type="button"
+                id="card-drawer-talk-button"
+                phx-click="drawer_tab"
+                phx-value-tab="talk"
+                data-active={to_string(@drawer_tab == :talk)}
+                class={talk_button_class(@drawer_tab == :talk)}
+              >
+                <.icon name="hero-command-line" class="size-[14px]" /> Talk
+                <span class="rounded-[3px] border border-base-300 px-[3px] font-mono text-[9.5px] font-semibold leading-[13px] text-base-content/45">
+                  t
+                </span>
+              </button>
+            </div>
             <%!--
               RE281 — card-level actions. Renders in `embed` too: @embed suppresses dismissal
               affordances (scrim, ✕), and Archive is not one — parity with today, where the
@@ -2183,6 +2180,7 @@ defmodule RelayWeb.CoreComponents do
               phx-click="drawer_tab"
               phx-value-tab={tab}
               data-active={to_string(@drawer_tab == tab)}
+              class={tab == :talk && "max-drawer:hidden"}
               style={drawer_tab_style(@drawer_tab == tab)}
             >
               {label}
@@ -2190,9 +2188,20 @@ defmodule RelayWeb.CoreComponents do
           </nav>
 
           <div class="flex min-h-0 flex-none flex-col drawer:flex-1 drawer:flex-row drawer:overflow-hidden">
+            <%!--
+              RE268 — on Talk the body's own chrome gets out of the way, because in the artboard
+              the terminal IS the body: it spans the full drawer width and the properties rail
+              lives inside the Detail branch. Left padded with the 220px rail beside it, the
+              548px terminal rendered ~520px wide, inset 20px on all four sides. The `drawer:`
+              variants sort after the unprefixed `p-5`/`gap-6`, so they win at >=45rem — the same
+              precedence the Talk panel's own `drawer:block` relies on.
+            --%>
             <div
               id={"#{@id}-main"}
-              class="flex min-w-0 flex-none flex-col gap-6 p-5 drawer:flex-1 drawer:overflow-y-auto"
+              class={[
+                "flex min-w-0 flex-none flex-col gap-6 p-5 drawer:flex-1 drawer:overflow-y-auto",
+                @drawer_tab == :talk && "drawer:gap-0 drawer:p-0"
+              ]}
             >
               <section
                 :if={@archived}
@@ -2871,29 +2880,36 @@ defmodule RelayWeb.CoreComponents do
               </div>
 
               <%!--
-                RE268 — the Talk pane (ADR 0009). `drawer:block` and `hidden` are equal
-                specificity, and `drawer:block` sorts later in the built stylesheet — so it beats
-                `hidden` at >=45rem (the same precedence `boards_live.ex` relies on the OTHER
-                way, to show a paragraph on desktop). Carrying both classes at once, as this did
-                before, rendered the terminal under every tab on desktop. The two rules must be
-                mutually exclusive: `max-drawer:hidden drawer:block` ONLY while Talk is the
-                active tab (still hidden below the drawer breakpoint even then); plain `hidden`
-                otherwise, so no viewport width can override the tab-hide.
+                RE268 — the Talk pane (ADR 0009). The tab-hide is the OUTER div and nothing else:
+                `hidden` there hides the whole subtree at every width, so no viewport rule can
+                override it (`drawer:block` and `hidden` are equal specificity and `drawer:block`
+                sorts later in the built stylesheet — carrying both on the same element, as this
+                did before, rendered the terminal under every tab on desktop).
+
+                The breakpoint split lives one level down: the 548px terminal is desktop-only, so
+                below 45rem the panel says so rather than rendering an empty tab. The header
+                button and the tab are gated to the same breakpoint; this notice is what the `t`
+                shortcut lands on, since a keydown has no breakpoint.
               --%>
               <div
                 id="card-drawer-tab-panel-talk"
-                class={if @drawer_tab == :talk, do: "max-drawer:hidden drawer:block", else: "hidden"}
+                class={if @drawer_tab == :talk, do: "block", else: "hidden"}
               >
-                <TalkComponents.talk_pane
-                  id="talk-pane"
-                  ref={@ref}
-                  title={@card.title}
-                  seed_summary={@talk_session && @talk_session.seed_summary}
-                  seed_fields={(@talk_session && @talk_session.seed_fields) || []}
-                  seed_open?={@talk_seed_open?}
-                  busy?={talk_busy?(@talk_active_turn)}
-                  stream={@talk_events}
-                />
+                <div class="max-drawer:hidden drawer:block">
+                  <TalkComponents.talk_pane
+                    id="talk-pane"
+                    ref={@ref}
+                    title={@card.title}
+                    seed_summary={@talk_session && @talk_session.seed_summary}
+                    seed_fields={(@talk_session && @talk_session.seed_fields) || []}
+                    seed_open?={@talk_seed_open?}
+                    busy?={talk_busy?(@talk_active_turn)}
+                    stream={@talk_events}
+                  />
+                </div>
+                <p id="card-drawer-talk-narrow" class="text-sm text-base-content/65 drawer:hidden">
+                  Talk needs a wider screen — open this card on a desktop to use the terminal.
+                </p>
               </div>
 
               <div id="card-drawer-tab-panel-activity" class={[@drawer_tab != :activity && "hidden"]}>
@@ -2988,7 +3004,10 @@ defmodule RelayWeb.CoreComponents do
 
             <div
               id={"#{@id}-rail"}
-              class="flex w-full shrink-0 flex-col gap-5 border-t border-base-300 bg-base-200/30 p-5 text-sm drawer:w-[220px] drawer:overflow-y-auto drawer:border-l drawer:border-t-0"
+              class={[
+                "flex w-full shrink-0 flex-col gap-5 border-t border-base-300 bg-base-200/30 p-5 text-sm drawer:w-[220px] drawer:overflow-y-auto drawer:border-l drawer:border-t-0",
+                @drawer_tab == :talk && "drawer:hidden"
+              ]}
             >
               <%!-- OWNERS: avatars + names, active owner ringed (ACTIVE WORKER merged here) --%>
               <div class="rail-section flex flex-col gap-2">
@@ -3567,6 +3586,17 @@ defmodule RelayWeb.CoreComponents do
       "" -> stages
       query -> Enum.filter(stages, &String.contains?(String.downcase(&1.name), query))
     end
+  end
+
+  # RE268 — the header's Talk button. Same 28px / radius-7 / 1px-border artboard idiom the
+  # overflow button spells in classes, plus the active/inactive flip. `border-base-content/60`
+  # and `bg-base-content/5` composite over the opaque `bg-base-100` behind them, which is what
+  # the artboard's `color-mix(… , var(--color-base-100))` draws.
+  defp talk_button_class(active?) do
+    [
+      "flex h-7 items-center gap-[7px] rounded-[7px] border px-[11px] text-xs font-semibold text-base-content/85",
+      if(active?, do: "border-base-content/60 bg-base-content/5", else: "border-base-300 bg-base-100")
+    ]
   end
 
   defp drawer_tab_style(true) do

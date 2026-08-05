@@ -8,6 +8,7 @@ defmodule RelayWeb.Api.NodeJobController do
   use RelayWeb, :controller
 
   alias Relay.Runs
+  alias Relay.Talk
 
   action_fallback RelayWeb.Api.FallbackController
 
@@ -40,10 +41,22 @@ defmodule RelayWeb.Api.NodeJobController do
     else
       case Runs.claim_next_job(executor) do
         {:ok, nil} -> maybe_wait(conn, board, executor, params)
-        {:ok, job} -> json(conn, claim_payload(job))
+        {:ok, job} -> json(conn, granted(job))
       end
     end
   end
+
+  # RE268 — a claim is where a talk turn becomes `:claimed`. It happens here rather than in
+  # `Relay.Runs.claim_next_job/1` so the run lifecycle keeps no Talk knowledge: it claims a job,
+  # and only `Relay.Talk` knows a job can carry a turn. A refusal (the turn was Stopped in the
+  # window before the executor noticed) is not an error the executor can act on — the revoke it
+  # collects on its next heartbeat is what ends the work.
+  defp granted(%Schemas.NodeJob{kind: :talk} = job) do
+    Talk.mark_claimed(job)
+    claim_payload(job)
+  end
+
+  defp granted(job), do: claim_payload(job)
 
   @doc """
   The executor's periodic beat (RLY-164): advertises capacity and collects revokes.
@@ -270,7 +283,7 @@ defmodule RelayWeb.Api.NodeJobController do
         run_event when is_tuple(run_event) and elem(run_event, 0) in @run_event_tags ->
           case Runs.claim_next_job(executor) do
             {:ok, nil} -> wait_loop(conn, executor, deadline)
-            {:ok, job} -> json(conn, claim_payload(job))
+            {:ok, job} -> json(conn, granted(job))
           end
       after
         timeout -> send_resp(conn, 204, "")

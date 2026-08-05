@@ -290,8 +290,12 @@ sharing behavior.
   through the same long-poll every flow node uses. Three tables: `Schemas.TalkSession` (one per
   card — `claude_session_id`, `pinned_executor_name`, the seed, `last_event_seq` /
   `cleared_through_seq`), `Schemas.TalkTurn` (one per human message, `queued → claimed → done |
-  stopped | failed`), `Schemas.TalkEvent` (one per rendered transcript line, append-only). **The
-  pin**: `finish_turn/3` records the claiming executor's name onto the session; `post_message/3`
+  stopped | failed`; `queued → claimed` is written by the claim endpoint via
+  `Talk.mark_claimed/1`, so `Relay.Runs` keeps no Talk knowledge),
+  `Schemas.TalkEvent` (one per rendered transcript line, append-only). **The
+  pin**: `finish_turn/3` records the claiming executor's name onto the session **on `:done`
+  only** — a `:stopped` or `:failed` turn never finished, so it cannot vouch for the session id
+  or the holder, and leaves both unset; `post_message/3`
   copies it onto the next job's `executor_name`, so `Runs.claim_next_job/1` needs no Talk
   knowledge — the pin rides the same column an exclusive run's pin already uses. **Ordering is
   `seq`, never a timestamp** — `append_events/2` assigns it inside one transaction locking the

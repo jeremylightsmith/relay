@@ -280,8 +280,13 @@ from the `node_jobs` row that carries it to an executor.
 | `failed` | The executor reported an error. Terminal. | — |
 
 `queued` and `claimed` are the turn's *active* statuses (`Schemas.TalkTurn.active_statuses/0`):
-the pane shows Stop instead of the composer, and a second `post_message/3` on the same session
-is refused while one is active.
+the pane shows Stop **in place of** the composer, which is removed while a turn is live, and a
+second `post_message/3` on the same session is refused while one is active.
+
+`queued → claimed` is written by `RelayWeb.Api.NodeJobController` (via `Relay.Talk.mark_claimed/1`)
+off the claim it just granted, not by `Relay.Runs.claim_next_job/1` — the run lifecycle claims a
+job and only Talk knows a job can carry a turn. Only a `:queued` turn moves, so a claim landing
+just after Stop cannot drag a `:stopped` turn back to live.
 
 ## Node outcomes
 

@@ -63,6 +63,7 @@ pretend otherwise.
 | # | Failure | Trigger | Handling | Ends as |
 | --- | --- | --- | --- | --- |
 | D1 | **Executor died** | `last_heartbeat` older than `max(60s, 2×interval)` → `:gone` (`runs.ex:1172`) | reaper (30s) requeues `shared_clean` jobs to `:queued`; parks `exclusive` runs `:executor_gone` (keeps the pin) | `queued` / `parked/executor_gone` |
+| D1t | **Executor died holding a talk turn** (RE268) | same trigger as D1, but the job is `kind: :talk` | **Nothing automatic.** The reaper deliberately skips talk jobs (`runs.ex:1830`) — requeueing one would hand a resumed `claude` session to a machine that does not hold it. The turn stays `claimed` and the pane keeps showing Stop | stranded until a human presses Stop (`Talk.stop_turn/1`, unconditional) |
 | D2 | **Executor returns** | scheduler sees capacity | `Policy.resumable?/2` resumes `executor_gone` parks onto the pinned executor (`scheduler.ex:85`) | `running` |
 | D3 | **Human take-over mid-run** | owner becomes `:human` | Listener revokes the job and parks `:claimed`; resumes fresh if handed back to AI (`listener.ex:100`) | `parked/claimed` |
 | D4 | **Outdated executor** | version < 21 | 409 on claim; heartbeat still 200 and returns `required_version` **and** `latest_executor_version` (`node_job_controller.ex:133`). With `auto_update` on — the default in both `AUTO_UPDATE_DEFAULTS` and the scaffolded `.relay/executor.json` — the executor downloads that version from relay-config and re-execs at a job boundary (RE185, `bin/relay:maybe_auto_update`; [runner.md "Auto-update (RE185)"](runner.md)). RLY-184's fail-stop is the fallback: auto-update off, refused, or it didn't take | **self-heals (auto-update)**; else card waits (C5) |
@@ -73,8 +74,9 @@ pretend otherwise.
 | # | Failure | Trigger | Handling | Ends as |
 | --- | --- | --- | --- | --- |
 | E1 | **Branch mismatch** | exclusive worktree's HEAD ≠ the run's branch | executor **refuses to run** (would ship a subset / wrong branch, RLY-166); node fails (`bin/relay:1687`) → A2–A7 | `failed` after breaker |
-| E2 | **Worktree contended** | a card's worktree is bound to another live run | `assign` refuses to steal it (`bin/relay:1111`) | job can't start |
-| E3 | **Failed-run worktree retained** | exclusive run fails | worktree kept for retry (re-baselined on revive); evicted oldest-first past `max_retained_failed` (3) (`bin/relay:1144`) | retained |
+| E2 | **Worktree contended** | a card's worktree is bound to another live run | `assign` refuses to steal it (`bin/relay:1385`) | job can't start |
+| E2t | **Worktree contended by a deferred talk turn** (RE268) | a run's terminal disposition sits deferred (`pending_finish`) because a talk turn still occupies the same worktree, and a NEW run for that card is dispatched | `rec` is still `state="active"` bound to the OLD `run_id`, so E2's "different live run" branch refuses it — the new run's **first job is rejected as failed** (`bin/relay:1499` `release()`; [runner.md](runner.md) "Known gap"). A refusal, not a corruption; the window is bounded by one talk turn's lifetime | run fails at its first node |
+| E3 | **Failed-run worktree retained** | exclusive run fails | worktree kept for retry (re-baselined on revive); evicted oldest-first past `max_retained_failed` (3) (`bin/relay:1587`). A retained tree a talk turn has since reattached to (`talk_live`) is **excluded from candidacy** (RE268) — evicting it would delete the tree the running `claude -p` is working in | retained |
 
 Per-card worktrees (`<ns>-<ref>`) replaced the old reused `<ns>-work-N` slot pool (RLY-231);
 `min_executor_version` was raised to 21 to enforce it.

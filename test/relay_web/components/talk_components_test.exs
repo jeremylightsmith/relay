@@ -84,8 +84,9 @@ defmodule RelayWeb.TalkComponentsTest do
       )
 
     assert html =~ "▾ seeded with DE3"
-    assert html =~ "description  Search box"
-    assert html =~ "plan         not written"
+    # The artboard's gutter is `k.padEnd(12) + v` — the label column is 12 wide, not 13.
+    assert html =~ ">description Search box<"
+    assert html =~ ">plan        not written<"
     assert html =~ "oklch(0.3 0.02 262)"
   end
 
@@ -160,12 +161,20 @@ defmodule RelayWeb.TalkComponentsTest do
     refute busy =~ "v5pulse"
   end
 
+  # RE268 whole-branch review — Stop must render *instead of* the composer, not beside it. While
+  # the composer stayed live, Enter on a second message hit `{:error, :turn_in_flight}`, which
+  # the LiveView swallows: no flash, no notice, the text left sitting in the box. Removing the
+  # node is also what clears it — LiveView never resets an uncontrolled text input on submit.
   test "the send control becomes Stop while a turn is in flight" do
     idle = render_component(&TalkComponents.talk_pane/1, pane(%{}))
     busy = render_component(&TalkComponents.talk_pane/1, pane(%{busy?: true}))
 
     refute idle =~ "talk_stop"
     assert busy =~ "talk_stop"
+
+    assert idle =~ "talk_send"
+    refute busy =~ "talk_send"
+    refute busy =~ ~s(id="talk-pane-composer")
   end
 
   # RE268 quality review — `talk-composer`, `talk-stop` and `talk-seed-toggle` were hardcoded,
@@ -178,6 +187,7 @@ defmodule RelayWeb.TalkComponentsTest do
 
     assert idle =~ ~s(id="talk-pane-2-composer")
     assert idle =~ ~s(id="talk-pane-2-seed-toggle")
+    assert busy =~ ~s(id="talk-pane-2-seed-toggle")
     assert busy =~ ~s(id="talk-pane-2-stop")
   end
 

@@ -62,12 +62,16 @@ defmodule RelayWeb.TalkComponents do
         :if={@open?}
         style="display:flex;flex-direction:column;gap:2px;padding:6px 0 4px 14px;border-left:1px solid oklch(0.3 0.02 262);margin-left:2px;"
       >
+        <%!-- The gutter is the artboard's `k.padEnd(12) + v` — exactly 12 columns, so the row is
+        one interpolation: two with a literal space between them silently make it 13. `phx-no-format`
+        is load-bearing for the same reason `white-space:pre-wrap` is — the HEEx formatter would
+        break the tag over three lines, and every preserved newline and indent then renders as a
+        blank line and a 6-space indent the artboard does not draw. --%>
         <span
           :for={field <- @fields}
+          phx-no-format
           style={mono() <> "font-size:11px;line-height:18px;color:oklch(0.6 0.025 262);white-space:pre-wrap;"}
-        >
-          {String.pad_trailing(field["label"], 12)} {field["value"]}
-        </span>
+        >{String.pad_trailing(field["label"], 12) <> field["value"]}</span>
       </div>
     </div>
     """
@@ -105,7 +109,7 @@ defmodule RelayWeb.TalkComponents do
           type="button"
           phx-click="drawer_tab"
           phx-value-tab="detail"
-          style={mono() <> "flex:0 0 auto;font-size:10px;font-weight:600;background:transparent;border:none;padding:0;color:oklch(0.6 0.02 262);"}
+          style={mono_family() <> "flex:0 0 auto;font-size:10px;font-weight:600;background:transparent;border:none;padding:0;color:oklch(0.6 0.02 262);"}
         >
           esc
         </button>
@@ -133,7 +137,22 @@ defmodule RelayWeb.TalkComponents do
           </span>
         </div>
 
+        <%!--
+          RE268 whole-branch review — the composer is REMOVED while a turn is live, not merely
+          decorated: Stop in the footer renders in its place (`plan.md`: "talk_stop renders
+          instead of the composer's submit affordance while @busy?"). Two reasons it must be
+          removal rather than `disabled`:
+
+            * a second Enter is refused server-side (`{:error, :turn_in_flight}`) with no flash
+              and no inline notice, so a live composer is a silent dead end; and
+            * removal is the only thing that clears the box. LiveView does not reset an
+              uncontrolled text input on `phx-submit` — it flags it `PHX_HAS_SUBMITTED`, and the
+              patcher never syncs a text input's value from attributes, so every message after
+              the first would be typed on top of the previous one. A fresh node has an empty
+              value.
+        --%>
         <form
+          :if={!@busy?}
           id={"#{@id}-composer"}
           phx-submit="talk_send"
           style="display:flex;gap:8px;padding-top:9px;align-items:baseline;"
@@ -170,7 +189,7 @@ defmodule RelayWeb.TalkComponents do
             type="button"
             id={"#{@id}-stop"}
             phx-click="talk_stop"
-            style={mono() <> "flex:0 0 auto;font-size:10px;font-weight:600;padding:4px 8px;border-radius:5px;border:1px solid oklch(0.32 0.03 220);background:oklch(0.23 0.03 220);color:oklch(0.76 0.1 220);"}
+            style={mono_family() <> "flex:0 0 auto;font-size:10px;font-weight:600;padding:4px 8px;border-radius:5px;border:1px solid oklch(0.32 0.03 220);background:oklch(0.23 0.03 220);color:oklch(0.76 0.1 220);"}
           >
             stop
           </button>

@@ -208,6 +208,21 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
 
       assert body["id"]
     end
+
+    # RE268 whole-branch review — claiming a TALK job is what moves its turn `:queued → :claimed`.
+    # Without this the status was documented but unreachable, and a turn read `:queued` for the
+    # whole time `claude -p` was running.
+    test "claiming a talk job marks its turn :claimed", %{conn: conn, board: board} do
+      stage = Enum.find(board.stages, &(&1.name == "Next up"))
+      {:ok, card} = Relay.Cards.create_card(stage, %{title: "Talk card"})
+      {:ok, turn} = Relay.Talk.post_message(card, insert(:user), "why is this stuck?")
+
+      body = conn |> claim() |> json_response(200)
+
+      assert body["kind"] == "talk"
+      assert body["turn_id"] == turn.id
+      assert Relay.Talk.get_turn(turn.id).status == :claimed
+    end
   end
 
   describe "POST /api/node-jobs/:id/outcome" do

@@ -8,11 +8,19 @@ defmodule Relay.FakeTalkExecutor do
   alias Relay.Runs
   alias Relay.Talk
 
-  @doc "Claims the next job for `executor` and returns the talk turn it carries, or nil."
+  @doc """
+  Claims the next job for `executor` and returns the talk turn it carries, or nil. Marks the
+  turn `:claimed` exactly where `RelayWeb.Api.NodeJobController` does, so a test driving this
+  seam sees the same turn status a real executor's claim produces.
+  """
   def claim(executor) do
     case Runs.claim_next_job(executor) do
-      {:ok, %{kind: :talk} = job} -> Talk.get_turn(job.payload["turn_id"])
-      _other -> nil
+      {:ok, %{kind: :talk} = job} ->
+        Talk.mark_claimed(job)
+        Talk.get_turn(job.payload["turn_id"])
+
+      _other ->
+        nil
     end
   end
 

@@ -63,9 +63,14 @@ defmodule Relay.Talk do
   The card's session, created on first use. The seed is recomputed on every call: it describes
   what the NEXT turn will be handed, so a stale summary would be a lie about the injected
   context rather than a cosmetic nit.
+
+  The card is re-read here rather than trusted: the drawer's caller holds
+  `Cards.get_card_light_by_ref/2`'s projection until its async body fill lands, and that
+  projection nils exactly the four heavy fields `build_seed/1` reads. Trusting it let `t`
+  pressed inside that window persist a `0 fields` seed — the lie this docstring forbids.
   """
   def session_for_card(%Card{} = card) do
-    seed = build_seed(card)
+    seed = Card |> Repo.get!(card.id) |> build_seed()
 
     # `on_conflict: :nothing` returns a struct with a nil id when a concurrent insert won the
     # unique index, so the row is always re-read rather than trusted from the insert.
@@ -219,6 +224,35 @@ defmodule Relay.Talk do
       :invalid
     end
   end
+
+  @doc """
+  Marks the turn carried by a just-claimed talk job `:claimed` — an executor now holds it and
+  `claude -p` is about to run. Called by `RelayWeb.Api.NodeJobController` off the claim it just
+  granted, which is what keeps `Relay.Runs` free of Talk knowledge: the run lifecycle claims a
+  job, and only Talk knows a job can carry a turn.
+
+  Only a `:queued` turn moves. Stop revokes the job but leaves it claimable for the moment
+  before the executor notices, and a claim must never drag a `:stopped` turn back to live.
+  """
+  def mark_claimed(%NodeJob{kind: :talk} = job) do
+    turn = Repo.one(from t in TalkTurn, where: t.node_job_id == ^job.id)
+
+    cond do
+      is_nil(turn) ->
+        {:error, :no_turn}
+
+      turn.status != :queued ->
+        {:error, :not_queued}
+
+      true ->
+        updated = turn |> TalkTurn.changeset(%{status: :claimed}) |> Repo.update!()
+        session = Repo.get!(TalkSession, updated.talk_session_id)
+        broadcast(session.card_id, {:talk_turn_changed, updated})
+        {:ok, updated}
+    end
+  end
+
+  def mark_claimed(%NodeJob{}), do: {:error, :not_talk}
 
   @doc """
   Ends a turn. `:done` persists the executor's `claude_session_id` on the session — the single

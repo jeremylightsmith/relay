@@ -64,6 +64,49 @@ defmodule RelayWeb.BoardLiveTalkTest do
     assert has_element?(view, ~s(#card-drawer-tabs[phx-hook="TypingKeyGuard"][data-guard-keys="t"]))
   end
 
+  # RE268 whole-branch review — in the artboard the TALK block is a sibling of the tab nav and
+  # spans the whole 1040px body; the 224px properties rail lives inside the Detail branch. Built
+  # as a padded child of `-main` with the rail beside it, the terminal rendered ~520px wide.
+  test "Talk replaces the drawer body: no rail, no body padding, on desktop", ctx do
+    view = open(ctx.conn, ctx.board, ctx.ref)
+
+    assert has_element?(view, "#card-drawer-main.p-5")
+    refute has_element?(view, "#card-drawer-main.drawer\\:p-0")
+    refute has_element?(view, "#card-drawer-rail.drawer\\:hidden")
+
+    view |> element("#card-drawer-tab-talk") |> render_click()
+
+    assert has_element?(view, "#card-drawer-main.drawer\\:p-0")
+    assert has_element?(view, "#card-drawer-rail.drawer\\:hidden")
+  end
+
+  # The panel is desktop-only by design (the 548px terminal has nowhere to go on a phone), but
+  # the entry points rendered at every width — tapping Talk on a phone selected a tab that
+  # showed nothing at all, with no explanation.
+  test "the Talk entry points are gated to the same breakpoint as the panel, with a notice below it",
+       ctx do
+    view = open(ctx.conn, ctx.board, ctx.ref)
+
+    assert has_element?(view, "#card-drawer-tab-talk.max-drawer\\:hidden")
+    assert has_element?(view, ".hidden.drawer\\:flex > #card-drawer-talk-button")
+
+    view |> element("#card-drawer-tab-talk") |> render_click()
+
+    assert has_element?(view, "#card-drawer-talk-narrow.drawer\\:hidden")
+    assert render(view) =~ "wider screen"
+  end
+
+  # Every other control in the drawer header is class-based, and the Talk *tab* already uses a
+  # named helper for the identical active/inactive conditional. The button also needs the same
+  # `h-11` wrapper the overflow button uses to centre a 28px control against the 44px chevrons.
+  test "the header Talk button is class-based and centred like its neighbours", ctx do
+    view = open(ctx.conn, ctx.board, ctx.ref)
+
+    assert has_element?(view, ".h-11 > #card-drawer-talk-button")
+    assert has_element?(view, "#card-drawer-talk-button.h-7.rounded-\\[7px\\].border")
+    refute render(view) =~ ~r/<button[^>]*id="card-drawer-talk-button"[^>]*style=/
+  end
+
   test "the seed line expands to one row per injected field", ctx do
     view = open(ctx.conn, ctx.board, ctx.ref)
     view |> element("#card-drawer-tab-talk") |> render_click()

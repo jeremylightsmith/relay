@@ -3906,8 +3906,9 @@ defmodule RelayWeb.BoardLive do
         |> stream_insert(:talk_events, event)
 
       # A blank draft and "one turn in flight at a time" are both silent no-ops: the composer
-      # already prevents the empty case, and refusing a second turn is a UI-less rule since Stop
-      # already replaces the composer while one is live.
+      # already prevents the empty case, and a second turn cannot be typed at all — the composer
+      # is REMOVED while one is live (Stop renders in its place), so `:turn_in_flight` is only
+      # reachable by a race against the executor's own claim, not by anything a person did.
       {:error, _reason} ->
         socket
     end

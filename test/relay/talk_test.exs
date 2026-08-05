@@ -46,6 +46,20 @@ defmodule Relay.TalkTest do
     assert Enum.any?(session.seed_fields, &(&1["label"] == "plan"))
   end
 
+  # RE268 whole-branch review — the drawer hands `session_for_card/1` the LIGHT card
+  # (`Cards.get_card_light_by_ref/2`) until its async body fill lands, and the light projection
+  # nils exactly the four heavy fields `build_seed/1` reads. Pressing `t` in that window used to
+  # persist a `0 fields · no plan yet` seed and send a context-free seed to the model.
+  test "the seed is built from the stored card even when handed a partially-selected struct", ctx do
+    light = %{ctx.card | description: nil, acceptance_criteria: nil, spec: nil, plan: nil}
+
+    session = Talk.session_for_card(light)
+
+    assert session.seed_summary =~ "3 fields"
+    assert session.seed_summary =~ "plan 2 steps"
+    assert Enum.any?(session.seed_fields, &(&1["label"] == "description"))
+  end
+
   test "posting a message writes the user line, a queued turn and a claimable talk job", ctx do
     Talk.subscribe(ctx.card.id)
 
@@ -65,6 +79,31 @@ defmodule Relay.TalkTest do
 
     assert {:ok, claimed} = Runs.claim_next_job(ctx.executor)
     assert claimed.id == job.id
+  end
+
+  # RE268 whole-branch review — `:claimed` was a documented-but-unreachable status: a turn stayed
+  # `:queued` for its whole life, including while `claude -p` ran, falsifying five doc lines.
+  test "claiming a turn's job moves the turn to :claimed and broadcasts it", ctx do
+    {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "why is this stuck?")
+    Talk.subscribe(ctx.card.id)
+
+    {:ok, job} = Runs.claim_next_job(ctx.executor)
+    assert {:ok, claimed} = Talk.mark_claimed(job)
+
+    assert claimed.status == :claimed
+    assert Talk.get_turn(turn.id).status == :claimed
+    assert Talk.active_turn(Talk.session_for_card(ctx.card)).id == turn.id
+    assert_receive {:talk_turn_changed, %TalkTurn{status: :claimed}}
+  end
+
+  test "a turn already ended by Stop is not dragged back to :claimed", ctx do
+    {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "why is this stuck?")
+    {:ok, _stopped} = Talk.stop_turn(turn)
+
+    job = Runs.get_job(turn.node_job_id)
+
+    assert {:error, :not_queued} = Talk.mark_claimed(job)
+    assert Talk.get_turn(turn.id).status == :stopped
   end
 
   test "a blank message is refused and a second turn is refused while one is in flight", ctx do
