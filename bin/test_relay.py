@@ -731,7 +731,7 @@ class ForwardEmitPointsTest(unittest.TestCase):
         self.assertEqual(self.sent, [("claude", "🤖 hi", "RLY-7")])
 
     def test_mirror_false_prints_locally_but_does_not_forward(self):
-        """RE268 review finding 4/5: a talk turn prints to the console but must not also mirror
+        """RE268: a talk turn prints to the console but must not also mirror
         to the board-log endpoint — that channel is ref-keyed and a talk turn either has no
         real ref registered there or would misattribute a concurrently-running node job's own
         lines."""
@@ -743,7 +743,7 @@ class ForwardEmitPointsTest(unittest.TestCase):
 
 
 class ToolBriefTest(unittest.TestCase):
-    """RE268 review finding 3: _print_claude_event and talk_events_from independently
+    """RE268: _print_claude_event and talk_events_from independently
     duplicated this exact extraction; both must now call one shared helper."""
 
     def test_it_prefers_command_then_falls_back_through_the_known_keys(self):
@@ -2933,9 +2933,9 @@ class ExecuteOneTest(unittest.TestCase):
 
 
 class ExecuteTalkTest(unittest.TestCase):
-    """RE268 quality review finding 9: run_talk_job/execute_talk/release_talk had no direct
-    tests — the done/stopped/failed decision, the always-report/always-release discipline, and
-    the ref-clean tag (finding 4) were the genuinely new logic and untested."""
+    """RE268: run_talk_job/execute_talk/release_talk had no direct tests — the done/stopped/
+    failed decision, the always-report/always-release discipline, and the ref-clean tag (see
+    run_talk_job's docstring) were the genuinely new logic and untested."""
 
     class _Pool:
         def __init__(self, hook_err=None):
@@ -3012,7 +3012,7 @@ class ExecuteTalkTest(unittest.TestCase):
         self.assertEqual(pool.created, ["exec-DE3"])
 
     def test_a_reset_turn_checks_out_the_cards_branch(self):
-        """RE268 review round 2, finding 4: a talk-created worktree (the reset path — the
+        """RE268: a talk-created worktree (the reset path — the
         card's run is done/cancelled and torn down, or the card was never run) must land ON
         THE CARD'S BRANCH, not sit detached at origin/main reading none of the card's work."""
         self._stub_stream(ok=True)
@@ -3059,10 +3059,10 @@ class ExecuteTalkTest(unittest.TestCase):
         self.assertEqual(pool.released, ["exec-DE3"])
 
     def test_the_tag_is_ref_clean_so_board_log_forwarding_is_not_misattributed(self):
-        """RE268 review finding 4: the old tag `f"[{ref} talk] "` made `_ref_from_tag` extract
-        'DE3 talk' — a ref that doesn't exist — so every forwarded line spammed the board-log
-        endpoint under a phantom card. `mirror=False` (finding 4/5) additionally suppresses that
-        forwarding entirely, since the talk transcript already has its own delivery channel."""
+        """RE268: the old tag `f"[{ref} talk] "` made `_ref_from_tag` extract 'DE3 talk' — a ref
+        that doesn't exist — so every forwarded line spammed the board-log endpoint under a
+        phantom card. `mirror=False` additionally suppresses that forwarding entirely, since the
+        talk transcript already has its own delivery channel."""
         captured = {}
 
         def fake(prompt, cwd, tag="", session_id=None, on_proc=None, on_event=None, mirror=True):
@@ -3195,7 +3195,7 @@ class ExecuteLoopTest(unittest.TestCase):
         self.assertEqual(self.reports[0][:2], ("nj-10", "failed"))
 
     def test_an_unplaceable_talk_job_is_reported_failed_via_the_talk_outcome_route(self):
-        """RE268 quality review finding 9: reject()'s kind-aware branch had no test. A talk job
+        """RE268: reject()'s kind-aware branch had no test. A talk job
         has no node-job id for /api/node-jobs/:id/outcome to accept, so an unplaceable talk
         job (cfg advertises exclusive:0) must report through /api/talk/turns/:id/outcome
         instead — never the node-job route."""
@@ -3229,7 +3229,7 @@ class ExecuteLoopTest(unittest.TestCase):
         self.assertEqual(talk_reports, [(78, "failed")])
 
     def test_an_unplaceable_talk_jobs_rejection_detail_is_kind_aware(self):
-        """RE268 review round 2, finding 5: reject()'s "no free slot" message reads
+        """RE268: reject()'s "no free slot" message reads
         `no free {job.get('isolation')!r} slot ...` — but "isolation" is a node-job key a talk
         job never carries, so a rejected talk turn's human-visible detail read the nonsense
         `no free None slot advertised {...}`. It must name what was actually rejected."""
@@ -3296,7 +3296,7 @@ class ExecuteLoopTest(unittest.TestCase):
 
 
 class TalkJobRefMapIsolationTest(unittest.TestCase):
-    """RE268 quality review finding 5: NODE_JOB_IDS/RUN_IDS are keyed by ref and read by
+    """RE268: NODE_JOB_IDS/RUN_IDS are keyed by ref and read by
     forward() for whichever job is currently registered under that ref. worker() must not
     register (or clear) a talk job's entry there — doing so would clobber (or, on the talk job's
     finally, erase) a concurrently-running node job's own attribution for the same card."""
@@ -4010,7 +4010,7 @@ class RealGitWorktreeTest(unittest.TestCase):
 
 
 class TalkBranchCheckoutTest(unittest.TestCase):
-    """RE268 quality review round 2, finding 4: `execute_talk`'s reset path (create_or_rebaseline
+    """RE268: `execute_talk`'s reset path (create_or_rebaseline
     + the prepare hook) leaves a freshly-created talk worktree DETACHED at base — the hook only
     warms the tree, it checks nothing out. ADR 0009's worktree table is explicit: a talk turn
     with no live run must land "on the card's branch, or the base branch if it has none." Drives
@@ -4058,6 +4058,44 @@ class TalkBranchCheckoutTest(unittest.TestCase):
     def test_stays_detached_when_the_branch_has_not_reached_the_remote(self):
         self.git("checkout", "-q", "--detach", "main")
         relay.checkout_talk_branch(self.dir, "never-pushed")
+        self.assertEqual(self.head_ref(), "")
+
+    def test_keeps_a_local_branch_ahead_of_the_remote_instead_of_resetting_it(self):
+        """RE268: `checkout -B <branch> origin/<branch>` does not merely attach the worktree to
+        the branch, it RESETS the local branch ref to the remote tip. A run that pushed, then a
+        later run committed MORE work that got cancelled before it could push, must not have
+        that unpushed work silently dropped from the branch just because a talk turn looked at
+        the card afterward."""
+        self.git("checkout", "-q", "-b", "rly-3-feature")
+        self.write("pushed.txt", "pushed work")
+        self.git("add", "-A"); self.git("commit", "-qm", "pushed work")
+        pushed_sha = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("update-ref", "refs/remotes/origin/rly-3-feature", pushed_sha)
+        self.write("unpushed.txt", "not yet on origin")
+        self.git("add", "-A"); self.git("commit", "-qm", "unpushed work")
+        unpushed_sha = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("checkout", "-q", "--detach", "main")   # what create_or_rebaseline leaves fresh
+
+        relay.checkout_talk_branch(self.dir, "rly-3-feature")
+
+        self.assertEqual(self.head_ref(), "refs/heads/rly-3-feature")
+        self.assertEqual(self.git("rev-parse", "rly-3-feature").stdout.strip(), unpushed_sha)
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "unpushed.txt")))
+
+    def test_logs_stderr_when_the_local_checkout_fails(self):
+        """RE268: a failed checkout (e.g. the branch is already checked out in another worktree —
+        a human sitting on the card's branch) must not fail silently into a detached-at-base tree
+        that confidently describes none of the card's work."""
+        self.git("checkout", "-q", "-b", "rly-4-feature")
+        self.git("checkout", "-q", "main")
+        other = tempfile.mkdtemp(prefix="relay-talk-branch-worktree-")
+        self.addCleanup(shutil.rmtree, other, ignore_errors=True)
+        self.git("worktree", "add", "-q", other, "rly-4-feature")
+        self.git("checkout", "-q", "--detach", "main")
+
+        out = capture(relay.checkout_talk_branch, self.dir, "rly-4-feature")
+
+        self.assertIn("rly-4-feature", out)
         self.assertEqual(self.head_ref(), "")
 
 
@@ -5589,7 +5627,7 @@ class TalkEventSenderTest(unittest.TestCase):
         self.assertTrue(s.failed)
 
     def test_the_final_attempt_does_not_sleep_after_giving_up(self):
-        """RE268 review finding 7: _post slept after EVERY attempt including the last, burning
+        """RE268: _post slept after EVERY attempt including the last, burning
         a pointless final backoff after the decision to give up was already made."""
         relay.api = lambda *a, **kw: (_ for _ in ()).throw(SystemExit("down"))
         sleeps = []
@@ -5604,7 +5642,7 @@ class TalkEventSenderTest(unittest.TestCase):
         self.assertEqual(sleeps, [100, 101])   # attempts 0,1 sleep; attempt 2 (the last) does not
 
     def test_send_best_effort_rearms_after_flush_gave_up_and_tries_once_more(self):
-        """RE268 review finding 8: the one-more-try-after-giving-up re-arm was a bare
+        """RE268: the one-more-try-after-giving-up re-arm was a bare
         `sender.failed = False` reach-in from outside, documented only by a trailing comment.
         A named method makes the intent self-describing and is what run_talk_job now calls."""
         relay.api = lambda *a, **kw: (_ for _ in ()).throw(SystemExit("down"))
@@ -5622,7 +5660,7 @@ class TalkEventSenderTest(unittest.TestCase):
         self.assertEqual(self.posted[0][2]["events"][-1]["text"], "some output was lost")
 
     def test_a_stale_pending_line_flushes_before_a_new_one_joins_it(self):
-        """RE268 review round 2, finding 3: `enqueue` only flushed at batch=40, and the only
+        """RE268: `enqueue` only flushed at batch=40, and the only
         other flush was the one `run_talk_job` does AFTER the process exits — so a typical short
         turn (a couple of tool lines, a couple of text blocks) delivered its whole transcript in
         ONE post at the very end, defeating the point of the on_event streaming hook. A line
@@ -5685,7 +5723,7 @@ class TalkWorktreeTest(unittest.TestCase):
 
 
 class TalkOccupancyTest(unittest.TestCase):
-    """RE268 quality review finding 1 (CRITICAL): a node job and a talk turn attached to the
+    """RE268: a node job and a talk turn attached to the
     SAME worktree record must not tear it down out from under each other. Occupancy is tracked
     separately — `live` for the node job, `talk_live` for the talk turn — and the tree is only
     finished once BOTH occupants have released it (last one out tears down)."""
@@ -5735,7 +5773,7 @@ class TalkOccupancyTest(unittest.TestCase):
         self.assertNotIn(slot, pool.wts)                  # finished once talk also releases
 
     def test_assign_refuses_to_rebaseline_a_retained_tree_with_a_live_talk_turn(self):
-        """RE268 quality review round 2, finding 2 (IMPORTANT): assign_talk's docstring promises
+        """RE268: assign_talk's docstring promises
         a retained (failed) worktree is reused AS IT IS — post-mortem is exactly what a talk
         turn is for. But assign()'s own retained-reclaim branch re-baselines unconditionally, so
         a node job's claim for the same card hard-resets the tree (via create_or_rebaseline)
@@ -5751,7 +5789,7 @@ class TalkOccupancyTest(unittest.TestCase):
 
 
 class TalkOnlyIdleRetirementTest(unittest.TestCase):
-    """RE268 quality review finding 2 (IMPORTANT): a talk-only worktree (never bound to a real
+    """RE268: a talk-only worktree (never bound to a real
     run) must not permanently consume an exclusive slot once its talk turn ends — it becomes
     reclaimable, like a failed run's retained worktree, instead of staying counted forever."""
 
@@ -5798,7 +5836,7 @@ class TalkOnlyIdleRetirementTest(unittest.TestCase):
         self.assertIn("exec-OTHER", pool.wts)
 
     def test_a_restart_recovered_worktree_is_not_retired_as_talk_only(self):
-        """RE268 quality review round 2, finding 1 (CRITICAL): recover() rebuilds every adopted
+        """RE268: recover() rebuilds every adopted
         per-card worktree as {"run_id": None, "state": "active", ...} with NO "talk" marker — the
         same run_id/state shape a talk-only worktree has. release_talk's retirement test must
         key off the "talk" marker the record actually carries, not merely run_id is None, or a

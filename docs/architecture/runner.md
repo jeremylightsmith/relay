@@ -619,21 +619,34 @@ claim/execute/report loop, one more branch.
   a talk turn has reattached to is excluded from that eviction while it is live.
 
   Retirement is gated on the record's own `talk` marker, **not** on `run_id is None` alone
-  (RE268 review round 2, finding 1): `recover()` rebuilds every restart-adopted per-card
-  worktree as `{"run_id": None, "state": "active", ...}` too — the identical shape, with no
+  (RE268): `recover()` rebuilds every restart-adopted per-card worktree as
+  `{"run_id": None, "state": "active", ...}` too — the identical shape, with no
   `talk` marker. Retiring on `run_id` alone mistook a recovered worktree for talk-only and
   retired (stashed + hard-reset) it out from under its resuming job.
 
   `ExecutorPool.assign/1` (the node-job path) likewise refuses to reclaim a **retained** tree a
   talk turn has reattached to (`talk_live`) rather than re-baselining it out from under that
-  turn's still-reading claude process (finding 2) — the same "refuse rather than steal a live
+  turn's still-reading claude process — the same "refuse rather than steal a live
   worktree" precedent it already applies to a tree bound to a different live run.
 
+  **Known gap:** while a node job's terminal disposition sits deferred (`pending_finish`), the
+  record stays `state="active"` bound to the OLD run_id. If a NEW run for the same card is
+  dispatched before the talk turn ends, `assign/1`'s "different live run" branch refuses it
+  (the run_id no longer matches) and the run's first job is rejected as failed rather than
+  retried — a refusal, not a corruption, but worth a brief retry-before-reject in `assign/1` if
+  this proves to matter in practice. The window is bounded by one talk turn's lifetime.
+
   A talk turn that creates its own worktree fresh (the card's run is done/cancelled and was
-  torn down, or the card was never run) lands **on the card's own branch** when the remote has
-  one, via `checkout_talk_branch/2` right after `create_or_rebaseline` — not left detached at
-  `origin/main` (finding 4). Falls back to the existing detached-at-base state when there is no
-  branch yet or it has not reached the remote.
+  torn down, or the card was never run) lands **on the card's own branch** when one exists, via
+  `checkout_talk_branch/2` right after `create_or_rebaseline` — not left detached at
+  `origin/main`. Falls back to the existing detached-at-base state when there is no branch yet
+  or it has not reached the remote. It prefers the LOCAL branch when one already exists and
+  never resets it — `checkout -B <branch> origin/<branch>` force-moves the branch ref to the
+  remote tip, which would silently discard commits a run made and never got to push — and falls
+  back to creating the local branch from the remote only when there is no local ref to lose. A
+  failed checkout (e.g. the branch is already checked out in another worktree) is logged rather
+  than swallowed, so it doesn't silently fall back to a detached tree describing none of the
+  card's work.
 - **Prompt.** `talk_prompt(job)` is built in **product code**, not a `.claude/agents/*.md`
   definition — a recorded exception to ADR 0006 (ADR 0009 §5): Talk is a property of Relay
   itself and must behave identically on every connected repo. It is the preamble (names the
@@ -672,8 +685,8 @@ claim/execute/report loop, one more branch.
 
   `batch=40` is a size cap, not a delay: a typical short turn (a couple of tool lines, a couple
   of text blocks) never reaches it, so without a second trigger every turn's transcript arrived
-  in one POST at the very end — defeating the point of the `on_event` streaming hook (RE268
-  review round 2, finding 3). `enqueue` also flushes whatever is already pending once it has
+  in one POST at the very end — defeating the point of the `on_event` streaming hook (RE268).
+  `enqueue` also flushes whatever is already pending once it has
   waited `flush_interval` (default 1s), checked *before* the new line joins it, so a slow
   trickle of events posts as it arrives instead of all landing in one batch together.
 - **Stop.** Arrives as an ordinary revoke on the existing heartbeat — `ExecutorHeartbeat`
@@ -681,10 +694,11 @@ claim/execute/report loop, one more branch.
   `control.cancelled()` after the process exits and reports `stopped` (not `failed`) with
   whatever partial output was already delivered. No talk-specific channel was added.
 
-`EXECUTOR_VERSION` 33 → 36 for this change (34 shipped the initial worker, 35 the occupancy/
+`EXECUTOR_VERSION` 33 → 37 for this change (34 shipped the initial worker, 35 the occupancy/
 retirement/attribution hardening above, 36 the recovery/retained-tree/streaming/branch fixes
-from round 2 of that same review); `Relay.Runs.min_executor_version/0` is **not** raised — an
-executor without Talk is not worse than a stopped one.
+from a follow-up review, 37 the branch-checkout non-destructiveness fix above);
+`Relay.Runs.min_executor_version/0` is **not** raised — an executor without Talk is not worse
+than a stopped one.
 
 ### Declaring an outcome
 
