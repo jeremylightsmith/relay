@@ -66,7 +66,7 @@ defmodule RelayWeb.PublicBoardLive do
       board_name={@board.name}
       public_path={@public_path}
     >
-      <p class="text-sm text-base-content/60">
+      <p class="text-sm text-base-content/65">
         This is our public roadmap. Upvote the ideas you want most.
       </p>
       <div class="mt-1 flex items-center justify-between">
@@ -137,7 +137,7 @@ defmodule RelayWeb.PublicBoardLive do
                 class="cursor-pointer"
               >
                 <p class="text-sm font-medium">{card.title}</p>
-                <p :if={card.public_description} class="mt-1 text-xs text-base-content/60">
+                <p :if={card.public_description} class="mt-1 text-xs text-base-content/65">
                   {card.public_description}
                 </p>
                 <div class="mt-2 flex items-center gap-2">
@@ -146,8 +146,7 @@ defmodule RelayWeb.PublicBoardLive do
                   </span>
                   <span
                     :if={MapSet.member?(@voted_ids, card.id)}
-                    class="text-[10px] font-semibold"
-                    style="color:oklch(0.60 0.14 250);"
+                    class="text-[10px] font-semibold text-primary"
                   >
                     YOU VOTED
                   </span>
@@ -224,7 +223,7 @@ defmodule RelayWeb.PublicBoardLive do
         <% card = find_card(@cards, @open_card_id) %>
         <div class="modal-box max-w-lg">
           <div class="flex items-center justify-between">
-            <span class="flex items-center gap-2 text-xs uppercase tracking-wider text-base-content/50">
+            <span class="flex items-center gap-2 text-xs uppercase tracking-wider text-base-content/55">
               <span class={["h-2.5 w-2.5 rounded-full", category_dot_class(card.stage.category)]}>
               </span>
               {category_label(card.stage.category)}
@@ -246,7 +245,7 @@ defmodule RelayWeb.PublicBoardLive do
           </p>
 
           <div id="public-supporters" class="mt-4">
-            <p class="text-xs uppercase tracking-wider text-base-content/50">
+            <p class="text-xs uppercase tracking-wider text-base-content/55">
               Supporters · {@open_card_supporters_total}
             </p>
             <%= if @current_scope do %>
@@ -263,8 +262,7 @@ defmodule RelayWeb.PublicBoardLive do
                   <span
                     :if={supporter.id == @current_scope.user.id}
                     data-supporter-you
-                    class="text-[10px] font-semibold"
-                    style="color:oklch(0.60 0.14 250);"
+                    class="text-[10px] font-semibold text-primary"
                   >
                     YOU
                   </span>
@@ -277,7 +275,7 @@ defmodule RelayWeb.PublicBoardLive do
                 Show all {@open_card_supporters_total} supporters →
               </p>
             <% else %>
-              <p class="mt-2 text-sm text-base-content/60">
+              <p class="mt-2 text-sm text-base-content/65">
                 {@open_card_supporters_total} people support this. Sign in to see who.
               </p>
             <% end %>
@@ -305,7 +303,7 @@ defmodule RelayWeb.PublicBoardLive do
       >
         <div class="modal-box max-w-sm text-center">
           <h3 class="text-lg font-semibold">{signin_title(@signin_reason)}</h3>
-          <p class="mt-2 text-sm text-base-content/60">
+          <p class="mt-2 text-sm text-base-content/65">
             Sign in so your vote sticks — you can change it any time.
           </p>
           <.link
@@ -340,7 +338,7 @@ defmodule RelayWeb.PublicBoardLive do
         <div class="modal-box max-w-[460px] p-0 overflow-hidden">
           <div class="border-b border-base-200 px-6 pt-5 pb-4">
             <div class="text-lg font-semibold tracking-tight">Post an idea</div>
-            <div class="mt-1 text-sm text-base-content/60">
+            <div class="mt-1 text-sm text-base-content/65">
               It lands in Unstarted with your first vote on it.
             </div>
           </div>
@@ -351,7 +349,7 @@ defmodule RelayWeb.PublicBoardLive do
             phx-submit="submit_idea"
             class="px-6 pt-4 pb-6"
           >
-            <div class="mb-1.5 font-mono text-[9.5px] font-semibold tracking-wider text-base-content/60">
+            <div class="mb-1.5 font-mono text-[9.5px] font-semibold tracking-wider text-base-content/65">
               YOUR IDEA
             </div>
             <.input
@@ -361,8 +359,8 @@ defmodule RelayWeb.PublicBoardLive do
               class="input input-bordered w-full"
             />
 
-            <div class="mt-4 mb-1.5 font-mono text-[9.5px] font-semibold tracking-wider text-base-content/60">
-              PUBLIC DESCRIPTION <span class="font-normal text-base-content/50">· optional</span>
+            <div class="mt-4 mb-1.5 font-mono text-[9.5px] font-semibold tracking-wider text-base-content/65">
+              PUBLIC DESCRIPTION <span class="font-normal text-base-content/55">· optional</span>
             </div>
             <.input
               field={@composer_form[:public_description]}
@@ -375,7 +373,7 @@ defmodule RelayWeb.PublicBoardLive do
 
             <div
               :if={is_nil(@current_user)}
-              class="mt-2.5 text-center text-[11px] text-base-content/60"
+              class="mt-2.5 text-center text-[11px] text-base-content/65"
             >
               You'll sign in first, so we can credit your idea.
             </div>

@@ -67,6 +67,15 @@ defmodule RelayWeb.BoardsLiveTest do
       assert to =~ ~r"^/board/.+/settings$"
     end
 
+    test "the New board button uses daisyUI's btn-primary primitive, not a hand-rolled fill",
+         %{conn: conn, user: user} do
+      _default = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      assert has_element?(view, "#top-bar-new-board.btn-primary")
+      refute has_element?(view, "#top-bar-new-board.bg-primary")
+    end
+
     test "a board tile shows its needs-you count", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       review = Enum.find(board.stages, &(&1.type == :review))

@@ -90,6 +90,23 @@ use them.
   (`test/fixtures/executor_contract.json`, RLY-176) so drift breaks CI instead of shipping.
   Nearly every recent engine bug reduced to "two copies of one fact disagreed" — reviews should
   treat a duplicated closed set the way they treat a failing test.
+- **No color literals in the web layer or in the app stylesheets.** `oklch(...)`, hex, `rgb()`
+  and the raw Tailwind palette classes (`text-white`, `bg-slate-200`, …) do not flip with
+  `data-theme`, so a screen built by transcribing a light-only artboard breaks dark mode. The
+  only place a raw color may appear *unannounced* is inside the two
+  `@plugin "../vendor/daisyui-theme"` blocks in `assets/css/app.css` and
+  `assets/css/storybook.css`, which is where the tokens are defined.
+  Everywhere else use the daisyUI semantic tokens — `bg-base-100`, `text-base-content/65`,
+  `border-base-300`, `var(--color-primary)`, `color-mix(in oklab, var(--color-warning) 15%,
+  var(--color-base-100))` — and prefer a shared control over a repeated inline style. The
+  literal → token mapping is documented at the top of the theming section of `app.css` and
+  enforced by `test/relay_web/theme_tokens_test.exs` (RE237). A **genuine** exception — a color
+  no brand role can express, such as a per-entity hash-derived hue or a third-party brand mark —
+  is opted out explicitly: put a trailing `# theme-tokens:allow: <reason>` comment on the one
+  offending line (the usual case; it exempts that line only), or add an `@allowlist` entry in
+  that test when the literal is unique to its file and the line carries no comment (`.heex`,
+  which has no `#` comment syntax). Both are inventoried by the same test, so a new exception is
+  a deliberate, reviewable test edit — not something you can slip in unnoticed.
 
 ### Phoenix v1.8 guidelines
 

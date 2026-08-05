@@ -31,11 +31,19 @@
 @plugin "../vendor/daisyui-theme" {
   name: "dark";
   default: false;
-  prefersdark: true;
+  /* RE237: theme resolution is explicit — data-theme is always written before first paint, by
+     root.html.heex in the app and by assets/js/storybook.js under /storybook. Leaving
+     prefersdark on would add a SECOND, competing source of dark tokens keyed on the OS instead,
+     which the `dark:` custom variant (keyed on data-theme) would NOT match — the exact
+     half-and-half state this card exists to remove. */
+  prefersdark: false;
   color-scheme: "dark";
   --color-base-100: oklch(0.26 0.02 255);
   --color-base-200: oklch(0.22 0.018 255);
-  --color-base-300: oklch(0.30 0.02 255);
+  /* RE237: Line must stay distinct from field-hover (0.30) — a border drawn on a hover/inset
+     fill is invisible when the two match. 0.34 reproduces the light theme's steps: base-100 to
+     Line is 0.08 in both themes, field-hover to Line is ~0.045 in both. */
+  --color-base-300: oklch(0.34 0.02 255);
   --color-base-content: oklch(0.96 0.006 255);
   --color-field-bg: oklch(0.24 0.02 255);
   --color-field-border: oklch(0.34 0.02 255);
@@ -112,6 +120,23 @@
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
+/* RE237: /storybook renders under PhoenixStorybook's own root layout, not root.html.heex, so
+   the app's theme resolver never runs there. assets/js/storybook.js is the bridge — it writes
+   the same explicit `data-theme` onto <html> from the same `phx:theme` preference, in both the
+   chrome document and the story iframes. So the `[data-theme="dark"]` rules below and the
+   `dark:` variant above fire on this route exactly as they do in app.css. */
+
+/* RE237 — mirror of the modal-scrim rule in app.css (see that file for the rationale). */
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: color-mix(in oklab, var(--color-base-content) 28%, transparent);
+}
+[data-theme="dark"] .modal-scrim {
+  background: color-mix(in oklab, var(--color-base-200) 72%, transparent);
+}
+
 /* RLY-59: PhoenixStorybook ships its own unlayered chrome CSS that defaults the
    sandbox to `serif` (the "weird font") and the chrome to a generic system sans.
    Force both onto Relay's Helvetica Neue so the storybook matches the app.
@@ -151,9 +176,9 @@
 
 /* RLY-137: the run timeline's active-node ring (artboard's `crring`). */
 @keyframes relayring {
-  0% { box-shadow: 0 0 0 0 oklch(0.56 0.16 292 / 0.4); }
-  70% { box-shadow: 0 0 0 7px oklch(0.56 0.16 292 / 0); }
-  100% { box-shadow: 0 0 0 0 oklch(0.56 0.16 292 / 0); }
+  0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-secondary) 40%, transparent); }
+  70% { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 /* --- Rendered markdown — one global house style (card description / spec / plan /
@@ -179,7 +204,7 @@
   font-size: 0.8em;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: color-mix(in oklch, var(--color-base-content) 60%, transparent);
+  color: color-mix(in oklch, var(--color-base-content) 65%, transparent);
 }
 .md p { margin: 0.5em 0; }
 .md ul, .md ol { margin: 0.5em 0; padding-left: 1.35em; }
@@ -290,7 +315,7 @@
 .docs-sidebar-heading {
   font-family: var(--font-mono); font-size: 11px; font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.08em;
-  color: color-mix(in oklch, var(--color-base-content) 50%, transparent);
+  color: color-mix(in oklch, var(--color-base-content) 55%, transparent);
   margin: 0 0 12px; padding-left: 10px;
 }
 .docs-sidebar-section ul { list-style: none; margin: 0; padding: 0; }
@@ -313,7 +338,7 @@
 .docs-toc-heading {
   font-family: var(--font-mono); font-size: 11px; font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.08em;
-  color: color-mix(in oklch, var(--color-base-content) 50%, transparent);
+  color: color-mix(in oklch, var(--color-base-content) 55%, transparent);
   margin: 0 0 14px;
 }
 .docs-toc ul { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--color-base-300); }
@@ -511,7 +536,7 @@
   border: 1px dashed var(--color-field-border);
   border-radius: 8px;
   padding: 9px 11px;
-  color: oklch(0.60 0.02 255);
+  color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
   font-style: italic;
 }
 .commit-field-input {
@@ -550,7 +575,7 @@ textarea.commit-field-input { min-height: 64px; }
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-primary) 14%, transparent);
 }
-.commit-field-prefix { padding: 9px 0 9px 11px; color: oklch(0.62 0.02 255); font-size: 14px; }
+.commit-field-prefix { padding: 9px 0 9px 11px; color: color-mix(in oklab, var(--color-base-content) 55%, transparent); font-size: 14px; }
 .commit-field-bare {
   flex: 1;
   border: none;
@@ -588,6 +613,7 @@ textarea.commit-field-input { min-height: 64px; }
   -webkit-mask-image: linear-gradient(180deg, #000 62%, transparent);
   mask-image: linear-gradient(180deg, #000 62%, transparent);
 }
+/* RE237 — mirror of the .commit-pill shadow rule in app.css (see that file for the rationale). */
 .commit-pill {
   position: absolute;
   top: calc(100% + 6px);
@@ -600,7 +626,10 @@ textarea.commit-field-input { min-height: 64px; }
   background: var(--color-base-100);
   border: 1px solid var(--color-field-border);
   border-radius: 8px;
-  box-shadow: 0 6px 18px oklch(0.5 0.03 255 / 0.18);
+  box-shadow: 0 6px 18px color-mix(in oklab, var(--color-base-content) 13%, transparent);
+}
+[data-theme="dark"] .commit-pill {
+  box-shadow: 0 6px 18px color-mix(in oklab, var(--color-base-200) 55%, transparent);
 }
 /* Unlayered .commit-pill beats Tailwind's layered .hidden utility on
    specificity alone, so the "hidden until dirty" pill never actually hides.
@@ -617,5 +646,5 @@ textarea.commit-field-input { min-height: 64px; }
   cursor: pointer;
 }
 .commit-pill-save { background: var(--color-primary); color: var(--color-primary-content); border: none; }
-.commit-pill-cancel { background: var(--color-base-100); color: oklch(0.55 0.02 255); border: 1px solid var(--color-field-border); }
-.commit-pill-hint { font-family: var(--font-mono); font-size: 10px; color: oklch(0.60 0.02 255); }
+.commit-pill-cancel { background: var(--color-base-100); color: color-mix(in oklab, var(--color-base-content) 65%, transparent); border: 1px solid var(--color-field-border); }
+.commit-pill-hint { font-family: var(--font-mono); font-size: 10px; color: color-mix(in oklab, var(--color-base-content) 55%, transparent); }

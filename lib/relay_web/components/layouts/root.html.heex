@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -10,12 +10,53 @@
     <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>
     </script>
     <script>
-      // QUICKFIX: dark mode is broken, so force light everywhere until it's fixed.
-      // Clears any stored/"system" preference so the OS can't pull in the dark theme.
-      // To restore theme switching, revert this block and the hidden <.theme_toggle />.
+      // RE237 — theme resolver. Synchronous and in <head> on purpose: it must run before
+      // first paint or the page flashes the wrong theme. Sets TWO attributes on <html>:
+      //   data-theme      — the RESOLVED theme, always literally "light" or "dark". Everything
+      //                     styling-related keys off this: the daisyUI tokens, the `dark:`
+      //                     custom variant in app.css, color-scheme, and docs.js's mermaid
+      //                     theme. Never absent, so they can never disagree.
+      //   data-theme-pref — the user's raw choice, "system" | "light" | "dark". Only the
+      //                     toggle indicator keys off this.
+      // LiveView never re-renders <html>, so both survive navigation and morphdom.
       (() => {
-        try { localStorage.removeItem("phx:theme"); } catch (e) {}
-        document.documentElement.setAttribute("data-theme", "light");
+        const mq = window.matchMedia("(prefers-color-scheme: dark)");
+
+        const read = () => {
+          try { return localStorage.getItem("phx:theme") || "system"; } catch (e) { return "system"; }
+        };
+
+        const write = (pref) => {
+          try {
+            if (pref === "system") { localStorage.removeItem("phx:theme"); }
+            else { localStorage.setItem("phx:theme", pref); }
+          } catch (e) {}
+        };
+
+        // The toggle's aria state cannot be rendered server-side (the preference lives in
+        // localStorage), so it is synced from data-theme-pref whenever the theme is applied
+        // and after each live navigation.
+        const syncAria = () => {
+          const pref = document.documentElement.getAttribute("data-theme-pref") || "system";
+          document.querySelectorAll("[data-phx-theme]").forEach((el) => {
+            el.setAttribute("aria-checked", el.dataset.phxTheme === pref ? "true" : "false");
+          });
+        };
+
+        const apply = (pref) => {
+          const resolved = pref === "system" ? (mq.matches ? "dark" : "light") : pref;
+          document.documentElement.setAttribute("data-theme", resolved);
+          document.documentElement.setAttribute("data-theme-pref", pref);
+          syncAria();
+        };
+
+        apply(read());
+
+        mq.addEventListener("change", () => { if (read() === "system") { apply("system"); } });
+        window.addEventListener("storage", (e) => { if (e.key === "phx:theme") { apply(e.newValue || "system"); } });
+        window.addEventListener("phx:set-theme", (e) => { const pref = e.target.dataset.phxTheme; write(pref); apply(pref); });
+        document.addEventListener("DOMContentLoaded", syncAria);
+        window.addEventListener("phx:page-loading-stop", syncAria);
       })();
     </script>
   </head>

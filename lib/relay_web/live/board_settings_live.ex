@@ -52,8 +52,7 @@ defmodule RelayWeb.BoardSettingsLive do
         <.link
           navigate={~p"/board/#{@board.slug}"}
           id="settings-done"
-          class="btn btn-sm border-none font-semibold text-white"
-          style="background:oklch(0.60 0.14 250);"
+          class="btn btn-sm btn-primary font-semibold"
         >
           Done
         </.link>
@@ -70,7 +69,7 @@ defmodule RelayWeb.BoardSettingsLive do
         <nav
           id="settings-tabs"
           class="flex drawer:hidden overflow-x-auto"
-          style="border-bottom:1px solid oklch(0.93 0.006 255);background:oklch(0.992 0.002 255);padding:0 14px;gap:2px;"
+          style="border-bottom:1px solid var(--color-base-300);background:var(--color-base-200);padding:0 14px;gap:2px;"
         >
           <.link
             patch={~p"/board/#{@board.slug}/settings"}
@@ -127,11 +126,11 @@ defmodule RelayWeb.BoardSettingsLive do
         <nav
           id="settings-rail"
           class="hidden drawer:flex"
-          style="width:210px;flex:0 0 auto;border-right:1px solid oklch(0.93 0.006 255);background:oklch(0.992 0.002 255);padding:22px 14px;flex-direction:column;gap:3px;"
+          style="width:210px;flex:0 0 auto;border-right:1px solid var(--color-base-300);background:var(--color-base-200);padding:22px 14px;flex-direction:column;gap:3px;"
         >
           <div
             class="font-mono"
-            style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);padding:4px 10px 8px 10px;"
+            style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);padding:4px 10px 8px 10px;"
           >
             BOARD
           </div>
@@ -180,7 +179,7 @@ defmodule RelayWeb.BoardSettingsLive do
 
           <div
             class="font-mono"
-            style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:oklch(0.60 0.02 255);padding:18px 10px 8px 10px;"
+            style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);padding:18px 10px 8px 10px;"
           >
             ENGINE
           </div>
@@ -194,23 +193,23 @@ defmodule RelayWeb.BoardSettingsLive do
         </nav>
 
         <%!-- Content pane — mockup lines ~186-187 --%>
-        <div style="flex:1;overflow-y:auto;background:oklch(0.985 0.004 250);">
+        <div style="flex:1;overflow-y:auto;background:var(--color-base-200);">
           <div style="max-width:760px;margin:0 auto;padding:34px 40px 84px 40px;">
             <section :if={@section == :public} id="public-pane">
-              <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 4px 0;color:oklch(0.24 0.02 255);">
+              <.page_heading class="mb-1">
                 Public board
-              </h1>
-              <p style="font-size:14px;line-height:1.55;color:oklch(0.52 0.02 255);margin:0 0 28px 0;max-width:560px;">
+              </.page_heading>
+              <p style="font-size:14px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin:0 0 28px 0;max-width:560px;">
                 Open a read-only version of this board to the public. Anyone can browse it and upvote ideas — the ones with the most support rise to the top.
               </p>
 
               <.form for={@public_form} id="public-settings-form" phx-change="save_public_settings">
-                <div style="display:flex;align-items:center;gap:16px;background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px 18px;">
+                <div style="display:flex;align-items:center;gap:16px;background:var(--color-base-100);border:1px solid var(--color-base-300);border-radius:12px;padding:16px 18px;">
                   <div style="flex:1;">
-                    <div style="font-size:14px;font-weight:600;color:oklch(0.28 0.02 255);">
+                    <div style="font-size:14px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);">
                       Enable public board
                     </div>
-                    <div style="font-size:12.5px;color:oklch(0.55 0.02 255);margin-top:2px;">
+                    <div style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin-top:2px;">
                       When on, the public URL below is live.
                     </div>
                   </div>
@@ -231,22 +230,22 @@ defmodule RelayWeb.BoardSettingsLive do
                   style="display:flex;flex-direction:column;gap:26px;margin-top:24px;"
                 >
                   <div style="display:flex;flex-direction:column;gap:8px;">
-                    <label style="font-size:12px;font-weight:600;color:oklch(0.40 0.02 255);">
+                    <label style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);">
                       Public URL
                     </label>
                     <div
                       id="public-url-row"
-                      style="max-width:460px;display:flex;align-items:center;border:1px solid oklch(0.90 0.006 255);border-radius:9px;padding:10px 12px;background:oklch(0.99 0.002 255);font-size:13.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:oklch(0.40 0.02 255);"
+                      style="max-width:460px;display:flex;align-items:center;border:1px solid var(--color-field-border);border-radius:9px;padding:10px 12px;background:var(--color-field-bg);font-size:13.5px;font-family:'JetBrains Mono',ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
                     >
                       {"#{RelayWeb.Endpoint.url()}/board/#{@board.slug}/public"}
                     </div>
                   </div>
 
                   <div style="display:flex;flex-direction:column;gap:10px;">
-                    <label style="font-size:12px;font-weight:600;color:oklch(0.40 0.02 255);">
+                    <label style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);">
                       New public ideas arrive in
                     </label>
-                    <p style="font-size:12.5px;line-height:1.5;color:oklch(0.55 0.02 255);margin:0 0 2px 0;max-width:520px;">
+                    <p style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin:0 0 2px 0;max-width:520px;">
                       When someone posts on the public board, Relay creates a card in this stage.
                     </p>
                     <div
@@ -264,7 +263,7 @@ defmodule RelayWeb.BoardSettingsLive do
                           checked={@board.public_intake_stage_id == stage.id}
                           class="radio radio-sm radio-secondary"
                         />
-                        <span style="font-size:13.5px;color:oklch(0.32 0.02 255);flex:1;">
+                        <span style="font-size:13.5px;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);flex:1;">
                           {stage.name}
                         </span>
                       </label>
@@ -275,15 +274,15 @@ defmodule RelayWeb.BoardSettingsLive do
             </section>
 
             <section :if={@section == :general} id="general-pane">
-              <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px 0;color:oklch(0.26 0.02 255);">
+              <.page_heading class="mb-1.5">
                 General
-              </h1>
-              <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 18px 0;max-width:560px;">
+              </.page_heading>
+              <p style="font-size:14px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0 0 18px 0;max-width:560px;">
                 The board's display name, its URL slug (relay.app/&lt;slug&gt;), and its card key.
               </p>
               <div style="display:flex;flex-direction:column;gap:22px;max-width:420px;">
                 <div>
-                  <label style="font-size:12px;font-weight:600;color:oklch(0.40 0.02 255);">
+                  <label style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);">
                     Board name
                   </label>
                   <.boxed_field
@@ -298,7 +297,7 @@ defmodule RelayWeb.BoardSettingsLive do
                   <span :if={@read_only?} style="font-size:14px;">{@board.name}</span>
                 </div>
                 <div style="display:flex;flex-direction:column;gap:8px;">
-                  <label style="font-size:12px;font-weight:600;color:oklch(0.40 0.02 255);">
+                  <label style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);">
                     Board URL
                   </label>
                   <.boxed_field
@@ -316,7 +315,7 @@ defmodule RelayWeb.BoardSettingsLive do
                   </span>
                 </div>
                 <div style="display:flex;flex-direction:column;gap:8px;">
-                  <label style="font-size:12px;font-weight:600;color:oklch(0.40 0.02 255);">
+                  <label style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);">
                     Card key
                   </label>
                   <.boxed_field
@@ -333,7 +332,7 @@ defmodule RelayWeb.BoardSettingsLive do
                   </span>
                   <p
                     id="board-key-warning"
-                    style="font-size:12px;line-height:1.5;color:oklch(0.55 0.12 60);margin:0;"
+                    style="font-size:12px;line-height:1.5;color:color-mix(in oklab, var(--color-warning) 65%, var(--color-base-content));margin:0;"
                   >
                     Changing this renames every card on this board (e.g. {@board.key}230).
                   </p>
@@ -343,13 +342,17 @@ defmodule RelayWeb.BoardSettingsLive do
               <div
                 :if={!@read_only?}
                 id="danger-zone"
-                style="margin-top:44px;border:1px solid oklch(0.90 0.03 15);border-radius:12px;padding:18px 20px;background:oklch(0.995 0.005 15);max-width:560px;"
+                style="margin-top:44px;border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));border-radius:12px;padding:18px 20px;background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));max-width:560px;"
               >
-                <div style="font-size:13px;font-weight:600;color:oklch(0.45 0.14 15);margin-bottom:4px;">
+                <div style="font-size:13px;font-weight:600;color:color-mix(in oklab, var(--color-error) 55%, var(--color-base-content));margin-bottom:4px;">
                   Danger zone
                 </div>
                 <div style="display:flex;align-items:center;gap:16px;">
-                  <span style="font-size:13px;color:oklch(0.50 0.04 15);flex:1;">
+                  <%!-- `oklch 0.50 0.04 15` is a muted warm grey, not a red: C 0.04 is a Rule-N
+                    near-neutral (see `delete_style/1` in story_map_components.ex). Rule B needed
+                    `error` at 65% to reach L 0.50, landing at C 0.10 — a clear red this body copy
+                    never was; the "Danger zone" heading above carries the warning. --%>
+                  <span style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);flex:1;">
                     Archiving hides this board for everyone. You can restore it later.
                   </span>
                   <button
@@ -357,7 +360,7 @@ defmodule RelayWeb.BoardSettingsLive do
                     id="archive-board-button"
                     phx-click="archive_board"
                     data-confirm="Archive this board?"
-                    style="background:oklch(0.98 0.015 15);border:1px solid oklch(0.86 0.06 15);color:oklch(0.52 0.16 15);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;"
+                    style="background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 35%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;"
                   >
                     Archive board
                   </button>
@@ -366,13 +369,15 @@ defmodule RelayWeb.BoardSettingsLive do
             </section>
 
             <section :if={@section == :stages} id="stages-pane">
-              <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px 0;color:oklch(0.26 0.02 255);">
+              <.page_heading class="mb-1.5">
                 Stages
-              </h1>
+              </.page_heading>
               <%!-- Mockup line ~217. --%>
-              <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0 0 12px 0;max-width:560px;">
-                Stages live inside four categories — <b style="color:oklch(0.34 0.02 255);">Unstarted</b>, <b style="color:oklch(0.34 0.02 255);">Planning</b>, <b style="color:oklch(0.34 0.02 255);">In progress</b>, and
-                <b style="color:oklch(0.34 0.02 255);">Complete</b>
+              <p style="font-size:14px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0 0 12px 0;max-width:560px;">
+                Stages live inside four categories — <b style="color:color-mix(in oklab, var(--color-base-content) 90%, transparent);">Unstarted</b>, <b style="color:color-mix(in oklab, var(--color-base-content) 90%, transparent);">Planning</b>, <b style="color:color-mix(in oklab, var(--color-base-content) 90%, transparent);">In progress</b>, and
+                <b style="color:color-mix(in oklab, var(--color-base-content) 90%, transparent);">
+                  Complete
+                </b>
                 — so everyone knows what a stage <i>means</i>. Use the arrows to move a stage
                 up or down — cross into another category and it takes on that meaning. Set
                 whether each stage is AI-enabled, its WIP limit, and whether it has Review and Done lanes.
@@ -388,11 +393,14 @@ defmodule RelayWeb.BoardSettingsLive do
                   <span class="category-dot" style={category_dot_style(category)}></span>
                   <span
                     class="font-mono"
-                    style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;color:oklch(0.50 0.02 255);"
+                    style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
                   >
                     {category_band_label(category)}
                   </span>
-                  <span class="font-mono" style="font-size:10.5px;color:oklch(0.68 0.02 255);">
+                  <span
+                    class="font-mono"
+                    style="font-size:10.5px;color:color-mix(in oklab, var(--color-base-content) 45%, transparent);"
+                  >
                     {length(stages)}
                   </span>
                 </div>
@@ -400,7 +408,7 @@ defmodule RelayWeb.BoardSettingsLive do
                   <div
                     :for={stage <- stages}
                     id={"stage-#{stage.id}-row"}
-                    style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:13px;padding:16px 18px;display:flex;flex-direction:column;gap:14px;"
+                    style="background:var(--color-base-100);border:1px solid var(--color-base-300);border-radius:13px;padding:16px 18px;display:flex;flex-direction:column;gap:14px;"
                   >
                     <div style="display:flex;align-items:center;gap:10px;">
                       <.stage_type_icon type={stage.type} />
@@ -432,7 +440,7 @@ defmodule RelayWeb.BoardSettingsLive do
                           phx-value-stage-id={stage.id}
                           phx-value-direction="up"
                           title="Move up"
-                          style="width:26px;height:26px;border-radius:6px;border:1px solid oklch(0.91 0.006 255);background:oklch(1 0 0);color:oklch(0.50 0.02 255);font-size:12px;padding:0;"
+                          style="width:26px;height:26px;border-radius:6px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);font-size:12px;padding:0;"
                         >
                           ↑
                         </button>
@@ -443,7 +451,7 @@ defmodule RelayWeb.BoardSettingsLive do
                           phx-value-stage-id={stage.id}
                           phx-value-direction="down"
                           title="Move down"
-                          style="width:26px;height:26px;border-radius:6px;border:1px solid oklch(0.91 0.006 255);background:oklch(1 0 0);color:oklch(0.50 0.02 255);font-size:12px;padding:0;"
+                          style="width:26px;height:26px;border-radius:6px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);font-size:12px;padding:0;"
                         >
                           ↓
                         </button>
@@ -454,7 +462,7 @@ defmodule RelayWeb.BoardSettingsLive do
                           phx-value-stage-id={stage.id}
                           data-confirm="Delete this stage?"
                           title="Delete stage"
-                          style="width:26px;height:26px;border-radius:6px;border:1px solid oklch(0.90 0.03 15);background:oklch(0.98 0.015 15);color:oklch(0.55 0.14 15);font-size:14px;padding:0;margin-left:4px;"
+                          style="width:26px;height:26px;border-radius:6px;border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 80%, var(--color-base-content));font-size:14px;padding:0;margin-left:4px;"
                         >
                           ×
                         </button>
@@ -483,7 +491,10 @@ defmodule RelayWeb.BoardSettingsLive do
                     <%!-- TYPE dropdown + AI-ENABLED toggle (RLY-46). --%>
                     <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
                       <div style="display:flex;align-items:center;gap:9px;">
-                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
+                        <span
+                          class="font-mono"
+                          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+                        >
                           TYPE
                         </span>
                         <details class="dropdown" id={"stage-#{stage.id}-type-dropdown"}>
@@ -513,7 +524,10 @@ defmodule RelayWeb.BoardSettingsLive do
                         :if={stage.type in [:work, :planning]}
                         style="display:flex;align-items:center;gap:9px;"
                       >
-                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
+                        <span
+                          class="font-mono"
+                          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+                        >
                           AI-ENABLED
                         </span>
                         <input
@@ -527,10 +541,10 @@ defmodule RelayWeb.BoardSettingsLive do
                         <span
                           :if={stage.ai_enabled}
                           id={"stage-#{stage.id}-ai-hint"}
-                          style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;letter-spacing:0.03em;color:oklch(0.46 0.14 292);"
+                          style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;letter-spacing:0.03em;color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));"
                         >
-                          <span style="width:11px;height:11px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;">
-                            <span style="width:4px;height:4px;border-radius:50%;border:1px solid oklch(1 0 0);">
+                          <span style="width:11px;height:11px;border-radius:50%;background:var(--color-secondary);display:flex;align-items:center;justify-content:center;">
+                            <span style="width:4px;height:4px;border-radius:50%;border:1px solid var(--color-secondary-content);">
                             </span>
                           </span>
                           Relay AI listens here
@@ -538,7 +552,10 @@ defmodule RelayWeb.BoardSettingsLive do
                       </div>
                       <%!-- COLLAPSED toggle (RLY-111) — board-wide default-collapse; any stage type. --%>
                       <div style="display:flex;align-items:center;gap:9px;">
-                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
+                        <span
+                          class="font-mono"
+                          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+                        >
                           COLLAPSED
                         </span>
                         <input
@@ -554,7 +571,10 @@ defmodule RelayWeb.BoardSettingsLive do
                     <%!-- Controls row — WIP (MMF 11). --%>
                     <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
                       <div style="display:flex;align-items:center;gap:9px;">
-                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
+                        <span
+                          class="font-mono"
+                          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+                        >
                           WIP
                         </span>
                         <button
@@ -568,7 +588,7 @@ defmodule RelayWeb.BoardSettingsLive do
                         </button>
                         <div
                           :if={stage.wip_limit}
-                          style="display:inline-flex;align-items:center;border:1px solid oklch(0.90 0.006 255);border-radius:8px;overflow:hidden;"
+                          style="display:inline-flex;align-items:center;border:1px solid var(--color-field-border);border-radius:8px;overflow:hidden;"
                         >
                           <button
                             type="button"
@@ -577,14 +597,14 @@ defmodule RelayWeb.BoardSettingsLive do
                             phx-value-stage-id={stage.id}
                             phx-value-delta="-1"
                             aria-label="Decrease WIP limit"
-                            style="width:26px;height:30px;border:none;background:oklch(0.98 0.002 255);color:oklch(0.50 0.02 255);font-size:15px;padding:0;"
+                            style="width:26px;height:30px;border:none;background:var(--color-base-200);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);font-size:15px;padding:0;"
                           >
                             −
                           </button>
                           <span
                             id={"stage-#{stage.id}-wip-value"}
                             class="font-mono"
-                            style="width:32px;text-align:center;font-size:13px;color:oklch(0.30 0.02 255);"
+                            style="width:32px;text-align:center;font-size:13px;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
                           >
                             {stage.wip_limit}
                           </span>
@@ -595,7 +615,7 @@ defmodule RelayWeb.BoardSettingsLive do
                             phx-value-stage-id={stage.id}
                             phx-value-delta="1"
                             aria-label="Increase WIP limit"
-                            style="width:26px;height:30px;border:none;background:oklch(0.98 0.002 255);color:oklch(0.50 0.02 255);font-size:15px;padding:0;"
+                            style="width:26px;height:30px;border:none;background:var(--color-base-200);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);font-size:15px;padding:0;"
                           >
                             +
                           </button>
@@ -604,17 +624,20 @@ defmodule RelayWeb.BoardSettingsLive do
                     </div>
                     <div
                       :if={stage.type == :review and is_nil(stage.parent_id)}
-                      style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px dashed oklch(0.94 0.006 255);padding-top:12px;"
+                      style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px dashed var(--color-base-300);padding-top:12px;"
                     >
-                      <span class="font-mono" style="font-size:11px;color:oklch(0.44 0.11 195);">
+                      <span
+                        class="font-mono"
+                        style="font-size:11px;color:color-mix(in oklab, var(--color-accent) 50%, var(--color-base-content));"
+                      >
                         ON REJECT, SEND TO
                       </span>
                       <details class="dropdown" id={"stage-#{stage.id}-reject-route"}>
                         <summary
                           class="btn btn-sm btn-outline gap-2"
-                          style="color:oklch(0.34 0.09 205);border-color:oklch(0.86 0.06 195);"
+                          style="color:color-mix(in oklab, var(--color-accent) 20%, var(--color-base-content));border-color:color-mix(in oklab, var(--color-accent) 35%, var(--color-base-100));"
                         >
-                          <span style="width:7px;height:7px;border-radius:2px;background:oklch(0.55 0.11 195);">
+                          <span style="width:7px;height:7px;border-radius:2px;background:var(--color-accent);">
                           </span>
                           {reject_route_name(stage, @stages)}
                         </summary>
@@ -638,16 +661,19 @@ defmodule RelayWeb.BoardSettingsLive do
                           </li>
                         </ul>
                       </details>
-                      <span style="flex:1;min-width:180px;font-size:11px;line-height:1.4;color:oklch(0.55 0.02 255);">
+                      <span style="flex:1;min-width:180px;font-size:11px;line-height:1.4;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
                         Rejected cards return here to be re-planned — the reviewer doesn't choose a destination.
                       </span>
                     </div>
                     <div
                       id={"stage-#{stage.id}-sublanes"}
-                      style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;border-top:1px dashed oklch(0.94 0.006 255);padding-top:12px;"
+                      style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;border-top:1px dashed var(--color-base-300);padding-top:12px;"
                     >
                       <div style="display:flex;align-items:center;gap:10px;">
-                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
+                        <span
+                          class="font-mono"
+                          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+                        >
                           REVIEW SUB-LANE
                         </span>
                         <input
@@ -661,7 +687,10 @@ defmodule RelayWeb.BoardSettingsLive do
                         />
                       </div>
                       <div style="display:flex;align-items:center;gap:10px;">
-                        <span class="font-mono" style="font-size:11px;color:oklch(0.58 0.02 255);">
+                        <span
+                          class="font-mono"
+                          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+                        >
                           DONE SUB-LANE
                         </span>
                         <input
@@ -674,17 +703,21 @@ defmodule RelayWeb.BoardSettingsLive do
                           phx-value-lane="done"
                         />
                       </div>
-                      <span style="flex:1;min-width:180px;font-size:11px;line-height:1.4;color:oklch(0.55 0.02 255);">
+                      <span style="flex:1;min-width:180px;font-size:11px;line-height:1.4;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
                         Both are optional lanes at the end of a stage —
-                        <b style="color:oklch(0.40 0.02 255);">Review</b>
+                        <b style="color:color-mix(in oklab, var(--color-base-content) 80%, transparent);">
+                          Review
+                        </b>
                         holds finished work for a human to approve or reject;
-                        <b style="color:oklch(0.40 0.02 255);">Done</b>
+                        <b style="color:color-mix(in oklab, var(--color-base-content) 80%, transparent);">
+                          Done
+                        </b>
                         parks it, ready for the next stage to pull.
                       </span>
                     </div>
                     <span
                       :if={lane_on?(@lane_map, stage.id, :review)}
-                      style="font-size:11px;line-height:1.4;color:oklch(0.55 0.02 255);"
+                      style="font-size:11px;line-height:1.4;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
                     >
                       A review sub-lane always rejects back into its own stage — nothing to configure.
                     </span>
@@ -695,7 +728,7 @@ defmodule RelayWeb.BoardSettingsLive do
                   id={"add-stage-#{category}"}
                   phx-click="add_stage"
                   phx-value-category={category}
-                  style="margin-top:10px;width:100%;border:1px dashed oklch(0.86 0.01 255);background:oklch(1 0 0);color:oklch(0.48 0.02 255);border-radius:11px;padding:11px;font-size:12.5px;font-weight:600;"
+                  style="margin-top:10px;width:100%;border:1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100));background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);border-radius:11px;padding:11px;font-size:12.5px;font-weight:600;"
                 >
                   + Add stage to {category_band_label(category)}
                 </button>
@@ -713,10 +746,10 @@ defmodule RelayWeb.BoardSettingsLive do
             />
 
             <section :if={@section == :members} id="members-pane">
-              <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 4px 0;color:oklch(0.24 0.02 255);">
+              <.page_heading class="mb-1">
                 Members
-              </h1>
-              <p style="font-size:14px;color:oklch(0.52 0.02 255);margin:0 0 26px 0;">
+              </.page_heading>
+              <p style="font-size:14px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin:0 0 26px 0;">
                 People with access to this board — and the AI agent that works alongside them.
               </p>
 
@@ -726,7 +759,7 @@ defmodule RelayWeb.BoardSettingsLive do
                 id="invite-member-form"
                 as={:invite}
                 phx-submit="invite_member"
-                style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px;display:flex;align-items:center;gap:10px;margin-bottom:26px;flex-wrap:wrap;"
+                style="background:var(--color-base-100);border:1px solid var(--color-base-300);border-radius:12px;padding:16px;display:flex;align-items:center;gap:10px;margin-bottom:26px;flex-wrap:wrap;"
               >
                 <input
                   type="email"
@@ -735,12 +768,12 @@ defmodule RelayWeb.BoardSettingsLive do
                   value={Phoenix.HTML.Form.normalize_value("email", f[:email].value)}
                   placeholder="name@company.com"
                   autocomplete="off"
-                  style="flex:1;min-width:180px;border:1px solid oklch(0.90 0.006 255);border-radius:8px;padding:9px 11px;font-size:13.5px;color:oklch(0.28 0.02 255);background:oklch(0.99 0.002 255);outline:none;"
+                  style="flex:1;min-width:180px;border:1px solid var(--color-field-border);border-radius:8px;padding:9px 11px;font-size:13.5px;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);background:var(--color-field-bg);outline:none;"
                 />
                 <button
                   type="submit"
                   id="send-invite"
-                  style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 16px;font-size:13.5px;font-weight:600;"
+                  style="background:var(--color-primary);color:var(--color-primary-content);border:none;border-radius:8px;padding:9px 16px;font-size:13.5px;font-weight:600;"
                 >
                   Send invite
                 </button>
@@ -748,15 +781,15 @@ defmodule RelayWeb.BoardSettingsLive do
 
               <div
                 class="font-mono"
-                style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:oklch(0.58 0.02 255);margin-bottom:10px;"
+                style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);margin-bottom:10px;"
               >
                 PEOPLE · {@member_count}
               </div>
-              <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;overflow:hidden;margin-bottom:28px;">
+              <div style="background:var(--color-base-100);border:1px solid var(--color-base-300);border-radius:12px;overflow:hidden;margin-bottom:28px;">
                 <div
                   :for={m <- @members}
                   id={"member-row-#{m.id}"}
-                  style="display:flex;align-items:center;gap:12px;padding:13px 16px;border-top:1px solid oklch(0.95 0.006 255);"
+                  style="display:flex;align-items:center;gap:12px;padding:13px 16px;border-top:1px solid color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));"
                 >
                   <.avatar
                     size={34}
@@ -767,25 +800,28 @@ defmodule RelayWeb.BoardSettingsLive do
                   />
                   <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;">
                     <div style="display:flex;align-items:center;gap:8px;">
-                      <span style="font-size:14px;font-weight:600;color:oklch(0.28 0.02 255);">
+                      <span style="font-size:14px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);">
                         {member_name(m)}
                       </span>
                       <span
                         :if={mine?(m, @current_scope)}
                         class="font-mono"
-                        style="font-size:10px;font-weight:600;letter-spacing:0.04em;background:oklch(0.95 0.03 250);color:oklch(0.45 0.13 250);padding:2px 6px;border-radius:5px;"
+                        style="font-size:10px;font-weight:600;letter-spacing:0.04em;background:color-mix(in oklab, var(--color-primary) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content));padding:2px 6px;border-radius:5px;"
                       >
                         YOU
                       </span>
                       <span
                         :if={is_nil(m.user_id)}
                         class="font-mono"
-                        style="font-size:10px;font-weight:600;letter-spacing:0.04em;background:oklch(0.96 0.03 75);color:oklch(0.52 0.11 65);padding:2px 6px;border-radius:5px;"
+                        style="font-size:10px;font-weight:600;letter-spacing:0.04em;background:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));padding:2px 6px;border-radius:5px;"
                       >
                         INVITED
                       </span>
                     </div>
-                    <span class="font-mono" style="font-size:12.5px;color:oklch(0.56 0.02 255);">
+                    <span
+                      class="font-mono"
+                      style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+                    >
                       {m.email}
                     </span>
                   </div>
@@ -797,7 +833,7 @@ defmodule RelayWeb.BoardSettingsLive do
                     phx-value-id={m.id}
                     data-confirm="Remove this member from the board?"
                     title="Remove"
-                    style="width:28px;height:28px;border-radius:7px;border:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);color:oklch(0.55 0.02 255);font-size:15px;line-height:1;padding:0;flex:0 0 auto;"
+                    style="width:28px;height:28px;border-radius:7px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-size:15px;line-height:1;padding:0;flex:0 0 auto;"
                   >
                     ×
                   </button>
@@ -807,30 +843,33 @@ defmodule RelayWeb.BoardSettingsLive do
 
               <div
                 class="font-mono"
-                style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:oklch(0.58 0.02 255);margin-bottom:10px;"
+                style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);margin-bottom:10px;"
               >
                 AGENT
               </div>
               <div
                 id="agent-card"
-                style="background:oklch(0.99 0.008 292);border:1px solid oklch(0.91 0.03 292);border-radius:12px;padding:16px;display:flex;align-items:center;gap:13px;"
+                style="background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 20%, var(--color-base-100));border-radius:12px;padding:16px;display:flex;align-items:center;gap:13px;"
               >
-                <div style="width:38px;height:38px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;flex:0 0 auto;">
-                  <span style="width:14px;height:14px;border-radius:50%;border:2px solid oklch(1 0 0);">
+                <div style="width:38px;height:38px;border-radius:50%;background:var(--color-secondary);display:flex;align-items:center;justify-content:center;flex:0 0 auto;">
+                  <span style="width:14px;height:14px;border-radius:50%;border:2px solid var(--color-secondary-content);">
                   </span>
                 </div>
                 <div style="flex:1;min-width:0;">
-                  <div style="font-size:14px;font-weight:600;color:oklch(0.28 0.02 255);">
+                  <div style="font-size:14px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);">
                     Relay AI
                   </div>
-                  <div style="font-size:12.5px;color:oklch(0.50 0.03 292);">
+                  <%!-- `oklch 0.50 0.03 292` is a grey-violet, not a violet: C 0.03 is a Rule-N near-neutral
+                    (see `delete_style/1` in story_map_components.ex), and Rule B's ink formula would
+                    have to run `secondary` to 80% to reach L 0.50, landing at C 0.13. --%>
+                  <div style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
                     Runs the AI-owned stages · authenticated with an API key
                   </div>
                 </div>
                 <.link
                   patch={~p"/board/#{@board.slug}/settings?section=keys"}
                   id="agent-manage-key"
-                  style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.03 292);color:oklch(0.46 0.13 292);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;flex:0 0 auto;text-decoration:none;"
+                  style="background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;flex:0 0 auto;text-decoration:none;"
                 >
                   Manage key →
                 </.link>
@@ -838,20 +877,24 @@ defmodule RelayWeb.BoardSettingsLive do
             </section>
 
             <section :if={@section == :keys} id="api-key-pane">
-              <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 4px 0;color:oklch(0.24 0.02 255);">
+              <.page_heading class="mb-1">
                 API keys
-              </h1>
-              <p style="font-size:14px;line-height:1.55;color:oklch(0.52 0.02 255);margin:0 0 24px 0;max-width:520px;">
+              </.page_heading>
+              <p style="font-size:14px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin:0 0 24px 0;max-width:520px;">
                 Give a key to your agent so it can read the board, move cards, post progress, and
                 ask questions on the AI-owned stages. Treat it like a password.
               </p>
 
-              <div style="display:flex;align-items:center;gap:11px;background:oklch(0.99 0.008 292);border:1px solid oklch(0.91 0.03 292);border-radius:10px;padding:12px 14px;margin-bottom:22px;">
-                <div style="width:26px;height:26px;border-radius:50%;background:oklch(0.56 0.16 292);display:flex;align-items:center;justify-content:center;flex:0 0 auto;">
-                  <span style="width:10px;height:10px;border-radius:50%;border:1.5px solid oklch(1 0 0);">
+              <div style="display:flex;align-items:center;gap:11px;background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 20%, var(--color-base-100));border-radius:10px;padding:12px 14px;margin-bottom:22px;">
+                <div style="width:26px;height:26px;border-radius:50%;background:var(--color-secondary);display:flex;align-items:center;justify-content:center;flex:0 0 auto;">
+                  <span style="width:10px;height:10px;border-radius:50%;border:1.5px solid var(--color-secondary-content);">
                   </span>
                 </div>
-                <span style="font-size:13px;color:oklch(0.44 0.06 292);">
+                <%!-- `oklch 0.44 0.06 292` is a violet-tinted grey, not violet ink: a Rule-N
+                  near-neutral (see `delete_style/1` in story_map_components.ex). Rule B needed
+                  `secondary` at 60% to reach L 0.44, landing at C 0.10 — the violet AI dot beside
+                  it carries the signal, not this caption. --%>
+                <span style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
                   These keys authenticate <b>Relay AI</b> on this board.
                 </span>
               </div>
@@ -860,15 +903,15 @@ defmodule RelayWeb.BoardSettingsLive do
                 <div
                   id="api-key-reveal-note"
                   class="font-mono"
-                  style="font-size:11.5px;color:oklch(0.52 0.11 65);margin-bottom:6px;"
+                  style="font-size:11.5px;color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));margin-bottom:6px;"
                 >
                   Copy this key now — you won't be able to see it again.
                 </div>
-                <div style="display:flex;align-items:center;gap:8px;background:oklch(0.985 0.004 255);border:1px solid oklch(0.93 0.006 255);border-radius:9px;padding:10px 12px;">
+                <div style="display:flex;align-items:center;gap:8px;background:var(--color-base-200);border:1px solid var(--color-base-300);border-radius:9px;padding:10px 12px;">
                   <code
                     id="api-key-secret"
                     class="font-mono"
-                    style="flex:1;min-width:0;font-size:13px;color:oklch(0.34 0.02 255);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                    style="flex:1;min-width:0;font-size:13px;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
                   >
                     {@revealed_token}
                   </code>
@@ -877,7 +920,7 @@ defmodule RelayWeb.BoardSettingsLive do
                     type="button"
                     phx-hook=".CopyKey"
                     data-target="api-key-secret"
-                    style="background:oklch(0.97 0.004 255);border:1px solid oklch(0.91 0.006 255);color:oklch(0.42 0.02 255);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;flex:0 0 auto;"
+                    style="background:var(--color-field-hover);border:1px solid var(--color-base-300);color:color-mix(in oklab, var(--color-base-content) 80%, transparent);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;flex:0 0 auto;"
                   >
                     Copy
                   </button>
@@ -891,15 +934,15 @@ defmodule RelayWeb.BoardSettingsLive do
                           const label = this.el.dataset.label || this.el.textContent.trim()
                           this.el.dataset.label = label
                           this.el.textContent = "Copied ✓"
-                          this.el.style.background = "oklch(0.95 0.06 150)"
-                          this.el.style.borderColor = "oklch(0.80 0.10 150)"
-                          this.el.style.color = "oklch(0.42 0.14 150)"
+                          this.el.style.background = "color-mix(in oklab, var(--color-success) 15%, var(--color-base-100))"
+                          this.el.style.borderColor = "color-mix(in oklab, var(--color-success) 50%, var(--color-base-100))"
+                          this.el.style.color = "color-mix(in oklab, var(--color-success) 45%, var(--color-base-content))"
                           clearTimeout(this._t)
                           this._t = setTimeout(() => {
                             this.el.textContent = label
-                            this.el.style.background = "oklch(0.97 0.004 255)"
-                            this.el.style.borderColor = "oklch(0.91 0.006 255)"
-                            this.el.style.color = "oklch(0.42 0.02 255)"
+                            this.el.style.background = "var(--color-field-hover)"
+                            this.el.style.borderColor = "var(--color-base-300)"
+                            this.el.style.color = "color-mix(in oklab, var(--color-base-content) 80%, transparent)"
                           }, 1600)
                         })
                       }
@@ -912,12 +955,12 @@ defmodule RelayWeb.BoardSettingsLive do
                 <div
                   :if={@api_key}
                   id="api-key-details"
-                  style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;"
+                  style="background:var(--color-base-100);border:1px solid var(--color-base-300);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;"
                 >
                   <div style="display:flex;align-items:center;gap:10px;">
                     <span
                       id="api-key-name"
-                      style="font-size:14px;font-weight:600;color:oklch(0.28 0.02 255);flex:1;"
+                      style="font-size:14px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);flex:1;"
                     >
                       {@api_key.name}
                     </span>
@@ -926,7 +969,7 @@ defmodule RelayWeb.BoardSettingsLive do
                       type="button"
                       phx-click="regenerate_key"
                       data-confirm="Regenerate the key? The current key stops working immediately."
-                      style="background:transparent;border:1px solid oklch(0.91 0.006 255);color:oklch(0.48 0.02 255);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;"
+                      style="background:transparent;border:1px solid var(--color-base-300);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;"
                     >
                       Regenerate
                     </button>
@@ -935,21 +978,24 @@ defmodule RelayWeb.BoardSettingsLive do
                       type="button"
                       phx-click="revoke_key"
                       data-confirm="Revoke the key? Tools using it will lose access."
-                      style="background:oklch(0.98 0.015 15);border:1px solid oklch(0.90 0.04 15);color:oklch(0.52 0.16 15);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;"
+                      style="background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;"
                     >
                       Revoke
                     </button>
                   </div>
-                  <div style="display:flex;align-items:center;gap:8px;background:oklch(0.985 0.004 255);border:1px solid oklch(0.93 0.006 255);border-radius:9px;padding:10px 12px;">
+                  <div style="display:flex;align-items:center;gap:8px;background:var(--color-base-200);border:1px solid var(--color-base-300);border-radius:9px;padding:10px 12px;">
                     <span
                       id="api-key-masked"
                       class="font-mono"
-                      style="flex:1;min-width:0;font-size:13px;color:oklch(0.34 0.02 255);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                      style="flex:1;min-width:0;font-size:13px;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
                     >
                       {masked(@api_key)}
                     </span>
                   </div>
-                  <div class="font-mono" style="font-size:11.5px;color:oklch(0.60 0.02 255);">
+                  <div
+                    class="font-mono"
+                    style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+                  >
                     <span id="api-key-created">Created {format_time(@api_key.inserted_at)}</span>
                     · <span id="api-key-last-used">last used {last_used(@api_key)}</span>
                   </div>
@@ -960,13 +1006,13 @@ defmodule RelayWeb.BoardSettingsLive do
                   id="generate-key"
                   type="button"
                   phx-click="generate_key"
-                  style="border:1px dashed oklch(0.86 0.01 255);background:oklch(1 0 0);color:oklch(0.46 0.02 255);border-radius:11px;padding:11px 16px;font-size:13px;font-weight:600;"
+                  style="border:1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100));background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 75%, transparent);border-radius:11px;padding:11px 16px;font-size:13px;font-weight:600;"
                 >
                   + Create new key
                 </button>
               </div>
 
-              <div style="margin-top:26px;font-size:12.5px;line-height:1.55;color:oklch(0.58 0.02 255);">
+              <div style="margin-top:26px;font-size:12.5px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
                 Keys are shown in full only right after they're created or regenerated. Store them
                 somewhere safe — anyone with a key can act as your agent.
               </div>
@@ -1432,8 +1478,15 @@ defmodule RelayWeb.BoardSettingsLive do
   defp main_stages_for_intake(stages), do: Enum.filter(stages, &is_nil(&1.parent_id))
 
   defp intake_row_style(active?) do
-    border = if active?, do: "oklch(0.86 0.05 250)", else: "oklch(0.92 0.006 255)"
-    bg = if active?, do: "oklch(0.97 0.02 250)", else: "oklch(1 0 0)"
+    border =
+      if active?,
+        do: "color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100))",
+        else: "var(--color-base-300)"
+
+    bg =
+      if active?,
+        do: "color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100))",
+        else: "var(--color-base-100)"
 
     "display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:9px;cursor:pointer;background:#{bg};border:1px solid #{border};"
   end
@@ -1617,40 +1670,40 @@ defmodule RelayWeb.BoardSettingsLive do
   defp nav_style(true) do
     "display:block;text-align:left;border:none;border-radius:8px;padding:8px 10px;" <>
       "font-size:13.5px;text-decoration:none;font-weight:600;" <>
-      "background:oklch(0.95 0.03 250);color:oklch(0.42 0.13 250);"
+      "background:color-mix(in oklab, var(--color-primary) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-primary) 45%, var(--color-base-content));"
   end
 
   defp nav_style(false) do
     "display:block;text-align:left;border:none;border-radius:8px;padding:8px 10px;" <>
       "font-size:13.5px;text-decoration:none;font-weight:500;" <>
-      "background:transparent;color:oklch(0.44 0.02 255);"
+      "background:transparent;color:color-mix(in oklab, var(--color-base-content) 75%, transparent);"
   end
 
   # RLY-72: horizontal tab in the mobile settings strip. Reuses nav_style/1's
-  # active/inactive blue-tint values (active = oklch(0.42 0.13 250) text on
-  # oklch(0.95 0.03 250)), laid out as a non-wrapping pill for a horizontal row.
+  # active/inactive blue-tint values (active = primary 15% tint background with
+  # primary 45% ink text), laid out as a non-wrapping pill for a horizontal row.
   # No artboard — deliberate responsive design matching the settings chrome.
   defp tab_style(true) do
     "flex:0 0 auto;text-decoration:none;padding:10px 14px;border-radius:8px;" <>
       "font-size:13.5px;font-weight:600;white-space:nowrap;" <>
-      "background:oklch(0.95 0.03 250);color:oklch(0.42 0.13 250);"
+      "background:color-mix(in oklab, var(--color-primary) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-primary) 45%, var(--color-base-content));"
   end
 
   defp tab_style(false) do
     "flex:0 0 auto;text-decoration:none;padding:10px 14px;border-radius:8px;" <>
       "font-size:13.5px;font-weight:500;white-space:nowrap;" <>
-      "background:transparent;color:oklch(0.44 0.02 255);"
+      "background:transparent;color:color-mix(in oklab, var(--color-base-content) 75%, transparent);"
   end
 
   # The mockup's limitToggleStyle (line ~1092): blue-tinted when On.
   defp wip_toggle_style(true) do
     "font-size:12px;font-weight:600;padding:5px 12px;border-radius:7px;" <>
-      "border:1px solid oklch(0.75 0.10 250);background:oklch(0.96 0.03 250);color:oklch(0.45 0.13 250);"
+      "border:1px solid color-mix(in oklab, var(--color-primary) 65%, var(--color-base-100));background:color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content));"
   end
 
   defp wip_toggle_style(false) do
     "font-size:12px;font-weight:600;padding:5px 12px;border-radius:7px;" <>
-      "border:1px solid oklch(0.90 0.006 255);background:oklch(1 0 0);color:oklch(0.52 0.02 255);"
+      "border:1px solid var(--color-field-border);background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
   end
 
   defp type_label(:queue), do: "Queue"
@@ -1667,15 +1720,15 @@ defmodule RelayWeb.BoardSettingsLive do
   # Mirrors the board's category band dots (mockup catMeta, lines ~906-908).
   defp category_dot_style(:unstarted),
     do:
-      "width:9px;height:9px;border-radius:50%;border:1.5px solid oklch(0.68 0.02 255);box-sizing:border-box;display:block;flex:0 0 auto;"
+      "width:9px;height:9px;border-radius:50%;border:1.5px solid color-mix(in oklab, var(--color-base-content) 45%, var(--color-base-100));box-sizing:border-box;display:block;flex:0 0 auto;"
 
   defp category_dot_style(:planning),
     do:
-      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-secondary) 0 25%, oklch(0.86 0.03 250) 25% 100%);display:block;flex:0 0 auto;"
+      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-secondary) 0 25%, color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100)) 25% 100%);display:block;flex:0 0 auto;"
 
   defp category_dot_style(:in_progress),
     do:
-      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-primary) 0 50%, oklch(0.86 0.03 250) 50% 100%);display:block;flex:0 0 auto;"
+      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-primary) 0 50%, color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100)) 50% 100%);display:block;flex:0 0 auto;"
 
   defp category_dot_style(:complete),
     do: "width:9px;height:9px;border-radius:50%;background:var(--color-success);display:block;flex:0 0 auto;"

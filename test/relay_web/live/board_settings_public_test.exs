@@ -24,4 +24,14 @@ defmodule RelayWeb.BoardSettingsPublicTest do
     assert has_element?(view, "#intake-stage-picker")
     assert Boards.get_public_board(board.slug) != :error
   end
+
+  test "the URL row uses the field-surface token, not the base-200 canvas token", %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=public")
+
+    view
+    |> element("#public-settings-form")
+    |> render_change(%{"board" => %{"public_enabled" => "true"}})
+
+    assert has_element?(view, "#public-url-row[style*='background:var(--color-field-bg)']")
+  end
 end

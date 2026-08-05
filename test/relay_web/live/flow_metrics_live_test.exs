@@ -62,13 +62,13 @@ defmodule RelayWeb.FlowMetricsLiveTest do
     assert html =~ ~r/NODE.*RUNS.*DURATION.*COST.*ATTEMPTS.*VERDICT SPLIT.*LOOP-LAPS/s
   end
 
-  test "verdict bar uses the artboard's three colors", %{conn: conn, board: board} do
+  test "verdict bar uses the succeeded/needs-input/failed theme tokens", %{conn: conn, board: board} do
     seed_runs(board, "implement", 10)
     {:ok, _view, html} = live(conn, ~p"/board/#{board.slug}/flows/code/metrics")
 
-    assert html =~ "oklch(0.60 0.13 155)"
-    assert html =~ "oklch(0.70 0.13 65)"
-    assert html =~ "oklch(0.62 0.16 22)"
+    assert html =~ "var(--color-success)"
+    assert html =~ "var(--color-warning)"
+    assert html =~ "var(--color-error)"
   end
 
   test "cost is blank and the cost note shows when no cost data exists", %{conn: conn, board: board} do
@@ -77,6 +77,22 @@ defmodule RelayWeb.FlowMetricsLiveTest do
 
     assert has_element?(view, "#stat-total-spend", "—")
     assert has_element?(view, "#cost-blank-note")
+  end
+
+  test "version chip, window selector and a shell node's type tag use the field-hover token", %{
+    conn: conn,
+    board: board
+  } do
+    seed_runs(board, "branch", 10)
+    {:ok, _view, html} = live(conn, ~p"/board/#{board.slug}/flows/code/metrics")
+
+    assert html =~
+             ~r/id="flow-metrics-version-chip"\s*style="[^"]*background:var\(--color-field-hover\)/
+
+    assert html =~
+             ~r/id="flow-metrics-window"\s*style="[^"]*background:var\(--color-field-hover\)/
+
+    assert html =~ ~r/id="node-type-branch"[^>]*background:var\(--color-field-hover\)/
   end
 
   test "window selector re-queries via URL patch", %{conn: conn, board: board} do
@@ -106,7 +122,7 @@ defmodule RelayWeb.FlowMetricsLiveTest do
 
     assert has_element?(view, "#deep-link-banner", "RLY-42")
     assert has_element?(view, "#node-here-implement")
-    assert html =~ "inset 3px 0 0 oklch(0.60 0.14 250)"
+    assert html =~ "inset 3px 0 0 var(--color-primary)"
   end
 
   test "deep-link with an empty node param omits the 'jumped to' clause", %{

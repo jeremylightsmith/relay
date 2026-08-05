@@ -203,10 +203,10 @@ defmodule RelayWeb.BoardLive do
           title="Board settings"
           aria-label="Board settings"
           class="flex min-h-[44px] min-w-[44px] items-center gap-[7px] rounded-lg px-3 text-[12px] font-semibold"
-          style="background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);color:oklch(0.40 0.02 255);"
+          style="background:var(--color-base-100);border:1px solid var(--color-field-border);color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
         >
-          <span style="width:13px;height:13px;border-radius:50%;border:2px solid oklch(0.55 0.02 255);position:relative;display:block;flex:0 0 auto;">
-            <span style="position:absolute;top:2.5px;left:2.5px;width:4px;height:4px;border-radius:50%;background:oklch(0.55 0.02 255);">
+          <span style="width:13px;height:13px;border-radius:50%;border:2px solid color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100));position:relative;display:block;flex:0 0 auto;">
+            <span style="position:absolute;top:2.5px;left:2.5px;width:4px;height:4px;border-radius:50%;background:color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100));">
             </span>
           </span>
           <span class="hidden sm:inline">Board settings</span>
@@ -217,7 +217,7 @@ defmodule RelayWeb.BoardLive do
           <button type="button" id="archived-cards-menu-item" phx-click="open_archived">
             <.icon name="hero-archive-box" class="size-4" />
             <span class="flex-1">Archived cards</span>
-            <span class="font-mono text-xs text-base-content/60">{@archived_count}</span>
+            <span class="font-mono text-xs text-base-content/65">{@archived_count}</span>
           </button>
         </li>
       </:menu_items>
@@ -234,7 +234,7 @@ defmodule RelayWeb.BoardLive do
             :if={@read_only?}
             id="read-only-banner"
             class="mx-4 mb-2 mt-2 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm sm:mx-5"
-            style="background:oklch(0.97 0.04 85);border:1px solid oklch(0.85 0.09 85);color:oklch(0.42 0.09 85);"
+            style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
           >
             <.icon name="hero-archive-box" class="size-4" />
             <span class="flex-1">This board is archived and read-only.</span>
@@ -315,7 +315,7 @@ defmodule RelayWeb.BoardLive do
           <div
             id="board-bands"
             class="drawer:min-w-0 drawer:w-auto drawer:overflow-x-auto drawer:overflow-y-hidden drawer:[-webkit-overflow-scrolling:touch] drawer:[overscroll-behavior-x:contain]"
-            style="display:flex;gap:22px;padding:16px 18px 18px 18px;align-items:stretch;background:oklch(0.952 0.008 255);flex:1 1 auto;min-height:0;"
+            style="display:flex;gap:22px;padding:16px 18px 18px 18px;align-items:stretch;background:var(--color-base-200);flex:1 1 auto;min-height:0;"
           >
             <section
               :for={{category, stages} <- @stage_groups}
@@ -329,11 +329,11 @@ defmodule RelayWeb.BoardLive do
                 <span class="category-dot" style={category_dot_style(category)}></span>
                 <h2
                   class="category-band"
-                  style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;font-family:var(--font-mono);color:oklch(0.52 0.02 255);margin:0;"
+                  style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin:0;"
                 >
                   {category_label(category)}
                 </h2>
-                <span style="font-size:10.5px;font-family:var(--font-mono);color:oklch(0.68 0.02 255);">
+                <span style="font-size:10.5px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);">
                   {category_card_count(category, stages, @stage_counts, @sublanes_by_parent)}
                 </span>
               </div>
@@ -404,7 +404,7 @@ defmodule RelayWeb.BoardLive do
           aria-label="Agent log"
         >
           <div class="flex items-center justify-between border-b border-base-200 px-4 py-1.5">
-            <div class="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-base-content/60">
+            <div class="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-base-content/65">
               <.icon name="hero-command-line" class="size-4" /> Agent log
             </div>
             <button
@@ -424,7 +424,7 @@ defmodule RelayWeb.BoardLive do
           >
             <div
               id="agent-log-empty"
-              class="hidden py-6 text-center text-base-content/50 only:block"
+              class="hidden py-6 text-center text-base-content/55 only:block"
             >
               Waiting for agent activity…
             </div>
@@ -436,7 +436,7 @@ defmodule RelayWeb.BoardLive do
               <span class="shrink-0 text-base-content/40">
                 {Calendar.strftime(entry.ts, "%H:%M:%S")}
               </span>
-              <span :if={entry.ref} class="shrink-0 text-base-content/60">[{entry.ref}]</span>
+              <span :if={entry.ref} class="shrink-0 text-base-content/65">[{entry.ref}]</span>
               <span class="whitespace-pre-wrap break-all">{entry.text}</span>
             </div>
           </div>
@@ -573,12 +573,12 @@ defmodule RelayWeb.BoardLive do
                 class="min-w-0 flex-1 text-left"
               >
                 <div class="flex items-baseline gap-2">
-                  <span class="font-mono text-xs text-base-content/60">
+                  <span class="font-mono text-xs text-base-content/65">
                     {Cards.ref(@board, card)}
                   </span>
                   <span class="truncate font-medium">{card.title}</span>
                 </div>
-                <div class="text-xs text-base-content/50">
+                <div class="text-xs text-base-content/55">
                   {drawer_stage_name(card.stage, @board.stages)} · archived {Calendar.strftime(
                     card.archived_at,
                     "%b %d, %Y"
@@ -595,7 +595,7 @@ defmodule RelayWeb.BoardLive do
                 Restore
               </button>
             </li>
-            <li :if={@archived_cards == []} class="py-3 text-sm text-base-content/50">
+            <li :if={@archived_cards == []} class="py-3 text-sm text-base-content/55">
               No archived cards.
             </li>
           </ul>
@@ -639,12 +639,12 @@ defmodule RelayWeb.BoardLive do
                 class="min-w-0 flex-1 text-left"
               >
                 <div class="flex items-baseline gap-2">
-                  <span class="font-mono text-xs text-base-content/60">
+                  <span class="font-mono text-xs text-base-content/65">
                     {Cards.ref(@board, card)}
                   </span>
                   <span class="truncate font-medium">{card.title}</span>
                 </div>
-                <div class="text-xs text-base-content/50">
+                <div class="text-xs text-base-content/55">
                   {drawer_stage_name(card.stage, @board.stages)} · {reason}
                 </div>
               </button>
@@ -658,7 +658,7 @@ defmodule RelayWeb.BoardLive do
                 Restart
               </button>
             </li>
-            <li :if={@stalled_cards == []} class="py-3 text-sm text-base-content/50">
+            <li :if={@stalled_cards == []} class="py-3 text-sm text-base-content/55">
               No stalled cards.
             </li>
           </ul>
@@ -805,8 +805,7 @@ defmodule RelayWeb.BoardLive do
       <div
         id="story-map"
         phx-hook="StoryMapDnD"
-        class="flex min-h-0 flex-1"
-        style="background:oklch(0.95 0.006 255);"
+        class="flex min-h-0 flex-1 bg-base-200"
       >
         <%!--
         RE262 — the tray renders unconditionally, unlike the artboard's `trayShown:
@@ -2639,10 +2638,12 @@ defmodule RelayWeb.BoardLive do
   end
 
   defp stopped_work_banner_style(:executor_outdated),
-    do: "background:oklch(0.97 0.04 85);border:1px solid oklch(0.85 0.09 85);color:oklch(0.42 0.09 85);"
+    do:
+      "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
 
   defp stopped_work_banner_style(_reason),
-    do: "background:oklch(0.97 0.03 22);border:1px solid oklch(0.88 0.07 22);color:oklch(0.48 0.13 22);"
+    do:
+      "background:color-mix(in oklab, var(--color-error) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 30%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 60%, var(--color-base-content));"
 
   defp refresh_face_runs(socket, cards_by_stage) do
     cards = cards_by_stage |> Map.values() |> List.flatten()
@@ -4009,20 +4010,20 @@ defmodule RelayWeb.BoardLive do
   # (in progress), and a solid green disc (complete).
   defp category_dot_style(:unstarted),
     do:
-      "width:9px;height:9px;border-radius:50%;border:1.5px solid oklch(0.68 0.02 255);box-sizing:border-box;display:block;flex:0 0 auto;"
+      "width:9px;height:9px;border-radius:50%;border:1.5px solid color-mix(in oklab, var(--color-base-content) 45%, var(--color-base-100));box-sizing:border-box;display:block;flex:0 0 auto;"
 
   defp category_dot_style(:planning),
     do:
-      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-secondary) 0 25%, oklch(0.86 0.03 250) 25% 100%);display:block;flex:0 0 auto;"
+      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-secondary) 0 25%, color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100)) 25% 100%);display:block;flex:0 0 auto;"
 
   defp category_dot_style(:in_progress),
     do:
-      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-primary) 0 50%, oklch(0.86 0.03 250) 50% 100%);display:block;flex:0 0 auto;"
+      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-primary) 0 50%, color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100)) 50% 100%);display:block;flex:0 0 auto;"
 
   defp category_dot_style(:complete),
     do: "width:9px;height:9px;border-radius:50%;background:var(--color-success);display:block;flex:0 0 auto;"
 
   defp agent_log_class(:error), do: "text-error"
-  defp agent_log_class(:lifecycle), do: "text-base-content/60"
+  defp agent_log_class(:lifecycle), do: "text-base-content/65"
   defp agent_log_class(_), do: "text-base-content"
 end

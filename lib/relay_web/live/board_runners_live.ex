@@ -43,11 +43,12 @@ defmodule RelayWeb.BoardRunnersLive do
   @tick_every to_timeout(second: 10)
   @log_cap 30
 
-  # Artboard palette (Relay Runners.dc.html, renderVals constants).
-  @green "oklch(0.60 0.13 155)"
-  @amber "oklch(0.70 0.13 65)"
-  @rose "oklch(0.62 0.16 22)"
-  @violet "oklch(0.56 0.16 292)"
+  # Artboard palette (Relay Runners.dc.html, renderVals constants). RE237: re-expressed as
+  # theme tokens — each is exactly its role's light-theme value.
+  @green "var(--color-success)"
+  @amber "var(--color-warning)"
+  @rose "var(--color-error)"
+  @violet "var(--color-secondary)"
 
   @impl true
   def render(assigns) do
@@ -60,13 +61,15 @@ defmodule RelayWeb.BoardRunnersLive do
         <.link
           navigate={~p"/board/#{@board.slug}"}
           id="runners-back"
-          class="btn btn-sm border-none font-semibold text-white"
-          style="background:oklch(0.60 0.14 250);"
+          class="btn btn-sm btn-primary font-semibold"
         >
           Back to board
         </.link>
       </:actions>
-      <div id="runners-page" style="background:oklch(0.955 0.008 255);min-height:calc(100vh - 74px);">
+      <div
+        id="runners-page"
+        style="background:var(--color-base-200);min-height:calc(100vh - 74px);"
+      >
         <div style="max-width:1120px;margin:0 auto;padding:30px 28px 72px 28px;">
           <%= if @runners == [] do %>
             <%!-- Empty state — artboard lines ~139-157; command is bin/relay execute on
@@ -76,26 +79,26 @@ defmodule RelayWeb.BoardRunnersLive do
               id="runners-empty"
               style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:62vh;text-align:center;"
             >
-              <div style="width:56px;height:56px;border-radius:16px;background:oklch(0.97 0.004 255);border:1px solid oklch(0.92 0.006 255);display:flex;align-items:center;justify-content:center;margin-bottom:20px;position:relative;">
-                <div style="width:20px;height:20px;border-radius:50%;border:2px dashed oklch(0.72 0.02 255);">
+              <div style="width:56px;height:56px;border-radius:16px;background:var(--color-field-hover);border:1px solid var(--color-base-300);display:flex;align-items:center;justify-content:center;margin-bottom:20px;position:relative;">
+                <div style="width:20px;height:20px;border-radius:50%;border:2px dashed color-mix(in oklab, var(--color-base-content) 40%, var(--color-base-100));">
                 </div>
-                <div style="position:absolute;bottom:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:oklch(0.98 0.03 22);border:1px solid oklch(0.90 0.05 22);display:flex;align-items:center;justify-content:center;font-size:11px;color:oklch(0.55 0.16 22);">
+                <div style="position:absolute;bottom:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));display:flex;align-items:center;justify-content:center;font-size:11px;color:color-mix(in oklab, var(--color-error) 80%, var(--color-base-content));">
                   !
                 </div>
               </div>
-              <h2 style="font-size:21px;font-weight:600;letter-spacing:-0.02em;margin:0 0 8px 0;color:oklch(0.26 0.02 255);">
+              <h2 style="font-size:21px;font-weight:600;letter-spacing:-0.02em;margin:0 0 8px 0;color:var(--color-base-content);">
                 No runners connected
               </h2>
-              <p style="font-size:14px;line-height:1.6;color:oklch(0.50 0.02 255);margin:0 0 26px 0;max-width:440px;">
+              <p style="font-size:14px;line-height:1.6;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0 0 26px 0;max-width:440px;">
                 Cards will queue until a runner checks in. Start one on any dev machine:
               </p>
-              <div style="display:flex;align-items:center;gap:10px;background:oklch(0.20 0.02 255);border-radius:11px;padding:13px 15px;box-shadow:0 8px 24px oklch(0.4 0.03 255/0.12);">
+              <div style="display:flex;align-items:center;gap:10px;background:var(--color-neutral);border-radius:11px;padding:13px 15px;box-shadow:0 8px 24px color-mix(in oklab, var(--color-neutral) 12%, transparent);">
                 <span
                   id="runner-start-command"
                   class="font-mono"
-                  style="font-size:12.5px;color:oklch(0.85 0.02 255);"
+                  style="font-size:12.5px;color:color-mix(in oklab, var(--color-neutral-content) 85%, transparent);"
                 >
-                  <span style="color:oklch(0.60 0.10 155);">$</span> bin/relay execute
+                  <span style="color:var(--color-success);">$</span> bin/relay execute
                 </span>
                 <button
                   type="button"
@@ -103,7 +106,7 @@ defmodule RelayWeb.BoardRunnersLive do
                   phx-hook=".CopyCmd"
                   data-command="bin/relay execute"
                   class="font-mono"
-                  style="background:oklch(0.30 0.02 255);border:1px solid oklch(0.40 0.02 255);color:oklch(0.82 0.02 255);border-radius:7px;padding:6px 11px;font-size:11.5px;font-weight:600;"
+                  style="background:color-mix(in oklab, var(--color-neutral-content) 15%, var(--color-neutral));border:1px solid color-mix(in oklab, var(--color-neutral-content) 25%, var(--color-neutral));color:color-mix(in oklab, var(--color-neutral-content) 80%, transparent);border-radius:7px;padding:6px 11px;font-size:11.5px;font-weight:600;"
                 >
                   Copy
                 </button>
@@ -125,10 +128,13 @@ defmodule RelayWeb.BoardRunnersLive do
               <div style="display:flex;align-items:center;gap:9px;margin-top:22px;">
                 <span
                   class="animate-spin"
-                  style="display:inline-block;width:15px;height:15px;border-radius:50%;border:2px solid oklch(0.85 0.02 255);border-top-color:oklch(0.60 0.14 250);"
+                  style="display:inline-block;width:15px;height:15px;border-radius:50%;border:2px solid color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100));border-top-color:var(--color-primary);"
                 >
                 </span>
-                <span class="font-mono" style="font-size:12.5px;color:oklch(0.56 0.02 255);">
+                <span
+                  class="font-mono"
+                  style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+                >
                   Waiting for a heartbeat…
                 </span>
               </div>
@@ -137,10 +143,10 @@ defmodule RelayWeb.BoardRunnersLive do
             <%!-- Page header + summary chips — artboard lines ~57-66. --%>
             <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:6px;">
               <div>
-                <h1 style="font-size:24px;font-weight:600;letter-spacing:-0.025em;margin:0 0 6px 0;color:oklch(0.24 0.02 255);">
+                <h1 style="font-size:24px;font-weight:600;letter-spacing:-0.025em;margin:0 0 6px 0;color:var(--color-base-content);">
                   Runners
                 </h1>
-                <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0;max-width:600px;">
+                <p style="font-size:14px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0;max-width:600px;">
                   Runners are the machines that work this board's cards. Relay hands each card to
                   a runner with a free slot in the right pool. This is the instrument you open
                   when nothing is running.
@@ -151,9 +157,9 @@ defmodule RelayWeb.BoardRunnersLive do
                   :if={@summary.fresh > 0}
                   id="summary-fresh"
                   class="font-mono"
-                  style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:oklch(0.46 0.10 155);background:oklch(0.97 0.03 155);border-radius:6px;padding:5px 10px;"
+                  style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:color-mix(in oklab, var(--color-success) 60%, var(--color-base-content));background:color-mix(in oklab, var(--color-success) 10%, var(--color-base-100));border-radius:6px;padding:5px 10px;"
                 >
-                  <span style="width:7px;height:7px;border-radius:50%;background:oklch(0.60 0.13 155);">
+                  <span style="width:7px;height:7px;border-radius:50%;background:var(--color-success);">
                   </span>
                   {@summary.fresh} online
                 </span>
@@ -161,9 +167,9 @@ defmodule RelayWeb.BoardRunnersLive do
                   :if={@summary.stale > 0}
                   id="summary-stale"
                   class="font-mono"
-                  style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:oklch(0.50 0.10 65);background:oklch(0.98 0.03 75);border-radius:6px;padding:5px 10px;"
+                  style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));border-radius:6px;padding:5px 10px;"
                 >
-                  <span style="width:7px;height:7px;border-radius:50%;background:oklch(0.70 0.13 65);">
+                  <span style="width:7px;height:7px;border-radius:50%;background:var(--color-warning);">
                   </span>
                   {@summary.stale} stale
                 </span>
@@ -171,9 +177,9 @@ defmodule RelayWeb.BoardRunnersLive do
                   :if={@summary.gone > 0}
                   id="summary-gone"
                   class="font-mono"
-                  style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:oklch(0.52 0.16 22);background:oklch(0.97 0.03 22);border-radius:6px;padding:5px 10px;"
+                  style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));background:color-mix(in oklab, var(--color-error) 10%, var(--color-base-100));border-radius:6px;padding:5px 10px;"
                 >
-                  <span style="width:7px;height:7px;border-radius:50%;background:oklch(0.62 0.16 22);">
+                  <span style="width:7px;height:7px;border-radius:50%;background:var(--color-error);">
                   </span>
                   {@summary.gone} gone
                 </span>
@@ -181,9 +187,9 @@ defmodule RelayWeb.BoardRunnersLive do
                   :if={@summary.outdated > 0}
                   id="summary-outdated"
                   class="font-mono"
-                  style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:oklch(0.52 0.16 22);background:oklch(0.97 0.03 22);border-radius:6px;padding:5px 10px;"
+                  style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));background:color-mix(in oklab, var(--color-error) 10%, var(--color-base-100));border-radius:6px;padding:5px 10px;"
                 >
-                  <span style="width:7px;height:7px;border-radius:50%;background:oklch(0.62 0.16 22);">
+                  <span style="width:7px;height:7px;border-radius:50%;background:var(--color-error);">
                   </span>
                   {@summary.outdated} outdated
                 </span>
@@ -197,7 +203,7 @@ defmodule RelayWeb.BoardRunnersLive do
                 style={panel_style(runner.display_state)}
               >
                 <%!-- Panel header — artboard lines ~72-79. --%>
-                <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid oklch(0.94 0.005 255);">
+                <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--color-base-300);">
                   <span
                     class={["inline-block", runner.display_state == :fresh && "animate-pulse"]}
                     style={fresh_dot_style(runner.display_state)}
@@ -219,14 +225,20 @@ defmodule RelayWeb.BoardRunnersLive do
                   <span
                     id={"runner-#{dom_id(runner)}-version"}
                     class="font-mono"
-                    style="font-size:11.5px;color:oklch(0.58 0.02 255);"
+                    style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
                   >
                     {version_label(runner)}
                   </span>
-                  <span class="font-mono" style="font-size:11.5px;color:oklch(0.58 0.02 255);">
+                  <span
+                    class="font-mono"
+                    style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+                  >
                     {runner.host}
                   </span>
-                  <span class="font-mono" style="font-size:11.5px;color:oklch(0.58 0.02 255);">
+                  <span
+                    class="font-mono"
+                    style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+                  >
                     {last_seen_label(runner, @now)}
                   </span>
                 </div>
@@ -236,7 +248,7 @@ defmodule RelayWeb.BoardRunnersLive do
                     <div style="display:flex;flex-direction:column;gap:8px;">
                       <span
                         class="font-mono"
-                        style="font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);"
+                        style="font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
                       >
                         CAPACITY
                       </span>
@@ -263,7 +275,7 @@ defmodule RelayWeb.BoardRunnersLive do
                     <div style="display:flex;flex-direction:column;gap:8px;">
                       <span
                         class="font-mono"
-                        style="font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.60 0.02 255);"
+                        style="font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
                       >
                         {working_label(runner)}
                       </span>
@@ -284,16 +296,19 @@ defmodule RelayWeb.BoardRunnersLive do
                         >
                           {job.ref}
                         </.link>
-                        <span style="font-size:12px;color:oklch(0.46 0.02 255);flex:1;min-width:0;">
+                        <span style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 75%, transparent);flex:1;min-width:0;">
                           {job.title}
                         </span>
                         <span
                           class="font-mono"
-                          style="font-size:9.5px;font-weight:600;color:oklch(0.50 0.02 255);background:oklch(0.96 0.004 255);border-radius:4px;padding:2px 6px;white-space:nowrap;"
+                          style="font-size:9.5px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);background:var(--color-field-hover);border-radius:4px;padding:2px 6px;white-space:nowrap;"
                         >
                           {job.node_key}
                         </span>
-                        <span class="font-mono" style="font-size:11px;color:oklch(0.52 0.02 255);">
+                        <span
+                          class="font-mono"
+                          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+                        >
                           {elapsed_label(job.claimed_at, @now)}
                         </span>
                       </div>
@@ -302,10 +317,12 @@ defmodule RelayWeb.BoardRunnersLive do
                       <div
                         :if={runner.freshness != :fresh and runner.jobs != []}
                         id={"runner-#{dom_id(runner)}-at-risk"}
-                        style="display:flex;align-items:center;gap:8px;background:oklch(0.98 0.03 75);border:1px solid oklch(0.90 0.05 75);border-radius:8px;padding:9px 11px;margin-top:2px;"
+                        style="display:flex;align-items:center;gap:8px;background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 35%, var(--color-base-100));border-radius:8px;padding:9px 11px;margin-top:2px;"
                       >
-                        <span style="font-size:12px;color:oklch(0.55 0.13 65);">⚠</span>
-                        <span style="font-size:12px;line-height:1.45;color:oklch(0.48 0.10 65);">
+                        <span style="font-size:12px;color:color-mix(in oklab, var(--color-warning) 65%, var(--color-base-content));">
+                          ⚠
+                        </span>
+                        <span style="font-size:12px;line-height:1.45;color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));">
                           No heartbeat for <b class="font-mono">{beat_age(runner, @now)}</b>
                           — going stale. Jobs in shared pools are requeued to another runner;
                           exclusive runs park until it returns (affinity).
@@ -316,9 +333,9 @@ defmodule RelayWeb.BoardRunnersLive do
                   <%!-- Log tail — artboard lines ~118-131, dark terminal treatment. --%>
                   <div
                     id={"runner-#{dom_id(runner)}-log"}
-                    style={"flex:1.15;min-width:0;background:oklch(0.19 0.02 255);display:flex;flex-direction:column;#{if runner.freshness != :fresh, do: "opacity:0.75;"}"}
+                    style={"flex:1.15;min-width:0;background:var(--color-neutral);display:flex;flex-direction:column;#{if runner.freshness != :fresh, do: "opacity:0.75;"}"}
                   >
-                    <div style="display:flex;align-items:center;gap:7px;padding:9px 13px;border-bottom:1px solid oklch(0.30 0.02 255);">
+                    <div style="display:flex;align-items:center;gap:7px;padding:9px 13px;border-bottom:1px solid color-mix(in oklab, var(--color-neutral-content) 15%, var(--color-neutral));">
                       <span
                         class={["inline-block", streaming?(runner) && "animate-pulse"]}
                         style={"width:7px;height:7px;border-radius:50%;background:#{log_dot_color(runner.freshness)};"}
@@ -326,7 +343,7 @@ defmodule RelayWeb.BoardRunnersLive do
                       </span>
                       <span
                         class="font-mono"
-                        style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:oklch(0.70 0.02 255);"
+                        style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-neutral-content) 65%, transparent);"
                       >
                         {log_title(runner.freshness)}
                       </span>
@@ -339,7 +356,7 @@ defmodule RelayWeb.BoardRunnersLive do
                         :for={entry <- Enum.reverse(Map.get(@logs, runner.name, []))}
                         style="white-space:pre-wrap;"
                       >
-                        <span style="color:oklch(0.55 0.02 255);">
+                        <span style="color:color-mix(in oklab, var(--color-neutral-content) 45%, transparent);">
                           {Calendar.strftime(entry.ts, "%H:%M:%S")}
                         </span>
                         <span style={"color:#{log_color(entry.kind)};"}>
@@ -350,7 +367,7 @@ defmodule RelayWeb.BoardRunnersLive do
                         :if={streaming?(runner)}
                         id={"runner-#{dom_id(runner)}-cursor"}
                         class="animate-pulse"
-                        style="display:inline-block;width:7px;height:13px;background:oklch(0.75 0.14 155);margin-left:2px;vertical-align:-2px;"
+                        style="display:inline-block;width:7px;height:13px;background:color-mix(in oklab, var(--color-success) 60%, var(--color-neutral-content));margin-left:2px;vertical-align:-2px;"
                       >
                       </span>
                     </div>
@@ -440,13 +457,13 @@ defmodule RelayWeb.BoardRunnersLive do
   defp panel_style(freshness) do
     border =
       case freshness do
-        :fresh -> "oklch(0.92 0.006 255)"
-        :stale -> "oklch(0.90 0.05 75)"
-        :gone -> "oklch(0.90 0.03 22)"
+        :fresh -> "var(--color-base-300)"
+        :stale -> "color-mix(in oklab, var(--color-warning) 35%, var(--color-base-100))"
+        :gone -> "color-mix(in oklab, var(--color-error) 25%, var(--color-base-100))"
       end
 
-    "background:oklch(1 0 0);border:1px solid #{border};border-radius:13px;overflow:hidden;" <>
-      "box-shadow:0 1px 3px oklch(0.55 0.03 255/0.05);"
+    "background:var(--color-base-100);border:1px solid #{border};border-radius:13px;overflow:hidden;" <>
+      "box-shadow:0 1px 3px color-mix(in oklab, var(--color-neutral) 5%, transparent);"
   end
 
   defp fresh_color(:fresh), do: @green
@@ -456,7 +473,11 @@ defmodule RelayWeb.BoardRunnersLive do
   defp fresh_color(:outdated), do: @rose
 
   defp fresh_dot_style(freshness) do
-    glow = if freshness == :fresh, do: "box-shadow:0 0 0 3px oklch(0.60 0.13 155 / 0.2);", else: ""
+    glow =
+      if freshness == :fresh,
+        do: "box-shadow:0 0 0 3px color-mix(in oklab, var(--color-success) 20%, transparent);",
+        else: ""
+
     "width:10px;height:10px;border-radius:50%;background:#{fresh_color(freshness)};flex:0 0 auto;#{glow}"
   end
 
@@ -480,25 +501,30 @@ defmodule RelayWeb.BoardRunnersLive do
   defp version_label(%{version: nil}), do: "unversioned"
   defp version_label(%{version: version}), do: "v#{version}"
 
-  defp name_color(:fresh), do: "oklch(0.24 0.02 255)"
+  defp name_color(:fresh), do: "var(--color-base-content)"
   # beating → the dark fresh-name colour, not the muted stale/gone one.
-  defp name_color(:outdated), do: "oklch(0.24 0.02 255)"
-  defp name_color(_freshness), do: "oklch(0.50 0.02 255)"
+  defp name_color(:outdated), do: "var(--color-base-content)"
+  defp name_color(_freshness), do: "color-mix(in oklab, var(--color-base-content) 70%, transparent)"
 
-  defp ref_color(:gone), do: "oklch(0.52 0.12 22)"
-  defp ref_color(_freshness), do: "oklch(0.30 0.02 255)"
+  defp ref_color(:gone), do: "color-mix(in oklab, var(--color-error) 70%, var(--color-base-content))"
+  defp ref_color(_freshness), do: "color-mix(in oklab, var(--color-base-content) 95%, transparent)"
 
   defp cap_chip_style(pool, freshness) do
     {border, bg, color, extra} =
       cond do
         freshness != :fresh ->
-          {"oklch(0.92 0.006 255)", "oklch(0.98 0.003 255)", "oklch(0.58 0.02 255)", "opacity:0.7;"}
+          {"var(--color-base-300)", "var(--color-base-200)",
+           "color-mix(in oklab, var(--color-base-content) 55%, transparent)", "opacity:0.7;"}
 
         pool.used >= pool.total ->
-          {"oklch(0.89 0.05 65)", "oklch(0.99 0.02 75)", "oklch(0.38 0.02 255)", ""}
+          {"color-mix(in oklab, var(--color-warning) 35%, var(--color-base-100))",
+           "color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100))",
+           "color-mix(in oklab, var(--color-base-content) 85%, transparent)", ""}
 
         true ->
-          {"oklch(0.90 0.04 155)", "oklch(0.99 0.015 155)", "oklch(0.38 0.02 255)", ""}
+          {"color-mix(in oklab, var(--color-success) 25%, var(--color-base-100))",
+           "color-mix(in oklab, var(--color-success) 5%, var(--color-base-100))",
+           "color-mix(in oklab, var(--color-base-content) 85%, transparent)", ""}
       end
 
     "display:flex;align-items:center;gap:8px;border:1px solid #{border};background:#{bg};" <>
@@ -510,8 +536,8 @@ defmodule RelayWeb.BoardRunnersLive do
   defp pip_style(i, pool, freshness) do
     fill =
       cond do
-        i >= pool.used -> "oklch(0.90 0.01 255)"
-        freshness != :fresh -> "oklch(0.72 0.02 255)"
+        i >= pool.used -> "color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100))"
+        freshness != :fresh -> "color-mix(in oklab, var(--color-base-content) 40%, var(--color-base-100))"
         pool.used >= pool.total -> @amber
         true -> @green
       end
@@ -525,19 +551,22 @@ defmodule RelayWeb.BoardRunnersLive do
   defp working_label(%{freshness: :gone}), do: "ORPHANED JOB"
 
   defp job_row_style(:fresh) do
-    "display:flex;align-items:center;gap:10px;border:1px solid oklch(0.94 0.005 255);" <>
-      "background:oklch(0.994 0.002 255);border-radius:8px;padding:8px 11px;"
+    "display:flex;align-items:center;gap:10px;border:1px solid var(--color-base-300);" <>
+      "background:var(--color-base-200);border-radius:8px;padding:8px 11px;"
   end
 
   defp job_row_style(_freshness) do
-    "display:flex;align-items:center;gap:10px;border:1px solid oklch(0.92 0.03 22);" <>
-      "background:oklch(0.99 0.01 22);border-radius:8px;padding:8px 11px;"
+    "display:flex;align-items:center;gap:10px;border:1px solid color-mix(in oklab, var(--color-error) 20%, var(--color-base-100));" <>
+      "background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border-radius:8px;padding:8px 11px;"
   end
 
   defp job_dot_style(:fresh), do: "width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:#{@violet};"
   defp job_dot_style(_freshness), do: "width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:#{@rose};"
 
-  defp log_dot_color(:fresh), do: "oklch(0.75 0.14 155)"
+  # The log tail is a fixed-dark "terminal" treatment (background var(--color-neutral) in
+  # both themes) — the fresh dot and streaming cursor use a brightened success mix so they
+  # still read against that dark band rather than the plain (darker) success token.
+  defp log_dot_color(:fresh), do: "color-mix(in oklab, var(--color-success) 60%, var(--color-neutral-content))"
   defp log_dot_color(:stale), do: @amber
   defp log_dot_color(:gone), do: @rose
 
@@ -545,9 +574,11 @@ defmodule RelayWeb.BoardRunnersLive do
   defp log_title(:stale), do: "LOG TAIL · stalled"
   defp log_title(:gone), do: "LOG TAIL · stopped"
 
-  defp log_color(:claude), do: "oklch(0.66 0.12 292)"
-  defp log_color(:error), do: "oklch(0.68 0.14 22)"
-  defp log_color(_kind), do: "oklch(0.78 0.02 255)"
+  # Same dark-terminal brightening as log_dot_color/1 — plain role tokens read too dark
+  # against the fixed --color-neutral log background.
+  defp log_color(:claude), do: "color-mix(in oklab, var(--color-secondary) 75%, var(--color-neutral-content))"
+  defp log_color(:error), do: "color-mix(in oklab, var(--color-error) 85%, var(--color-neutral-content))"
+  defp log_color(_kind), do: "color-mix(in oklab, var(--color-neutral-content) 75%, transparent)"
 
   defp last_seen_label(runner, now), do: "last beat " <> beat_age(runner, now) <> " ago"
 

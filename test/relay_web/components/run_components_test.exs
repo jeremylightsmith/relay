@@ -69,7 +69,7 @@ defmodule RelayWeb.RunComponentsTest do
       html =
         render_component(&RunComponents.run_status_strip/1, detail: detail(%{}, []), baton: "BATON · FLOW")
 
-      assert html =~ "oklch(0.985 0.018 292)"
+      assert html =~ "color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100))"
       assert html =~ "animation:relaypulse"
       assert html =~ "BATON · FLOW"
       assert html =~ "running v3"
@@ -89,7 +89,7 @@ defmodule RelayWeb.RunComponentsTest do
         )
 
       assert parked =~ "Parked — waiting on your answer"
-      assert parked =~ "oklch(0.985 0.022 75)"
+      assert parked =~ "color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100))"
       assert failed =~ "Run failed"
       refute failed =~ "circuit breaker"
       assert failed =~ "was on v3"
@@ -119,7 +119,7 @@ defmodule RelayWeb.RunComponentsTest do
       assert html =~ "FLOW · CODE · task 2 of 4"
       assert html =~ "height:9px"
       assert html =~ "var(--color-success)"
-      assert html =~ "box-shadow:0 0 0 2px oklch(0.56 0.16 292/0.25)"
+      assert html =~ "box-shadow:0 0 0 2px color-mix(in oklab, var(--color-secondary) 25%, transparent)"
       assert html =~ "opacity:0.5"
     end
   end
@@ -139,7 +139,7 @@ defmodule RelayWeb.RunComponentsTest do
       assert html =~ "0:08"
       assert html =~ "—"
       assert html =~ "OUTCOME: FAILED"
-      assert html =~ "background:oklch(0.20 0.02 255)"
+      assert html =~ "background:var(--color-neutral)"
       assert html =~ "assert on CSV bytes"
       assert html =~ "attempt 2"
     end
@@ -210,7 +210,7 @@ defmodule RelayWeb.RunComponentsTest do
       assert html =~ "quality_review"
       assert html =~ "3 · stopped"
       assert html =~ "$2.28"
-      assert html =~ "oklch(0.975 0.025 22)"
+      assert html =~ "color-mix(in oklab, var(--color-error) 5%, var(--color-base-100))"
     end
 
     test "failed variant states the reason without inventing a circuit breaker" do
@@ -263,7 +263,7 @@ defmodule RelayWeb.RunComponentsTest do
       assert html =~ "paused at brainstorm"
       assert html =~ "attempt 1"
       assert html =~ ~s(id="embedded-stepper")
-      assert html =~ "oklch(0.975 0.025 75)"
+      assert html =~ "color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100))"
     end
 
     test "parked variant's attempt count reflects the paused node's actual attempt, not always 1" do
@@ -303,7 +303,7 @@ defmodule RelayWeb.RunComponentsTest do
       refute html =~ "RELAY AI NEEDS YOUR INPUT"
       refute html =~ "paused at implement"
       assert html =~ ~s(id="embedded-panel")
-      assert html =~ "oklch(0.975 0.025 75)"
+      assert html =~ "color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100))"
       assert html =~ "Parked"
     end
 
@@ -397,7 +397,7 @@ defmodule RelayWeb.RunComponentsTest do
       assert html =~ ~s(id="card-RLY-1-run-face")
       assert html =~ "node 2 of 4"
       assert html =~ "height:5px"
-      assert html =~ "oklch(0.90 0.02 292)"
+      assert html =~ "color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100))"
     end
 
     test "parked, failed, queued, done, cancelled badges" do

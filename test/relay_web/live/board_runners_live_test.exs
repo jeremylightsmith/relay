@@ -55,7 +55,8 @@ defmodule RelayWeb.BoardRunnersLiveTest do
     assert has_element?(view, "#runner-mac-mini-pool-exclusive", "0/1")
     assert has_element?(view, "#summary-fresh", "1 online")
     # artboard lines ~84-97 / capChip ~176-187: an under-capacity chip is the green treatment
-    assert render(element(view, "#runner-mac-mini-pool-shared_clean")) =~ "oklch(0.90 0.04 155)"
+    assert render(element(view, "#runner-mac-mini-pool-shared_clean")) =~
+             "color-mix(in oklab, var(--color-success) 25%, var(--color-base-100))"
   end
 
   test "an idle fresh executor reads WORKING NOW · 0 with no at-risk note",
@@ -172,8 +173,8 @@ defmodule RelayWeb.BoardRunnersLiveTest do
 
     assert has_element?(view, "#runner-mac-a-log", "hello a")
     refute has_element?(view, "#runner-mac-b-log", "hello a")
-    # the artboard's dark terminal treatment (line ~118)
-    assert render(element(view, "#runner-mac-a-log")) =~ "oklch(0.19 0.02 255)"
+    # the artboard's dark terminal treatment (line ~118) — always-dark regardless of theme
+    assert render(element(view, "#runner-mac-a-log")) =~ "background:var(--color-neutral)"
   end
 
   test "unclaimed-ref and ref-less lines render nowhere on this page",

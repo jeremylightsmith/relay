@@ -126,7 +126,7 @@ defmodule RelayWeb.BoardLiveReviewTest do
     assert has_element?(view, "#review-reject-panel", "Returns to")
     assert has_element?(view, "#review-reject-panel", "Plan")
     assert has_element?(view, "#review-send-back", "Reject → Plan")
-    assert has_element?(view, ~s|#review-send-back[style*="oklch(0.62 0.14 65)"]|)
+    assert has_element?(view, ~s|#review-send-back[style*="background:var(--color-warning)"]|)
     refute has_element?(view, "#review-reject-target")
     refute has_element?(view, "#review-approve")
 

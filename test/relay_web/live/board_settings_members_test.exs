@@ -20,6 +20,16 @@ defmodule RelayWeb.BoardSettingsMembersTest do
     assert has_element?(view, "#invite-member-form")
   end
 
+  test "the invite email input uses the field-surface token, not the base-200 canvas token", %{
+    conn: conn,
+    user: user
+  } do
+    board = board_for(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=members")
+
+    assert has_element?(view, "#invite-email[style*='background:var(--color-field-bg)']")
+  end
+
   test "the current user's own row shows a YOU badge and no remove button", %{conn: conn, user: user} do
     board = board_for(user)
     [me] = Members.list_members(board)
@@ -85,9 +95,13 @@ defmodule RelayWeb.BoardSettingsMembersTest do
 
     row = view |> element("#member-row-#{me.id} span[style*='border-radius:50%']") |> render()
 
-    # matches `docs/designs/Relay Board.dc.html` member row avatarStyle (line ~1406):
-    # oklch(0.62 0.13 <hue>) at the shared avatar's size-derived font (round(34*0.42) = 14px)
-    assert row =~ "background:oklch(0.62 0.13 "
+    # matches `docs/designs/Relay Board.dc.html` member row avatarStyle (line ~1406) via
+    # RelayWeb.CoreComponents.identity_color/1 (RE237: oklch() held at fixed perceptual
+    # lightness, not a token), at the shared avatar's size-derived font (round(34*0.42) = 14px).
+    # Pinned to the literal formula — not a re-derived call — so a regression to hsl() or a
+    # non-perceptual lightness is caught here.
+    hue = RelayWeb.CoreComponents.identity_hue(me.email)
+    assert row =~ "background:oklch(0.62 0.13 #{hue})"
     assert row =~ "font-size:14px"
   end
 

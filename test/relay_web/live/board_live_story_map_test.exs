@@ -751,7 +751,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       html = view |> element(button) |> render()
       assert html =~ "Move 3 cards out of this activity before deleting it"
       # The artboard's `delOff` (line ~398), not the enabled `delStyle`.
-      assert html =~ "color:oklch(0.82 0.01 255);cursor:not-allowed;"
+      assert html =~ "color:color-mix(in oklab, var(--color-base-content) 25%, transparent);cursor:not-allowed;"
 
       render_click(view, "story_map_delete", %{"kind" => "activity", "id" => to_string(ctx.onboard.id)})
 
@@ -781,8 +781,14 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       button = "#story-map-delete-task-#{ctx.organize.id}"
       refute has_element?(view, "#{button}[disabled]")
       assert view |> element(button) |> render() =~ "Delete task"
-      # The artboard's enabled `delStyle` (line ~397).
-      assert view |> element(button) |> render() =~ "color:oklch(0.62 0.03 25);"
+      # The artboard's enabled `delStyle` (line ~397) is `oklch(0.62 0.03 25)` — a warm grey, a
+      # deliberately muted destructive affordance, not `--color-error`'s coral. RE237 maps that
+      # near-neutral through Rule N, which is the only branch that can hold C ~0.03 at L 0.62.
+      assert view |> element(button) |> render() =~
+               "color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+
+      # Still visibly stronger than the disabled ✕ next to it (that one is 25%).
+      refute view |> element(button) |> render() =~ "cursor:not-allowed"
 
       view |> element(button) |> render_click()
 

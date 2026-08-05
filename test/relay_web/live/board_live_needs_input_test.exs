@@ -309,6 +309,6 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     render_async(view)
 
     # single-question block: Send is on the first (only) step
-    assert has_element?(view, "#needs-input-send[style*='oklch(0.70 0.13 65)']")
+    assert has_element?(view, "#needs-input-send[style*='background:var(--color-warning)']")
   end
 end

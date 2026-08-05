@@ -40,7 +40,7 @@ defmodule RelayWeb.FlowSettingsComponents do
       <div
         :if={@read_only?}
         id="flows-read-only-banner"
-        style="display:flex;align-items:center;gap:10px;background:oklch(0.97 0.04 85);border:1px solid oklch(0.85 0.09 85);color:oklch(0.42 0.09 85);border-radius:10px;padding:11px 16px;margin-bottom:18px;font-size:13.5px;"
+        style="display:flex;align-items:center;gap:10px;background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));border-radius:10px;padding:11px 16px;margin-bottom:18px;font-size:13.5px;"
       >
         <.icon name="hero-archive-box" class="size-4" />
         <span>This board is archived (read-only). Flows can't be created or changed.</span>
@@ -51,11 +51,11 @@ defmodule RelayWeb.FlowSettingsComponents do
             the button is a mockup-only affordance and is deliberately not shipped. --%>
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:20px;">
         <div>
-          <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;margin:0 0 6px 0;color:oklch(0.26 0.02 255);">
+          <.page_heading class="mb-1.5">
             Flows
-          </h1>
+          </.page_heading>
           <%!-- Artboard blurb minus the versioning sentence (deferred to RLY-152). --%>
-          <p style="font-size:14px;line-height:1.55;color:oklch(0.50 0.02 255);margin:0;max-width:600px;">
+          <p style="font-size:14px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0;max-width:600px;">
             A flow is the automation attached to a stage transition — it pulls work from one
             stage, runs a graph of agent and shell steps, and lands the card on the next stage
             when it succeeds.
@@ -70,7 +70,7 @@ defmodule RelayWeb.FlowSettingsComponents do
             type="button"
             id="new-flow-button"
             phx-click="flow_new"
-            style="display:flex;align-items:center;gap:6px;background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:8px;padding:9px 15px;font-size:13px;font-weight:600;"
+            style="display:flex;align-items:center;gap:6px;background:var(--color-primary);color:var(--color-primary-content);border:none;border-radius:8px;padding:9px 15px;font-size:13px;font-weight:600;"
           >
             <span style="font-size:15px;line-height:1;">+</span>New flow
           </button>
@@ -82,7 +82,7 @@ defmodule RelayWeb.FlowSettingsComponents do
       <div
         :if={@rows == []}
         id="flows-empty"
-        style="margin-top:22px;border:1px dashed oklch(0.86 0.01 255);border-radius:12px;background:oklch(1 0 0);padding:26px 24px;font-size:13.5px;line-height:1.6;color:oklch(0.50 0.02 255);max-width:640px;"
+        style="margin-top:22px;border:1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100));border-radius:12px;background:var(--color-base-100);padding:26px 24px;font-size:13.5px;line-height:1.6;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);max-width:640px;"
       >
         No flows on this board yet. Default flows are seeded when a board is created;
         existing boards get them with the Spec-flow cutover (RLY-136).
@@ -94,7 +94,7 @@ defmodule RelayWeb.FlowSettingsComponents do
         <.flows_table rows={@rows} panel={@panel} preflight={@preflight} slug={@slug} />
         <p
           id="flows-footer-note"
-          style="font-size:12px;line-height:1.55;color:oklch(0.58 0.02 255);margin:16px 2px 0 2px;max-width:640px;"
+          style="font-size:12px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);margin:16px 2px 0 2px;max-width:640px;"
         >
           Disabling a flow is a cutover — cards stop being picked up at that transition and
           wait for a human. Enabling one starts handing new cards to the AI immediately.
@@ -116,12 +116,15 @@ defmodule RelayWeb.FlowSettingsComponents do
     ~H"""
     <div
       id="new-flow-panel"
-      style="margin:20px 0 4px 0;background:oklch(1 0 0);border:1px solid oklch(0.91 0.03 250);border-radius:12px;padding:14px 16px;max-width:640px;"
+      style="margin:20px 0 4px 0;background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-primary) 25%, var(--color-base-100));border-radius:12px;padding:14px 16px;max-width:640px;"
     >
-      <div style="font-size:13.5px;font-weight:600;color:oklch(0.34 0.10 250);margin-bottom:3px;">
+      <div style="font-size:13.5px;font-weight:600;color:color-mix(in oklab, var(--color-primary) 25%, var(--color-base-content));margin-bottom:3px;">
         New flow
       </div>
-      <p style="font-size:12.5px;line-height:1.5;color:oklch(0.44 0.04 250);margin:0 0 12px 0;">
+      <%!-- `oklch 0.44 0.04 250` is a slate-grey, not Human-blue: C 0.04 is a Rule-N near-neutral
+        (see `delete_style/1` in story_map_components.ex). Rule B needed `primary` at 55% to reach
+        L 0.44, landing at C 0.09 — a blue statement this helper copy never made. --%>
+      <p style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0 0 12px 0;">
         Pick a key and the three stages this flow triggers on. It is created switched off with
         an empty graph — add its steps in the editor, then turn it on here.
       </p>
@@ -173,7 +176,7 @@ defmodule RelayWeb.FlowSettingsComponents do
           <button
             type="submit"
             id="new-flow-create"
-            style="background:oklch(0.60 0.14 250);color:oklch(1 0 0);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+            style="background:var(--color-primary);color:var(--color-primary-content);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
           >
             Create flow
           </button>
@@ -181,7 +184,7 @@ defmodule RelayWeb.FlowSettingsComponents do
             type="button"
             id="new-flow-cancel"
             phx-click="flow_cancel_panel"
-            style="background:oklch(1 0 0);border:1px solid oklch(0.90 0.006 255);color:oklch(0.48 0.02 255);border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+            style="background:var(--color-base-100);border:1px solid var(--color-field-border);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
           >
             Cancel
           </button>
@@ -203,16 +206,19 @@ defmodule RelayWeb.FlowSettingsComponents do
     <div
       :if={@shipped_rows != []}
       id="flows-first-run"
-      style="display:flex;align-items:flex-start;gap:12px;background:oklch(0.98 0.02 250);border:1px solid oklch(0.89 0.05 250);border-radius:12px;padding:15px 17px;margin-top:20px;"
+      style="display:flex;align-items:flex-start;gap:12px;background:color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-primary) 30%, var(--color-base-100));border-radius:12px;padding:15px 17px;margin-top:20px;"
     >
-      <span style="width:24px;height:24px;border-radius:7px;background:oklch(0.60 0.14 250);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">
+      <span style="width:24px;height:24px;border-radius:7px;background:var(--color-primary);color:var(--color-primary-content);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">
         i
       </span>
       <div style="flex:1;">
-        <div style="font-size:14px;font-weight:600;color:oklch(0.34 0.10 250);margin-bottom:3px;">
+        <div style="font-size:14px;font-weight:600;color:color-mix(in oklab, var(--color-primary) 25%, var(--color-base-content));margin-bottom:3px;">
           Flows are off until you turn them on
         </div>
-        <p style="font-size:13px;line-height:1.55;color:oklch(0.44 0.04 250);margin:0;max-width:620px;">
+        <%!-- `oklch 0.44 0.04 250` is a slate-grey, not Human-blue: C 0.04 is a Rule-N near-neutral
+          (see `delete_style/1` in story_map_components.ex). Rule B needed `primary` at 55% to reach
+          L 0.44, landing at C 0.09 — a blue statement this helper copy never made. --%>
+        <p style="font-size:13px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0;max-width:620px;">
           This board ships with the {flow_names(@shipped_rows)} defaults, but nothing runs
           automatically yet — every card waits for a human. Turn a flow on to start handing
           its stage to the AI. Cut over one flow at a time; you can always turn it back off.
@@ -227,14 +233,14 @@ defmodule RelayWeb.FlowSettingsComponents do
     <div
       id="flows-legend"
       class="font-mono"
-      style="display:flex;gap:18px;flex-wrap:wrap;margin:22px 0 12px 0;font-size:11px;color:oklch(0.55 0.02 255);"
+      style="display:flex;gap:18px;flex-wrap:wrap;margin:22px 0 12px 0;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
     >
       <span style="display:flex;align-items:center;gap:6px;">
-        <span style="width:8px;height:8px;border-radius:2px;background:oklch(0.62 0.13 195);"></span>
+        <span style="width:8px;height:8px;border-radius:2px;background:var(--color-accent);"></span>
         shared_clean — many runs, fresh checkout each
       </span>
       <span style="display:flex;align-items:center;gap:6px;">
-        <span style="width:8px;height:8px;border-radius:2px;background:oklch(0.70 0.13 65);"></span>
+        <span style="width:8px;height:8px;border-radius:2px;background:var(--color-warning);"></span>
         exclusive — one run per machine, holds the tree
       </span>
     </div>
@@ -250,13 +256,13 @@ defmodule RelayWeb.FlowSettingsComponents do
     ~H"""
     <div
       id="flows-table"
-      style="border:1px solid oklch(0.92 0.006 255);border-radius:12px;overflow:hidden;background:oklch(1 0 0);box-shadow:0 1px 2px oklch(0.55 0.03 255/0.04);"
+      style="border:1px solid var(--color-base-300);border-radius:12px;overflow:hidden;background:var(--color-base-100);box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 4%, transparent);"
     >
       <div style="overflow-x:auto;">
         <div style="min-width:660px;">
           <div
             class="font-mono"
-            style="display:flex;align-items:center;gap:14px;padding:11px 18px;background:oklch(0.975 0.004 255);border-bottom:1px solid oklch(0.93 0.006 255);font-size:10.5px;font-weight:600;letter-spacing:0.06em;color:oklch(0.55 0.02 255);"
+            style="display:flex;align-items:center;gap:14px;padding:11px 18px;background:var(--color-field-hover);border-bottom:1px solid var(--color-base-300);font-size:10.5px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
           >
             <span style="flex:0 0 150px;">FLOW</span>
             <span style="flex:1;min-width:0;white-space:nowrap;">
@@ -267,15 +273,18 @@ defmodule RelayWeb.FlowSettingsComponents do
             <span style="flex:0 0 34px;"></span>
           </div>
 
-          <div :for={row <- @rows} style="border-bottom:1px solid oklch(0.95 0.005 255);">
+          <div
+            :for={row <- @rows}
+            style="border-bottom:1px solid color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));"
+          >
             <div id={"flow-row-#{row.flow.id}"} style={row_style(row.flow.enabled)}>
               <div style="flex:0 0 150px;display:flex;flex-direction:column;gap:3px;min-width:0;">
-                <span style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);letter-spacing:-0.01em;">
+                <span style="font-size:14px;font-weight:600;color:var(--color-base-content);letter-spacing:-0.01em;">
                   {flow_name(row.flow)}
                 </span>
                 <span
                   class="font-mono"
-                  style="display:flex;align-items:center;gap:8px;font-size:11px;color:oklch(0.60 0.02 255);"
+                  style="display:flex;align-items:center;gap:8px;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
                 >
                   <span id={"flow-#{row.flow.id}-nodes-count"}>
                     v{row.flow.version} · {nodes_label(row.flow)}
@@ -283,7 +292,7 @@ defmodule RelayWeb.FlowSettingsComponents do
                   <span
                     :if={row.customized?}
                     id={"flow-#{row.flow.id}-customized"}
-                    style="font-size:9px;font-weight:600;letter-spacing:0.05em;color:oklch(0.46 0.12 250);background:oklch(0.96 0.03 250);padding:2px 6px;border-radius:4px;"
+                    style="font-size:9px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-primary) 60%, var(--color-base-content));background:color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100));padding:2px 6px;border-radius:4px;"
                   >
                     customized
                   </span>
@@ -295,9 +304,13 @@ defmodule RelayWeb.FlowSettingsComponents do
                 style="flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:6px;row-gap:4px;"
               >
                 <.stage_chip stage={row.flow.pulls_from_stage} style={chip_style(:pulls)} />
-                <span style="color:oklch(0.72 0.02 255);font-size:12px;">→</span>
+                <span style="color:color-mix(in oklab, var(--color-base-content) 40%, transparent);font-size:12px;">
+                  →
+                </span>
                 <.stage_chip stage={row.flow.works_in_stage} style={chip_style(:works)} />
-                <span style="color:oklch(0.72 0.02 255);font-size:12px;">→</span>
+                <span style="color:color-mix(in oklab, var(--color-base-content) 40%, transparent);font-size:12px;">
+                  →
+                </span>
                 <.stage_chip stage={row.flow.lands_on_stage} style={chip_style(:lands)} />
               </div>
 
@@ -336,7 +349,7 @@ defmodule RelayWeb.FlowSettingsComponents do
                 <details class="dropdown dropdown-end" id={"flow-#{row.flow.id}-menu"}>
                   <summary
                     aria-label={"Actions for the #{flow_name(row.flow)} flow"}
-                    style="list-style:none;width:28px;height:28px;border-radius:7px;border:1px solid oklch(0.92 0.006 255);background:oklch(1 0 0);color:oklch(0.50 0.02 255);display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1;cursor:pointer;"
+                    style="list-style:none;width:28px;height:28px;border-radius:7px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1;cursor:pointer;"
                   >
                     ⋯
                   </summary>
@@ -375,7 +388,7 @@ defmodule RelayWeb.FlowSettingsComponents do
                         id={"flow-#{row.flow.id}-delete"}
                         phx-click="flow_delete"
                         phx-value-flow-id={row.flow.id}
-                        style="color:oklch(0.55 0.19 25);"
+                        style="color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));"
                       >
                         🗑 Delete flow
                       </button>
@@ -406,16 +419,16 @@ defmodule RelayWeb.FlowSettingsComponents do
     ~H"""
     <div
       id={"flow-#{@flow.id}-confirm"}
-      style="display:flex;align-items:flex-start;gap:12px;margin:0 18px 16px 18px;background:oklch(0.985 0.025 75);border:1px solid oklch(0.87 0.07 75);border-radius:10px;padding:14px 16px;"
+      style="display:flex;align-items:flex-start;gap:12px;margin:0 18px 16px 18px;background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));border-radius:10px;padding:14px 16px;"
     >
-      <span style="width:22px;height:22px;border-radius:50%;background:oklch(0.70 0.13 65);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">
+      <span style="width:22px;height:22px;border-radius:50%;background:var(--color-warning);color:var(--color-warning-content);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">
         !
       </span>
       <div style="flex:1;">
-        <div style="font-size:13.5px;font-weight:600;color:oklch(0.42 0.10 65);margin-bottom:3px;">
+        <div style="font-size:13.5px;font-weight:600;color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));margin-bottom:3px;">
           {confirm_title(@flow)}
         </div>
-        <p style="font-size:12.5px;line-height:1.5;color:oklch(0.44 0.05 65);margin:0 0 10px 0;max-width:560px;">
+        <p style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-warning) 40%, var(--color-base-content));margin:0 0 10px 0;max-width:560px;">
           {confirm_body(@flow)}
         </p>
         <.preflight_list :if={@preflight} flow={@flow} preflight={@preflight} />
@@ -425,7 +438,7 @@ defmodule RelayWeb.FlowSettingsComponents do
             id={"flow-#{@flow.id}-confirm-cta"}
             phx-click="flow_confirm_toggle"
             phx-value-flow-id={@flow.id}
-            style="background:oklch(0.62 0.14 65);color:oklch(1 0 0);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+            style="background:var(--color-warning);color:var(--color-warning-content);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
           >
             {confirm_cta(@flow)}
           </button>
@@ -433,7 +446,7 @@ defmodule RelayWeb.FlowSettingsComponents do
             type="button"
             id={"flow-#{@flow.id}-confirm-cancel"}
             phx-click="flow_cancel_panel"
-            style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.04 65);color:oklch(0.48 0.04 65);border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+            style="background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
           >
             Cancel
           </button>
@@ -465,7 +478,9 @@ defmodule RelayWeb.FlowSettingsComponents do
           name={if row.ok?, do: "hero-check-circle", else: "hero-exclamation-triangle"}
           class={["w-4 h-4 shrink-0 mt-px", if(row.ok?, do: "text-success", else: "text-warning")]}
         />
-        <span style="color:oklch(0.42 0.04 65);">{row.text}</span>
+        <span style="color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));">
+          {row.text}
+        </span>
       </li>
     </ul>
     """
@@ -640,46 +655,66 @@ defmodule RelayWeb.FlowSettingsComponents do
 
   defp row_style(enabled?) do
     "display:flex;align-items:center;gap:14px;padding:14px 18px;" <>
-      if(enabled?, do: "", else: "background:oklch(0.992 0.002 255);")
+      if(enabled?, do: "", else: "background:var(--color-field-bg);")
   end
 
   @chip_base "font-size:11.5px;font-weight:500;border-radius:6px;padding:4px 9px;white-space:nowrap;"
 
   defp chip_style(:pulls),
     do:
-      @chip_base <> "color:oklch(0.50 0.02 255);background:oklch(0.965 0.004 255);border:1px solid oklch(0.92 0.006 255);"
+      @chip_base <>
+        "color:color-mix(in oklab, var(--color-base-content) 70%, transparent);background:var(--color-field-hover);border:1px solid var(--color-base-300);"
 
   defp chip_style(:works),
-    do: @chip_base <> "color:oklch(0.46 0.14 292);background:oklch(0.98 0.03 292);border:1px solid oklch(0.91 0.05 292);"
+    do:
+      @chip_base <>
+        "color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 20%, var(--color-base-100));"
 
   defp chip_style(:lands),
-    do: @chip_base <> "color:oklch(0.44 0.13 250);background:oklch(0.98 0.012 250);border:1px solid oklch(0.91 0.03 250);"
+    do:
+      @chip_base <>
+        "color:color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content));background:color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-primary) 25%, var(--color-base-100));"
 
   defp chip_style(:missing),
-    do: @chip_base <> "color:oklch(0.48 0.11 65);background:oklch(0.98 0.04 75);border:1px solid oklch(0.87 0.07 75);"
+    do:
+      @chip_base <>
+        "color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));"
 
   defp iso_style(isolation, enabled?) do
     "display:inline-flex;align-items:center;gap:6px;font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:6px;" <>
       case isolation do
-        :shared_clean -> "background:oklch(0.97 0.03 195);color:oklch(0.42 0.10 195);"
-        :exclusive -> "background:oklch(0.98 0.04 75);color:oklch(0.48 0.11 65);"
+        :shared_clean ->
+          "background:color-mix(in oklab, var(--color-accent) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content));"
+
+        :exclusive ->
+          "background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));"
       end <>
       if(enabled?, do: "", else: "opacity:0.55;")
   end
 
-  defp iso_dot(:shared_clean), do: "width:6px;height:6px;border-radius:2px;background:oklch(0.62 0.13 195);"
-  defp iso_dot(:exclusive), do: "width:6px;height:6px;border-radius:2px;background:oklch(0.70 0.13 65);"
+  defp iso_dot(:shared_clean), do: "width:6px;height:6px;border-radius:2px;background:var(--color-accent);"
+  defp iso_dot(:exclusive), do: "width:6px;height:6px;border-radius:2px;background:var(--color-warning);"
 
   defp toggle_style(enabled?, missing?) do
     "width:38px;height:22px;border-radius:11px;position:relative;transition:background 0.18s;border:none;padding:0;" <>
-      if(enabled?, do: "background:oklch(0.60 0.14 250);", else: "background:oklch(0.88 0.01 255);") <>
+      if(enabled?,
+        do: "background:var(--color-primary);",
+        else: "background:color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));"
+      ) <>
       if(missing?, do: "opacity:0.45;cursor:not-allowed;", else: "cursor:pointer;")
   end
 
+  # The knob is INK on the track's fill, not a surface, so it splits on `enabled?` the way
+  # `toggle_style/2` does. `base-100` here read as "white disc" from the light artboard, but it
+  # is a surface token: in dark it resolves to 0.26 and punched a near-black disc into the 0.65
+  # blue ON track — darker even than the 0.365 OFF track. The `-content` tokens are the ones
+  # pinned light in both themes (0.98), which is what a knob needs.
   defp knob_style(enabled?) do
+    knob = if enabled?, do: "var(--color-primary-content)", else: "var(--color-neutral-content)"
+
     "position:absolute;top:2px;" <>
       if(enabled?, do: "right:2px;", else: "left:2px;") <>
-      "width:18px;height:18px;border-radius:50%;background:oklch(1 0 0);transition:all 0.18s;box-shadow:0 1px 2px oklch(0.4 0.02 255/0.3);"
+      "width:18px;height:18px;border-radius:50%;background:#{knob};transition:all 0.18s;box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 30%, transparent);"
   end
 
   attr :flow, Flow, required: true
@@ -688,16 +723,16 @@ defmodule RelayWeb.FlowSettingsComponents do
     ~H"""
     <div
       id={"flow-#{@flow.id}-reset-confirm"}
-      style="display:flex;align-items:flex-start;gap:12px;margin:0 18px 16px 18px;background:oklch(0.985 0.025 75);border:1px solid oklch(0.87 0.07 75);border-radius:10px;padding:14px 16px;"
+      style="display:flex;align-items:flex-start;gap:12px;margin:0 18px 16px 18px;background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));border-radius:10px;padding:14px 16px;"
     >
-      <span style="width:22px;height:22px;border-radius:50%;background:oklch(0.70 0.13 65);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">
+      <span style="width:22px;height:22px;border-radius:50%;background:var(--color-warning);color:var(--color-warning-content);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">
         !
       </span>
       <div style="flex:1;">
-        <div style="font-size:13.5px;font-weight:600;color:oklch(0.42 0.10 65);margin-bottom:3px;">
+        <div style="font-size:13.5px;font-weight:600;color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));margin-bottom:3px;">
           Reset the {flow_name(@flow)} flow to the shipped default?
         </div>
-        <p style="font-size:12.5px;line-height:1.5;color:oklch(0.44 0.05 65);margin:0 0 12px 0;max-width:560px;">
+        <p style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-warning) 40%, var(--color-base-content));margin:0 0 12px 0;max-width:560px;">
           Replace this flow's definition with the shipped default? Your customizations are
           overwritten. The flow's triggers and on/off state are untouched.
         </p>
@@ -707,7 +742,7 @@ defmodule RelayWeb.FlowSettingsComponents do
             id={"flow-#{@flow.id}-reset-cta"}
             phx-click="flow_confirm_reset"
             phx-value-flow-id={@flow.id}
-            style="background:oklch(0.62 0.14 65);color:oklch(1 0 0);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+            style="background:var(--color-warning);color:var(--color-warning-content);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
           >
             Reset {flow_name(@flow)}
           </button>
@@ -715,7 +750,7 @@ defmodule RelayWeb.FlowSettingsComponents do
             type="button"
             id={"flow-#{@flow.id}-reset-cancel"}
             phx-click="flow_cancel_panel"
-            style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.04 65);color:oklch(0.48 0.04 65);border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+            style="background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
           >
             Cancel
           </button>
@@ -733,16 +768,16 @@ defmodule RelayWeb.FlowSettingsComponents do
     ~H"""
     <div
       id={"flow-#{@flow.id}-delete-confirm"}
-      style="display:flex;align-items:flex-start;gap:12px;margin:0 18px 16px 18px;background:oklch(0.985 0.02 25);border:1px solid oklch(0.87 0.07 25);border-radius:10px;padding:14px 16px;"
+      style="display:flex;align-items:flex-start;gap:12px;margin:0 18px 16px 18px;background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 35%, var(--color-base-100));border-radius:10px;padding:14px 16px;"
     >
-      <span style="width:22px;height:22px;border-radius:50%;background:oklch(0.62 0.19 25);color:oklch(1 0 0);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">
+      <span style="width:22px;height:22px;border-radius:50%;background:var(--color-error);color:var(--color-error-content);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">
         !
       </span>
       <div style="flex:1;">
-        <div style="font-size:13.5px;font-weight:600;color:oklch(0.45 0.16 25);margin-bottom:3px;">
+        <div style="font-size:13.5px;font-weight:600;color:color-mix(in oklab, var(--color-error) 55%, var(--color-base-content));margin-bottom:3px;">
           Delete the {flow_name(@flow)} flow?
         </div>
-        <p style="font-size:12.5px;line-height:1.5;color:oklch(0.46 0.08 25);margin:0 0 10px 0;max-width:560px;">
+        <p style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-error) 55%, var(--color-base-content));margin:0 0 10px 0;max-width:560px;">
           This permanently removes the flow from this board and its version history. A shipped
           default flow will not come back on the next deploy — use Reset to default instead if
           you only want to undo edits.
@@ -750,7 +785,7 @@ defmodule RelayWeb.FlowSettingsComponents do
         <p
           :if={@mid_run > 0}
           id={"flow-#{@flow.id}-delete-midrun"}
-          style="font-size:12.5px;line-height:1.5;color:oklch(0.46 0.08 25);margin:0 0 10px 0;max-width:560px;font-weight:600;"
+          style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-error) 55%, var(--color-base-content));margin:0 0 10px 0;max-width:560px;font-weight:600;"
         >
           {@mid_run} cards are mid-run on this flow. Deleting it orphans them — their next
           hand-off fails with <span style="font-family:ui-monospace,monospace;">no_flow</span>.
@@ -761,7 +796,7 @@ defmodule RelayWeb.FlowSettingsComponents do
             id={"flow-#{@flow.id}-delete-cta"}
             phx-click="flow_confirm_delete"
             phx-value-flow-id={@flow.id}
-            style="background:oklch(0.58 0.19 25);color:oklch(1 0 0);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+            style="background:var(--color-error);color:var(--color-error-content);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
           >
             Delete {flow_name(@flow)}
           </button>
@@ -769,7 +804,7 @@ defmodule RelayWeb.FlowSettingsComponents do
             type="button"
             id={"flow-#{@flow.id}-delete-cancel"}
             phx-click="flow_cancel_panel"
-            style="background:oklch(1 0 0);border:1px solid oklch(0.88 0.04 25);color:oklch(0.48 0.06 25);border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+            style="background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-error) 30%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 60%, var(--color-base-content));border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
           >
             Cancel
           </button>

@@ -7,20 +7,20 @@ defmodule RelayWeb.SupportComponentsTest do
   describe "support_badge/1" do
     test "pill variant, voted: violet fill + white text + arrow and count" do
       html = render_component(&support_badge/1, %{count: 12, voted: true, variant: :pill})
-      assert html =~ "oklch(0.60 0.14 250)"
+      assert html =~ "var(--color-primary)"
       assert html =~ "↑"
       assert html =~ "12"
     end
 
     test "pill variant, not voted: outlined violet" do
       html = render_component(&support_badge/1, %{count: 3, voted: false, variant: :pill})
-      assert html =~ "oklch(0.48 0.10 250)"
-      assert html =~ "1px solid oklch(0.86 0.05 250)"
+      assert html =~ "color-mix(in oklab, var(--color-primary) 65%, var(--color-base-content))"
+      assert html =~ "1px solid color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100))"
     end
 
     test "count variant: muted internal card-face label" do
       html = render_component(&support_badge/1, %{count: 7, variant: :count})
-      assert html =~ "oklch(0.56 0.02 255)"
+      assert html =~ "color-mix(in oklab, var(--color-base-content) 65%, transparent)"
       assert html =~ ~s(title="Public supporters")
       assert html =~ "↑"
       assert html =~ "7"

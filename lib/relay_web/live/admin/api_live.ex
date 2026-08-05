@@ -32,7 +32,7 @@ defmodule RelayWeb.Admin.ApiLive do
     <Layouts.app flash={@flash} current_scope={@current_scope}>
       <div class="mx-auto max-w-5xl px-4 py-8">
         <h1 class="text-2xl font-semibold">API requests</h1>
-        <p class="mt-1 text-sm text-base-content/60">
+        <p class="mt-1 text-sm text-base-content/65">
           Live view of the last 200 inbound API requests. In-memory only — cleared on restart.
         </p>
 
@@ -43,7 +43,7 @@ defmodule RelayWeb.Admin.ApiLive do
         >
           <div
             id="requests-empty"
-            class="hidden only:block p-8 text-center text-sm text-base-content/60"
+            class="hidden only:block p-8 text-center text-sm text-base-content/65"
           >
             No API requests recorded yet.
           </div>
@@ -54,26 +54,26 @@ defmodule RelayWeb.Admin.ApiLive do
               phx-click={JS.toggle(to: "##{dom_id}-params")}
               class="grid w-full grid-cols-[7rem_3.5rem_1fr_auto_5rem] items-center gap-3 px-4 py-2 text-left text-sm hover:bg-base-200/60"
             >
-              <span class="font-mono text-xs text-base-content/60">
+              <span class="font-mono text-xs text-base-content/65">
                 {Calendar.strftime(e.at, "%H:%M:%S")}
               </span>
               <span class="font-mono font-semibold">{e.method}</span>
               <span class="truncate font-mono">{e.path}</span>
               <span class={["badge badge-sm", status_class(e.status)]}>{e.status || "—"}</span>
-              <span class="text-right font-mono text-xs text-base-content/60">{e.duration_ms}ms</span>
+              <span class="text-right font-mono text-xs text-base-content/65">{e.duration_ms}ms</span>
             </button>
 
             <dl
               id={"#{dom_id}-params"}
               class="hidden grid grid-cols-[6rem_1fr] gap-x-4 gap-y-1 bg-base-200/40 px-4 py-3 text-xs"
             >
-              <dt class="text-base-content/60">Board</dt>
+              <dt class="text-base-content/65">Board</dt>
               <dd class="font-mono">{board_label(e.board)}</dd>
-              <dt class="text-base-content/60">Query</dt>
+              <dt class="text-base-content/65">Query</dt>
               <dd class="font-mono break-all">{blank(e.query)}</dd>
-              <dt class="text-base-content/60">Remote IP</dt>
+              <dt class="text-base-content/65">Remote IP</dt>
               <dd class="font-mono">{blank(e.remote_ip)}</dd>
-              <dt class="text-base-content/60">Params</dt>
+              <dt class="text-base-content/65">Params</dt>
               <dd><pre class="whitespace-pre-wrap break-all font-mono">{e.params}</pre></dd>
             </dl>
           </div>

@@ -2,11 +2,12 @@ defmodule RelayWeb.FlowMetricsComponents do
   @moduledoc "Presentation components for the Flow Metrics tab (RLY-209)."
   use Phoenix.Component
 
-  # Artboard colors (docs/designs/Relay Flow Metrics.dc.html lines 246, 341). Kept as function
-  # results, NOT module attributes — inside ~H a bare `@green` reads assigns, not an attribute.
-  defp green, do: "oklch(0.60 0.13 155)"
-  defp amber, do: "oklch(0.70 0.13 65)"
-  defp rose, do: "oklch(0.62 0.16 22)"
+  # Artboard colors (docs/designs/Relay Flow Metrics.dc.html lines 246, 341), re-expressed as
+  # daisyUI tokens (RE237) so they flip with data-theme. Kept as function results, NOT module
+  # attributes — inside ~H a bare `@green` reads assigns, not an attribute.
+  defp green, do: "var(--color-success)"
+  defp amber, do: "var(--color-warning)"
+  defp rose, do: "var(--color-error)"
 
   attr :id, :string, required: true
   attr :split, :map, required: true, doc: "collapsed %{ok:, needs:, fail:, ok_pct:, needs_pct:, fail_pct:, total:}"
@@ -17,7 +18,7 @@ defmodule RelayWeb.FlowMetricsComponents do
     <div id={@id}>
       <div
         title={"#{@split.ok_pct}% succeeded · #{@split.needs_pct}% needs input · #{@split.fail_pct}% failed"}
-        style="display:flex;width:100%;max-width:158px;height:8px;border-radius:5px;overflow:hidden;background:oklch(0.94 0.006 255);"
+        style="display:flex;width:100%;max-width:158px;height:8px;border-radius:5px;overflow:hidden;background:var(--color-base-300);"
       >
         <div style={"height:100%;width:#{@split.ok_pct}%;background:#{green()};"} />
         <div style={"height:100%;width:#{@split.needs_pct}%;background:#{amber()};"} />
@@ -30,6 +31,8 @@ defmodule RelayWeb.FlowMetricsComponents do
     """
   end
 
-  defp label_color(fail_pct) when fail_pct >= 25, do: "oklch(0.54 0.14 22)"
-  defp label_color(_), do: "oklch(0.58 0.02 255)"
+  defp label_color(fail_pct) when fail_pct >= 25,
+    do: "color-mix(in oklab, var(--color-error) 80%, var(--color-base-content))"
+
+  defp label_color(_), do: "color-mix(in oklab, var(--color-base-content) 55%, transparent)"
 end
