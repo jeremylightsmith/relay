@@ -264,6 +264,22 @@ defmodule Relay.Factory do
     node_job |> merge_attributes(attrs) |> evaluate_lazy_attributes()
   end
 
+  def talk_session_factory(attrs) do
+    {card, attrs} = Map.pop_lazy(attrs, :card, fn -> insert(:card) end)
+
+    %Schemas.TalkSession{card_id: card.id, seed_summary: "2 fields · no plan yet · 0 runs", seed_fields: []}
+    |> merge_attributes(attrs)
+    |> evaluate_lazy_attributes()
+  end
+
+  def talk_turn_factory(attrs) do
+    {session, attrs} = Map.pop_lazy(attrs, :talk_session, fn -> insert(:talk_session) end)
+
+    %Schemas.TalkTurn{talk_session_id: session.id, prompt: "why is this stuck?", status: :queued}
+    |> merge_attributes(attrs)
+    |> evaluate_lazy_attributes()
+  end
+
   defp pop_first(attrs, [], default), do: {default, attrs}
 
   defp pop_first(attrs, [key | rest], default) do

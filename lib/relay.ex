@@ -40,6 +40,7 @@ defmodule Relay do
       Runs.SchedulerSupervisor,
       Runs.Supervisor,
       StoryMap,
+      Talk,
       Votes
     ]
 end

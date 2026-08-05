@@ -21,6 +21,8 @@ what each term *means*; the sections below say what each value *does*.
 | Run status | `running` · `parked` · `done` · `failed` · `cancelled` | `Schemas.Run.statuses/0` |
 | Stage category | `unstarted` · `planning` · `in_progress` · `complete` | `Schemas.Stage.categories/0` |
 | Stage type | `queue` · `work` · `planning` · `review` · `done` | `Schemas.Stage.types/0` |
+| Talk event kind | `user` · `tool` · `out` · `error` | `Schemas.TalkEvent.kinds/0` |
+| Talk turn status | `queued` · `claimed` · `done` · `stopped` · `failed` | `Schemas.TalkTurn.statuses/0` |
 <!-- END generated: vocabularies -->
 
 These are the *runtime* vocabularies, not every closed set in the codebase. The flow-**definition**
@@ -263,6 +265,23 @@ A talk job never refreshes the card's `agent_heartbeat_at` (a talk turn is not t
 working the card — the baton does not move) and is never requeued by the orphan reaper (a
 resumed `claude` session must land back on the executor that holds it, never a different
 machine); it ends only when a human presses Stop or it reports an outcome.
+
+## Talk turn status
+
+A talk turn is one human message and the work it caused (RE268 / ADR 0009), tracked separately
+from the `node_jobs` row that carries it to an executor.
+
+| Status | Meaning | Next |
+| --- | --- | --- |
+| `queued` | Written when the person hits Enter; no executor holds the turn's job yet. | `claimed` (an executor takes it) or `stopped` (the person hits Stop before it is claimed). |
+| `claimed` | An executor is running `claude -p --resume` for this turn. | `done`, `stopped` or `failed`. |
+| `done` | The turn finished normally; the executor's `claude_session_id` is persisted so the next turn resumes it. Terminal. | — |
+| `stopped` | The person hit Stop. A normal, **non-error** end state — the job is revoked and the turn's partial output stays in the transcript. Terminal. | — |
+| `failed` | The executor reported an error. Terminal. | — |
+
+`queued` and `claimed` are the turn's *active* statuses (`Schemas.TalkTurn.active_statuses/0`):
+the pane shows Stop instead of the composer, and a second `post_message/3` on the same session
+is refused while one is active.
 
 ## Node outcomes
 

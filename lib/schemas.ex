@@ -33,6 +33,9 @@ defmodule Schemas do
       StoryActivity,
       StoryTask,
       SubTask,
+      TalkEvent,
+      TalkSession,
+      TalkTurn,
       User,
       UserApiToken,
       Vote
