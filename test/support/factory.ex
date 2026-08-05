@@ -247,9 +247,13 @@ defmodule Relay.Factory do
     {node_execution, attrs} =
       Map.pop_lazy(attrs, :node_execution, fn -> insert(:node_execution) end)
 
+    run = Relay.Repo.get!(Schemas.Run, node_execution.run_id)
+
     node_job = %Schemas.NodeJob{
       run_id: node_execution.run_id,
       node_execution_id: node_execution.id,
+      card_id: run.card_id,
+      kind: :node,
       node_key: node_execution.node_key,
       state: :claimed,
       executor_name: "mac-1",

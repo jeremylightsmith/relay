@@ -113,7 +113,12 @@ defmodule Relay.Runs do
 
   @doc "The run's single queued or claimed job, or nil."
   def active_job(%Run{id: run_id}) do
-    Repo.one(from j in NodeJob, where: j.run_id == ^run_id and j.state in ^NodeJob.active_states())
+    # `run_id == ^run_id` already excludes talk jobs (always run_id: nil), but the kind clause
+    # is explicit per ADR 0009 so the filter survives a future refactor of this query.
+    Repo.one(
+      from j in NodeJob,
+        where: j.run_id == ^run_id and j.state in ^NodeJob.active_states() and j.kind in ^NodeJob.flow_kinds()
+    )
   end
 
   @doc "Subscribes the calling process to `board_id`'s runs topic (`board:<id>:runs`)."
@@ -527,6 +532,9 @@ defmodule Relay.Runs do
       join: c in Card,
       on: c.id == r.card_id,
       where: c.board_id == ^board.id and j.state in ^NodeJob.claimed_states(),
+      # Explicit: a talk job carries no run_id (excluded by the inner join already), and this
+      # function's result is `run_id => executor_name`, which is meaningless for a talk turn.
+      where: j.kind in ^NodeJob.flow_kinds(),
       select: {j.run_id, j.executor_name}
     )
     |> Repo.all()
@@ -1069,17 +1077,20 @@ defmodule Relay.Runs do
   defp do_claim_next_job(board_id, name, allowed) do
     query =
       from j in NodeJob,
-        join: r in Run,
-        on: r.id == j.run_id,
         join: c in Card,
-        on: c.id == r.card_id,
+        on: c.id == j.card_id,
         where: c.board_id == ^board_id,
         where: j.state == :queued,
-        # Unpinned jobs need advertised free capacity in their class; a job
-        # already pinned to this executor bypasses the capacity filter.
+        # Unpinned FLOW jobs need advertised free capacity in their class; a job already
+        # pinned to this executor bypasses the capacity filter. An unpinned TALK job also
+        # bypasses it (ADR 0009 §3): a turn runs in the card's own worktree and advertises no
+        # isolation class, and the FIRST turn on a card is what CREATES the executor pin, so
+        # refusing it for want of an advertised slot would mean a card nobody has talked to
+        # can never be talked to on a busy executor.
         where:
           j.executor_name == ^name or
-            (is_nil(j.executor_name) and fragment("?->>'isolation'", j.payload) in ^allowed),
+            (is_nil(j.executor_name) and
+               (j.kind == ^NodeJob.talk_kind() or fragment("?->>'isolation'", j.payload) in ^allowed)),
         order_by: [asc: j.id],
         limit: 1,
         lock: "FOR UPDATE SKIP LOCKED"
@@ -1098,7 +1109,10 @@ defmodule Relay.Runs do
   # On claiming an exclusive run's job, persist the holder on the run row so BOTH
   # readers — the claim layer (exclusive_holder/2) and the scheduler (active_runs/1) —
   # derive the same pin from ONE column (RLY-199). Idempotent: a re-claim by the same
-  # holder rewrites the same name. shared_clean runs are never pinned.
+  # holder rewrites the same name. shared_clean runs are never pinned. A talk payload never
+  # matches `%{"isolation" => "exclusive"}`, so this is a no-op for talk — the TALK pin is
+  # written by `Relay.Talk.finish_turn/3` onto the session row instead, one column, one
+  # writer, per RLY-199's rule.
   defp maybe_pin_run(%NodeJob{run_id: run_id, payload: %{"isolation" => "exclusive"}}, name) do
     Repo.update_all(from(r in Run, where: r.id == ^run_id), set: [pinned_executor_name: name])
     :ok
@@ -1130,13 +1144,16 @@ defmodule Relay.Runs do
         # we can't see would cross the board boundary, and a stale/garbage id would become
         # a kill order. Jobs are never hard-deleted — they transition to :revoked/:done — so
         # "exists here and is no longer active" covers every real revoke.
+        #
+        # Joined on card_id (not through Run) so TALK jobs are included — this is what makes
+        # the Stop button reach the executor: `Relay.Runs.revoke_talk_job/1` flips the job to
+        # :revoked, and the executor learns to kill its `claude -p` from this same heartbeat
+        # path a flow job's revoke already used.
         on_board =
           Repo.all(
             from j in NodeJob,
-              join: r in Run,
-              on: r.id == j.run_id,
               join: c in Card,
-              on: c.id == r.card_id,
+              on: c.id == j.card_id,
               where: c.board_id == ^board_id and j.id in ^ids,
               select: {j.id, j.state}
           )
@@ -1178,7 +1195,12 @@ defmodule Relay.Runs do
             on: r.id == j.run_id,
             join: c in Card,
             on: c.id == r.card_id,
+            # A talk turn is not the agent working the card (ADR 0009 §6: the baton does not
+            # move), so it must never stamp agent_heartbeat_at — the inner join on Run already
+            # excludes it (a talk job's run_id is nil), and this filter makes that exclusion
+            # explicit rather than incidental.
             where: c.board_id == ^board_id and j.id in ^ids and j.state in ^NodeJob.active_states(),
+            where: j.kind in ^NodeJob.flow_kinds(),
             select: c.ref_number
           )
           |> Repo.all()
@@ -1261,7 +1283,10 @@ defmodule Relay.Runs do
           on: r.id == j.run_id,
           join: c in Card,
           on: c.id == r.card_id,
-          where: j.id == ^id and c.board_id == ^board_id
+          # A talk job can never be reported through POST /api/node-jobs/:id/outcome — it has
+          # no run to attach an outcome to, and the inner join on Run already excludes it (a
+          # talk job's run_id is nil); this filter makes that exclusion explicit.
+          where: j.id == ^id and c.board_id == ^board_id and j.kind in ^NodeJob.flow_kinds()
       )
 
     cond do
@@ -1437,6 +1462,10 @@ defmodule Relay.Runs do
           join: c in Card,
           on: c.id == r.card_id,
           where: c.board_id == ^board.id and j.state == :queued,
+          # Explicit: "work has stopped" is a FLOW diagnosis — a talk job queued because no
+          # executor is connected is a separate, not-yet-built story, and the inner join on
+          # Run already excludes it.
+          where: j.kind in ^NodeJob.flow_kinds(),
           select: %{count: count(j.id), oldest: min(j.inserted_at)}
       )
 
@@ -1689,6 +1718,9 @@ defmodule Relay.Runs do
       where: c.board_id == ^board.id,
       where: j.state in ^NodeJob.active_states(),
       where: not is_nil(j.executor_name),
+      # Explicit: the runners view's per-executor job list is FLOW jobs only (step 1) — the
+      # inner join on Run already excludes talk jobs (run_id nil).
+      where: j.kind in ^NodeJob.flow_kinds(),
       order_by: [asc: j.claimed_at, asc: j.id],
       select: %{
         executor_name: j.executor_name,
@@ -1740,6 +1772,10 @@ defmodule Relay.Runs do
           join: c in Card,
           on: c.id == r.card_id,
           where: c.board_id == ^board_id and j.executor_name == ^name and j.state in ^NodeJob.active_states(),
+          # Explicit: a stale executor's talk turn is a separate recovery story (it stays
+          # claimed until a human presses Stop — see requeue_orphaned_jobs/3's step-1 note),
+          # and the inner join on Run already excludes it.
+          where: j.kind in ^NodeJob.flow_kinds(),
           select: {j, r, c.id}
       )
 
@@ -1771,6 +1807,12 @@ defmodule Relay.Runs do
       recovery must land back on the same executor. Keeping `executor_name` routes it there via
       the pinned-claim path (RLY-135), which bypasses the advertised-capacity filter. Only
       `shared_clean` jobs are unpinned, since any executor can pick those up.
+
+  **Known step-1 limitation (RE268 / ADR 0009):** a TALK turn is never requeued here — the
+  query below is explicitly `kind in NodeJob.flow_kinds()`. Requeueing a talk job would hand a
+  resumed `claude` session to a machine that does not hold it, so a turn whose executor dies
+  stays `claimed` until a human presses Stop (`Relay.Runs.revoke_talk_job/1` revokes
+  unconditionally).
   """
   def requeue_orphaned_jobs(%Board{id: board_id}, %Executor{} = executor, running_ids) do
     held = for id <- running_ids, int = to_job_id(id), is_integer(int), do: int
@@ -1785,6 +1827,7 @@ defmodule Relay.Runs do
       where: j.executor_name == ^executor.name,
       where: j.state in ^NodeJob.active_states(),
       where: not is_nil(j.claimed_at) and j.claimed_at < ^cutoff,
+      where: j.kind in ^NodeJob.flow_kinds(),
       select: {j, c.id}
     )
     |> Repo.all()
@@ -2337,6 +2380,8 @@ defmodule Relay.Runs do
     %NodeJob{
       run_id: run.id,
       node_execution_id: execution.id,
+      card_id: run.card_id,
+      kind: :node,
       node_key: execution.node_key,
       state: :queued,
       payload: payload,
@@ -2345,6 +2390,60 @@ defmodule Relay.Runs do
     |> NodeJob.changeset()
     |> Repo.insert!()
   end
+
+  @doc ~S"""
+  Inserts one **talk** turn's dispatch row (ADR 0009): `kind: :talk`, no run, no node
+  execution, `card_id` set. `executor_name` is the session's pin — nil for the first turn on a
+  card, which is what lets ANY executor take it and become the holder. Mirrors
+  `exclusive_holder/2`'s pin-on-the-job-row shape exactly, so `claim_next_job/1` needs no Talk
+  knowledge.
+  """
+  def insert_talk_job!(%Card{} = card, payload, executor_name) when is_map(payload) do
+    %NodeJob{
+      kind: :talk,
+      card_id: card.id,
+      node_key: "talk",
+      state: :queued,
+      payload: payload,
+      executor_name: executor_name
+    }
+    |> NodeJob.changeset()
+    |> Repo.insert!()
+  end
+
+  @doc "The job row with `id`, or nil. The read `Relay.Talk` uses to resolve a turn's job."
+  def get_job(id) when is_integer(id), do: Repo.get(NodeJob, id)
+
+  @doc ~S"""
+  Withdraws a live **talk** job so the heartbeat's `revoked_among/2` tells its executor to kill
+  the running `claude -p` — the Stop button (ADR 0009 §1). Unconditional server-side: a turn
+  whose executor is already gone still ends, which is the only thing that stops such a turn.
+  Flow jobs have no clause here on purpose: they are revoked through the run lifecycle
+  (`revoke_active_jobs/1`), and a second path into `:revoked` is exactly the duplicated-fact
+  bug AGENTS.md forbids.
+  """
+  def revoke_talk_job(%NodeJob{kind: :talk} = job) do
+    {n, _} =
+      Repo.update_all(
+        from(j in NodeJob, where: j.id == ^job.id and j.state in ^NodeJob.active_states()),
+        set: [state: :revoked, finished_at: now()]
+      )
+
+    if n == 1, do: :ok, else: {:error, :not_active}
+  end
+
+  @doc "Finalises a **talk** job once its turn has reported an outcome. Terminal; idempotent-safe (a second call simply matches no active row)."
+  def finish_talk_job!(%NodeJob{kind: :talk} = job) do
+    Repo.update_all(
+      from(j in NodeJob, where: j.id == ^job.id and j.state in ^NodeJob.active_states()),
+      set: [state: :done, finished_at: now()]
+    )
+
+    Repo.get!(NodeJob, job.id)
+  end
+
+  @doc "How many `## Task N:` steps a card's plan declares. Wraps `Relay.Runs.PlanTasks` so the Talk seed line reads the plan through the ONE parser the foreach node uses."
+  def plan_task_count(plan), do: plan |> PlanTasks.parse() |> length()
 
   # Exclusive runs have absolute executor affinity (ADR 0006 §5): the machine that
   # claims a run's first job is persisted as the run's `pinned_executor_name`
@@ -2408,7 +2507,13 @@ defmodule Relay.Runs do
 
   @doc false
   def revoke_active_jobs(%Run{id: run_id}) do
-    jobs = Repo.all(from j in NodeJob, where: j.run_id == ^run_id and j.state in ^NodeJob.active_states())
+    # `run_id == ^run_id` already excludes talk jobs (always run_id: nil), but the kind clause
+    # is explicit per ADR 0009 so the filter survives a future refactor of this query.
+    jobs =
+      Repo.all(
+        from j in NodeJob,
+          where: j.run_id == ^run_id and j.state in ^NodeJob.active_states() and j.kind in ^NodeJob.flow_kinds()
+      )
 
     Enum.each(jobs, fn job ->
       revoked = job |> Changeset.change(state: :revoked, finished_at: now()) |> Repo.update!()

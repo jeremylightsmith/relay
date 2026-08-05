@@ -29,9 +29,11 @@ defmodule Schemas.NodeJob do
     field :payload, :map, default: %{}
     field :claimed_at, :utc_datetime
     field :finished_at, :utc_datetime
+    field :kind, Ecto.Enum, values: [:node, :talk], default: :node
 
     belongs_to :run, Schemas.Run
     belongs_to :node_execution, Schemas.NodeExecution
+    belongs_to :card, Schemas.Card
 
     timestamps(type: :utc_datetime)
   end
@@ -51,12 +53,52 @@ defmodule Schemas.NodeJob do
   @doc "The closed set of node-job states."
   def states, do: Ecto.Enum.values(__MODULE__, :state)
 
-  @doc "Validates a programmatically-built job row."
+  @doc ~S"""
+  The closed set of dispatchers that write this table (ADR 0009). `:node` is a flow-dispatched
+  node job; `:talk` is one turn of a person-driven Talk session, carrying no run. Defined ONCE
+  here — no consumer re-types either literal.
+  """
+  def kinds, do: Ecto.Enum.values(__MODULE__, :kind)
+
+  @doc "The kinds a FLOW dispatches — every query that means \"the engine's jobs\" filters on this."
+  def flow_kinds, do: [:node]
+
+  @doc "The single person-dispatched kind (ADR 0009). Deliberately scalar: there is one, and code that means \"this is a talk turn\" should read as a comparison, not a membership test."
+  def talk_kind, do: :talk
+
+  @doc ~S"""
+  Validates a programmatically-built job row. `run_id`/`node_execution_id` are required for a
+  flow job and forbidden for a talk turn — a talk turn deliberately synthesises no `Run`
+  (ADR 0009), because a Run would make every card with an open conversation read as having an
+  active run. `card_id` is required for both: it is the board-scoping join for the whole table.
+  """
   def changeset(job) do
     job
     |> change()
-    |> validate_required([:run_id, :node_execution_id, :node_key, :state])
+    |> validate_required([:card_id, :node_key, :state, :kind])
+    |> validate_kind_shape()
+    |> foreign_key_constraint(:card_id)
     |> foreign_key_constraint(:run_id)
     |> foreign_key_constraint(:node_execution_id)
+  end
+
+  defp validate_kind_shape(changeset) do
+    case get_field(changeset, :kind) do
+      :talk ->
+        changeset
+        |> validate_nil(:run_id)
+        |> validate_nil(:node_execution_id)
+
+      _flow ->
+        validate_required(changeset, [:run_id, :node_execution_id])
+    end
+  end
+
+  defp validate_nil(changeset, field) do
+    if is_nil(get_field(changeset, field)) do
+      changeset
+    else
+      add_error(changeset, field, "must be nil on a talk job")
+    end
   end
 end

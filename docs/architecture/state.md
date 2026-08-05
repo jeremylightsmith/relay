@@ -15,6 +15,7 @@ what each term *means*; the sections below say what each value *does*.
 | --- | --- | --- |
 | Card status | `ready` · `working` · `needs_input` · `in_review` · `queued` · `failed` | `Schemas.Card.statuses/0` |
 | Node outcome | `succeeded` · `failed` · `partial` · `needs_input` | `Schemas.NodeExecution.outcomes/0` |
+| Node-job kind | `node` · `talk` | `Schemas.NodeJob.kinds/0` |
 | Node-job state | `queued` · `claimed` · `done` · `revoked` | `Schemas.NodeJob.states/0` |
 | Run parked reason | `needs_input` · `claimed` · `executor_gone` | `Schemas.Run.parked_reasons/0` |
 | Run status | `running` · `parked` · `done` · `failed` · `cancelled` | `Schemas.Run.statuses/0` |
@@ -245,6 +246,23 @@ claims it, runs it, and reports back.
 | `revoked` | Withdrawn — the run was cancelled, or the executor stopped heartbeating and the reaper took the job back for re-dispatch. Terminal. | — |
 
 A revoked job never produces an outcome; the engine re-queues the node instead.
+
+### Node-job kind
+
+RE268 / ADR 0009: `node_jobs` is the dispatch table for two dispatchers, distinguished by
+`kind`. `:node` is written by the flow engine and always carries a `run_id` and
+`node_execution_id`. `:talk` is one turn of a person-driven Talk session — it carries neither,
+because a talk turn deliberately synthesises no `Run` (a `Run` would make every card with an
+open conversation read as having an active run).
+
+`card_id` is set on **every** row, flow or talk, backfilled from the run for existing rows — it
+is the one board-scoping join both kinds share, the same deliberate denormalisation
+`story_tasks.board_id` already uses.
+
+A talk job never refreshes the card's `agent_heartbeat_at` (a talk turn is not the agent
+working the card — the baton does not move) and is never requeued by the orphan reaper (a
+resumed `claude` session must land back on the executor that holds it, never a different
+machine); it ends only when a human presses Stop or it reports an outcome.
 
 ## Node outcomes
 
