@@ -1511,6 +1511,74 @@ defmodule Relay.Runs do
     Repo.all(from e in Executor, where: e.board_id == ^board_id)
   end
 
+  ## Resume refusals (RE297)
+
+  @doc """
+  Records the scheduler's refused resumes for `board_id` as facts on the run rows.
+
+  `refusals` is `Relay.Runs.Scheduler.Plan`'s `refusals` list — every run whose resume
+  `Policy.resumable?/2` allowed and `Scheduler.take_slot/3` could not place on this tick.
+
+  `resume_refused_since` is stamped **only when it is currently nil**, so the column measures a
+  CONTINUOUS refusal rather than the latest tick; a reason that changes mid-refusal updates the
+  reason and keeps the original `since`. Every OTHER active run on the board has both columns
+  cleared, so a run that resumed — or that stopped being refused for any other reason — never
+  carries a stale clock into `abandon_unresumable_runs/1`.
+
+  Steady state is a single SELECT that returns nothing: the values are already at their target,
+  so a quiet board writes no rows per tick. `now` is injectable for tests.
+  """
+  def record_resume_refusals(board_id, refusals, now \\ nil) do
+    now = now || now()
+    Enum.each(refusals, &stamp_refusal(&1, now))
+    clear_stale_refusals(board_id, Enum.map(refusals, & &1.run_id))
+    :ok
+  end
+
+  # Two guarded UPDATEs by primary key, each a no-op once the row already says this. Splitting
+  # them is what lets `since` be write-once while `reason` tracks the current cause.
+  defp stamp_refusal(%{run_id: run_id, reason: reason}, now) do
+    Repo.update_all(
+      from(r in Run, where: r.id == ^run_id and is_nil(r.resume_refused_since)),
+      set: [resume_refused_since: now]
+    )
+
+    Repo.update_all(
+      from(r in Run,
+        where: r.id == ^run_id,
+        where: is_nil(r.resume_refused_reason) or r.resume_refused_reason != ^reason
+      ),
+      set: [resume_refused_reason: reason]
+    )
+  end
+
+  # Board-scoped, and only over runs that actually carry a stamp — so the common case (nothing
+  # is being refused) is one indexed SELECT returning zero rows and no UPDATE at all.
+  defp clear_stale_refusals(board_id, refused_ids) do
+    stamped =
+      Repo.all(
+        from r in Run,
+          join: c in Card,
+          on: c.id == r.card_id,
+          where: c.board_id == ^board_id,
+          where: r.status in ^Run.active_statuses(),
+          where: not is_nil(r.resume_refused_since) or not is_nil(r.resume_refused_reason),
+          select: r.id
+      )
+
+    case stamped -- refused_ids do
+      [] ->
+        :ok
+
+      ids ->
+        Repo.update_all(from(r in Run, where: r.id in ^ids),
+          set: [resume_refused_since: nil, resume_refused_reason: nil]
+        )
+
+        :ok
+    end
+  end
+
   ## Diagnosis (RLY-177)
 
   # A job that has sat queued or claimed this long with nothing alive behind it is
@@ -2025,7 +2093,9 @@ defmodule Relay.Runs do
 
   @doc false
   def resume_run(%Run{} = run, opts \\ []) do
-    case Transitions.transition(run, [:parked], :running, set: [parked_reason: nil]) do
+    case Transitions.transition(run, [:parked], :running,
+           set: [parked_reason: nil, resume_refused_since: nil, resume_refused_reason: nil]
+         ) do
       {:ok, updated} ->
         broadcast_runs(board_id_of(updated), {:run_resumed, updated})
         {:ok, _pid} = ensure_server(updated, {:reenter, Keyword.get(opts, :resume_session)})
@@ -2222,7 +2292,9 @@ defmodule Relay.Runs do
             current_node: node,
             failure_detail: nil,
             finished_at: nil,
-            retries: run.retries + 1
+            retries: run.retries + 1,
+            resume_refused_since: nil,
+            resume_refused_reason: nil
           ]
         )
       rescue
