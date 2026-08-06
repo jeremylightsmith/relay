@@ -1,5 +1,5 @@
 defmodule RelayWeb.Api.BoardLogsTest do
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   import Ecto.Query
 
@@ -7,7 +7,16 @@ defmodule RelayWeb.Api.BoardLogsTest do
   alias Relay.AgentLog
   alias Relay.Repo
 
+  # RE298 / ADR 0009 rule 2: `POST /api/board/logs` -> `AgentLog.record/2` always enqueues onto
+  # the app-wide `Relay.Activity.LogSink` (no injectable sink on this path — unlike
+  # `log_sink_test.exs`, which starts its own). `allow!/1` grants that single global process
+  # access to this test's sandbox connection for the life of the test; the ref -> card_id lookup
+  # inside `LogSink` only ever resolves cards visible in the connection it currently holds, so a
+  # concurrently-running test's entries simply fail to resolve and get dropped (logged, not
+  # inserted) rather than leaking across tests.
   setup %{conn: conn} do
+    allow!(Process.whereis(LogSink))
+
     board = insert(:board)
     {:ok, %{token: token}} = Relay.ApiKeys.create_key(board, board.owner)
     {:ok, conn: put_req_header(conn, "authorization", "Bearer " <> token), board: board}

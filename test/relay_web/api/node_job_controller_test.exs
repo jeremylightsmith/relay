@@ -1,5 +1,5 @@
 defmodule RelayWeb.Api.NodeJobControllerTest do
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   import Ecto.Query
 

@@ -1,5 +1,5 @@
 defmodule RelayWeb.BoardLiveStrandedMoveTest do
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
   import Relay.Factory

@@ -5,7 +5,7 @@ defmodule RelayWeb.BoardLiveEscalationTest do
   card the drawer swapped the answer form for a red "⊗ AGENT STOPPED" banner with no input field,
   so every escalation was a dead end.
   """
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
 

@@ -1,5 +1,5 @@
 defmodule Relay.Runs.Scheduler.ServerTest do
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   import Relay.Factory
 

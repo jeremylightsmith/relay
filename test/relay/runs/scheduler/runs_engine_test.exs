@@ -1,5 +1,5 @@
 defmodule Relay.Runs.Scheduler.RunsEngineTest do
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   import Ecto.Query
   import ExUnit.CaptureLog

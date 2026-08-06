@@ -6,7 +6,7 @@ defmodule Relay.RunsPreflightTest do
   as ready — a run dispatches to ONE machine, so a union would lie; (b) an executor that has
   never reported its inventory must NOT be listed as missing anything.
   """
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   alias Relay.Boards
   alias Relay.Flows

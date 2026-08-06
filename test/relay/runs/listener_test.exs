@@ -1,20 +1,23 @@
 defmodule Relay.Runs.ListenerTest do
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   alias Relay.Runs
   alias Relay.Runs.FakeDispatcher
-  alias Relay.Runs.Listener
   alias Relay.Runs.Scheduler.Server
   alias Schemas.Card
   alias Schemas.NodeJob
   alias Schemas.Run
 
+  # A stable, known name for this file's private engine's Listener child (rather than the random
+  # one start_engine!/1 would otherwise pick) — this file looks the Listener process up directly
+  # (Process.whereis/1, :sys.get_state/1) to drain its mailbox before asserting. Module-scoped so
+  # it cannot collide with code_flow_e2e_test.exs's own pinned Listener name now that both run
+  # async (RE298).
+  @listener :listener_test_listener
+
   setup do
     FakeDispatcher.register(self())
-    # A stable, known name for the private engine's Listener child (rather than the random one
-    # start_engine!/1 would otherwise pick) — this file looks the Listener process up directly
-    # (Process.whereis/1, :sys.get_state/1) to drain its mailbox before asserting.
-    start_engine!(listener: Listener)
+    start_engine!(listener: @listener)
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Listener Board"})
@@ -174,7 +177,7 @@ defmodule Relay.Runs.ListenerTest do
     {:ok, _comment} =
       Relay.Activity.add_comment(reload(board, card), %{actor: {:user, user.id}, body: "looking"})
 
-    _ = :sys.get_state(Listener)
+    _ = :sys.get_state(@listener)
     assert length(Runs.list_runs(reload(board, card))) == 2
   end
 
@@ -189,13 +192,13 @@ defmodule Relay.Runs.ListenerTest do
         current_node: "brainstorm"
       )
 
-    listener_pid = Process.whereis(Listener)
+    listener_pid = Process.whereis(@listener)
     ref = Process.monitor(listener_pid)
 
     {:ok, _comment} =
       Relay.Activity.add_comment(reload(board, card), %{actor: {:user, user.id}, body: "still parked"})
 
-    _ = :sys.get_state(Listener)
+    _ = :sys.get_state(@listener)
     refute_receive {:DOWN, ^ref, :process, ^listener_pid, _reason}
 
     assert %Run{status: :parked, parked_reason: nil} = Runs.get_run!(run.id)
@@ -211,6 +214,9 @@ defmodule Relay.Runs.ListenerTest do
 
     assert_receive {:run_parked, _run}
 
+    # ADR 0009 rule 2: start_supervised! severs $callers, so this scheduler process would have
+    # no path back to the test's sandbox connection or engine instance without an explicit
+    # `callers:` — same pattern as scheduler_server_test.exs.
     start_supervised!(
       {Server,
        [
@@ -218,6 +224,7 @@ defmodule Relay.Runs.ListenerTest do
          engine: Relay.Runs.Scheduler.RunsEngine,
          tick_ms: 3_600_000,
          debounce_ms: 5,
+         callers: [self()],
          name: :"race_sched_#{board.id}"
        ]}
     )

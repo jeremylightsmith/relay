@@ -12,24 +12,27 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
   Uses `Relay.Runs.Scheduler.ScriptedExecutor` (W11's harness, `test/support/scripted_executor.ex`)
   for the claim/outcome HTTP calls rather than re-implementing them here.
   """
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   alias Relay.Cards
   alias Relay.Flows
   alias Relay.Repo
   alias Relay.Runs
   alias Relay.Runs.Capacity
-  alias Relay.Runs.Listener
   alias Relay.Runs.Scheduler.ScriptedExecutor, as: Exec
   alias Relay.Runs.Scheduler.Server
 
   @executor_name "e2e-executor"
   @default_capacity %{"shared_clean" => 1, "exclusive" => 0}
 
+  # A stable, known name for this file's private engine's Listener child — settle/1 looks it up
+  # directly (Process.whereis/1) to drain its mailbox before asserting. Module-scoped so it
+  # cannot collide with listener_test.exs's / code_flow_e2e_test.exs's own pinned Listener names
+  # now that all three run async (RE298).
+  @listener :plan_flow_e2e_listener
+
   setup %{conn: conn} do
-    # A stable, known name for the private engine's Listener child — settle/1 looks it up
-    # directly (Process.whereis/1) to drain its mailbox before asserting.
-    start_engine!(listener: Listener)
+    start_engine!(listener: @listener)
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Cutover Board"})
@@ -105,7 +108,7 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
   # pending timer survives a mailbox drain; that one is closed by ExUnit teardown order
   # (`OnExitHandler.run/1` terminates supervised children before the sandbox owner is stopped).
   defp settle(server) do
-    _ = :sys.get_state(Process.whereis(Listener))
+    _ = :sys.get_state(Process.whereis(@listener))
     _ = :sys.get_state(server)
     :ok
   end

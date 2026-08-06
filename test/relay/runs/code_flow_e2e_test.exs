@@ -11,7 +11,7 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   `test/relay_web/api/spec_flow_e2e_test.exs` (W11); uses W11's
   `Relay.Runs.Scheduler.ScriptedExecutor` harness for the HTTP calls.
   """
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   import Ecto.Query
 
@@ -20,7 +20,6 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   alias Relay.Repo
   alias Relay.Runs
   alias Relay.Runs.Capacity
-  alias Relay.Runs.Listener
   alias Relay.Runs.Scheduler.ScriptedExecutor, as: Exec
   alias Relay.Runs.Scheduler.Server
   alias Schemas.NodeExecution
@@ -30,10 +29,14 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   @executor_name "code-e2e-executor"
   @capacity %{"shared_clean" => 0, "exclusive" => 1}
 
+  # A stable, known name for this file's private engine's Listener child — settle/1 looks it up
+  # directly (Process.whereis/1) to drain its mailbox before asserting. Module-scoped so it
+  # cannot collide with listener_test.exs's own pinned Listener name now that both run async
+  # (RE298).
+  @listener :code_flow_e2e_listener
+
   setup %{conn: conn} do
-    # A stable, known name for the private engine's Listener child — settle/1 looks it up
-    # directly (Process.whereis/1) to drain its mailbox before asserting.
-    start_engine!(listener: Listener)
+    start_engine!(listener: @listener)
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Code Cutover Board"})
@@ -98,7 +101,7 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   # scheduler so neither is mid-query when the sandbox tears down. Always called
   # AFTER an assert_receive on the run's terminal broadcast.
   defp settle(server) do
-    _ = :sys.get_state(Process.whereis(Listener))
+    _ = :sys.get_state(Process.whereis(@listener))
     _ = :sys.get_state(server)
     :ok
   end

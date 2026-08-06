@@ -1,5 +1,5 @@
 defmodule RelayWeb.BoardLiveRetryRunTest do
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
 

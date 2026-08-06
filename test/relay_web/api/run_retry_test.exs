@@ -1,5 +1,5 @@
 defmodule RelayWeb.Api.RunRetryTest do
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   alias Relay.Cards
   alias Relay.Runs

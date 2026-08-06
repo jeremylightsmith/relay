@@ -1,5 +1,5 @@
 defmodule Relay.Runs.RunServerTest do
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   alias Relay.Runs
   alias Relay.Runs.FakeDispatcher

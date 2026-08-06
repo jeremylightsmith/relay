@@ -167,7 +167,13 @@ and every process the engine spawns on its behalf finds it. With nothing registe
   gone; a fresh instance starts with an empty table.
 - Wall-clock, `mix test --exclude browser`:
   - **before: 24.8s (18.6s async + 6.2s sync)**
-  - **after: <FILLED IN BY TASK 6 — the measured figure from the finished branch>**
+  - **after: 19.9s (19.8s async + 0.1s sync)**, green on seeds 1, 424242 and 999 plus three
+    randomised runs. The 0.1s sync tail is `test/support/data_case_test.exs` (reaches
+    `Sandbox.allow/3`'s `:not_found` branch on purpose), `test/relay/runs/executor_reaper_test.exs`
+    and `test/relay_web/live/board_settings_flow_preflight_test.exs` (the still-open
+    global-firehose-vs-per-instance-`Listener` gap), `test/relay_web/story_map_filter_test.exs`
+    (its own atom-count race), and the two `RelayWeb.ApiLog` modules — each carries its own
+    ADR-0009-sanctioned reason comment.
 
 ## Alternatives considered
 
