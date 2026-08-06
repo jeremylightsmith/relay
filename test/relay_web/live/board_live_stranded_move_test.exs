@@ -1,6 +1,4 @@
 defmodule RelayWeb.BoardLiveStrandedMoveTest do
-  # async: false — cancel_run/1 (exercised by the confirm test) touches the singleton
-  # Relay.Runs.Registry, same as Relay.RunsTest / NodeJobControllerTest.
   use RelayWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest

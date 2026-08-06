@@ -119,9 +119,10 @@ defmodule Relay.DataCase do
   end
 
   @doc """
-  Stops and restarts this test's engine tree under the **same** registry, run-supervisor and
-  capacity names — what a test that simulates an application restart needs (the boot-resume `Task`
-  runs again against the same rows).
+  Stops and restarts this test's engine tree under the **same** registry, run-supervisor,
+  listener, executor-reaper and capacity names — what a test that simulates an application
+  restart needs (the boot-resume `Task` runs again against the same rows), and what a test that
+  pinned a name via `start_engine!(listener: Listener)` needs the pin to survive.
 
   Tolerates the tree already being down (a test that needs a real down window — e.g. answering a
   card while nothing is listening — calls `stop_supervised!(Relay.Runs.Supervisor)` itself first,
@@ -137,26 +138,30 @@ defmodule Relay.DataCase do
     Instance.current()
   end
 
+  # Names are stashed in the calling process's dictionary (not `Relay.Runs.Instance` — this is a
+  # `DataCase`-only stability contract, not part of "which engine tree do I belong to") so a bare
+  # `restart_engine!()` reuses the exact names `start_engine!/1` picked, instead of rolling fresh
+  # random ones that orphan any `Process.whereis(pinned_name)` the test relies on.
+  @engine_opts_key :relay_data_case_engine_opts
+
   defp start_engine_tree!(opts) do
     instance = Instance.current()
     n = System.unique_integer([:positive])
 
+    defaults = [
+      name: :"relay_runs_supervisor_#{n}",
+      registry: instance.registry,
+      run_supervisor: instance.run_supervisor,
+      listener: :"relay_runs_listener_#{n}",
+      executor_reaper: :"relay_runs_executor_reaper_#{n}",
+      callers: [self()]
+    ]
+
+    resolved = Keyword.merge(Process.get(@engine_opts_key, defaults), opts)
+    Process.put(@engine_opts_key, resolved)
+
     ExUnit.Callbacks.start_supervised!(
-      Supervisor.child_spec(
-        {Relay.Runs.Supervisor,
-         Keyword.merge(
-           [
-             name: :"relay_runs_supervisor_#{n}",
-             registry: instance.registry,
-             run_supervisor: instance.run_supervisor,
-             listener: :"relay_runs_listener_#{n}",
-             executor_reaper: :"relay_runs_executor_reaper_#{n}",
-             callers: [self()]
-           ],
-           opts
-         )},
-        id: Relay.Runs.Supervisor
-      )
+      Supervisor.child_spec({Relay.Runs.Supervisor, resolved}, id: Relay.Runs.Supervisor)
     )
   end
 

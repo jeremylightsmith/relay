@@ -17,4 +17,15 @@ defmodule Relay.DataCaseTest do
 
     assert Process.alive?(pruner)
   end
+
+  test "restart_engine!/1 keeps a start_engine!/1 listener override stable across a restart" do
+    listener_name = :"data_case_listener_#{System.unique_integer([:positive])}"
+
+    start_engine!(listener: listener_name)
+    assert is_pid(Process.whereis(listener_name))
+
+    restart_engine!()
+
+    assert is_pid(Process.whereis(listener_name))
+  end
 end
