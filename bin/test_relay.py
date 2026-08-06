@@ -123,7 +123,7 @@ class ClaimContractKeysTest(unittest.TestCase):
     Spelling the sets out means renaming ANY server field fails this suite immediately.
     """
 
-    TOP_LEVEL = {"id", "run_id", "ref", "node_id", "node_type", "agent", "run",
+    TOP_LEVEL = {"id", "kind", "run_id", "ref", "node_id", "node_type", "agent", "run",
                  "isolation", "resume_session", "vars"}
     VARS = {"ref", "branch", "prior_detail", "findings", "sub_task"}
 
@@ -177,6 +177,37 @@ class ClaimContractKeysTest(unittest.TestCase):
         self.assertNotEqual(CONTRACT["claim"]["shared_clean_agent"]["vars"]["ref"], "MUT-1")
 
 
+class TalkContractKeysTest(unittest.TestCase):
+    """RE268 — the talk claim/events/outcome shapes, spelled out for the same reason the flow
+    claim is: the executor reads these keys without any test naming them."""
+
+    TOP_LEVEL = {"id", "kind", "ref", "turn_id", "prompt", "author", "branch", "seed",
+                 "resume_session"}
+
+    def test_the_talk_claim_has_exactly_the_keys_the_executor_reads(self):
+        payload = CONTRACT["talk_claim"]["first_turn"]
+        self.assertEqual(set(payload), self.TOP_LEVEL)
+        self.assertEqual(payload["kind"], "talk")
+
+    def test_a_flow_claim_declares_its_kind_too(self):
+        for case, payload in CONTRACT["claim"].items():
+            self.assertEqual(payload["kind"], "node", case)
+
+    def test_the_seed_carries_a_summary_and_labelled_fields(self):
+        seed = CONTRACT["talk_claim"]["first_turn"]["seed"]
+        self.assertIn("summary", seed)
+        self.assertTrue(all({"label", "value"} == set(f) for f in seed["fields"]))
+
+    def test_the_event_batch_shape_is_what_the_sender_builds(self):
+        sent = CONTRACT["talk_events"]["request"]["events"][0]
+        self.assertEqual(set(sent), {"client_seq", "kind", "text", "dim"})
+
+    def test_the_outcome_shape_is_what_the_worker_reports(self):
+        self.assertEqual(set(CONTRACT["talk_outcome"]["request"]),
+                         {"status", "session_id", "detail"})
+        self.assertEqual(CONTRACT["talk_outcome"]["response"]["turn_state"], "done")
+
+
 class ReverseContractTest(unittest.TestCase):
     """What the executor POSTs, checked against what the controller was proven to accept.
 
@@ -220,6 +251,16 @@ class ReverseContractTest(unittest.TestCase):
     def test_the_heartbeat_response_carries_release_runs(self):
         # ExecutorHeartbeat._beat() hands each of these to on_release_run().
         self.assertIn("release_runs", CONTRACT["heartbeat"]["response"])
+
+    def test_the_claim_request_carries_the_running_ids(self):
+        """RE268: the server needs the in-flight ids to answer a claim with `revoked`, which is
+        what makes Stop land in well under a second instead of on the next 15s heartbeat."""
+        self.assertIn("running", CONTRACT["claim_request"])
+        self.assertEqual(
+            set(relay.claim_body({"name": "x"}, {"shared_clean": 1}, [7, 9])),
+            set(CONTRACT["claim_request"]),
+        )
+        self.assertEqual(relay.claim_body({"name": "x"}, {}, [7, 9])["running"], [7, 9])
 
     def test_the_claim_request_carries_the_executor_version(self):
         # RLY-184: the server refuses a claim whose executor has no version, so this key is
@@ -698,6 +739,33 @@ class ForwardEmitPointsTest(unittest.TestCase):
               "message": {"content": [{"type": "text", "text": "hi"}]}}
         capture(relay._print_claude_event, ev, "[RLY-7] ")
         self.assertEqual(self.sent, [("claude", "🤖 hi", "RLY-7")])
+
+    def test_mirror_false_prints_locally_but_does_not_forward(self):
+        """RE268: a talk turn prints to the console but must not also mirror
+        to the board-log endpoint — that channel is ref-keyed and a talk turn either has no
+        real ref registered there or would misattribute a concurrently-running node job's own
+        lines."""
+        ev = {"type": "assistant",
+              "message": {"content": [{"type": "text", "text": "hi"}]}}
+        out = capture(relay._print_claude_event, ev, "[RLY-7] ", mirror=False)
+        self.assertIn("hi", out)          # still printed locally
+        self.assertEqual(self.sent, [])   # but never forwarded
+
+
+class ToolBriefTest(unittest.TestCase):
+    """RE268: _print_claude_event and talk_events_from independently
+    duplicated this exact extraction; both must now call one shared helper."""
+
+    def test_it_prefers_command_then_falls_back_through_the_known_keys(self):
+        self.assertEqual(relay._tool_brief({"input": {"command": "ls -la"}}), "ls -la")
+        self.assertEqual(relay._tool_brief({"input": {"file_path": "lib/relay.ex"}}),
+                         "lib/relay.ex")
+        self.assertEqual(relay._tool_brief({"input": {}}), "")
+        self.assertEqual(relay._tool_brief({}), "")
+
+    def test_it_truncates_to_140_chars(self):
+        long = "x" * 500
+        self.assertEqual(len(relay._tool_brief({"input": {"command": long}})), 140)
 
 
 class BoardIncludeDoneTest(unittest.TestCase):
@@ -1351,7 +1419,8 @@ class ClaimAndReportTest(unittest.TestCase):
         m, p, b, k = sent[0]
         self.assertEqual((m, p), ("POST", "/api/node-jobs/claim"))
         self.assertEqual(b, {"executor": {"name": "box", "host": "h"},
-                             "capacity": {"shared_clean": 2, "exclusive": 1}})
+                             "capacity": {"shared_clean": 2, "exclusive": 1},
+                             "running": []})
         self.assertEqual(k.get("timeout"), 25)
 
     def test_claim_empty_body_is_no_work(self):
@@ -1535,10 +1604,10 @@ class StreamClaudeJobTest(unittest.TestCase):
         relay.subprocess.Popen = lambda *a, **k: _FakePopen([bad, good], code=0)
         orig = relay._print_claude_event
 
-        def flaky(ev, tag=""):
+        def flaky(ev, tag="", mirror=True):
             if ev.get("type") == "assistant":
                 raise RuntimeError("render boom")
-            return orig(ev, tag)
+            return orig(ev, tag, mirror=mirror)
 
         relay._print_claude_event = flaky
         self.addCleanup(setattr, relay, "_print_claude_event", orig)
@@ -2874,6 +2943,199 @@ class ExecuteOneTest(unittest.TestCase):
         self.assertEqual(self.pool.capacity()["exclusive"], 1)       # never leak a slot
 
 
+class ExecuteTalkTest(unittest.TestCase):
+    """RE268: run_talk_job/execute_talk/release_talk had no direct tests — the done/stopped/
+    failed decision, the always-report/always-release discipline, and the ref-clean tag (see
+    run_talk_job's docstring) were the genuinely new logic and untested."""
+
+    class _Pool:
+        def __init__(self, hook_err=None):
+            self.released = []
+            self.created = []
+            self._hook_err = hook_err
+
+        def create_or_rebaseline(self, slot):
+            self.created.append(slot)
+
+        def run_prepare_hook(self, slot_path, ref, branch):
+            return self._hook_err
+
+        def release_talk(self, slot):
+            self.released.append(slot)
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in
+                       ("_stream_claude_job", "report_talk_outcome", "worktree_path", "DRY", "api")}
+        self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+        relay.DRY = False
+        relay.worktree_path = lambda name: "/tmp/" + name
+        self.reported = []
+        relay.report_talk_outcome = lambda tid, status, sid, detail: (
+            self.reported.append((tid, status, sid, detail)) or status)
+        # execute_talk owns a real TalkEventSender now (RE268), so the transcript POST has to be
+        # captured rather than attempted. `lines` is every event that reached the wire.
+        self.lines = []
+        relay.api = lambda method, path, body=None, **kw: (
+            self.lines.extend((body or {}).get("events", [])) or {})
+
+    def _error_lines(self):
+        return [line["text"] for line in self.lines if line["kind"] == relay.TALK_KIND_ERROR]
+
+    def _job(self, **overrides):
+        j = {"turn_id": 7, "ref": "DE3", "prompt": "why?", "resume_session": None,
+             "seed": {"fields": []}}
+        j.update(overrides)
+        return j
+
+    def _stub_stream(self, ok, session_id="sess-1", events=()):
+        def fake(prompt, cwd, tag="", session_id=None, on_proc=None, on_event=None, mirror=True):
+            for ev in events:
+                if on_event:
+                    on_event(ev)
+            return ok, fake.session_id
+        fake.session_id = session_id
+        relay._stream_claude_job = fake
+        return fake
+
+    def test_a_clean_turn_reports_done(self):
+        self._stub_stream(ok=True)
+        pool = self._Pool()
+        relay.execute_talk(self._job(), "exec-DE3", False, relay.JobControl(), pool)
+        self.assertEqual(self.reported, [(7, "done", "sess-1", "")])
+        self.assertEqual(pool.released, ["exec-DE3"])           # always released
+
+    def test_a_nonzero_claude_exit_reports_failed(self):
+        self._stub_stream(ok=False)
+        pool = self._Pool()
+        relay.execute_talk(self._job(), "exec-DE3", False, relay.JobControl(), pool)
+        self.assertEqual(self.reported[0][:2], (7, "failed"))
+        self.assertEqual(pool.released, ["exec-DE3"])
+
+    def test_a_nonzero_claude_exit_writes_the_reason_into_the_transcript(self):
+        """RE268: only parsed stream-json reaches on_event, so a claude that dies at startup
+        (an expired --resume id, a missing binary) emits NO result event and produced NO line at
+        all. `detail` is stored on the turn but nothing renders it, so the person saw their own
+        message, the composer come back, and nothing else — ever."""
+        self._stub_stream(ok=False)
+        relay.execute_talk(self._job(), "exec-DE3", False, relay.JobControl(), self._Pool())
+        self.assertEqual(self._error_lines(), ["the claude session exited non-zero"])
+        self.assertEqual(self._error_lines(), [self.reported[0][3]])
+
+    def test_the_failure_line_continues_the_turns_client_seq(self):
+        """One turn has ONE transcript writer: a second TalkEventSender would restart client_seq
+        at 1 and the server's replay guard would drop every line it wrote."""
+        self._stub_stream(ok=False, events=[
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "thinking"}]}}])
+        relay.execute_talk(self._job(), "exec-DE3", False, relay.JobControl(), self._Pool())
+        self.assertEqual([line["client_seq"] for line in self.lines], [1, 2])
+        self.assertEqual(self.lines[-1]["kind"], relay.TALK_KIND_ERROR)
+
+    def test_a_revoked_turn_reports_stopped_not_failed(self):
+        control = relay.JobControl()
+
+        def fake(prompt, cwd, tag="", session_id=None, on_proc=None, on_event=None, mirror=True):
+            control.cancel()
+            return True, "sess-2"
+
+        relay._stream_claude_job = fake
+        pool = self._Pool()
+        relay.execute_talk(self._job(), "exec-DE3", False, control, pool)
+        self.assertEqual(self.reported[0][:2], (7, "stopped"))
+        self.assertEqual(pool.released, ["exec-DE3"])
+
+    def test_a_reset_turn_creates_and_warms_the_worktree_first(self):
+        self._stub_stream(ok=True)
+        pool = self._Pool()
+        relay.execute_talk(self._job(), "exec-DE3", True, relay.JobControl(), pool)
+        self.assertEqual(pool.created, ["exec-DE3"])
+
+    def test_a_reset_turn_checks_out_the_cards_branch(self):
+        """RE268: a talk-created worktree (the reset path — the
+        card's run is done/cancelled and torn down, or the card was never run) must land ON
+        THE CARD'S BRANCH, not sit detached at origin/main reading none of the card's work."""
+        self._stub_stream(ok=True)
+        pool = self._Pool()
+        calls = []
+        self.addCleanup(setattr, relay, "checkout_talk_branch", relay.checkout_talk_branch)
+        relay.checkout_talk_branch = lambda path, branch: calls.append((path, branch))
+        relay.execute_talk(self._job(branch="rly-1-feature"), "exec-DE3", True,
+                           relay.JobControl(), pool)
+        self.assertEqual(calls, [("/tmp/exec-DE3", "rly-1-feature")])
+
+    def test_a_reused_turn_does_not_touch_the_branch(self):
+        """No reset -> the worktree already carries whatever state a node job or an earlier
+        talk turn left it in (possibly dirty, mid-edit — the whole point); a reused turn must
+        not force a branch checkout on top of that."""
+        self._stub_stream(ok=True)
+        pool = self._Pool()
+        calls = []
+        self.addCleanup(setattr, relay, "checkout_talk_branch", relay.checkout_talk_branch)
+        relay.checkout_talk_branch = lambda path, branch: calls.append((path, branch))
+        relay.execute_talk(self._job(branch="rly-1-feature"), "exec-DE3", False,
+                           relay.JobControl(), pool)
+        self.assertEqual(calls, [])
+
+    def test_a_failing_prepare_hook_reports_failed_without_running_the_turn(self):
+        called = []
+        relay._stream_claude_job = lambda *a, **k: called.append(True) or (True, None)
+        pool = self._Pool(hook_err="prepare blew up")
+        relay.execute_talk(self._job(), "exec-DE3", True, relay.JobControl(), pool)
+        self.assertEqual(called, [])
+        self.assertEqual(self.reported[0][:2], (7, "failed"))
+        self.assertIn("prepare blew up", self.reported[0][3])
+        self.assertEqual(pool.released, ["exec-DE3"])           # still released, never leaked
+        self.assertEqual(self._error_lines(), [self.reported[0][3]])   # and visible in the pane
+
+    def test_a_worker_crash_reports_failed_and_still_releases(self):
+        def boom(*a, **k):
+            raise RuntimeError("kaboom")
+
+        relay._stream_claude_job = boom
+        pool = self._Pool()
+        relay.execute_talk(self._job(), "exec-DE3", False, relay.JobControl(), pool)
+        self.assertEqual(self.reported[0][:2], (7, "failed"))
+        self.assertIn("kaboom", self.reported[0][3])
+        self.assertEqual(pool.released, ["exec-DE3"])
+        self.assertEqual(self._error_lines(), [self.reported[0][3]])   # and visible in the pane
+
+    def test_a_crash_after_the_session_started_keeps_the_session_id(self):
+        """RE268: the crash path used to POST session_id=None. If only the FIRST outcome POST
+        failed transiently, that threw away session continuity for every later turn on the card."""
+        def fake(prompt, cwd, tag="", session_id=None, on_proc=None, on_event=None, mirror=True):
+            return True, "sess-live"
+
+        relay._stream_claude_job = fake
+        boom = [RuntimeError("report blew up")]
+
+        def flaky(tid, status, sid, detail):
+            self.reported.append((tid, status, sid, detail))
+            if boom:
+                raise boom.pop()
+            return status
+
+        relay.report_talk_outcome = flaky
+        relay.execute_talk(self._job(), "exec-DE3", False, relay.JobControl(), self._Pool())
+        self.assertEqual(self.reported[1][:3], (7, "failed", "sess-live"))
+
+    def test_the_tag_is_ref_clean_so_board_log_forwarding_is_not_misattributed(self):
+        """RE268: the old tag `f"[{ref} talk] "` made `_ref_from_tag` extract 'DE3 talk' — a ref
+        that doesn't exist — so every forwarded line spammed the board-log endpoint under a
+        phantom card. `mirror=False` additionally suppresses that forwarding entirely, since the
+        talk transcript already has its own delivery channel."""
+        captured = {}
+
+        def fake(prompt, cwd, tag="", session_id=None, on_proc=None, on_event=None, mirror=True):
+            captured["tag"] = tag
+            captured["mirror"] = mirror
+            return True, "sess-1"
+
+        relay._stream_claude_job = fake
+        pool = self._Pool()
+        relay.execute_talk(self._job(), "exec-DE3", False, relay.JobControl(), pool)
+        self.assertEqual(relay._ref_from_tag(captured["tag"]), "DE3")
+        self.assertFalse(captured["mirror"])
+
+
 def isolate_executor_locks(test):
     """Point the executor singleton locks (identity + namespace) at a throwaway dir.
 
@@ -2913,8 +3175,8 @@ class ExecuteLoopTest(unittest.TestCase):
         isolate_executor_locks(self)
         self._saved = {k: getattr(relay, k) for k in
                        ("load_executor_config", "claim_node_job", "run_node_job",
-                        "report_outcome", "reset_worktree", "refresh_worktree",
-                        "FORWARDER", "env", "log", "DRY")}
+                        "report_outcome", "report_talk_outcome", "reset_worktree",
+                        "refresh_worktree", "FORWARDER", "env", "log", "DRY")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
         self.addCleanup(relay.signal.signal, relay.signal.SIGINT,
                          relay.signal.getsignal(relay.signal.SIGINT))
@@ -2935,7 +3197,7 @@ class ExecuteLoopTest(unittest.TestCase):
 
     def test_once_claims_runs_and_reports(self):
         j = job(node_type="shell", run="true", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
-        relay.claim_node_job = lambda executor, capacity, timeout: j
+        relay.claim_node_job = lambda *a, **k: j
         self.reports = []
         relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
 
@@ -2945,7 +3207,7 @@ class ExecuteLoopTest(unittest.TestCase):
         self.assertEqual(self.reports[0][3], "sha")
 
     def test_long_poll_timeout_is_no_work_not_error(self):
-        relay.claim_node_job = lambda executor, capacity, timeout: None   # 204/timeout
+        relay.claim_node_job = lambda *a, **k: None   # 204/timeout
         self.reports = []
         relay.report_outcome = lambda *a: self.reports.append(a)
 
@@ -2968,7 +3230,7 @@ class ExecuteLoopTest(unittest.TestCase):
         doesn't hold the claim open forever, and the loop must keep polling rather than die."""
         j = job(node_type="shell", run="x", id="nj-9", run_id="r9", vars={"ref": "RLY-9"})
         del j["isolation"]                                      # no "isolation" key
-        relay.claim_node_job = lambda executor, capacity, timeout: j
+        relay.claim_node_job = lambda *a, **k: j
         self.reports = []
         relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
 
@@ -2983,7 +3245,7 @@ class ExecuteLoopTest(unittest.TestCase):
         thinks the claim is still held."""
         # cfg advertises exclusive:0
         j = job("exclusive_shell", run="x", id="nj-10", run_id="r10", vars={"ref": "RLY-10"})
-        relay.claim_node_job = lambda executor, capacity, timeout: j
+        relay.claim_node_job = lambda *a, **k: j
         self.reports = []
         relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
 
@@ -2991,13 +3253,65 @@ class ExecuteLoopTest(unittest.TestCase):
 
         self.assertEqual(self.reports[0][:2], ("nj-10", "failed"))
 
+    def test_an_unplaceable_talk_job_is_reported_failed_via_the_talk_outcome_route(self):
+        """RE268: reject()'s kind-aware branch had no test. A talk job
+        has no node-job id for /api/node-jobs/:id/outcome to accept, so an unplaceable talk
+        job (cfg advertises exclusive:0) must report through /api/talk/turns/:id/outcome
+        instead — never the node-job route."""
+        talk_job = {"id": "tj-1", "kind": "talk", "ref": "DE3", "turn_id": 77,
+                   "prompt": "why?", "seed": {"fields": []}, "resume_session": None}
+        relay.claim_node_job = lambda *a, **k: talk_job
+        node_reports, talk_reports = [], []
+        relay.report_outcome = lambda *a: (node_reports.append(a) or "done")
+        relay.report_talk_outcome = lambda tid, status, sid, detail: (
+            talk_reports.append((tid, status, sid)) or status)
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+
+        self.assertEqual(node_reports, [])                       # never the node-job route
+        self.assertEqual(talk_reports, [(77, "failed", None)])
+
+    def test_a_malformed_talk_job_is_reported_failed_via_the_talk_outcome_route(self):
+        """The other half of reject()'s kind-aware branch: a talk job missing `ref` blows up
+        ExecutorPool.assign_talk with a KeyError before it can even place it — still must
+        report through the talk outcome route, not the node-job one."""
+        talk_job = {"id": "tj-2", "kind": "talk", "turn_id": 78,   # no "ref"
+                   "prompt": "why?", "seed": {"fields": []}, "resume_session": None}
+        relay.claim_node_job = lambda *a, **k: talk_job
+        talk_reports = []
+        relay.report_talk_outcome = lambda tid, status, sid, detail: (
+            talk_reports.append((tid, status)) or status)
+        relay.report_outcome = lambda *a: self.fail("must not use the node-job outcome route")
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+
+        self.assertEqual(talk_reports, [(78, "failed")])
+
+    def test_an_unplaceable_talk_jobs_rejection_detail_is_kind_aware(self):
+        """RE268: reject()'s "no free slot" message reads
+        `no free {job.get('isolation')!r} slot ...` — but "isolation" is a node-job key a talk
+        job never carries, so a rejected talk turn's human-visible detail read the nonsense
+        `no free None slot advertised {...}`. It must name what was actually rejected."""
+        talk_job = {"id": "tj-3", "kind": "talk", "ref": "DE3", "turn_id": 79,
+                   "prompt": "why?", "seed": {"fields": []}, "resume_session": None}
+        relay.claim_node_job = lambda *a, **k: talk_job
+        talk_reports = []
+        relay.report_talk_outcome = lambda tid, status, sid, detail: (
+            talk_reports.append(detail) or status)
+        relay.report_outcome = lambda *a: self.fail("must not use the node-job outcome route")
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+
+        self.assertNotIn("None", talk_reports[0])
+        self.assertIn("talk", talk_reports[0])
+
     def test_once_never_auto_updates(self):
         """A single-job invocation restarting itself would re-run the whole command; the job
         boundary that makes a restart safe only exists in the long-running loop."""
         self.addCleanup(setattr, relay, "maybe_auto_update", relay.maybe_auto_update)
         calls = []
         relay.maybe_auto_update = lambda *a, **k: calls.append(a)
-        relay.claim_node_job = lambda executor, capacity, timeout: None
+        relay.claim_node_job = lambda *a, **k: None
         relay.report_outcome = lambda *a: None
 
         relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
@@ -3020,7 +3334,7 @@ class ExecuteLoopTest(unittest.TestCase):
             return True
 
         relay.maybe_auto_update = fake
-        relay.claim_node_job = lambda executor, capacity, timeout: None
+        relay.claim_node_job = lambda *a, **k: None
         relay.report_outcome = lambda *a: None
         # Safety net, not the assertion: if the call site regresses to unreachable, `once=False`
         # would otherwise spin forever claiming nothing rather than fail — bound that to a clean
@@ -3038,6 +3352,55 @@ class ExecuteLoopTest(unittest.TestCase):
         self.assertIsNotNone(hb)
         self.assertIsInstance(state, dict)
         self.assertTrue(config_url)
+
+
+class TalkJobRefMapIsolationTest(unittest.TestCase):
+    """RE268: NODE_JOB_IDS/RUN_IDS are keyed by ref and read by
+    forward() for whichever job is currently registered under that ref. worker() must not
+    register (or clear) a talk job's entry there — doing so would clobber (or, on the talk job's
+    finally, erase) a concurrently-running node job's own attribution for the same card."""
+
+    def setUp(self):
+        isolate_executor_locks(self)
+        self._saved = {k: getattr(relay, k) for k in
+                       ("load_executor_config", "claim_node_job", "execute_talk",
+                        "report_talk_outcome", "FORWARDER", "env", "log", "DRY")}
+        self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+        relay.DRY = False
+        relay.env = lambda name: "x"
+        relay.log = lambda *a, **k: None
+        relay.load_executor_config = lambda: {
+            "name": "box", "namespace": "exec",
+            "capacity": {"shared_clean": 1, "exclusive": 1},
+            "poll_timeout": 1, "heartbeat_interval": 60}
+        self.addCleanup(setattr, relay.ExecutorPool, "ensure", relay.ExecutorPool.ensure)
+        relay.ExecutorPool.ensure = lambda self: None
+        os.environ.setdefault("RELAY_URL", "http://example.test")
+        os.environ.setdefault("RELAY_API_KEY", "k")
+
+    def test_a_talk_job_does_not_clobber_a_concurrent_node_jobs_ref_keyed_entries(self):
+        relay.NODE_JOB_IDS["DE3"] = "real-node-job"
+        relay.RUN_IDS["DE3"] = "real-run"
+        self.addCleanup(relay.NODE_JOB_IDS.pop, "DE3", None)
+        self.addCleanup(relay.RUN_IDS.pop, "DE3", None)
+        seen = {}
+
+        def fake_execute_talk(job, slot, reset, control, pool):
+            seen["node_job_id"] = relay.NODE_JOB_IDS.get("DE3")
+            seen["run_id"] = relay.RUN_IDS.get("DE3")
+
+        relay.execute_talk = fake_execute_talk
+        talk_job = {"id": "tj-1", "kind": "talk", "ref": "DE3", "turn_id": 7,
+                   "prompt": "why?", "seed": {"fields": []}, "resume_session": None}
+        relay.claim_node_job = lambda *a, **k: talk_job
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+
+        # while the talk job ran, the node job's own entries must have been untouched
+        self.assertEqual(seen, {"node_job_id": "real-node-job", "run_id": "real-run"})
+        # and the talk job's finally must not have erased them either
+        self.assertEqual(relay.NODE_JOB_IDS.get("DE3"), "real-node-job")
+        self.assertEqual(relay.RUN_IDS.get("DE3"), "real-run")
 
 
 class AutoUpdateBoundaryTest(unittest.TestCase):
@@ -3099,7 +3462,7 @@ class AutoUpdateBoundaryTest(unittest.TestCase):
         relay.run_node_job = blocking_run
         claims = [job(node_type="shell", run="true", id="nj-1", run_id="r1",
                       vars={"ref": "RLY-1"})]
-        relay.claim_node_job = lambda e, c, t: claims.pop(0) if claims else None
+        relay.claim_node_job = lambda *a, **k: claims.pop(0) if claims else None
 
         threading.Timer(0.2, gate.set).start()   # let the job finish partway through
         self._interrupt_after(0.4)               # then stop the otherwise-endless loop
@@ -3376,6 +3739,25 @@ class ExecutorVocabularyContractTest(unittest.TestCase):
         # not pinned — bin/relay prints them opaquely and must never branch on them.
         self.assertEqual(relay.AUDIT_SEVERITIES, tuple(self.vocab["audit_severities"]))
 
+    def test_talk_turn_statuses_match_the_fixture(self):
+        # RE268: these are the only statuses /api/talk/turns/:id/outcome accepts. A drift 422s
+        # BOTH the primary POST and the crash-path one, stranding the turn `:claimed` — which
+        # nothing reaps, and which then refuses every later turn with `turn_in_flight`.
+        self.assertEqual(relay.TALK_TURN_STATUSES,
+                         tuple(self.vocab["talk_turn_statuses"]["reportable"]))
+        self.assertEqual((relay.TALK_DONE, relay.TALK_STOPPED, relay.TALK_FAILED),
+                         relay.TALK_TURN_STATUSES)
+        for active in self.vocab["talk_turn_statuses"]["active"]:
+            self.assertNotIn(active, relay.TALK_TURN_STATUSES,
+                             "the executor must never report a server-only turn status")
+
+    def test_talk_event_kinds_match_the_fixture(self):
+        # A drift here is silent, not loud: Relay.Talk.normalize_event/1 degrades an unknown
+        # kind to :out, so a renamed "error" would render as ordinary output forever.
+        self.assertEqual(relay.TALK_EVENT_KINDS, tuple(self.vocab["talk_event_kinds"]))
+        for kind in (relay.TALK_KIND_TOOL, relay.TALK_KIND_OUT, relay.TALK_KIND_ERROR):
+            self.assertIn(kind, relay.TALK_EVENT_KINDS)
+
 
 class ExecutorIdentTest(unittest.TestCase):
     """The `executor` dict both claim and heartbeat put on the wire. Pure and named for the
@@ -3525,7 +3907,8 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
 
     def test_a_refusal_stops_all_further_claiming_but_keeps_the_process_alive(self):
         calls = []
-        relay.claim_node_job = lambda e, c, t: (calls.append(c)
+        # capacity is a[1]; the test only counts calls, so it just needs SOMETHING recorded.
+        relay.claim_node_job = lambda *a, **k: (calls.append(a[1] if len(a) > 1 else None)
                                                 or relay.outdated_refusal(9))
         self._interrupt_after(0.3)
 
@@ -3535,7 +3918,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
     def test_a_refused_executor_advertises_zero_capacity_immediately(self):
-        relay.claim_node_job = lambda e, c, t: relay.outdated_refusal(9)
+        relay.claim_node_job = lambda *a, **k: relay.outdated_refusal(9)
         self._interrupt_after(0.3)
 
         relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
@@ -3548,7 +3931,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         self.assertEqual(hb.beats[-1], {"shared_clean": 0, "exclusive": 0})
 
     def test_the_loop_wires_the_pool_release_functions_into_the_heartbeat(self):
-        relay.claim_node_job = lambda e, c, t: None   # no work: just start, beat, idle
+        relay.claim_node_job = lambda *a, **k: None   # no work: just start, beat, idle
         self._interrupt_after(0.2)
         relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
         hb = FakeHeartbeat.instances[-1]
@@ -3559,7 +3942,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         self.assertEqual(hb.on_release_run.__name__, "release_run")
 
     def test_it_logs_once_naming_both_versions_and_the_remedy(self):
-        relay.claim_node_job = lambda e, c, t: relay.outdated_refusal(9)
+        relay.claim_node_job = lambda *a, **k: relay.outdated_refusal(9)
         self._interrupt_after(0.3)
 
         relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
@@ -3584,7 +3967,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         claims = [job(node_type="shell", run="true", id="nj-1", run_id="r1",
                       vars={"ref": "RLY-1"})]
 
-        def claim(e, c, t):
+        def claim(*a, **k):
             return claims.pop(0) if claims else relay.outdated_refusal(9)
 
         relay.claim_node_job = claim
@@ -3596,7 +3979,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         self.assertEqual(reports[0][:2], ("nj-1", "succeeded"))
 
     def test_once_exits_non_zero_rather_than_idling(self):
-        relay.claim_node_job = lambda e, c, t: relay.outdated_refusal(9)
+        relay.claim_node_job = lambda *a, **k: relay.outdated_refusal(9)
 
         with self.assertRaises(SystemExit) as caught:
             relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
@@ -3604,7 +3987,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         self.assertEqual(caught.exception.code, 1)
 
     def test_a_normal_run_never_sets_the_flag(self):
-        relay.claim_node_job = lambda e, c, t: None      # 204 / long-poll timeout
+        relay.claim_node_job = lambda *a, **k: None      # 204 / long-poll timeout
         self._interrupt_after(0.2)
 
         relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
@@ -3703,6 +4086,96 @@ class RealGitWorktreeTest(unittest.TestCase):
 
         self.assertEqual(outcome, "succeeded")
         self.assertEqual(self.head_ref(), "refs/heads/" + branch)
+
+
+class TalkBranchCheckoutTest(unittest.TestCase):
+    """RE268: `execute_talk`'s reset path (create_or_rebaseline
+    + the prepare hook) leaves a freshly-created talk worktree DETACHED at base — the hook only
+    warms the tree, it checks nothing out. ADR 0009's worktree table is explicit: a talk turn
+    with no live run must land "on the card's branch, or the base branch if it has none." Drives
+    real git plumbing (RealGitWorktreeTest's style, above) rather than mocking `subprocess.run`.
+    `refs/remotes/origin/<branch>` is what `git_fetch_with_retry` actually leaves behind — this
+    simulates that without a real network fetch."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="relay-talk-branch-test-")
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.email", "t@example.com")
+        self.git("config", "user.name", "T")
+        self.write("seed.txt", "seed")
+        self.git("add", "-A"); self.git("commit", "-qm", "seed")
+
+    def git(self, *args):
+        return relay.subprocess.run(["git", *args], cwd=self.dir, capture_output=True, text=True)
+
+    def write(self, name, text):
+        with open(os.path.join(self.dir, name), "w") as f:
+            f.write(text)
+
+    def head_ref(self):
+        return self.git("symbolic-ref", "-q", "HEAD").stdout.strip()
+
+    def test_checks_out_the_branch_when_the_remote_has_it(self):
+        self.git("checkout", "-q", "-b", "rly-1-feature")
+        self.write("work.txt", "committed on the card's branch")
+        self.git("add", "-A"); self.git("commit", "-qm", "card work")
+        sha = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("update-ref", "refs/remotes/origin/rly-1-feature", sha)
+        self.git("checkout", "-q", "--detach", "main")   # what create_or_rebaseline leaves fresh
+
+        relay.checkout_talk_branch(self.dir, "rly-1-feature")
+
+        self.assertEqual(self.head_ref(), "refs/heads/rly-1-feature")
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "work.txt")))
+
+    def test_stays_detached_when_there_is_no_branch_yet(self):
+        self.git("checkout", "-q", "--detach", "main")
+        relay.checkout_talk_branch(self.dir, None)
+        self.assertEqual(self.head_ref(), "")
+
+    def test_stays_detached_when_the_branch_has_not_reached_the_remote(self):
+        self.git("checkout", "-q", "--detach", "main")
+        relay.checkout_talk_branch(self.dir, "never-pushed")
+        self.assertEqual(self.head_ref(), "")
+
+    def test_keeps_a_local_branch_ahead_of_the_remote_instead_of_resetting_it(self):
+        """RE268: `checkout -B <branch> origin/<branch>` does not merely attach the worktree to
+        the branch, it RESETS the local branch ref to the remote tip. A run that pushed, then a
+        later run committed MORE work that got cancelled before it could push, must not have
+        that unpushed work silently dropped from the branch just because a talk turn looked at
+        the card afterward."""
+        self.git("checkout", "-q", "-b", "rly-3-feature")
+        self.write("pushed.txt", "pushed work")
+        self.git("add", "-A"); self.git("commit", "-qm", "pushed work")
+        pushed_sha = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("update-ref", "refs/remotes/origin/rly-3-feature", pushed_sha)
+        self.write("unpushed.txt", "not yet on origin")
+        self.git("add", "-A"); self.git("commit", "-qm", "unpushed work")
+        unpushed_sha = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("checkout", "-q", "--detach", "main")   # what create_or_rebaseline leaves fresh
+
+        relay.checkout_talk_branch(self.dir, "rly-3-feature")
+
+        self.assertEqual(self.head_ref(), "refs/heads/rly-3-feature")
+        self.assertEqual(self.git("rev-parse", "rly-3-feature").stdout.strip(), unpushed_sha)
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "unpushed.txt")))
+
+    def test_logs_stderr_when_the_local_checkout_fails(self):
+        """RE268: a failed checkout (e.g. the branch is already checked out in another worktree —
+        a human sitting on the card's branch) must not fail silently into a detached-at-base tree
+        that confidently describes none of the card's work."""
+        self.git("checkout", "-q", "-b", "rly-4-feature")
+        self.git("checkout", "-q", "main")
+        other = tempfile.mkdtemp(prefix="relay-talk-branch-worktree-")
+        self.addCleanup(shutil.rmtree, other, ignore_errors=True)
+        self.git("worktree", "add", "-q", other, "rly-4-feature")
+        self.git("checkout", "-q", "--detach", "main")
+
+        out = capture(relay.checkout_talk_branch, self.dir, "rly-4-feature")
+
+        self.assertIn("rly-4-feature", out)
+        self.assertEqual(self.head_ref(), "")
 
 
 class OutcomeCommandTest(unittest.TestCase):
@@ -5107,6 +5580,408 @@ class NoHardcodedScratchPathTest(unittest.TestCase):
             hits, [],
             "hard-coded /tmp path(s) an agent could copy-paste — point at "
             "$RELAY_NODE_SCRATCH's directory instead:\n" + "\n".join(hits))
+
+
+class TalkPromptTest(unittest.TestCase):
+    """RE268 — the prompt is built in PRODUCT code, not a .claude/agents definition: a recorded
+    exception to ADR 0006 (ADR 0009 §5), because Talk must behave identically on every board
+    regardless of what the connected repo ships."""
+
+    def setUp(self):
+        self.job = json.loads(json.dumps(CONTRACT["talk_claim"]["first_turn"]))
+
+    def test_the_preamble_names_the_pane_the_tools_and_the_read_only_rule(self):
+        p = relay.talk_prompt(self.job)
+        self.assertIn("terminal", p.lower())
+        self.assertIn("bin/relay why", p)
+        self.assertIn("bin/relay runs", p)
+        self.assertIn("must not", p.lower())
+
+    def test_the_seed_block_carries_every_injected_field(self):
+        p = relay.talk_prompt(self.job)
+        for f in self.job["seed"]["fields"]:
+            self.assertIn(f["label"], p)
+            self.assertIn(f["value"], p)
+
+    def test_the_humans_text_is_last_and_verbatim(self):
+        p = relay.talk_prompt(self.job)
+        self.assertTrue(p.rstrip().endswith(self.job["prompt"]))
+
+    def test_a_brace_in_the_humans_text_is_never_rendered_as_a_var(self):
+        self.job["prompt"] = "why does {ref} appear twice?"
+        self.assertIn("{ref}", relay.talk_prompt(self.job))
+
+
+class TalkEventMappingTest(unittest.TestCase):
+    """The recorded stream-json seam (ADR 0009 § Testing): assistant text -> :out, tool
+    invocations -> a single dim :tool line, a turn error -> :error."""
+
+    def _replay(self):
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "test", "fixtures", "talk_stream.jsonl")
+        with open(path, encoding="utf-8") as f:
+            return [json.loads(line) for line in f if line.strip()]
+
+    def test_assistant_text_becomes_an_out_line(self):
+        evs = [e for ev in self._replay() for e in relay.talk_events_from(ev)]
+        outs = [e for e in evs if e["kind"] == "out"]
+        self.assertTrue(outs)
+        self.assertFalse(any(e["dim"] for e in outs))
+
+    def test_a_tool_use_becomes_one_dim_tool_line_naming_its_target(self):
+        evs = [e for ev in self._replay() for e in relay.talk_events_from(ev)]
+        tools = [e for e in evs if e["kind"] == "tool"]
+        self.assertEqual(len(tools), 1)
+        self.assertTrue(tools[0]["dim"])
+        self.assertIn("Read", tools[0]["text"])
+        self.assertIn("lib/relay.ex", tools[0]["text"])
+
+    def test_a_clean_result_emits_no_line(self):
+        self.assertEqual(relay.talk_events_from({"type": "result", "is_error": False}), [])
+
+    def test_an_errored_result_emits_an_error_line(self):
+        out = relay.talk_events_from({"type": "result", "is_error": True, "result": "boom"})
+        self.assertEqual([e["kind"] for e in out], ["error"])
+        self.assertIn("boom", out[0]["text"])
+
+    def test_an_unknown_event_type_is_ignored_rather_than_crashing_the_turn(self):
+        self.assertEqual(relay.talk_events_from({"type": "wat"}), [])
+
+
+class TalkEventSenderTest(unittest.TestCase):
+    """Delivery is at-least-once and MUST NOT DROP — the whole reason Talk does not reuse
+    LogForwarder, whose enqueue drops on a full queue and whose _send swallows errors."""
+
+    def setUp(self):
+        self.posted = []
+
+        def fake_api(method, path, body=None, **kw):
+            self.posted.append((method, path, body, kw))
+            return {"status": "ok", "accepted": len(body["events"])}
+
+        self.orig, relay.api = relay.api, fake_api
+
+    def tearDown(self):
+        relay.api = self.orig
+
+    def test_client_seq_is_per_turn_and_starts_at_one(self):
+        s = relay.TalkEventSender(turn_id=7)
+        s.enqueue("out", "a")
+        s.enqueue("tool", "Read · x", dim=True)
+        self.assertTrue(s.flush())
+        self.assertEqual([e["client_seq"] for e in self.posted[0][2]["events"]], [1, 2])
+
+    def test_it_posts_the_turns_events_route_idempotently(self):
+        s = relay.TalkEventSender(turn_id=7)
+        s.enqueue("out", "a")
+        s.flush()
+        method, path, _body, kw = self.posted[0]
+        self.assertEqual((method, path), ("POST", "/api/talk/turns/7/events"))
+        self.assertTrue(kw.get("idempotent"))
+
+    def test_a_failing_post_is_retried_with_the_same_client_seqs(self):
+        calls = {"n": 0}
+
+        def flaky(method, path, body=None, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise SystemExit("boom")
+            self.posted.append((method, path, body, kw))
+            return {"status": "ok", "accepted": len(body["events"])}
+
+        relay.api = flaky
+        s = relay.TalkEventSender(turn_id=7, backoff=lambda _a: 0)
+        s.enqueue("out", "a")
+        self.assertTrue(s.flush())
+        self.assertEqual([e["client_seq"] for e in self.posted[0][2]["events"]], [1])
+
+    def test_exhausting_the_budget_reports_failure_rather_than_discarding(self):
+        def always_fails(*a, **kw):
+            raise SystemExit("down")
+
+        relay.api = always_fails
+        s = relay.TalkEventSender(turn_id=7, max_attempts=2, backoff=lambda _a: 0)
+        s.enqueue("out", "a")
+        self.assertFalse(capture_ret(s.flush))
+        self.assertTrue(s.failed)
+
+    def test_the_final_attempt_does_not_sleep_after_giving_up(self):
+        """RE268: _post slept after EVERY attempt including the last, burning
+        a pointless final backoff after the decision to give up was already made."""
+        relay.api = lambda *a, **kw: (_ for _ in ()).throw(SystemExit("down"))
+        sleeps = []
+        orig_sleep = relay.time.sleep
+        relay.time.sleep = lambda secs: sleeps.append(secs)
+        self.addCleanup(setattr, relay.time, "sleep", orig_sleep)
+        s = relay.TalkEventSender(turn_id=7, max_attempts=3, backoff=lambda a: 100 + a)
+
+        s.enqueue("out", "a")
+        self.assertFalse(capture_ret(s.flush))
+
+        self.assertEqual(sleeps, [100, 101])   # attempts 0,1 sleep; attempt 2 (the last) does not
+
+    def test_send_best_effort_rearms_after_flush_gave_up_and_tries_once_more(self):
+        """RE268: the one-more-try-after-giving-up re-arm was a bare
+        `sender.failed = False` reach-in from outside, documented only by a trailing comment.
+        A named method makes the intent self-describing and is what run_talk_job now calls."""
+        relay.api = lambda *a, **kw: (_ for _ in ()).throw(SystemExit("down"))
+        s = relay.TalkEventSender(turn_id=7, max_attempts=1, backoff=lambda _a: 0)
+        s.enqueue("out", "a")
+        self.assertFalse(capture_ret(s.flush))
+        self.assertTrue(s.failed)
+
+        relay.api = lambda m, p, b=None, **kw: (
+            self.posted.append((m, p, b, kw)) or {"status": "ok", "accepted": len(b["events"])})
+        delivered = s.send_best_effort("error", "some output was lost")
+
+        self.assertTrue(delivered)
+        self.assertFalse(s.failed)
+        self.assertEqual(self.posted[0][2]["events"][-1]["text"], "some output was lost")
+
+    def test_a_stale_pending_line_flushes_before_a_new_one_joins_it(self):
+        """RE268: `enqueue` only flushed at batch=40, and the only
+        other flush was the one `run_talk_job` does AFTER the process exits — so a typical short
+        turn (a couple of tool lines, a couple of text blocks) delivered its whole transcript in
+        ONE post at the very end, defeating the point of the on_event streaming hook. A line
+        older than `flush_interval` must flush on its own, ahead of whatever enqueues next."""
+        clock = {"t": 0.0}
+        s = relay.TalkEventSender(turn_id=7, flush_interval=1.0, clock=lambda: clock["t"])
+        s.enqueue("out", "a")
+        self.assertEqual(self.posted, [])                 # still buffered — under the interval
+        clock["t"] = 1.5
+        s.enqueue("out", "b")                              # "a" is now stale -> flushes alone
+        self.assertEqual(len(self.posted), 1)
+        self.assertEqual([e["text"] for e in self.posted[0][2]["events"]], ["a"])
+        s.flush()                                          # drain what's left ("b")
+        self.assertEqual(len(self.posted), 2)
+        self.assertEqual([e["text"] for e in self.posted[1][2]["events"]], ["b"])
+
+
+class TalkWorktreeTest(unittest.TestCase):
+    """ADR 0009 §2: a turn always uses the card's exclusive per-card worktree, attaching to the
+    live one when there is one. NEVER the shared <ns>-clean tree, which other cards' jobs are
+    using."""
+
+    def _pool(self, **cfg):
+        base = {"namespace": "exec", "capacity": {"shared_clean": 2, "exclusive": 2},
+                "max_retained_failed": 3}
+        base.update(cfg)
+        return relay.ExecutorPool(base)
+
+    def test_a_card_with_no_worktree_gets_its_own_and_is_reset(self):
+        pool = self._pool()
+        self.assertEqual(pool.assign_talk("DE3"), ("exec-DE3", True))
+
+    def test_it_attaches_to_a_live_exclusive_worktree_without_resetting_it(self):
+        pool = self._pool()
+        pool.assign(job("exclusive_shell", vars={"ref": "DE3"}))
+        self.assertEqual(pool.assign_talk("DE3"), ("exec-DE3", False))
+
+    def test_it_reuses_a_retained_failed_worktree_as_it_is(self):
+        pool = self._pool()
+        pool.wts["exec-DE3"] = {"run_id": None, "state": "retained", "live": False, "partition": None}
+        self.assertEqual(pool.assign_talk("DE3"), ("exec-DE3", False))
+
+    def test_a_shared_clean_card_still_gets_its_own_tree(self):
+        pool = self._pool()
+        pool.assign(job("shared_clean_agent", vars={"ref": "CA1"}))
+        slot, _reset = pool.assign_talk("CA1")
+        self.assertNotEqual(slot, pool.shared_name)
+        self.assertEqual(slot, "exec-CA1")
+
+    def test_it_refuses_rather_than_stealing_when_there_is_no_room(self):
+        pool = self._pool(capacity={"shared_clean": 1, "exclusive": 0})
+        self.assertIsNone(pool.assign_talk("DE3"))
+
+    def test_a_talk_worktree_is_not_released_by_a_run_ending(self):
+        pool = self._pool()
+        pool.assign_talk("DE3")
+        pool.release_run(run_id=None, status="done")   # the None binding must NOT match
+        pool.release_run(run_id="run-9", status="done")
+        self.assertIn("exec-DE3", pool.wts)
+
+
+class TalkOccupancyTest(unittest.TestCase):
+    """RE268: a node job and a talk turn attached to the
+    SAME worktree record must not tear it down out from under each other. Occupancy is tracked
+    separately — `live` for the node job, a `talk_users` count for talk turns — and the tree is only
+    finished once BOTH occupants have released it (last one out tears down)."""
+
+    def _pool(self, **cfg):
+        base = {"namespace": "exec", "capacity": {"shared_clean": 2, "exclusive": 2},
+                "max_retained_failed": 3}
+        base.update(cfg)
+        return relay.ExecutorPool(base)
+
+    def test_a_node_jobs_done_release_defers_while_a_talk_turn_still_occupies_the_tree(self):
+        pool = self._pool()
+        j = job("exclusive_shell", vars={"ref": "DE3"})
+        slot, _reset = pool.assign(j)
+        pool.assign_talk("DE3")                       # talk turn attaches (dirty read)
+        pool.release(j, slot, "done")                 # node job finishes
+        self.assertIn(slot, pool.wts)                  # NOT torn down — talk still there
+        self.assertEqual(pool.wts[slot]["state"], "active")
+
+    def test_the_deferred_disposition_finishes_once_the_talk_turn_also_releases(self):
+        pool = self._pool()
+        j = job("exclusive_shell", vars={"ref": "DE3"})
+        slot, _reset = pool.assign(j)
+        pool.assign_talk("DE3")
+        pool.release(j, slot, "done")                 # deferred
+        pool.release_talk(slot)                        # last occupant out
+        self.assertNotIn(slot, pool.wts)                # now finished (done -> removed)
+
+    def test_two_overlapping_talk_turns_do_not_tear_the_tree_down_under_each_other(self):
+        """RE268 round-3 finding 0: talk occupancy is a COUNT, not a flag.
+
+        Stop writes :stopped and revokes server-side immediately, but the executor only learns
+        of the revoke on its next heartbeat (15s default) — so turn 1's thread is still live
+        when the person retypes and turn 2 is claimed into the same tree. With a boolean the
+        second occupant was not counted, and turn 1's release stashed and force-removed the
+        worktree turn 2's claude was answering in."""
+        pool = self._pool()
+        slot, _reset = pool.assign_talk("DE3")
+        pool.assign_talk("DE3")                        # second turn, same tree
+        self.assertEqual(pool.wts[slot]["talk_users"], 2)
+        pool.release_talk(slot)                        # turn 1 finishes
+        self.assertIn(slot, pool.wts)                  # tree survives for turn 2
+        self.assertEqual(pool.wts[slot]["talk_users"], 1)
+        pool.release_talk(slot)                        # turn 2 finishes
+        self.assertEqual(pool.wts[slot]["state"], "retained")   # last out -> talk-only retirement
+
+    def test_a_deferred_disposition_survives_a_non_final_talk_release(self):
+        """The pop used to run above the early return, discarding the node job's deferred
+        disposition whenever another occupant was still present."""
+        pool = self._pool()
+        j = job("exclusive_shell", vars={"ref": "DE3"})
+        slot, _reset = pool.assign(j)
+        pool.assign_talk("DE3")
+        pool.assign_talk("DE3")                        # two talk turns
+        pool.release(j, slot, "done")                  # deferred behind both
+        pool.release_talk(slot)                        # one leaves; disposition must be kept
+        self.assertIn(slot, pool.wts)
+        self.assertEqual(pool.wts[slot].get("pending_finish"), "done")
+        pool.release_talk(slot)                        # last out — now it finishes
+        self.assertNotIn(slot, pool.wts)
+
+    def test_a_talk_release_never_touches_the_node_jobs_live_flag(self):
+        pool = self._pool()
+        j = job("exclusive_shell", vars={"ref": "DE3"})
+        slot, _reset = pool.assign(j)                  # node job live
+        pool.assign_talk("DE3")
+        pool.release_talk(slot)                         # talk turn ends; node job still running
+        self.assertTrue(pool.wts[slot]["live"])          # node occupancy untouched
+        self.assertEqual(pool.wts[slot]["state"], "active")
+
+    def test_release_run_defers_the_same_way_as_release(self):
+        pool = self._pool()
+        j = job("exclusive_shell", vars={"ref": "DE3"})
+        slot, _reset = pool.assign(j)
+        pool.release(j, slot, "parked")                 # idle-bound
+        pool.assign_talk("DE3")                          # talk turn attaches to the idle tree
+        pool.release_run(run_id=j["run_id"], status="done")
+        self.assertIn(slot, pool.wts)                     # deferred — talk still there
+        pool.release_talk(slot)
+        self.assertNotIn(slot, pool.wts)                  # finished once talk also releases
+
+    def test_assign_refuses_to_rebaseline_a_retained_tree_with_a_live_talk_turn(self):
+        """RE268: assign_talk's docstring promises
+        a retained (failed) worktree is reused AS IT IS — post-mortem is exactly what a talk
+        turn is for. But assign()'s own retained-reclaim branch re-baselines unconditionally, so
+        a node job's claim for the same card hard-resets the tree (via create_or_rebaseline)
+        while the talk turn's claude process is reading it. assign() must refuse — the same
+        "refuse rather than steal a live worktree" precedent it already applies when the
+        worktree is bound to a different live run."""
+        pool = self._pool()
+        pool.wts["exec-DE3"] = {"run_id": None, "state": "retained", "live": False,
+                                "partition": None}
+        pool.assign_talk("DE3")           # attaches -> talk_users 1 (the post-mortem case)
+        j = job("exclusive_shell", vars={"ref": "DE3"})
+        self.assertIsNone(pool.assign(j))
+
+
+class TalkOnlyIdleRetirementTest(unittest.TestCase):
+    """RE268: a talk-only worktree (never bound to a real
+    run) must not permanently consume an exclusive slot once its talk turn ends — it becomes
+    reclaimable, like a failed run's retained worktree, instead of staying counted forever."""
+
+    def _pool(self, **cfg):
+        base = {"namespace": "exec", "capacity": {"shared_clean": 2, "exclusive": 2},
+                "max_retained_failed": 3}
+        base.update(cfg)
+        return relay.ExecutorPool(base)
+
+    def test_an_idle_talk_only_tree_stops_counting_toward_capacity(self):
+        pool = self._pool()
+        pool.assign_talk("DE3")
+        self.assertEqual(pool.capacity()["exclusive"], 1)
+        pool.release_talk("exec-DE3")
+        self.assertEqual(pool.capacity()["exclusive"], 2)              # reclaimed
+        self.assertEqual(pool.wts["exec-DE3"]["state"], "retained")
+
+    def test_a_retired_talk_only_tree_is_still_reused_by_a_later_talk_turn(self):
+        pool = self._pool()
+        pool.assign_talk("DE3")
+        pool.release_talk("exec-DE3")
+        self.assertEqual(pool.assign_talk("DE3"), ("exec-DE3", False))
+
+    def test_a_worktree_still_bound_to_a_real_run_is_not_retired_on_talk_release(self):
+        pool = self._pool()
+        j = job("exclusive_shell", vars={"ref": "DE3"})
+        slot, _reset = pool.assign(j)
+        pool.release(j, slot, "parked")                 # idle-bound, but a real run owns it
+        pool.assign_talk("DE3")
+        pool.release_talk(slot)
+        self.assertEqual(pool.wts[slot]["state"], "active")   # not retired — a run still owns it
+        self.assertEqual(pool.capacity()["exclusive"], 1)
+
+    def test_a_retired_tree_reoccupied_by_a_talk_turn_is_not_evicted_over_cap(self):
+        """Retiring an idle talk-only tree makes it evictable oldest-first like any retained
+        tree — but never while a talk turn is CURRENTLY live in it again."""
+        pool = self._pool(max_retained_failed=1)
+        pool.assign_talk("DE3")
+        pool.release_talk("exec-DE3")                    # retired talk-only tree #1
+        pool.assign_talk("DE3")                           # a new talk turn reattaches to it
+        pool.assign_talk("OTHER")
+        pool.release_talk("exec-OTHER")                  # retired #2 -> triggers eviction check
+        self.assertIn("exec-DE3", pool.wts)                # not evicted: a talk turn is live in it
+        self.assertIn("exec-OTHER", pool.wts)
+
+    def test_a_restart_recovered_worktree_is_not_retired_as_talk_only(self):
+        """RE268: recover() rebuilds every adopted
+        per-card worktree as {"run_id": None, "state": "active", ...} with NO "talk" marker — the
+        same run_id/state shape a talk-only worktree has. release_talk's retirement test must
+        key off the "talk" marker the record actually carries, not merely run_id is None, or a
+        restart-recovered worktree gets retired (stashed + hard-reset) out from under its
+        resuming job, which expects its branch commits to survive untouched."""
+        pool = self._pool()
+        with pool.lock:
+            pool.wts["exec-DE3"] = {"run_id": None, "state": "active", "live": False,
+                                    "partition": pool._take_partition()}
+        pool.assign_talk("DE3")          # a talk turn attaches to the recovered worktree
+        pool.release_talk("exec-DE3")
+        self.assertEqual(pool.wts["exec-DE3"]["state"], "active")   # NOT retired
+        self.assertIsNotNone(pool.wts["exec-DE3"]["partition"])      # partition still held
+
+
+class TalkOutcomeTest(unittest.TestCase):
+    def setUp(self):
+        self.posted = []
+        self.orig = relay.api
+        relay.api = lambda m, p, b=None, **kw: (self.posted.append((m, p, b)), {"status": "ok", "turn_state": b["status"]})[1]
+
+    def tearDown(self):
+        relay.api = self.orig
+
+    def test_it_posts_the_talk_outcome_route_with_the_fixture_key_set(self):
+        relay.report_talk_outcome(7, "done", "sess-abc", "")
+        method, path, body = self.posted[0]
+        self.assertEqual((method, path), ("POST", "/api/talk/turns/7/outcome"))
+        self.assertEqual(set(body), set(CONTRACT["talk_outcome"]["request"]))
+
+    def test_a_revoked_turn_reports_stopped_not_failed(self):
+        relay.report_talk_outcome(7, "stopped", None, "")
+        self.assertEqual(self.posted[0][2]["status"], "stopped")
 
 
 if __name__ == "__main__":

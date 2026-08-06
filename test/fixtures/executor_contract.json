@@ -4,6 +4,7 @@
       "agent": null,
       "id": "<node-job-id>",
       "isolation": "exclusive",
+      "kind": "node",
       "node_id": "work",
       "node_type": "shell",
       "ref": "CB1",
@@ -22,6 +23,7 @@
       "agent": "plan-implementer",
       "id": "<node-job-id>",
       "isolation": "shared_clean",
+      "kind": "node",
       "node_id": "work",
       "node_type": "agent",
       "ref": "CA1",
@@ -40,6 +42,7 @@
       "agent": "plan-implementer",
       "id": "<node-job-id>",
       "isolation": "shared_clean",
+      "kind": "node",
       "node_id": "work",
       "node_type": "agent",
       "ref": "CA1",
@@ -63,8 +66,9 @@
       "host": "fixture-host",
       "interval": 30,
       "name": "fixture",
-      "version": 21
-    }
+      "version": 39
+    },
+    "running": []
   },
   "heartbeat": {
     "request": {
@@ -85,7 +89,7 @@
         "host": "fixture-host",
         "interval": 30,
         "name": "fixture",
-        "version": 21
+        "version": 39
       },
       "running": []
     },
@@ -110,7 +114,69 @@
       "status": "ok"
     }
   },
-  "version": 2,
+  "talk_claim": {
+    "first_turn": {
+      "author": "Test User",
+      "branch": null,
+      "id": "<node-job-id>",
+      "kind": "talk",
+      "prompt": "why is this stuck?",
+      "ref": "CB2",
+      "resume_session": null,
+      "seed": {
+        "fields": [
+          {
+            "label": "description",
+            "value": "Why is this stuck?"
+          },
+          {
+            "label": "runs",
+            "value": "0 on this card"
+          },
+          {
+            "label": "flow",
+            "value": "no branch yet"
+          }
+        ],
+        "summary": "1 field · no plan yet · 0 runs"
+      },
+      "turn_id": "<talk-turn-id>"
+    }
+  },
+  "talk_events": {
+    "request": {
+      "events": [
+        {
+          "client_seq": 1,
+          "dim": true,
+          "kind": "tool",
+          "text": "Read · lib/relay.ex"
+        },
+        {
+          "client_seq": 2,
+          "dim": false,
+          "kind": "out",
+          "text": "It is waiting on an open question."
+        }
+      ]
+    },
+    "response": {
+      "accepted": 2,
+      "status": "ok"
+    }
+  },
+  "talk_outcome": {
+    "request": {
+      "detail": null,
+      "session_id": "<session-id>",
+      "status": "done"
+    },
+    "response": {
+      "status": "ok",
+      "turn_state": "done"
+    }
+  },
+  "version": 3,
   "vocabulary": {
     "audit_severities": [
       "error",
@@ -142,6 +208,23 @@
         "done",
         "failed",
         "cancelled"
+      ]
+    },
+    "talk_event_kinds": [
+      "user",
+      "tool",
+      "out",
+      "error"
+    ],
+    "talk_turn_statuses": {
+      "active": [
+        "queued",
+        "claimed"
+      ],
+      "reportable": [
+        "done",
+        "stopped",
+        "failed"
       ]
     }
   }

@@ -36,6 +36,22 @@ defmodule RelayWeb.PublicBoardLiveTest do
       assert {:ok, _view, _html} = live(conn, ~p"/board/#{board.slug}/public")
     end
 
+    # RE268 quality review — the original assertion ran against the bare board page, before any
+    # card modal opened, so `#public-card-modal` (the only place Talk markup could ever land) was
+    # never even in the DOM: the refute passed whether or not PublicBoardLive grew a Talk
+    # surface. Opening a card first is what makes this a real regression guard.
+    #
+    # RE268 — the public board renders its own `#public-card-modal`, never `card_drawer/1`, so
+    # public viewers get no Talk surface, ever (ADR 0009: Talk is authenticated-member only).
+    test "offers no Talk surface — public viewers never see the tab", %{conn: conn, board: board, mobile: mobile} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/public")
+
+      html = view |> element("#public-card-open-#{mobile.id}") |> render_click()
+
+      assert has_element?(view, "#public-card-modal")
+      refute html =~ "card-drawer-tab-talk"
+    end
+
     test "shows three columns — Unstarted, Planning, In progress — each with a count",
          %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/public")

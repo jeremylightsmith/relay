@@ -15,11 +15,14 @@ what each term *means*; the sections below say what each value *does*.
 | --- | --- | --- |
 | Card status | `ready` · `working` · `needs_input` · `in_review` · `queued` · `failed` | `Schemas.Card.statuses/0` |
 | Node outcome | `succeeded` · `failed` · `partial` · `needs_input` | `Schemas.NodeExecution.outcomes/0` |
+| Node-job kind | `node` · `talk` | `Schemas.NodeJob.kinds/0` |
 | Node-job state | `queued` · `claimed` · `done` · `revoked` | `Schemas.NodeJob.states/0` |
 | Run parked reason | `needs_input` · `claimed` · `executor_gone` | `Schemas.Run.parked_reasons/0` |
 | Run status | `running` · `parked` · `done` · `failed` · `cancelled` | `Schemas.Run.statuses/0` |
 | Stage category | `unstarted` · `planning` · `in_progress` · `complete` | `Schemas.Stage.categories/0` |
 | Stage type | `queue` · `work` · `planning` · `review` · `done` | `Schemas.Stage.types/0` |
+| Talk event kind | `user` · `tool` · `out` · `error` | `Schemas.TalkEvent.kinds/0` |
+| Talk turn status | `queued` · `claimed` · `done` · `stopped` · `failed` | `Schemas.TalkTurn.statuses/0` |
 <!-- END generated: vocabularies -->
 
 These are the *runtime* vocabularies, not every closed set in the codebase. The flow-**definition**
@@ -245,6 +248,45 @@ claims it, runs it, and reports back.
 | `revoked` | Withdrawn — the run was cancelled, or the executor stopped heartbeating and the reaper took the job back for re-dispatch. Terminal. | — |
 
 A revoked job never produces an outcome; the engine re-queues the node instead.
+
+### Node-job kind
+
+RE268 / ADR 0009: `node_jobs` is the dispatch table for two dispatchers, distinguished by
+`kind`. `:node` is written by the flow engine and always carries a `run_id` and
+`node_execution_id`. `:talk` is one turn of a person-driven Talk session — it carries neither,
+because a talk turn deliberately synthesises no `Run` (a `Run` would make every card with an
+open conversation read as having an active run).
+
+`card_id` is set on **every** row, flow or talk, backfilled from the run for existing rows — it
+is the one board-scoping join both kinds share, the same deliberate denormalisation
+`story_tasks.board_id` already uses.
+
+A talk job never refreshes the card's `agent_heartbeat_at` (a talk turn is not the agent
+working the card — the baton does not move) and is never requeued by the orphan reaper (a
+resumed `claude` session must land back on the executor that holds it, never a different
+machine); it ends only when a human presses Stop or it reports an outcome.
+
+## Talk turn status
+
+A talk turn is one human message and the work it caused (RE268 / ADR 0009), tracked separately
+from the `node_jobs` row that carries it to an executor.
+
+| Status | Meaning | Next |
+| --- | --- | --- |
+| `queued` | Written when the person hits Enter; no executor holds the turn's job yet. | `claimed` (an executor takes it) or `stopped` (the person hits Stop before it is claimed). |
+| `claimed` | An executor is running `claude -p --resume` for this turn. | `done`, `stopped` or `failed`. |
+| `done` | The turn finished normally; the executor's `claude_session_id` is persisted so the next turn resumes it. Terminal. | — |
+| `stopped` | The person hit Stop. A normal, **non-error** end state — the job is revoked and the turn's partial output stays in the transcript. Terminal. | — |
+| `failed` | The executor reported an error. Terminal. | — |
+
+`queued` and `claimed` are the turn's *active* statuses (`Schemas.TalkTurn.active_statuses/0`):
+the pane shows Stop **in place of** the composer, which is removed while a turn is live, and a
+second `post_message/3` on the same session is refused while one is active.
+
+`queued → claimed` is written by `RelayWeb.Api.NodeJobController` (via `Relay.Talk.mark_claimed/1`)
+off the claim it just granted, not by `Relay.Runs.claim_next_job/1` — the run lifecycle claims a
+job and only Talk knows a job can carry a turn. Only a `:queued` turn moves, so a claim landing
+just after Stop cannot drag a `:stopped` turn back to live.
 
 ## Node outcomes
 

@@ -220,6 +220,8 @@ defmodule RelayWeb.Router do
     post "/node-jobs/claim", NodeJobController, :claim
     post "/node-jobs/heartbeat", NodeJobController, :heartbeat
     post "/node-jobs/:id/outcome", NodeJobController, :outcome
+    post "/talk/turns/:id/events", TalkController, :events
+    post "/talk/turns/:id/outcome", TalkController, :outcome
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development

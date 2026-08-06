@@ -2559,7 +2559,15 @@ defmodule RelayWeb.BoardLiveTest do
          %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
 
-      assert has_element?(view, ~s(#card-drawer-panel[phx-hook="ArrowKeyGuard"]))
+      # data-guard-keys is asserted too: after the TypingKeyGuard consolidation the guarded keys
+      # are a server-rendered attribute, and the hook degrades to a SILENT no-op when it is
+      # missing — so without this, RLY-234 (Left/Right navigating cards while you edit the drawer
+      # title) could come back with a fully green suite.
+      assert has_element?(
+               view,
+               ~s(#card-drawer-panel[phx-hook="ArrowKeyGuard"][data-guard-keys="ArrowLeft,ArrowRight"])
+             )
+
       refute has_element?(view, ~s(#card-drawer-panel[data-prev]))
       refute has_element?(view, ~s(#card-drawer-panel[data-next]))
     end

@@ -93,6 +93,7 @@ tracked as a separate follow-up.
 | `events:firehose` | `Relay.Events` — mirrors every board event as `{board_id, event}` | every `board:<board_id>` event, tagged with its board id | `Relay.Runs.Listener` (reconciles card events against runs — RLY-132; its first rule closes, rather than resumes, an active run whose card has reached a terminal-type stage — RLY-233) |
 | `runs:capacity` | `Relay.Runs.Capacity` | `{:executor_capacity_changed, executor_id}` — an executor's advertised free capacity changed | every per-board `Relay.Runs.Scheduler.Server` |
 | `api_log` | `RelayWeb.ApiLog` | `{:api_log, entry}` | `Admin.ApiLive` |
+| `card:<card_id>:talk` | `Relay.Talk` (RE268 / ADR 0009) | `{:talk_event, event}`, `{:talk_turn_changed, turn}` | the open `BoardLive` whose drawer is on the Talk tab, only while it is |
 
 Two invariants make the seam trustworthy: **only contexts broadcast** domain events (so
 LiveView and REST mutations share one path), and broadcasting is **fire-and-forget** (a
@@ -147,4 +148,5 @@ reserved for the genuine question above; the two never overlap (RLY-179).
 *Sources of truth: `lib/relay/application.ex`, `lib/relay/events.ex`,
 `lib/relay/agent_log.ex`, `lib/relay/board_watch.ex`,
 `lib/relay_web/api_log.ex`, `lib/relay/runs.ex`, `lib/relay/runs/supervisor.ex`,
-`lib/relay/runs/listener.ex`, `lib/relay/runs/executor_reaper.ex`, `lib/relay/runs/`.*
+`lib/relay/runs/listener.ex`, `lib/relay/runs/executor_reaper.ex`, `lib/relay/runs/`,
+`lib/relay/talk.ex`.*

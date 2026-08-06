@@ -57,7 +57,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
     {run, Runs.active_job(run)}
   end
 
-  defp claim(conn, capacity \\ %{"shared_clean" => 1, "exclusive" => 1}) do
+  defp claim(conn, capacity \\ %{"shared_clean" => 1, "exclusive" => 1}, running \\ []) do
     post(
       conn,
       ~p"/api/node-jobs/claim",
@@ -66,9 +66,10 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
           "name" => "fake",
           "host" => "fake",
           "interval" => 30,
-          "version" => Runs.min_executor_version()
+          "version" => Runs.min_talk_executor_version()
         },
-        "capacity" => capacity
+        "capacity" => capacity,
+        "running" => running
       })
     )
   end
@@ -107,7 +108,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
           conn,
           ~p"/api/node-jobs/claim?wait=0",
           Jason.encode!(%{
-            "executor" => %{"name" => "idle", "version" => Runs.min_executor_version()},
+            "executor" => %{"name" => "idle", "version" => Runs.min_talk_executor_version()},
             "capacity" => %{"shared_clean" => 1}
           })
         )
@@ -122,7 +123,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
             conn,
             ~p"/api/node-jobs/claim",
             Jason.encode!(%{
-              "executor" => %{"name" => "zero-capacity", "version" => Runs.min_executor_version()},
+              "executor" => %{"name" => "zero-capacity", "version" => Runs.min_talk_executor_version()},
               "capacity" => %{"shared_clean" => 0, "exclusive" => 0}
             })
           )
@@ -207,6 +208,63 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       body = conn |> claim() |> json_response(200)
 
       assert body["id"]
+    end
+
+    # RE268 whole-branch review — claiming a TALK job is what moves its turn `:queued → :claimed`.
+    # Without this the status was documented but unreachable, and a turn read `:queued` for the
+    # whole time `claude -p` was running.
+    test "claiming a talk job marks its turn :claimed", %{conn: conn, board: board} do
+      stage = Enum.find(board.stages, &(&1.name == "Next up"))
+      {:ok, card} = Relay.Cards.create_card(stage, %{title: "Talk card"})
+      {:ok, turn} = Relay.Talk.post_message(card, insert(:user), "why is this stuck?")
+
+      body = conn |> claim() |> json_response(200)
+
+      assert body["kind"] == "talk"
+      assert body["turn_id"] == turn.id
+      assert Relay.Talk.get_turn(turn.id).status == :claimed
+    end
+  end
+
+  describe "POST /api/node-jobs/claim — revocations (RE268)" do
+    # `wait: 0` keeps the test out of the 25s long-poll; the revocation path is identical, and
+    # `wait_loop/5` re-checks on every wake so a Stop mid-poll returns just as promptly.
+    defp claim_now(conn, running) do
+      post(
+        conn,
+        ~p"/api/node-jobs/claim",
+        Jason.encode!(%{
+          "executor" => %{
+            "name" => "fake",
+            "host" => "fake",
+            "interval" => 30,
+            "version" => Runs.min_talk_executor_version()
+          },
+          "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
+          "running" => running,
+          "wait" => "0"
+        })
+      )
+    end
+
+    test "a no-job claim carries the revoked ids among what the executor reports running", ctx do
+      %{conn: conn, board: board} = ctx
+      flow = four_outcome_flow(board)
+      {run, job} = start_queued_job(board, flow)
+
+      conn |> claim() |> json_response(200)
+      Runs.revoke_active_jobs(run)
+
+      body = conn |> claim_now([job.id]) |> json_response(200)
+
+      # This is what makes Stop land in well under a second: without it the executor would not
+      # learn the job was killed until its next 15s heartbeat, and `claude` would keep streaming.
+      assert body["revoked"] == [job.id]
+      refute Map.has_key?(body, "id")
+    end
+
+    test "still 204 when nothing this executor reports running has been revoked", ctx do
+      assert ctx.conn |> claim_now([]) |> response(204)
     end
   end
 
@@ -534,7 +592,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
         |> post(
           ~p"/api/node-jobs/heartbeat",
           Jason.encode!(%{
-            "executor" => %{"name" => "current", "host" => "new", "version" => Runs.min_executor_version()},
+            "executor" => %{"name" => "current", "host" => "new", "version" => Runs.min_talk_executor_version()},
             "capacity" => %{"shared_clean" => 1},
             "running" => []
           })
@@ -552,7 +610,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
         |> post(
           ~p"/api/node-jobs/heartbeat",
           Jason.encode!(%{
-            "executor" => %{"name" => "box", "host" => "h", "version" => Runs.min_executor_version()},
+            "executor" => %{"name" => "box", "host" => "h", "version" => Runs.min_talk_executor_version()},
             "capacity" => %{"shared_clean" => 1},
             "running" => []
           })

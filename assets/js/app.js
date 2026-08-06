@@ -28,7 +28,7 @@ import BoardDnD from "./hooks/board_dnd"
 import StoryMapDnD from "./hooks/story_map_dnd"
 import StoryMapCursors from "./hooks/story_map_cursors"
 import BoardPager from "./hooks/board_pager"
-import ArrowKeyGuard from "./hooks/arrow_key_guard"
+import TypingKeyGuard from "./hooks/typing_key_guard"
 import CommitField from "./hooks/commit_field"
 import InlineNameInput from "./hooks/inline_name_input"
 import SubmitOnCmdEnter from "./hooks/submit_on_cmd_enter"
@@ -39,7 +39,25 @@ const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, BoardDnD, StoryMapDnD, StoryMapCursors, BoardPager, ArrowKeyGuard, CommitField, InlineNameInput, SubmitOnCmdEnter, SubmitOnEnter},
+  // RE268 quality review — ArrowKeyGuard (RLY-234) and TypingKeyGuard were near-verbatim
+  // duplicates of the same capture-phase keydown guard; ArrowKeyGuard's key list is now just
+  // TypingKeyGuard's generic `data-guard-keys` (see the `card-drawer-panel` mount in
+  // core_components.ex), so both hook names share one implementation. Both mount points stay —
+  // ArrowKeyGuard's is conditional on card nav being enabled, TypingKeyGuard's applies to every
+  // drawer — only the duplicate JS body is gone.
+  hooks: {
+    ...colocatedHooks,
+    BoardDnD,
+    StoryMapDnD,
+    StoryMapCursors,
+    BoardPager,
+    ArrowKeyGuard: TypingKeyGuard,
+    TypingKeyGuard,
+    CommitField,
+    InlineNameInput,
+    SubmitOnCmdEnter,
+    SubmitOnEnter,
+  },
 })
 
 // Show progress bar on live navigation and form submits

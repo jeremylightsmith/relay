@@ -284,6 +284,31 @@ sharing behavior.
   everyone else does, so viewers cannot disagree. `story_map_draft` / `story_map_draft_name` /
   `story_map_compose` stay **per-tab** (RE263) — sharing them would hand one person the ability
   to clear another's in-progress input.
+- **Talk** (`Relay.Talk`, RE268 / ADR 0009 — not yet merged to `main`) —
+  a person-driven execution lane, orthogonal to the flow engine: a person types in a card's
+  terminal pane, one turn becomes a `node_jobs` row with `kind: :talk` and no run, claimed
+  through the same long-poll every flow node uses. Three tables: `Schemas.TalkSession` (one per
+  card — `claude_session_id`, `pinned_executor_name`, the seed, `last_event_seq` /
+  `cleared_through_seq`), `Schemas.TalkTurn` (one per human message, `queued → claimed → done |
+  stopped | failed`; `queued → claimed` is written by the claim endpoint via
+  `Talk.mark_claimed/1`, so the claim path itself needs no knowledge of *turns* — `Relay.Runs`
+  knows only that a job can carry `kind: :talk`, via `insert_talk_job!/3`, `revoke_talk_job/1`,
+  `finish_talk_job!/1` and the `talk_capable?/1` floor on the claim),
+  `Schemas.TalkEvent` (one per rendered transcript line, append-only). **The
+  pin**: `finish_turn/3` records the claiming executor's name onto the session **on `:done`
+  only** — a `:stopped` or `:failed` turn never finished, so it cannot vouch for the session id
+  or the holder, and leaves both unset; `post_message/3`
+  copies it onto the next job's `executor_name`, so `Runs.claim_next_job/1` needs no Talk
+  knowledge — the pin rides the same column an exclusive run's pin already uses. **Ordering is
+  `seq`, never a timestamp** — `append_events/2` assigns it inside one transaction locking the
+  session row, so two concurrent batches can't collide; delivery is at-least-once and
+  `(talk_turn_id, client_seq)` is unique, so a replayed batch stores and broadcasts nothing new.
+  `clear/1` hides scrollback by bumping `cleared_through_seq`; it deletes no row. Broadcasts on
+  `card:<card_id>:talk`: `{:talk_event, event}` and `{:talk_turn_changed, turn}`. **Known step-1
+  limitation**: a turn whose executor dies stays `claimed` — the orphan reaper deliberately
+  ignores talk jobs; `stop_turn/1` revokes unconditionally so a person can always end it. Not
+  here in step 1: receipts, `awaiting` turns, the write lease, card-level executor pinning — a
+  talk turn never moves the card's baton.
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
 
 ## Core schemas
@@ -323,6 +348,10 @@ erDiagram
     User ||--o{ DeviceToken : "push"
     Card ||--o{ Vote : upvotes
     User ||--o{ Vote : cast
+    Card ||--o| TalkSession : "one Talk session"
+    TalkSession ||--o{ TalkTurn : "one per human message"
+    TalkTurn ||--o{ TalkEvent : "transcript lines"
+    TalkTurn |o--o| NodeJob : "kind: talk (no run)"
 ```
 
 A `Stage` may point at a `parent` (sub-lanes like `Spec:Review`) and a `reject_to_stage`

@@ -61,6 +61,9 @@ flowchart LR
     StoryMap --> Cards
     StoryMap --> Events
     StoryMap --> Repo
+    Talk --> Cards
+    Talk --> Repo
+    Talk --> Runs
     Votes --> Events
     Votes --> Repo
 ```

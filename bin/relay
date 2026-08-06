@@ -69,8 +69,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 34
-EXECUTOR_FINGERPRINT = "55e73eab14de21f0cc5a1f36da2b0145d8883a0536c0c8ca0ef2caa0ddc5c592"
+EXECUTOR_VERSION = 41
+EXECUTOR_FINGERPRINT = "9844826e8b27218758ffc403e050a778a1696ffa53cc3e79cb1364a4892c3884"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1287,7 +1287,25 @@ def plan_path(slot_path, ref):
 ACTIVE_RUN_STATES = ("running", "parked")
 TERMINAL_RUN_STATES = ("done", "failed", "cancelled")
 ISOLATION_CLASSES = ("shared_clean", "exclusive")
+# Talk (RE268). TALK_TURN_STATUSES are the end states POSTable to
+# /api/talk/turns/:id/outcome (Schemas.TalkTurn.reportable_statuses/0) — a drift 422s the
+# outcome POST and strands the turn `:claimed`, which nothing reaps. TALK_EVENT_KINDS is
+# Schemas.TalkEvent.kinds/0; a drift there is silent, because the server degrades an unknown
+# kind to :out and an error line would render as ordinary output.
+TALK_TURN_STATUSES = ("done", "stopped", "failed")
+TALK_DONE, TALK_STOPPED, TALK_FAILED = TALK_TURN_STATUSES
+TALK_EVENT_KINDS = ("user", "tool", "out", "error")
+# `user` is the server's own kind for the person's line; the executor only ever emits the
+# other three. Unpacked from the tuple rather than re-typed, so the fixture assertion (which
+# compares ORDER too) is the single definition of both membership and position.
+_, TALK_KIND_TOOL, TALK_KIND_OUT, TALK_KIND_ERROR = TALK_EVENT_KINDS
 
+
+# Bounded placement retry (RE268): a talk turn holding a retained tree makes `assign`
+# refuse a node job transiently. ~10s total covers one turn handing the tree back;
+# past that it is genuine capacity exhaustion and the job is rejected as before.
+PLACEMENT_ATTEMPTS = 10
+PLACEMENT_RETRY_S = 1.0
 
 RETAINED_MARKER = ".relay-retained"   # gitignored sentinel at a retained worktree's root
 
@@ -1408,6 +1426,15 @@ class ExecutorPool:
 
             # Reclaim a retained (failed) worktree for a new run of the same card: re-baseline it.
             if rec and rec["state"] == "retained":
+                # Refuse rather than steal a retained tree a talk turn has reattached to for a
+                # post-mortem (RE268): assign_talk's docstring promises to reuse it AS IT IS —
+                # exactly the flow
+                # someone asking "why did this fail?" while the run is retried relies on — but
+                # re-baselining here hard-resets the tree (via create_or_rebaseline) while that
+                # talk turn's claude process is reading it. Same precedent as the "different
+                # live run" refusal below.
+                if rec.get("talk_users", 0) > 0:
+                    return None
                 if self._active_count() >= self.max_worktrees:
                     return None
                 if rec.get("partition") is None:
@@ -1427,12 +1454,88 @@ class ExecutorPool:
             # never runs twice at once). Refuse rather than steal a live worktree.
             return None
 
+    def release_talk(self, slot):
+        """Mark a talk turn's worktree idle. Deliberately does NOT touch `rec["live"]` — that
+        flag is the NODE job's own occupancy, and a node job can be running in this same
+        worktree right now (dirty reads are the point of assign_talk). Occupancy is tracked
+        per-occupant: `live` for a node job, a `talk_users` COUNT for talk turns (RE268) — a shared
+        flag let either occupant tear the tree down from under the other (a node job's
+        `release()` finishing while a talk turn streamed inside it destroyed the tree mid-answer;
+        a talk turn ending cleared `live` under a still-running node job).
+
+        If a node job's own release already finished but was DEFERRED because this talk turn was
+        still here (`pending_finish`), finish it now — last occupant out tears down. Otherwise,
+        if this worktree was TALK-CREATED (never bound to a real run — `rec["talk"]`), retire it
+        so it stops permanently consuming an exclusive slot (see `_retire_talk_only_locked`).
+
+        Gated on `rec.get("talk")`, NOT merely `run_id is None` (RE268): `recover()` rebuilds
+        every restart-adopted per-card worktree as
+        `{"run_id": None, "state": "active", ...}` too — the identical shape, with no "talk"
+        marker. Retiring on run_id alone mistook a recovered worktree for talk-only and retired
+        (stashed + hard-reset) it out from under its resuming job, whose commits were supposed to
+        survive untouched."""
+        with self.lock:
+            rec = self.wts.get(slot)
+            if rec is None:
+                return
+            rec["talk_users"] = max(0, rec.get("talk_users", 0) - 1)
+            if rec["talk_users"] > 0:
+                return                      # another talk turn still occupies this worktree
+            if rec["live"]:
+                return                      # a node job still occupies this worktree
+            # Popped only once we know we are the last occupant out: above the early returns it
+            # would discard the deferred disposition instead of leaving it for whoever is.
+            pending = rec.pop("pending_finish", None)
+            if pending is not None:
+                self._finish_locked(slot, rec, pending)
+            elif rec.get("talk") and rec["run_id"] is None and rec["state"] == "active":
+                self._retire_talk_only_locked(slot, rec)
+
+    def assign_talk(self, ref):
+        """Reserve the CARD'S OWN worktree for a talk turn (ADR 0009 §2): attach to the live one
+        when a node job has it (dirty reads are the point), reuse a retained failed one as it is
+        (post-mortem is exactly what people ask about), and create one otherwise. Returns
+        (slot_name, reset?) or None when there is no room — NEVER the shared `<ns>-clean` tree,
+        which other CARDS' jobs are using and which a talk turn must not disturb.
+
+        Increments `talk_users`, never `live` — `live` is the node job's own occupancy and must
+        stay untouched by the talk turn attaching (see the shared-flag hazard in release_talk,
+        above).
+
+        A talk-created worktree is bound to no run (`run_id` None), so `release_run` can never
+        tear it down: the tree must survive a run ending, because a session spans runs."""
+        name = self.wt_name(ref)
+        with self.lock:
+            rec = self.wts.get(name)
+            if rec is not None:
+                rec["talk_users"] = rec.get("talk_users", 0) + 1
+                return name, False
+            if self._active_count() >= self.max_worktrees:
+                return None
+            self.wts[name] = {"run_id": None, "state": "active", "live": False,
+                              "talk_users": 1, "partition": self._take_partition(),
+                              "talk": True}
+            return name, True
+
     # ---- release (outcome / revoke path) --------------------------------
     def release(self, job, slot, run_state):
         """Free/keep the worktree per the outcome's run_state. shared_clean always frees a slot.
         For an exclusive per-card worktree: running/parked keep it active; done/cancelled tear it
         down; failed retains it; a revoke (run_state=None) leaves it active and bound so the
-        pinned run resumes in it (the mid-run reset-on-revoke is GONE — never-detach, RLY-231)."""
+        pinned run resumes in it (the mid-run reset-on-revoke is GONE — never-detach, RLY-231).
+
+        A terminal disposition (done/cancelled/failed) is DEFERRED via `pending_finish` while a
+        talk turn is still occupying the same worktree (`talk_users > 0`) — tearing it down would
+        kill that turn's process mid-answer and stash its uncommitted edits out from under it
+        (RE268). `release_talk` finishes it once the talk turn also releases: last occupant out
+        tears down.
+
+        Known gap (RE268, see runner.md's "Talk turns"): while a disposition sits deferred, `rec`
+        stays `state="active"` bound to the OLD run_id. If a NEW run for the same card is
+        dispatched before the talk turn ends, `assign`'s "different live run" branch refuses it
+        (rec["run_id"] no longer matches) and the run's first job is rejected as failed — a
+        refusal, not a corruption, but worth a retry-before-reject in `assign` if this proves to
+        matter in practice; the window is bounded by one talk turn's lifetime."""
         if job["isolation"] == "shared_clean":
             with self.lock:
                 self.shared_used = max(0, self.shared_used - 1)
@@ -1444,16 +1547,30 @@ class ExecutorPool:
             rec["live"] = False
             if run_state is None or run_state in ACTIVE_RUN_STATES:
                 return                                  # revoke or still-live: keep active+bound
+            if rec.get("talk_users", 0) > 0:
+                rec["pending_finish"] = run_state
+                return
             self._finish_locked(slot, rec, run_state)
 
     def release_run(self, run_id, status=None):
         """Recovery path: the heartbeat named `run_id` terminal (server-side) while this executor
         holds its worktree with no live job. Tear it down (done/cancelled) or retain it (failed)
         per `status`. A legacy server may send status=None → default to removal (the old
-        behavior). Never touch a worktree with a live job (defense-in-depth)."""
+        behavior). Never touch a worktree with a live job (defense-in-depth) — and, for the same
+        reason, never one with a live TALK turn either (defer via `pending_finish`, same as
+        `release` above): a stale/duplicate `release_runs` entry must not tear down a tree a talk
+        turn is using.
+
+        `rec["run_id"] is not None` guards a talk-created (or recovered) worktree, which
+        deliberately carries `run_id: None` (ADR 0009 §2 — a talk session spans runs and must
+        outlive them): a legacy `release_runs` entry of `null` must never match it and tear down
+        a tree bound to nothing."""
         with self.lock:
             for name, rec in list(self.wts.items()):
-                if rec["run_id"] == run_id and rec["state"] == "active" and not rec["live"]:
+                if rec["run_id"] is not None and rec["run_id"] == run_id and rec["state"] == "active" and not rec["live"]:
+                    if rec.get("talk_users", 0) > 0:
+                        rec["pending_finish"] = status or "done"
+                        continue
                     self._finish_locked(name, rec, status or "done")
 
     def _finish_locked(self, slot, rec, run_state):
@@ -1468,6 +1585,17 @@ class ExecutorPool:
             self.wts.pop(slot, None)
             self._teardown(slot, retain=False)
 
+    def _retire_talk_only_locked(self, slot, rec):
+        """An idle talk-only worktree (never bound to a real run) is no longer worth an
+        exclusive slot: release its partition and make it evictable oldest-first, exactly like a
+        failed run's retained worktree (RE268) — otherwise a card that was only ever talked to,
+        never run, would consume a partition forever (and keep `has_bound_slots()` true, so the
+        poller never idles). Caller holds self.lock."""
+        self._release_partition(rec)
+        rec["state"] = "retained"
+        self._teardown(slot, retain=True)
+        self._evict_retained_over_cap_locked()
+
     def idle_bound_run_ids(self):
         """Run-ids of ACTIVE worktrees with no live job — the heartbeat's `bound_runs`. A
         worktree with a live job is excluded so the server can never name a still-running run for
@@ -1479,7 +1607,14 @@ class ExecutorPool:
 
     # ---- retention eviction --------------------------------------------
     def _evict_retained_over_cap_locked(self):
-        retained = [n for n, r in self.wts.items() if r["state"] == "retained"]
+        """Retained trees over `max_retained_failed` are evicted oldest-first. A retained tree a
+        talk turn has since reattached to (`talk_users > 0`) is excluded from candidacy — the idle
+        retirement above makes a talk-only tree retained-and-reusable, and without this guard a
+        SECOND idle talk-only tree retiring could push a currently-occupied one out from under
+        its live talk turn (the same class of shared-occupancy hazard `release_talk` guards
+        against, just reached via retirement rather than release)."""
+        retained = [n for n, r in self.wts.items()
+                   if r["state"] == "retained" and not r.get("talk_users", 0)]
         if len(retained) <= self.max_retained_failed:
             return
         # Oldest-first by the worktree dir's mtime (survives restarts; no in-memory clock).
@@ -1655,29 +1790,46 @@ def render(template, vars):
     return template
 
 
-def _print_claude_event(ev, tag=""):
-    """Render one stream-json event from a headless claude as a readable feed line."""
-    ref = _ref_from_tag(tag)
+def _tool_brief(block):
+    """The short 'target' text for a tool_use content block — its command/file_path/path/
+    pattern/description, truncated to 140 chars. Shared by the console/board-log renderer
+    (_print_claude_event) and the talk transcript mapper (talk_events_from), which previously
+    duplicated this extraction verbatim (RE268)."""
+    inp = block.get("input") or {}
+    brief = (inp.get("command") or inp.get("file_path") or inp.get("path")
+             or inp.get("pattern") or inp.get("description") or "")
+    return str(brief)[:140]
+
+
+def _print_claude_event(ev, tag="", mirror=True):
+    """Render one stream-json event from a headless claude as a readable feed line.
+
+    `mirror`, when False, still prints locally but skips `forward()` to the board-log mirror
+    (RE268) — used for a talk turn, whose transcript already has its
+    own delivery channel (TalkEventSender) and whose ref is deliberately NOT registered in the
+    ref-keyed NODE_JOB_IDS/RUN_IDS maps forward() reads, to avoid clobbering a concurrently
+    running node job's own attribution for the same card."""
+    ref = _ref_from_tag(tag) if mirror else None
     t = ev.get("type")
     if t == "assistant":
         for b in ev.get("message", {}).get("content", []):
             if b.get("type") == "text" and b.get("text", "").strip():
                 text = b["text"].strip()[:600]
                 print(f"    {tag}🤖 " + text, flush=True)
-                forward("claude", f"🤖 {text}", ref)
+                if mirror:
+                    forward("claude", f"🤖 {text}", ref)
             elif b.get("type") == "tool_use":
-                inp = b.get("input", {}) or {}
-                brief = (inp.get("command") or inp.get("file_path") or inp.get("path")
-                         or inp.get("pattern") or inp.get("description") or "")
-                line = f"🔧 {b.get('name')}  {str(brief)[:140]}"
+                line = f"🔧 {b.get('name')}  {_tool_brief(b)}"
                 print(f"    {tag}{line}", flush=True)
-                forward("claude", line, ref)
+                if mirror:
+                    forward("claude", line, ref)
     elif t == "result":
         turns = ev.get("num_turns")
         line = (f"{'✗' if ev.get('is_error') else '✓'} claude finished"
                 + (f" ({turns} turns)" if turns else ""))
         print(f"    {tag}{line}", flush=True)
-        forward("claude", line, ref)
+        if mirror:
+            forward("claude", line, ref)
 
 
 def _apply_node_env(child_env, partition, scratch, plan):
@@ -1792,14 +1944,14 @@ def outdated_refusal(required):
     return {"executor_outdated": True, "required": required}
 
 
-def claim_node_job(executor, capacity, timeout):
+def claim_node_job(executor, capacity, timeout, running=()):
     """Long-poll claim: hold one request open (advertising free `capacity` per isolation class)
     up to `timeout`s. Returns a job dict, or None on a 204/empty body or a read timeout — both
     mean 'no work', not an error (§7). Returns outdated_refusal(required) when the server
     refuses this executor's version (409 executor_outdated, RLY-184)."""
     try:
         resp = api("POST", "/api/node-jobs/claim",
-                   {"executor": executor, "capacity": capacity},
+                   claim_body(executor, capacity, running),
                    soft_conflict=True, timeout=timeout)
     except socket.timeout:
         return None
@@ -1817,6 +1969,17 @@ def outcome_body(outcome, detail, git_sha, session_id=None):
     generator posts at the real controller (RLY-176)."""
     return {"outcome": outcome, "detail": detail,
             "git_sha": git_sha, "session_id": session_id}
+
+
+def claim_body(executor, capacity, running=()):
+    """The exact body POSTed to /api/node-jobs/claim.
+
+    `running` (RE268) is the job-ids this executor currently has in flight — the same list
+    `heartbeat_body` sends, and for the same reason: it is what lets the server answer with the
+    `revoked` ids among them. Without it a Stop could only reach us on the next 15s beat, so a
+    killed turn kept streaming for up to 15 seconds. Pure and separate from the POST so
+    bin/test_relay.py can pin its key set against test/fixtures/executor_contract.json."""
+    return {"executor": executor, "capacity": capacity, "running": list(running)}
 
 
 def heartbeat_body(executor, capacity, running, bound_runs, capabilities=None):
@@ -1845,7 +2008,8 @@ def report_outcome(job_id, outcome, detail, git_sha, session_id=None):
 
 
 def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None,
-                      agent=None, partition=None, scratch=None, plan=None):
+                      agent=None, partition=None, scratch=None, plan=None, on_event=None,
+                      mirror=True):
     """Executor variant of _stream_claude. Runs `claude -p` (or `--resume <session_id>` on a
     needs-input re-entry), streams events, captures the claude session id from the stream-json
     events (init/result carry `session_id`), and sets $RELAY_NODE_OUTCOME so an agent node can
@@ -1856,7 +2020,11 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
     slot's own test database. `scratch`, if given, is exported as RELAY_NODE_SCRATCH
     (RLY-214) — the agent's own scratch file for this node, per `scratch_path(slot, ref,
     node)`. `plan`, if given, is exported as RELAY_PLAN (RLY-223) — the per-ref materialized
-    plan the agent reads. Returns (ok, captured_session_id). `on_proc` receives the live Popen."""
+    plan the agent reads. `on_event`, if given, is called with each parsed stream-json event as
+    it arrives, so a talk turn can stream its transcript while the turn is still working.
+    `mirror`, if False, is passed through to `_print_claude_event` so a talk turn prints locally
+    without also forwarding to the ref-keyed board-log mirror (RE268).
+    Returns (ok, captured_session_id). `on_proc` receives the live Popen."""
     cmd = ["claude", "-p", prompt, "--dangerously-skip-permissions",
            "--verbose", "--output-format", "stream-json"]
     if session_id:
@@ -1890,7 +2058,9 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
         try:
             ev = json.loads(line)
             captured = ev.get("session_id") or captured
-            _print_claude_event(ev, tag)
+            _print_claude_event(ev, tag, mirror=mirror)
+            if on_event:
+                on_event(ev)
         except Exception:
             print(f"    {tag}" + line[:200], flush=True)
     return proc.wait() == 0, captured
@@ -2162,6 +2332,304 @@ def run_node_job(job, slot_path, control, partition=None):
                               capture_output=True, text=True)
     git_sha = sha_proc.stdout.strip() if sha_proc.returncode == 0 else None
     return outcome, detail, git_sha, session_id
+
+
+# ---- Talk (RE268 / ADR 0009) ------------------------------------------------
+# The turn prompt is built HERE, in product code, and deliberately not from a
+# `.claude/agents/*.md` definition — a recorded exception to ADR 0006 (ADR 0009 §5). Talk is a
+# property of Relay itself and must behave the same on every board regardless of what the
+# connected repo ships.
+TALK_PREAMBLE = """You are attached to a Relay card as a terminal session.
+
+This is a TERMINAL, not a chat. There is no message frame and no partner persona: you answer,
+you run commands, you print what you find. Be direct and short.
+
+You may read any file in this working tree and run any read-only command. The tree is the card's
+own worktree and may be dirty, mid-edit — that is deliberate, and it is often exactly what is
+being asked about.
+
+To learn what the card's runs actually did, use the Relay CLI rather than guessing:
+  bin/relay why  {ref}     — why the card is where it is, including rejections
+  bin/relay runs {ref}     — the card's run history and per-node outcomes
+  bin/relay card {ref}     — the card's current fields
+
+In this step you must NOT change anything: do not edit files, do not commit, do not push, and do
+not modify the card. If you are asked to change something, say plainly that you cannot yet.
+"""
+
+
+def talk_prompt(job):
+    """preamble + seed block + the human's text, in that order.
+
+    The human's text is spliced VERBATIM and never passed through render(): someone asking
+    "why does {ref} appear twice?" must see those characters reach the model unchanged, and a
+    person's typing must never reach into a var namespace."""
+    seed = job.get("seed") or {}
+    lines = [TALK_PREAMBLE.replace("{ref}", str(job.get("ref") or "")), "<card>"]
+    lines.append(f"ref          {job.get('ref')}")
+    for f in seed.get("fields") or []:
+        lines.append(f"{str(f.get('label', '')).ljust(12)} {f.get('value', '')}")
+    lines += ["</card>", "", str(job.get("prompt") or "")]
+    return "\n".join(lines)
+
+
+def talk_events_from(ev):
+    """Map ONE stream-json event to the transcript lines it produces (ADR 0009):
+    assistant text -> :out, a tool invocation -> one dim :tool line `<tool> · <short target>`,
+    an errored result -> :error. Anything else produces nothing — an unrecognised event must
+    never cost the turn.
+
+    A line whose text comes out EMPTY is not emitted (RE268): the server requires `text` and
+    drops a blank line anyway, so posting one is a guaranteed hole rather than a record. A
+    tool_use block with neither a name nor a brief is the only way to reach that."""
+    out = []
+    if ev.get("type") == "assistant":
+        for b in ev.get("message", {}).get("content", []) or []:
+            if b.get("type") == "text" and b.get("text", "").strip():
+                out.append({"kind": TALK_KIND_OUT, "text": b["text"].strip()[:4000], "dim": False})
+            elif b.get("type") == "tool_use":
+                text = f"{b.get('name')} · {_tool_brief(b)}".strip(" ·")
+                if text.strip():
+                    out.append({"kind": TALK_KIND_TOOL, "text": text, "dim": True})
+    elif ev.get("type") == "result" and ev.get("is_error"):
+        out.append({"kind": TALK_KIND_ERROR,
+                    "text": str(ev.get("result") or "the turn ended with an error")[:600],
+                    "dim": False})
+    return out
+
+
+def _talk_backoff(attempt):
+    return min(8, 0.5 * (2 ** attempt))
+
+
+class TalkEventSender:
+    """At-least-once transcript delivery for ONE talk turn.
+
+    Deliberately unlike LogForwarder, which is best-effort BY CONSTRUCTION (`enqueue` drops on a
+    full queue, `_send` swallows errors) — right for a live feed, wrong for a record this
+    feature promises to keep. Here nothing is dropped: a failed POST is retried with backoff,
+    `client_seq` makes the retry safe, and exhausting the budget sets `failed` so the turn is
+    reported `failed` with a visible :error line rather than leaving a silent hole.
+
+    `flush_interval` (RE268) makes a pending line flush on
+    its own once it has waited that long, rather than only at `batch` lines or after the whole
+    claude process exits: batch=40 is a size cap, not a delay, and a typical short turn (a
+    couple of tool lines, a couple of text blocks) never reaches 40 — so without this every
+    turn's transcript arrived in one POST at the very end, defeating the point of the on_event
+    streaming hook. `clock` is injectable so tests don't depend on real wall time."""
+
+    def __init__(self, turn_id, batch=40, max_attempts=6, backoff=_talk_backoff,
+                flush_interval=1.0, clock=time.monotonic):
+        self.turn_id = turn_id
+        self.batch = batch
+        self.max_attempts = max_attempts
+        self.backoff = backoff
+        self.flush_interval = flush_interval
+        self.clock = clock
+        self.failed = False
+        self._next_seq = 1
+        self._pending = []
+        self._lock = threading.Lock()
+        self._last_flush = clock()
+
+    def enqueue(self, kind, text, dim=False):
+        # Flush whatever is ALREADY pending first if it has gone stale — before this new line
+        # joins it — so a slow trickle of events posts as it arrives instead of all landing in
+        # one batch the moment 40 lines finally accumulate.
+        with self._lock:
+            stale = bool(self._pending) and (self.clock() - self._last_flush) >= self.flush_interval
+        if stale:
+            self.flush()
+        with self._lock:
+            self._pending.append({"client_seq": self._next_seq, "kind": kind,
+                                  "text": text, "dim": bool(dim)})
+            self._next_seq += 1
+            ready = len(self._pending) >= self.batch
+        if ready:
+            self.flush()
+
+    def flush(self):
+        """Drain everything queued. Returns False once the retry budget is exhausted, and from
+        then on stays False — a turn that has lost lines must not report success."""
+        while True:
+            with self._lock:
+                if not self._pending:
+                    return not self.failed
+                chunk, self._pending = self._pending[:self.batch], self._pending[self.batch:]
+            ok = self._post(chunk)
+            with self._lock:
+                self._last_flush = self.clock()
+            if not ok:
+                self.failed = True
+                return False
+
+    def send_best_effort(self, kind, text):
+        """Re-arm after `flush()` has already given up, and try once more to deliver a single
+        line — used by `run_talk_job` for one last, visible failure line when the transcript's
+        own delivery already failed. A named method, rather than reaching into `self.failed`
+        from outside, keeps the intent self-describing (RE268)."""
+        self.failed = False
+        self.enqueue(kind, text)
+        return self.flush()
+
+    def _post(self, chunk):
+        last = None
+        for attempt in range(self.max_attempts):
+            try:
+                api("POST", f"/api/talk/turns/{self.turn_id}/events",
+                    {"events": chunk}, idempotent=True)
+                return True
+            except (Exception, SystemExit) as e:
+                last = e
+                # Don't sleep after the LAST attempt — the decision to give up is already made
+                # by then, so sleeping burns a pointless final backoff (RE268).
+                if attempt < self.max_attempts - 1:
+                    time.sleep(self.backoff(attempt))
+        log(f"talk turn {self.turn_id}: dropping {len(chunk)} line(s) after "
+            f"{self.max_attempts} attempts: {last}", kind="error")
+        return False
+
+
+def talk_outcome_body(status, session_id, detail):
+    """The exact body POSTed to /api/talk/turns/:id/outcome. Pure and separate from the POST so
+    bin/test_relay.py can pin its key set against the fixture's `talk_outcome.request`."""
+    return {"status": status, "session_id": session_id, "detail": detail}
+
+
+def report_talk_outcome(turn_id, status, session_id, detail):
+    resp = api("POST", f"/api/talk/turns/{turn_id}/outcome",
+               talk_outcome_body(status, session_id, detail), idempotent=True)
+    return (resp or {}).get("turn_state")
+
+
+def run_talk_job(job, slot_path, control, sender):
+    """Run one claimed talk turn in `slot_path`; return (status, session_id, detail).
+    Does NOT report — execute_talk POSTs the outcome.
+
+    `sender` is OWNED by execute_talk and passed in, so one turn has exactly one transcript
+    writer: `client_seq` is that writer's per-turn counter, and a second sender would restart
+    it at 1 and have every line it wrote dropped by the server's replay guard (RE268)."""
+    # Ref-clean, unlike the old `f"[{ref} talk] "` — _ref_from_tag() greedily reads everything
+    # inside the brackets, so that shape extracted "DE3 talk" (a ref that doesn't exist) and
+    # every forwarded line spammed the board-log endpoint under a phantom card (RE268).
+    # `mirror=False` below additionally suppresses that forwarding entirely.
+    tag = f"[{job.get('ref')}] (talk) "
+
+    def on_event(ev):
+        for line in talk_events_from(ev):
+            # A deliberate Stop kills `claude`, which exits emitting `result{is_error: true}` —
+            # mapped to an :error line reading "the turn ended with an error". The turn's stored
+            # status is correctly `stopped`, so this was purely a lie told to the person: every
+            # Stop painted a red error as its last line. Drop error lines once the control is
+            # already cancelled; the partial output stays, and nothing claims it failed (RE268).
+            if line["kind"] == TALK_KIND_ERROR and control.cancelled():
+                continue
+            sender.enqueue(line["kind"], line["text"], line["dim"])
+
+    ok, session_id = _stream_claude_job(
+        talk_prompt(job), cwd=slot_path, tag=tag,
+        session_id=job.get("resume_session"), on_proc=control.register,
+        on_event=on_event, mirror=False)
+
+    delivered = sender.flush()
+    if control.cancelled():
+        return TALK_STOPPED, session_id, "stopped by the person"
+    if not delivered:
+        sender.send_best_effort(TALK_KIND_ERROR,
+                                "some output was lost: the transcript could not be delivered")
+        return TALK_FAILED, session_id, "transcript delivery failed"
+    if not ok:
+        # A non-zero exit that emitted no `result` event (an expired --resume session id, a
+        # missing binary, a startup error on claude's stderr) produces NO transcript line at
+        # all: only parsed stream-json reaches on_event, and `detail` is stored but never
+        # rendered. Without this the person sees their own line, the composer come back, and
+        # nothing else — ever. The failure has to land IN the transcript (RE268).
+        return TALK_FAILED, session_id, talk_failure(sender, "the claude session exited non-zero")
+    return TALK_DONE, session_id, ""
+
+
+def talk_failure(sender, detail):
+    """Put `detail` in the transcript as an :error line, then hand it back for the outcome POST.
+    `send_best_effort` because a failing turn's last word must not itself be lost to a
+    half-exhausted retry budget (RE268)."""
+    sender.send_best_effort(TALK_KIND_ERROR, detail)
+    return detail
+
+
+def checkout_talk_branch(slot_path, branch):
+    """After `create_or_rebaseline` leaves a freshly-created talk worktree DETACHED at base, put
+    it ON THE CARD'S BRANCH when one exists (RE268; ADR 0009's worktree table: a talk turn with
+    no live run gets its worktree "on the card's branch, or the base branch if it has none").
+
+    Without this, a talk turn attached to a card whose worktree had to be created fresh (the
+    run is done/cancelled and was torn down, or the card was never run at all — exactly the
+    case a talk turn can reach that the flow engine never would) read origin/main and
+    confidently described "this working tree" while seeing none of the card's actual work.
+
+    Prefers the LOCAL branch when one already exists and never resets it: `checkout -B <branch>
+    origin/<branch>` does not merely attach the worktree, it force-moves the branch ref to the
+    remote tip, which would silently discard commits a run made and never got to push (RE268).
+    Falls back to creating the local branch FROM the remote only when there is no local ref to
+    lose. A no-op when neither exists — the existing detached-at-base state (already correct for
+    a brand-new card) is left alone. Same non-destructive precedent as `reattach_branch` above.
+
+    A failed checkout (e.g. the branch is already checked out in another worktree — a human
+    sitting on the card's branch) is logged rather than swallowed: silently falling back to
+    detached-at-base would recreate the exact bug this function exists to fix, with no
+    diagnostic (RE268)."""
+    if not branch:
+        return
+    local = subprocess.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"],
+                           cwd=slot_path, capture_output=True, text=True)
+    if local.returncode == 0:
+        checkout = subprocess.run(["git", "checkout", "-q", branch],
+                                  cwd=slot_path, capture_output=True, text=True)
+    else:
+        exists = subprocess.run(
+            ["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}"],
+            cwd=slot_path, capture_output=True, text=True)
+        if exists.returncode != 0:
+            return
+        checkout = subprocess.run(["git", "checkout", "-q", "-b", branch, f"origin/{branch}"],
+                                  cwd=slot_path, capture_output=True, text=True)
+    if checkout.returncode != 0:
+        log(f"  ⚠ checkout_talk_branch: failed to check out {branch} in {slot_path}: "
+            f"{checkout.stderr.strip()}", kind="error")
+
+
+def execute_talk(job, slot, reset, control, pool):
+    """Worker body for one talk turn. Mirrors execute_one's discipline — always report, never
+    leak a slot — but has no run_state to act on: a talk worktree deliberately OUTLIVES any run
+    (ADR 0009 §2), so nothing is torn down here."""
+    slot_path = worktree_path(slot)
+    # Hoisted out of the try so the crash path below can still carry it: if only the FIRST
+    # outcome POST failed transiently, dropping the session id costs session continuity for
+    # every later turn on this card (RE268).
+    session_id = None
+    # Every failure this function can reach must also land IN the transcript — `detail` is
+    # stored on the turn but nothing renders it, so a bare outcome POST is a silent dead end
+    # for the person watching the pane (RE268).
+    sender = TalkEventSender(job["turn_id"])
+    try:
+        if reset and not DRY:
+            pool.create_or_rebaseline(slot)
+            checkout_talk_branch(slot_path, job.get("branch"))
+            hook_err = pool.run_prepare_hook(slot_path, job.get("ref"), job.get("branch"))
+            if hook_err:
+                detail = talk_failure(sender, f"prepare hook failed: {hook_err}")
+                report_talk_outcome(job["turn_id"], TALK_FAILED, None, detail)
+                return
+        status, session_id, detail = run_talk_job(job, slot_path, control, sender)
+        report_talk_outcome(job["turn_id"], status, session_id, detail)
+    except (Exception, SystemExit) as e:
+        try:
+            detail = talk_failure(sender, f"talk worker crashed: {e}")
+            report_talk_outcome(job["turn_id"], TALK_FAILED, session_id, detail)
+        except (Exception, SystemExit) as report_err:
+            log(f"failed to report talk crash for turn {job.get('turn_id')}: {report_err}",
+                kind="error")
+    finally:
+        pool.release_talk(slot)
 
 
 def execute_one(job, slot, reset, control, pool):
@@ -2702,6 +3170,21 @@ def cmd_execute(args):
         way."""
         job_id = job.get("id") if isinstance(job, dict) else None
         log(f"rejecting claimed job {job_id or job!r}: {detail}", kind="error")
+        if isinstance(job, dict) and job.get("kind") == "talk" and job.get("turn_id"):
+            # The person is watching a terminal. A rejected turn that reports `failed` without
+            # writing a line leaves them with their own message, a returned composer, and
+            # nothing else — ever. This is the busiest-laptop path (all worktrees taken), so it
+            # fires FIRST in practice; the same guarantee run_talk_job/execute_talk already make
+            # has to hold here too (RE268).
+            try:
+                talk_failure(TalkEventSender(job["turn_id"]), detail)
+            except (Exception, SystemExit) as e:
+                log(f"failed to write talk rejection line for {job_id}: {e}", kind="error")
+            try:
+                report_talk_outcome(job["turn_id"], TALK_FAILED, None, detail)
+            except (Exception, SystemExit) as e:
+                log(f"failed to report talk rejection for {job_id}: {e}", kind="error")
+            return
         if job_id is None:
             return
         try:
@@ -2726,16 +3209,27 @@ def cmd_execute(args):
         hb.start()
 
     def worker(job, slot, reset, control):
-        ref = (job.get("vars") or {}).get("ref") or job["id"]
-        NODE_JOB_IDS[ref] = job["id"]
-        RUN_IDS[ref] = job.get("run_id")
+        ref = (job.get("vars") or {}).get("ref") or job.get("ref") or job["id"]
+        # A talk job is deliberately NOT registered here (RE268): these maps
+        # are keyed by ref and read by forward() to attribute board-log lines to a node job/run.
+        # A talk turn has neither, so registering it would clobber a concurrently-running node
+        # job's own entries for the same card while the talk turn runs — and popping them in the
+        # finally would erase that node job's attribution entirely for the rest of its run.
+        is_talk = job.get("kind") == "talk"
+        if not is_talk:
+            NODE_JOB_IDS[ref] = job["id"]
+            RUN_IDS[ref] = job.get("run_id")
         try:
-            execute_one(job, slot, reset, control, pool)
+            if is_talk:
+                execute_talk(job, slot, reset, control, pool)
+            else:
+                execute_one(job, slot, reset, control, pool)
         finally:
             with lock:
                 in_flight.pop(job["id"], None)
-            NODE_JOB_IDS.pop(ref, None)
-            RUN_IDS.pop(ref, None)
+            if not is_talk:
+                NODE_JOB_IDS.pop(ref, None)
+                RUN_IDS.pop(ref, None)
             wake.set()
 
     def _shutdown(*_):
@@ -2775,7 +3269,7 @@ def cmd_execute(args):
             break
         pool.refresh_idle_shared()
         try:
-            job = claim_node_job(executor, cap, poll_timeout)
+            job = claim_node_job(executor, cap, poll_timeout, running_ids())
         except SystemExit as e:                     # exhausted api() retries → die()
             log(f"claim failed, will retry: {e}", kind="error")
             if args.once:
@@ -2783,6 +3277,17 @@ def cmd_execute(args):
             wake.wait(1)
             wake.clear()
             continue
+        # RE268 — a no-job reply can carry `revoked`: the Stop path. Same key, same meaning and
+        # same handler as the heartbeat's, just delivered on the already-open long-poll instead
+        # of up to 15s later. A reply with no "id" is not a job, so it must not fall through to
+        # the placement code below.
+        if isinstance(job, dict) and job.get("revoked"):
+            for revoked_id in job["revoked"]:
+                revoke(revoked_id)
+            if "id" not in job:
+                if args.once:
+                    break
+                continue
         if isinstance(job, dict) and job.get("executor_outdated"):
             outdated = True
             required_version = job.get("required")
@@ -2800,17 +3305,42 @@ def cmd_execute(args):
             if args.once:
                 break
             continue
-        try:
-            assigned = pool.assign(job)
-        except (KeyError, TypeError) as e:          # malformed job: assign can't even read it
-            reject(job, f"malformed job: {e}")
+        # RE268: placement can fail TRANSIENTLY now, not just on real capacity exhaustion — a
+        # talk turn occupying a retained tree makes `assign` refuse it for the length of one
+        # turn. Rejecting on the first miss turned that into report_outcome("failed"), i.e. a
+        # FAILED RUN on the board caused by someone asking "why did this fail?" while that run
+        # was retried. Retry placement for a bounded window; only a persistent miss is a real
+        # capacity refusal. This helps the flow lane generally, not just Talk.
+        assigned, malformed = None, False
+        for placement_try in range(PLACEMENT_ATTEMPTS):
+            try:
+                if job.get("kind") == "talk":
+                    assigned = pool.assign_talk(job["ref"])
+                else:
+                    assigned = pool.assign(job)
+            except (KeyError, TypeError) as e:      # malformed job: assign can't even read it
+                reject(job, f"malformed job: {e}")
+                malformed = True
+                break
+            if assigned is not None:
+                break
+            if placement_try < PLACEMENT_ATTEMPTS - 1:
+                wake.wait(PLACEMENT_RETRY_S)
+                wake.clear()
+        if malformed:
             if args.once:
                 break
             wake.wait(1)                            # back off — don't hot-loop re-polling
             wake.clear()
             continue
         if assigned is None:                        # no free slot for this job's isolation
-            reject(job, f"no free {job.get('isolation')!r} slot advertised {cap}")
+            # A talk job carries no "isolation" key (that's a node-job field) — assign_talk
+            # always wants an exclusive per-card slot, so name that rather than printing the
+            # nonsense `no free None slot ...` (RE268).
+            if job.get("kind") == "talk":
+                reject(job, f"no free exclusive slot for a talk turn advertised {cap}")
+            else:
+                reject(job, f"no free {job.get('isolation')!r} slot advertised {cap}")
             if args.once:
                 break
             wake.wait(1)                            # back off — don't hot-loop re-polling

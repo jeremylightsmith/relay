@@ -225,6 +225,8 @@ defmodule Relay.Factory do
 
   # Full-control factory: `board` (when overridden) must be persisted. `last_heartbeat`
   # defaults to now, so the row reads :fresh — backdate it to exercise :stale / :gone.
+  # `version` is the HIGHER of the two floors (RE268): the default executor is a fully current
+  # one, able to claim talk jobs as well as flow jobs. Override it to exercise an old executor.
   def executor_factory(attrs) do
     {board, attrs} = Map.pop_lazy(attrs, :board, fn -> insert(:board) end)
 
@@ -234,7 +236,7 @@ defmodule Relay.Factory do
       host: "mac.local",
       interval: 30,
       capacity: %{"shared_clean" => 3, "exclusive" => 1},
-      version: Relay.Runs.min_executor_version(),
+      version: Relay.Runs.min_talk_executor_version(),
       last_heartbeat: DateTime.truncate(DateTime.utc_now(), :second)
     }
 
@@ -247,9 +249,13 @@ defmodule Relay.Factory do
     {node_execution, attrs} =
       Map.pop_lazy(attrs, :node_execution, fn -> insert(:node_execution) end)
 
+    run = Relay.Repo.get!(Schemas.Run, node_execution.run_id)
+
     node_job = %Schemas.NodeJob{
       run_id: node_execution.run_id,
       node_execution_id: node_execution.id,
+      card_id: run.card_id,
+      kind: :node,
       node_key: node_execution.node_key,
       state: :claimed,
       executor_name: "mac-1",
@@ -258,6 +264,22 @@ defmodule Relay.Factory do
     }
 
     node_job |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
+
+  def talk_session_factory(attrs) do
+    {card, attrs} = Map.pop_lazy(attrs, :card, fn -> insert(:card) end)
+
+    %Schemas.TalkSession{card_id: card.id, seed_summary: "2 fields · no plan yet · 0 runs", seed_fields: []}
+    |> merge_attributes(attrs)
+    |> evaluate_lazy_attributes()
+  end
+
+  def talk_turn_factory(attrs) do
+    {session, attrs} = Map.pop_lazy(attrs, :talk_session, fn -> insert(:talk_session) end)
+
+    %Schemas.TalkTurn{talk_session_id: session.id, prompt: "why is this stuck?", status: :queued}
+    |> merge_attributes(attrs)
+    |> evaluate_lazy_attributes()
   end
 
   defp pop_first(attrs, [], default), do: {default, attrs}
