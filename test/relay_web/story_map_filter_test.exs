@@ -9,7 +9,7 @@ defmodule RelayWeb.StoryMapFilterTest do
   moves it, and the assertion fails on unlucky seeds for reasons that have nothing to do
   with this module. Sync tests run one at a time, so the delta is the code under test.
   """
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias RelayWeb.StoryMapFilter
   alias Schemas.Card

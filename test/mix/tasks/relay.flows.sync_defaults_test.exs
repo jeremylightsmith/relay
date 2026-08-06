@@ -1,5 +1,5 @@
 defmodule Mix.Tasks.Relay.Flows.SyncDefaultsTest do
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   import ExUnit.CaptureIO
 

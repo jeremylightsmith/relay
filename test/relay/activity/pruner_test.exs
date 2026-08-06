@@ -1,5 +1,5 @@
 defmodule Relay.Activity.PrunerTest do
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   import Ecto.Query
 
@@ -16,7 +16,11 @@ defmodule Relay.Activity.PrunerTest do
     old_decision = insert(:activity, card: card, type: :approved, inserted_at: old)
     fresh_action = insert(:activity, card: card, type: :action, text: "new chatter", inserted_at: recent)
 
-    pruner = start_supervised!({Pruner, name: :pruner_test, interval: to_timeout(hour: 6)})
+    pruner =
+      allow!(
+        start_supervised!({Pruner, name: :"pruner_#{System.unique_integer([:positive])}", interval: to_timeout(hour: 6)})
+      )
+
     send(pruner, :prune)
     :sys.get_state(pruner)
 

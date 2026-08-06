@@ -1,5 +1,7 @@
 defmodule RelayWeb.Plugs.ApiLoggerTest do
-  # async: false — exercises the app-wide RelayWeb.ApiLog singleton.
+  # async: false — the app-wide RelayWeb.ApiLog ring buffer is a process-global singleton with no
+  # instance seam; this test clears it and asserts over its contents. ADR 0009 rule 1's sanctioned
+  # process-global exception.
   use RelayWeb.ConnCase, async: false
 
   alias Relay.ApiKeys

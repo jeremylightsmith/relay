@@ -1,5 +1,5 @@
 defmodule RelayWeb.Api.VersionControllerTest do
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   setup do
     original = System.get_env("GIT_SHA")

@@ -45,6 +45,26 @@ defmodule Relay.DataCase do
   end
 
   @doc """
+  Grants `pid` access to the calling test's sandbox connection and returns it, so it composes
+  with `start_supervised!/1` (ADR 0009 rule 2):
+
+      pruner = allow!(start_supervised!({Pruner, name: :"pruner_#{System.unique_integer([:positive])}"}))
+
+  Use this whenever the test itself holds the pid of a process that touches the database. When a
+  `DynamicSupervisor` severs the chain and the test never sees the pid, use `$callers`
+  propagation instead (`Relay.Runs.Instance.adopt_callers/1`).
+
+  Tolerates a process that is already an owner or already allowed, and the shared-mode case, so
+  the call is safe in a module that is still `async: false`.
+  """
+  def allow!(pid) when is_pid(pid) do
+    case Sandbox.allow(Relay.Repo, self(), pid) do
+      :ok -> pid
+      {:already, _owner_or_allowed} -> pid
+    end
+  end
+
+  @doc """
   A helper that transforms changeset errors into a map of messages.
 
       assert {:error, changeset} = Accounts.create_user(%{password: "short"})
