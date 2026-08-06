@@ -13,7 +13,7 @@ defmodule Relay.Runs.NoOpGuardTest do
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "No-op Guard Board"})
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     :ok = Runs.subscribe(board.id)
     %{board: board}
   end

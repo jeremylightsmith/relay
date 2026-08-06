@@ -3,6 +3,7 @@ defmodule Relay.Runs.ReenterFindingsTest do
 
   alias Relay.Runs
   alias Relay.Runs.FakeDispatcher
+  alias Relay.Runs.Instance
   alias Schemas.NodeExecution
   alias Schemas.NodeJob
 
@@ -14,7 +15,7 @@ defmodule Relay.Runs.ReenterFindingsTest do
     # asynchronously. Starting it before this run exists means that query can
     # only ever see zero rows — started after, it can race the still-in-flight
     # `start_run` below and re-enter the same brand-new run a second time.
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     FakeDispatcher.register(self())
 
     user = insert(:user)
@@ -61,10 +62,13 @@ defmodule Relay.Runs.ReenterFindingsTest do
     # The run is terminal now; drive the new mode directly.
     run = run |> Ecto.Changeset.change(status: :running, current_node: "brainstorm") |> Repo.update!()
 
+    instance = Instance.current()
+
     {:ok, _pid} =
       DynamicSupervisor.start_child(
-        Relay.Runs.RunSupervisor,
-        {Relay.Runs.RunServer, run_id: run.id, mode: {:reenter_new_visit, nil}}
+        instance.run_supervisor,
+        {Relay.Runs.RunServer,
+         run_id: run.id, mode: {:reenter_new_visit, nil}, registry: instance.registry, callers: Instance.callers()}
       )
 
     assert_receive {:dispatched, %NodeJob{node_execution_id: id, payload: payload}}

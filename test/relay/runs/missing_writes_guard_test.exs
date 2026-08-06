@@ -16,7 +16,7 @@ defmodule Relay.Runs.MissingWritesGuardTest do
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Missing Writes Board"})
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     :ok = Runs.subscribe(board.id)
     %{board: board}
   end

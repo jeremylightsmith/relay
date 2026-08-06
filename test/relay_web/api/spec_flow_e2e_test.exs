@@ -12,7 +12,7 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
 
   setup %{conn: conn} do
     Runs.Capacity.reset()
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Spec E2E"})

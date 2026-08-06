@@ -14,7 +14,7 @@ defmodule RelayWeb.Api.RestartStalledTest do
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Restart API Board"})
     {:ok, %{token: token}} = Relay.ApiKeys.create_key(board, user)
     flow = park_flow(board)
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
 
     conn = put_req_header(conn, "authorization", "Bearer " <> token)
     {:ok, conn: conn, board: board, flow: flow}

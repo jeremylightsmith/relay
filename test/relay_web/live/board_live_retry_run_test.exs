@@ -16,7 +16,7 @@ defmodule RelayWeb.BoardLiveRetryRunTest do
     flow = dead_end_flow(board)
     stage = Enum.find(board.stages, &(&1.name == "Next up"))
     {:ok, card} = Cards.create_card(stage, %{title: "Retry from the board"})
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     %{board: board, flow: flow, card: card}
   end
 

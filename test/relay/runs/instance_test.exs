@@ -1,6 +1,7 @@
 defmodule Relay.Runs.InstanceTest do
   use ExUnit.Case, async: true
 
+  alias Relay.Runs.FakeDispatcher
   alias Relay.Runs.Instance
   alias Relay.Runs.InstanceRegistry
   alias Relay.Runs.NoopDispatcher
@@ -87,6 +88,31 @@ defmodule Relay.Runs.InstanceTest do
 
     test "InstanceRegistry is started by the application" do
       assert is_pid(Process.whereis(InstanceRegistry))
+    end
+  end
+
+  describe "an instance-scoped dispatcher" do
+    test "FakeDispatcher.register/1 resolves the registered dispatcher and its notification pid" do
+      :ok = FakeDispatcher.register(self())
+
+      assert Relay.Runs.dispatcher() == FakeDispatcher
+      assert Instance.current().dispatcher_pid == self()
+    end
+
+    test "FakeDispatcher.register/1 does not leak through application env to a sibling process" do
+      :ok = FakeDispatcher.register(self())
+      test_pid = self()
+
+      spawn(fn -> send(test_pid, {:dispatcher, Relay.Runs.dispatcher()}) end)
+
+      assert_receive {:dispatcher, NoopDispatcher}
+    end
+
+    test "a process that has not registered still resolves the application's dispatcher" do
+      test_pid = self()
+      spawn(fn -> send(test_pid, {:dispatcher, Relay.Runs.dispatcher()}) end)
+
+      assert_receive {:dispatcher, NoopDispatcher}
     end
   end
 end

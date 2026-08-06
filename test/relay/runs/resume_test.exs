@@ -3,6 +3,7 @@ defmodule Relay.Runs.ResumeTest do
 
   alias Relay.Runs
   alias Relay.Runs.FakeDispatcher
+  alias Relay.Runs.Instance
   alias Schemas.NodeExecution
   alias Schemas.NodeJob
   alias Schemas.Run
@@ -30,13 +31,12 @@ defmodule Relay.Runs.ResumeTest do
 
   test "an app restart mid-run revokes the orphaned job and re-dispatches the current node",
        %{flow: flow, card: card} do
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     {:ok, run} = Runs.start_run(card, flow)
     assert_receive {:dispatched, %NodeJob{id: orphan_id, node_key: "brainstorm"}}
 
     # "Restart the app": the whole engine tree goes down and comes back.
-    stop_supervised!(Relay.Runs.Supervisor)
-    start_supervised!(Relay.Runs.Supervisor)
+    restart_engine!()
 
     # The boot resume task revoked the orphan and dispatched a fresh attempt.
     assert_receive {:revoked, %NodeJob{id: ^orphan_id, state: :revoked}}
@@ -52,22 +52,21 @@ defmodule Relay.Runs.ResumeTest do
 
   test "parked runs stay dormant across restarts — parking never holds a process",
        %{flow: flow, card: card} do
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     {:ok, run} = Runs.start_run(card, flow)
     assert_receive {:dispatched, job}
     {:ok, _run} = Runs.report_outcome(job, %{outcome: :needs_input, detail: "?", session_id: "s1"})
 
-    stop_supervised!(Relay.Runs.Supervisor)
-    start_supervised!(Relay.Runs.Supervisor)
+    restart_engine!()
 
     refute_receive {:dispatched, _job}, 100
     assert %Run{status: :parked, parked_reason: :needs_input} = Runs.get_run!(run.id)
-    assert Registry.lookup(Relay.Runs.Registry, run.id) == []
+    assert Registry.lookup(Instance.current().registry, run.id) == []
   end
 
   test "a second resume_run/2 on an already-resumed run is a detected no-op, not a silent re-write",
        %{flow: flow, card: card} do
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     {:ok, _run} = Runs.start_run(card, flow)
     assert_receive {:dispatched, job}
     {:ok, parked} = Runs.report_outcome(job, %{outcome: :needs_input, detail: "?", session_id: "s1"})

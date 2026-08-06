@@ -14,7 +14,7 @@ defmodule RelayWeb.BoardLiveStrandedMoveTest do
 
   setup %{user: user} do
     FakeDispatcher.register(self())
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
 
     board = insert(:board, owner: user)
     insert(:membership, board: board, user: user)

@@ -21,7 +21,7 @@ defmodule RelayWeb.BoardLiveEscalationTest do
     FakeDispatcher.register(self())
     board = Relay.Boards.get_or_create_default_board(user)
     flow = park_flow(board)
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     %{board: board, flow: flow}
   end
 

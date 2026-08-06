@@ -32,7 +32,9 @@ defmodule Relay.Runs.CodeFlowE2ETest do
 
   setup %{conn: conn} do
     Capacity.reset()
-    start_supervised!(Relay.Runs.Supervisor)
+    # A stable, known name for the private engine's Listener child — settle/1 looks it up
+    # directly (Process.whereis/1) to drain its mailbox before asserting.
+    start_engine!(listener: Listener)
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Code Cutover Board"})
@@ -81,7 +83,16 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   end
 
   defp start_scheduler(board) do
-    start_supervised!({Server, [board_id: board.id, tick_ms: 3_600_000, debounce_ms: 5, name: :"code_e2e_#{board.id}"]})
+    start_supervised!(
+      {Server,
+       [
+         board_id: board.id,
+         tick_ms: 3_600_000,
+         debounce_ms: 5,
+         name: :"code_e2e_#{board.id}",
+         callers: [self()]
+       ]}
+    )
   end
 
   # See plan_flow_e2e_test.exs's settle/1: drain the Listener and the per-test

@@ -28,7 +28,9 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
 
   setup %{conn: conn} do
     Capacity.reset()
-    start_supervised!(Relay.Runs.Supervisor)
+    # A stable, known name for the private engine's Listener child — settle/1 looks it up
+    # directly (Process.whereis/1) to drain its mailbox before asserting.
+    start_engine!(listener: Listener)
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Cutover Board"})
@@ -81,7 +83,16 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
   end
 
   defp start_scheduler(board) do
-    start_supervised!({Server, [board_id: board.id, tick_ms: 3_600_000, debounce_ms: 5, name: :"e2e_sched_#{board.id}"]})
+    start_supervised!(
+      {Server,
+       [
+         board_id: board.id,
+         tick_ms: 3_600_000,
+         debounce_ms: 5,
+         name: :"e2e_sched_#{board.id}",
+         callers: [self()]
+       ]}
+    )
   end
 
   # Belt-and-braces drain of the two async DB readers (the Listener, reconciling off run

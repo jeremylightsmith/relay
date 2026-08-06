@@ -4,7 +4,7 @@ defmodule RelayWeb.BoardSettingsFlowPreflightTest do
   prose, per AGENTS.md. The CTA must stay clickable in EVERY state — this feature reports, it
   never blocks.
   """
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
 
@@ -15,7 +15,7 @@ defmodule RelayWeb.BoardSettingsFlowPreflightTest do
   setup :register_and_log_in_user
 
   setup %{user: user} do
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     board = Boards.get_or_create_default_board(user)
     %{board: board}
   end

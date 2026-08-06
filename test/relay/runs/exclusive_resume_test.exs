@@ -12,7 +12,7 @@ defmodule Relay.Runs.ExclusiveResumeTest do
 
   setup do
     Relay.Runs.FakeDispatcher.register(self())
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     Capacity.reset()
 
     user = insert(:user)

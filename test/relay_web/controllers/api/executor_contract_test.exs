@@ -25,7 +25,7 @@ defmodule RelayWeb.Api.ExecutorContractTest do
 
   setup do
     FakeDispatcher.register(self())
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     :ok
   end
 

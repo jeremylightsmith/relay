@@ -23,6 +23,17 @@ defmodule RelayWeb.ConnCase do
 
       import Phoenix.ConnTest
       import Plug.Conn
+
+      import Relay.DataCase,
+        only: [
+          allow!: 1,
+          start_capacity!: 0,
+          start_engine!: 0,
+          start_engine!: 1,
+          restart_engine!: 0,
+          restart_engine!: 1
+        ]
+
       import Relay.Factory
       import RelayWeb.ConnCase
       # The default endpoint for testing

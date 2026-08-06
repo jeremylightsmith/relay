@@ -147,7 +147,7 @@ defmodule Relay.Runs.RestartTest do
     end
 
     setup %{board: board} do
-      start_supervised!(Relay.Runs.Supervisor)
+      start_engine!()
       %{flow: park_flow(board)}
     end
 

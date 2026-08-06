@@ -11,7 +11,10 @@ defmodule Relay.Runs.ListenerTest do
 
   setup do
     FakeDispatcher.register(self())
-    start_supervised!(Relay.Runs.Supervisor)
+    # A stable, known name for the private engine's Listener child (rather than the random one
+    # start_engine!/1 would otherwise pick) — this file looks the Listener process up directly
+    # (Process.whereis/1, :sys.get_state/1) to drain its mailbox before asserting.
+    start_engine!(listener: Listener)
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Listener Board"})
@@ -295,7 +298,7 @@ defmodule Relay.Runs.ListenerTest do
 
     # Bring the engine tree back — the Listener's own boot sweep must self-heal without any
     # new card event.
-    start_supervised!(Relay.Runs.Supervisor)
+    restart_engine!()
 
     assert_receive {:run_resumed, %Run{status: :running}}
     assert_receive {:dispatched, %NodeJob{node_key: "brainstorm"} = fresh}

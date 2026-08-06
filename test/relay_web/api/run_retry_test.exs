@@ -16,7 +16,7 @@ defmodule RelayWeb.Api.RunRetryTest do
     flow = dead_end_flow(board)
     stage = Enum.find(board.stages, &(&1.name == "Next up"))
     {:ok, card} = Cards.create_card(stage, %{title: "Retry me"})
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
 
     conn = put_req_header(conn, "authorization", "Bearer " <> token)
     {:ok, conn: conn, board: board, flow: flow, card: card}
