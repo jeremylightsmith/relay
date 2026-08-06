@@ -252,6 +252,16 @@ class ReverseContractTest(unittest.TestCase):
         # ExecutorHeartbeat._beat() hands each of these to on_release_run().
         self.assertIn("release_runs", CONTRACT["heartbeat"]["response"])
 
+    def test_the_claim_request_carries_the_running_ids(self):
+        """RE268: the server needs the in-flight ids to answer a claim with `revoked`, which is
+        what makes Stop land in well under a second instead of on the next 15s heartbeat."""
+        self.assertIn("running", CONTRACT["claim_request"])
+        self.assertEqual(
+            set(relay.claim_body({"name": "x"}, {"shared_clean": 1}, [7, 9])),
+            set(CONTRACT["claim_request"]),
+        )
+        self.assertEqual(relay.claim_body({"name": "x"}, {}, [7, 9])["running"], [7, 9])
+
     def test_the_claim_request_carries_the_executor_version(self):
         # RLY-184: the server refuses a claim whose executor has no version, so this key is
         # the difference between working and 409 — pinned on both sides of the fixture.
@@ -1409,7 +1419,8 @@ class ClaimAndReportTest(unittest.TestCase):
         m, p, b, k = sent[0]
         self.assertEqual((m, p), ("POST", "/api/node-jobs/claim"))
         self.assertEqual(b, {"executor": {"name": "box", "host": "h"},
-                             "capacity": {"shared_clean": 2, "exclusive": 1}})
+                             "capacity": {"shared_clean": 2, "exclusive": 1},
+                             "running": []})
         self.assertEqual(k.get("timeout"), 25)
 
     def test_claim_empty_body_is_no_work(self):
@@ -3186,7 +3197,7 @@ class ExecuteLoopTest(unittest.TestCase):
 
     def test_once_claims_runs_and_reports(self):
         j = job(node_type="shell", run="true", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
-        relay.claim_node_job = lambda executor, capacity, timeout: j
+        relay.claim_node_job = lambda *a, **k: j
         self.reports = []
         relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
 
@@ -3196,7 +3207,7 @@ class ExecuteLoopTest(unittest.TestCase):
         self.assertEqual(self.reports[0][3], "sha")
 
     def test_long_poll_timeout_is_no_work_not_error(self):
-        relay.claim_node_job = lambda executor, capacity, timeout: None   # 204/timeout
+        relay.claim_node_job = lambda *a, **k: None   # 204/timeout
         self.reports = []
         relay.report_outcome = lambda *a: self.reports.append(a)
 
@@ -3219,7 +3230,7 @@ class ExecuteLoopTest(unittest.TestCase):
         doesn't hold the claim open forever, and the loop must keep polling rather than die."""
         j = job(node_type="shell", run="x", id="nj-9", run_id="r9", vars={"ref": "RLY-9"})
         del j["isolation"]                                      # no "isolation" key
-        relay.claim_node_job = lambda executor, capacity, timeout: j
+        relay.claim_node_job = lambda *a, **k: j
         self.reports = []
         relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
 
@@ -3234,7 +3245,7 @@ class ExecuteLoopTest(unittest.TestCase):
         thinks the claim is still held."""
         # cfg advertises exclusive:0
         j = job("exclusive_shell", run="x", id="nj-10", run_id="r10", vars={"ref": "RLY-10"})
-        relay.claim_node_job = lambda executor, capacity, timeout: j
+        relay.claim_node_job = lambda *a, **k: j
         self.reports = []
         relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
 
@@ -3249,7 +3260,7 @@ class ExecuteLoopTest(unittest.TestCase):
         instead — never the node-job route."""
         talk_job = {"id": "tj-1", "kind": "talk", "ref": "DE3", "turn_id": 77,
                    "prompt": "why?", "seed": {"fields": []}, "resume_session": None}
-        relay.claim_node_job = lambda executor, capacity, timeout: talk_job
+        relay.claim_node_job = lambda *a, **k: talk_job
         node_reports, talk_reports = [], []
         relay.report_outcome = lambda *a: (node_reports.append(a) or "done")
         relay.report_talk_outcome = lambda tid, status, sid, detail: (
@@ -3266,7 +3277,7 @@ class ExecuteLoopTest(unittest.TestCase):
         report through the talk outcome route, not the node-job one."""
         talk_job = {"id": "tj-2", "kind": "talk", "turn_id": 78,   # no "ref"
                    "prompt": "why?", "seed": {"fields": []}, "resume_session": None}
-        relay.claim_node_job = lambda executor, capacity, timeout: talk_job
+        relay.claim_node_job = lambda *a, **k: talk_job
         talk_reports = []
         relay.report_talk_outcome = lambda tid, status, sid, detail: (
             talk_reports.append((tid, status)) or status)
@@ -3283,7 +3294,7 @@ class ExecuteLoopTest(unittest.TestCase):
         `no free None slot advertised {...}`. It must name what was actually rejected."""
         talk_job = {"id": "tj-3", "kind": "talk", "ref": "DE3", "turn_id": 79,
                    "prompt": "why?", "seed": {"fields": []}, "resume_session": None}
-        relay.claim_node_job = lambda executor, capacity, timeout: talk_job
+        relay.claim_node_job = lambda *a, **k: talk_job
         talk_reports = []
         relay.report_talk_outcome = lambda tid, status, sid, detail: (
             talk_reports.append(detail) or status)
@@ -3300,7 +3311,7 @@ class ExecuteLoopTest(unittest.TestCase):
         self.addCleanup(setattr, relay, "maybe_auto_update", relay.maybe_auto_update)
         calls = []
         relay.maybe_auto_update = lambda *a, **k: calls.append(a)
-        relay.claim_node_job = lambda executor, capacity, timeout: None
+        relay.claim_node_job = lambda *a, **k: None
         relay.report_outcome = lambda *a: None
 
         relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
@@ -3323,7 +3334,7 @@ class ExecuteLoopTest(unittest.TestCase):
             return True
 
         relay.maybe_auto_update = fake
-        relay.claim_node_job = lambda executor, capacity, timeout: None
+        relay.claim_node_job = lambda *a, **k: None
         relay.report_outcome = lambda *a: None
         # Safety net, not the assertion: if the call site regresses to unreachable, `once=False`
         # would otherwise spin forever claiming nothing rather than fail — bound that to a clean
@@ -3381,7 +3392,7 @@ class TalkJobRefMapIsolationTest(unittest.TestCase):
         relay.execute_talk = fake_execute_talk
         talk_job = {"id": "tj-1", "kind": "talk", "ref": "DE3", "turn_id": 7,
                    "prompt": "why?", "seed": {"fields": []}, "resume_session": None}
-        relay.claim_node_job = lambda executor, capacity, timeout: talk_job
+        relay.claim_node_job = lambda *a, **k: talk_job
 
         relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
 
@@ -3451,7 +3462,7 @@ class AutoUpdateBoundaryTest(unittest.TestCase):
         relay.run_node_job = blocking_run
         claims = [job(node_type="shell", run="true", id="nj-1", run_id="r1",
                       vars={"ref": "RLY-1"})]
-        relay.claim_node_job = lambda e, c, t: claims.pop(0) if claims else None
+        relay.claim_node_job = lambda *a, **k: claims.pop(0) if claims else None
 
         threading.Timer(0.2, gate.set).start()   # let the job finish partway through
         self._interrupt_after(0.4)               # then stop the otherwise-endless loop
@@ -3896,7 +3907,8 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
 
     def test_a_refusal_stops_all_further_claiming_but_keeps_the_process_alive(self):
         calls = []
-        relay.claim_node_job = lambda e, c, t: (calls.append(c)
+        # capacity is a[1]; the test only counts calls, so it just needs SOMETHING recorded.
+        relay.claim_node_job = lambda *a, **k: (calls.append(a[1] if len(a) > 1 else None)
                                                 or relay.outdated_refusal(9))
         self._interrupt_after(0.3)
 
@@ -3906,7 +3918,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
     def test_a_refused_executor_advertises_zero_capacity_immediately(self):
-        relay.claim_node_job = lambda e, c, t: relay.outdated_refusal(9)
+        relay.claim_node_job = lambda *a, **k: relay.outdated_refusal(9)
         self._interrupt_after(0.3)
 
         relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
@@ -3919,7 +3931,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         self.assertEqual(hb.beats[-1], {"shared_clean": 0, "exclusive": 0})
 
     def test_the_loop_wires_the_pool_release_functions_into_the_heartbeat(self):
-        relay.claim_node_job = lambda e, c, t: None   # no work: just start, beat, idle
+        relay.claim_node_job = lambda *a, **k: None   # no work: just start, beat, idle
         self._interrupt_after(0.2)
         relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
         hb = FakeHeartbeat.instances[-1]
@@ -3930,7 +3942,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         self.assertEqual(hb.on_release_run.__name__, "release_run")
 
     def test_it_logs_once_naming_both_versions_and_the_remedy(self):
-        relay.claim_node_job = lambda e, c, t: relay.outdated_refusal(9)
+        relay.claim_node_job = lambda *a, **k: relay.outdated_refusal(9)
         self._interrupt_after(0.3)
 
         relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
@@ -3955,7 +3967,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         claims = [job(node_type="shell", run="true", id="nj-1", run_id="r1",
                       vars={"ref": "RLY-1"})]
 
-        def claim(e, c, t):
+        def claim(*a, **k):
             return claims.pop(0) if claims else relay.outdated_refusal(9)
 
         relay.claim_node_job = claim
@@ -3967,7 +3979,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         self.assertEqual(reports[0][:2], ("nj-1", "succeeded"))
 
     def test_once_exits_non_zero_rather_than_idling(self):
-        relay.claim_node_job = lambda e, c, t: relay.outdated_refusal(9)
+        relay.claim_node_job = lambda *a, **k: relay.outdated_refusal(9)
 
         with self.assertRaises(SystemExit) as caught:
             relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
@@ -3975,7 +3987,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         self.assertEqual(caught.exception.code, 1)
 
     def test_a_normal_run_never_sets_the_flag(self):
-        relay.claim_node_job = lambda e, c, t: None      # 204 / long-poll timeout
+        relay.claim_node_job = lambda *a, **k: None      # 204 / long-poll timeout
         self._interrupt_after(0.2)
 
         relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))

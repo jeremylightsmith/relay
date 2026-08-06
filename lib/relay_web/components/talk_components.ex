@@ -84,6 +84,11 @@ defmodule RelayWeb.TalkComponents do
   attr :seed_fields, :list, default: []
   attr :seed_open?, :boolean, default: false
   attr :busy?, :boolean, default: false
+
+  attr :awaiting?, :boolean,
+    default: false,
+    doc: "the card is parked on a question — switches the lead prompt, per artboard line 829"
+
   attr :events, :list, default: nil, doc: "a plain list (stories/tests); nil when `stream` is used"
   attr :stream, :any, default: nil, doc: "the LiveView @streams.talk_events assign"
 
@@ -161,7 +166,7 @@ defmodule RelayWeb.TalkComponents do
           <input
             type="text"
             name="text"
-            placeholder="what happened?"
+            placeholder={lead_prompt(@awaiting?)}
             autocomplete="off"
             style={mono() <> "flex:1;min-width:0;border:none;outline:none;background:transparent;color:oklch(0.94 0.01 262);caret-color:oklch(0.72 0.14 150);"}
           />
@@ -176,7 +181,7 @@ defmodule RelayWeb.TalkComponents do
                 nothing is exactly what the composer rule exists to prevent. /clear stays live —
                 it routes to clear_talk/1 and is safe mid-turn. --%>
           <button
-            :for={label <- slash_chips()}
+            :for={label <- slash_chips(@awaiting?)}
             :if={!@busy? or label == slash_clear()}
             type="button"
             phx-click="talk_slash"
@@ -219,7 +224,17 @@ defmodule RelayWeb.TalkComponents do
   """
   def slash_clear, do: "/clear"
 
-  defp slash_chips, do: ["why did review reject?", "fix it", "/card", "/run", slash_clear()]
+  # Artboard line 829: the lead chip and the composer placeholder both depend on whether the
+  # card is parked — "why is this stuck?" when it is, "why did review reject?" / "what happened?"
+  # when it is not. Hardcoding the not-parked wording asked the wrong question on exactly the
+  # cards Talk exists for.
+  defp slash_chips(awaiting?), do: [lead_chip(awaiting?), "fix it", "/card", "/run", slash_clear()]
+
+  defp lead_chip(true), do: "why is this stuck?"
+  defp lead_chip(false), do: "why did review reject?"
+
+  defp lead_prompt(true), do: "why is this stuck?"
+  defp lead_prompt(false), do: "what happened?"
 
   defp out_color(%{dim: true}), do: "oklch(0.58 0.03 262)"
   defp out_color(_event), do: "oklch(0.86 0.015 262)"

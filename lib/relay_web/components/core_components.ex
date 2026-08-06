@@ -2900,10 +2900,11 @@ defmodule RelayWeb.CoreComponents do
                     id="talk-pane"
                     ref={@ref}
                     title={@card.title}
-                    seed_summary={@talk_session && @talk_session.seed_summary}
+                    seed_summary={(@talk_session && @talk_session.seed_summary) || ""}
                     seed_fields={(@talk_session && @talk_session.seed_fields) || []}
                     seed_open?={@talk_seed_open?}
                     busy?={talk_busy?(@talk_active_turn)}
+                    awaiting?={@card.status == :needs_input}
                     stream={@talk_events}
                   />
                 </div>

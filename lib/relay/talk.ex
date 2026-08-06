@@ -360,6 +360,13 @@ defmodule Relay.Talk do
       session = Repo.get!(TalkSession, turn.talk_session_id)
       updated = turn |> TalkTurn.changeset(%{status: :stopped}) |> Repo.update!()
       broadcast(session.card_id, {:talk_turn_changed, updated})
+
+      # Wake the executor's open claim long-poll so the revocation lands in well under a second
+      # instead of waiting out the 15s heartbeat. `post_message/3` already does this to get a NEW
+      # turn picked up promptly; a Stop needs it just as much, and for the same channel — without
+      # it the poll sleeps through the one event it most needs to hear.
+      Runs.broadcast_run_changed(board_id_of(updated), session.card_id)
+
       {:ok, updated}
     else
       {:error, :not_active}
@@ -442,9 +449,9 @@ defmodule Relay.Talk do
 
     summary =
       [
-        "#{length(fields)} fields",
-        if(steps > 0, do: "plan #{steps} steps", else: "no plan yet"),
-        "#{length(runs)} runs",
+        count(length(fields), "field"),
+        if(steps > 0, do: "plan #{steps} #{noun(steps, "step")}", else: "no plan yet"),
+        count(length(runs), "run"),
         if(card.rejection, do: "changes requested")
       ]
       |> Enum.reject(&is_nil/1)
@@ -459,6 +466,12 @@ defmodule Relay.Talk do
 
     %{summary: summary, fields: rows}
   end
+
+  # The seed line is the first thing a person reads in the pane, so "1 fields" is a small lie in
+  # a prominent place. One definition, used by every count on the line.
+  defp count(n, noun), do: "#{n} #{noun(n, noun)}"
+  defp noun(1, noun), do: noun
+  defp noun(_n, noun), do: noun <> "s"
 
   defp present?(value), do: is_binary(value) and String.trim(value) != ""
 

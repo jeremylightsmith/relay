@@ -201,6 +201,20 @@ defmodule RelayWeb.TalkComponentsTest do
     assert html =~ "oklch(0.22 0.018 262)"
   end
 
+  test "the lead chip and placeholder follow the card's state, per the artboard" do
+    # Artboard line 829 makes both conditional. Hardcoding the not-parked wording asked
+    # "why did review reject?" on a card that was parked on a question — the wrong question on
+    # exactly the cards Talk exists for.
+    parked = render_component(&TalkComponents.talk_pane/1, pane(%{awaiting?: true}))
+    running = render_component(&TalkComponents.talk_pane/1, pane(%{awaiting?: false}))
+
+    assert parked =~ "why is this stuck?"
+    refute parked =~ "why did review reject?"
+
+    assert running =~ "why did review reject?"
+    assert running =~ "what happened?"
+  end
+
   test "the prompt chips are hidden while a turn is live, but /clear stays" do
     # Four of the five post a turn, which Talk refuses with {:error, :turn_in_flight} and the
     # LiveView renders nothing for — a live-looking control that silently does nothing, which is

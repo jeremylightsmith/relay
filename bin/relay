@@ -69,8 +69,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 40
-EXECUTOR_FINGERPRINT = "d041963dc2a68e65f4d690d0f89b1bf3f02490db66c766bef958b7d3d0225cc5"
+EXECUTOR_VERSION = 41
+EXECUTOR_FINGERPRINT = "9844826e8b27218758ffc403e050a778a1696ffa53cc3e79cb1364a4892c3884"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1944,14 +1944,14 @@ def outdated_refusal(required):
     return {"executor_outdated": True, "required": required}
 
 
-def claim_node_job(executor, capacity, timeout):
+def claim_node_job(executor, capacity, timeout, running=()):
     """Long-poll claim: hold one request open (advertising free `capacity` per isolation class)
     up to `timeout`s. Returns a job dict, or None on a 204/empty body or a read timeout — both
     mean 'no work', not an error (§7). Returns outdated_refusal(required) when the server
     refuses this executor's version (409 executor_outdated, RLY-184)."""
     try:
         resp = api("POST", "/api/node-jobs/claim",
-                   {"executor": executor, "capacity": capacity},
+                   claim_body(executor, capacity, running),
                    soft_conflict=True, timeout=timeout)
     except socket.timeout:
         return None
@@ -1969,6 +1969,17 @@ def outcome_body(outcome, detail, git_sha, session_id=None):
     generator posts at the real controller (RLY-176)."""
     return {"outcome": outcome, "detail": detail,
             "git_sha": git_sha, "session_id": session_id}
+
+
+def claim_body(executor, capacity, running=()):
+    """The exact body POSTed to /api/node-jobs/claim.
+
+    `running` (RE268) is the job-ids this executor currently has in flight — the same list
+    `heartbeat_body` sends, and for the same reason: it is what lets the server answer with the
+    `revoked` ids among them. Without it a Stop could only reach us on the next 15s beat, so a
+    killed turn kept streaming for up to 15 seconds. Pure and separate from the POST so
+    bin/test_relay.py can pin its key set against test/fixtures/executor_contract.json."""
+    return {"executor": executor, "capacity": capacity, "running": list(running)}
 
 
 def heartbeat_body(executor, capacity, running, bound_runs, capabilities=None):
@@ -2506,6 +2517,13 @@ def run_talk_job(job, slot_path, control, sender):
 
     def on_event(ev):
         for line in talk_events_from(ev):
+            # A deliberate Stop kills `claude`, which exits emitting `result{is_error: true}` —
+            # mapped to an :error line reading "the turn ended with an error". The turn's stored
+            # status is correctly `stopped`, so this was purely a lie told to the person: every
+            # Stop painted a red error as its last line. Drop error lines once the control is
+            # already cancelled; the partial output stays, and nothing claims it failed (RE268).
+            if line["kind"] == TALK_KIND_ERROR and control.cancelled():
+                continue
             sender.enqueue(line["kind"], line["text"], line["dim"])
 
     ok, session_id = _stream_claude_job(
@@ -3251,7 +3269,7 @@ def cmd_execute(args):
             break
         pool.refresh_idle_shared()
         try:
-            job = claim_node_job(executor, cap, poll_timeout)
+            job = claim_node_job(executor, cap, poll_timeout, running_ids())
         except SystemExit as e:                     # exhausted api() retries → die()
             log(f"claim failed, will retry: {e}", kind="error")
             if args.once:
@@ -3259,6 +3277,17 @@ def cmd_execute(args):
             wake.wait(1)
             wake.clear()
             continue
+        # RE268 — a no-job reply can carry `revoked`: the Stop path. Same key, same meaning and
+        # same handler as the heartbeat's, just delivered on the already-open long-poll instead
+        # of up to 15s later. A reply with no "id" is not a job, so it must not fall through to
+        # the placement code below.
+        if isinstance(job, dict) and job.get("revoked"):
+            for revoked_id in job["revoked"]:
+                revoke(revoked_id)
+            if "id" not in job:
+                if args.once:
+                    break
+                continue
         if isinstance(job, dict) and job.get("executor_outdated"):
             outdated = True
             required_version = job.get("required")

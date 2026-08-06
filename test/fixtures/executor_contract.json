@@ -67,7 +67,8 @@
       "interval": 30,
       "name": "fixture",
       "version": 38
-    }
+    },
+    "running": []
   },
   "heartbeat": {
     "request": {
@@ -137,7 +138,7 @@
             "value": "no branch yet"
           }
         ],
-        "summary": "1 fields · no plan yet · 0 runs"
+        "summary": "1 field · no plan yet · 0 runs"
       },
       "turn_id": "<talk-turn-id>"
     }

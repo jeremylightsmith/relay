@@ -252,18 +252,36 @@ defmodule RelayWeb.Api.NodeJobController do
   defp parse_outcome(_value), do: {:error, :unknown_outcome}
 
   defp maybe_wait(conn, board, executor, params) do
+    running = List.wrap(params["running"])
+
     cond do
       params["wait"] in ["0", 0] ->
-        send_resp(conn, 204, "")
+        no_work(conn, board, running)
 
       # No advertised capacity → claim_next_job/1 can never succeed for this
       # executor; a full 25s long-poll would be a wasted connection.
       zero_capacity?(executor) ->
-        send_resp(conn, 204, "")
+        no_work(conn, board, running)
 
       true ->
         Runs.subscribe(board.id)
-        wait_loop(conn, executor, System.monotonic_time(:millisecond) + @long_poll_ms)
+        wait_loop(conn, board, executor, running, System.monotonic_time(:millisecond) + @long_poll_ms)
+    end
+  end
+
+  # RE268 — a revocation reaching the executor is what actually kills a running `claude -p`, and
+  # until now it only rode the 15s heartbeat: pressing Stop left output streaming for up to 15s
+  # (measured ~13). The claim long-poll is already open and already woken by run events, so it
+  # carries revocations too. `revoked` is the SAME key and the same `Runs.revoked_among/2` source
+  # the heartbeat reply uses — the executor applies both through one handler, so there is no
+  # second notion of "what is dead".
+  #
+  # Only the no-job reply carries it. A granted job's payload shape is pinned by the executor
+  # contract and left untouched; an executor being handed work is not the case Stop cares about.
+  defp no_work(conn, board, running) do
+    case Runs.revoked_among(board, running) do
+      [] -> send_resp(conn, 204, "")
+      revoked -> json(conn, %{revoked: revoked})
     end
   end
 
@@ -273,20 +291,29 @@ defmodule RelayWeb.Api.NodeJobController do
 
   # Retry the atomic claim whenever a run event fires; anything else in the
   # mailbox (e.g. a stray monitor message) falls through and keeps waiting.
-  defp wait_loop(conn, executor, deadline) do
+  defp wait_loop(conn, board, executor, running, deadline) do
     timeout = deadline - System.monotonic_time(:millisecond)
 
     if timeout <= 0 do
-      send_resp(conn, 204, "")
+      no_work(conn, board, running)
     else
       receive do
         run_event when is_tuple(run_event) and elem(run_event, 0) in @run_event_tags ->
           case Runs.claim_next_job(executor) do
-            {:ok, nil} -> wait_loop(conn, executor, deadline)
-            {:ok, job} -> json(conn, granted(job))
+            # Woken with nothing to grant is the Stop case: `Talk.stop_turn/1` broadcasts a run
+            # event precisely so this loop re-checks. Return as soon as something is revoked,
+            # rather than sitting out the rest of the 25s with a kill order in hand.
+            {:ok, nil} ->
+              case Runs.revoked_among(board, running) do
+                [] -> wait_loop(conn, board, executor, running, deadline)
+                revoked -> json(conn, %{revoked: revoked})
+              end
+
+            {:ok, job} ->
+              json(conn, granted(job))
           end
       after
-        timeout -> send_resp(conn, 204, "")
+        timeout -> no_work(conn, board, running)
       end
     end
   end

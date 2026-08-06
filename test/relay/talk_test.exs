@@ -34,7 +34,7 @@ defmodule Relay.TalkTest do
         version: Runs.min_talk_executor_version()
       )
 
-    %{board: board, card: card, author: author, executor: executor}
+    %{board: board, stage: stage, card: card, author: author, executor: executor}
   end
 
   test "the closed sets are defined once" do
@@ -313,6 +313,32 @@ defmodule Relay.TalkTest do
 
     assert {:ok, stored} = Talk.append_events(turn, [bad, event(1, "out", "good")])
     assert Enum.map(stored, & &1.text) == ["good"]
+  end
+
+  test "the seed line counts in the singular when there is one of something", ctx do
+    bare = insert(:card, board: ctx.board, stage: ctx.stage, description: "just the one field")
+
+    seed = Talk.build_seed(bare)
+
+    # The seed line is the first thing a person reads in the pane; "1 fields" is a small lie in
+    # a prominent place.
+    assert seed.summary =~ "1 field ·"
+    refute seed.summary =~ "1 fields"
+    assert seed.summary =~ "0 runs"
+  end
+
+  test "Stop wakes the claim long-poll, so the revocation does not wait for a heartbeat", ctx do
+    {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
+
+    # The claim long-poll subscribes to the board's run events; `post_message/3` already
+    # broadcasts one so a NEW turn is picked up promptly. Without the same broadcast here, a Stop
+    # is invisible to that open connection and only reaches the executor on the next 15s beat —
+    # which is why pressing Stop left `claude` streaming for ~13s.
+    :ok = Runs.subscribe(ctx.card.board_id)
+
+    {:ok, _stopped} = Talk.stop_turn(turn)
+
+    assert_receive run_event when elem(run_event, 0) == :run_changed
   end
 
   test "a turn ended by Stop is not resurrected as :done by a late outcome", ctx do

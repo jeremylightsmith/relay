@@ -57,7 +57,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
     {run, Runs.active_job(run)}
   end
 
-  defp claim(conn, capacity \\ %{"shared_clean" => 1, "exclusive" => 1}) do
+  defp claim(conn, capacity \\ %{"shared_clean" => 1, "exclusive" => 1}, running \\ []) do
     post(
       conn,
       ~p"/api/node-jobs/claim",
@@ -68,7 +68,8 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
           "interval" => 30,
           "version" => Runs.min_talk_executor_version()
         },
-        "capacity" => capacity
+        "capacity" => capacity,
+        "running" => running
       })
     )
   end
@@ -222,6 +223,48 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert body["kind"] == "talk"
       assert body["turn_id"] == turn.id
       assert Relay.Talk.get_turn(turn.id).status == :claimed
+    end
+  end
+
+  describe "POST /api/node-jobs/claim — revocations (RE268)" do
+    # `wait: 0` keeps the test out of the 25s long-poll; the revocation path is identical, and
+    # `wait_loop/5` re-checks on every wake so a Stop mid-poll returns just as promptly.
+    defp claim_now(conn, running) do
+      post(
+        conn,
+        ~p"/api/node-jobs/claim",
+        Jason.encode!(%{
+          "executor" => %{
+            "name" => "fake",
+            "host" => "fake",
+            "interval" => 30,
+            "version" => Runs.min_talk_executor_version()
+          },
+          "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
+          "running" => running,
+          "wait" => "0"
+        })
+      )
+    end
+
+    test "a no-job claim carries the revoked ids among what the executor reports running", ctx do
+      %{conn: conn, board: board} = ctx
+      flow = four_outcome_flow(board)
+      {run, job} = start_queued_job(board, flow)
+
+      conn |> claim() |> json_response(200)
+      Runs.revoke_active_jobs(run)
+
+      body = conn |> claim_now([job.id]) |> json_response(200)
+
+      # This is what makes Stop land in well under a second: without it the executor would not
+      # learn the job was killed until its next 15s heartbeat, and `claude` would keep streaming.
+      assert body["revoked"] == [job.id]
+      refute Map.has_key?(body, "id")
+    end
+
+    test "still 204 when nothing this executor reports running has been revoked", ctx do
+      assert ctx.conn |> claim_now([]) |> response(204)
     end
   end
 

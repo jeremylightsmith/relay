@@ -164,7 +164,8 @@ defmodule RelayWeb.Api.ExecutorContractTest do
     %{"name" => "fixture", "host" => "fixture-host", "interval" => 30, "version" => Runs.min_talk_executor_version()}
   end
 
-  defp claim_body(capacity), do: %{"executor" => executor_ident(), "capacity" => capacity}
+  # `running` (RE268) is what lets a no-job claim reply carry `revoked` — the fast Stop path.
+  defp claim_body(capacity), do: %{"executor" => executor_ident(), "capacity" => capacity, "running" => []}
 
   defp stringify(atoms), do: Enum.map(atoms, &Atom.to_string/1)
 
