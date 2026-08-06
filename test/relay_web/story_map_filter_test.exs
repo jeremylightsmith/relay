@@ -4,12 +4,14 @@ defmodule RelayWeb.StoryMapFilterTest do
   structs. No DB, no LiveView: this module owns the key format the way
   `RelayWeb.StoryMapGrid` owns the column keys, so it is proven the same way.
 
-  NOT `async: true`: the no-atom-leak test below reads `:erlang.system_info(:atom_count)`,
-  which is a VM-GLOBAL counter. Run concurrently, every other async test loading a module
-  moves it, and the assertion fails on unlucky seeds for reasons that have nothing to do
-  with this module. Sync tests run one at a time, so the delta is the code under test.
+  NOT `async: true`, intentionally and not pending any future task: the no-atom-leak test
+  below reads `:erlang.system_info(:atom_count)`, which is a VM-GLOBAL counter, not a
+  per-process resource ADR 0009's rules can make safe. Run concurrently, every other async
+  test loading a module moves it, and the assertion fails on unlucky seeds for reasons that
+  have nothing to do with this module. Sync tests run one at a time, so the delta is the code
+  under test.
   """
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias RelayWeb.StoryMapFilter
   alias Schemas.Card
