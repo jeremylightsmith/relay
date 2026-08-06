@@ -789,8 +789,16 @@ defmodule RelayWeb.BoardLive do
     <%!-- RE259 — the filter bar and the map share ONE height-owning flex column, so the
           two `h-[calc(100dvh_-_53px)]` magic numbers stay at one and `#story-map` becomes
           `flex-1 min-h-0` instead of the arithmetic doubling. --%>
+    <%!-- `isolation:isolate` scopes the map's whole z-index scale. Those values come from the
+          artboard, where the only thing they had to out-rank was the map's own sticky headers
+          (8..35) — so the filter bar is 55, the UNMAPPED tray 50 and the presence cursor layer
+          40, all at or above `.drawer-side`'s 40. The drawer is a SIBLING of this element, not a
+          child, so all three were painting over an open card. One stacking context contains
+          every one of them, instead of hand-tuning three numbers against an app-level scale the
+          artboard never saw. --%>
     <div
       id="story-map-viewport"
+      style="isolation:isolate;"
       class={["flex min-h-0 flex-col", if(@embed, do: "h-dvh", else: "h-[calc(100dvh_-_53px)]")]}
     >
       <StoryMapComponents.story_map_filter_bar

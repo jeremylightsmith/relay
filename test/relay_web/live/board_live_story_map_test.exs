@@ -169,6 +169,21 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       refute has_element?(view, "#card-drawer")
       assert has_element?(view, "#story-map-grid")
     end
+
+    test "the map's z-index scale is scoped, so its chrome cannot paint over the drawer",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map?card=#{Cards.ref(ctx.board, ctx.sso)}")
+
+      assert has_element?(view, "#card-drawer")
+
+      # The map carries its own z-index scale from the artboard, where the only thing it had to
+      # out-rank was its own sticky headers: the filter bar is 55, the UNMAPPED tray 50, the
+      # presence cursor layer 40 — all at or above `.drawer-side`'s 40, and the drawer is a
+      # SIBLING of the viewport, so they were painting over the open card. `isolation: isolate`
+      # makes the viewport a stacking context, containing every one of those values at once
+      # instead of hand-tuning three numbers against an app-level scale they cannot see.
+      assert has_element?(view, "#story-map-viewport[style*=\"isolation:isolate\"]")
+    end
   end
 
   describe "realtime" do
