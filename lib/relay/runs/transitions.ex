@@ -30,6 +30,7 @@ defmodule Relay.Runs.Transitions do
     {:running, :cancelled, "human cancelled a live run"},
     {:parked, :running, "resume"},
     {:parked, :cancelled, "human cancelled a parked run"},
+    {:parked, :failed, "scheduler gave up on an unresumable parked run (RE297)"},
     {:failed, :running, "human retry / `revive_run` (RLY-189)"}
   ]
 

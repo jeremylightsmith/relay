@@ -215,6 +215,7 @@ a guarded `UPDATE` that refuses (and logs) a transition from an unexpected state
 | --- | --- | --- |
 | `failed` | `running` | human retry / `revive_run` (RLY-189) |
 | `parked` | `cancelled` | human cancelled a parked run |
+| `parked` | `failed` | scheduler gave up on an unresumable parked run (RE297) |
 | `parked` | `running` | resume |
 | `running` | `cancelled` | human cancelled a live run |
 | `running` | `done` | flow reached its `done` target |

@@ -1579,6 +1579,69 @@ defmodule Relay.Runs do
     end
   end
 
+  # How long a run may be CONTINUOUSLY refused a resume before the scheduler gives up on it.
+  # Deliberately long and strongly biased against false alarms: a genuinely long executor
+  # outage must never be escalated spuriously — 30 minutes of ACTIVE refusal is not an outage,
+  # it is a dead end. Sibling of @stopped_work_after_s and @executor_stale_floor_s.
+  @unresumable_after_s 1800
+
+  @doc "Seconds of continuous refusal after which a parked run is failed. The single home of the 30-minute policy."
+  def unresumable_after_s, do: @unresumable_after_s
+
+  @doc """
+  Fails every parked run whose resume has been refused for longer than `unresumable_after_s/0`
+  (RE297) — the clock `ExecutorReaper` applies to the facts `record_resume_refusals/3` wrote.
+  DB-only; no snapshot needed. `now` is injectable, as its reaper siblings are.
+
+  Landing on `:failed` is what makes the stall visible with no new UI: a `:failed` card is
+  skipped by `Policy.pullable?/1` and `resumable?/2`, is counted by the board's stalled badge
+  (`restartable_runs/1`), appears in the restart dialog, and gives `relay why` the `:run_failed`
+  verdict carrying the detail.
+
+  The pin is cleared **only** when the refusal reason proves it unhonourable
+  (`Schemas.Run.pin_unhonourable_refusal_reasons/0`) — otherwise the machine is alive and the
+  run's worktree really is still on it, so a retry must land back there.
+  """
+  def abandon_unresumable_runs(now \\ nil) do
+    now = now || now()
+    cutoff = DateTime.add(now, -unresumable_after_s(), :second)
+
+    runs =
+      Repo.all(
+        from r in Run,
+          where: r.status == :parked,
+          where: not is_nil(r.resume_refused_since) and r.resume_refused_since < ^cutoff
+      )
+
+    Enum.each(runs, &abandon_unresumable_run(&1, now))
+    :ok
+  end
+
+  defp abandon_unresumable_run(%Run{} = run, now) do
+    detail = unresumable_detail(run, now)
+    # Idempotent: a park may have left a job behind, and it must not stay :claimed under a
+    # machine that is never coming back for it.
+    revoke_active_jobs(run)
+    run |> clear_unhonourable_pin() |> fail_run(detail)
+    :ok
+  end
+
+  defp clear_unhonourable_pin(%Run{resume_refused_reason: reason} = run) do
+    if reason in Run.pin_unhonourable_refusal_reasons(),
+      do: run |> Changeset.change(pinned_executor_name: nil) |> Repo.update!(),
+      else: run
+  end
+
+  # Names the cause in the shape a human can act on, in the same words `relay why` prints
+  # (`Scheduler.resume_refusal_sentence/1` is the one definition of that phrasing).
+  defp unresumable_detail(%Run{resume_refused_since: since, resume_refused_reason: reason}, now) do
+    minutes = div(DateTime.diff(now, since, :second), 60)
+
+    "The scheduler could not resume this run for #{minutes}m: " <>
+      "#{Scheduler.resume_refusal_sentence(reason)} (resume_refused_reason=#{reason}). " <>
+      "Retry it, or move the card back to re-run it on the current flow."
+  end
+
   ## Diagnosis (RLY-177)
 
   # A job that has sat queued or claimed this long with nothing alive behind it is
@@ -2693,22 +2756,50 @@ defmodule Relay.Runs do
 
   @doc false
   def close_run!(%Run{} = run, status, failure_detail) do
-    case Transitions.transition(run, [:running], status,
-           set: [
-             parked_reason: nil,
-             current_node: nil,
-             failure_detail: failure_detail,
-             finished_at: now()
-           ]
-         ) do
-      {:ok, updated} ->
-        updated
+    set = [
+      parked_reason: nil,
+      current_node: nil,
+      failure_detail: failure_detail,
+      finished_at: now(),
+      resume_refused_since: nil,
+      resume_refused_reason: nil
+    ]
 
-      # Defensively impossible (every caller holds a provably-:running run); the guarded
-      # UPDATE already logged the no-op, so return the row's current truth.
-      {:error, :not_in_expected_state} ->
-        Repo.get!(Run, run.id)
+    # The from-state is the run's OWN status (as `revive_run/4` already does), not a hardcoded
+    # `[:running]`: RE297 closes a :parked run through this same function, and both
+    # {:running, :failed|:done|:cancelled} and {:parked, :failed} are declared edges.
+    if Transitions.legal?(run.status, status) do
+      case Transitions.transition(run, [run.status], status, set: set) do
+        {:ok, updated} ->
+          updated
+
+        # The guarded UPDATE already logged the no-op; return the row's current truth.
+        {:error, :not_in_expected_state} ->
+          Repo.get!(Run, run.id)
+      end
+    else
+      # A concurrent close raced this run out of a status with an edge to `status`. The reaper
+      # re-reads every row it sweeps, so this is a race, not a caller bug — and a raise here
+      # would take the reaper's whole sweep down with it.
+      Repo.get!(Run, run.id)
     end
+  end
+
+  @doc """
+  The one definition of "a run failed" (RE297): close it terminally, mark its card `:failed`
+  with the detail a human reads, and broadcast `{:run_finished, run}`. Extracted from
+  `RunServer.fail_effects/3` so the engine and `abandon_unresumable_runs/1` cannot drift.
+
+  `card_detail` defaults to `failure_detail`; `RunServer` passes the failed node's own output
+  instead, so the card shows what the agent actually said rather than the engine's terse reason.
+  """
+  def fail_run(%Run{} = run, failure_detail, card_detail \\ nil) do
+    run = close_run!(run, :failed, failure_detail)
+    card = Repo.get!(Card, run.card_id)
+    detail = card_detail || run.failure_detail || "The agent's run failed."
+    {:ok, _card} = Cards.mark_failed(card, detail, :agent)
+    broadcast_runs(board_id_of(run), {:run_finished, run})
+    run
   end
 
   @doc false

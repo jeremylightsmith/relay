@@ -630,12 +630,11 @@ defmodule Relay.Runs.RunServer do
   # hard match — this is what makes the blank-detail fallback actually reachable.
   defp first_present(candidates), do: Enum.find(candidates, &(is_binary(&1) and String.trim(&1) != ""))
 
-  # Terminal path shared with the no-flow branches: close the run, leave the
-  # failure on the card, mark the card :failed, broadcast.
+  # Terminal path shared with the no-flow branches. `Runs.fail_run/3` owns the close + card
+  # mark + broadcast (RE297, one definition used by the engine and the reaper alike); the node's
+  # own output is what the card should show, so it is passed as the card detail.
   defp fail_effects(run, execution, reason) do
-    run = Runs.close_run!(run, :failed, reason)
-    card_fail_effects(run, execution)
-    Runs.broadcast_runs(Runs.board_id_of(run), {:run_finished, run})
+    Runs.fail_run(run, reason, first_present([execution && execution.detail, reason]))
     :ok
   end
 end

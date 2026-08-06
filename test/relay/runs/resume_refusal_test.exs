@@ -1,6 +1,8 @@
 defmodule Relay.Runs.ResumeRefusalTest do
   use Relay.DataCase, async: false
 
+  import Ecto.Query
+
   alias Relay.Runs
   alias Schemas.Run
 
@@ -85,6 +87,82 @@ defmodule Relay.Runs.ResumeRefusalTest do
       {:ok, _resumed} = Runs.resume_run(Runs.get_run!(run.id))
 
       assert %Run{resume_refused_since: nil, resume_refused_reason: nil} = Runs.get_run!(run.id)
+    end
+  end
+
+  describe "abandon_unresumable_runs/1" do
+    test "leaves a run refused for 29 minutes parked", %{board: board, works: works} do
+      run = parked_run(works)
+      :ok = Runs.record_resume_refusals(board.id, [refusal(run, :no_isolation)], at(-29 * 60))
+
+      :ok = Runs.abandon_unresumable_runs(at(0))
+
+      assert %Run{status: :parked} = Runs.get_run!(run.id)
+    end
+
+    test "fails a run refused for 31 minutes, naming the cause on the run and the card",
+         %{board: board, works: works} do
+      run = parked_run(works)
+      :ok = Runs.record_resume_refusals(board.id, [refusal(run, :no_isolation)], at(-31 * 60))
+
+      :ok = Runs.abandon_unresumable_runs(at(0))
+
+      assert %Run{status: :failed, failure_detail: detail} = Runs.get_run!(run.id)
+      assert detail =~ "resume_refused_reason=no_isolation"
+      assert detail =~ "could not resume this run for 31m"
+
+      card = Relay.Repo.get!(Schemas.Card, run.card_id)
+      assert card.status == :failed
+
+      # `list_timeline/1` merges Comment and Activity structs, so match on the struct —
+      # a bare `entry.type` would KeyError on the comment `mark_failed/3` also posts.
+      assert Enum.any?(Relay.Activity.list_timeline(card), fn
+               %Schemas.Activity{type: :failure, text: text} ->
+                 text =~ "resume_refused_reason=no_isolation"
+
+               _entry ->
+                 false
+             end)
+    end
+
+    test "clears the pin when the reason proves it unhonourable", %{board: board, works: works} do
+      for reason <- Run.pin_unhonourable_refusal_reasons() do
+        run = parked_run(works)
+        Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [pinned_executor_name: "exec-a"])
+        :ok = Runs.record_resume_refusals(board.id, [refusal(run, reason)], at(-31 * 60))
+
+        :ok = Runs.abandon_unresumable_runs(at(0))
+
+        assert %Run{status: :failed, pinned_executor_name: nil} = Runs.get_run!(run.id)
+      end
+    end
+
+    test "keeps the pin when the machine is alive and the worktree is still there",
+         %{board: board, works: works} do
+      for reason <- Run.resume_refusal_reasons() -- Run.pin_unhonourable_refusal_reasons() do
+        run = parked_run(works)
+        Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [pinned_executor_name: "exec-a"])
+        :ok = Runs.record_resume_refusals(board.id, [refusal(run, reason)], at(-31 * 60))
+
+        :ok = Runs.abandon_unresumable_runs(at(0))
+
+        assert %Run{status: :failed, pinned_executor_name: "exec-a"} = Runs.get_run!(run.id)
+      end
+    end
+
+    test "revokes a job the park left behind", %{board: board, works: works} do
+      run = parked_run(works)
+      execution = insert(:node_execution, run: run, node_key: "work", outcome: nil, finished_at: nil)
+      job = insert(:node_job, node_execution: execution, state: :claimed)
+      :ok = Runs.record_resume_refusals(board.id, [refusal(run, :no_free_slot)], at(-31 * 60))
+
+      :ok = Runs.abandon_unresumable_runs(at(0))
+
+      assert Relay.Repo.get!(Schemas.NodeJob, job.id).state == :revoked
+    end
+
+    test "the 30-minute window is the one named policy number" do
+      assert Runs.unresumable_after_s() == 1800
     end
   end
 end
