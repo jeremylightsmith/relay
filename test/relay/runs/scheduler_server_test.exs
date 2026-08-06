@@ -51,8 +51,13 @@ defmodule Relay.Runs.Scheduler.ServerTest do
   setup do
     start_capacity!()
     # Hardcoded executor ids would collide with a concurrent test's real Executor rows; these are
-    # unique per test and live only in this test's capacity table.
-    %{exec_a: System.unique_integer([:positive]), exec_b: System.unique_integer([:positive])}
+    # unique per test and live only in this test's capacity table. Sorted because
+    # Scheduler.take_slot/3's greedy :any branch picks the LOWEST id — the pinned-debit test below
+    # pins the higher one so a greedy regression changes which executor the fresh pull lands on.
+    [exec_a, exec_b] =
+      Enum.sort([System.unique_integer([:positive]), System.unique_integer([:positive])])
+
+    %{exec_a: exec_a, exec_b: exec_b}
   end
 
   # Start the FakeEngine's collaborator Agent (named per-test), seeded with the test pid and
@@ -236,12 +241,13 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     assert Repo.get!(Card, other_card.id).status == :queued
   end
 
-  test "an in-flight pinned :exclusive run debits its pinned executor, not the other one",
+  test "an in-flight pinned :exclusive run debits its pinned executor, not the lowest-id one",
        %{exec_a: exec_a, exec_b: exec_b} do
-    # Two executors advertise one exclusive slot each. The running run is pinned to exec_b. A
-    # pin-targeted debit spends exec_b, so the fresh pull lands on exec_a. A greedy-:any debit
-    # would instead spend whichever executor sorts first and could land the fresh pull on the
-    # pinned one — so the executor the fresh card lands on is what distinguishes the two behaviors.
+    # Two executors advertise one exclusive slot each. The running run is pinned to the
+    # HIGHER-id executor (exec_b, since `setup` sorts the pair). A pin-targeted debit spends
+    # exec_b, so the fresh pull lands on exec_a. A greedy-:any debit would instead spend
+    # exec_a (the lowest id) and land the fresh pull on exec_b — so the executor the fresh card
+    # lands on is what distinguishes the two behaviors.
     %{board: board, card: card} = board_with_flow(:ready, :exclusive)
 
     start_engine([
@@ -252,7 +258,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
         flow_key: "spec",
         isolation: :exclusive,
         pinned_executor_id: exec_b,
-        pinned_executor_name: "nine"
+        pinned_executor_name: "pinned"
       }
     ])
 
@@ -282,7 +288,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
         flow_key: "spec",
         isolation: :exclusive,
         pinned_executor_id: exec_b,
-        pinned_executor_name: "nine"
+        pinned_executor_name: "pinned"
       }
     ])
 

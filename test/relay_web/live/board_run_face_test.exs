@@ -10,6 +10,11 @@ defmodule RelayWeb.BoardRunFaceTest do
 
   setup :register_and_log_in_user
 
+  setup do
+    start_capacity!()
+    :ok
+  end
+
   setup %{user: user} do
     board = Boards.get_or_create_default_board(user)
     code = Enum.find(board.stages, &(&1.name == "Code"))
@@ -118,7 +123,6 @@ defmodule RelayWeb.BoardRunFaceTest do
   # avoid colliding with the default board's own 1..11 sequence on `stages_board_id_position_index`.
   describe "age and stall (RLY-191)" do
     setup %{user: user} do
-      start_capacity!()
       board = insert(:board, owner: user)
       insert(:membership, board: board, user: user)
       works = insert(:stage, board: board, name: "Code", position: 1, type: :work, ai_enabled: true)
