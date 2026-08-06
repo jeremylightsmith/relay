@@ -66,7 +66,7 @@
       "host": "fixture-host",
       "interval": 30,
       "name": "fixture",
-      "version": 38
+      "version": 39
     },
     "running": []
   },
@@ -89,7 +89,7 @@
         "host": "fixture-host",
         "interval": 30,
         "name": "fixture",
-        "version": 38
+        "version": 39
       },
       "running": []
     },
