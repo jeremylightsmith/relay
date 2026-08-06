@@ -18,7 +18,9 @@ defmodule Relay.Runs.Scheduler do
   consumed as decisions are made, so a single pass never over-dispatches. Extensions: every decision
   names an executor (capacity consumed on that executor's isolation class);
   `exclusive` runs are pinned to their affine executor (absolute — never
-  reassigned mid-run).
+  reassigned mid-run); a resume the capacity map cannot satisfy is REPORTED as a `refusals`
+  entry rather than silently skipped (RE297), so a permanently-unplaceable run can be aged out
+  instead of waiting forever.
   """
 
   alias Relay.Runs.Policy
@@ -38,7 +40,8 @@ defmodule Relay.Runs.Scheduler do
       decided: MapSet.new(),
       wip_extra: %{},
       dispatches: [],
-      to_queue: []
+      to_queue: [],
+      refusals: []
     }
 
     acc =
@@ -53,7 +56,8 @@ defmodule Relay.Runs.Scheduler do
     %Plan{
       dispatches: acc.dispatches,
       to_queue: acc.to_queue,
-      to_unqueue: unqueue(snapshot.cards, acc.to_queue, acc.dispatches, run_by_card)
+      to_unqueue: unqueue(snapshot.cards, acc.to_queue, acc.dispatches, run_by_card),
+      refusals: acc.refusals
     }
   end
 
@@ -90,8 +94,11 @@ defmodule Relay.Runs.Scheduler do
 
   defp maybe_resume(acc, run) do
     case take_slot(acc.capacity, run.isolation, executor_target(run)) do
+      # RE297: a refused resume used to be dropped on the floor, so the engine could not tell
+      # "waiting, legitimately" from "waiting forever". Report it instead; `Relay.Runs` turns
+      # the report into a clock and the reaper eventually gives up on it.
       :none ->
-        acc
+        %{acc | refusals: acc.refusals ++ [refusal(run, acc.capacity)]}
 
       {executor_id, capacity} ->
         %{
@@ -106,6 +113,20 @@ defmodule Relay.Runs.Scheduler do
   # exclusive resumes are pinned; every other placement is greedy.
   defp executor_target(%{isolation: :exclusive, pinned_executor_id: eid}), do: {:pinned, eid}
   defp executor_target(_run), do: :any
+
+  defp refusal(run, capacity), do: %{run_id: run.id, card_id: run.card_id, reason: refusal_reason(run, capacity)}
+
+  # Classified from the snapshot alone, most-specific first — every value is a member of
+  # `Schemas.Run.resume_refusal_reasons/0`, which is the one definition of the set.
+  defp refusal_reason(%{isolation: nil}, _capacity), do: :no_isolation
+
+  defp refusal_reason(%{isolation: :exclusive, pinned_executor_id: nil}, _capacity), do: :pin_unresolved
+
+  defp refusal_reason(%{isolation: :exclusive, pinned_executor_id: eid}, capacity) do
+    if Map.has_key?(capacity, eid), do: :no_free_slot, else: :pinned_executor_absent
+  end
+
+  defp refusal_reason(_run, _capacity), do: :no_free_slot
 
   # --- then pull fresh from this flow's pulls-from stage ---
 
@@ -464,6 +485,22 @@ defmodule Relay.Runs.Scheduler do
 
     "running " <> Enum.join(labels, "/")
   end
+
+  @doc """
+  The one-sentence human explanation of a `Schemas.Run.resume_refusal_reasons/0` value —
+  shared by `explain/2`'s `:resume_refused` detail and the `failure_detail`
+  `Relay.Runs.abandon_unresumable_runs/1` writes, so an operator reads the same words in
+  `relay why` and on the failed card.
+  """
+  @spec resume_refusal_sentence(atom()) :: String.t()
+  def resume_refusal_sentence(:no_isolation), do: "its flow row no longer exists, so it has no isolation class to place"
+
+  def resume_refusal_sentence(:pin_unresolved),
+    do: "it is an exclusive run whose executor pin cannot be resolved, so no machine can be chosen for it"
+
+  def resume_refusal_sentence(:pinned_executor_absent), do: "the executor it is pinned to is not advertising any capacity"
+
+  def resume_refusal_sentence(:no_free_slot), do: "no executor has a free slot of its isolation class"
 
   # --- misc ---
 

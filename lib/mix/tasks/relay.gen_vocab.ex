@@ -34,6 +34,7 @@ defmodule Mix.Tasks.Relay.GenVocab do
     {"Card status", {Schemas.Card, :statuses}},
     {"Run status", {Schemas.Run, :statuses}},
     {"Run parked reason", {Schemas.Run, :parked_reasons}},
+    {"Run resume-refusal reason", {Schemas.Run, :resume_refusal_reasons}},
     {"Node-job state", {Schemas.NodeJob, :states}},
     {"Node-job kind", {Schemas.NodeJob, :kinds}},
     {"Node outcome", {Schemas.NodeExecution, :outcomes}},
