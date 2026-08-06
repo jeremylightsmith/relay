@@ -6,8 +6,9 @@ defmodule Relay.Runs.RunServer do
   dispatches — Postgres is the checkpoint of record, and a crash between
   steps only ever re-dispatches (never loses) a node. The server stops on
   park and on every terminal status; parking never holds a process
-  (ADR 0006). Registered by run id in `Relay.Runs.Registry`; started
-  under `Relay.Runs.RunSupervisor`.
+  (ADR 0006). Registered by run id in its instance's Registry and started under its instance's
+  run `DynamicSupervisor` (`Relay.Runs.Instance`; `Relay.Runs.Registry` / `Relay.Runs.RunSupervisor`
+  in production).
 
   Start modes ({:continue, mode}):
     * `{:dispatch, job_id}` — fresh start: the row set already exists,
@@ -51,6 +52,7 @@ defmodule Relay.Runs.RunServer do
   alias Relay.Repo
   alias Relay.Runs
   alias Relay.Runs.Engine
+  alias Relay.Runs.Instance
   alias Relay.Runs.Transitions
   alias Schemas.Card
   alias Schemas.NodeExecution
@@ -66,13 +68,17 @@ defmodule Relay.Runs.RunServer do
 
   def start_link(opts) do
     run_id = Keyword.fetch!(opts, :run_id)
-    GenServer.start_link(__MODULE__, opts, name: via(run_id))
+    registry = Keyword.get(opts, :registry, Instance.default().registry)
+    GenServer.start_link(__MODULE__, opts, name: via(registry, run_id))
   end
 
-  defp via(run_id), do: {:via, Registry, {Relay.Runs.Registry, run_id}}
+  # The registry name arrives in `opts` rather than being resolved here: start_link/1 runs in the
+  # DynamicSupervisor's process, which has already lost the caller's $callers chain (ADR 0009).
+  defp via(registry, run_id), do: {:via, Registry, {registry, run_id}}
 
   @impl true
   def init(opts) do
+    Instance.adopt_callers(opts)
     {:ok, %{run_id: Keyword.fetch!(opts, :run_id)}, {:continue, Keyword.fetch!(opts, :mode)}}
   end
 

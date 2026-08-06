@@ -44,10 +44,11 @@ defmodule Relay.Runs.Listener do
   alias Schemas.NodeExecution
   alias Schemas.Run
 
-  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
 
   @impl true
-  def init(_opts) do
+  def init(opts) do
+    Relay.Runs.Instance.adopt_callers(opts)
     # Traps its supervisor's :shutdown exit signal into a message instead of
     # dying mid-reconcile: an untrapped signal can land while a Repo call is
     # in flight (e.g. a test's stop_supervised!/1 racing a queued firehose

@@ -30,13 +30,19 @@ defmodule Relay.Runs.Capacity do
 
   use GenServer
 
-  @table :runs_capacity
+  @default_table :runs_capacity
   @topic "runs:capacity"
   @pubsub Relay.PubSub
 
-  @doc "Starts the capacity process and creates its public ETS table."
+  @doc """
+  The name of the default (application-wide) capacity ETS table. `Relay.Runs.Instance` uses it as
+  the default instance's `:capacity_table`, so the atom is written down exactly once.
+  """
+  def default_table, do: @default_table
+
+  @doc "Starts the capacity process and creates its ETS table (`:table`, default `default_table/0`)."
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, :ok, Keyword.put_new(opts, :name, __MODULE__))
+    GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end
 
   @doc "The capacity-changed topic."
@@ -54,31 +60,32 @@ defmodule Relay.Runs.Capacity do
   Callers must not pre-atomize (RLY-201).
   """
   def put(executor_id, slots) when is_map(slots) do
-    :ets.insert(@table, {executor_id, normalize(slots)})
+    :ets.insert(@default_table, {executor_id, normalize(slots)})
     broadcast(executor_id)
     :ok
   end
 
   @doc "Removes a gone executor and broadcasts the change."
   def clear(executor_id) do
-    :ets.delete(@table, executor_id)
+    :ets.delete(@default_table, executor_id)
     broadcast(executor_id)
     :ok
   end
 
   @doc "The full capacity map the scheduler reads into `Snapshot.capacity`."
-  def snapshot, do: @table |> :ets.tab2list() |> Map.new()
+  def snapshot, do: @default_table |> :ets.tab2list() |> Map.new()
 
   @doc "Drops all advertised capacity (used in tests to start from a clean slate)."
   def reset do
-    :ets.delete_all_objects(@table)
+    :ets.delete_all_objects(@default_table)
     :ok
   end
 
   @impl true
-  def init(:ok) do
-    :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
-    {:ok, %{}}
+  def init(opts) do
+    table = Keyword.get(opts, :table, @default_table)
+    :ets.new(table, [:named_table, :public, :set, read_concurrency: true])
+    {:ok, %{table: table}}
   end
 
   @doc """

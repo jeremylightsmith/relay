@@ -37,6 +37,7 @@ defmodule Relay.Runs.Scheduler.Server do
 
   @impl true
   def init(opts) do
+    Relay.Runs.Instance.adopt_callers(opts)
     board_id = Keyword.fetch!(opts, :board_id)
 
     state = %{

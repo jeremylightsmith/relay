@@ -24,6 +24,10 @@ defmodule Relay.Application do
         # RLY-133: server-side dispatch. Capacity store (fed by the executor heartbeat), the per-board
         # scheduler registry + dynamic supervisor, and a boot task that starts a scheduler per
         # board only when :runs_auto_start is on (off in test, so boot never queries the DB).
+        # RE298 / ADR 0009: the engine-instance lookup (Relay.Runs.Instance). A plain Registry
+        # keyed by owner pid — empty in production, where every resolution falls through to the
+        # default instance. Touches no database, so it is safe in every environment.
+        {Registry, keys: :unique, name: Relay.Runs.InstanceRegistry},
         Relay.Runs.Capacity,
         {Registry, keys: :unique, name: Relay.Runs.SchedulerRegistry},
         SchedulerSupervisor,
