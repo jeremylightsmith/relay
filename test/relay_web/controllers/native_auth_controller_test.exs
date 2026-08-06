@@ -1,10 +1,14 @@
 defmodule RelayWeb.NativeAuthControllerTest do
   use RelayWeb.ConnCase, async: true
 
+  # Bad-token cases log `[error] Google tokeninfo failed` on purpose; capture it (shown only on
+  # failure) so it doesn't clutter the suite output.
   alias Relay.Accounts.GoogleTokenValidator
   alias Relay.Repo
   alias Schemas.Membership
   alias Schemas.User
+
+  @moduletag :capture_log
 
   @tokeninfo %{
     "aud" => "test-google-client-id",

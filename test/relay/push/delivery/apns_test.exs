@@ -6,6 +6,9 @@ defmodule Relay.Push.Delivery.APNSTest do
   alias Relay.Push.Delivery.APNS
   alias Schemas.DeviceToken
 
+  # Error-response cases log `[apns] ...` errors on purpose; capture them (shown only on failure).
+  @moduletag :capture_log
+
   @payload %{
     "aps" => %{"alert" => %{"title" => "Ready for your review", "body" => "RLY-1: A card"}, "badge" => 2},
     "card_ref" => "RLY-1",

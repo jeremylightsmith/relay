@@ -1291,7 +1291,9 @@ class _FakePopen:
     """Minimal Popen stand-in: yields the given stdout lines, then exits with `code`."""
 
     def __init__(self, lines, code=0):
-        self.stdout = iter(lines)
+        # A generator, not a bare iter(): like a real subprocess pipe it is both iterable and
+        # closeable, so `_stream_shell`'s `proc.stdout.close()` cleanup works against the fake.
+        self.stdout = (line for line in lines)
         self._code = code
         self.terminated = False
 
@@ -5108,4 +5110,8 @@ class NoHardcodedScratchPathTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    # buffer=True captures each test's stdout/stderr and replays it only if that test fails.
+    # These tests drive the real `relay` CLI through error/scenario paths, so without buffering
+    # they print dozens of `relay: ...` / `[relay] ...` lines on a fully green run — noise that
+    # agents running `mix precommit` would pay tokens for.
+    unittest.main(buffer=True)

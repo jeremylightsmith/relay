@@ -1,12 +1,16 @@
 defmodule RelayWeb.BoardLiveOptimisticDrawerTest do
   use RelayWeb.ConnCase, async: true
 
+  # The failure-path test logs `[warning] optimistic drawer body load failed` on purpose;
+  # capture it (shown only on failure) so it doesn't clutter the suite output.
   import Phoenix.LiveViewTest
 
   alias Relay.Activity
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Events
+
+  @moduletag :capture_log
 
   setup :register_and_log_in_user
 

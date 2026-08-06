@@ -143,7 +143,7 @@ defmodule Relay.MixProject do
         "deps.unlock --unused",
         "format",
         "credo --strict",
-        "sobelow --config",
+        "sobelow --config --quiet",
         "deps.audit",
         "relay.gen_state --check",
         "relay.gen_vocab --check",

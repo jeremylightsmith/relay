@@ -17,4 +17,12 @@ if :playwright in Keyword.get(ExUnit.configuration(), :include, []) do
   Application.put_env(:phoenix_test, :base_url, "http://127.0.0.1:#{port}")
 end
 
+# Drop sandbox-teardown log noise (Postgrex disconnects, best-effort LogSink drops) that no test
+# asserts on — see Relay.TestSupport.LogNoiseFilter. Keeps `mix test` / `mix precommit` output
+# lean so agents that capture it don't pay for hundreds of lines of teardown chatter.
+:logger.add_primary_filter(
+  :relay_test_log_noise,
+  {&Relay.TestSupport.LogNoiseFilter.filter/2, []}
+)
+
 Ecto.Adapters.SQL.Sandbox.mode(Relay.Repo, :manual)

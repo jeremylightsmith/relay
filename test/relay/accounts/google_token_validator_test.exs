@@ -1,7 +1,11 @@
 defmodule Relay.Accounts.GoogleTokenValidatorTest do
   use ExUnit.Case, async: true
 
+  # These tests exercise the token-rejection path, which logs `[error] Google tokeninfo failed`
+  # on purpose; capture it so it doesn't clutter the suite output (shown only on a failure).
   alias Relay.Accounts.GoogleTokenValidator
+
+  @moduletag :capture_log
 
   @valid %{
     "aud" => "test-google-client-id",

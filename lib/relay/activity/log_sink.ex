@@ -128,11 +128,19 @@ defmodule Relay.Activity.LogSink do
         refs
       rescue
         error ->
-          Logger.warning("LogSink dropped #{state.count} buffered log line(s): #{Exception.message(error)}")
+          Logger.warning("LogSink dropped #{state.count} buffered log line(s): #{error_summary(error)}")
           state.refs
       end
 
     %{state | buffer: [], count: 0, refs: refs}
+  end
+
+  # Keep the drop warning to one line. Some DB errors — notably `DBConnection.OwnershipError`,
+  # which the sandbox raises constantly in tests when a flush races a checked-in connection —
+  # carry a ~25-line usage essay as their message; logging it in full buried the whole test suite
+  # (and would bury prod logs on a real blip too). The first line still names the actual error.
+  defp error_summary(error) do
+    error |> Exception.message() |> String.split("\n", parts: 2) |> hd()
   end
 
   defp insert_and_broadcast([]), do: :ok

@@ -69,8 +69,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 33
-EXECUTOR_FINGERPRINT = "fd1c1d0e4bb3f578934b93e6f4becc7a3b802f85a25591c59d0c001f2a8a0963"
+EXECUTOR_VERSION = 34
+EXECUTOR_FINGERPRINT = "55e73eab14de21f0cc5a1f36da2b0145d8883a0536c0c8ca0ef2caa0ddc5c592"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1729,10 +1729,15 @@ def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scr
     if on_proc:
         on_proc(proc)
     tail = collections.deque(maxlen=12)
-    for line in proc.stdout:
-        print(f"    {tag}{line.rstrip()}", flush=True)
-        tail.append(line.rstrip())
-    ok = proc.wait() == 0
+    try:
+        for line in proc.stdout:
+            print(f"    {tag}{line.rstrip()}", flush=True)
+            tail.append(line.rstrip())
+        ok = proc.wait() == 0
+    finally:
+        # Close the subprocess pipe explicitly — leaving it to GC leaks the fd and, under the
+        # test runner's warning filter, prints a ResourceWarning per call that buries the output.
+        proc.stdout.close()
     if not ok and sink is not None:
         sink.extend(tail)
     return ok
