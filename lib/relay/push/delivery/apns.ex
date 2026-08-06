@@ -10,7 +10,9 @@ defmodule Relay.Push.Delivery.APNS do
   Sent with `Req` over `Relay.Push.APNSFinch`, a dedicated HTTP/2 Finch pool —
   APNs is HTTP/2-only, and we stay Req-first rather than adding pigeon/FCM.
   Tests inject a `Req.Test` plug via `:apns_req_options`, mirroring
-  `Relay.Accounts.GoogleTokenValidator`, so the suite never contacts Apple.
+  `Relay.Accounts.GoogleTokenValidator`, so the suite never contacts Apple,
+  and pass their APNs credentials to `deliver/3` directly rather than writing them into
+  application env (ADR 0009).
 
   Priority is always `10` (normal alert): per ADR 0005 / RLY-90 there are **no**
   server-side quiet hours — iOS Do-Not-Disturb / Focus does the suppressing.
@@ -26,10 +28,17 @@ defmodule Relay.Push.Delivery.APNS do
   require Logger
 
   @impl Relay.Push.Delivery
-  def deliver(token, payload) do
-    config = apns_config()
+  def deliver(token, payload), do: deliver(token, payload, Push.config().apns)
 
-    case Req.post(req(config), url: "/3/device/#{token}", json: payload) do
+  @doc """
+  Sends `payload` to `token` using `apns_config` (`[key:, key_id:, team_id:, topic:, env:]`).
+
+  The config is an argument, never an application-env read (ADR 0009 rule 1): `deliver/2` — the
+  `Relay.Push.Delivery` callback — resolves it once at the boundary from `Relay.Push.config/0`,
+  and tests pass their own.
+  """
+  def deliver(token, payload, apns_config) when is_list(apns_config) do
+    case Req.post(req(apns_config), url: "/3/device/#{token}", json: payload) do
       {:ok, %{status: status}} when status in 200..299 ->
         :ok
 
@@ -68,12 +77,6 @@ defmodule Relay.Push.Delivery.APNS do
       "production" -> "api.push.apple.com"
       _sandbox -> "api.sandbox.push.apple.com"
     end
-  end
-
-  defp apns_config do
-    :relay
-    |> Application.get_env(Push, [])
-    |> Keyword.get(:apns, [])
   end
 
   # Apple says the device is gone: drop the row so we stop paying for it.
