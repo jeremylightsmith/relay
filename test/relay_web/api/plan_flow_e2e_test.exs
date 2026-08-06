@@ -27,7 +27,6 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
   @default_capacity %{"shared_clean" => 1, "exclusive" => 0}
 
   setup %{conn: conn} do
-    Capacity.reset()
     # A stable, known name for the private engine's Listener child — settle/1 looks it up
     # directly (Process.whereis/1) to drain its mailbox before asserting.
     start_engine!(listener: Listener)

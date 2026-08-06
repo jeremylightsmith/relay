@@ -1,10 +1,10 @@
 defmodule RelayWeb.Api.DiagnosisControllerTest do
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   alias Relay.Cards
 
   setup %{conn: conn} do
-    Relay.Runs.Capacity.reset()
+    start_capacity!()
     board = insert(:board)
     {:ok, %{token: token}} = Relay.ApiKeys.create_key(board, board.owner)
     queue = insert(:stage, board: board, name: "Plan:Done", position: 1, type: :queue)

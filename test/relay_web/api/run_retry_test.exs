@@ -7,7 +7,6 @@ defmodule RelayWeb.Api.RunRetryTest do
   alias Schemas.NodeJob
 
   setup %{conn: conn} do
-    Relay.Runs.Capacity.reset()
     FakeDispatcher.register(self())
 
     user = insert(:user)

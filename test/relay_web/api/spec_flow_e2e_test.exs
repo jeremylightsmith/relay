@@ -11,7 +11,6 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
   alias Schemas.Card
 
   setup %{conn: conn} do
-    Runs.Capacity.reset()
     start_engine!()
 
     user = insert(:user)

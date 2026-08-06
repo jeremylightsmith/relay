@@ -31,7 +31,6 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   @capacity %{"shared_clean" => 0, "exclusive" => 1}
 
   setup %{conn: conn} do
-    Capacity.reset()
     # A stable, known name for the private engine's Listener child — settle/1 looks it up
     # directly (Process.whereis/1) to drain its mailbox before asserting.
     start_engine!(listener: Listener)

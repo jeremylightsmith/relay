@@ -15,12 +15,15 @@ defmodule Relay.Runs.Capacity do
   executor having to re-advertise a decremented count (which would be racy
   across reconciles).
 
-  Global (not board-scoped): capacity is keyed by executor and read by every
-  board's scheduler. Every `put/2`/`clear/1` broadcasts
-  `{:executor_capacity_changed, executor_id}` on `topic/0` so schedulers
-  reconcile immediately (acceptance criterion 2's "without waiting a full tick").
-  The executor heartbeat feeds this store; with no executor connected it is
-  empty and the scheduler is dormant.
+  Global (not board-scoped) within an engine instance: capacity is keyed by executor and read by
+  every board's scheduler. The table name is resolved through `Relay.Runs.Instance` — the
+  application-wide `default_table/0` in production, a private table per test (ADR 0009), so one
+  test's advertised capacity can never be read or wiped by another. The
+  `{:executor_capacity_changed, executor_id}` broadcast on `topic/0` stays global: a spurious
+  wake-up makes a scheduler re-reconcile against its own (correctly scoped) snapshot, which is
+  idempotent. Every `put/2`/`clear/1` broadcasts it so schedulers reconcile immediately
+  (acceptance criterion 2's "without waiting a full tick"). The executor heartbeat feeds this
+  store; with no executor connected it is empty and the scheduler is dormant.
 
   **`exclusive` semantics (RLY-231):** the `exclusive` class means the max number of
   concurrent per-card worktrees an executor holds, reinterpreted from the old fixed
@@ -60,31 +63,26 @@ defmodule Relay.Runs.Capacity do
   Callers must not pre-atomize (RLY-201).
   """
   def put(executor_id, slots) when is_map(slots) do
-    :ets.insert(@default_table, {executor_id, normalize(slots)})
+    :ets.insert(table(), {executor_id, normalize(slots)})
     broadcast(executor_id)
     :ok
   end
 
   @doc "Removes a gone executor and broadcasts the change."
   def clear(executor_id) do
-    :ets.delete(@default_table, executor_id)
+    :ets.delete(table(), executor_id)
     broadcast(executor_id)
     :ok
   end
 
   @doc "The full capacity map the scheduler reads into `Snapshot.capacity`."
-  def snapshot, do: @default_table |> :ets.tab2list() |> Map.new()
+  def snapshot, do: table() |> :ets.tab2list() |> Map.new()
 
-  @doc "Drops all advertised capacity (used in tests to start from a clean slate)."
-  def reset do
-    :ets.delete_all_objects(@default_table)
-    :ok
-  end
+  # The table this process's engine instance owns — `default_table/0` in production, where nothing
+  # is registered, and a per-test table under `Relay.DataCase.start_capacity!/0` (ADR 0009). Reads
+  # and writes still never hop through the GenServer.
+  defp table, do: Relay.Runs.Instance.current().capacity_table
 
-  # RE298: the table name is parameterised so a per-test Capacity can own its own ETS table.
-  # `put/2`, `clear/1`, `snapshot/0` and `reset/0` above still read/write @default_table only —
-  # the read/write paths move onto Instance.current().capacity_table in Task 5. A Capacity
-  # started with `table: :other` today creates a table no other code path touches yet.
   @impl true
   def init(opts) do
     table = Keyword.get(opts, :table, @default_table)

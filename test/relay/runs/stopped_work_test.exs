@@ -1,10 +1,10 @@
 defmodule Relay.Runs.StoppedWorkTest do
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   alias Relay.Runs
 
   setup do
-    Relay.Runs.Capacity.reset()
+    start_capacity!()
     board = insert(:board)
     queue = insert(:stage, board: board, name: "Plan:Done", position: 1, type: :queue)
     works = insert(:stage, board: board, name: "Code", position: 2, type: :work)
