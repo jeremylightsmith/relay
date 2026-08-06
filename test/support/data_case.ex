@@ -44,7 +44,7 @@ defmodule Relay.DataCase do
     on_exit(fn -> Sandbox.stop_owner(pid) end)
   end
 
-  @doc """
+  @doc ~S"""
   Grants `pid` access to the calling test's sandbox connection and returns it, so it composes
   with `start_supervised!/1` (ADR 0009 rule 2):
 
@@ -61,6 +61,9 @@ defmodule Relay.DataCase do
     case Sandbox.allow(Relay.Repo, self(), pid) do
       :ok -> pid
       {:already, _owner_or_allowed} -> pid
+      # Shared mode (`async: false`): the caller holds no checkout of its own, so there is
+      # nothing to grant — every process in the VM already shares the owner's connection.
+      :not_found -> pid
     end
   end
 
