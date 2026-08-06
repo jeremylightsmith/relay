@@ -370,7 +370,7 @@ defmodule Relay.Runs.RunServer do
   defp override_no_op_success(run, flow, job, %{outcome: :succeeded, git_sha: sha} = attrs) when is_binary(sha) do
     node = Enum.find(flow.nodes, &(&1.key == job.node_key))
 
-    if node && node.expects_commits && baseline_sha(run) == sha do
+    if node && node.expects_commits && baseline_sha(run, job) == sha do
       Map.merge(attrs, %{outcome: :failed, detail: no_op_detail(job.node_key, sha)})
     else
       attrs
@@ -379,17 +379,53 @@ defmodule Relay.Runs.RunServer do
 
   defp override_no_op_success(_run, _flow, _job, attrs), do: attrs
 
-  # The git_sha of this run's most recent prior outcome-bearing execution with a non-nil
-  # sha — the faithful proxy for "HEAD before this node ran" (the just-finalized row is
-  # not written yet, and even if it were it carries a nil git_sha until finalize). Not
-  # same-node: a spec_review between two implements reports the identical sha.
-  defp baseline_sha(run) do
-    Repo.one(
+  # The git_sha of the most recent outcome-bearing execution with a non-nil sha PRECEDING this
+  # node's first attempt of this visit — "HEAD before the node was entered", not "HEAD before
+  # this attempt" (the just-finalized row is not written yet, and even if it were it carries a
+  # nil git_sha until finalize).
+  #
+  # RE298: the per-VISIT boundary is the load-bearing part. An attempt that commits and then dies
+  # before writing its outcome file is recorded :failed carrying the POST-work sha; baselining on
+  # that row leaves the retry structurally unable to pass the guard — the work is already
+  # committed, so it cannot move HEAD, and the only way to report success is to fabricate a
+  # commit. Per-visit, the visit's real commit still counts, while a visit that genuinely
+  # committed nothing is still caught. Not same-node across visits: a spec_review between two
+  # implements reports the identical sha. Fall back to the unbounded lookup when the boundary
+  # can't be resolved — a missing row is not evidence of a lie.
+  defp baseline_sha(run, job) do
+    latest =
       from e in NodeExecution,
         where: e.run_id == ^run.id and not is_nil(e.git_sha),
         order_by: [desc: e.id],
         limit: 1,
         select: e.git_sha
+
+    query =
+      case visit_first_attempt_id(run, job) do
+        nil -> latest
+        id -> where(latest, [e], e.id < ^id)
+      end
+
+    Repo.one(query)
+  end
+
+  # The execution row id of attempt 1 of the {node_key, visit} the given job belongs to — the
+  # boundary between "before this node was entered" and "this node's own attempts". Two callers
+  # need that boundary: the commit guard's baseline above and `origin_findings/2` below.
+  defp visit_first_attempt_id(run, job) do
+    case Repo.get(NodeExecution, job.node_execution_id) do
+      %NodeExecution{node_key: node_key, visit: visit} -> visit_first_attempt_id(run.id, node_key, visit)
+      nil -> nil
+    end
+  end
+
+  defp visit_first_attempt_id(run_id, node_key, visit) do
+    Repo.one(
+      from e in NodeExecution,
+        where: e.run_id == ^run_id and e.node_key == ^node_key and e.visit == ^visit and e.attempt == 1,
+        order_by: [asc: e.id],
+        limit: 1,
+        select: e.id
     )
   end
 
@@ -414,16 +450,7 @@ defmodule Relay.Runs.RunServer do
   # Re-deriving keeps every attempt at exactly one origin plus one latest, and is restart-safe by
   # construction — the same property Relay.Runs.Engine is built on.
   defp origin_findings(run, %NodeExecution{node_key: node_key, visit: visit}) do
-    first_attempt_id =
-      Repo.one(
-        from e in NodeExecution,
-          where: e.run_id == ^run.id and e.node_key == ^node_key and e.visit == ^visit and e.attempt == 1,
-          order_by: [asc: e.id],
-          limit: 1,
-          select: e.id
-      )
-
-    with id when is_integer(id) <- first_attempt_id,
+    with id when is_integer(id) <- visit_first_attempt_id(run.id, node_key, visit),
          {:failed, detail} <-
            Repo.one(
              from e in NodeExecution,

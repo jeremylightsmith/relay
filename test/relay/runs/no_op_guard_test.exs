@@ -140,6 +140,44 @@ defmodule Relay.Runs.NoOpGuardTest do
     assert run.failure_detail == nil
   end
 
+  test "a retry keeps succeeded when an earlier attempt of the same visit made the commit", ctx do
+    # RE298: attempt 1 committed `moved99` and then died before writing its outcome file, so it
+    # was recorded :failed carrying the POST-work sha. Attempt 2 finds the work already done and
+    # can no longer move HEAD — baselining on attempt 1 would make it structurally impossible to
+    # pass the guard, and the only way out would be to fabricate a commit. The baseline is the
+    # sha before attempt 1 of this visit, so the visit's real commit still counts.
+    flow = marked_flow(ctx.board)
+    impl = seed_then_impl(ctx.board, flow, @base)
+
+    {:ok, %{status: :running}} =
+      Runs.report_outcome(impl, %{outcome: :failed, detail: "died before reporting", git_sha: "moved99"})
+
+    assert_receive {:dispatched, %NodeJob{node_key: "impl"} = retry}
+
+    {:ok, _run} = Runs.report_outcome(retry, %{outcome: :succeeded, detail: "already done", git_sha: "moved99"})
+
+    exec = Repo.get!(NodeExecution, retry.node_execution_id)
+    assert exec.outcome == :succeeded
+  end
+
+  test "a retry that commits nothing is still caught when the whole visit moved no commits", ctx do
+    # The guard keeps its teeth: attempt 1 failed WITHOUT committing, so the visit's baseline is
+    # still @base and attempt 2's unchanged sha is a genuine no-op.
+    flow = marked_flow(ctx.board)
+    impl = seed_then_impl(ctx.board, flow, @base)
+
+    {:ok, %{status: :running}} =
+      Runs.report_outcome(impl, %{outcome: :failed, detail: "died before reporting", git_sha: @base})
+
+    assert_receive {:dispatched, %NodeJob{node_key: "impl"} = retry}
+
+    {:ok, _run} = Runs.report_outcome(retry, %{outcome: :succeeded, detail: "x", git_sha: @base})
+
+    exec = Repo.get!(NodeExecution, retry.node_execution_id)
+    assert exec.outcome == :failed
+    assert exec.detail =~ "no_op_success: impl"
+  end
+
   test "an overridden loop-tail node leaves its sub_task box unchecked", ctx do
     # A foreach flow whose marked head is also the loop tail: on a real success it would
     # check the sub_task off, but the override makes it :failed, so the box stays unchecked.

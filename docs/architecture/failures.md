@@ -21,7 +21,7 @@ is [runner.md](runner.md).
 | A3 | **Routed failure → fixer** | `failed` with a `:failed` edge to a fix node | follow it (`precommit→final_fix`, `smoke→smoke_fix`, `sync→sync_fix`, …) | continues |
 | A4 | **Escalated failure** | `failed` with a `:failed → needs_input` edge (RLY-194: `implement`, `*_fix`, `post`, `branch`) | park `:needs_input` for a human; classified `:escalation` by `Relay.Runs.park_kind/1` | `parked/needs_input` |
 | A5 | **No route** | `failed` with no `:failed` edge, or budgets spent | `{:fail}` → run `failed` → `mark_failed` → card `failed` | `failed` |
-| A6 | **Silent no-op** | `expects_commits` node reports `succeeded` but HEAD didn't move | rewritten to `failed` before finalize (`override_no_op_success/4`, `run_server.ex:337`) → routes as A2–A5 | as A2–A5 |
+| A6 | **Silent no-op** | `expects_commits` node reports `succeeded` but HEAD didn't move since the node was *entered* — per visit, not per attempt, so a retry still counts a commit an earlier attempt of the same visit made (RE298) | rewritten to `failed` before finalize (`override_no_op_success/4`, `run_server.ex`) → routes as A2–A5 | as A2–A5 |
 | A7 | **Same error looping** | 3 identical `failure_signature`s | circuit breaker `{:fail}` even with budget left (`engine.ex:82`) | `failed` |
 | A8 | **Runaway** | `max_loops` on an edge, or 20 node visits, exceeded | `{:fail}` | `failed` |
 | A9 | **Unrouted non-failed outcome** | outcome (e.g. `partial`) with no matching edge | `degrade_to_failed` — follow the node's `:failed` edge, spending *its* budget (`engine.ex:145`) | as A3–A5 |
