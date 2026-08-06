@@ -81,6 +81,10 @@ defmodule Relay.Runs.Capacity do
     :ok
   end
 
+  # RE298: the table name is parameterised so a per-test Capacity can own its own ETS table.
+  # `put/2`, `clear/1`, `snapshot/0` and `reset/0` above still read/write @default_table only —
+  # the read/write paths move onto Instance.current().capacity_table in Task 5. A Capacity
+  # started with `table: :other` today creates a table no other code path touches yet.
   @impl true
   def init(opts) do
     table = Keyword.get(opts, :table, @default_table)

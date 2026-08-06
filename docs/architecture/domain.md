@@ -104,7 +104,7 @@ sharing behavior.
   **The board-health audit** (RE249): `Relay.Runs.audit/2` / `Relay.Runs.Audit.findings/2`, a
   pure function over runs (`:node_executions` preloaded) on the metrics' `metric_windows/0`
   vocabulary, answering *is this board's history clean?*; owns `severities/0`/`checks/0`, advisory.
-  **The dispatcher seam**: the `Relay.Runs.Dispatcher` behaviour (`config :relay, :runs_dispatcher`).
+  **The dispatcher seam**: the `Relay.Runs.Dispatcher` behaviour, resolved through `Relay.Runs.Instance` (`config :relay, :runs_dispatcher` in production, a per-test instance under test — RE298 / ADR 0009).
   Card writes go through `Relay.Cards`, so ADR 0003/0004 rules apply automatically.
   Run/node/job statuses are in [state.md](state.md); dispatch, the executor, worktrees and the
   transport in [runner.md](runner.md); the failure grid in [failures.md](failures.md). Why:

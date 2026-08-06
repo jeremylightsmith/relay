@@ -85,9 +85,8 @@ defmodule Relay.Runs.InstanceTest do
       assert default.capacity_table == Relay.Runs.Capacity.default_table()
     end
 
-    test "InstanceRegistry is started by the application and is empty" do
+    test "InstanceRegistry is started by the application" do
       assert is_pid(Process.whereis(InstanceRegistry))
-      assert Registry.count(InstanceRegistry) >= 0
     end
   end
 end
