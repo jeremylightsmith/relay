@@ -1,4 +1,12 @@
 defmodule RelayWeb.Api.VersionControllerTest do
+  # async: true despite mutating `GIT_SHA` — the OS process environment is a global stronger than
+  # the `Application.put_env/3` ADR 0009 rule 1 forbids, so it needs an explicit reason.
+  # Safe here because the reader and the writers are both contained: the sole runtime reader of
+  # `GIT_SHA` is `RelayWeb.Api.VersionController.show/2`, this is the sole module that mutates it,
+  # and it is the only module that issues a live `GET /api/version` (the other two hits are a
+  # docstring and a docs-string assertion). Tests within one module are serialized, so these three
+  # cannot race each other. **Re-check this the moment a second test hits `/api/version`** — at
+  # that point the env var needs a real seam (or this module goes `async: false`).
   use RelayWeb.ConnCase, async: true
 
   setup do

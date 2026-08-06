@@ -103,6 +103,16 @@ defmodule Relay.DataCase do
 
   Supervised under the child id `Relay.Runs.Supervisor`, so `stop_supervised!(Relay.Runs.Supervisor)`
   still stops it; use `restart_engine!/0` to bring it back under the same names.
+
+  > #### The `Listener` is NOT isolated {: .warning}
+  >
+  > The names are per-instance; the event topic is not. `Relay.Runs.Listener` subscribes to the
+  > process-global `Relay.Events.subscribe_firehose/0`, so the `Listener` this starts receives
+  > **every concurrent test's** card events and reconciles them on *this* test's sandbox
+  > connection. Harmless when a test's cards are its own (a foreign reconcile is a no-op), but a
+  > test that asserts on *how many times* the engine reacted, or that stops the tree mid-flight,
+  > will race. That is why `executor_reaper_test` and `board_settings_flow_preflight_test` are
+  > `async: false`. See the "Known limitation" bullet in ADR 0009's Consequences.
   """
   def start_engine!(opts \\ []) do
     n = System.unique_integer([:positive])

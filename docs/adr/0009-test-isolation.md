@@ -165,6 +165,20 @@ and every process the engine spawns on its behalf finds it. With nothing registe
 - `Relay.Runs.Capacity`'s ETS table is resolved per instance rather than being a single named
   table, so a test's capacity can no longer be read or wiped by a concurrent test. `reset/0` is
   gone; a fresh instance starts with an empty table.
+- **Known limitation — the `Listener` firehose is still process-global.** Rule 2 gave every engine
+  its own names, but not its own event topic: `Relay.Runs.Listener.init/1` subscribes to
+  `Relay.Events.subscribe_firehose/0`, which has no per-instance variant. So the `Listener` that
+  `Relay.DataCase.start_engine!/1` hands a test receives **every concurrent test's** card events and
+  reconciles them on **its own** sandbox connection. 24 async modules call `start_engine!/1` and
+  carry this; they are green on the measured seed matrix because their cards are unique per test and
+  a reconcile for a foreign card is a no-op, but it is a latent cross-test coupling, not an isolated
+  one. Two modules provably lost that bet and stay `async: false` with in-file blocker comments —
+  `test/relay/runs/executor_reaper_test.exs` and
+  `test/relay_web/live/board_settings_flow_preflight_test.exs` — which is why this ADR's async
+  conversion is **partially unmet**: those two were flipped, raced, and reverted. Closing it needs
+  either a per-instance firehose topic or a `start_engine!(listener: false)` option; both are
+  follow-up work, not part of this change. **If a new engine test flakes with events it never
+  produced, this is why.**
 - Wall-clock, `mix test --exclude browser`:
   - **before: 24.8s (18.6s async + 6.2s sync)**
   - **after: 19.9s (19.8s async + 0.1s sync)**, green on seeds 1, 424242 and 999 plus three
