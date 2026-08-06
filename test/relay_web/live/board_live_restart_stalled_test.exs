@@ -63,6 +63,10 @@ defmodule RelayWeb.BoardLiveRestartStalledTest do
   # `{:error, {:executor_unavailable, name}}` before it ever dispatches anything, so
   # this needs no FakeDispatcher round trip (mirrors test/relay/runs/retry_test.exs's
   # `exclusive_failed_run/2`, built straight from factories rather than through `park/4`).
+  #
+  # RE297: affinity is read off the run's OWN `pinned_executor_name` column now, not the last
+  # NodeJob's `executor_name` (a second copy of the same fact) — so the fixture pins the run
+  # directly, exactly as `maybe_pin_run/2` would on a real claim.
   defp refused_restart_card(board, executor_name) do
     spec = Enum.find(board.stages, &(&1.name == "Spec"))
 
@@ -83,7 +87,8 @@ defmodule RelayWeb.BoardLiveRestartStalledTest do
         status: :failed,
         current_node: nil,
         flow_key: flow.key,
-        flow_id: flow.id
+        flow_id: flow.id,
+        pinned_executor_name: executor_name
       )
 
     execution = insert(:node_execution, run: run, node_key: "brainstorm", outcome: :failed)

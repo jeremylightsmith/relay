@@ -220,6 +220,7 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-1
 | `dispatchable` | would dispatch on the scheduler's next tick |
 | `no_enabled_flow` | no enabled flow pulls from this card's stage |
 | `awaiting_capacity` | a flow would dispatch; no executor advertises a free slot of the needed class |
+| `resume_refused` | a parked run's resume is being refused on every scheduler tick; `evidence.resume_refused_reason` names why (`no_isolation` · `pin_unresolved` · `pinned_executor_absent` · `no_free_slot`) and `evidence.resume_refused_since` when it started. After 30 minutes the reaper fails the run so `relay retry` applies |
 | `wip_full` | the works-in column (plus its sub-lanes) is at its WIP limit |
 | `owned_by_human` | a human holds the baton (ADR 0004) |
 | `blocked_on_input` | card status `needs_input`, or the run is parked `needs_input` |

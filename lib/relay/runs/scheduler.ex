@@ -296,10 +296,11 @@ defmodule Relay.Runs.Scheduler do
   defp do_explain(snapshot, card) do
     run = Enum.find(snapshot.runs, &(&1.card_id == card.id))
     flow = Enum.find(snapshot.flows, &(&1.pulls_from_stage_id == card.stage_id))
+    plan = plan(snapshot)
     evidence = evidence(snapshot, card, run, flow)
 
     cond do
-      dispatched?(snapshot, card) ->
+      dispatched?(plan, snapshot, card) ->
         verdict(:dispatchable, "This card would dispatch on the scheduler's next tick.", evidence)
 
       not Policy.agent_may_hold?(card) ->
@@ -309,7 +310,7 @@ defmodule Relay.Runs.Scheduler do
         verdict(:blocked_on_input, "This card is waiting on a human answer (status needs_input).", evidence)
 
       run != nil ->
-        run_verdict(run, evidence)
+        run_verdict(run, Enum.find(plan.refusals, &(&1.run_id == run.id)), evidence)
 
       flow == nil ->
         verdict(
@@ -370,6 +371,30 @@ defmodule Relay.Runs.Scheduler do
     end
   end
 
+  # RE297: the scheduler WANTED to resume this run and could not place it. Naming the refusal —
+  # and its cause — is the difference between "waiting, legitimately" and a dead end, which the
+  # undifferentiated :awaiting_capacity could not express.
+  defp run_verdict(run, %{reason: reason}, evidence) do
+    verdict(
+      :resume_refused,
+      "Run #{run.id} is parked and the scheduler is refusing to resume it on every tick: " <>
+        resume_refusal_sentence(reason) <> "." <> pin_phrase(run),
+      evidence |> Map.put(:resume_refused_reason, reason) |> put_pin_name(run)
+    )
+  end
+
+  defp run_verdict(run, nil, evidence), do: run_verdict(run, evidence)
+
+  defp pin_phrase(%{pinned_executor_name: name}) when is_binary(name),
+    do: ~s[ Its worktree lives on executor "#{name}" (exclusive affinity).]
+
+  defp pin_phrase(_run), do: ""
+
+  defp put_pin_name(evidence, %{pinned_executor_name: name}) when is_binary(name),
+    do: Map.put(evidence, :pinned_executor_name, name)
+
+  defp put_pin_name(evidence, _run), do: evidence
+
   defp run_verdict(%{status: :parked, parked_reason: :executor_gone, pinned_executor_name: name} = run, evidence)
        when is_binary(name) do
     verdict(
@@ -398,10 +423,10 @@ defmodule Relay.Runs.Scheduler do
 
   defp run_verdict(run, evidence), do: verdict(:run_active, "Run #{run.id} is live and working.", evidence)
 
-  # `:dispatchable` is plan/1's own answer, not a re-derivation — this is the whole
-  # anti-drift property the agreement test pins.
-  defp dispatched?(snapshot, card) do
-    plan = plan(snapshot)
+  # `:dispatchable` is plan/1's own answer, not a re-derivation — this is the whole anti-drift
+  # property the agreement test pins. The plan is computed once in do_explain/2 and passed in,
+  # so the refusal branch reads the SAME pass.
+  defp dispatched?(plan, snapshot, card) do
     run_ids = for r <- snapshot.runs, r.card_id == card.id, do: r.id
 
     Enum.any?(plan.dispatches, fn
@@ -423,17 +448,26 @@ defmodule Relay.Runs.Scheduler do
       stage_id: card.stage_id,
       active_owner: card.active_owner,
       flow_key: flow && flow.key,
-      isolation: flow && flow.isolation,
+      isolation: run_isolation(run, flow),
       capacity: snapshot.capacity,
       run_id: run && run.id,
       run_status: run && run.status,
+      # RE297: exactly the fields that could not be checked from outside when this card was
+      # written — the runs JSON projection exposes none of them.
+      pinned_executor_id: run && run.pinned_executor_id,
+      resume_refused_reason: nil,
       # Filled in by Relay.Runs.diagnose/3 — the Snapshot's run maps carry no
-      # current_node (snapshot.ex:44-51); only the DB row has it.
+      # current_node (snapshot.ex:44-51); only the DB row has it. `resume_refused_since` is
+      # layered there for the same reason.
       current_node: nil,
       wip_limit: works_in && wip_limit(stage_by_id, works_in),
       wip_used: works_in && used(children, cards_by_stage, works_in)
     }
   end
+
+  # The run's own isolation (from the LIVE flow row) when it has one, else the pulling flow's —
+  # a run whose flow row was deleted reads nil here, which is itself the diagnosis (RE297).
+  defp run_isolation(run, flow), do: (run && run.isolation) || (flow && flow.isolation)
 
   defp verdict(verdict, detail, evidence), do: %{verdict: verdict, detail: detail, evidence: evidence}
 

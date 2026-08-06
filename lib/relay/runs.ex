@@ -1765,7 +1765,23 @@ defmodule Relay.Runs do
     |> put_evidence(:last_execution, last_execution_summary(last))
     |> put_evidence(:job, job_summary(job))
     |> layer_pin_freshness(board, now)
+    |> layer_resume_refusal(run, now)
     |> override_verdict(run, last, job, board, now, capacity)
+  end
+
+  # `resume_refused_since` is a run COLUMN, so the pure snapshot cannot carry it — layered here
+  # exactly as current_node is (RE297). The age is what turns "refused" into "refused long
+  # enough that the reaper is about to give up on it".
+  defp layer_resume_refusal(base, run, now) do
+    since = run && run.resume_refused_since
+    base = put_evidence(base, :resume_refused_since, since)
+
+    if base.verdict == :resume_refused and since do
+      minutes = div(DateTime.diff(now, since, :second), 60)
+      %{base | detail: base.detail <> " It has been refused for #{minutes}m."}
+    else
+      base
+    end
   end
 
   defp override_verdict(base, run, last, job, board, now, capacity) do
@@ -2241,8 +2257,11 @@ defmodule Relay.Runs do
   Whether `run` itself stalled in a way retry can revive in place — the ONE per-RUN eligibility
   rule, used directly by per-run retry (`check_retryable/1`). True for a clean `:failed` run, and
   for an escalation park (`park_kind/3 == :escalation` — a node failure routed to a human,
-  RLY-194/A4). False for a genuine `:needs_input` question, any `:executor_gone` park (RLY-199
-  auto-resumes those), and `:running`/`:done`/`:cancelled`.
+  RLY-194/A4). False for a genuine `:needs_input` question, any `:executor_gone` park, and
+  `:running`/`:done`/`:cancelled`. An `:executor_gone` park is not restartable-in-place because
+  the scheduler resumes it when the machine returns — and when it never can,
+  `abandon_unresumable_runs/1` fails the run outright so the ordinary `:failed` hatch applies
+  (RE297). The older "RLY-199 auto-resumes those" rationale was wrong: nothing bounded the wait.
 
   The board-scoped consumers — the bulk sweep (`restart_stalled/2`), the board's stalled badge
   (`restartable_count/1`), and the restart dialog (`stalled_cards/1`) — all read this same rule
@@ -2317,18 +2336,20 @@ defmodule Relay.Runs do
     Repo.one(from e in NodeExecution, where: e.run_id == ^run_id, order_by: [desc: e.id], limit: 1, select: e.node_key)
   end
 
-  # Worktrees are executor-side state Phoenix cannot see, so the one thing the server
-  # CAN check is whether the machine holding this run's worktree is still there. An
-  # exclusive run pinned to an absent executor would queue a job nothing can claim.
-  defp check_retry_executor(%Run{} = run, %Flow{isolation: :exclusive} = _flow) do
-    case Repo.one(from j in NodeJob, where: j.run_id == ^run.id, order_by: [desc: j.id], limit: 1) do
-      %NodeJob{state: state, executor_name: name} when state != :revoked and is_binary(name) ->
-        check_executor_live(run, name)
+  # Worktrees are executor-side state Phoenix cannot see, so the one thing the server CAN check
+  # is whether the machine holding this run's worktree is still there. An exclusive run pinned
+  # to an absent executor would queue a job nothing can claim.
+  #
+  # RE297: affinity is the run's OWN `pinned_executor_name` column — written on claim
+  # (`maybe_pin_run/2`), kept through an `:executor_gone` park, cleared by a human baton and by
+  # `abandon_unresumable_runs/1` when the reason proves it unhonourable. Reading the last
+  # NodeJob's `executor_name` instead was a SECOND copy of that fact: after the reaper
+  # deliberately clears the pin, the dead machine's name still sits on the last job, and retry
+  # would stay refused exactly when the hatch must open.
+  defp check_retry_executor(%Run{pinned_executor_name: nil}, %Flow{isolation: :exclusive}), do: :ok
 
-      _unpinned ->
-        :ok
-    end
-  end
+  defp check_retry_executor(%Run{pinned_executor_name: name} = run, %Flow{isolation: :exclusive}),
+    do: check_executor_live(run, name)
 
   defp check_retry_executor(_run, _flow), do: :ok
 

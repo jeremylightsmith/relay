@@ -113,7 +113,8 @@ defmodule Relay.Runs.ExclusiveResumeTest do
     assert plan.dispatches == []
   end
 
-  test "relay why names the awaited machine even while the gone executor's capacity lingers", %{board: board} do
+  test "relay why names the refusal and the awaited machine while the gone executor's capacity lingers",
+       %{board: board} do
     %{run: run, exec_a: exec_a} = park_pinned(board)
 
     # The live-server symptom of the oscillation: exec-a is gone but its advertised slot still
@@ -124,8 +125,9 @@ defmodule Relay.Runs.ExclusiveResumeTest do
 
     card = Relay.Cards.get_card(board, run.card_id)
 
-    assert %{verdict: :awaiting_capacity, detail: detail, evidence: evidence} = Runs.diagnose(board, card)
+    assert %{verdict: :resume_refused, detail: detail, evidence: evidence} = Runs.diagnose(board, card)
     assert detail =~ ~s(executor "exec-a")
     assert evidence.pinned_executor_name == "exec-a"
+    assert evidence.resume_refused_reason == :pinned_executor_absent
   end
 end

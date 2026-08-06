@@ -165,4 +165,22 @@ defmodule Relay.Runs.DiagnoseTest do
     assert detail =~ "not currently connected"
     assert evidence.pinned_executor_freshness == :absent
   end
+
+  test "a refused parked run is :resume_refused and carries the RE297 evidence", %{board: board, works: works} do
+    queue = insert(:stage, board: board, name: "Plan:Done2", position: 3, type: :queue)
+    insert(:flow, board: board, key: "code", enabled: true, pulls_from_stage_id: queue.id, works_in_stage_id: works.id)
+
+    card = insert(:card, stage: works, status: :working)
+    run = insert(:run, card: card, status: :parked, parked_reason: :executor_gone, current_node: nil)
+    since = DateTime.utc_now() |> DateTime.add(-20 * 60, :second) |> DateTime.truncate(:second)
+    :ok = Runs.record_resume_refusals(board.id, [%{run_id: run.id, card_id: card.id, reason: :no_isolation}], since)
+
+    assert %{verdict: :resume_refused, detail: detail, evidence: evidence} = Runs.diagnose(board, card)
+    assert detail =~ "flow row no longer exists"
+    assert detail =~ "It has been refused for 20m."
+    assert evidence.resume_refused_reason == :no_isolation
+    assert evidence.resume_refused_since == since
+    assert evidence.isolation == nil
+    assert Map.has_key?(evidence, :pinned_executor_id)
+  end
 end

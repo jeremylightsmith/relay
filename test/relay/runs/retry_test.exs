@@ -242,5 +242,22 @@ defmodule Relay.Runs.RetryTest do
       run = exclusive_failed_run(ctx, "mac-never")
       assert {:error, {:executor_unavailable, "mac-never"}} = Runs.retry_run(run)
     end
+
+    # RE297: `abandon_unresumable_runs/1` clears a provably-unhonourable pin, and the run's own
+    # column is what retry now reads — the dead executor's name still sitting on the last
+    # NodeJob must NOT keep the hatch shut.
+    test "an unpinned exclusive run retries even though the last job names a dead executor", ctx do
+      run = exclusive_failed_run(ctx, nil)
+
+      insert(:node_job,
+        node_execution: insert(:node_execution, run: run, node_key: "precommit", outcome: :failed),
+        state: :done,
+        executor_name: "mac-dead",
+        payload: %{"isolation" => "exclusive"}
+      )
+
+      assert {:ok, revived} = Runs.retry_run(Runs.get_run!(run.id))
+      assert revived.status == :running
+    end
   end
 end
