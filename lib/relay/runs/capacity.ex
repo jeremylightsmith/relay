@@ -15,12 +15,15 @@ defmodule Relay.Runs.Capacity do
   executor having to re-advertise a decremented count (which would be racy
   across reconciles).
 
-  Global (not board-scoped): capacity is keyed by executor and read by every
-  board's scheduler. Every `put/2`/`clear/1` broadcasts
-  `{:executor_capacity_changed, executor_id}` on `topic/0` so schedulers
-  reconcile immediately (acceptance criterion 2's "without waiting a full tick").
-  The executor heartbeat feeds this store; with no executor connected it is
-  empty and the scheduler is dormant.
+  Global (not board-scoped) within an engine instance: capacity is keyed by executor and read by
+  every board's scheduler. The table name is resolved through `Relay.Runs.Instance` — the
+  application-wide `default_table/0` in production, a private table per test (ADR 0009), so one
+  test's advertised capacity can never be read or wiped by another. The
+  `{:executor_capacity_changed, executor_id}` broadcast on `topic/0` stays global: a spurious
+  wake-up makes a scheduler re-reconcile against its own (correctly scoped) snapshot, which is
+  idempotent. Every `put/2`/`clear/1` broadcasts it so schedulers reconcile immediately
+  (acceptance criterion 2's "without waiting a full tick"). The executor heartbeat feeds this
+  store; with no executor connected it is empty and the scheduler is dormant.
 
   **`exclusive` semantics (RLY-231):** the `exclusive` class means the max number of
   concurrent per-card worktrees an executor holds, reinterpreted from the old fixed
@@ -30,13 +33,19 @@ defmodule Relay.Runs.Capacity do
 
   use GenServer
 
-  @table :runs_capacity
+  @default_table :runs_capacity
   @topic "runs:capacity"
   @pubsub Relay.PubSub
 
-  @doc "Starts the capacity process and creates its public ETS table."
+  @doc """
+  The name of the default (application-wide) capacity ETS table. `Relay.Runs.Instance` uses it as
+  the default instance's `:capacity_table`, so the atom is written down exactly once.
+  """
+  def default_table, do: @default_table
+
+  @doc "Starts the capacity process and creates its ETS table (`:table`, default `default_table/0`)."
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, :ok, Keyword.put_new(opts, :name, __MODULE__))
+    GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end
 
   @doc "The capacity-changed topic."
@@ -54,31 +63,31 @@ defmodule Relay.Runs.Capacity do
   Callers must not pre-atomize (RLY-201).
   """
   def put(executor_id, slots) when is_map(slots) do
-    :ets.insert(@table, {executor_id, normalize(slots)})
+    :ets.insert(table(), {executor_id, normalize(slots)})
     broadcast(executor_id)
     :ok
   end
 
   @doc "Removes a gone executor and broadcasts the change."
   def clear(executor_id) do
-    :ets.delete(@table, executor_id)
+    :ets.delete(table(), executor_id)
     broadcast(executor_id)
     :ok
   end
 
   @doc "The full capacity map the scheduler reads into `Snapshot.capacity`."
-  def snapshot, do: @table |> :ets.tab2list() |> Map.new()
+  def snapshot, do: table() |> :ets.tab2list() |> Map.new()
 
-  @doc "Drops all advertised capacity (used in tests to start from a clean slate)."
-  def reset do
-    :ets.delete_all_objects(@table)
-    :ok
-  end
+  # The table this process's engine instance owns — `default_table/0` in production, where nothing
+  # is registered, and a per-test table under `Relay.DataCase.start_capacity!/0` (ADR 0009). Reads
+  # and writes still never hop through the GenServer.
+  defp table, do: Relay.Runs.Instance.current().capacity_table
 
   @impl true
-  def init(:ok) do
-    :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
-    {:ok, %{}}
+  def init(opts) do
+    table = Keyword.get(opts, :table, @default_table)
+    :ets.new(table, [:named_table, :public, :set, read_concurrency: true])
+    {:ok, %{table: table}}
   end
 
   @doc """

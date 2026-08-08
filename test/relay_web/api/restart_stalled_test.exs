@@ -1,5 +1,5 @@
 defmodule RelayWeb.Api.RestartStalledTest do
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   alias Relay.Cards
   alias Relay.Runs
@@ -7,14 +7,13 @@ defmodule RelayWeb.Api.RestartStalledTest do
   alias Schemas.NodeJob
 
   setup %{conn: conn} do
-    Relay.Runs.Capacity.reset()
     FakeDispatcher.register(self())
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Restart API Board"})
     {:ok, %{token: token}} = Relay.ApiKeys.create_key(board, user)
     flow = park_flow(board)
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
 
     conn = put_req_header(conn, "authorization", "Bearer " <> token)
     {:ok, conn: conn, board: board, flow: flow}

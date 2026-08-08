@@ -21,9 +21,14 @@ defmodule Relay.Runs.SchedulerSupervisor do
 
   @doc "Starts (or returns the already-running) scheduler for `board_id`."
   def ensure_started(board_id, opts \\ []) do
-    spec = {Server, Keyword.put(opts, :board_id, board_id)}
+    # ADR 0009 rule 2: this DynamicSupervisor severs $callers, so hand the chain down explicitly
+    # unless the caller supplied its own. A no-op in production.
+    child_opts =
+      opts
+      |> Keyword.put(:board_id, board_id)
+      |> Keyword.put_new(:callers, Relay.Runs.Instance.callers())
 
-    case DynamicSupervisor.start_child(__MODULE__, spec) do
+    case DynamicSupervisor.start_child(__MODULE__, {Server, child_opts}) do
       {:error, {:already_started, pid}} -> {:ok, pid}
       other -> other
     end

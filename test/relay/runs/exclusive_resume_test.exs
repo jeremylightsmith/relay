@@ -1,5 +1,5 @@
 defmodule Relay.Runs.ExclusiveResumeTest do
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   import Ecto.Query
 
@@ -12,8 +12,7 @@ defmodule Relay.Runs.ExclusiveResumeTest do
 
   setup do
     Relay.Runs.FakeDispatcher.register(self())
-    start_supervised!(Relay.Runs.Supervisor)
-    Capacity.reset()
+    start_engine!()
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Excl Board"})

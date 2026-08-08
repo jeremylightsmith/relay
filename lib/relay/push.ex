@@ -64,6 +64,23 @@ defmodule Relay.Push do
   end
 
   @doc """
+  The push configuration, read once here at the boundary (ADR 0009 rule 1): `Application` env is
+  what `config/*.exs` and `config/runtime.exs` set at boot, and nothing mutates it at runtime. A
+  caller that needs different config passes it explicitly rather than writing it back into the
+  application environment.
+  """
+  def config do
+    env = Application.get_env(:relay, __MODULE__, [])
+
+    %{
+      adapter: Keyword.get(env, :adapter, Relay.Push.Delivery.Log),
+      async: Keyword.get(env, :async, true),
+      task_supervisor: Keyword.get(env, :task_supervisor, Relay.Push.TaskSupervisor),
+      apns: Keyword.get(env, :apns, [])
+    }
+  end
+
+  @doc """
   How many cards need `user`: unarchived cards in `:needs_input` or `:in_review`
   on any non-archived board `user` is a resolved member of, across boards.
   Stamped onto every push as `aps.badge`.
@@ -117,15 +134,20 @@ defmodule Relay.Push do
   transaction never commits. A caller inside a transaction (`Cards.move_card/4`
   snapping status via `snap_status/3`) must re-invoke this — or, more simply,
   call `Cards.maybe_notify/3` again — once its transaction returns `{:ok, _}`.
-  """
-  def card_status_changed(card, from_status, actor)
 
-  def card_status_changed(%Card{status: status} = card, _from_status, actor) when status in [:needs_input, :in_review] do
-    dispatch(fn -> notify(card, actor) end)
+  `opts[:config]` overrides the resolved `config/0` — used by tests to inject a broken adapter or
+  an unreachable task supervisor without mutating application env (ADR 0009 rule 1).
+  """
+  def card_status_changed(card, from_status, actor, opts \\ [])
+
+  def card_status_changed(%Card{status: status} = card, _from_status, actor, opts)
+      when status in [:needs_input, :in_review] do
+    config = Keyword.get_lazy(opts, :config, &config/0)
+    dispatch(config, fn -> notify(card, actor, config) end)
     :ok
   end
 
-  def card_status_changed(%Card{}, _from_status, _actor), do: :ok
+  def card_status_changed(%Card{}, _from_status, _actor, _opts), do: :ok
 
   # The whole dispatch decision — including the `start_child` call itself — runs
   # under `safely/1`. `start_child` is a `GenServer.call` to the named
@@ -133,28 +155,20 @@ defmodule Relay.Push do
   # rename drifted out of sync with `Relay.Application`) it *exits* rather than
   # returning an error tuple, and an unprotected exit here would propagate
   # straight into the caller of `set_status/3`.
-  defp dispatch(fun) do
+  defp dispatch(config, fun) do
     if Repo.in_transaction?() do
       :ok
     else
-      safely(fn -> dispatch_now(fun) end)
+      safely(fn -> dispatch_now(config, fun) end)
       :ok
     end
   end
 
-  defp dispatch_now(fun) do
-    if async?() do
-      Task.Supervisor.start_child(Relay.Push.TaskSupervisor, fn -> safely(fun) end)
-    else
-      fun.()
-    end
+  defp dispatch_now(%{async: true} = config, fun) do
+    Task.Supervisor.start_child(config.task_supervisor, fn -> safely(fun) end)
   end
 
-  defp async? do
-    :relay
-    |> Application.get_env(Relay.Push, [])
-    |> Keyword.get(:async, true)
-  end
+  defp dispatch_now(%{async: false}, fun), do: fun.()
 
   defp safely(fun) do
     fun.()
@@ -169,15 +183,14 @@ defmodule Relay.Push do
       :ok
   end
 
-  defp notify(%Card{} = card, actor) do
+  defp notify(%Card{} = card, actor, config) do
     board = Repo.get!(Board, card.board_id)
-    adapter = adapter()
 
     for user <- recipients(board, actor), tokens = device_tokens(user), tokens != [] do
       payload = payload(card, board, needs_you_count(user))
 
       for token <- tokens do
-        adapter.deliver(token, payload)
+        config.adapter.deliver(token, payload)
       end
     end
 
@@ -232,11 +245,4 @@ defmodule Relay.Push do
   # Duplicates `Relay.Cards.ref/2` on purpose: `Push` cannot depend on `Cards`
   # (Cards calls Push — a back-dep would be a boundary cycle).
   defp ref(%Board{key: key}, %Card{ref_number: ref_number}), do: "#{key}#{ref_number}"
-
-  @doc "The configured delivery adapter (see `Relay.Push.Delivery`)."
-  def adapter do
-    :relay
-    |> Application.get_env(Relay.Push, [])
-    |> Keyword.get(:adapter, Relay.Push.Delivery.Log)
-  end
 end

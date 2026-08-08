@@ -33,6 +33,7 @@ One flat `one_for_one` supervisor (`Relay.Supervisor`, started by `Relay.Applica
 | `Relay.Presence` | `Phoenix.Presence` tracker + fetcher `Task.Supervisor` for story-map presence (RE257); requires `Phoenix.PubSub` above, touches no database |
 | `RelayWeb.ApiLog` | in-memory recent API request log for the admin page |
 | `Relay.BoardWatch` | ETS owner for per-board version counters (RLY-12) |
+| `Registry` (`Relay.Runs.InstanceRegistry`) | engine-instance lookup keyed by owner pid (RE298 / ADR 0009); empty in production, where every resolution falls through to `Relay.Runs.Instance.default/0` |
 | `Relay.Runs.Capacity` | ETS owner for per-executor advertised free capacity (RLY-133), fed by the executor heartbeat |
 | `Registry` (`Relay.Runs.SchedulerRegistry`) | per-board scheduler lookup keys (RLY-133) |
 | `Relay.Runs.SchedulerSupervisor` | DynamicSupervisor for per-board `Scheduler.Server`s (RLY-133); boot-starts per board only when `:runs_auto_start` |

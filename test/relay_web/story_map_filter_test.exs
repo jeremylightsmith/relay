@@ -3,13 +3,8 @@ defmodule RelayWeb.StoryMapFilterTest do
   RE259 — the owner-key wire format and the filter predicate, unit-tested against plain
   structs. No DB, no LiveView: this module owns the key format the way
   `RelayWeb.StoryMapGrid` owns the column keys, so it is proven the same way.
-
-  NOT `async: true`: the no-atom-leak test below reads `:erlang.system_info(:atom_count)`,
-  which is a VM-GLOBAL counter. Run concurrently, every other async test loading a module
-  moves it, and the assertion fails on unlucky seeds for reasons that have nothing to do
-  with this module. Sync tests run one at a time, so the delta is the code under test.
   """
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias RelayWeb.StoryMapFilter
   alias Schemas.Card
@@ -28,6 +23,14 @@ defmodule RelayWeb.StoryMapFilterTest do
   defp dana, do: user(3, "Dana Kim", "dana@acme.co")
   defp mara, do: user(4, "Mara Lopez", "mara@acme.co")
 
+  # Does an atom with exactly this text exist in the VM right now?
+  defp interned?(text) do
+    _ = String.to_existing_atom(text)
+    true
+  rescue
+    ArgumentError -> false
+  end
+
   describe "the owner-key wire format" do
     test "an owner row round-trips through its key" do
       assert StoryMapFilter.owner_key(human_owner(dana())) == "u:3"
@@ -44,13 +47,21 @@ defmodule RelayWeb.StoryMapFilterTest do
     end
 
     test "a forged key is :error and creates no atom" do
-      before = :erlang.system_info(:atom_count)
+      forged = ["u:", "u:0", "u:-1", "u:abc", "u:3x", "", "agentx", "shoe_size"]
 
-      for forged <- ["u:", "u:0", "u:-1", "u:abc", "u:3x", "", "agentx", "shoe_size"] do
-        assert StoryMapFilter.parse_owner_key(forged) == :error
+      # RE298: this used to assert on `:erlang.system_info(:atom_count)`, a VM-GLOBAL counter that
+      # any concurrently-loading module moves — which is what kept this whole module out of the
+      # async pool. Asking instead whether an atom with each forged TEXT exists, before and after,
+      # proves the same thing (`parse_owner_key/1` must never reach `String.to_atom/1`) and is
+      # only disturbed by code interning one of these exact strings, which nothing does.
+      # `""` is already interned VM-wide, which is why this compares sets rather than emptiness.
+      interned_before = Enum.filter(forged, &interned?/1)
+
+      for key <- forged do
+        assert StoryMapFilter.parse_owner_key(key) == :error
       end
 
-      assert :erlang.system_info(:atom_count) == before
+      assert Enum.filter(forged, &interned?/1) == interned_before
     end
 
     test "chip_dom_id/1 replaces the colon a CSS selector cannot carry" do

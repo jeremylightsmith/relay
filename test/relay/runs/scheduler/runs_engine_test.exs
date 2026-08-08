@@ -1,5 +1,5 @@
 defmodule Relay.Runs.Scheduler.RunsEngineTest do
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   import Ecto.Query
   import ExUnit.CaptureLog
@@ -8,7 +8,7 @@ defmodule Relay.Runs.Scheduler.RunsEngineTest do
   alias Relay.Runs.Scheduler.RunsEngine
 
   setup do
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Engine Board"})
     {:ok, spec} = Relay.Flows.enable_flow(Relay.Flows.get_flow!(board, "spec"))

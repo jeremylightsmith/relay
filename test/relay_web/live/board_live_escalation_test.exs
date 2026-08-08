@@ -5,7 +5,7 @@ defmodule RelayWeb.BoardLiveEscalationTest do
   card the drawer swapped the answer form for a red "⊗ AGENT STOPPED" banner with no input field,
   so every escalation was a dead end.
   """
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
 
@@ -21,7 +21,7 @@ defmodule RelayWeb.BoardLiveEscalationTest do
     FakeDispatcher.register(self())
     board = Relay.Boards.get_or_create_default_board(user)
     flow = park_flow(board)
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     %{board: board, flow: flow}
   end
 

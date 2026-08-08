@@ -16,7 +16,7 @@ defmodule RelayWeb.Api.ExecutorContractTest do
   which rewrites the fixture AND still fails, so a regenerated fixture cannot slip through
   unreviewed in the same run.
   """
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   alias Relay.Runs
   alias Relay.Runs.FakeDispatcher
@@ -25,7 +25,7 @@ defmodule RelayWeb.Api.ExecutorContractTest do
 
   setup do
     FakeDispatcher.register(self())
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     :ok
   end
 

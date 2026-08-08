@@ -1,5 +1,5 @@
 defmodule RelayWeb.Api.NodeJobControllerTest do
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   import Ecto.Query
 
@@ -9,7 +9,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
 
   setup %{conn: conn} do
     FakeDispatcher.register(self())
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Node Board"})
@@ -404,7 +404,6 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       # Before this route existed, Capacity was fed only by /api/board/heartbeat, which
       # `relay execute` never calls — so starting an executor and enabling a flow dispatched
       # nothing at all, and the first live cutover needed a hand-run curl.
-      Capacity.reset()
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
@@ -423,7 +422,6 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
          %{conn: conn, board: board} do
       # RLY-201: atomize_capacity/1 called String.to_existing_atom/1 on client keys, so
       # {"gpu": 1} raised ArgumentError → 500 on the executor's liveness path.
-      Capacity.reset()
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{

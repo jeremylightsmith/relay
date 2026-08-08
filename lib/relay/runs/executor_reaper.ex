@@ -16,6 +16,7 @@ defmodule Relay.Runs.ExecutorReaper do
 
   @impl true
   def init(opts) do
+    Relay.Runs.Instance.adopt_callers(opts)
     interval = Keyword.get(opts, :interval_ms, @default_interval_ms)
     {:ok, %{interval: interval}, {:continue, :schedule}}
   end

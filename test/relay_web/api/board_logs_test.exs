@@ -1,4 +1,16 @@
 defmodule RelayWeb.Api.BoardLogsTest do
+  # NOT `async: true`, under ADR 0009 rule 1's sanctioned exception: a process-global singleton
+  # with no instance seam. `POST /api/board/logs` -> `AgentLog.record/2` always enqueues onto the
+  # app-wide `Relay.Activity.LogSink` (unlike `log_sink_test.exs` and
+  # `log_sink_resilience_test.exs`, which start their own sink and are async).
+  #
+  # `allow!/1` cannot buy async here, and this module tried it and raced (RE298): `Sandbox.allow/3`
+  # binds a pid to exactly ONE connection, so when two tests overlap the second gets
+  # `{:already, :allowed}` and the sink stays on the FIRST test's connection. `LogSink`'s
+  # ref -> card_id lookup then cannot see this test's card, resolves to `[]`, and the flush
+  # inserts and broadcasts nothing — raising nothing and logging nothing. The test just never
+  # receives its broadcast. Shared mode is the documented fallback for a singleton like this;
+  # async needs an injectable sink on the HTTP path, which is a production change, not a test one.
   use RelayWeb.ConnCase, async: false
 
   import Ecto.Query

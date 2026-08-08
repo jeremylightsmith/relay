@@ -1,12 +1,12 @@
 defmodule RelayWeb.BoardStoppedWorkTest do
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
 
   setup :register_and_log_in_user
 
   setup %{user: user} do
-    Relay.Runs.Capacity.reset()
+    start_capacity!()
     board = insert(:board, owner: user)
     insert(:membership, board: board, user: user)
     queue = insert(:stage, board: board, name: "Plan:Done", position: 1, type: :queue)

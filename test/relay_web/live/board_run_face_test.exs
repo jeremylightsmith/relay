@@ -1,7 +1,5 @@
 defmodule RelayWeb.BoardRunFaceTest do
-  # RLY-191: the describe block below resets the global `Relay.Runs.Capacity` ETS table, so
-  # this module can no longer run concurrently with other async tests touching capacity.
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
 
@@ -11,6 +9,11 @@ defmodule RelayWeb.BoardRunFaceTest do
   alias Relay.Runs
 
   setup :register_and_log_in_user
+
+  setup do
+    start_capacity!()
+    :ok
+  end
 
   setup %{user: user} do
     board = Boards.get_or_create_default_board(user)
@@ -120,7 +123,6 @@ defmodule RelayWeb.BoardRunFaceTest do
   # avoid colliding with the default board's own 1..11 sequence on `stages_board_id_position_index`.
   describe "age and stall (RLY-191)" do
     setup %{user: user} do
-      Relay.Runs.Capacity.reset()
       board = insert(:board, owner: user)
       insert(:membership, board: board, user: user)
       works = insert(:stage, board: board, name: "Code", position: 1, type: :work, ai_enabled: true)

@@ -1,5 +1,5 @@
 defmodule RelayWeb.Api.RunRetryTest do
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   alias Relay.Cards
   alias Relay.Runs
@@ -7,7 +7,6 @@ defmodule RelayWeb.Api.RunRetryTest do
   alias Schemas.NodeJob
 
   setup %{conn: conn} do
-    Relay.Runs.Capacity.reset()
     FakeDispatcher.register(self())
 
     user = insert(:user)
@@ -16,7 +15,7 @@ defmodule RelayWeb.Api.RunRetryTest do
     flow = dead_end_flow(board)
     stage = Enum.find(board.stages, &(&1.name == "Next up"))
     {:ok, card} = Cards.create_card(stage, %{title: "Retry me"})
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
 
     conn = put_req_header(conn, "authorization", "Bearer " <> token)
     {:ok, conn: conn, board: board, flow: flow, card: card}

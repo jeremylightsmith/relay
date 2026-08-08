@@ -11,7 +11,8 @@ defmodule Relay.Runs do
   `set_status/3`, `request_input/3`), so ADR 0003 snapping and ADR 0004
   claiming apply automatically — the engine never re-implements card-state
   rules. Node execution goes through the `Relay.Runs.Dispatcher`
-  behaviour (`config :relay, :runs_dispatcher`), so the whole engine is
+  behaviour, resolved through `Relay.Runs.Instance` — `config :relay, :runs_dispatcher` in
+  production, a per-test instance under test (ADR 0009) — so the whole engine is
   provable with a fake executor before cards 04/05 exist.
   """
 
@@ -28,6 +29,7 @@ defmodule Relay.Runs do
   alias Relay.Runs.Audit
   alias Relay.Runs.Capacity
   alias Relay.Runs.Engine
+  alias Relay.Runs.Instance
   alias Relay.Runs.PlanTasks
   alias Relay.Runs.Policy
   alias Relay.Runs.Preflight
@@ -2601,7 +2603,7 @@ defmodule Relay.Runs do
   end
 
   @doc false
-  def dispatcher, do: Application.get_env(:relay, :runs_dispatcher, Relay.Runs.NoopDispatcher)
+  def dispatcher, do: Instance.current().dispatcher
 
   @doc false
   def engine_opts do
@@ -2616,15 +2618,24 @@ defmodule Relay.Runs do
   @doc false
   def engine_opts(%Run{} = run), do: Keyword.put(engine_opts(), :bonus, run.retries)
 
+  # ADR 0009 rule 2: DynamicSupervisor.start_child/2 severs $callers, so the child would have
+  # neither a sandbox connection nor a way back to the caller's engine instance. Pass the chain
+  # down explicitly; RunServer.init/1 re-seeds it. In production `callers` is `[self()]` and
+  # nothing is registered against it, so this changes nothing.
   defp ensure_server(%Run{id: id}, mode) do
-    case DynamicSupervisor.start_child(Relay.Runs.RunSupervisor, {RunServer, run_id: id, mode: mode}) do
+    instance = Instance.current()
+
+    spec =
+      {RunServer, run_id: id, mode: mode, registry: instance.registry, callers: Instance.callers()}
+
+    case DynamicSupervisor.start_child(instance.run_supervisor, spec) do
       {:ok, pid} -> {:ok, pid}
       {:error, {:already_started, pid}} -> {:ok, pid}
     end
   end
 
   defp stop_server(%Run{id: id}) do
-    case Registry.lookup(Relay.Runs.Registry, id) do
+    case Registry.lookup(Instance.current().registry, id) do
       [{pid, _value}] -> GenServer.stop(pid, :normal)
       [] -> :ok
     end

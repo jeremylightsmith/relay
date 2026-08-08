@@ -1,5 +1,5 @@
 defmodule Relay.Runs.RetryTest do
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   alias Relay.Runs
   alias Relay.Runs.FakeDispatcher
@@ -14,7 +14,7 @@ defmodule Relay.Runs.RetryTest do
     flow = dead_end_flow(board)
     stage = Enum.find(board.stages, &(&1.name == "Next up"))
     {:ok, card} = Relay.Cards.create_card(stage, %{title: "Do not throw my work away"})
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     %{board: board, flow: flow, card: card, user: user}
   end
 

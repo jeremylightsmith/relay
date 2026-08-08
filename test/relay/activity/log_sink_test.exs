@@ -1,5 +1,5 @@
 defmodule Relay.Activity.LogSinkTest do
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   import Ecto.Query
 
@@ -11,7 +11,10 @@ defmodule Relay.Activity.LogSinkTest do
     board = insert(:board)
     stage = insert(:stage, board: board)
     card = insert(:card, stage: stage, ref_number: 7)
-    sink = start_supervised!({LogSink, name: :"log_sink_#{System.unique_integer([:positive])}", debounce_ms: 0})
+
+    sink =
+      allow!(start_supervised!({LogSink, name: :"log_sink_#{System.unique_integer([:positive])}", debounce_ms: 0}))
+
     {:ok, board: board, card: card, sink: sink}
   end
 
@@ -67,7 +70,12 @@ defmodule Relay.Activity.LogSinkTest do
     # debounce_ms is deliberately huge: only the @max_buffer bound can flush this.
     # `id:` override needed: the setup block already started a LogSink child under
     # the default (module-derived) id, and a plain Supervisor tracks children by id.
-    sink = start_supervised!({LogSink, name: :log_sink_burst, debounce_ms: 60_000}, id: :log_sink_burst)
+    sink =
+      allow!(
+        start_supervised!({LogSink, name: :"log_sink_burst_#{System.unique_integer([:positive])}", debounce_ms: 60_000},
+          id: :log_sink_burst
+        )
+      )
 
     :ok = LogSink.enqueue(board.id, for(i <- 1..500, do: entry(%{text: "burst #{i}"})), sink)
     :sys.get_state(sink)

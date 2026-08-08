@@ -1,7 +1,5 @@
 defmodule RelayWeb.BoardLiveStrandedMoveTest do
-  # async: false — cancel_run/1 (exercised by the confirm test) touches the singleton
-  # Relay.Runs.Registry, same as Relay.RunsTest / NodeJobControllerTest.
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
   import Relay.Factory
@@ -14,7 +12,7 @@ defmodule RelayWeb.BoardLiveStrandedMoveTest do
 
   setup %{user: user} do
     FakeDispatcher.register(self())
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
 
     board = insert(:board, owner: user)
     insert(:membership, board: board, user: user)

@@ -1,5 +1,7 @@
 defmodule RelayWeb.Admin.ApiLiveTest do
-  # async: false — reads/writes the app-wide RelayWeb.ApiLog singleton.
+  # async: false — RelayWeb.Admin.ApiLive reads the app-wide RelayWeb.ApiLog singleton by module
+  # name, so this test cannot be given its own buffer. ADR 0009 rule 1's sanctioned process-global
+  # exception.
   use RelayWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest

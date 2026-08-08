@@ -1,6 +1,5 @@
 defmodule Relay.Push.Delivery.APNSTest do
-  # Not async: sets the global Relay.Push apns config.
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   alias Relay.Push
   alias Relay.Push.Delivery.APNS
@@ -23,29 +22,23 @@ defmodule Relay.Push.Delivery.APNSTest do
     :public_key.pem_encode([:public_key.pem_entry_encode(:ECPrivateKey, key)])
   end
 
+  # ADR 0009 rule 1: the config is a test-local value passed into deliver/3, never written into
+  # application env. JWT.reset/0 still has to run because the provider-token cache is a genuine
+  # process-global (:persistent_term) — but every test in this file signs with its own key, so
+  # resetting before each one is what makes them independent rather than what serialises them.
   setup do
-    previous = Application.get_env(:relay, Push)
+    APNS.JWT.reset()
+    on_exit(&APNS.JWT.reset/0)
 
-    Application.put_env(
-      :relay,
-      Push,
-      Keyword.put(previous, :apns,
+    %{
+      apns: [
         key: test_key_pem(),
         key_id: "ABC1234567",
         team_id: "TEAM123456",
         topic: "com.relay.mobile",
         env: "sandbox"
-      )
-    )
-
-    APNS.JWT.reset()
-
-    on_exit(fn ->
-      Application.put_env(:relay, Push, previous)
-      APNS.JWT.reset()
-    end)
-
-    :ok
+      ]
+    }
   end
 
   defp decode_jwt_header(bearer) do
@@ -58,7 +51,7 @@ defmodule Relay.Push.Delivery.APNSTest do
     segment |> Base.url_decode64!(padding: false) |> Jason.decode!()
   end
 
-  test "posts the payload to the sandbox host with APNs headers" do
+  test "posts the payload to the sandbox host with APNs headers", %{apns: apns} do
     test_pid = self()
 
     Req.Test.stub(APNS, fn conn ->
@@ -67,7 +60,7 @@ defmodule Relay.Push.Delivery.APNSTest do
       Plug.Conn.send_resp(conn, 200, "")
     end)
 
-    assert :ok = APNS.deliver("device-token-xyz", @payload)
+    assert :ok = APNS.deliver("device-token-xyz", @payload, apns)
 
     assert_received {:apns_request, path, headers, body}
     assert path == "/3/device/device-token-xyz"
@@ -79,7 +72,7 @@ defmodule Relay.Push.Delivery.APNSTest do
     assert headers["apns-priority"] == "10"
   end
 
-  test "signs an ES256 provider JWT carrying kid, iss and iat" do
+  test "signs an ES256 provider JWT carrying kid, iss and iat", %{apns: apns} do
     test_pid = self()
 
     Req.Test.stub(APNS, fn conn ->
@@ -87,7 +80,7 @@ defmodule Relay.Push.Delivery.APNSTest do
       Plug.Conn.send_resp(conn, 200, "")
     end)
 
-    assert :ok = APNS.deliver("device-token-xyz", @payload)
+    assert :ok = APNS.deliver("device-token-xyz", @payload, apns)
 
     assert_received {:auth, bearer}
     {header, claims} = decode_jwt_header(bearer)
@@ -98,7 +91,7 @@ defmodule Relay.Push.Delivery.APNSTest do
     assert is_integer(claims["iat"])
   end
 
-  test "reuses the cached JWT across sends rather than re-signing" do
+  test "reuses the cached JWT across sends rather than re-signing", %{apns: apns} do
     test_pid = self()
 
     Req.Test.stub(APNS, fn conn ->
@@ -106,15 +99,15 @@ defmodule Relay.Push.Delivery.APNSTest do
       Plug.Conn.send_resp(conn, 200, "")
     end)
 
-    assert :ok = APNS.deliver("tok-1", @payload)
-    assert :ok = APNS.deliver("tok-2", @payload)
+    assert :ok = APNS.deliver("tok-1", @payload, apns)
+    assert :ok = APNS.deliver("tok-2", @payload, apns)
 
     assert_received {:auth, first}
     assert_received {:auth, second}
     assert first == second
   end
 
-  test "a 410 Unregistered prunes the device row" do
+  test "a 410 Unregistered prunes the device row", %{apns: apns} do
     user = insert(:user)
     {:ok, _} = Push.register_device(user, "tok-gone")
 
@@ -124,11 +117,11 @@ defmodule Relay.Push.Delivery.APNSTest do
       |> Plug.Conn.send_resp(410, Jason.encode!(%{"reason" => "Unregistered"}))
     end)
 
-    assert {:error, {:apns, 410}} = APNS.deliver("tok-gone", @payload)
+    assert {:error, {:apns, 410}} = APNS.deliver("tok-gone", @payload, apns)
     assert Repo.aggregate(DeviceToken, :count) == 0
   end
 
-  test "a 400 BadDeviceToken prunes the device row" do
+  test "a 400 BadDeviceToken prunes the device row", %{apns: apns} do
     user = insert(:user)
     {:ok, _} = Push.register_device(user, "tok-bad")
 
@@ -138,11 +131,11 @@ defmodule Relay.Push.Delivery.APNSTest do
       |> Plug.Conn.send_resp(400, Jason.encode!(%{"reason" => "BadDeviceToken"}))
     end)
 
-    assert {:error, {:apns, 400}} = APNS.deliver("tok-bad", @payload)
+    assert {:error, {:apns, 400}} = APNS.deliver("tok-bad", @payload, apns)
     assert Repo.aggregate(DeviceToken, :count) == 0
   end
 
-  test "a 400 for another reason does not prune" do
+  test "a 400 for another reason does not prune", %{apns: apns} do
     user = insert(:user)
     {:ok, _} = Push.register_device(user, "tok-keep")
 
@@ -152,21 +145,17 @@ defmodule Relay.Push.Delivery.APNSTest do
       |> Plug.Conn.send_resp(400, Jason.encode!(%{"reason" => "PayloadTooLarge"}))
     end)
 
-    assert {:error, {:apns, 400}} = APNS.deliver("tok-keep", @payload)
+    assert {:error, {:apns, 400}} = APNS.deliver("tok-keep", @payload, apns)
     assert Repo.aggregate(DeviceToken, :count) == 1
   end
 
-  test "a transport error returns an error and never raises" do
+  test "a transport error returns an error and never raises", %{apns: apns} do
     Req.Test.stub(APNS, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
 
-    assert {:error, _reason} = APNS.deliver("tok-x", @payload)
+    assert {:error, _reason} = APNS.deliver("tok-x", @payload, apns)
   end
 
-  test "targets the production host when env is production" do
-    config = Application.get_env(:relay, Push)
-    apns = Keyword.put(config[:apns], :env, "production")
-    Application.put_env(:relay, Push, Keyword.put(config, :apns, apns))
-
+  test "targets the production host when env is production", %{apns: apns} do
     test_pid = self()
 
     Req.Test.stub(APNS, fn conn ->
@@ -174,7 +163,15 @@ defmodule Relay.Push.Delivery.APNSTest do
       Plug.Conn.send_resp(conn, 200, "")
     end)
 
-    assert :ok = APNS.deliver("tok-x", @payload)
+    assert :ok = APNS.deliver("tok-x", @payload, Keyword.put(apns, :env, "production"))
     assert_received {:host, "api.push.apple.com"}
+  end
+
+  # The behaviour callback still works with no config passed: it reads the app's configured
+  # APNs credentials once, at the boundary. In :test that keyword list is empty, so this proves
+  # the delegation compiles and fails the way a mis-configured production would — it must not
+  # raise a FunctionClauseError from the arity change.
+  test "deliver/2 delegates to deliver/3 with the application's configured credentials" do
+    assert_raise KeyError, fn -> APNS.deliver("tok-x", @payload) end
   end
 end

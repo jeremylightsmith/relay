@@ -6,7 +6,7 @@ defmodule Relay.RunsPreflightTest do
   as ready — a run dispatches to ONE machine, so a union would lie; (b) an executor that has
   never reported its inventory must NOT be listed as missing anything.
   """
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   alias Relay.Boards
   alias Relay.Flows
@@ -16,7 +16,7 @@ defmodule Relay.RunsPreflightTest do
   # The Plan flow's trigger (`Relay.Flows.DefaultLibrary`) is "Spec:Done" -> "Plan" ->
   # "Plan:Done" — the sub-lanes only exist once enabled, same setup as flows_seed_test.exs.
   setup do
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     board = insert(:board)
     spec = insert(:stage, board: board, name: "Spec", category: :planning, type: :planning, position: 1)
     plan_stage = insert(:stage, board: board, name: "Plan", category: :planning, type: :planning, position: 2)

@@ -1,12 +1,10 @@
 defmodule Relay.Push.TriggerTest do
-  # Not async: several tests swap the Relay.Push adapter via Application.put_env.
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   import ExUnit.CaptureLog
 
   alias Relay.Cards
   alias Relay.Push
-  alias Relay.Push.TaskSupervisor
 
   # A board with one stage, one card, and `n` resolved human members.
   defp board_with_members(n) do
@@ -155,56 +153,39 @@ defmodule Relay.Push.TriggerTest do
   end
 
   describe "fire-and-forget" do
-    # A broken adapter, without defining a second module in this file (AGENTS.md
-    # forbids that): a module that does not exist raises UndefinedFunctionError
-    # at the `adapter.deliver/2` call — exactly the blast radius we need contained.
-    # Wrapped in capture_log both to silence the expected "[push] dispatch failed"
-    # error line and to assert `safely/1` actually logged it.
-    test "an exploding adapter never fails set_status" do
+    # A broken adapter, without defining a second module in this file (AGENTS.md forbids that):
+    # a module that does not exist raises UndefinedFunctionError at the `adapter.deliver/2` call —
+    # exactly the blast radius we need contained. The adapter is injected per call (ADR 0009
+    # rule 1) instead of being written into application env, so this test is async-safe; the
+    # containment being proven lives in Relay.Push, which is where the call is made.
+    test "an exploding adapter never fails the caller" do
       %{card: card, users: [alice]} = board_with_members(1)
       with_device(alice, "tok-alice")
 
-      previous = Application.get_env(:relay, Push)
-
-      Application.put_env(
-        :relay,
-        Push,
-        Keyword.put(previous, :adapter, Relay.Push.Delivery.DoesNotExist)
-      )
-
-      on_exit(fn -> Application.put_env(:relay, Push, previous) end)
+      config = %{Push.config() | adapter: Relay.Push.Delivery.DoesNotExist}
 
       log =
         capture_log(fn ->
-          assert {:ok, updated} = Cards.set_status(card, %{status: :needs_input}, :agent)
-          assert updated.status == :needs_input
+          assert :ok = Push.card_status_changed(%{card | status: :needs_input}, :working, :agent, config: config)
         end)
 
       assert log =~ "[push] dispatch failed"
     end
 
-    # The async branch (`config :relay, Relay.Push, async: true`, what production
-    # runs) dispatches through `Relay.Push.TaskSupervisor`. If that named process
-    # is ever unavailable, `Task.Supervisor.start_child/2` exits (:noproc) rather
-    # than returning an error tuple — this proves `dispatch/1` contains that exit
-    # too, not just exceptions raised inside the dispatched fun. Wrapped in
-    # capture_log both to silence the expected "[push] dispatch exit" error line
-    # and to assert `safely/1` actually logged it.
-    test "the async branch never fails set_status when its supervisor is unavailable" do
+    # The async branch (`config :relay, Relay.Push, async: true`, what production runs) dispatches
+    # through a Task.Supervisor. If that named process is unavailable, `Task.Supervisor.start_child/2`
+    # *exits* (:noproc) rather than returning an error tuple — this proves `dispatch/2` contains that
+    # exit too, not just exceptions raised inside the dispatched fun. The unreachable supervisor is
+    # injected by name rather than by terminating the app-wide one (ADR 0009 rule 1).
+    test "the async branch never fails the caller when its task supervisor is unavailable" do
       %{card: card, users: [alice]} = board_with_members(1)
       with_device(alice, "tok-alice")
 
-      previous = Application.get_env(:relay, Push)
-      Application.put_env(:relay, Push, Keyword.put(previous, :async, true))
-      on_exit(fn -> Application.put_env(:relay, Push, previous) end)
-
-      :ok = Supervisor.terminate_child(Relay.Supervisor, TaskSupervisor)
-      on_exit(fn -> Supervisor.restart_child(Relay.Supervisor, TaskSupervisor) end)
+      config = %{Push.config() | async: true, task_supervisor: :push_task_supervisor_that_does_not_exist}
 
       log =
         capture_log(fn ->
-          assert {:ok, updated} = Cards.set_status(card, %{status: :needs_input}, :agent)
-          assert updated.status == :needs_input
+          assert :ok = Push.card_status_changed(%{card | status: :needs_input}, :working, :agent, config: config)
         end)
 
       assert log =~ "[push] dispatch exit"
@@ -212,24 +193,17 @@ defmodule Relay.Push.TriggerTest do
   end
 
   describe "the real async path (Task.Supervisor actually runs the task)" do
-    # Relay.Push.Delivery.Test sends to a configured pid (defaulting to self()) so
-    # a dispatched Task — which is a different process than the caller — can still
-    # reach the test process. Without this, async: true could only be exercised by
-    # killing the supervisor (above), never by letting a task actually deliver.
-    test "a dispatched Task delivers the push to the configured test pid" do
+    # Relay.Push.Delivery.Test resolves its target through `$callers`, which Task seeds with its
+    # spawner — so a dispatched Task (a different process than the test) still reaches the test's
+    # mailbox with no application-env key involved. Without this, async: true could only be
+    # exercised by breaking the supervisor (above), never by letting a task actually deliver.
+    test "a dispatched Task delivers the push back to the test process" do
       %{card: card, users: [alice]} = board_with_members(1)
       with_device(alice, "tok-alice")
 
-      previous = Application.get_env(:relay, Push)
-      Application.put_env(:relay, Push, Keyword.put(previous, :async, true))
-      Application.put_env(:relay, :push_test_pid, self())
+      config = %{Push.config() | async: true}
 
-      on_exit(fn ->
-        Application.put_env(:relay, Push, previous)
-        Application.delete_env(:relay, :push_test_pid)
-      end)
-
-      assert {:ok, _updated} = Cards.set_status(card, %{status: :in_review}, :agent)
+      assert :ok = Push.card_status_changed(%{card | status: :in_review}, :working, :agent, config: config)
 
       assert_receive {:push_delivered, "tok-alice", payload}, 1000
       assert payload["kind"] == "in_review"

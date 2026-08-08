@@ -4,6 +4,14 @@ defmodule RelayWeb.BoardSettingsFlowPreflightTest do
   prose, per AGENTS.md. The CTA must stay clickable in EVERY state — this feature reports, it
   never blocks.
   """
+
+  # async: false — start_engine!/1's Listener subscribes to the global `Relay.Events` firehose
+  # (there is no per-instance topic), so under async every concurrent test's card event reaches
+  # this test's private Listener, which reconciles on THIS test's sandbox connection and can steal
+  # or contend the checkout mid-test (ADR 0009's Rule 2 fix is per-instance *naming*, not a
+  # per-instance *firehose* — that gap is still open). This test never exercises reconciliation,
+  # only the Registry-backed preflight path, so it does not need a Listener at all; revisit once
+  # `start_engine!/1` can start a tree without one, or the firehose is scoped per instance.
   use RelayWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
@@ -15,7 +23,7 @@ defmodule RelayWeb.BoardSettingsFlowPreflightTest do
   setup :register_and_log_in_user
 
   setup %{user: user} do
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     board = Boards.get_or_create_default_board(user)
     %{board: board}
   end

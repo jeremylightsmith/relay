@@ -11,7 +11,7 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   `test/relay_web/api/spec_flow_e2e_test.exs` (W11); uses W11's
   `Relay.Runs.Scheduler.ScriptedExecutor` harness for the HTTP calls.
   """
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   import Ecto.Query
 
@@ -20,7 +20,6 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   alias Relay.Repo
   alias Relay.Runs
   alias Relay.Runs.Capacity
-  alias Relay.Runs.Listener
   alias Relay.Runs.Scheduler.ScriptedExecutor, as: Exec
   alias Relay.Runs.Scheduler.Server
   alias Schemas.NodeExecution
@@ -30,9 +29,14 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   @executor_name "code-e2e-executor"
   @capacity %{"shared_clean" => 0, "exclusive" => 1}
 
+  # A stable, known name for this file's private engine's Listener child — settle/1 looks it up
+  # directly (Process.whereis/1) to drain its mailbox before asserting. Module-scoped so it
+  # cannot collide with listener_test.exs's own pinned Listener name now that both run async
+  # (RE298).
+  @listener :code_flow_e2e_listener
+
   setup %{conn: conn} do
-    Capacity.reset()
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!(listener: @listener)
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Code Cutover Board"})
@@ -81,14 +85,23 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   end
 
   defp start_scheduler(board) do
-    start_supervised!({Server, [board_id: board.id, tick_ms: 3_600_000, debounce_ms: 5, name: :"code_e2e_#{board.id}"]})
+    start_supervised!(
+      {Server,
+       [
+         board_id: board.id,
+         tick_ms: 3_600_000,
+         debounce_ms: 5,
+         name: :"code_e2e_#{board.id}",
+         callers: [self()]
+       ]}
+    )
   end
 
   # See plan_flow_e2e_test.exs's settle/1: drain the Listener and the per-test
   # scheduler so neither is mid-query when the sandbox tears down. Always called
   # AFTER an assert_receive on the run's terminal broadcast.
   defp settle(server) do
-    _ = :sys.get_state(Process.whereis(Listener))
+    _ = :sys.get_state(Process.whereis(@listener))
     _ = :sys.get_state(server)
     :ok
   end

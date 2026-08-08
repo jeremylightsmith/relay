@@ -4,7 +4,7 @@ defmodule Relay.Runs.MissingWritesGuardTest do
   reports `:succeeded` with that field still blank has not done its work — the "empty spec
   reached Spec:Review" failure class.
   """
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   alias Relay.Runs
   alias Relay.Runs.FakeDispatcher
@@ -16,7 +16,7 @@ defmodule Relay.Runs.MissingWritesGuardTest do
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Missing Writes Board"})
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
     :ok = Runs.subscribe(board.id)
     %{board: board}
   end

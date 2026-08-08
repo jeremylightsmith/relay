@@ -1,7 +1,8 @@
 defmodule Relay.Runs.CapacityTest do
   # Uses the application-started Relay.Runs.Capacity instance, isolated by unique executor ids
-  # (the BoardWatch test pattern).
-  use ExUnit.Case, async: true
+  # (the BoardWatch test pattern), except the "instance scoping" describe block below, which
+  # starts its own private capacity table via Relay.DataCase.start_capacity!/0 (ADR 0009).
+  use Relay.DataCase, async: true
 
   alias Relay.Runs.Capacity
 
@@ -88,6 +89,26 @@ defmodule Relay.Runs.CapacityTest do
       :ok = Capacity.put(eid, %{"gpu" => 1, "shared_clean" => "lots", "exclusive" => 2})
 
       assert Capacity.snapshot()[eid] == %{shared_clean: 0, exclusive: 2}
+    end
+  end
+
+  describe "instance scoping (ADR 0009)" do
+    test "a test's own capacity table is invisible to the default instance" do
+      eid = System.unique_integer([:positive])
+      table = start_capacity!()
+
+      :ok = Capacity.put(eid, %{shared_clean: 1, exclusive: 0})
+
+      assert %{shared_clean: 1} = Capacity.snapshot()[eid]
+      assert table != Capacity.default_table()
+
+      default_rows = Map.new(:ets.tab2list(Capacity.default_table()))
+      refute Map.has_key?(default_rows, eid)
+    end
+
+    test "reset/0 no longer exists — a global wipe is not reachable from a test" do
+      Code.ensure_loaded!(Capacity)
+      refute function_exported?(Capacity, :reset, 0)
     end
   end
 end

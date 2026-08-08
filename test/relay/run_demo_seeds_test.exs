@@ -4,7 +4,7 @@ defmodule Relay.RunDemoSeedsTest do
   human (and the acceptance pass) clicks on to check the escalation panel. Evaluating the script is
   the only honest check: a string match on the source would pass on a seed that no longer runs.
   """
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   import ExUnit.CaptureIO
 

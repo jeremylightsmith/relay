@@ -1,5 +1,5 @@
 defmodule RelayWeb.Api.SpecFlowE2ETest do
-  use RelayWeb.ConnCase, async: false
+  use RelayWeb.ConnCase, async: true
 
   import Ecto.Query
 
@@ -11,8 +11,7 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
   alias Schemas.Card
 
   setup %{conn: conn} do
-    Runs.Capacity.reset()
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Spec E2E"})
@@ -29,6 +28,11 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
     # explicitly. Left running, its next tick/flush queries this test's board after the sandbox
     # rolls the transaction back, crash-looping and — worse — able to exhaust the DynamicSupervisor's
     # restart intensity and take down schedulers for later tests' boards too.
+    #
+    # RE298 / ADR 0009 rule 2: `ensure_started/2` passes this test's `$callers` chain into the
+    # scheduler's child spec, and `Scheduler.Server.init/1` re-seeds it, so the scheduler process
+    # inherits both this test's DB sandbox connection and its `Relay.Runs.Instance` (registered by
+    # `start_engine!/0` above) even though it runs under the application-wide supervisor.
     on_exit(fn -> DynamicSupervisor.terminate_child(SchedulerSupervisor, sched_pid) end)
 
     exec = put_req_header(conn, "authorization", "Bearer " <> board_key)

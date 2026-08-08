@@ -1,5 +1,5 @@
 defmodule Relay.RunsTest do
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   alias Relay.Runs
   alias Relay.Runs.FakeDispatcher
@@ -11,7 +11,7 @@ defmodule Relay.RunsTest do
 
   setup do
     FakeDispatcher.register(self())
-    start_supervised!(Relay.Runs.Supervisor)
+    start_engine!()
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Runs Board"})
