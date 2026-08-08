@@ -69,8 +69,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 41
-EXECUTOR_FINGERPRINT = "9844826e8b27218758ffc403e050a778a1696ffa53cc3e79cb1364a4892c3884"
+EXECUTOR_VERSION = 42
+EXECUTOR_FINGERPRINT = "b35fd704b2c0169b9a6545e1deaec7f673f37914195bb3134bdcde43d32c513c"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -2066,7 +2066,7 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
     return proc.wait() == 0, captured
 
 
-def determine_agent_outcome(job, ok, outcome_path):
+def determine_agent_outcome(job, ok, outcome_path, cwd=None):
     """Agent-node outcome contract, evaluated in order (relay.md is the write-up):
       1. re-fetch the card — status needs_input ⇒ needs_input (exactly as work() detects today);
       2. else an outcome file at $RELAY_NODE_OUTCOME supplies {outcome, detail} — the only
@@ -2076,7 +2076,10 @@ def determine_agent_outcome(job, ok, outcome_path):
          so treating it as `succeeded` lets a node route past its own gate having produced
          nothing (RLY-163 — the RLY-159 dogfood landed a card in Spec:Review with an empty
          spec exactly this way, and the same hole would let a silent review reach `merge`).
-         Rule 1 still covers the legitimate "I stopped to ask a human" case.
+         Rule 1 still covers the legitimate "I stopped to ask a human" case. The verdict is
+         unconditional, but when `cwd` is given the DETAIL names any uncommitted work the node
+         left in that worktree (RE298) — "did not declare" and "did nothing" are not the same
+         thing, and the retry reads this detail as its findings.
       4. NOTE (RLY-194): the SERVER may additionally override a declared `succeeded` back to
          `failed` for a node marked expects_commits that produced no commits (HEAD unchanged).
          That rule is server-side only — the three rules above are unchanged, and no field is
@@ -2105,8 +2108,43 @@ def determine_agent_outcome(job, ok, outcome_path):
         return ("failed",
                 f"agent exited 0 but did not write an outcome to $RELAY_NODE_OUTCOME "
                 f"({outcome_path}) and did not raise needs-input — a node must declare its "
-                f"verdict, so this is not treated as success")
-    return ("failed", "agent exited non-zero")
+                f"verdict, so this is not treated as success" + abandoned_work_note(cwd))
+    return ("failed", "agent exited non-zero" + abandoned_work_note(cwd))
+
+
+def uncommitted_paths(path):
+    """The paths `git status --porcelain` reports dirty in `path`, or `[]` when it cannot be
+    read (a missing slot, a non-git directory). Unreadable is not the same as clean, but the
+    only caller is decorating a failure detail, where guessing wrong is worse than saying
+    nothing."""
+    try:
+        proc = subprocess.run(["git", "status", "--porcelain"], cwd=path,
+                              capture_output=True, text=True)
+    except OSError:
+        return []
+    if proc.returncode != 0:
+        return []
+    return [line[3:].strip() for line in proc.stdout.splitlines() if line.strip()]
+
+
+def abandoned_work_note(cwd):
+    """A sentence naming the uncommitted work an agent left behind, or "" when there is none.
+
+    RE298: a node that exits without declaring may still have done every edit its findings
+    asked for — `acceptance_fix` twice exited 0 having correctly fixed both failing criteria
+    across six files, and committed none of them. A detail that says only "did not write an
+    outcome" makes that work invisible: the retry re-derives it from scratch, and the next job
+    to reuse the slot sweeps it into a stash (`reset_worktree`) where nobody looks. The verdict
+    is still `failed` — the node did not declare — but this detail is what the server hands the
+    retry as its findings, so it must point at what is already sitting in the worktree.
+    """
+    paths = uncommitted_paths(cwd) if cwd else []
+    if not paths:
+        return ""
+    shown = ", ".join(paths[:10]) + (", …" if len(paths) > 10 else "")
+    return (f" It left {len(paths)} uncommitted file(s) in {cwd} — the work may be DONE but "
+            f"undeclared, so read it before redoing it (`git -C {cwd} diff`; a later job on "
+            f"this slot stashes leftovers, recover with `git stash list`): {shown}")
 
 
 def git_head_sha(path):
@@ -2318,7 +2356,7 @@ def run_node_job(job, slot_path, control, partition=None):
                 session_id=job.get("resume_session"),
                 outcome_path=outcome_path, on_proc=control.register, agent=job.get("agent"),
                 partition=partition, scratch=scratch, plan=plan)
-            outcome, detail = determine_agent_outcome(job, ok, outcome_path)
+            outcome, detail = determine_agent_outcome(job, ok, outcome_path, cwd=slot_path)
         finally:
             shutil.rmtree(outcome_dir, ignore_errors=True)
     else:  # shell | gate

@@ -734,9 +734,13 @@ that set, not this page.
 
 Four rules sit on top of it:
 
-- **Silence is failure.** A node that exits without declaring is reported `failed` whatever its
-  exit code — a node that did nothing is indistinguishable from one that exited early, so it must
-  never route past its own gate.
+- **Silence is failure — but silence is not nothing.** A node that exits without declaring is
+  reported `failed` whatever its exit code: a node that did nothing is indistinguishable from one
+  that exited early, so it must never route past its own gate. The *detail*, however, names any
+  uncommitted work the node left in its worktree (RE298), because "did not declare" and "did
+  nothing" are different failures and the retry receives this detail as its findings. Without it
+  the work is invisible — the retry redoes it from scratch and the next job on that slot sweeps it
+  into a stash.
 - **A success claim must be backed by a commit.** On a node marked `expects_commits`, a
   `succeeded` that left HEAD unmoved is rewritten to `failed` before finalize
   ([failures.md](failures.md) A6).

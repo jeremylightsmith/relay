@@ -1651,6 +1651,71 @@ class AgentOutcomeContractTest(unittest.TestCase):
         self.assertIn("did not write", detail)
         self.assertEqual(relay.determine_agent_outcome(job, False, "/nope.json")[0], "failed")
 
+    def _dirty_repo(self):
+        """A git worktree carrying one committed file and one uncommitted edit."""
+        import tempfile
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        _git(d, "init", "-q")
+        _write(os.path.join(d, "kept.txt"), "committed\n")
+        _git(d, "add", "-A")
+        _git(d, "commit", "-qm", "base")
+        _write(os.path.join(d, "kept.txt"), "edited\n")
+        _write(os.path.join(d, "new.txt"), "added\n")
+        return d
+
+    def test_an_undeclared_exit_names_the_work_it_abandoned_in_the_worktree(self):
+        """RE298: `acceptance_fix` twice exited 0 without writing $RELAY_NODE_OUTCOME, having
+        made every edit its findings asked for — six files, uncommitted. The card said only
+        "did not write an outcome", so the work was invisible: nothing pointed at the worktree,
+        and the next job on that slot would have stashed it away. The verdict stays `failed`
+        (the node still did not declare), but the detail must name what was left behind, since
+        that detail is what the retry receives as its findings."""
+        relay.get_card = lambda ref: {"status": "working"}
+        job = {"vars": {"ref": "RLY-1"}}
+        outcome, detail = relay.determine_agent_outcome(job, True, "/nope.json",
+                                                        cwd=self._dirty_repo())
+        self.assertEqual(outcome, "failed")
+        self.assertIn("did not write", detail)
+        self.assertIn("uncommitted", detail)
+        self.assertIn("kept.txt", detail)
+        self.assertIn("new.txt", detail)
+
+    def test_a_crashed_agent_also_names_the_work_it_abandoned(self):
+        """An agent that dies mid-task strands edits the same way one that exits 0 does."""
+        relay.get_card = lambda ref: {"status": "working"}
+        job = {"vars": {"ref": "RLY-1"}}
+        outcome, detail = relay.determine_agent_outcome(job, False, "/nope.json",
+                                                        cwd=self._dirty_repo())
+        self.assertEqual(outcome, "failed")
+        self.assertIn("uncommitted", detail)
+        self.assertIn("new.txt", detail)
+
+    def test_an_undeclared_exit_on_a_clean_worktree_says_nothing_was_left(self):
+        """The mirror case must not imply abandoned work that does not exist."""
+        import tempfile
+        relay.get_card = lambda ref: {"status": "working"}
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        _git(d, "init", "-q")
+        _write(os.path.join(d, "kept.txt"), "committed\n")
+        _git(d, "add", "-A")
+        _git(d, "commit", "-qm", "base")
+
+        job = {"vars": {"ref": "RLY-1"}}
+        _outcome, detail = relay.determine_agent_outcome(job, True, "/nope.json", cwd=d)
+        self.assertNotIn("uncommitted", detail)
+
+    def test_an_undeclared_exit_survives_a_worktree_it_cannot_read(self):
+        """A missing or non-git cwd is not evidence of anything — it must not crash the
+        report path, which is the executor's only way to tell the board what happened."""
+        relay.get_card = lambda ref: {"status": "working"}
+        job = {"vars": {"ref": "RLY-1"}}
+        outcome, detail = relay.determine_agent_outcome(job, True, "/nope.json",
+                                                        cwd="/nonexistent-slot")
+        self.assertEqual(outcome, "failed")
+        self.assertIn("did not write", detail)
+
     def test_a_declared_success_is_still_honored(self):
         import tempfile
         relay.get_card = lambda ref: {"status": "working"}
@@ -1797,7 +1862,7 @@ class RunNodeJobTest(unittest.TestCase):
     def test_agent_job_captures_session_and_uses_the_contract(self):
         relay._stream_claude_job = lambda prompt, cwd, tag="", session_id=None, \
             outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None: (True, "sess-9")
-        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "")
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-2"})
         outcome, detail, sha, session = relay.run_node_job(j, "/tmp/wt", self.control)
@@ -1814,7 +1879,7 @@ class RunNodeJobTest(unittest.TestCase):
             return True, "sess-9"
 
         relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "")
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 agent="plan-implementer", vars={"ref": "RLY-2"})
         relay.run_node_job(j, "/tmp/wt", self.control)
@@ -1830,7 +1895,7 @@ class RunNodeJobTest(unittest.TestCase):
             return True, "sess-9"
 
         relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "")
         j = job(node_type="agent", run="/brainstorm {ref}", id="nj-2", run_id="r1",
                 agent=None, vars={"ref": "RLY-2"})
         relay.run_node_job(j, "/tmp/wt", self.control)
@@ -1847,7 +1912,7 @@ class RunNodeJobTest(unittest.TestCase):
             return True, "sess-9"
 
         relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "")
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 resume_session="sess-prior", vars={"ref": "RLY-2"})
         relay.run_node_job(j, "/tmp/wt", self.control)
@@ -1864,8 +1929,9 @@ class RunNodeJobTest(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.dirname(outcome_path)))
             return True, "sess-9"
 
-        def fake_determine(job, ok, path):
+        def fake_determine(job, ok, path, cwd=None):
             seen["determine_path"] = path
+            seen["determine_cwd"] = cwd
             return "succeeded", ""
 
         relay._stream_claude_job = fake_stream
@@ -1880,6 +1946,9 @@ class RunNodeJobTest(unittest.TestCase):
         self.assertFalse(seen["stream_path"].startswith("/tmp/wt"))
         # cleaned up once the job is done — no leakage into the next job on this slot
         self.assertFalse(os.path.exists(os.path.dirname(seen["stream_path"])))
+        # ...and the judge is pointed at the worktree, so an undeclared exit can report the
+        # uncommitted work left there (RE298)
+        self.assertEqual(seen["determine_cwd"], "/tmp/wt")
 
     def test_git_sha_is_none_when_rev_parse_fails(self):
         relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: True
@@ -1933,7 +2002,7 @@ class RunNodeJobTest(unittest.TestCase):
             return True, "sess-1"
 
         relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "")
         j = job(node_type="agent", run="/brainstorm {ref}", id="nj-8", run_id="r1",
                 vars={"ref": "RLY-8"})
         relay.run_node_job(j, "/tmp/wt", self.control)
@@ -1956,7 +2025,7 @@ class RunNodeJobTest(unittest.TestCase):
 
         relay._stream_claude_job = fake_stream
         relay._stream_shell = fake_shell
-        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "")
 
         agent_job = job(node_type="agent", run="review it", id="nj-9", run_id="r1",
                         vars={"ref": "RLY-9"})
@@ -1988,7 +2057,7 @@ class RunNodeJobTest(unittest.TestCase):
             return True, "sess-1"
 
         relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "")
 
         j = job(node_type="agent", run="implement {ref}", id="nj-251", run_id="r1",
                 vars={"ref": "RE251", "findings": "assert on CSV bytes"})
@@ -2355,6 +2424,11 @@ def isolate_relay_state(test):
     test.addCleanup(lambda: os.environ.__setitem__("RELAY_STATE_DIR", prev)
                     if prev is not None else os.environ.pop("RELAY_STATE_DIR", None))
     return statedir
+
+
+def _write(path, text):
+    with open(path, "w") as f:
+        f.write(text)
 
 
 def _git(cwd, *args):
@@ -5270,7 +5344,7 @@ class TestPartitionTest(unittest.TestCase):
             return True, "sess-1"
 
         relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "")
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
         try:
@@ -5419,7 +5493,7 @@ class ScratchPathTest(unittest.TestCase):
             return True, "sess-1"
 
         relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "")
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
         try:
@@ -5536,7 +5610,7 @@ class PlanPathTest(unittest.TestCase):
             return True, "sess-1"
 
         relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path: ("succeeded", "")
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "")
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
         try:
