@@ -1,5 +1,17 @@
 defmodule RelayWeb.Api.BoardLogsTest do
-  use RelayWeb.ConnCase, async: true
+  # NOT `async: true`, under ADR 0009 rule 1's sanctioned exception: a process-global singleton
+  # with no instance seam. `POST /api/board/logs` -> `AgentLog.record/2` always enqueues onto the
+  # app-wide `Relay.Activity.LogSink` (unlike `log_sink_test.exs` and
+  # `log_sink_resilience_test.exs`, which start their own sink and are async).
+  #
+  # `allow!/1` cannot buy async here, and this module tried it and raced (RE298): `Sandbox.allow/3`
+  # binds a pid to exactly ONE connection, so when two tests overlap the second gets
+  # `{:already, :allowed}` and the sink stays on the FIRST test's connection. `LogSink`'s
+  # ref -> card_id lookup then cannot see this test's card, resolves to `[]`, and the flush
+  # inserts and broadcasts nothing — raising nothing and logging nothing. The test just never
+  # receives its broadcast. Shared mode is the documented fallback for a singleton like this;
+  # async needs an injectable sink on the HTTP path, which is a production change, not a test one.
+  use RelayWeb.ConnCase, async: false
 
   import Ecto.Query
 
@@ -7,16 +19,7 @@ defmodule RelayWeb.Api.BoardLogsTest do
   alias Relay.AgentLog
   alias Relay.Repo
 
-  # RE298 / ADR 0009 rule 2: `POST /api/board/logs` -> `AgentLog.record/2` always enqueues onto
-  # the app-wide `Relay.Activity.LogSink` (no injectable sink on this path — unlike
-  # `log_sink_test.exs`, which starts its own). `allow!/1` grants that single global process
-  # access to this test's sandbox connection for the life of the test; the ref -> card_id lookup
-  # inside `LogSink` only ever resolves cards visible in the connection it currently holds, so a
-  # concurrently-running test's entries simply fail to resolve and get dropped (logged, not
-  # inserted) rather than leaking across tests.
   setup %{conn: conn} do
-    allow!(Process.whereis(LogSink))
-
     board = insert(:board)
     {:ok, %{token: token}} = Relay.ApiKeys.create_key(board, board.owner)
     {:ok, conn: put_req_header(conn, "authorization", "Bearer " <> token), board: board}

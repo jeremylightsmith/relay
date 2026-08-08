@@ -6,7 +6,7 @@ defmodule RelayWeb.Api.VersionControllerTest do
   # and it is the only module that issues a live `GET /api/version` (the other two hits are a
   # docstring and a docs-string assertion). Tests within one module are serialized, so these three
   # cannot race each other. **Re-check this the moment a second test hits `/api/version`** — at
-  # that point the env var needs a real seam (or this module goes `async: false`).
+  # that point the env var needs a real seam (or this module drops out of the async pool).
   use RelayWeb.ConnCase, async: true
 
   setup do

@@ -7,7 +7,9 @@ defmodule Relay.TestSupport.LogNoiseFilter do
       — emitted when an async test checks its sandbox connection back in while a background
       process still has a query in flight. A pure teardown race, never a real failure.
     * `LogSink dropped N buffered log line(s): ...` — `Relay.Activity.LogSink` is best-effort by
-      construction; in tests its debounced flush routinely loses the same ownership race.
+      construction, and `log_sink_resilience_test.exs` drives that exact path on purpose (a flush
+      with no DB access must drop its batch rather than crash the sink). The same line can also
+      appear when a debounced flush fires after its test's sandbox owner has already checked in.
 
   Installed in `test/test_helper.exs`. A primary filter runs ahead of every handler, including
   `ExUnit.CaptureLog`'s — so ONLY patterns that no `capture_log` test relies on may live here.

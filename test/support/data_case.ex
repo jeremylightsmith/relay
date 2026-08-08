@@ -58,14 +58,28 @@ defmodule Relay.DataCase do
 
   Tolerates a process that is already an owner or already allowed, and the shared-mode case, so
   the call is safe in a module that is still `async: false`.
+
+  > #### Only for a pid this test owns {: .warning}
+  >
+  > `Sandbox.allow/3` binds a pid to exactly **one** connection, so this cannot isolate an
+  > app-wide singleton. If a concurrent test allowed it first, the `{:already, :allowed}` branch
+  > below leaves it on *that* test's connection and this test's queries silently see nothing.
+  > A shared singleton needs an instance seam (its own supervised process per test) to go
+  > `async: true` — see ADR 0009's Consequences and `board_logs_test.exs`.
   """
   def allow!(pid) when is_pid(pid) do
     case Sandbox.allow(Relay.Repo, self(), pid) do
-      :ok -> pid
-      {:already, _owner_or_allowed} -> pid
+      :ok ->
+        pid
+
+      # NOT necessarily bound to THIS test's connection — see the warning above.
+      {:already, _owner_or_allowed} ->
+        pid
+
       # Shared mode (`async: false`): the caller holds no checkout of its own, so there is
       # nothing to grant — every process in the VM already shares the owner's connection.
-      :not_found -> pid
+      :not_found ->
+        pid
     end
   end
 

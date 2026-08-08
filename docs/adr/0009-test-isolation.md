@@ -165,6 +165,15 @@ and every process the engine spawns on its behalf finds it. With nothing registe
 - `Relay.Runs.Capacity`'s ETS table is resolved per instance rather than being a single named
   table, so a test's capacity can no longer be read or wiped by a concurrent test. `reset/0` is
   gone; a fresh instance starts with an empty table.
+- **`Sandbox.allow/3` binds a pid to exactly one connection, so it cannot make an app-wide
+  singleton async.** `Relay.DataCase.allow!/1` is rule 2's first mechanism, but it only isolates a
+  process *this test owns*. When two async tests both `allow!` the same global process, the second
+  gets `{:already, :allowed}` and that process stays on the **first** test's connection. This is a
+  silent failure, not a loud one: `Relay.Activity.LogSink` resolves its `ref -> card_id` lookup on
+  the wrong connection, finds nothing, and inserts and broadcasts nothing — no exception, no log
+  line, just a broadcast the test never receives (~4% of runs). `test/relay_web/api/board_logs_test.exs`
+  was flipped this way, raced, and is back to `async: false` under rule 1's singleton exception.
+  **A shared singleton needs an instance seam to go async; `allow!` is not a substitute for one.**
 - **Known limitation — the `Listener` firehose is still process-global.** Rule 2 gave every engine
   its own names, but not its own event topic: `Relay.Runs.Listener.init/1` subscribes to
   `Relay.Events.subscribe_firehose/0`, which has no per-instance variant. So the `Listener` that
@@ -181,13 +190,21 @@ and every process the engine spawns on its behalf finds it. With nothing registe
   produced, this is why.**
 - Wall-clock, `mix test --exclude browser`:
   - **before: 24.8s (18.6s async + 6.2s sync)**
-  - **after: 19.9s (19.8s async + 0.1s sync)**, green on seeds 1, 424242 and 999 plus three
-    randomised runs. The 0.1s sync tail is `test/support/data_case_test.exs` (reaches
-    `Sandbox.allow/3`'s `:not_found` branch on purpose), `test/relay/runs/executor_reaper_test.exs`
-    and `test/relay_web/live/board_settings_flow_preflight_test.exs` (the still-open
-    global-firehose-vs-per-instance-`Listener` gap), `test/relay_web/story_map_filter_test.exs`
-    (its own atom-count race), and the two `RelayWeb.ApiLog` modules — each carries its own
-    ADR-0009-sanctioned reason comment.
+  - **after: 20.6s (20.5s async + 0.1s sync)** — median of three consecutive runs (20.5s / 20.6s /
+    20.9s), green on seeds 1, 424242 and 999. The **6.2s serial tail is gone**, which is the whole
+    point; the remaining spread between 19.9s and 21.6s across runs is machine noise, not signal.
+  - The 0.1s sync tail is six modules, each carrying its own ADR-0009-sanctioned reason comment:
+    `test/support/data_case_test.exs` (reaches `Sandbox.allow/3`'s `:not_found` branch on purpose),
+    `test/relay/runs/executor_reaper_test.exs` and
+    `test/relay_web/live/board_settings_flow_preflight_test.exs` (the still-open
+    global-firehose-vs-per-instance-`Listener` gap), `test/relay_web/api/board_logs_test.exs` (the
+    app-wide `LogSink` singleton, see the `Sandbox.allow/3` bullet above), and the two
+    `RelayWeb.ApiLog` modules.
+  - `test/relay_web/story_map_filter_test.exs` is **no longer** in that tail. It was serial for its
+    own reason — a no-atom-leak test reading `:erlang.system_info(:atom_count)`, a VM-global counter
+    every concurrently-loading module moves. Asserting instead on whether an atom with each forged
+    *text* exists, before and after, proves the same property and is async-safe. The general lesson:
+    when a test reads a global counter, look for the process-local question it was really asking.
 
 ## Alternatives considered
 
