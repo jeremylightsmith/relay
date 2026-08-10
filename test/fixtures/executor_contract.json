@@ -114,6 +114,40 @@
       "status": "ok"
     }
   },
+  "scaffold": {
+    "file_path_example": "/api/scaffold/bin/relay",
+    "manifest": {
+      "items": [
+        {
+          "bytes": "<bytes>",
+          "path": ".claude/skills/relay-doctor/SKILL.md",
+          "sha256": "<sha256>"
+        },
+        {
+          "bytes": "<bytes>",
+          "path": ".claude/skills/relay-onboard/SKILL.md",
+          "sha256": "<sha256>"
+        },
+        {
+          "bytes": "<bytes>",
+          "path": ".claude/skills/relay-setup/SKILL.md",
+          "sha256": "<sha256>"
+        },
+        {
+          "bytes": "<bytes>",
+          "path": ".claude/skills/relay-update/SKILL.md",
+          "sha256": "<sha256>"
+        },
+        {
+          "bytes": "<bytes>",
+          "path": "bin/relay",
+          "sha256": "<sha256>"
+        }
+      ],
+      "version": "<scaffold-version>"
+    },
+    "manifest_path": "/api/scaffold"
+  },
   "talk_claim": {
     "first_turn": {
       "author": "Test User",
@@ -176,7 +210,7 @@
       "turn_state": "done"
     }
   },
-  "version": 3,
+  "version": 4,
   "vocabulary": {
     "audit_severities": [
       "error",

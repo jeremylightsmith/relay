@@ -58,6 +58,7 @@ flowchart LR
     Runs --> Events
     Runs --> Flows
     Runs --> Repo
+    Runs --> Scaffold
     StoryMap --> Cards
     StoryMap --> Events
     StoryMap --> Repo
