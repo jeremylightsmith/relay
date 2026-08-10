@@ -280,7 +280,7 @@ class ReverseContractTest(unittest.TestCase):
 
     def test_the_heartbeat_response_carries_the_latest_fetchable_version(self):
         """RE185: the executor auto-updates against `latest_executor_version` (what
-        relay-config actually serves), which is a DIFFERENT number from `required_version`
+        the board actually serves), which is a DIFFERENT number from `required_version`
         (the floor below which work is refused)."""
         self.assertIn("latest_executor_version", CONTRACT["heartbeat"]["response"])
 
@@ -2461,8 +2461,8 @@ class AutoUpdateDownloadTest(unittest.TestCase):
         self.assertIn("EXECUTOR_VERSION", source)
 
     def test_the_downloaded_files_own_version_wins_over_any_announcement(self):
-        """A board ahead of relay-config must be harmless, not a chase: the version is read
-        from the bytes we actually got."""
+        """A board that announces a version ahead of what it actually serves must be harmless,
+        not a chase: the version is read from the bytes we actually got."""
         self.body = VALID_STUB.format(relay.EXECUTOR_VERSION + 5).encode()
         _source, version = relay.download_executor("http://config.test")
         self.assertEqual(version, relay.EXECUTOR_VERSION + 5)
@@ -2486,9 +2486,10 @@ class AutoUpdateDownloadTest(unittest.TestCase):
         self.assertTrue(any("does not compile" in m for m in self.logs))
 
     def test_an_equal_or_older_version_is_a_benign_noop_not_a_failure(self):
-        # relay-config serving <= the running version is the EXPECTED publish-window state (a board
-        # ahead of relay-config), not a refusal — so it returns NOTHING_NEWER, distinct from the
-        # None that a genuine failure returns, so it never burns the anti-thrash budget (RE185).
+        # The board serving <= the running version is the EXPECTED publish-window state (a
+        # deploy committed but not yet live), not a refusal — so it returns NOTHING_NEWER,
+        # distinct from the None that a genuine failure returns, so it never burns the
+        # anti-thrash budget (RE185).
         for v in (relay.EXECUTOR_VERSION, relay.EXECUTOR_VERSION - 1):
             self.body = VALID_STUB.format(v).encode()
             self.assertIs(relay.download_executor("http://config.test"), relay.NOTHING_NEWER)
@@ -2709,9 +2710,10 @@ class MaybeAutoUpdateTest(unittest.TestCase):
         self.assertFalse(self.state["disabled"])
 
     def test_a_benign_nothing_newer_does_not_count_toward_the_cap(self):
-        # RE185 round-3: relay-config serving nothing newer is the expected window while a publish
-        # is committed but not yet pushed — every heartbeat hits it, so counting it would cap out
-        # and PERMANENTLY disable self-update over a non-problem. Only genuine failures (None) count.
+        # RE185 round-3: the board serving nothing newer is the expected window while a publish
+        # is committed but not yet deployed — every heartbeat hits it, so counting it would cap
+        # out and PERMANENTLY disable self-update over a non-problem. Only genuine failures
+        # (None) count.
         relay.download_executor = lambda url: relay.NOTHING_NEWER
         self.state["attempts"] = relay.AUTO_UPDATE_MAX_ATTEMPTS - 1
         self.assertFalse(self._run(self.new))
@@ -4461,8 +4463,8 @@ class UpdateTest(unittest.TestCase):
             self.assertEqual(json.load(f)["version"], self.manifest()["version"])
 
     def test_the_five_are_the_executor_and_the_four_relay_skills(self):
-        capture_ret(relay.cmd_update, self.args())
-        installed = sorted(self.served)
+        report = capture_ret(relay.cmd_update, self.args())
+        installed = sorted(report["written"])
 
         self.assertEqual(len(installed), 5)
         self.assertIn(relay.EXECUTOR_REL, installed)
@@ -4574,6 +4576,13 @@ class UpdateTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             capture_ret(relay.cmd_update, self.args())
         self.assertFalse(os.path.exists(self.path(relay.EXECUTOR_REL)))
+
+    def test_a_manifest_path_escaping_the_project_root_is_refused(self):
+        self.served["../evil.md"] = "evil\n"
+
+        with self.assertRaises(SystemExit):
+            capture_ret(relay.cmd_update, self.args())
+        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(self.tmp), "evil.md")))
 
     # ---- CLI surface ----
 
