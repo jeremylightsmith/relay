@@ -50,7 +50,7 @@ current-state, de-dup rules, not this carve-out.)
 
 | Home | Reader — and *where they are* | Kind of content | Lifecycle | Published |
 | --- | --- | --- | --- | --- |
-| `relay.md` | a **driver agent in another repo's context** | how to drive a card via `bin/relay` | current; tiny; shipped out by `bin/relay init` | in every consuming repo |
+| `relay.md` | a **driver agent in another repo's context** | how to drive a card via `bin/relay` | current; tiny; authored into a consuming repo by `/relay-onboard` | in every consuming repo |
 | `priv/docs/*` | an integrator/operator **browsing a URL** | product + integration reference & onboarding | current | public site |
 | `docs/architecture/*` | a **contributor editing this repo** | how the system works **today** | current; freshness-gated | public (symlinked) |
 | `docs/adr/*` | anyone **weighing or reviewing a structural change** | a decision + its rationale (the *why*) | durable; immutable once Accepted | internal |

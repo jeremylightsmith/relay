@@ -24,7 +24,7 @@ defmodule RelayWeb.DocsControllerTest do
           "Create a board",
           "RELAY_URL",
           "RELAY_API_KEY",
-          "relay init",
+          "/relay-setup",
           "relay execute",
           "Settings",
           "Next up"
@@ -62,33 +62,35 @@ defmodule RelayWeb.DocsControllerTest do
            "steps are out of order: #{inspect(Enum.zip(headings, offsets))}"
   end
 
-  test "the bootstrap step is real, not flagged as unbuilt (RLY-181 shipped)", %{conn: conn} do
+  test "the bootstrap step points at the board, not a third-party repo (RE304)", %{conn: conn} do
     html = conn |> get(~p"/docs") |> html_response(200)
 
     refute html =~ "RLY-181"
     refute html =~ "not available yet"
-    assert html =~ "relay-config"
-    assert html =~ "bin/relay init"
+    assert html =~ "/api/scaffold"
+    assert html =~ "/relay-setup"
+    refute html =~ "relay-config"
+    refute html =~ "install.sh"
+    refute html =~ "bin/relay init"
   end
 
-  test "the CLI page documents init", %{conn: conn} do
+  test "the CLI page documents update and has retired init", %{conn: conn} do
     html = conn |> get(~p"/docs/cli") |> html_response(200)
 
-    assert html =~ "bin/relay init"
-    assert html =~ "--config-url"
-    assert html =~ "relay-config"
-    refute html =~ "--force"
-    refute html =~ "--dry-run"
+    assert html =~ "bin/relay update"
+    assert html =~ "--check"
+    refute html =~ "bin/relay init"
+    refute html =~ "relay-config"
+    refute html =~ "publish_config"
   end
 
-  test "the runner architecture page describes the relay-config scaffold source", %{conn: conn} do
+  test "the runner architecture page describes the app-served scaffold (RE304)", %{conn: conn} do
     html = conn |> get(~p"/docs/architecture-runner") |> html_response(200)
 
-    assert html =~ "relay-config"
-    refute html =~ "/api/scaffold"
-    # RLY-208: ScaffoldController was deleted; the page's "Sources of truth" footer must not
-    # still cite it.
-    refute html =~ "scaffold_controller.ex"
+    assert html =~ "/api/scaffold"
+    assert html =~ "scaffold_controller.ex"
+    refute html =~ "relay-config"
+    refute html =~ "published.json"
   end
 
   test "the getting-started page needs no repo access and links the runbook", %{conn: conn} do

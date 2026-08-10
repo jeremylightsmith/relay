@@ -38,7 +38,7 @@ missing, so an interrupted session continues instead of restarting. On an alread
 
 ## When to Use
 
-- Wiring Relay into a repo for the first time, right after `bin/relay init`.
+- Wiring Relay into a repo for the first time, right after `/relay-setup`.
 - A repo whose `.claude/` and whose flows have drifted so far apart that the answer is a *path*,
   not a patch.
 - Before enabling a board's flows for the first time.
@@ -49,16 +49,19 @@ Already wired and one node broke? That is `/relay-doctor`, not this.
 
 Two independent floors. Each is a **stop**, not a mutation — neither is something a skill can fix.
 
-1. **Scaffold floor** — `bin/relay`, `relay.md`, and `.relay/executor.json` must exist. If any is
-   missing, stop and hand the human the bootstrap to run in a real terminal (`bin/relay init` needs
-   a TTY and writes nothing when piped):
+1. **Scaffold floor** — `bin/relay` and the four `relay-*` skills must be installed. If
+   `bin/relay` is missing, stop and hand the human the entry point:
 
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/jeremylightsmith/relay-config/main/install.sh | sh
-   bin/relay init
+   ```
+   /relay-setup
    ```
 
-   Resume from Phase 1 when they say go.
+   If `bin/relay` is present but any `relay-*` skill is missing or stale, run `/relay-update`
+   (via the `Skill` tool) and continue. Resume from Phase 1 when the floor is met.
+
+   `relay.md` and `.relay/executor.json` are **not** part of that floor — they are not
+   Relay-owned served files, and authoring them for this repo is part of onboarding's own work
+   below.
 
 2. **Credential floor** — `RELAY_URL` and `RELAY_API_KEY` must be set and `./bin/relay board` must
    succeed. If not, stop with the checklist: mint a board key at

@@ -7,15 +7,14 @@ exits non-zero.
 > [!NOTE]
 > Every write is attributed to the board's AI agent, **"Relay AI"**. Set `RELAY_URL` and
 > `RELAY_API_KEY` first — see [Authentication & API access](/docs/authentication). The one
-> exception is `bin/relay init`, which needs neither: it pulls scaffolding from the
-> `relay-config` repo over plain HTTPS and runs before a board key exists (it does need an
-> interactive terminal).
+> exception is `bin/relay update`, which needs only `RELAY_URL`: the board serves the scaffold
+> unauthenticated, because it runs before a board key exists.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `bin/relay init` | Interactively scaffold this project from the `relay-config` repo: `relay.md`, `.claude/` agents + skills, `AGENTS.md`/`CLAUDE.md`. Flags: `--config-url` (relay-config base, else `RELAY_CONFIG_URL`), `--url` (board host for the closing checklist, else `RELAY_URL`), `--no-self-update` (skip the upgrade-only, verified `bin/relay` refresh). See [Getting started](/docs) |
+| `bin/relay update [--check]` | Install or refresh the five Relay-owned files from the board (`bin/relay` + the four `relay-*` skills). `--check` reports the served vs. local version and which files would change, and writes nothing. Add `--json` for machine output. Prefer the `/relay-update` skill, which wraps it. See [Getting started](/docs) |
 | `bin/relay board` | The board: stages with their cards |
 | `bin/relay card RLY-12` | One card: description, plan, branch, timeline |
 | `bin/relay why RLY-12` | **Why isn't this card moving?** One plain-language answer |
@@ -53,9 +52,23 @@ Every `--json` command also takes `--field PATH` to print a single dotted-path v
 
 ## Keeping `bin/relay` current
 
-`bin/relay execute` keeps itself up to date (RE185). Each heartbeat reply names
-`latest_executor_version` — the newest CLI the public `relay-config` repo actually serves — and
-when the executor is behind it downloads that file, verifies it parses, writes it over its own
+Relay owns five files in your project — `bin/relay` and the four `relay-*` skills — and your
+board serves them at `GET /api/scaffold`. They are Relay's, never yours, so an update overwrites
+them unconditionally; nothing else in `.claude/` is ever touched.
+
+```bash
+bin/relay update --check    # served vs. local version, and what would change. Writes nothing.
+bin/relay update            # apply
+```
+
+The manifest's `version` is derived from the files' content, so it moves exactly when they do.
+`bin/relay update` refetches when that version differs from the one recorded in
+`.relay/scaffold.json`, **or** when any of the five is missing on disk — so a deleted skill comes
+back even though nothing was released.
+
+`bin/relay execute` also keeps itself up to date (RE185). Each heartbeat reply names
+`latest_executor_version` — the `EXECUTOR_VERSION` of the `bin/relay` the board actually serves —
+and when the executor is behind it downloads that file, verifies it parses, writes it over its own
 `bin/relay`, and restarts **at a job boundary**, so a running node is never interrupted. A
 download that will not compile is refused and the previous version keeps running, and a
 `bin/relay` with local modifications this executor did not write is never overwritten.
@@ -67,11 +80,7 @@ Two `.relay/executor.json` keys control it:
 | `auto_update` | `true` | Set `false` to pin this machine's CLI. It then falls back to RLY-184's behaviour: once the board's minimum passes it by, it stops claiming and says so loudly. |
 | `auto_update_min_interval` | `300` | Seconds between update attempts. |
 
-`RELAY_CONFIG_URL` overrides where the CLI is fetched from.
-
-Publishing stays a human step: `mix relay.publish_config` regenerates the `relay-config` tree and
-records what it published in `.relay/published.json`. `mix relay.publish_config --check` exits
-non-zero when `bin/relay` is ahead of that marker (i.e. executors cannot yet fetch your change);
-`mix precommit` runs the `--check --warn` form, which prints the same warning without failing.
+Publishing is now **coupled to deploying**: the scaffold is built into the app's image, so a
+skill or CLI fix reaches projects when the app ships, and there is nothing to publish by hand.
 
 For the autonomous runner and its operating rules, see [the runner](/docs/architecture-runner).

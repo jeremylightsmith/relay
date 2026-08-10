@@ -43,37 +43,40 @@ the error you get without it.
 
 ## 3. Get the CLI and scaffold your project
 
-Download the executor, then run init **in a terminal** (init is interactive and will
-refuse a piped/non-TTY run):
+Everything the CLI needs is served by **your board** — **no access to the Relay repository is
+needed**, there is no repository to clone, and nothing comes from a third party.
+
+Download the `/relay-setup` skill into your project, then run it inside Claude Code:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jeremylightsmith/relay-config/main/install.sh | sh
-bin/relay init
+mkdir -p .claude/skills/relay-setup
+curl -fsSL "$RELAY_URL/api/scaffold/.claude/skills/relay-setup/SKILL.md" \
+  -o .claude/skills/relay-setup/SKILL.md
 ```
 
-`bin/relay init` pulls configuration from the `relay-config` repo, keeps `bin/relay` up
-to date, installs `relay.md` (how your agent drives Relay) and wires it into
-`CLAUDE.md`/`AGENTS.md`, then walks you through each remaining skill and agent one at a
-time — **no access to the Relay repository is needed**, everything is fetched from
-`relay-config`, not cloned from anywhere:
+```
+/relay-setup
+```
 
-- `.relay/executor.json` — how many jobs this machine will run at once, and in which
-  isolation class;
-- `.claude/agents/` — the agent definitions the flows invoke by name;
-- `.claude/skills/` — the skills the Spec and Plan flows run;
-- `AGENTS.md` — the project instructions every agent reads.
+That is the whole of CLI setup. `/relay-setup` downloads `bin/relay` from
+`$RELAY_URL/api/scaffold/bin/relay`, runs `/relay-update` to install the four Relay-owned
+skills, and then runs `/relay-onboard` to wire this repo to your board's flows.
 
-Already have `bin/relay` on this machine? Run `bin/relay init` directly from that
-project directory — it defaults to the public `relay-config` repo (override with
-`--config-url` or `RELAY_CONFIG_URL`) and takes an optional `--url` for the closing
-checklist; it does not need a board URL or an API key to scaffold, since it runs before
-a board key exists.
+Relay owns exactly five files in your project and updates them as a set:
 
-`relay init` is safe to re-run: install an item once and a second run reports it
-`unchanged`, and a file you have edited locally is shown as a diff with the choice to
-overwrite or leave it. `--no-self-update` suppresses the automatic `bin/relay` upgrade
-that otherwise fires first when `relay-config` is advertising a newer CLI than the one
-you have (it only ever upgrades, never downgrades).
+| Item | Path |
+|---|---|
+| the executor | `bin/relay` |
+| entry-point skill | `.claude/skills/relay-setup/SKILL.md` |
+| updater skill | `.claude/skills/relay-update/SKILL.md` |
+| doctor skill | `.claude/skills/relay-doctor/SKILL.md` |
+| onboarding skill | `.claude/skills/relay-onboard/SKILL.md` |
+
+Everything else in `.claude/` is yours; Relay never writes it.
+
+Already have `bin/relay`? Run `/relay-update` (or `bin/relay update --check` to see what would
+change first). It compares the board's scaffold version against `.relay/scaffold.json`, refetches
+only what actually differs, and restores anything that has been deleted.
 
 **Question for a human:** which project directory should agents work in? It must be a git
 repository, and it should be one you are willing to let agents create branches in.
