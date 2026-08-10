@@ -10,7 +10,7 @@ Config (env): RELAY_URL, RELAY_API_KEY  (a board key from /board/settings)
 Executor-local config: .relay/executor.json (worktree namespace + capacity)
 
   relay execute [--once] [--dry-run] [--interval N]   # the executor
-  relay init [--config-url URL] [--url URL] [--no-self-update]   # scaffold a project (interactive)
+  relay update [--check] [--json]   # install/refresh the Relay-owned files from the board
   relay board [--json]        relay card REF [--json]
   relay why REF [--json]      # why isn't this card moving? — one plain-language answer
   relay runs REF [--json]     # the card's runs + node executions, detail untruncated
@@ -31,7 +31,6 @@ TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output;
 import argparse
 import base64
 import collections
-import difflib
 import fcntl
 import hashlib
 import json
@@ -69,8 +68,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 42
-EXECUTOR_FINGERPRINT = "b35fd704b2c0169b9a6545e1deaec7f673f37914195bb3134bdcde43d32c513c"
+EXECUTOR_VERSION = 43
+EXECUTOR_FINGERPRINT = "0aa2889ac17b9cacabd5153345469b2ef21f2266c515c5b26a6125c61f86fef2"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -2915,51 +2914,64 @@ def parse_executor_version(source):
     return int(m.group(1)) if m else None
 
 
-# `download_executor`'s benign result when relay-config serves a version that is NOT newer than the
+# `download_executor`'s benign result when the board serves a version that is NOT newer than the
 # running one — the expected state while a publish is committed here but not yet pushed to
-# relay-config. Distinct from None (a genuine fetch/parse/compile failure) so it never counts
+# the board. Distinct from None (a genuine fetch/parse/compile failure) so it never counts
 # toward the anti-thrash cap (RE185).
 NOTHING_NEWER = object()
 
 
-def download_executor(config_url):
-    """Fetch and verify bin/relay from relay-config; returns (source_text, version) or None.
+def verify_executor_source(body, url):
+    """Every check a downloaded `bin/relay` must pass before it may touch disk (RE185).
 
-    The ONLY download path — `relay init`'s _self_update calls it too, so init gains the same
-    verification. Every rejection logs its reason and returns None, and the running version
-    keeps serving: a bad update must never be able to leave a machine with a broken executor.
-    """
-    url = config_url.rstrip("/") + "/bin/relay"
-    try:
-        body = _fetch(url)
-    except OSError as e:                    # HTTPError/URLError both subclass OSError
-        log(f"auto-update: GET {url} failed: {e}", kind="error")
-        return None
+    Returns (source, version) or None, logging the reason for every rejection. Shared by
+    auto-update's download_executor and `relay update`, so the trust boundary is defined ONCE:
+    UTF-8, a leading `#!`, a declared EXECUTOR_VERSION, and it compiles. Nothing downloaded is
+    ever executed in this process; it is only written to disk after it compiles."""
     try:
         source = body.decode("utf-8")
     except UnicodeDecodeError as e:
-        log(f"auto-update: {url} is not UTF-8 text ({e}) — refusing it", kind="error")
+        log(f"{url} is not UTF-8 text ({e}) — refusing it", kind="error")
         return None
     if not source.startswith("#!"):
         # An empty body, or an HTML error/login page served where a script should be.
-        log(f"auto-update: {url} did not return a script (no leading #!) — refusing it",
-            kind="error")
+        log(f"{url} did not return a script (no leading #!) — refusing it", kind="error")
         return None
     version = parse_executor_version(source)
     if version is None:
-        log(f"auto-update: {url} declares no EXECUTOR_VERSION — refusing it", kind="error")
+        log(f"{url} declares no EXECUTOR_VERSION — refusing it", kind="error")
         return None
     try:
         # A syntax check with no execution and no .pyc side effect.
         compile(source, "<relay-update>", "exec")
     except (SyntaxError, ValueError) as e:
-        log(f"auto-update: downloaded version {version} does not compile ({e}) — refusing it "
-            f"and staying on {EXECUTOR_VERSION}", kind="error")
+        log(f"the executor at {url} does not compile ({e}) — refusing it and staying on "
+            f"{EXECUTOR_VERSION}", kind="error")
         return None
+    return source, version
+
+
+def download_executor(config_url):
+    """Fetch and verify bin/relay from the board's scaffold endpoint; (source, version) or None.
+
+    The auto-update path. `relay update` shares verify_executor_source below but NOT the
+    strictly-newer gate: update must be able to reinstall the same or an older version (a fresh
+    project, or a deleted file), while auto-update must only ever move forward.
+    """
+    url = config_url.rstrip("/") + "/" + EXECUTOR_REL
+    try:
+        body = _fetch(url)
+    except OSError as e:                    # HTTPError/URLError both subclass OSError
+        log(f"auto-update: GET {url} failed: {e}", kind="error")
+        return None
+    result = verify_executor_source(body, url)
+    if result is None:
+        return None
+    source, version = result
     if version <= EXECUTOR_VERSION:
         # The DOWNLOADED file's version is authoritative, never the number the board announced:
-        # a board ahead of relay-config is then harmless rather than a chase.
-        log(f"auto-update: relay-config serves version {version}, not newer than the running "
+        # a board ahead of what it serves is then harmless rather than a chase.
+        log(f"auto-update: the board serves version {version}, not newer than the running "
             f"{EXECUTOR_VERSION} — nothing to do")
         return NOTHING_NEWER
     return source, version
@@ -3140,7 +3152,7 @@ def maybe_auto_update(cfg, hb, state, config_url):
     # Only a GENUINE failure counts toward the cap: an attempt that reached out for new code and
     # could not run it (fetch/parse/compile → None). The skip above does not (a human's uncommitted
     # bin/relay is deliberate and already warned about), the success below does not, and
-    # NOTHING_NEWER does not — relay-config serving nothing newer is the expected window while a
+    # NOTHING_NEWER does not — the board serving nothing newer is the expected window while a
     # publish is committed here but not yet pushed, so counting it would cap out and permanently
     # disable self-update over a non-problem (RE185).
     result = download_executor(config_url)
@@ -3171,7 +3183,7 @@ def cmd_execute(args):
     DRY = args.dry_run
     cfg = load_executor_config()
     update_state = check_update_handshake(new_auto_update_state())
-    config_url = _config_url(args)
+    config_url = scaffold_base()
     poll_timeout = args.interval or cfg["poll_timeout"]
     env("RELAY_URL"), env("RELAY_API_KEY")
     acquire_executor_locks(cfg)   # RLY-193: refuse a colliding second executor before any work
@@ -3437,63 +3449,43 @@ def cmd_outcome(args):
     return {"outcome": args.outcome}
 
 
-# ============================ relay init ============================
+# ============================ the scaffold (RE304) ============================
+#
+# Relay owns exactly five files in a project — `bin/relay` and the four `relay-*` skills — and
+# the BOARD serves them at /api/scaffold. They are never user-edited, which is what lets an
+# update overwrite them unconditionally: no provenance ledger, no per-file diff prompt, no
+# "did you edit this or did we ship a newer one?" question.
+#
+# The manifest's `version` is derived from content server-side; this end only ever compares it
+# for equality. "N versions behind" is deliberately not a thing.
+
+SCAFFOLD_PATH = "/api/scaffold"        # pinned to test/fixtures/executor_contract.json (RLY-176)
+SCAFFOLD_STATE_REL = os.path.join(".relay", "scaffold.json")
+EXECUTOR_REL = "bin/relay"             # the ONE item that goes through RE185's installer
+
 
 def _fetch(url, timeout=30):
-    """GET a URL with NO credentials, returning raw bytes. `init` runs before a board
-    key exists, so it deliberately bypasses api()'s bearer token — relay-config is a
-    public, unauthenticated repo by design (RLY-181/RLY-208)."""
+    """GET a URL with NO credentials, returning raw bytes. `/relay-setup` and `relay update`
+    run before a board key exists, so this deliberately bypasses api()'s bearer token — the
+    scaffold routes are unauthenticated by design (RE304)."""
     req = urllib.request.Request(url, method="GET")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read()
 
 
-# relay init pulls scaffolding from the relay-config repo over plain HTTPS (RLY-208), not from
-# the board server. Overridable via --config-url / RELAY_CONFIG_URL (forks; test fixtures).
-RELAY_CONFIG_URL = "https://raw.githubusercontent.com/jeremylightsmith/relay-config/main"
-
-
-def _config_url(args):
-    url = getattr(args, "config_url", None) or os.environ.get("RELAY_CONFIG_URL") or RELAY_CONFIG_URL
-    return url.rstrip("/")
+def scaffold_base(url=None):
+    """The scaffold base URL on the board. The one place RELAY_URL becomes a scaffold URL."""
+    return (url or env("RELAY_URL")).rstrip("/") + SCAFFOLD_PATH
 
 
 def _safe_path(rel):
-    """Absolute path for a manifest entry, refusing anything that escapes ROOT. The
-    payload comes from our own server, but a scaffold that could write outside the
-    project is not a thing to leave to trust."""
+    """Absolute path for a manifest entry, refusing anything that escapes ROOT. The payload
+    comes from our own board, but a scaffold that could write outside the project is not a
+    thing to leave to trust."""
     path = os.path.normpath(os.path.join(ROOT, rel))
     if path != ROOT and not path.startswith(ROOT + os.sep):
         die(f"scaffold path escapes the project root: {rel!r}")
     return path
-
-
-def _classify(path, content, force):
-    """One file against disk → (bucket, diff to print). No hash manifest: a file that
-    differs is shown as a unified diff and left alone unless --force (RLY-181)."""
-    if not os.path.exists(path):
-        return "created", ""
-    try:
-        with open(path, encoding="utf-8") as f:
-            existing = f.read()
-    except UnicodeDecodeError:
-        # A binary/latin-1 file where a template goes. It cannot equal the template and
-        # cannot be diffed, so treat it like any other differing file: left alone unless
-        # --force. Uniform with every other handled failure path in cmd_init.
-        if force:
-            return "overwritten", ""
-        return "skipped", f"  (not valid UTF-8; cannot diff — {path})\n"
-    if existing == content:
-        return "unchanged", ""
-    if force:
-        return "overwritten", ""
-    diff = "".join(difflib.unified_diff(
-        existing.splitlines(keepends=True),
-        content.splitlines(keepends=True),
-        fromfile=f"{path} (yours)",
-        tofile=f"{path} (template)",
-    ))
-    return "skipped", diff
 
 
 def _write_file(path, content, mode):
@@ -3503,168 +3495,125 @@ def _write_file(path, content, mode):
     os.chmod(path, int(mode, 8))
 
 
-def _self_update(config_url, target_version):
-    """Re-download bin/relay in place when relay-config advertises a NEWER one; returns the new
-    version, or None if it did not fire.
-
-    Only ever UPGRADES: pointing a checkout at an older config must not clobber that checkout's
-    CLI. Shares RE185's verified download path, so `init` gets the same parse check as
-    auto-update, and an unwritable target is reported, never fatal — a read-only install can
-    still scaffold."""
-    if target_version <= EXECUTOR_VERSION:
-        return None
-    result = download_executor(config_url)
-    if result is None or result is NOTHING_NEWER:
-        return None
-    source, version = result
-    return version if install_executor(source, version) else None
+def scaffold_state_path():
+    return os.path.join(ROOT, SCAFFOLD_STATE_REL)
 
 
-def _env_report():
-    """The things `init` can check but must never install (ADR 0006 / RLY-181 scope)."""
-    return [
-        ("this is a git repository", os.path.isdir(os.path.join(ROOT, ".git"))),
-        ("`claude` is on PATH", shutil.which("claude") is not None),
-        ("RELAY_URL is set", bool(os.environ.get("RELAY_URL"))),
-        ("RELAY_API_KEY is set", bool(os.environ.get("RELAY_API_KEY"))),
-    ]
-
-
-def _ask(prompt):
-    """One lowercased, stripped line from the user. Isolated so tests can stub `relay.input`."""
-    return input(prompt).strip().lower()
-
-
-def _prompt_optional(item):
-    """Ask install / skip / more-info for one optional item. Returns True to install."""
-    print(f"\n  {item['title']} — {item['description']}")
-    while True:
-        ans = _ask("  install? [Y]es / [s]kip / [m]ore info: ")
-        if ans in ("", "y", "yes"):
-            return True
-        if ans in ("s", "skip", "n", "no"):
-            print("  ! skipped. The default flows expect this; skip it and you'll need to edit "
-                  "your board's flow so it doesn't use it, or remove that step.")
-            return False
-        if ans in ("m", "more", "more info"):
-            print(f"    {item.get('details') or item['description']}")
-        # anything else: re-ask
-
-
-def _ensure_include(path, include_line, starter):
-    """Guarantee `include_line` is present in `path`, preserving existing content.
-
-    Absent file -> write the starter (which already includes the line). Existing file -> append
-    the line only if missing. Idempotent: a second run is a no-op."""
-    if not os.path.exists(path):
-        _write_file(path, starter, "644")
-        return "created"
-    with open(path, encoding="utf-8") as f:
-        content = f.read()
-    if include_line in content:
-        return "unchanged"
-    sep = "" if content.endswith("\n") else "\n"
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(f"{sep}{include_line}\n")
-    return "updated"
-
-
-def _install_item(config_url, item, announce, results):
-    """Fetch one manifest item and place it. `starter` items wire the @relay.md include
-    (preserving user content); every other kind is written via _classify (diff/overwrite)."""
-    dest = _safe_path(item["dest"])
-    content = _fetch(config_url + "/" + item["src"].lstrip("/")).decode("utf-8")
-
-    if item.get("kind") == "starter":
-        status = _ensure_include(dest, "@relay.md", content)
-        print(f"  {item['dest']}: {status}")
-        results["unchanged" if status == "unchanged" else "installed"].append(item["dest"])
-        return
-
-    if announce:
-        print(f"  {item['title']} → {item['dest']}")
-    bucket, diff = _classify(dest, content, force=False)
-    if bucket == "unchanged":
-        print(f"  {item['dest']}: unchanged")
-        results["unchanged"].append(item["dest"])
-        return
-    if bucket == "skipped" and diff:
-        print(diff, end="")
-        if _ask(f"  {item['dest']} differs from the template. overwrite? [y]es / [N]o: ") not in ("y", "yes"):
-            print(f"  {item['dest']}: left as-is")
-            results["skipped"].append(item["dest"])
-            return
-    _write_file(dest, content, item.get("mode", "644"))
-    print(f"  {item['dest']}: installed")
-    results["installed"].append(item["dest"])
-
-
-def cmd_init(args):
-    """Interactive, friendly project scaffolding from the relay-config repo (RLY-208).
-
-    Announces each step before it acts, does one thing at a time, and lets the user opt out of
-    optional skills/agents. Requires a TTY — a piped/CI run is told to re-run in a terminal and
-    writes nothing. Files come from relay-config (RELAY_CONFIG_URL), not the board server."""
-    if not sys.stdin.isatty():
-        print("relay init is interactive and needs a terminal.")
-        print("It won't guess for you when piped or in CI, so it has written nothing.")
-        print("Re-run it directly in your shell:")
-        print("    bin/relay init")
-        return {"installed": [], "skipped": [], "unchanged": []}
-
-    config_url = _config_url(args)
-    board_url = (args.url or os.environ.get("RELAY_URL") or "").rstrip("/")
-
-    print("relay init will set this project up to work with Relay. Here's the plan:")
-    print(f"  - pull configuration from {config_url}")
-    print("  - make sure bin/relay is up to date")
-    print("  - install relay.md (how your agent drives Relay) and wire it into CLAUDE.md/AGENTS.md")
-    print("  - offer each skill and agent one at a time — install or skip as you like")
-
+def local_scaffold_version():
+    """The version this project last installed, or None for every non-answer (no file,
+    unreadable, not JSON, key missing, not a string) — all of which mean "refetch"."""
     try:
-        manifest = json.loads(_fetch(config_url + "/manifest.json"))
-    except urllib.error.HTTPError as e:
-        die(f"GET {config_url}/manifest.json failed: HTTP {e.code}")
-    except urllib.error.URLError as e:
-        die(f"GET {config_url}/manifest.json failed: {e.reason}")
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        die(f"GET {config_url}/manifest.json returned something that is not JSON: {e}")
+        with open(scaffold_state_path(), encoding="utf-8") as f:
+            version = json.load(f).get("version")
+    except (OSError, ValueError):
+        return None
+    return version if isinstance(version, str) else None
 
-    if not args.no_self_update:
-        version = manifest.get("executor", {}).get("version", 0)
-        print("\nChecking the executor is up to date…")
-        updated = _self_update(config_url, version)
-        if updated:
-            print(f"  bin/relay updated: version {EXECUTOR_VERSION} → {updated} (re-run to use it)")
+
+def write_scaffold_state(version):
+    _write_file(scaffold_state_path(), json.dumps({"version": version}, indent=2) + "\n", "644")
+
+
+def fetch_scaffold_manifest():
+    """The served manifest, validated. Dies with a readable message on anything else —
+    a half-understood manifest must never turn into a half-written scaffold."""
+    manifest = api("GET", SCAFFOLD_PATH, auth=False)
+    version, items = manifest.get("version"), manifest.get("items")
+    if not isinstance(version, str) or not isinstance(items, list) or not items:
+        die(f"GET {SCAFFOLD_PATH} returned no usable manifest (version/items missing)")
+    for item in items:
+        if not isinstance(item, dict) or not item.get("path") or not item.get("sha256"):
+            die(f"GET {SCAFFOLD_PATH} returned a manifest item with no path/sha256: {item!r}")
+    return manifest
+
+
+def scaffold_status():
+    """The ONE comparison behind both `--check` and apply.
+
+    Refetch when the served version differs from `.relay/scaffold.json`, OR when any
+    destination file is missing on disk. The second condition is not redundant: without it,
+    deleting a skill leaves the version matching and the file never returns.
+    """
+    manifest = fetch_scaffold_manifest()
+    served, local = manifest["version"], local_scaffold_version()
+    missing = [i["path"] for i in manifest["items"]
+               if not os.path.exists(_safe_path(i["path"]))]
+    stale = served != local or bool(missing)
+    changed = [i["path"] for i in manifest["items"]
+               if _sha256_file(_safe_path(i["path"])) != i["sha256"]] if stale else []
+    return {"served_version": served, "local_version": local, "current": not stale,
+            "missing": missing, "changed": changed, "items": manifest["items"]}
+
+
+def install_scaffold(status):
+    """Write every changed item and record the served version. Returns the paths written.
+
+    Each body is checked against the manifest's sha256 before it touches disk, and `bin/relay`
+    additionally goes through RE185's verified installer (`verify_executor_source` +
+    `install_executor`'s atomic os.replace and write ledger) rather than a second copy of that
+    logic — so a concurrent `bin/relay card …` never reads a half-written CLI.
+    """
+    base = scaffold_base()
+    written = []
+    for item in status["items"]:
+        rel = item["path"]
+        if rel not in status["changed"]:
+            continue
+        url = base + "/" + rel.lstrip("/")
+        try:
+            body = _fetch(url)
+        except OSError as e:
+            die(f"GET {url} failed: {e}")
+        if hashlib.sha256(body).hexdigest() != item["sha256"]:
+            die(f"{rel} does not match the manifest sha256 — refusing to write it")
+        # install_executor() mkstemps NEXT TO the target and does not create directories, so a
+        # first-ever install into a bare project needs bin/ to exist before it runs.
+        os.makedirs(os.path.dirname(_safe_path(rel)) or ".", exist_ok=True)
+        if rel == EXECUTOR_REL:
+            result = verify_executor_source(body, url)
+            if result is None:
+                die(f"the board's {rel} did not pass verification — nothing was written for it")
+            source, version = result
+            if not install_executor(source, version, _safe_path(rel)):
+                die(f"could not write {rel}")
         else:
-            print("  bin/relay is current.")
+            _write_file(_safe_path(rel), body.decode("utf-8"), "644")
+        written.append(rel)
+    write_scaffold_state(status["served_version"])
+    return written
 
-    items = manifest.get("items", [])
-    required = [i for i in items if i.get("required")]
-    optional = [i for i in items if not i.get("required")]
-    results = {"installed": [], "skipped": [], "unchanged": []}
 
-    print("\nInstalling the required pieces:")
-    for item in required:
-        _install_item(config_url, item, announce=True, results=results)
+def format_scaffold(report):
+    lines = [f"scaffold: served {report['served_version']} · "
+             f"local {report['local_version'] or '(none)'}"]
+    if report["current"]:
+        lines.append("  this project is current — nothing to do.")
+        return "\n".join(lines)
+    verb = "updated" if report["applied"] else "would change"
+    paths = report["written"] if report["applied"] else report["changed"]
+    lines.append(f"  {verb} ({len(paths)}):")
+    lines += [f"    {p}" for p in paths]
+    if not report["applied"]:
+        lines.append("  nothing written (--check). Run `bin/relay update` to apply.")
+    return "\n".join(lines)
 
-    if optional:
-        print("\nNow the optional skills and agents — one at a time:")
-        for item in optional:
-            if _prompt_optional(item):
-                _install_item(config_url, item, announce=False, results=results)
-            else:
-                results["skipped"].append(item["dest"])
 
-    print("\nStill needed (relay init can't do these for you):")
-    board = board_url or "https://<your-board>"
-    for label, ok in _env_report():
-        print(f"  [{'x' if ok else ' '}] {label}")
-    print(f"  [ ] mint a board API key: {board} → Settings → API keys")
-    print(f"  [ ] export RELAY_URL={board} and RELAY_API_KEY=<that key>")
-    print(f"  [ ] enable flows: {board} → Settings → Flows")
-    print("  then: bin/relay execute")
-    return results
+def cmd_update(args):
+    """Install or refresh the five Relay-owned files from the board (RE304).
+
+    `--check` reports and writes nothing (and needs no TTY); without it, apply. Replaces
+    `relay init`: one mechanism, no prompts, no optional items."""
+    status = scaffold_status()
+    written = [] if (args.check or status["current"]) else install_scaffold(status)
+    report = {"served_version": status["served_version"],
+              "local_version": status["local_version"],
+              "current": status["current"],
+              "missing": status["missing"],
+              "changed": status["changed"],
+              "applied": not args.check,
+              "written": written}
+    emit(args, report, lambda: print(format_scaffold(report)))
+    return report
 
 
 # ============================ argparse ============================
@@ -3738,10 +3687,9 @@ def build_parser():
     ex.add_argument("--once", action="store_true")
     ex.add_argument("--dry-run", action="store_true")
     ex.add_argument("--interval", type=int)
-    ini = add("init", cmd_init)
-    ini.add_argument("--config-url", help="relay-config base URL (default: RELAY_CONFIG_URL / the public repo)")
-    ini.add_argument("--url", help="board URL for the closing checklist (default: RELAY_URL)")
-    ini.add_argument("--no-self-update", action="store_true")
+    up = add("update", cmd_update, json_flag=True)
+    up.add_argument("--check", action="store_true",
+                    help="report what would change and write nothing")
     return p
 
 

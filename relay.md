@@ -76,6 +76,7 @@ no `jq`). Non-zero exit on any error. Long text args accept `-` (stdin) or `@pat
 | `bin/relay flow` · `bin/relay flow code` | The board's flows, or one flow's definition; `--json` **is the pull** |
 | `bin/relay flow-push code code.json` | Push an edited flow document back (`-` reads stdin) |
 | `bin/relay version` | The git SHA the deployed app was built from |
+| `bin/relay update [--check]` | Install or refresh the five Relay-owned files (`bin/relay` + the four `relay-*` skills) from the board's `/api/scaffold`. `--check` reports and writes nothing. Prefer `/relay-update`, which wraps it. |
 | `bin/relay create "Fix login" --stage Backlog` | Create a card (`--stage`/`--description`/`--tag`) |
 | `bin/relay move RLY-12 Code` | Move to a stage (by name, e.g. `"Code:Review"`) |
 | `bin/relay status RLY-12 working` | Set status (`ready`\|`working`\|`needs_input`\|`in_review`) |
