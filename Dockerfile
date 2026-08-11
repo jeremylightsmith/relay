@@ -58,14 +58,19 @@ COPY lib lib
 COPY docs docs
 COPY .claude .claude
 COPY bin bin
+COPY relay.md relay.md
 
 # Compile the release
 RUN mix compile
 
-# RE304: build priv/scaffold/ from the .claude and bin sources copied above. It must exist
-# before `mix release` bundles priv/ into the image — the release ships priv/ but ships neither
-# bin/ nor .claude/, so this is the only way /api/scaffold and
+# RE304: build priv/scaffold/ from the .claude, bin and relay.md sources copied above. It must
+# exist before `mix release` bundles priv/ into the image — the release ships priv/ but ships
+# neither bin/ nor .claude/, so this is the only way /api/scaffold and
 # Relay.Runs.latest_executor_version/0 have anything to read at runtime.
+#
+# Every COPY feeding this is derived from Scaffold.items/0 by
+# test/relay/scaffold_build_wiring_test.exs — add an item there and that test tells you to add
+# the COPY here, rather than the deploy telling you.
 RUN mix relay.build_scaffold
 
 COPY assets assets

@@ -26,11 +26,29 @@ defmodule Relay.ScaffoldBuildWiringTest do
     assert builder =~ ~r/^RUN mix relay\.build_scaffold$/m
   end
 
-  test "the scaffold sources are copied in before the scaffold is built", %{builder: builder} do
-    # `mix relay.build_scaffold` reads `bin/relay` and `.claude/skills/relay-*`; copying them
-    # after the build would produce an empty manifest, not an error.
-    assert offset(builder, ~r/^COPY \.claude \.claude$/m) < offset(builder, ~r/^RUN mix relay\.build_scaffold$/m)
-    assert offset(builder, ~r/^COPY bin bin$/m) < offset(builder, ~r/^RUN mix relay\.build_scaffold$/m)
+  test "EVERY scaffold source is copied in before the scaffold is built", %{builder: builder} do
+    # Derived from Scaffold.items/0, never a hand-listed pair. This test used to name `.claude`
+    # and `bin` literally, so adding `relay.md` to items/0 left the Dockerfile a source short and
+    # the suite green — `build!/2` raises on the missing file and the DEPLOY is what failed.
+    # Anything added to items/0 from now on fails here instead, which is the whole point of the
+    # file: CI pins MIX_ENV=test and never runs the Dockerfile.
+    build_at = offset(builder, ~r/^RUN mix relay\.build_scaffold$/m)
+
+    for source <- scaffold_copy_sources() do
+      copy = ~r/^COPY #{Regex.escape(source)} (#{Regex.escape(source)}|\.\/)$/m
+
+      assert offset(builder, copy) < build_at,
+             "Dockerfile must `COPY #{source}` before `RUN mix relay.build_scaffold` — " <>
+               "#{source} holds a Scaffold.items/0 entry, and build!/2 raises without it"
+    end
+  end
+
+  # The top-level path each served item arrives by: `bin/relay` -> `bin`, a skill -> `.claude`,
+  # `relay.md` -> `relay.md` (a root file is copied by name).
+  defp scaffold_copy_sources do
+    Relay.Scaffold.items()
+    |> Enum.map(&(&1 |> Path.split() |> hd()))
+    |> Enum.uniq()
   end
 
   test "the scaffold is built before the release bundles priv/", %{builder: builder} do
