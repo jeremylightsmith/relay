@@ -37,6 +37,20 @@ defmodule Relay.ScaffoldBuildWiringTest do
     assert offset(builder, ~r/^RUN mix relay\.build_scaffold$/m) < offset(builder, ~r/^RUN mix release$/m)
   end
 
+  # The task copies files and hashes bytes; it needs `compile`, never `app.config`. `app.config`
+  # loads `config/runtime.exs` whenever that file exists, and ours raises without `DATABASE_URL`
+  # under MIX_ENV=prod — so with `app.config` the prod build only worked because
+  # `COPY config/runtime.exs` happens to sit BELOW the task, and hoisting that COPY (a routine
+  # tidy) would have broken `fly deploy` with a missing-database error from a task that needs no
+  # database. CI cannot catch that: the workflow pins MIX_ENV=test, so only a real deploy
+  # exercises the Dockerfile. Pin the decoupling instead of the accident.
+  test "building the scaffold does not depend on runtime config" do
+    source = File.read!("lib/mix/tasks/relay.build_scaffold.ex")
+
+    refute source =~ "Mix.Task.run(\"app.config\")"
+    assert source =~ "Mix.Task.run(\"compile\")"
+  end
+
   defp offset(text, regex) do
     case Regex.run(regex, text, return: :index) do
       [{start, _len} | _] -> start

@@ -4434,8 +4434,8 @@ class UpdateTest(unittest.TestCase):
 
     # ---- helpers ----
 
-    def args(self, check=False):
-        return argparse.Namespace(check=check, json=False, field=None)
+    def args(self, check=False, force=False):
+        return argparse.Namespace(check=check, force=force, json=False, field=None)
 
     def path(self, rel):
         return os.path.join(self.tmp, rel)
@@ -4563,6 +4563,44 @@ class UpdateTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit):
             capture_ret(relay.cmd_update, self.args(check=True))
+
+    # RE304 review pass 3, finding A: ROOT is the repo containing the script, so `update` run in
+    # the Relay app repo would overwrite the five SOURCES with whatever the board last deployed —
+    # skills first, bin/relay last — silently reverting in-progress work. RE185's auto-update
+    # already refuses to clobber this same file; this path shares its installer and must not
+    # answer differently.
+    def _make_app_repo(self):
+        os.makedirs(os.path.join(self.tmp, "lib", "relay"), exist_ok=True)
+        with open(os.path.join(self.tmp, "lib", "relay", "scaffold.ex"), "w") as f:
+            f.write("defmodule Relay.Scaffold do\nend\n")
+
+    def test_apply_refuses_in_the_relay_app_repo(self):
+        self._make_app_repo()
+
+        with self.assertRaises(SystemExit):
+            capture_ret(relay.cmd_update, self.args())
+
+        self.assertFalse(os.path.exists(self.path(relay.EXECUTOR_REL)))
+
+    def test_force_overrides_the_app_repo_refusal(self):
+        self._make_app_repo()
+
+        report = capture_ret(relay.cmd_update, self.args(force=True))
+
+        self.assertEqual(sorted(report["written"]), sorted(self.served))
+
+    def test_check_is_allowed_in_the_relay_app_repo(self):
+        self._make_app_repo()
+
+        report = capture_ret(relay.cmd_update, self.args(check=True))
+
+        self.assertFalse(report["current"])
+        self.assertFalse(os.path.exists(self.path(relay.EXECUTOR_REL)))
+
+    def test_a_consuming_project_is_not_mistaken_for_the_app_repo(self):
+        report = capture_ret(relay.cmd_update, self.args())
+
+        self.assertEqual(sorted(report["written"]), sorted(self.served))
 
     def test_a_moved_version_refetches_only_what_actually_changed(self):
         self.make_current()
