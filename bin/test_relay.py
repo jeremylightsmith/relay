@@ -992,6 +992,16 @@ class ExecutorConfigTest(unittest.TestCase):
         self._write({"auto_update": False})
         self.assertFalse(relay.load_executor_config()["auto_update"])
 
+    def test_base_defaults_to_origin_main(self):
+        relay.EXECUTOR_CONFIG_PATH = "/nope/does/not/exist.json"
+        self.assertEqual(relay.load_executor_config()["base"], "origin/main")
+
+    def test_base_can_name_a_different_trunk(self):
+        """A repo whose trunk is not `main` must be able to say so: every worktree reset
+        (create_or_rebaseline, refresh_idle_shared) baselines to this ref."""
+        self._write({"base": "origin/master"})
+        self.assertEqual(relay.load_executor_config()["base"], "origin/master")
+
 
 class ExecutorPoolTest(unittest.TestCase):
     """Per-card worktree model (RLY-231): the exclusive class no longer has fixed
@@ -1233,6 +1243,66 @@ class ExecutorPoolRecoverTest(unittest.TestCase):
         self.assertIn(["remove", "--force", relay.worktree_path("exec-work-2")], calls)
 
 
+class ExecutorPoolBaseTest(unittest.TestCase):
+    """The ref every worktree is baselined to is `base` from executor.json, not a hardcoded
+    `origin/main`. A repo whose trunk is `master` (or a fork tracking `upstream/main`) had no
+    way to say so: `ExecutorPool.__init__`'s default was the only definition, and nothing
+    passed a value. Every reset path — worktree creation, per-card re-baseline, the idle
+    shared_clean refresh, and the prepare hook's RELAY_BASE — reads this one field."""
+
+    CFG = {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 2},
+           "base": "origin/master"}
+
+    def setUp(self):
+        for name in ("reset_worktree", "refresh_worktree", "ensure_worktree",
+                     "git_fetch_with_retry", "git_worktree_with_retry"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        self.calls = []
+        relay.reset_worktree = lambda path, base: self.calls.append(("reset", path, base))
+        relay.refresh_worktree = lambda name, base: self.calls.append(("refresh", name, base))
+        relay.ensure_worktree = lambda name, base: self.calls.append(("ensure", name, base))
+        relay.git_fetch_with_retry = lambda cwd: True
+        relay.git_worktree_with_retry = lambda args: self.calls.append(("wt", *args)) or True
+
+    def test_pool_takes_its_base_from_the_config(self):
+        self.assertEqual(relay.ExecutorPool(self.CFG).base, "origin/master")
+
+    def test_pool_falls_back_to_origin_main_when_the_config_omits_base(self):
+        """Pools are built from raw dicts in places load_executor_config never touches, so the
+        fallback lives on the pool too — one named constant shared with the config default."""
+        self.assertEqual(relay.ExecutorPool({"namespace": "exec",
+                                             "capacity": {"shared_clean": 1, "exclusive": 1}}).base,
+                         "origin/main")
+
+    def test_creating_a_per_card_worktree_baselines_to_the_configured_base(self):
+        p = relay.ExecutorPool(self.CFG)
+        p.create_or_rebaseline("exec-RLY-1")   # dir does not exist → `git worktree add`
+        self.assertIn(("wt", "add", "--detach", relay.worktree_path("exec-RLY-1"),
+                       "origin/master"), self.calls)
+
+    def test_refreshing_the_idle_shared_worktree_uses_the_configured_base(self):
+        p = relay.ExecutorPool(self.CFG)
+        p.refresh_idle_shared()
+        self.assertIn(("refresh", "exec-clean", "origin/master"), self.calls)
+
+    def test_the_prepare_hook_is_told_the_configured_base(self):
+        """The hook warms a worktree relative to the trunk it was baselined from, so a wrong
+        RELAY_BASE silently warms from the wrong branch."""
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        hook = os.path.join(tmp, "hook.sh")
+        out = os.path.join(tmp, "seen")
+        with open(hook, "w") as f:
+            f.write(f'#!/bin/sh\nprintf "%s %s" "$RELAY_BASE" "$4" > {out}\n')
+        os.chmod(hook, 0o755)
+
+        p = relay.ExecutorPool({**self.CFG, "prepare": hook})
+        self.assertIsNone(p.run_prepare_hook(tmp, "RLY-1", "rly-1-x"))
+
+        with open(out) as f:
+            self.assertEqual(f.read(), "origin/master origin/master")
+
+
 class ExecutorConfigCommittedFileTest(unittest.TestCase):
     """The committed .relay/executor.json is a shared example checked into every clone; it
     must not hardcode one developer's executor identity (the `name` is the executor's wire
@@ -1272,6 +1342,17 @@ class ExecutorConfigCommittedFileTest(unittest.TestCase):
             cfg = json.load(f)
         self.assertEqual(cfg["auto_update"], True)
         self.assertEqual(cfg["auto_update_min_interval"], 300)
+
+    def test_committed_executor_json_documents_the_base_key(self):
+        """The knob a repo whose trunk is not `main` has to find; it is invisible unless the
+        checked-in example names it."""
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            ".relay", "executor.json",
+        )
+        with open(path) as f:
+            cfg = json.load(f)
+        self.assertEqual(cfg["base"], "origin/main")
 
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

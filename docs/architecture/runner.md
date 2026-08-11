@@ -457,7 +457,7 @@ metered API. Subscription rate limits are the ceiling; when hit, the step is thr
 silently billed to the paid API.
 
 - **Config.** `.relay/executor.json` holds `name` (defaults to hostname), `namespace`
-  (default `exec`), `capacity: {shared_clean, exclusive}`, `poll_timeout`,
+  (default `exec`), `capacity: {shared_clean, exclusive}`, `base`, `poll_timeout`,
   `heartbeat_interval`, and three optional per-card-worktree keys (RLY-231):
   `cache_dir` (a warm dep/build cache dir passed to the prepare hook), `prepare` (path to a
   project-specific prepare hook, default `.relay/prepare-worktree.sh`), and
@@ -466,6 +466,13 @@ silently billed to the paid API.
   `true`) and `auto_update_min_interval` (seconds between update attempts, default 300).
   Missing file → sensible defaults, including the auto-update keys; capacity is the field a
   developer routinely edits.
+
+  > **`base` is the trunk every worktree is baselined to** — the ref a worktree is created at,
+  > hard-reset to on re-baseline, refreshed to when the shared tree goes idle, and handed to the
+  > prepare hook as `RELAY_BASE`. Default `origin/main`; set it to `origin/master`,
+  > `upstream/main`, or a long-lived integration branch when that is your trunk. It does **not**
+  > govern where a card's *branch* starts — that start point is written into the flow's `branch`
+  > node (`git checkout -B {branch} origin/main`) and has to be changed in the flow.
 
   > **Running more than one `exclusive` slot?** Concurrent runs each work in their own
   > worktree, so make sure they don't share mutable state — most importantly, **give each run

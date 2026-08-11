@@ -68,8 +68,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 47
-EXECUTOR_FINGERPRINT = "d2eefaa01328c8303133bdf59861f91dbcf2a143857d70e6cb9b62eda416fd79"
+EXECUTOR_VERSION = 48
+EXECUTOR_FINGERPRINT = "5d0197cf33393c9ff9c3f26e5313548671347722a1cfb05c514da29a0ea5e9aa"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1103,6 +1103,18 @@ def cmd_attach(args):
 
 # ============================ the executor ============================
 
+# The ref every pool worktree is baselined to — created at, hard-reset to, and (for the shared
+# tree) refreshed to. `main` is only this repo's trunk: a repo on `master`, a fork tracking
+# `upstream/main`, or a team working off a long-lived integration branch needs a different one,
+# and before this was configurable there was no way to say so — the value existed once, as
+# ExecutorPool.__init__'s default, and nothing ever passed an override. Overridable per
+# executor with `"base"` in .relay/executor.json.
+#
+# NOTE this is the baseline for *worktrees*, not for branches. A flow's `branch` node names its
+# own start point (`git checkout -B {branch} origin/main`), and changing this does not touch it.
+DEFAULT_BASE = "origin/main"
+
+
 def load_executor_config():
     """Executor-local config from .relay/executor.json. Missing file → sensible defaults;
     capacity is the only field a developer routinely edits (ADR 0006, table 1)."""
@@ -1110,6 +1122,7 @@ def load_executor_config():
         "name": socket.gethostname(),
         "namespace": "exec",
         "capacity": {"shared_clean": 1, "exclusive": 1},
+        "base": DEFAULT_BASE,
         "poll_timeout": 25,
         "heartbeat_interval": 15,
         "max_retained_failed": 3,
@@ -1337,9 +1350,12 @@ class ExecutorPool:
                   `max_retained_failed` or under capacity pressure.
     """
 
-    def __init__(self, cfg, base="origin/main"):
+    def __init__(self, cfg):
         self.ns = cfg.get("namespace", "exec")
-        self.base = base
+        # Pools are also built from raw dicts (tests, callers that never went through
+        # load_executor_config), so the fallback lives here too — same named constant, not a
+        # second copy of the string.
+        self.base = cfg.get("base") or DEFAULT_BASE
         self.cfg = cfg
         self.cap_shared = cfg["capacity"]["shared_clean"]
         self.max_worktrees = cfg["capacity"]["exclusive"]

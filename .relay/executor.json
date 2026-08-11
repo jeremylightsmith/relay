@@ -1,9 +1,10 @@
 {
-  "namespace": "exec",
+  "namespace": "relay",
   "capacity": {
     "shared_clean": 3,
     "exclusive": 2
   },
+  "base": "origin/main",
   "cache_dir": "~/.cache/relay/exec",
   "prepare": ".relay/prepare-worktree.sh",
   "max_retained_failed": 3,

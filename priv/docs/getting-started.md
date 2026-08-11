@@ -108,6 +108,16 @@ every few seconds. Two classes matter:
 - `shared_clean` — jobs that can share one clean worktree;
 - `exclusive` — jobs that need a worktree to themselves. The Code flow needs this one.
 
+**If your trunk is not `main`,** set `base` in the same file — it is the ref every worktree is
+created at and reset to, and it defaults to `origin/main`:
+
+```json
+{ "capacity": { "shared_clean": 1, "exclusive": 1 }, "base": "origin/master" }
+```
+
+Note that `base` governs *worktrees*, not branches: where a card's branch starts is written into
+the flow's `branch` node, and changing it is a flow edit.
+
 ## 5. Enable a flow
 
 Flows are seeded **disabled**, so nothing dispatches until you turn one on. Open
