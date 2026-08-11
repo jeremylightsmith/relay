@@ -14,6 +14,7 @@ defmodule RelayWeb.Api.ScaffoldController do
   use RelayWeb, :controller
 
   alias Relay.Scaffold
+  alias RelayWeb.Api.ErrorJSON
 
   def manifest(conn, _params) do
     case Scaffold.manifest() do
@@ -23,7 +24,8 @@ defmodule RelayWeb.Api.ScaffoldController do
       :error ->
         conn
         |> put_status(:service_unavailable)
-        |> json(%{error: "scaffold_unavailable", detail: "run `mix relay.build_scaffold`"})
+        |> put_view(json: ErrorJSON)
+        |> render(:error, code: "scaffold_unavailable", message: "run `mix relay.build_scaffold`")
     end
   end
 
@@ -37,7 +39,8 @@ defmodule RelayWeb.Api.ScaffoldController do
       :error ->
         conn
         |> put_status(:not_found)
-        |> json(%{error: "not_found"})
+        |> put_view(json: ErrorJSON)
+        |> render(:error, code: "not_found", message: "Not found")
     end
   end
 end

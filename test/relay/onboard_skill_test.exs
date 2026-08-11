@@ -92,7 +92,17 @@ defmodule Relay.OnboardSkillTest do
 
     refute phase0 =~ "neither is something a skill can fix"
     assert phase0 =~ "a skill cannot mint a key"
-    assert phase0 =~ "self-heals via `/relay-update`"
+    assert phase0 =~ "self-heals via `bin/relay update`"
+  end
+
+  # The missing `relay-*` skill may *be* `relay-update`, and the Skill tool cannot resolve a
+  # name that is not installed — so the floor must repair itself with the command.
+  test "the scaffold floor repairs missing skills with the command, not the Skill tool", %{doc: doc} do
+    [_, phase0_and_later] = String.split(doc, "## Phase 0", parts: 2)
+    [phase0, _] = String.split(phase0_and_later, "## Phase 1", parts: 2)
+
+    assert phase0 =~ "bin/relay update --json"
+    refute String.replace(phase0, ~r/\s+/, " ") =~ "run `/relay-update` (via the `Skill` tool)"
   end
 
   test "the sibling-file mistake names the current scaffold mechanism, not the retired publish task",

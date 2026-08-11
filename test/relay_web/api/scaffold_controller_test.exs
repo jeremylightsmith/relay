@@ -51,4 +51,13 @@ defmodule RelayWeb.Api.ScaffoldControllerTest do
       assert conn |> get(path) |> json_response(404)
     end
   end
+
+  # bin/relay's api() reads `["error"]["message"]`; a flat string `error` raises TypeError
+  # there and the operator sees a bare "HTTP 404" instead of what the controller wrote.
+  test "errors use the API's nested envelope, like every other /api route", %{conn: conn} do
+    assert %{"error" => %{"code" => "not_found", "message" => message}} =
+             conn |> get("/api/scaffold/nope") |> json_response(404)
+
+    assert is_binary(message)
+  end
 end

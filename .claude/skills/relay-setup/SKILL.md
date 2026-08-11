@@ -10,7 +10,8 @@ description: Use when wiring a project to a Relay board from scratch — there i
 The entry point, and the **only** thing a fresh project needs. Everything Relay installs is
 served by your board — there is no repository to clone and no third-party host in the path.
 
-    /relay-setup = get bin/relay → /relay-update (installs the skills) → /relay-onboard (wires the repo)
+    /relay-setup = get bin/relay → bin/relay update (installs the skills) → restart the session
+                   → /relay-onboard (wires the repo)
 
 Assume nothing exists. This skill is written to run in a project where the only Relay artifact
 is this file.
@@ -62,18 +63,38 @@ wrong or the board is unreachable — fix that before continuing; nothing below 
 
 ## Step 3 — Install the skills
 
-Invoke **`/relay-update`** (via the `Skill` tool). It pulls the four `relay-*` skills, keeps
-`bin/relay` current, and handles the commit conversation. Do not re-implement any of that here.
+Run the command directly — **do not** invoke `/relay-update` here. That skill is one of the four
+files this step installs, so it is not on disk yet and the `Skill` tool cannot resolve a name
+that is not installed:
 
-## Step 4 — Wire the repo to the board
+```bash
+bin/relay update --check --json   # what would be written
+bin/relay update --json           # write it
+```
 
-Invoke **`/relay-onboard`** (via the `Skill` tool). It reconciles the repo's agents and skills
-against the board's flows and loops until `/relay-doctor` reports zero errors.
+Report the `written` list by name. It should be `bin/relay` plus the four
+`.claude/skills/relay-*/SKILL.md` files.
 
-That is the end of setup. `/relay-onboard` closes with the remaining human steps (start
-`relay execute`, enable a flow in Settings › Flows).
+`bin/relay update` is the whole mechanism, and from here on **`/relay-update` owns it** — it
+wraps this same command and adds the judgment this skill deliberately skips (where these shared
+tooling files get committed). Nothing beyond the one command is re-implemented here.
+
+## Step 4 — Restart the session, then wire the repo to the board
+
+Those four skills were written to disk *during* this session, so Claude Code does not know about
+them yet — `/relay-onboard`, `/relay-update` and `/relay-doctor` only become available once the
+skill list is rebuilt. Tell the human:
+
+> Relay is installed, uncommitted. **Restart Claude Code** (or start a fresh session), then run
+> `/relay-onboard` to wire this repo to your board's flows. These five are shared tooling files —
+> `/relay-update` runs the commit conversation with you any time after the restart.
+
+Then stop; setup is done. In that new session `/relay-onboard` reconciles the repo's agents and
+skills against the board's flows, loops until `/relay-doctor` reports zero errors, and closes
+with the remaining human steps (start `relay execute`, enable a flow in Settings › Flows).
 
 ## Blast radius
 
-`bin/relay`, the four `relay-*` skills, and whatever `/relay-onboard` does within its own
-declared radius. Never app code, never a push, never a card.
+`bin/relay`, the four `relay-*` skills, and `.relay/scaffold.json`. Never app code, never a
+commit, never a push, never a card — `/relay-onboard` does its own work in its own session,
+under its own declared radius.

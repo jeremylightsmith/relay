@@ -49,7 +49,7 @@ Already wired and one node broke? That is `/relay-doctor`, not this.
 
 Two independent floors. The credential floor is always a **stop** — a skill cannot mint a key.
 The scaffold floor stops only when `bin/relay` itself is missing; a stale `relay-*` skill
-self-heals via `/relay-update` instead.
+self-heals via `bin/relay update` instead.
 
 1. **Scaffold floor** — `bin/relay` and the four `relay-*` skills must be installed. If
    `bin/relay` is missing, stop and hand the human the entry point:
@@ -58,8 +58,17 @@ self-heals via `/relay-update` instead.
    /relay-setup
    ```
 
-   If `bin/relay` is present but any `relay-*` skill is missing or stale, run `/relay-update`
-   (via the `Skill` tool) and continue. Resume from Phase 1 when the floor is met.
+   If `bin/relay` is present but any `relay-*` skill is missing or stale, refresh them with the
+   **command**, not the skill — the missing one may *be* `/relay-update`, and the `Skill` tool
+   cannot resolve a name that is not installed:
+
+   ```bash
+   bin/relay update --json
+   ```
+
+   Report the `written` list. A skill file written mid-session is not discoverable until Claude
+   Code restarts, so if this wrote any `SKILL.md`, stop and tell the human to restart the session
+   and re-run `/relay-onboard`. Resume from Phase 1 when the floor is met.
 
    `relay.md` and `.relay/executor.json` are **not** part of that floor — they are not
    Relay-owned served files, and authoring them for this repo is part of onboarding's own work
