@@ -4499,6 +4499,71 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(report["written"], [".claude/skills/relay-doctor/SKILL.md"])
         self.assertTrue(os.path.exists(self.path(".claude/skills/relay-doctor/SKILL.md")))
 
+    # RE304 review finding 1, symptom A: RE185's auto-update rewrites bin/relay in place and
+    # never touches .relay/scaffold.json, so the marker legitimately lags the bytes. A
+    # version-gated verdict called that "not current" with an EMPTY change list, and
+    # /relay-update then asked a human where to commit zero files. The work list is the verdict.
+    def test_a_lagging_marker_with_matching_bytes_reports_current(self):
+        self.make_current()
+        self.write_local(".relay/scaffold.json", json.dumps({"version": "0" * 12}))
+
+        report = capture_ret(relay.cmd_update, self.args(check=True))
+
+        self.assertTrue(report["current"])
+        self.assertEqual(report["changed"], [])
+
+    def test_applying_with_nothing_to_write_reconciles_the_marker(self):
+        self.make_current()
+        self.write_local(".relay/scaffold.json", json.dumps({"version": "0" * 12}))
+
+        capture_ret(relay.cmd_update, self.args())
+
+        with open(self.path(".relay/scaffold.json")) as f:
+            self.assertEqual(json.load(f)["version"], self.manifest()["version"])
+
+    def test_check_never_writes_the_marker(self):
+        self.make_current()
+        self.write_local(".relay/scaffold.json", json.dumps({"version": "0" * 12}))
+
+        capture_ret(relay.cmd_update, self.args(check=True))
+
+        with open(self.path(".relay/scaffold.json")) as f:
+            self.assertEqual(json.load(f)["version"], "0" * 12)
+
+    # RE304 review finding 1, symptom B: these files are Relay-owned and never user-edited, so
+    # a drifted one is damage to repair, not a customisation to preserve. A version-gated
+    # verdict left it corrupted while reporting the project current.
+    def test_a_corrupted_file_is_repaired_even_when_the_version_matches(self):
+        self.make_current()
+        self.write_local(".claude/skills/relay-doctor/SKILL.md", "CORRUPTED\n")
+
+        report = capture_ret(relay.cmd_update, self.args())
+
+        self.assertFalse(report["current"])
+        self.assertEqual(report["written"], [".claude/skills/relay-doctor/SKILL.md"])
+        with open(self.path(".claude/skills/relay-doctor/SKILL.md")) as f:
+            self.assertEqual(f.read(), self.served[".claude/skills/relay-doctor/SKILL.md"])
+
+    # RE304 review finding 5: .relay/scaffold.json is the one file `relay update` exists to
+    # heal, so a garbled one must refetch, not raise AttributeError out of the CLI.
+    def test_a_non_object_scaffold_state_is_treated_as_no_version(self):
+        self.make_current()
+        self.write_local(".relay/scaffold.json", "[]")
+
+        report = capture_ret(relay.cmd_update, self.args(check=True))
+
+        self.assertIsNone(report["local_version"])
+        self.assertTrue(report["current"])
+
+    def test_a_non_object_manifest_is_refused(self):
+        def fake(req, *a, **k):
+            return _FakeResp(json.dumps(["not", "a", "manifest"]).encode())
+
+        relay.urllib.request.urlopen = fake
+
+        with self.assertRaises(SystemExit):
+            capture_ret(relay.cmd_update, self.args(check=True))
+
     def test_a_moved_version_refetches_only_what_actually_changed(self):
         self.make_current()
         self.served[".claude/skills/relay-onboard/SKILL.md"] = "onboard skill v2\n"

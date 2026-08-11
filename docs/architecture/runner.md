@@ -192,10 +192,13 @@ setup`, from the `test` alias, and from the `Dockerfile` after `mix compile` and
 **Consequence, accepted deliberately:** publishing is coupled to deploying. A skill fix reaches
 projects only when the app ships. In exchange, the whole publish/marker/drift apparatus is gone.
 
-**`bin/relay update`** is the one mechanism for getting those files onto disk. It refetches when
-the served version differs from `.relay/scaffold.json`'s, **or** when any destination file is
-missing — the second condition is what makes a deleted skill come back. `--check` reports and
-writes nothing; `--json` on either. The executor rewrites itself through RE185's verified
+**`bin/relay update`** is the one mechanism for getting those files onto disk. **The work list is
+the verdict:** every item is hashed against the manifest on every run, and "current" means
+nothing needs writing — never a version comparison. That is what makes a deleted *or edited*
+file come back, and what keeps the RE185 steady state honest, since auto-update rewrites
+`bin/relay` in place without touching `.relay/scaffold.json`, so the marker legitimately lags the
+bytes. Applying with an empty work list reconciles the marker; `--check` reports and writes
+nothing, ever; `--json` on either. The executor rewrites itself through RE185's verified
 installer (`verify_executor_source` + `install_executor`'s atomic `os.replace` and write ledger),
 and every body is additionally checked against the manifest's sha256 before it touches disk.
 
@@ -867,8 +870,14 @@ implementer is instructed to treat as outranking `plan.md` for that task), "waiv
 Approve with the waiver and follow-up recorded.
 
 The contract lives inline in each of the four `.claude/agents/*.md` files rather than in a shared
-reference file, because those files ship to other projects through the RLY-181 scaffold manifest
-as single files with no `references/` siblings.
+reference file, because an agent definition IS its system prompt: the file is loaded whole at
+invocation and has no mechanism for pulling in a sibling, so a shared `references/` file would
+simply never reach the model. (This rationale used to rest on those files shipping to other
+projects through the RLY-181 scaffold manifest. RE304 deleted that manifest, and
+`Relay.Scaffold.items/0` ships no agents at all — every agent is now the repo's own, per ADR
+0010 — but the single-file constraint is a property of how agents load, so it is unchanged. The
+same constraint does still apply for the shipping reason to the four `relay-*` skills, which is
+why `relay-onboard/SKILL.md` restates it there.)
 `test/relay/agents/escalation_contract_test.exs` pins the markers so an edit can't silently drop
 the contract.
 

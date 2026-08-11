@@ -14,7 +14,9 @@ the doctor, repeat — until it reports **zero errors**. That is the whole metho
 
 Three legitimate paths, and the human picks one:
 
-- **Seed** — take the shipped default factory as-is; install what is missing; adjust the gates.
+- **Seed** — take the shipped default flow shape as-is; **author** the agents and skills it
+  names; adjust the gates. (Nothing fetches a factory for you: the scaffold ships `bin/relay`
+  and the four `relay-*` skills, and ADR 0010 makes every other agent and skill the repo's own.)
 - **Adopt** — keep the repo's existing agents and skills; remap the flow's nodes onto them.
 - **Hybrid** — seed the flow's shape, adopt wherever the repo already has a better artifact.
 
@@ -136,7 +138,11 @@ candidate from the `.claude/` inventory *with the evidence for it*, show the who
 once, and iterate until the human is happy. A node with no candidate has exactly two exits, the
 human's choice:
 
-- **author one** — follow the `writing-skills` skill and write the agent or skill; or
+- **author one** — write the file the node names: an agent is `.claude/agents/<name>.md` with
+  YAML frontmatter (`name`, `description`, optional `tools`) and a body that IS its system
+  prompt; a skill is `.claude/skills/<name>/SKILL.md` with `name` + `description` frontmatter and
+  the procedure in the body. Keep it to one job, and write the `description` so a reader can tell
+  when it applies — that string is the whole basis for choosing it. Or
 - **drop the node** — remove it from the flow and re-point its edges.
 
 Never auto-map. The user is the authority on their own factory.

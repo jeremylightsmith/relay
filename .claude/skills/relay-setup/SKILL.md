@@ -72,8 +72,11 @@ bin/relay update --check --json   # what would be written
 bin/relay update --json           # write it
 ```
 
-Report the `written` list by name. It should be `bin/relay` plus the four
-`.claude/skills/relay-*/SKILL.md` files.
+Report the `written` list by name. **Expect three, not five** — `bin/relay update` writes only
+what is missing or out of date, and by this point two of the five are already on disk
+byte-identical: you curled `bin/relay` yourself in step 2, and the reader curled
+`.claude/skills/relay-setup/SKILL.md` to get this far. Three written is the healthy outcome; do
+not treat the other two as a failed install or re-run hunting for them.
 
 `bin/relay update` is the whole mechanism, and from here on **`/relay-update` owns it** — it
 wraps this same command and adds the judgment this skill deliberately skips (where these shared

@@ -189,8 +189,10 @@ all-clear.
 1. Report everything first. Then work the **errors** one at a time. Warnings are reported
    and left alone unless the user asks.
 2. Every error has two legitimate directions — the user picks:
-   - **Repo side** — create the missing `.claude/agents/<name>.md` or skill (follow the
-     `writing-skills` skill), or install the missing binary.
+   - **Repo side** — create the missing file, or install the missing binary. An agent is
+     `.claude/agents/<name>.md` with YAML frontmatter (`name`, `description`, optional `tools`)
+     whose body IS its system prompt; a skill is `.claude/skills/<name>/SKILL.md` with `name` +
+     `description` frontmatter and the procedure in the body.
    - **Flow side** — the flow names something that should not exist: pull
      (`./bin/relay flow <key> --json > /tmp/<key>.json`), edit the node, push
      (`./bin/relay flow-push <key> /tmp/<key>.json`).

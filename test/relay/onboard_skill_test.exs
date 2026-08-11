@@ -53,8 +53,13 @@ defmodule Relay.OnboardSkillTest do
     end
   end
 
-  test "hands a missing step to writing-skills or drops the node", %{doc: doc} do
-    assert doc =~ "`writing-skills`"
+  # RE304: the scaffold no longer ships `writing-skills`, so pointing at it from a skill that
+  # DOES ship would dangle in every scaffolded project. The authoring guidance is inlined
+  # instead — assert on that, and assert the dead pointer stays gone.
+  test "inlines how to author a missing step, or drops the node", %{doc: doc} do
+    refute doc =~ "writing-skills"
+    assert doc =~ ".claude/agents/<name>.md"
+    assert doc =~ ".claude/skills/<name>/SKILL.md"
     assert doc =~ "drop the node"
   end
 
