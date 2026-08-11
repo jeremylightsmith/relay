@@ -7,7 +7,7 @@ defmodule Relay.OnboardSkillTest do
     {:ok, doc: File.read!(@skill)}
   end
 
-  test "the skill directory holds exactly SKILL.md — the publish task copies nothing else" do
+  test "the skill directory holds exactly SKILL.md — the scaffold build copies nothing else" do
     assert File.ls!(Path.dirname(@skill)) == ["SKILL.md"]
   end
 
@@ -91,6 +91,14 @@ defmodule Relay.OnboardSkillTest do
     [phase0, _] = String.split(phase0_and_later, "## Phase 1", parts: 2)
 
     refute phase0 =~ "neither is something a skill can fix"
+    assert phase0 =~ "a skill cannot mint a key"
+    assert phase0 =~ "self-heals via `/relay-update`"
+  end
+
+  test "the sibling-file mistake names the current scaffold mechanism, not the retired publish task",
+       %{doc: doc} do
+    refute doc =~ "the publish task"
+    assert doc =~ "Scaffold.items"
   end
 
   describe "discoverability" do

@@ -176,5 +176,5 @@ Close with a summary: what changed, what the doctor now reports, and the remaini
 - **Running this from a flow node** — it is interactive by design.
 - **Touching app code or git** — the blast radius is `.claude/`, `relay.md`,
   `.relay/executor.json`, and flow documents.
-- **Adding a sibling file to this skill's directory** — the publish task copies `SKILL.md` only,
-  so a reference file would silently vanish from every scaffolded repo.
+- **Adding a sibling file to this skill's directory** — `Relay.Scaffold.items/0` names `SKILL.md`
+  only, so a reference file would silently vanish from every scaffolded repo.

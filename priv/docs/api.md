@@ -5,7 +5,9 @@ entry point the `bin/relay` CLI uses, so anything the CLI does you can do direct
 
 ## Base URL & authentication
 
-All endpoints live under `/api` and require a **board API key**:
+All endpoints live under `/api` and require a **board API key** — except `GET /api/version`
+and the two scaffold endpoints (`GET /api/scaffold`, `GET /api/scaffold/*path`), which are
+intentionally public:
 
 ```
 Authorization: Bearer <board API key>
@@ -291,6 +293,42 @@ curl https://relay.example/api/version
 ```
 
 CLI: `bin/relay version`.
+
+### GET /api/scaffold
+
+The manifest of the five Relay-owned files this board serves: `bin/relay` and the four
+`relay-*` skills (`Relay.Scaffold.items/0`). **Unauthenticated**, on purpose and on the same
+pipeline as `GET /api/version` — `/relay-setup` runs before a project has a board key, so this
+has to be reachable with no `Authorization` header at all. `503 scaffold_unavailable` if the
+board has not built its scaffold (`mix relay.build_scaffold`, which `mix setup` runs
+automatically); a deployed board never returns it.
+
+```
+curl https://relay.example/api/scaffold
+```
+
+```json
+{ "version": "0123456789ab", "items": [
+  { "path": "bin/relay", "sha256": "…", "bytes": 12345 }
+] }
+```
+
+`version` is derived, never stored: the first 12 hex characters of the sha256 of the sorted
+`"<path>:<sha256>"` lines, so it changes exactly when content changes.
+
+### GET /api/scaffold/\*path
+
+One file's raw bytes. `path` is checked against the manifest's `items` — a static allowlist —
+before it ever reaches the filesystem, so this is not a general file server: any path outside
+the five Relay-owned files is `404 not_found`. **Unauthenticated**, same reasoning as above.
+
+```
+curl https://relay.example/api/scaffold/bin/relay
+curl https://relay.example/api/scaffold/.claude/skills/relay-update/SKILL.md
+```
+
+CLI: `bin/relay update` fetches the manifest, compares its `version` against
+`.relay/scaffold.json`, and re-downloads only what differs or is missing.
 
 ---
 

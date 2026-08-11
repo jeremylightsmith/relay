@@ -183,6 +183,27 @@ defmodule RelayWeb.DocsControllerTest do
     assert html =~ "GET /api/board"
   end
 
+  test "the REST API reference documents the unauthenticated scaffold endpoints (RE304)", %{
+    conn: conn
+  } do
+    html = conn |> get(~p"/docs/api") |> html_response(200)
+
+    assert html =~ "GET /api/scaffold"
+    assert html =~ "/api/scaffold/*path"
+    assert html =~ "scaffold_unavailable"
+    # The blanket auth statement must carve out the unauthenticated routes it now excludes.
+    assert html =~ "except"
+  end
+
+  test "the getting-started page says /relay-onboard authors relay.md and executor.json (RE304)",
+       %{conn: conn} do
+    html = conn |> get(~p"/docs") |> html_response(200)
+
+    assert html =~ "authors"
+    assert html =~ "relay.md"
+    assert html =~ ".relay/executor.json"
+  end
+
   test "an unknown slug is a 404", %{conn: conn} do
     assert_error_sent 404, fn -> get(conn, "/docs/does-not-exist") end
   end

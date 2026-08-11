@@ -61,6 +61,8 @@ curl -fsSL "$RELAY_URL/api/scaffold/.claude/skills/relay-setup/SKILL.md" \
 That is the whole of CLI setup. `/relay-setup` downloads `bin/relay` from
 `$RELAY_URL/api/scaffold/bin/relay`, runs `/relay-update` to install the four Relay-owned
 skills, and then runs `/relay-onboard` to wire this repo to your board's flows.
+`/relay-onboard` also authors `relay.md` and `.relay/executor.json` for this repo if either is
+missing — that `.relay/executor.json` is where step 4's capacity configuration comes from.
 
 Relay owns exactly five files in your project and updates them as a set:
 
