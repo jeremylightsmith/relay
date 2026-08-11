@@ -29,7 +29,8 @@ know what would change, ask the command.
 
 - A Relay release shipped and this project has not picked it up.
 - A run was refused with `executor_outdated`, or the Runners view shows an `OUTDATED` badge.
-- One of the five files above is missing or was deleted.
+- One of the five files above is missing, was deleted, or was edited — `update` repairs all
+  three the same way, because none of them is yours to change.
 - Any time someone asks "is our Relay tooling current?"
 
 ## The checklist

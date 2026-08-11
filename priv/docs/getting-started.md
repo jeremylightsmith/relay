@@ -79,8 +79,8 @@ Relay owns exactly five files in your project and updates them as a set:
 Everything else in `.claude/` is yours; Relay never writes it.
 
 Already have `bin/relay`? Run `/relay-update` (or `bin/relay update --check` to see what would
-change first). It compares the board's scaffold version against `.relay/scaffold.json`, refetches
-only what actually differs, and restores anything that has been deleted.
+change first). It compares the board's scaffold manifest against what is on disk, refetches only
+what actually differs, and restores anything that has been deleted or edited.
 
 **Question for a human:** which project directory should agents work in? It must be a git
 repository, and it should be one you are willing to let agents create branches in.

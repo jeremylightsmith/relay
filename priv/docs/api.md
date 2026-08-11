@@ -327,8 +327,9 @@ curl https://relay.example/api/scaffold/bin/relay
 curl https://relay.example/api/scaffold/.claude/skills/relay-update/SKILL.md
 ```
 
-CLI: `bin/relay update` fetches the manifest, compares its `version` against
-`.relay/scaffold.json`, and re-downloads only what differs or is missing.
+CLI: `bin/relay update` fetches the manifest, hashes each of the five files against it, and
+re-downloads only the ones whose content differs — which covers a file that is missing, and one
+that has been edited. `.relay/scaffold.json` records what was installed; it is not the trigger.
 
 ---
 

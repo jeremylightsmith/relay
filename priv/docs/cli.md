@@ -62,9 +62,12 @@ bin/relay update            # apply
 ```
 
 The manifest's `version` is derived from the files' content, so it moves exactly when they do.
-`bin/relay update` refetches when that version differs from the one recorded in
-`.relay/scaffold.json`, **or** when any of the five is missing on disk — so a deleted skill comes
-back even though nothing was released.
+**What gets written is decided by content, not by that version:** `bin/relay update` hashes all
+five files against the manifest on every run and writes the ones that differ, so "this project is
+current" means "nothing needs writing". A deleted skill comes back, and so does an **edited** one
+— these five are Relay-owned, so a local change to them is damage to repair, not a customisation
+to keep. A version that has moved while the bytes already match writes nothing but the recorded
+version itself (the normal state after `bin/relay execute` self-updates).
 
 `bin/relay execute` also keeps itself up to date (RE185). Each heartbeat reply names
 `latest_executor_version` — the `EXECUTOR_VERSION` of the `bin/relay` the board actually serves —

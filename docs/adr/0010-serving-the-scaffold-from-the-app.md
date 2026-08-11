@@ -39,8 +39,10 @@ The Relay app builds and serves those five files itself.
 
 `bin/relay update` is the one mechanism for getting the files onto disk. Because the five are
 Relay-owned and never user-edited, it overwrites unconditionally: no provenance ledger, no
-per-file diff prompt. It refetches when the served version differs from `.relay/scaffold.json`'s
-or when any destination file is missing.
+per-file diff prompt. Every item is hashed against the manifest on every run and the work list is
+the verdict — a missing *or* edited file is rewritten, and "current" means nothing needs writing.
+The recorded version is a record of what was installed, never the trigger: RE185's auto-update
+moves `bin/relay`'s bytes without touching it, so gating on it would misreport the steady state.
 
 `bin/relay init`, `mix relay.publish_config`, `.relay/published.json`,
 `Relay.Runs.PublishMarker` and the precommit drift check are deleted.
