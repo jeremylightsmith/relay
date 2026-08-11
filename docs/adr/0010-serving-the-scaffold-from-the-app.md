@@ -60,6 +60,14 @@ app actually serves.
 - **`priv/scaffold/` must be built before `mix release`.** The `Dockerfile`, `mix setup` and the
   `test` alias all run the task; a build that skips it serves a 503 and advertises
   `latest_executor_version: null`.
+- **Executors already in the field need one manual cutover.** An executor running a pre-RE304
+  `bin/relay` resolves its update URL from `RELAY_CONFIG_URL` / the relay-config raw base, not
+  from the board. Once this deploys it keeps polling relay-config, gets `NOTHING_NEWER`, and is
+  permanently pinned — silently, because `min_executor_version/0` is unchanged so it still
+  claims work, and neither `bin/relay update` nor `/relay-update` exists in that checkout to
+  heal it. Each such checkout needs one hand-run:
+  `curl -fsSL "$RELAY_URL/api/scaffold/bin/relay" -o bin/relay` (equivalently, one final publish
+  to relay-config before retiring it).
 - **Rolling back to a project's old tooling means rolling back the app.** There is no
   independent publish channel any more, by design.
 - `Relay.Runs.min_executor_version/0` and the 409 `executor_outdated` refusal are unchanged.

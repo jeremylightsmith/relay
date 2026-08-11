@@ -244,9 +244,9 @@ defmodule RelayWeb.Api.ExecutorContractTest do
     "resume_session" => "<session-id>",
     "session_id" => "<session-id>",
     "turn_id" => "<talk-turn-id>",
-    # RE185: the VALUE moves on every publish, but the contract is the key and its presence —
-    # a literal would make this fixture churn (and fail) every time `.relay/published.json`
-    # moves, which is not a transport change.
+    # RE185: the VALUE moves on every deploy that changes `bin/relay`, but the contract is the
+    # key and its presence — a literal would make this fixture churn (and fail) every time the
+    # served scaffold's `EXECUTOR_VERSION` moves, which is not a transport change.
     "latest_executor_version" => "<latest-executor-version>"
   }
 
