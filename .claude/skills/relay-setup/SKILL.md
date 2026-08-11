@@ -72,10 +72,10 @@ bin/relay update --check --json   # what would be written
 bin/relay update --json           # write it
 ```
 
-Report the `written` list by name. **Expect three, not five** — `bin/relay update` writes only
-what is missing or out of date, and by this point two of the five are already on disk
+Report the `written` list by name. **Expect four, not six** — `bin/relay update` writes only
+what is missing or out of date, and by this point two of the six are already on disk
 byte-identical: you curled `bin/relay` yourself in step 2, and the reader curled
-`.claude/skills/relay-setup/SKILL.md` to get this far. Three written is the healthy outcome; do
+`.claude/skills/relay-setup/SKILL.md` to get this far. Four written is the healthy outcome; do
 not treat the other two as a failed install or re-run hunting for them.
 
 `bin/relay update` is the whole mechanism, and from here on **`/relay-update` owns it** — it
@@ -89,7 +89,7 @@ them yet — `/relay-onboard`, `/relay-update` and `/relay-doctor` only become a
 skill list is rebuilt. Tell the human:
 
 > Relay is installed, uncommitted. **Restart Claude Code** (or start a fresh session), then run
-> `/relay-onboard` to wire this repo to your board's flows. These five are shared tooling files —
+> `/relay-onboard` to wire this repo to your board's flows. These six are shared tooling files —
 > `/relay-update` runs the commit conversation with you any time after the restart.
 
 Then stop; setup is done. In that new session `/relay-onboard` reconciles the repo's agents and

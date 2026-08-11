@@ -173,11 +173,12 @@ alongside `/api/version`:
 Unauthenticated because `/relay-setup` downloads `bin/relay` before a project has minted a board
 key, and because these files were published openly regardless.
 
-**Exactly five files are Relay-owned** (`Relay.Scaffold.items/0`): `bin/relay` and the four
-`.claude/skills/relay-{setup,update,doctor,onboard}/SKILL.md`. They are never user-edited, which
-is what lets `bin/relay update` overwrite them unconditionally — no provenance ledger, no
-per-file diff prompt. Everything else in a project (`relay.md`, agents, other skills,
-`AGENTS.md`/`CLAUDE.md`, flow documents) is out of scope and is never written by this surface;
+**Exactly six files are Relay-owned** (`Relay.Scaffold.items/0`): `bin/relay`, the four
+`.claude/skills/relay-{setup,update,doctor,onboard}/SKILL.md`, and `relay.md`. They are never
+user-edited, which is what lets `bin/relay update` overwrite them unconditionally — no provenance
+ledger, no per-file diff prompt. Everything else in a project (agents, other skills,
+`AGENTS.md`/`CLAUDE.md`, `.relay/executor.json`, flow documents) is out of scope and is never
+written by this surface;
 wiring those is `/relay-onboard`'s job.
 
 **The version is derived, never maintained.** `Relay.Scaffold.version/1` is the first 12 hex
@@ -494,7 +495,7 @@ silently billed to the paid API.
   correct because a single identity can no longer be split across two live processes each
   beating a partial `running` list. Two executors on one host are therefore unsupported;
   multi-executor-per-host capacity would be a separate card doing host+namespace identity work.
-- `bin/relay update [--check] [--json]` — non-interactive, writes only the five
+- `bin/relay update [--check] [--json]` — non-interactive, writes only the six
   Relay-owned files, needs no TTY and no board key.
 - **Worktree namespace (RLY-231: one worktree per card).** `ExecutorPool` maps every job's
   `isolation` onto worktrees under the `exec-*` namespace. `shared_clean` jobs share one

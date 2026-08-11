@@ -7,11 +7,12 @@ description: Use when a project's Relay tooling may be stale — refreshing `bin
 
 ## Overview
 
-Relay owns exactly five files in your project:
+Relay owns exactly six files in your project:
 
 | Item | Path |
 |---|---|
 | the executor | `bin/relay` |
+| the agent guide | `relay.md` |
 | entry-point skill | `.claude/skills/relay-setup/SKILL.md` |
 | updater skill | `.claude/skills/relay-update/SKILL.md` |
 | doctor skill | `.claude/skills/relay-doctor/SKILL.md` |
@@ -29,10 +30,10 @@ know what would change, ask the command.
 
 - A Relay release shipped and this project has not picked it up.
 - A run was refused with `executor_outdated`, or the Runners view shows an `OUTDATED` badge.
-- One of the five files above is missing, was deleted, or was edited — `update` repairs all
+- One of the six files above is missing, was deleted, or was edited — `update` repairs all
   three the same way, because none of them is yours to change.
 
-**Never run this in the Relay app repo itself.** There these five files are the *source*, not
+**Never run this in the Relay app repo itself.** There these six files are the *source*, not
 installed copies, and because publishing is coupled to deploying (ADR 0010) the board serves
 whatever was last deployed — so an update reverts local work to it. `bin/relay update` refuses
 there without `--force`; `--check` is still fine and still tells you the truth.
@@ -85,5 +86,5 @@ fine — say what you're doing and do that.
 
 ## Blast radius
 
-The five files above, `.relay/scaffold.json`, and one commit if the human asked for one. Never
+The six files above, `.relay/scaffold.json`, and one commit if the human asked for one. Never
 app code, never other `.claude/` files, never a branch, never a push, never a card.

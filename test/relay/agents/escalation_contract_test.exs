@@ -39,7 +39,7 @@ defmodule Relay.Agents.EscalationContractTest do
     end
   end
 
-  test "each reviewer specifies the required shape of the escalation question" do
+  test "each reviewer specifies the CONTENT of the escalation question" do
     for name <- @reviewers do
       body = agent(name)
 
@@ -50,7 +50,31 @@ defmodule Relay.Agents.EscalationContractTest do
              "#{name}.md must offer the 'fix the code anyway' option"
 
       assert body =~ "Waive it", "#{name}.md must offer the 'waive it' option"
-      assert body =~ "allow_text", "#{name}.md must set allow_text on the question"
+    end
+  end
+
+  test "no agent file re-states the questions SCHEMA the outcome contract injects" do
+    # The envelope — the array, `allow_text`, the heredoc, the command — is appended to every
+    # agent prompt by OUTCOME_CONTRACT. Six files used to hand-carry their own copy, which is
+    # how a schema drifts from the validator that enforces it. Each file still specifies what
+    # its question should SAY; only the shape is deferred.
+    for path <- agent_files() do
+      body = File.read!(path)
+
+      refute body =~ "allow_text",
+             "#{path} restates the questions schema — the outcome contract injects it, and a " <>
+               "second copy is what drifts"
+
+      refute body =~ "<<'JSON'",
+             "#{path} carries its own questions heredoc — point at the outcome contract instead"
+    end
+  end
+
+  test "the files that escalate point at the injected contract for the shape" do
+    for name <- @agents do
+      assert agent(name) =~ "outcome contract",
+             "#{name}.md must send the reader to the injected outcome contract for the " <>
+               "command and the payload shape"
     end
   end
 

@@ -1,11 +1,17 @@
 defmodule Relay.Scaffold do
   @moduledoc """
-  The five Relay-owned files the board serves at `/api/scaffold`, and the build that produces
+  The six Relay-owned files the board serves at `/api/scaffold`, and the build that produces
   them (RE304, ADR 0010).
 
-  These files are Relay's, never a user's: a project's `bin/relay` and its four `relay-*`
-  skills. That is what lets `bin/relay update` overwrite them unconditionally — no provenance
-  ledger, no per-file diff prompt.
+  These files are Relay's, never a user's: a project's `bin/relay`, its four `relay-*` skills,
+  and `relay.md`. That is what lets `bin/relay update` overwrite them unconditionally — no
+  provenance ledger, no per-file diff prompt.
+
+  `relay.md` joined the set after RE304 (see ADR 0010's amendment). It is the agent-facing guide
+  to driving a card — the CLI verbs, the node/outcome contract, the `RELAY_NODE_SCRATCH` rule —
+  and it is entirely generic, with nothing repo-specific in it. Leaving it undistributed meant
+  every project's copy froze at whatever `/relay-onboard` first wrote and silently rotted away
+  from the executor it describes.
 
   **The version is derived, never maintained.** It is the first 12 hex characters of the
   sha256 of the sorted `"<path>:<sha256>"` lines, so it changes exactly when content changes,
@@ -27,7 +33,8 @@ defmodule Relay.Scaffold do
     ".claude/skills/relay-onboard/SKILL.md",
     ".claude/skills/relay-setup/SKILL.md",
     ".claude/skills/relay-update/SKILL.md",
-    "bin/relay"
+    "bin/relay",
+    "relay.md"
   ]
 
   @manifest_name "manifest.json"
@@ -74,7 +81,7 @@ defmodule Relay.Scaffold do
   rather than by sanitising.
   """
   # `path` is matched against the @items literal list above before any read; a value that is
-  # not one of those five strings never reaches File.read/1.
+  # not one of those six strings never reaches File.read/1.
   # sobelow_skip ["Traversal.FileModule"]
   @spec fetch(String.t()) :: {:ok, binary()} | :error
   def fetch(path) when is_binary(path) do

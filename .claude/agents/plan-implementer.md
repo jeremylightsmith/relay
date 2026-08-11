@@ -51,20 +51,19 @@ not an escalation: the executor reads only `succeeded | failed | needs_input`, s
 report that declares success routes onward as success, and one that declares nothing is
 reported as failed.
 
-```bash
-escalation_file="$(dirname "$RELAY_NODE_SCRATCH")/escalation.json"
-cat > "$escalation_file" <<'JSON'
-[
-  {
-    "prompt": "**Stuck on <task name>.** <what is stuck, in one line>.\n\nWhat I tried: <what you did>.\n\nWhat would unblock me: <the decision or context you need>.",
-    "options": [
-      "<a concrete way forward>",
-      "<the other concrete way forward>"
-    ],
-    "allow_text": true
-  }
-]
-JSON
+The outcome contract carries the payload shape as well as the command — one authoritative copy,
+already rendered for this run. Write your question to
+`$(dirname "$RELAY_NODE_SCRATCH")/escalation.json` in that shape; do not reconstruct it from
+memory. What yours must say:
+
+```text
+prompt   **Stuck on <task name>.** <what is stuck, in one line>.
+
+         What I tried: <what you did>.
+
+         What would unblock me: <the decision or context you need>.
+options  "<a concrete way forward>"
+         "<the other concrete way forward>"
 ```
 
 Say what's stuck, what you tried, and what would unblock you. Never silently ship work you

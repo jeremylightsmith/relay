@@ -14,7 +14,7 @@ exits non-zero.
 
 | Command | What it does |
 | --- | --- |
-| `bin/relay update [--check]` | Install or refresh the five Relay-owned files from the board (`bin/relay` + the four `relay-*` skills). `--check` reports the served vs. local version and which files would change, and writes nothing. Add `--json` for machine output. Prefer the `/relay-update` skill, which wraps it. See [Getting started](/docs) |
+| `bin/relay update [--check]` | Install or refresh the six Relay-owned files from the board (`bin/relay`, the four `relay-*` skills, and `relay.md`). `--check` reports the served vs. local version and which files would change, and writes nothing. Add `--json` for machine output. Prefer the `/relay-update` skill, which wraps it. See [Getting started](/docs) |
 | `bin/relay board` | The board: stages with their cards |
 | `bin/relay card RLY-12` | One card: description, plan, branch, timeline |
 | `bin/relay why RLY-12` | **Why isn't this card moving?** One plain-language answer |
@@ -52,7 +52,7 @@ Every `--json` command also takes `--field PATH` to print a single dotted-path v
 
 ## Keeping `bin/relay` current
 
-Relay owns five files in your project — `bin/relay` and the four `relay-*` skills — and your
+Relay owns six files in your project — `bin/relay`, the four `relay-*` skills, and `relay.md` — and your
 board serves them at `GET /api/scaffold`. They are Relay's, never yours, so an update overwrites
 them unconditionally; nothing else in `.claude/` is ever touched.
 
@@ -63,9 +63,9 @@ bin/relay update            # apply
 
 The manifest's `version` is derived from the files' content, so it moves exactly when they do.
 **What gets written is decided by content, not by that version:** `bin/relay update` hashes all
-five files against the manifest on every run and writes the ones that differ, so "this project is
+six files against the manifest on every run and writes the ones that differ, so "this project is
 current" means "nothing needs writing". A deleted skill comes back, and so does an **edited** one
-— these five are Relay-owned, so a local change to them is damage to repair, not a customisation
+— these six are Relay-owned, so a local change to them is damage to repair, not a customisation
 to keep. A version that has moved while the bytes already match writes nothing but the recorded
 version itself (the normal state after `bin/relay execute` self-updates).
 

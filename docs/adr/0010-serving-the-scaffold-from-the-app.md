@@ -58,7 +58,7 @@ app actually serves.
 - **`latest_executor_version` cannot lie.** The advertised number and the served bytes come from
   the same file.
 - **A new unauthenticated public surface.** Mitigated by construction: the glob route serves only
-  entries in a static five-item allowlist, and the same files were published openly before.
+  entries in a static six-item allowlist, and the same files were published openly before.
 - **`priv/scaffold/` must be built before `mix release`.** The `Dockerfile`, `mix setup` and the
   `test` alias all run the task; a build that skips it serves a 503 and advertises
   `latest_executor_version: null`.
@@ -73,6 +73,29 @@ app actually serves.
 - **Rolling back to a project's old tooling means rolling back the app.** There is no
   independent publish channel any more, by design.
 - `Relay.Runs.min_executor_version/0` and the 409 `executor_outdated` refusal are unchanged.
+
+## Amendment — `relay.md` joins the set (six files)
+
+The decision above scoped Relay-owned to `bin/relay` and the four `relay-*` skills, reasoning
+that flows had become server-side data and `/relay-onboard` owned repo wiring. That reasoning
+swept in `relay.md` by association, but it does not hold for that file:
+
+- `relay.md` is **generic**. It is the agent-facing guide to driving a card — the CLI verbs, the
+  mental model, the node/outcome contract, the `RELAY_NODE_SCRATCH` rule. Nothing in it is
+  repo-specific, so there is nothing for a project to own.
+- It describes the executor, so it goes **stale in lockstep** with `bin/relay`. Leaving it
+  undistributed meant each project's copy froze at whatever `/relay-onboard` first authored while
+  the tooling it documents kept moving — the same silent-drift failure this ADR exists to remove,
+  reintroduced one file over.
+
+So `relay.md` is served, and `/relay-onboard` no longer authors one. `.relay/executor.json` stays
+outside the set: it holds genuinely per-machine values (`capacity`, `base`, `prepare`), and
+overwriting it unconditionally would clobber real configuration.
+
+The Decision section above is left as written — it records what was decided at the time, and
+"five" there should be read as superseded by this amendment. Everywhere outside this document the
+count is **six**. Nothing else changes: same derived version, same unconditional overwrite, same
+manifest shape.
 
 ## Alternatives considered
 

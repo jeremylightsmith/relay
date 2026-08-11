@@ -142,6 +142,11 @@
           "bytes": "<bytes>",
           "path": "bin/relay",
           "sha256": "<sha256>"
+        },
+        {
+          "bytes": "<bytes>",
+          "path": "relay.md",
+          "sha256": "<sha256>"
         }
       ],
       "version": "<scaffold-version>"

@@ -1,0 +1,86 @@
+// Generated from docs/designs/flows/code.json — do not hand-edit; regenerate instead.
+digraph "code" {
+  rankdir=TB;
+  bgcolor="white";
+  splines=spline; nodesep=0.35; ranksep=0.45;
+  node [fontname="Helvetica", fontsize=11, penwidth=1.2];
+  edge [fontname="Helvetica", fontsize=9, color="#8b95a5", penwidth=1.1, arrowsize=0.7];
+  labelloc="t"; fontname="Helvetica"; fontsize=14; label="code flow — Plan:Done → Code → Review  ·  isolation: exclusive";
+
+  "start" [shape="circle", style="filled", fillcolor="#25303f", color="#25303f", fontcolor="white", width="0.45", label="start"];
+  "done" [shape="doublecircle", style="filled", fillcolor="#3f8f68", color="#3f8f68", fontcolor="white", width="0.5", label="done"];
+  "needs_input" [shape="box", style="rounded,filled", fillcolor="#fdf3e2", color="#c08a2e", fontcolor="#5b4110", label="needs_input\n(parked — a human answers)"];
+  { rank=sink; "done"; "needs_input"; }
+
+  "branch" [label=<<b>branch</b><br/><font point-size="9" color="#6b7280">shell</font>>, shape="box", style="filled", fillcolor="#eef1f6", color="#5b6b86", fontcolor="#25303f"];
+  "implement" [label=<<b>implement</b><br/><font point-size="9" color="#6b7280">agent</font><br/><font point-size="9" color="#6b7280">agent: plan-implementer</font><br/><font point-size="9" color="#6b7280">sonnet · high</font><br/><font point-size="9" color="#6b7280">foreach card.sub_tasks</font><br/><font point-size="9" color="#6b7280">commits · retries 1</font>>, shape="box", style="rounded,filled", fillcolor="#f3ecfd", color="#7c4ddb", fontcolor="#2b2540"];
+  "spec_review" [label=<<b>spec_review</b><br/><font point-size="9" color="#6b7280">agent</font><br/><font point-size="9" color="#6b7280">agent: spec-reviewer</font><br/><font point-size="9" color="#6b7280">sonnet</font>>, shape="box", style="rounded,filled", fillcolor="#f3ecfd", color="#7c4ddb", fontcolor="#2b2540"];
+  "quality_review" [label=<<b>quality_review</b><br/><font point-size="9" color="#6b7280">agent</font><br/><font point-size="9" color="#6b7280">agent: quality-reviewer</font><br/><font point-size="9" color="#6b7280">opus</font>>, shape="box", style="rounded,filled", fillcolor="#f3ecfd", color="#7c4ddb", fontcolor="#2b2540"];
+  "sync" [label=<<b>sync</b><br/><font point-size="9" color="#6b7280">shell</font>>, shape="box", style="filled", fillcolor="#eef1f6", color="#5b6b86", fontcolor="#25303f"];
+  "sync_fix" [label=<<b>sync_fix</b><br/><font point-size="9" color="#6b7280">agent</font><br/><font point-size="9" color="#6b7280">agent: rebaser</font><br/><font point-size="9" color="#6b7280">sonnet</font>>, shape="box", style="rounded,filled", fillcolor="#f3ecfd", color="#7c4ddb", fontcolor="#2b2540"];
+  "precommit" [label=<<b>precommit</b><br/><font point-size="9" color="#6b7280">gate</font>>, shape="hexagon", style="filled", fillcolor="#e9f3ee", color="#3f8f68", fontcolor="#1f3b2c"];
+  "final_review" [label=<<b>final_review</b><br/><font point-size="9" color="#6b7280">agent</font><br/><font point-size="9" color="#6b7280">agent: final-reviewer</font><br/><font point-size="9" color="#6b7280">opus</font>>, shape="box", style="rounded,filled", fillcolor="#f3ecfd", color="#7c4ddb", fontcolor="#2b2540"];
+  "final_fix" [label=<<b>final_fix</b><br/><font point-size="9" color="#6b7280">agent</font><br/><font point-size="9" color="#6b7280">agent: final-fixer</font><br/><font point-size="9" color="#6b7280">opus</font><br/><font point-size="9" color="#6b7280">commits</font>>, shape="box", style="rounded,filled", fillcolor="#f3ecfd", color="#7c4ddb", fontcolor="#2b2540"];
+  "smoke" [label=<<b>smoke</b><br/><font point-size="9" color="#6b7280">agent</font><br/><font point-size="9" color="#6b7280">agent: smoke-tester</font><br/><font point-size="9" color="#6b7280">opus</font>>, shape="box", style="rounded,filled", fillcolor="#f3ecfd", color="#7c4ddb", fontcolor="#2b2540"];
+  "smoke_fix" [label=<<b>smoke_fix</b><br/><font point-size="9" color="#6b7280">agent</font><br/><font point-size="9" color="#6b7280">opus</font><br/><font point-size="9" color="#6b7280">commits</font>>, shape="box", style="rounded,filled", fillcolor="#f3ecfd", color="#7c4ddb", fontcolor="#2b2540"];
+  "acceptance" [label=<<b>acceptance</b><br/><font point-size="9" color="#6b7280">agent</font><br/><font point-size="9" color="#6b7280">agent: acceptance-tester</font><br/><font point-size="9" color="#6b7280">opus</font>>, shape="box", style="rounded,filled", fillcolor="#f3ecfd", color="#7c4ddb", fontcolor="#2b2540"];
+  "acceptance_fix" [label=<<b>acceptance_fix</b><br/><font point-size="9" color="#6b7280">agent</font><br/><font point-size="9" color="#6b7280">opus</font><br/><font point-size="9" color="#6b7280">commits</font>>, shape="box", style="rounded,filled", fillcolor="#f3ecfd", color="#7c4ddb", fontcolor="#2b2540"];
+  "post" [label=<<b>post</b><br/><font point-size="9" color="#6b7280">agent</font><br/><font point-size="9" color="#6b7280">sonnet</font>>, shape="box", style="rounded,filled", fillcolor="#f3ecfd", color="#7c4ddb", fontcolor="#2b2540"];
+  "resync" [label=<<b>resync</b><br/><font point-size="9" color="#6b7280">shell</font>>, shape="box", style="filled", fillcolor="#eef1f6", color="#5b6b86", fontcolor="#25303f"];
+  "resync_fix" [label=<<b>resync_fix</b><br/><font point-size="9" color="#6b7280">agent</font><br/><font point-size="9" color="#6b7280">agent: rebaser</font><br/><font point-size="9" color="#6b7280">sonnet</font>>, shape="box", style="rounded,filled", fillcolor="#f3ecfd", color="#7c4ddb", fontcolor="#2b2540"];
+  "reverify" [label=<<b>reverify</b><br/><font point-size="9" color="#6b7280">gate</font>>, shape="hexagon", style="filled", fillcolor="#e9f3ee", color="#3f8f68", fontcolor="#1f3b2c"];
+  "merge" [label=<<b>merge</b><br/><font point-size="9" color="#6b7280">shell</font>>, shape="box", style="filled", fillcolor="#eef1f6", color="#5b6b86", fontcolor="#25303f"];
+
+  "start" -> "branch" [color="#8b95a5", fontcolor="#8b95a5"];
+  "branch" -> "implement" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded "];
+  "implement" -> "spec_review" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded "];
+  "spec_review" -> "implement" [color="#c0562e", fontcolor="#c0562e", label=" failed · max 3 ", constraint=false, weight=0, style=dashed];
+  "spec_review" -> "quality_review" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded "];
+  "quality_review" -> "implement" [color="#c0562e", fontcolor="#c0562e", label=" failed · max 3 ", constraint=false, weight=0, style=dashed];
+  "quality_review" -> "implement" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded · foreach_remaining ", constraint=false, weight=0, style=dashed];
+  "quality_review" -> "sync" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded · foreach_exhausted "];
+  "sync" -> "precommit" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded "];
+  "sync" -> "sync_fix" [color="#c0562e", fontcolor="#c0562e", label=" failed "];
+  "sync_fix" -> "precommit" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded "];
+  "precommit" -> "final_fix" [color="#c0562e", fontcolor="#c0562e", label=" failed · max 2 "];
+  "precommit" -> "final_review" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded "];
+  "final_review" -> "final_fix" [color="#c0562e", fontcolor="#c0562e", label=" failed · max 2 "];
+  "final_review" -> "smoke" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded "];
+  "final_fix" -> "precommit" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded ", constraint=false, weight=0, style=dashed];
+  "smoke" -> "smoke_fix" [color="#c0562e", fontcolor="#c0562e", label=" failed · max 2 "];
+  "smoke_fix" -> "smoke" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded ", constraint=false, weight=0, style=dashed];
+  "smoke" -> "acceptance" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded "];
+  "acceptance" -> "acceptance_fix" [color="#c0562e", fontcolor="#c0562e", label=" failed · max 2 "];
+  "acceptance_fix" -> "acceptance" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded ", constraint=false, weight=0, style=dashed];
+  "acceptance" -> "post" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded "];
+  "post" -> "resync" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded "];
+  "resync" -> "reverify" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded "];
+  "resync" -> "resync_fix" [color="#c0562e", fontcolor="#c0562e", label=" failed "];
+  "resync_fix" -> "reverify" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded "];
+  "reverify" -> "resync_fix" [color="#c0562e", fontcolor="#c0562e", label=" failed · max 2 ", constraint=false, weight=0, style=dashed];
+  "reverify" -> "merge" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded "];
+  "merge" -> "done" [color="#3f8f68", fontcolor="#3f8f68", label=" succeeded "];
+  "merge" -> "resync" [color="#c0562e", fontcolor="#c0562e", label=" failed · max 2 ", constraint=false, weight=0, style=dashed];
+  "implement" -> "needs_input" [color="#d9b38a", style=dashed, penwidth=0.7, arrowsize=0.5, weight=0];
+  "sync_fix" -> "needs_input" [color="#d9b38a", style=dashed, penwidth=0.7, arrowsize=0.5, weight=0];
+  "final_fix" -> "needs_input" [color="#d9b38a", style=dashed, penwidth=0.7, arrowsize=0.5, weight=0];
+  "smoke_fix" -> "needs_input" [color="#d9b38a", style=dashed, penwidth=0.7, arrowsize=0.5, weight=0];
+  "acceptance_fix" -> "needs_input" [color="#d9b38a", style=dashed, penwidth=0.7, arrowsize=0.5, weight=0];
+  "resync_fix" -> "needs_input" [color="#d9b38a", style=dashed, penwidth=0.7, arrowsize=0.5, weight=0];
+  "post" -> "needs_input" [color="#d9b38a", style=dashed, penwidth=0.7, arrowsize=0.5, weight=0];
+  "branch" -> "needs_input" [color="#d9b38a", style=dashed, penwidth=0.7, arrowsize=0.5, weight=0];
+
+  // A single plaintext node: an HTML table stays compact, where sample edges
+  // between invisible nodes stretch the cluster to a third of the page.
+  legend [shape=plaintext, fontsize=9, label=<
+    <table border="1" cellborder="0" cellspacing="4" cellpadding="2" color="#d7dce3" bgcolor="white">
+      <tr><td colspan="2" align="left"><font color="#6b7280">legend</font></td></tr>
+      <tr><td bgcolor="#f3ecfd" align="left">&#160;agent&#160;</td><td align="left"><font color="#6b7280">runs a claude agent</font></td></tr>
+      <tr><td bgcolor="#eef1f6" align="left">&#160;shell&#160;</td><td align="left"><font color="#6b7280">runs a command</font></td></tr>
+      <tr><td bgcolor="#e9f3ee" align="left">&#160;gate&#160;</td><td align="left"><font color="#6b7280">must pass to continue</font></td></tr>
+      <tr><td align="left"><font color="#3f8f68">&#9472;&#9472;</font></td><td align="left"><font color="#6b7280">succeeded</font></td></tr>
+      <tr><td align="left"><font color="#c0562e">&#9476;&#9476;</font></td><td align="left"><font color="#6b7280">failed / loops back</font></td></tr>
+      <tr><td align="left"><font color="#d9b38a">&#9476;&#9476;</font></td><td align="left"><font color="#6b7280">escalates to needs_input</font></td></tr>
+    </table>>];
+  { rank=sink; "legend"; }
+}

@@ -25,10 +25,10 @@ defmodule Relay.ScaffoldTest do
   end
 
   describe "build!/2" do
-    test "the manifest lists exactly the five Relay-owned items", %{src: src, dest: dest} do
+    test "the manifest lists exactly the six Relay-owned items", %{src: src, dest: dest} do
       manifest = Scaffold.build!(src, dest)
 
-      assert length(Scaffold.items()) == 5
+      assert length(Scaffold.items()) == 6
       assert Enum.map(manifest["items"], & &1["path"]) == Scaffold.items()
 
       for item <- manifest["items"] do
@@ -73,7 +73,17 @@ defmodule Relay.ScaffoldTest do
   end
 
   describe "the scaffold this build serves" do
-    test "the manifest names the same five items the module declares" do
+    test "relay.md is served, so a project's Relay guide refreshes with the tooling" do
+      # RE304 left relay.md out on the grounds that only never-edited files are Relay-owned.
+      # It is a generic guide with no repo-specific content, so leaving it undistributed just
+      # meant every project's copy rotted in place — including the node/outcome contract that
+      # skills read to work a card correctly.
+      assert "relay.md" in Scaffold.items()
+      assert {:ok, body} = Scaffold.fetch("relay.md")
+      assert body =~ "RELAY_NODE_SCRATCH"
+    end
+
+    test "the manifest names the same six items the module declares" do
       assert {:ok, manifest} = Scaffold.manifest()
       assert Enum.map(manifest["items"], & &1["path"]) == Scaffold.items()
       assert manifest["version"] =~ ~r/\A[0-9a-f]{12}\z/

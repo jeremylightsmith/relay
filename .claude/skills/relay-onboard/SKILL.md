@@ -31,7 +31,7 @@ Restating a check here would be a second copy of it, and the copy would drift. T
 **Never run this from a flow node.** It asks questions and confirms every mutation; a runner has
 nobody to ask.
 
-**Blast radius:** `.claude/` files, `relay.md`, `.relay/executor.json`, and flow documents.
+**Blast radius:** `.claude/` files, `.relay/executor.json`, and flow documents.
 **Never** app code, git branches, commits, or cards.
 
 **Idempotent and resumable.** Every run starts by running the doctor and does only what is
@@ -72,9 +72,9 @@ self-heals via `bin/relay update` instead.
    Code restarts, so if this wrote any `SKILL.md`, stop and tell the human to restart the session
    and re-run `/relay-onboard`. Resume from Phase 1 when the floor is met.
 
-   `relay.md` and `.relay/executor.json` are **not** part of that floor — they are not
-   Relay-owned served files, and authoring them for this repo is part of onboarding's own work
-   below.
+   `.relay/executor.json` is **not** part of that floor — it is not a Relay-owned served file,
+   and authoring it for this repo is part of onboarding's own work below. `relay.md` **is**
+   served, so `update` installs it and you never author one.
 
 2. **Credential floor** — `RELAY_URL` and `RELAY_API_KEY` must be set and `./bin/relay board` must
    succeed. If not, stop with the checklist: mint a board key at
@@ -119,9 +119,9 @@ is a repo-side job plus a gate adjustment, not "author a flow from nothing".
 
 Show the **whole** plan before mutating anything, and get sign-off on it as a unit:
 
-- files to create or modify, each with its diff — including: if `relay.md` or
-  `.relay/executor.json` is missing, author it for this repo as part of the shown plan (both are
-  already inside this skill's declared blast radius; nothing else installs them);
+- files to create or modify, each with its diff — including: if `.relay/executor.json` is
+  missing, author it for this repo as part of the shown plan (it is already inside this skill's
+  declared blast radius, and nothing else installs it);
 - flow changes as a **node-level** diff (node key → what changes);
 - the **verify command**, asked here, once.
 
@@ -189,7 +189,7 @@ Close with a summary: what changed, what the doctor now reports, and the remaini
 - **Restarting from scratch on a resumed session** — run the doctor first and do only what is
   missing.
 - **Running this from a flow node** — it is interactive by design.
-- **Touching app code or git** — the blast radius is `.claude/`, `relay.md`,
-  `.relay/executor.json`, and flow documents.
+- **Touching app code or git** — the blast radius is `.claude/`, `.relay/executor.json`, and
+  flow documents.
 - **Adding a sibling file to this skill's directory** — `Relay.Scaffold.items/0` names `SKILL.md`
   only, so a reference file would silently vanish from every scaffolded repo.

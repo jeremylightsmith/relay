@@ -69,7 +69,7 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
 EXECUTOR_VERSION = 48
-EXECUTOR_FINGERPRINT = "5d0197cf33393c9ff9c3f26e5313548671347722a1cfb05c514da29a0ea5e9aa"
+EXECUTOR_FINGERPRINT = "4552d75897b0f855b352fe45055e92cb8cc668b7b188071428f6f2889bb67c00"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -2250,10 +2250,52 @@ Valid outcomes: succeeded | failed. Use `--detail @file` for anything long or
 containing quotes or newlines — do NOT hand-write the JSON yourself; this command writes it.
 
 `detail` is handed to the next node as {prior.detail}, so make it useful: for a review, the
-actual findings; for a failure, why. If you need a human instead, run
-`{relay} needs-input {ref} --questions @<file>` and stop — that parks the run and you need not
-declare an outcome. Exiting without either is reported as `failed`, because a node that
-declares nothing cannot be distinguished from one that did nothing."""
+actual findings; for a failure, why. Exiting without declaring anything is reported as `failed`,
+because a node that declares nothing cannot be distinguished from one that did nothing.
+
+IF YOU NEED A HUMAN INSTEAD — write your questions beside $RELAY_NODE_SCRATCH, post them, and
+STOP. That parks the run, and you need not declare an outcome:
+
+    questions_file="$(dirname "$RELAY_NODE_SCRATCH")/questions.json"
+    cat > "$questions_file" <<'JSON'
+    [
+      {
+        "prompt": "**<Subject of the decision>.** <The question, stated plainly.>",
+        "options": [
+          "<A full, self-contained choice.> — RECOMMENDED",
+          "<Another full, self-contained choice.>"
+        ],
+        "allow_text": true
+      },
+      {
+        "prompt": "**<Subject>.** <A genuinely open-ended ask.>",
+        "options": [],
+        "allow_text": true
+      }
+    ]
+JSON
+    {relay} needs-input {ref} --questions @"$questions_file"
+
+A non-empty ARRAY, one object per decision — the card drawer paginates it into a
+one-question-at-a-time stepper, so never number several questions into one prose string. Batch
+everything you need in ONE call rather than asking twice. `prompt` is required, non-blank, and
+rendered as markdown; `options` are full self-contained sentences (the human sees buttons with no
+surrounding prose) and `[]` means a genuinely open ask; `allow_text` defaults to true and MUST be
+true unless `options` is non-empty. The human's answers land on the card timeline — read them
+with `{relay} card {ref}` when this node runs again."""
+
+
+# The heredoc body inside OUTCOME_CONTRACT's needs-input block. The example lives in exactly one
+# place — the contract text agents actually read — and both this helper and
+# test/relay_web/controllers/api/needs_input_contract_test.exs extract it from there rather than
+# restating it, so neither can validate a copy that is not the one being shipped.
+QUESTIONS_EXAMPLE_RE = re.compile(r"<<'JSON'\n(.*?)\nJSON\n", re.S)
+
+
+def outcome_contract_questions_example():
+    """The questions JSON the outcome contract teaches, as text."""
+    m = QUESTIONS_EXAMPLE_RE.search(OUTCOME_CONTRACT)
+    return m.group(1) if m else ""
 
 
 # Appended to an agent node's prompt BETWEEN its own rendered `run` and the outcome contract, and
@@ -3469,10 +3511,10 @@ def cmd_outcome(args):
 
 # ============================ the scaffold (RE304) ============================
 #
-# Relay owns exactly five files in a project — `bin/relay` and the four `relay-*` skills — and
-# the BOARD serves them at /api/scaffold. They are never user-edited, which is what lets an
-# update overwrite them unconditionally: no provenance ledger, no per-file diff prompt, no
-# "did you edit this or did we ship a newer one?" question.
+# Relay owns exactly six files in a project — `bin/relay`, the four `relay-*` skills, and
+# `relay.md` — and the BOARD serves them at /api/scaffold. They are never user-edited, which is
+# what lets an update overwrite them unconditionally: no provenance ledger, no per-file diff
+# prompt, no "did you edit this or did we ship a newer one?" question.
 #
 # The manifest's `version` is derived from content server-side; this end only ever compares it
 # for equality. "N versions behind" is deliberately not a thing.
@@ -3480,6 +3522,7 @@ def cmd_outcome(args):
 SCAFFOLD_PATH = "/api/scaffold"        # pinned to test/fixtures/executor_contract.json (RLY-176)
 SCAFFOLD_STATE_REL = os.path.join(".relay", "scaffold.json")
 EXECUTOR_REL = "bin/relay"             # the ONE item that goes through RE185's installer
+GUIDE_REL = "relay.md"                 # the agent-facing guide; plain content, written verbatim
 
 
 def _fetch(url, timeout=30):
@@ -3558,9 +3601,9 @@ def fetch_scaffold_manifest():
 
 
 def in_relay_app_repo():
-    """Whether ROOT is the Relay APP repo — the one place the five files are SOURCE, not copies.
+    """Whether ROOT is the Relay APP repo — the one place the six files are SOURCE, not copies.
 
-    `lib/relay/scaffold.ex` is the marker: it is the module that defines the five paths and the
+    `lib/relay/scaffold.ex` is the marker: it is the module that defines the six paths and the
     version rule, so it exists in the app repo and nowhere else. A consuming project never has it.
     """
     return os.path.isfile(os.path.join(ROOT, "lib", "relay", "scaffold.ex"))
@@ -3570,7 +3613,7 @@ def scaffold_status():
     """The ONE comparison behind both `--check` and apply.
 
     **The work list is the verdict.** Every item is hashed against the manifest on every run,
-    and `current` is simply "nothing to write" — never a version comparison. The five files
+    and `current` is simply "nothing to write" — never a version comparison. The six files
     total ~209 KB, so there is no cost reason to gate the hashing on a cheaper signal, and
     two states make the hash the only trustworthy one:
 
@@ -3651,7 +3694,7 @@ def format_scaffold(report):
 
 
 def cmd_update(args):
-    """Install or refresh the five Relay-owned files from the board (RE304).
+    """Install or refresh the six Relay-owned files from the board (RE304).
 
     `--check` reports and writes nothing (and needs no TTY); without it, apply. Replaces
     `relay init`: one mechanism, no prompts, no optional items.
@@ -3660,7 +3703,7 @@ def cmd_update(args):
     (auto-update moved the bytes, the marker stayed behind), and without this the marker would
     lag forever. `--check` never writes it — reporting must stay side-effect free.
 
-    Applying REFUSES in the Relay app repo without `--force`. There the five files are the
+    Applying REFUSES in the Relay app repo without `--force`. There the six files are the
     source, and ADR 0010 couples publishing to deploying, so the board's served copy is by
     construction behind HEAD on any branch that touches them — meaning an apply would silently
     revert the very work in progress, skills first and `bin/relay` last. RE185's auto-update
@@ -3671,7 +3714,7 @@ def cmd_update(args):
     written = []
     if not args.check:
         if status["changed"] and in_relay_app_repo() and not args.force:
-            die("refusing to install into the Relay app repo: these five files are the SOURCE "
+            die("refusing to install into the Relay app repo: these six files are the SOURCE "
                 "here, not installed copies, and the board serves whatever was last deployed — "
                 f"applying would revert {len(status['changed'])} of them to it. "
                 "Use `bin/relay update --check` to see the difference, or --force if you really "
@@ -3766,7 +3809,7 @@ def build_parser():
     up.add_argument("--check", action="store_true",
                     help="report what would change and write nothing")
     up.add_argument("--force", action="store_true",
-                    help="install even into the Relay app repo, where these five files are the source")
+                    help="install even into the Relay app repo, where these six files are the source")
     return p
 
 

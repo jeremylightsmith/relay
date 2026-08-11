@@ -3334,12 +3334,28 @@ class ExecuteLoopTest(unittest.TestCase):
         self._saved = {k: getattr(relay, k) for k in
                        ("load_executor_config", "claim_node_job", "run_node_job",
                         "report_outcome", "report_talk_outcome", "reset_worktree",
-                        "refresh_worktree", "FORWARDER", "env", "log", "DRY")}
+                        "refresh_worktree", "FORWARDER", "env", "log", "DRY",
+                        "PLACEMENT_RETRY_S")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
         self.addCleanup(relay.signal.signal, relay.signal.SIGINT,
                          relay.signal.getsignal(relay.signal.SIGINT))
         relay.DRY = False
-        relay.env = lambda name: "x"
+        # Don't sleep real seconds between placement retries: an unplaceable job walks the full
+        # PLACEMENT_ATTEMPTS loop, which at the shipped 1.0s interval is ~9s of `wake.wait` per
+        # test. These tests exercise routing/reporting, not the backoff duration.
+        relay.PLACEMENT_RETRY_S = 0
+        # A rejected talk turn's transcript delivery (reject -> talk_failure -> TalkEventSender)
+        # POSTs an :error line; report_talk_outcome is stubbed per-test but this delivery is not,
+        # so it hits the real `api()` -> urlopen path and, on failure, burns the full 15.5s
+        # default `_talk_backoff` (a bound default arg, so it can't be swapped from here). Two
+        # things are needed to keep it instant: RELAY_URL must carry a scheme or `api()` dies in
+        # `urllib.request.Request` before urlopen is ever reached (a schemeless "x" raised
+        # ValueError and triggered all six retries), and urlopen must return a body so the POST
+        # succeeds on the first try. All other executor HTTP is stubbed at the function level.
+        self._urlopen = relay.urllib.request.urlopen
+        self.addCleanup(setattr, relay.urllib.request, "urlopen", self._urlopen)
+        relay.urllib.request.urlopen = lambda req, *a, **k: _FakeResp(b"{}")
+        relay.env = lambda name: "http://relay.test" if name == "RELAY_URL" else "x"
         relay.log = lambda *a, **k: None
         relay.reset_worktree = lambda *a, **k: None
         relay.refresh_worktree = lambda *a, **k: None   # loop ff's the idle shared worktree
@@ -4484,7 +4500,8 @@ class UpdateTest(unittest.TestCase):
         self.addCleanup(lambda: os.environ.__setitem__("RELAY_URL", prev)
                         if prev is not None else os.environ.pop("RELAY_URL", None))
 
-        self.served = {relay.EXECUTOR_REL: VALID_STUB.format(relay.EXECUTOR_VERSION)}
+        self.served = {relay.EXECUTOR_REL: VALID_STUB.format(relay.EXECUTOR_VERSION),
+                       relay.GUIDE_REL: "# Working with Relay from your agent\n"}
         for skill in self.SKILLS:
             self.served[f".claude/skills/{skill}/SKILL.md"] = f"{skill} skill\n"
         self.fetched = []
@@ -4534,7 +4551,7 @@ class UpdateTest(unittest.TestCase):
 
     # ---- apply ----
 
-    def test_update_installs_all_five_files_and_records_the_version(self):
+    def test_update_installs_all_six_files_and_records_the_version(self):
         report = capture_ret(relay.cmd_update, self.args())
 
         for rel in self.served:
@@ -4543,14 +4560,15 @@ class UpdateTest(unittest.TestCase):
         with open(self.path(".relay/scaffold.json")) as f:
             self.assertEqual(json.load(f)["version"], self.manifest()["version"])
 
-    def test_the_five_are_the_executor_and_the_four_relay_skills(self):
+    def test_the_six_are_the_executor_the_guide_and_the_four_relay_skills(self):
         report = capture_ret(relay.cmd_update, self.args())
         installed = sorted(report["written"])
 
-        self.assertEqual(len(installed), 5)
+        self.assertEqual(len(installed), 6)
         self.assertIn(relay.EXECUTOR_REL, installed)
+        self.assertIn(relay.GUIDE_REL, installed)
         for rel in installed:
-            self.assertTrue(rel == relay.EXECUTOR_REL
+            self.assertTrue(rel in (relay.EXECUTOR_REL, relay.GUIDE_REL)
                             or rel.startswith(".claude/skills/relay-"), rel)
 
     def test_nothing_outside_the_manifest_is_written(self):
@@ -4803,10 +4821,11 @@ class ScaffoldContractTest(unittest.TestCase):
 
     def test_the_executor_path_update_special_cases_is_a_manifest_item(self):
         paths = [i["path"] for i in self.scaffold["manifest"]["items"]]
-        self.assertEqual(len(paths), 5)
+        self.assertEqual(len(paths), 6)
         self.assertIn(relay.EXECUTOR_REL, paths)
+        self.assertIn(relay.GUIDE_REL, paths)
         for path in paths:
-            self.assertTrue(path == relay.EXECUTOR_REL
+            self.assertTrue(path in (relay.EXECUTOR_REL, relay.GUIDE_REL)
                             or path.startswith(".claude/skills/relay-"), path)
 
     def test_the_raw_file_route_is_the_base_plus_the_item_path(self):
@@ -5661,6 +5680,34 @@ class ScratchPathTest(unittest.TestCase):
     def test_outcome_contract_names_no_literal_tmp_path(self):
         self.assertNotIn("/tmp/findings.md", relay.OUTCOME_CONTRACT)
         self.assertIn("RELAY_NODE_SCRATCH", relay.OUTCOME_CONTRACT)
+
+    def test_outcome_contract_carries_a_usable_questions_payload(self):
+        """The contract shipped the needs-input COMMAND but not the payload SHAPE, so every
+        skill that asks a human hand-carried its own copy of the schema — and one that got it
+        wrong died on `--questions is not valid JSON`, exited without parking AND without an
+        outcome, and was reported `failed` with the question never reaching the human."""
+        payload = relay.outcome_contract_questions_example()
+
+        self.assertEqual(relay.needs_input_body(None, payload), {"questions": json.loads(payload)})
+
+    def test_the_questions_example_covers_both_answer_shapes(self):
+        """Both branches of the server's `answerable?` rule: options-with-text, and a genuinely
+        open ask. A one-shape example teaches half the schema."""
+        questions = json.loads(relay.outcome_contract_questions_example())
+
+        self.assertTrue(any(q.get("options") for q in questions))
+        self.assertTrue(any(q.get("options") == [] and q.get("allow_text") for q in questions))
+        for q in questions:
+            self.assertTrue(q["prompt"].strip())
+
+    def test_the_rendered_contract_still_carries_the_example(self):
+        """render() is str.replace per known var, so the example's literal JSON braces must
+        survive rendering untouched — if they did not, every agent would read mangled JSON."""
+        rendered = relay.render(relay.OUTCOME_CONTRACT,
+                                {"relay": "./bin/relay", "ref": "RLY-1"})
+
+        self.assertIn(relay.outcome_contract_questions_example().strip(), rendered)
+        self.assertIn("./bin/relay needs-input RLY-1 --questions", rendered)
 
     def test_run_node_job_threads_the_scratch_path_into_a_shell_step(self):
         seen = {}

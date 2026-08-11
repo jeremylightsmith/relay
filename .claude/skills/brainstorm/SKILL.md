@@ -142,43 +142,27 @@ changes only *how* you deliver them, not *whether* you ask.
 
 - **If you have questions, ask them.** Collect *all* of them into a **single**
   `needs-input` call carrying a **structured** question array, then STOP. Do not
-  guess-and-write a spec when real questions remain. Write the array to a scratch JSON file
-  under `$RELAY_NODE_SCRATCH`'s directory (never an invented `/tmp` path — see
-  [`relay.md`](../../../relay.md#the-relay_node_scratch-contract))
-  and pass it with `--questions`:
+  guess-and-write a spec when real questions remain.
 
-      questions_file="$(dirname "$RELAY_NODE_SCRATCH")/questions.json"
-      cat > "$questions_file" <<'JSON'
-      [
-        {
-          "prompt": "**<Subject of the decision>.** <The question, stated plainly.>",
-          "options": [
-            "<A full, self-contained choice.> — RECOMMENDED",
-            "<Another full, self-contained choice.>"
-          ],
-          "allow_text": true
-        },
-        {
-          "prompt": "**<Subject>.** <A genuinely open-ended ask.>",
-          "options": [],
-          "allow_text": true
-        }
-      ]
-      JSON
-      ./bin/relay needs-input <ref> --questions @"$questions_file"
+  The **outcome contract appended to the end of your prompt** carries the exact command and the
+  exact questions-JSON shape, already rendered for this run — including where to write the file
+  (beside `$RELAY_NODE_SCRATCH`, never an invented `/tmp` path). Follow it rather than
+  reconstructing a payload from memory.
 
-  The array **is** the batch — the drawer paginates it into a one-question-at-a-time
-  stepper, so **never** hand-number questions into one big string. Prose gives the human
-  a wall of text where they should get clickable options.
+  What that contract does *not* tell you is how to write a **good** question, which is this
+  skill's job:
 
-  - **One decision per array item.** `prompt` is markdown (the drawer renders it) — bold
-    the decision's subject, then state the question plainly.
-  - **`options` are the concrete choices**, each a full self-contained sentence. The
-    human sees one option per button with **no surrounding prose**, so an option must
-    make sense alone. Mark the one you'd pick with a trailing `— RECOMMENDED`.
-  - **`allow_text` defaults to `true`** — leave it true unless the options are genuinely
-    exhaustive. Use `"options": []` for a genuinely open-ended ask; the stepper then
-    renders just its multi-line answer box.
+  - **One decision per array item.** The array **is** the batch — the drawer paginates it into a
+    one-question-at-a-time stepper, so **never** hand-number questions into one big string.
+    Prose gives the human a wall of text where they should get clickable options.
+  - **Bold the decision's subject** in `prompt`, then state the question plainly. It renders as
+    markdown.
+  - **Make every option a full self-contained sentence.** The human sees one option per button
+    with **no surrounding prose**, so an option must make sense alone. Mark the one you'd pick
+    with a trailing `— RECOMMENDED`.
+  - **Leave `allow_text` true** unless the options are genuinely exhaustive, and use
+    `"options": []` for a genuinely open-ended ask — the stepper then renders just its
+    multi-line answer box.
 
   Calling `needs-input` blocks the card on a human and posts your questions to its
   timeline; the runner stops working it until the human answers.

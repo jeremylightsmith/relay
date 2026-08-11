@@ -296,8 +296,8 @@ CLI: `bin/relay version`.
 
 ### GET /api/scaffold
 
-The manifest of the five Relay-owned files this board serves: `bin/relay` and the four
-`relay-*` skills (`Relay.Scaffold.items/0`). **Unauthenticated**, on purpose and on the same
+The manifest of the six Relay-owned files this board serves: `bin/relay`, the four
+`relay-*` skills, and `relay.md` (`Relay.Scaffold.items/0`). **Unauthenticated**, on purpose and on the same
 pipeline as `GET /api/version` — `/relay-setup` runs before a project has a board key, so this
 has to be reachable with no `Authorization` header at all. `503 scaffold_unavailable` if the
 board has not built its scaffold (`mix relay.build_scaffold`, which `mix setup` runs
@@ -320,14 +320,14 @@ curl https://relay.example/api/scaffold
 
 One file's raw bytes. `path` is checked against the manifest's `items` — a static allowlist —
 before it ever reaches the filesystem, so this is not a general file server: any path outside
-the five Relay-owned files is `404 not_found`. **Unauthenticated**, same reasoning as above.
+the six Relay-owned files is `404 not_found`. **Unauthenticated**, same reasoning as above.
 
 ```
 curl https://relay.example/api/scaffold/bin/relay
 curl https://relay.example/api/scaffold/.claude/skills/relay-update/SKILL.md
 ```
 
-CLI: `bin/relay update` fetches the manifest, hashes each of the five files against it, and
+CLI: `bin/relay update` fetches the manifest, hashes each of the six files against it, and
 re-downloads only the ones whose content differs — which covers a file that is missing, and one
 that has been edited. `.relay/scaffold.json` records what was installed; it is not the trigger.
 

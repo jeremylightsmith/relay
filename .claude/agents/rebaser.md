@@ -31,19 +31,15 @@ sites, not to keep both hunks. When the resolution needs a human judgement, OR y
 
 1. Run `git rebase --abort` so the branch is left **exactly** as it was — non-rebasing, commits
    intact, HEAD attached to the branch (RLY-166).
-2. Park the run for a human. Write the questions to a scratch file, naming the conflicting
-   files, what each side intended, and the specific judgement being asked:
+2. Park the run for a human. The **outcome contract at the end of your prompt** carries the
+   `needs-input` block — the exact command and the exact questions-JSON shape, already rendered
+   for this run. Follow it; do not invent a payload shape from memory.
 
-       questions_file="$(dirname "$RELAY_NODE_SCRATCH")/rebase_questions.json"
-       cat > "$questions_file" <<'JSON'
-       [
-         {
-           "prompt": "Rebasing onto origin/main hit a conflict I should not resolve by guessing. Files: <files>. Our side: <intent>. Their side: <intent>. Which resolution is correct?",
-           "options": ["<option A>", "<option B>"],
-           "allow_text": true
-         }
-       ]
-       JSON
+   What *your* question must say: name the conflicting files, what each side intended, and the
+   specific judgement being asked, with the candidate resolutions as the `options` —
+
+   > Rebasing onto origin/main hit a conflict I should not resolve by guessing. Files:
+   > `<files>`. Our side: `<intent>`. Their side: `<intent>`. Which resolution is correct?
 
    Then run the `needs-input <ref> --questions @"$questions_file"` command **exactly as it
    appears in the outcome contract at the end of your prompt** — that copy is already rendered

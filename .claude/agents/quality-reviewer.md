@@ -85,21 +85,21 @@ must state all three of: the finding with a `file:line` reference and why it mat
 mandating plan text **quoted verbatim**; and why the implementer cannot act on it without
 contradicting the plan.
 
-```bash
-escalation_file="$(dirname "$RELAY_NODE_SCRATCH")/escalation.json"
-cat > "$escalation_file" <<'JSON'
-[
-  {
-    "prompt": "**Plan-mandated defect.** `lib/foo/bar.ex:42` — <what is wrong and why it matters>.\n\nThe plan mandates it, verbatim:\n\n> <exact quote from plan.md, naming the task it came from>\n\nThe implementer cannot fix this without contradicting the plan it is instructed to follow, so this needs your call.",
-    "options": [
-      "Fix the code anyway — deviate from the plan for this run.",
-      "Waive it — ship as planned; I'll file a follow-up card."
-    ],
-    "allow_text": true
-  }
-]
-JSON
+```text
+prompt   **Plan-mandated defect.** `lib/foo/bar.ex:42` — <what is wrong and why it matters>.
+
+         The plan mandates it, verbatim:
+
+         > <exact quote from plan.md, naming the task it came from>
+
+         The implementer cannot fix this without contradicting the plan it is instructed to follow, so this needs your call.
+options  "Fix the code anyway — deviate from the plan for this run."
+         "Waive it — ship as planned; I'll file a follow-up card."
 ```
+
+Write that to `$(dirname "$RELAY_NODE_SCRATCH")/escalation.json` in the questions-JSON shape the
+**outcome contract at the end of your prompt** spells out — it carries the one authoritative copy
+of that shape, already rendered for this run. Do not reconstruct the payload from memory.
 
 Then run the `needs-input <ref> --questions @"$escalation_file"` command **exactly as it
 appears in the outcome contract at the end of your prompt** — that copy is already rendered with

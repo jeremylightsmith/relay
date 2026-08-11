@@ -20,7 +20,16 @@ defmodule Relay.BrainstormSkillTest do
   end
 
   test "asks the human via needs-input in headless/runner use", %{doc: doc} do
-    assert doc =~ "bin/relay needs-input"
+    assert doc =~ "needs-input"
+  end
+
+  test "defers the questions payload shape to the injected outcome contract", %{doc: doc} do
+    # The shape is appended to every agent prompt by bin/relay's OUTCOME_CONTRACT. This skill
+    # keeps the judgement it uniquely owns — how to write a good question — and stops carrying
+    # a second copy of the schema that can drift from the validator.
+    assert doc =~ "outcome contract"
+    refute doc =~ "allow_text\":"
+    refute doc =~ "<<'JSON'"
   end
 
   test "points onward to /write-plan", %{doc: doc} do
