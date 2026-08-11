@@ -47,7 +47,9 @@ Already wired and one node broke? That is `/relay-doctor`, not this.
 
 ## Phase 0 — Floor check
 
-Two independent floors. Each is a **stop**, not a mutation — neither is something a skill can fix.
+Two independent floors. The credential floor is always a **stop** — a skill cannot mint a key.
+The scaffold floor stops only when `bin/relay` itself is missing; a stale `relay-*` skill
+self-heals via `/relay-update` instead.
 
 1. **Scaffold floor** — `bin/relay` and the four `relay-*` skills must be installed. If
    `bin/relay` is missing, stop and hand the human the entry point:
@@ -106,7 +108,9 @@ is a repo-side job plus a gate adjustment, not "author a flow from nothing".
 
 Show the **whole** plan before mutating anything, and get sign-off on it as a unit:
 
-- files to create or modify, each with its diff;
+- files to create or modify, each with its diff — including: if `relay.md` or
+  `.relay/executor.json` is missing, author it for this repo as part of the shown plan (both are
+  already inside this skill's declared blast radius; nothing else installs them);
 - flow changes as a **node-level** diff (node key → what changes);
 - the **verify command**, asked here, once.
 

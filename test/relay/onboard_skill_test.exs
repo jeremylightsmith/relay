@@ -73,6 +73,26 @@ defmodule Relay.OnboardSkillTest do
     assert doc =~ "Never offer to enable a flow that still has errors"
   end
 
+  test "Phase 3's plan actually authors relay.md and .relay/executor.json when missing", %{
+    doc: doc
+  } do
+    [_, phase3_and_later] = String.split(doc, "## Phase 3", parts: 2)
+    [phase3, _] = String.split(phase3_and_later, "## Phase 4", parts: 2)
+
+    assert phase3 =~ "relay.md"
+    assert phase3 =~ ".relay/executor.json"
+    assert phase3 =~ "author it for this repo"
+  end
+
+  test "the floor check preamble does not claim the scaffold floor is never a mutation", %{
+    doc: doc
+  } do
+    [_, phase0_and_later] = String.split(doc, "## Phase 0", parts: 2)
+    [phase0, _] = String.split(phase0_and_later, "## Phase 1", parts: 2)
+
+    refute phase0 =~ "neither is something a skill can fix"
+  end
+
   describe "discoverability" do
     test "relay.md's Setup section names the skill" do
       assert File.read!("relay.md") =~ "/relay-onboard"
